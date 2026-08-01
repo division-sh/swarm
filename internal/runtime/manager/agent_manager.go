@@ -38,6 +38,7 @@ type AgentManager struct {
 	deliveryStore                   runtimedelivery.Store
 	testLifecycleProbe              runtimelifecycleprobe.Observer
 	sessions                        sessions.Registry
+	sessionResetter                 sessions.Resetter
 	semanticSource                  semanticview.Source
 	semanticReadinessSource         dynamicFlowRuntimeReadinessSource
 	promptResolver                  runtimecontracts.PromptResolver
@@ -56,6 +57,7 @@ type AgentManager struct {
 	selectedContractRouteRecoveries map[string]SelectedContractRouteRecoveryTruth
 	directiveHeartbeat              directiveHeartbeatConfig
 	lifecycle                       *agentLifecycleCoordinator
+	roles                           PersistenceRoles
 	baseContext                     context.Context
 
 	runMu              sync.Mutex
@@ -126,9 +128,14 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 			throttleSuppressPrefixes = append(throttleSuppressPrefixes, prefix)
 		}
 	}
-	lifecycle := newAgentLifecycleCoordinator(opts.LifecycleStore, opts.Sessions)
+	lifecycle := newAgentLifecycleCoordinator(
+		opts.LifecycleStore,
+		opts.SessionLifecycle,
+		opts.PersistenceRoles.AgentRoutes,
+		opts.PersistenceRoles.LifecycleState,
+		opts.PersistenceRoles.LifecycleEffects,
+	)
 	lifecycle.baseContext = opts.BaseContext
-	lifecycle.bindRoutes(bus)
 	if opts.WorkOwner != nil {
 		_ = lifecycle.prepareRunOwner(opts.BaseContext, opts.WorkOwner)
 	}
@@ -140,6 +147,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		testLifecycleProbe: opts.TestLifecycleProbe,
 		workspaces:         opts.Workspaces,
 		sessions:           opts.Sessions,
+		sessionResetter:    opts.SessionResetter,
 		semanticSource:     opts.SemanticSource,
 		semanticReadinessSource: dynamicFlowRuntimeReadinessSource{
 			fact: opts.BundleSourceFact, source: opts.SemanticSource,
@@ -160,6 +168,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		modelAliases:                    llmselection.EffectiveModelAliases(opts.ModelAliases),
 		requireModelResolution:          opts.RequireModelResolution,
 		lifecycle:                       lifecycle,
+		roles:                           opts.PersistenceRoles,
 		baseContext:                     opts.BaseContext,
 		poisonPanicCounts:               make(map[poisonPanicKey]int),
 		poisonEventEntities:             make(map[string]map[string]struct{}),

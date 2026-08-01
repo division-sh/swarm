@@ -6,10 +6,14 @@ import (
 	"testing"
 	"time"
 
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 type managerTestWorkFixture struct {
@@ -18,6 +22,107 @@ type managerTestWorkFixture struct {
 }
 
 var managerTestWorkFixtures sync.Map
+
+type managerTestDeliveryContinuationSink interface {
+	RetainDeliveryContinuation(runtimedelivery.Snapshot) error
+	ReleaseDeliveryContinuation(string) error
+}
+
+type managerTestDeliveryRuntime struct {
+	authority runtimedelivery.ExecutionAuthority
+	sink      managerTestDeliveryContinuationSink
+}
+
+type managerTestDirectiveOperationProvider interface {
+	managerTestDirectiveOperations() runtimeagentcontrol.DirectiveOperationStore
+}
+
+type managerTestBusContinuationSink struct {
+	owner runtimebus.DeliveryContinuationOwner
+}
+
+func (s managerTestBusContinuationSink) RetainDeliveryContinuation(snapshot runtimedelivery.Snapshot) error {
+	return s.owner.Retain(snapshot)
+}
+
+func (s managerTestBusContinuationSink) ReleaseDeliveryContinuation(deliveryID string) error {
+	return s.owner.Release(deliveryID)
+}
+
+func (r managerTestDeliveryRuntime) DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error) {
+	if err := r.authority.Validate(); err != nil {
+		return runtimedelivery.ExecutionAuthority{}, err
+	}
+	return r.authority, nil
+}
+
+func (r managerTestDeliveryRuntime) RetainDeliveryContinuation(snapshot runtimedelivery.Snapshot) error {
+	return r.sink.RetainDeliveryContinuation(snapshot)
+}
+
+func (r managerTestDeliveryRuntime) ReleaseDeliveryContinuation(deliveryID string) error {
+	return r.sink.ReleaseDeliveryContinuation(deliveryID)
+}
+
+func projectManagerTestPersistenceRoles(roles *PersistenceRoles, candidate any) {
+	if candidate == nil {
+		return
+	}
+	if roles.AgentRoutes == nil {
+		roles.AgentRoutes, _ = candidate.(AgentRouteBus)
+	}
+	if roles.RouteInstaller == nil {
+		roles.RouteInstaller, _ = candidate.(FlowInstanceRouteContextInstaller)
+	}
+	if roles.RouteVerifier == nil {
+		roles.RouteVerifier, _ = candidate.(FlowInstanceRouteContextVerifier)
+	}
+	if roles.RouteRestorer == nil {
+		roles.RouteRestorer, _ = candidate.(PersistedFlowInstanceRouteRestorer)
+	}
+	if roles.RouteRetirer == nil {
+		roles.RouteRetirer, _ = candidate.(PublishedFlowInstanceRouteRetirer)
+	}
+	if roles.RouteRemover == nil {
+		roles.RouteRemover, _ = candidate.(FlowInstanceRouteContextRemover)
+	}
+	if roles.FlowTermination == nil {
+		roles.FlowTermination, _ = candidate.(FlowInstanceTerminalMutationOwner)
+	}
+	if roles.CreationPublisher == nil {
+		roles.CreationPublisher, _ = candidate.(runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher)
+	}
+	if roles.LifecycleState == nil {
+		roles.LifecycleState, _ = candidate.(AgentLifecycleStateReader)
+	}
+	if roles.LifecycleEffects == nil {
+		roles.LifecycleEffects, _ = candidate.(runtimeeffects.Store)
+	}
+	if roles.LifecycleDiagnostics == nil {
+		roles.LifecycleDiagnostics, _ = candidate.(AgentLifecycleDiagnosticPersistence)
+	}
+	if roles.EffectsRecovery == nil {
+		roles.EffectsRecovery, _ = candidate.(runtimeeffects.RecoveryStore)
+	}
+	if roles.DeliveryQuiescence == nil {
+		roles.DeliveryQuiescence, _ = candidate.(ActiveRunDeliveryQuiescenceReader)
+	}
+	if roles.DeliveryRuntime == nil {
+		roles.DeliveryRuntime, _ = candidate.(DeliveryRuntimeOwner)
+	}
+	if roles.EventExistence == nil {
+		roles.EventExistence, _ = candidate.(EventExistenceReader)
+	}
+	if roles.DirectiveOperations == nil {
+		roles.DirectiveOperations, _ = candidate.(runtimeagentcontrol.DirectiveOperationStore)
+	}
+	if roles.DirectiveTargets == nil {
+		roles.DirectiveTargets, _ = candidate.(AgentDirectiveRunTargetResolver)
+	}
+	if roles.FlowRoutes == nil {
+		roles.FlowRoutes, _ = candidate.(runtimebus.FlowInstanceRoutePersistence)
+	}
+}
 
 func admitManagerTestBusContext(ctx context.Context) (context.Context, error) {
 	if ctx == nil {
@@ -77,10 +182,32 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 	if opts.DeliveryStore == nil {
 		opts.DeliveryStore = newManagerDeliveryTestStore(t)
 	}
+	if opts.SessionLifecycle == nil && opts.Sessions != nil {
+		opts.SessionLifecycle, _ = opts.Sessions.(sessions.LifecycleProjection)
+	}
+	if opts.SessionResetter == nil && opts.Sessions != nil {
+		opts.SessionResetter, _ = opts.Sessions.(sessions.Resetter)
+	}
+	if opts.SessionResetter == nil {
+		opts.SessionResetter = sessions.NewInMemoryRegistry(0)
+	}
+	projectManagerTestPersistenceRoles(&opts.PersistenceRoles, bus)
+	if opts.PersistenceRoles.DirectiveOperations == nil {
+		if provider, ok := bus.(managerTestDirectiveOperationProvider); ok {
+			opts.PersistenceRoles.DirectiveOperations = provider.managerTestDirectiveOperations()
+		}
+	}
+	projectManagerTestPersistenceRoles(&opts.PersistenceRoles, opts.WorkflowInstances)
+	projectManagerTestPersistenceRoles(&opts.PersistenceRoles, opts.DeliveryStore)
+	projectManagerTestPersistenceRoles(&opts.PersistenceRoles, opts.LifecycleStore)
+	for _, store := range stores {
+		projectManagerTestPersistenceRoles(&opts.PersistenceRoles, store)
+	}
 	if authorityStore, ok := opts.DeliveryStore.(interface {
 		managerTestDeliveryAuthority() runtimedelivery.ExecutionAuthority
 	}); ok {
 		authority := authorityStore.managerTestDeliveryAuthority()
+		continuationOwner := runtimebustest.NewDeliveryContinuationOwner(true)
 		if setter, ok := bus.(interface {
 			SetDeliveryAuthority(runtimedelivery.ExecutionAuthority) error
 		}); ok {
@@ -91,9 +218,16 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 		if setter, ok := bus.(interface {
 			SetDeliveryContinuationOwner(runtimebus.DeliveryContinuationOwner) error
 		}); ok {
-			if err := setter.SetDeliveryContinuationOwner(runtimebustest.NewDeliveryContinuationOwner(true)); err != nil {
+			if err := setter.SetDeliveryContinuationOwner(continuationOwner); err != nil {
 				t.Fatalf("set manager test delivery continuation owner: %v", err)
 			}
+		}
+		if opts.PersistenceRoles.DeliveryRuntime == nil {
+			var sink managerTestDeliveryContinuationSink = managerTestBusContinuationSink{owner: continuationOwner}
+			if busSink, ok := bus.(managerTestDeliveryContinuationSink); ok {
+				sink = busSink
+			}
+			opts.PersistenceRoles.DeliveryRuntime = managerTestDeliveryRuntime{authority: authority, sink: sink}
 		}
 	}
 	manager := NewAgentManagerWithOptions(bus, factory, opts, stores...)

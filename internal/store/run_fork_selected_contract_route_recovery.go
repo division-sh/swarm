@@ -13,77 +13,45 @@ import (
 	"time"
 
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
 const (
-	RunForkSelectedContractRoutePersistenceOwner = "store.run_fork.selected_contract_route_persistence"
-	RunForkSelectedContractRouteRecoveryOwner    = "runtime.run_fork.selected_contract_route_recovery"
-
 	runForkSelectedContractRouteRecoveryTable = "run_fork_selected_contract_route_recoveries"
 )
-
-type RunForkSelectedContractRouteRecoveryRequest struct {
-	ForkRunID         string
-	SourceRunID       string
-	ForkEventID       string
-	ContractSelection RunForkContractSelection
-	RouteTopology     RunForkSelectedContractRouteTopology
-	RecipientPlanning RunForkSelectedContractRecipientPlanning
-}
-
-type RunForkSelectedContractRouteRecovery struct {
-	Owner                        string                   `json:"owner"`
-	RuntimeRecoveryOwner         string                   `json:"runtime_recovery_owner"`
-	ForkRunID                    string                   `json:"fork_run_id"`
-	SourceRunID                  string                   `json:"source_run_id"`
-	ForkEventID                  string                   `json:"fork_event_id"`
-	ContractSelection            RunForkContractSelection `json:"contract_selection"`
-	RouteTopologyOwner           string                   `json:"route_topology_owner"`
-	DynamicTopologyOwner         string                   `json:"dynamic_topology_owner,omitempty"`
-	RecipientPlanningOwner       string                   `json:"recipient_planning_owner"`
-	FrontierEvidenceFingerprint  string                   `json:"frontier_evidence_fingerprint"`
-	RouteTopologyFingerprint     string                   `json:"route_topology_fingerprint"`
-	RecipientPlanningFingerprint string                   `json:"recipient_planning_fingerprint"`
-	StaticRouteEventCount        int                      `json:"static_route_event_count"`
-	DynamicTopologyProofCount    int                      `json:"dynamic_topology_proof_count"`
-	RecipientPlanEventCount      int                      `json:"recipient_plan_event_count"`
-	RouteTopology                json.RawMessage          `json:"route_topology"`
-	RecipientPlanning            json.RawMessage          `json:"recipient_planning"`
-	CreatedAt                    time.Time                `json:"created_at"`
-}
 
 func (s *PostgresStore) requireRunForkSelectedContractRouteRecoveryAccess() error {
 	return s.requireCurrentSchema()
 }
 
-func (s *PostgresStore) RecordRunForkSelectedContractRouteRecovery(ctx context.Context, req RunForkSelectedContractRouteRecoveryRequest) (RunForkSelectedContractRouteRecovery, error) {
+func (s *PostgresStore) RecordRunForkSelectedContractRouteRecovery(ctx context.Context, req runfork.RunForkSelectedContractRouteRecoveryRequest) (runfork.RunForkSelectedContractRouteRecovery, error) {
 	if s == nil || s.DB == nil {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("postgres store is required")
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireRunForkSelectedContractRouteRecoveryAccess(); err != nil {
-		return RunForkSelectedContractRouteRecovery{}, err
+		return runfork.RunForkSelectedContractRouteRecovery{}, err
 	}
 	record, err := normalizeRunForkSelectedContractRouteRecovery(req, time.Now().UTC())
 	if err != nil {
-		return RunForkSelectedContractRouteRecovery{}, err
+		return runfork.RunForkSelectedContractRouteRecovery{}, err
 	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("begin selected-contract route recovery: %w", err)
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("begin selected-contract route recovery: %w", err)
 	}
 	defer tx.Rollback()
 	if err := requirePostgresRunActive(ctx, tx, record.SourceRunID); err != nil {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("admit selected-contract route recovery source: %w", err)
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("admit selected-contract route recovery source: %w", err)
 	}
 	if err := requirePostgresRunActive(ctx, tx, record.ForkRunID); err != nil {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("admit selected-contract route recovery fork: %w", err)
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("admit selected-contract route recovery fork: %w", err)
 	}
 	if err := insertRunForkSelectedContractRouteRecovery(ctx, tx, record); err != nil {
-		return RunForkSelectedContractRouteRecovery{}, err
+		return runfork.RunForkSelectedContractRouteRecovery{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("commit selected-contract route recovery: %w", err)
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("commit selected-contract route recovery: %w", err)
 	}
 	return record, nil
 }
@@ -92,7 +60,7 @@ type runForkSelectedContractRouteRecoveryExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
-func insertRunForkSelectedContractRouteRecovery(ctx context.Context, execer runForkSelectedContractRouteRecoveryExecer, record RunForkSelectedContractRouteRecovery) error {
+func insertRunForkSelectedContractRouteRecovery(ctx context.Context, execer runForkSelectedContractRouteRecoveryExecer, record runfork.RunForkSelectedContractRouteRecovery) error {
 	if _, err := execer.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_route_recoveries (
 			fork_run_id, source_run_id, fork_event_id,
@@ -144,12 +112,12 @@ func insertRunForkSelectedContractRouteRecovery(ctx context.Context, execer runF
 	return nil
 }
 
-func validateRunForkSelectedContractRouteRecoveryAtActivation(ctx context.Context, tx *sql.Tx, expected RunForkSelectedContractRouteRecovery) error {
+func validateRunForkSelectedContractRouteRecoveryAtActivation(ctx context.Context, tx *sql.Tx, expected runfork.RunForkSelectedContractRouteRecovery) error {
 	actual, err := loadRunForkSelectedContractRouteRecovery(ctx, tx, `WHERE fork_run_id = $1::uuid`, expected.ForkRunID)
 	if err == sql.ErrNoRows {
 		return runForkReplayResumeError(
-			RunForkBlockerFlowRouteHistoryUnproven,
-			RunForkReplayResumeFactRouteHistory,
+			runfork.RunForkBlockerFlowRouteHistoryUnproven,
+			runfork.RunForkReplayResumeFactRouteHistory,
 			"selected-contract activation requires persisted route recovery from materialization",
 		)
 	}
@@ -170,8 +138,8 @@ func validateRunForkSelectedContractRouteRecoveryAtActivation(ctx context.Contex
 		actual.DynamicTopologyProofCount != expected.DynamicTopologyProofCount ||
 		actual.RecipientPlanEventCount != expected.RecipientPlanEventCount {
 		return runForkReplayResumeError(
-			RunForkBlockerFlowRouteHistoryUnproven,
-			RunForkReplayResumeFactRouteHistory,
+			runfork.RunForkBlockerFlowRouteHistoryUnproven,
+			runfork.RunForkReplayResumeFactRouteHistory,
 			"selected-contract activation route recovery does not match current canonical topology proof",
 		)
 	}
@@ -181,31 +149,31 @@ func validateRunForkSelectedContractRouteRecoveryAtActivation(ctx context.Contex
 	return nil
 }
 
-func (s *PostgresStore) LoadRunForkSelectedContractRouteRecovery(ctx context.Context, forkRunID string) (RunForkSelectedContractRouteRecovery, bool, error) {
+func (s *PostgresStore) LoadRunForkSelectedContractRouteRecovery(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractRouteRecovery, bool, error) {
 	if s == nil || s.DB == nil {
-		return RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("postgres store is required")
+		return runfork.RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("postgres store is required")
 	}
 	forkRunID = strings.TrimSpace(forkRunID)
 	if forkRunID == "" {
-		return RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("fork run_id is required")
+		return runfork.RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("fork run_id is required")
 	}
 	if _, err := uuid.Parse(forkRunID); err != nil {
-		return RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("fork run_id must be a UUID: %w", err)
+		return runfork.RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("fork run_id must be a UUID: %w", err)
 	}
 	if err := s.requireRunForkSelectedContractRouteRecoveryAccess(); err != nil {
-		return RunForkSelectedContractRouteRecovery{}, false, err
+		return runfork.RunForkSelectedContractRouteRecovery{}, false, err
 	}
 	record, err := loadRunForkSelectedContractRouteRecovery(ctx, s.DB, `WHERE fork_run_id = $1::uuid`, forkRunID)
 	if err == sql.ErrNoRows {
-		return RunForkSelectedContractRouteRecovery{}, false, nil
+		return runfork.RunForkSelectedContractRouteRecovery{}, false, nil
 	}
 	if err != nil {
-		return RunForkSelectedContractRouteRecovery{}, false, err
+		return runfork.RunForkSelectedContractRouteRecovery{}, false, err
 	}
 	return record, true, nil
 }
 
-func (s *PostgresStore) ListRunForkSelectedContractRouteRecoveries(ctx context.Context) ([]RunForkSelectedContractRouteRecovery, error) {
+func (s *PostgresStore) ListRunForkSelectedContractRouteRecoveries(ctx context.Context) ([]runfork.RunForkSelectedContractRouteRecovery, error) {
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
@@ -219,7 +187,7 @@ func (s *PostgresStore) ListRunForkSelectedContractRouteRecoveries(ctx context.C
 		return nil, fmt.Errorf("list selected-contract route recoveries: %w", err)
 	}
 	defer rows.Close()
-	out := []RunForkSelectedContractRouteRecovery{}
+	out := []runfork.RunForkSelectedContractRouteRecovery{}
 	for rows.Next() {
 		record, err := scanRunForkSelectedContractRouteRecovery(rows)
 		if err != nil {
@@ -263,78 +231,78 @@ func (s *PostgresStore) ListSelectedContractRouteRecoveryRecords(ctx context.Con
 	return out, nil
 }
 
-func normalizeRunForkSelectedContractRouteRecovery(req RunForkSelectedContractRouteRecoveryRequest, createdAt time.Time) (RunForkSelectedContractRouteRecovery, error) {
+func normalizeRunForkSelectedContractRouteRecovery(req runfork.RunForkSelectedContractRouteRecoveryRequest, createdAt time.Time) (runfork.RunForkSelectedContractRouteRecovery, error) {
 	forkRunID := strings.TrimSpace(req.ForkRunID)
 	if forkRunID == "" {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires fork run_id")
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires fork run_id")
 	}
 	if _, err := uuid.Parse(forkRunID); err != nil {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery fork run_id must be a UUID: %w", err)
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery fork run_id must be a UUID: %w", err)
 	}
 	sourceRunID := strings.TrimSpace(req.SourceRunID)
 	if sourceRunID == "" {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires source run_id")
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires source run_id")
 	}
 	if _, err := uuid.Parse(sourceRunID); err != nil {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery source run_id must be a UUID: %w", err)
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery source run_id must be a UUID: %w", err)
 	}
 	forkEventID := strings.TrimSpace(req.ForkEventID)
 	if forkEventID == "" {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires fork event_id")
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires fork event_id")
 	}
 	if _, err := uuid.Parse(forkEventID); err != nil {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery fork event_id must be a UUID: %w", err)
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery fork event_id must be a UUID: %w", err)
 	}
 	selection, err := normalizeRunForkSelectedContractSelection(req.ContractSelection)
 	if err != nil {
-		return RunForkSelectedContractRouteRecovery{}, err
+		return runfork.RunForkSelectedContractRouteRecovery{}, err
 	}
 	topology := req.RouteTopology
-	if strings.TrimSpace(topology.Owner) != RunForkSelectedContractRouteTopologyOwner {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires %s topology; got %q", RunForkSelectedContractRouteTopologyOwner, topology.Owner)
+	if strings.TrimSpace(topology.Owner) != runfork.RunForkSelectedContractRouteTopologyOwner {
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires %s topology; got %q", runfork.RunForkSelectedContractRouteTopologyOwner, topology.Owner)
 	}
 	if !topology.NonMutating || topology.RoutePersistenceSupported || topology.ExecutableRecipientsSupported {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires non-mutating topology evidence without executable route persistence")
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires non-mutating topology evidence without executable route persistence")
 	}
 	if strings.TrimSpace(topology.FrontierEvidenceFingerprint) == "" {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires topology frontier evidence fingerprint")
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires topology frontier evidence fingerprint")
 	}
 	if err := validateRunForkSelectedContractRouteRecoverySelection("route recovery", selection, topology.ContractSelection); err != nil {
-		return RunForkSelectedContractRouteRecovery{}, err
+		return runfork.RunForkSelectedContractRouteRecovery{}, err
 	}
 	planning := req.RecipientPlanning
-	if strings.TrimSpace(planning.Owner) != RunForkSelectedContractRecipientPlanningOwner {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires %s recipient planning; got %q", RunForkSelectedContractRecipientPlanningOwner, planning.Owner)
+	if strings.TrimSpace(planning.Owner) != runfork.RunForkSelectedContractRecipientPlanningOwner {
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires %s recipient planning; got %q", runfork.RunForkSelectedContractRecipientPlanningOwner, planning.Owner)
 	}
 	if !planning.NonMutating || planning.DeliveryWritesSupported {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires non-mutating recipient planning evidence")
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires non-mutating recipient planning evidence")
 	}
 	if !planning.RecipientPlanningSupported {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires supported recipient planning")
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery requires supported recipient planning")
 	}
-	if strings.TrimSpace(planning.RouteTopologyOwner) != RunForkSelectedContractRouteTopologyOwner {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery recipient planning must consume %s; got %q", RunForkSelectedContractRouteTopologyOwner, planning.RouteTopologyOwner)
+	if strings.TrimSpace(planning.RouteTopologyOwner) != runfork.RunForkSelectedContractRouteTopologyOwner {
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery recipient planning must consume %s; got %q", runfork.RunForkSelectedContractRouteTopologyOwner, planning.RouteTopologyOwner)
 	}
 	if strings.TrimSpace(planning.FrontierEvidenceFingerprint) != strings.TrimSpace(topology.FrontierEvidenceFingerprint) {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery topology and recipient planning frontier fingerprints differ")
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery topology and recipient planning frontier fingerprints differ")
 	}
 	if err := validateRunForkSelectedContractRouteRecoverySelection("route recovery recipient planning", selection, planning.ContractSelection); err != nil {
-		return RunForkSelectedContractRouteRecovery{}, err
+		return runfork.RunForkSelectedContractRouteRecovery{}, err
 	}
 	topologyJSON, topologyFingerprint, err := runForkSelectedContractRecoveryJSONFingerprint(topology)
 	if err != nil {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("fingerprint route topology: %w", err)
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("fingerprint route topology: %w", err)
 	}
 	planningJSON, planningFingerprint, err := runForkSelectedContractRecoveryJSONFingerprint(planning)
 	if err != nil {
-		return RunForkSelectedContractRouteRecovery{}, fmt.Errorf("fingerprint recipient planning: %w", err)
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("fingerprint recipient planning: %w", err)
 	}
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
-	return RunForkSelectedContractRouteRecovery{
-		Owner:                        RunForkSelectedContractRoutePersistenceOwner,
-		RuntimeRecoveryOwner:         RunForkSelectedContractRouteRecoveryOwner,
+	return runfork.RunForkSelectedContractRouteRecovery{
+		Owner:                        runfork.RunForkSelectedContractRoutePersistenceOwner,
+		RuntimeRecoveryOwner:         runfork.RunForkSelectedContractRouteRecoveryOwner,
 		ForkRunID:                    forkRunID,
 		SourceRunID:                  sourceRunID,
 		ForkEventID:                  forkEventID,
@@ -354,7 +322,7 @@ func normalizeRunForkSelectedContractRouteRecovery(req RunForkSelectedContractRo
 	}, nil
 }
 
-func validateRunForkSelectedContractRouteRecoverySelection(context string, left, right RunForkContractSelection) error {
+func validateRunForkSelectedContractRouteRecoverySelection(context string, left, right runfork.RunForkContractSelection) error {
 	left, err := normalizeRunForkSelectedContractSelection(left)
 	if err != nil {
 		return err
@@ -435,7 +403,7 @@ func runForkSelectedContractRouteRecoverySelect() string {
 
 func loadRunForkSelectedContractRouteRecovery(ctx context.Context, querier interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, where string, args ...any) (RunForkSelectedContractRouteRecovery, error) {
+}, where string, args ...any) (runfork.RunForkSelectedContractRouteRecovery, error) {
 	row := querier.QueryRowContext(ctx, runForkSelectedContractRouteRecoverySelect()+" "+where, args...)
 	return scanRunForkSelectedContractRouteRecovery(row)
 }
@@ -444,9 +412,9 @@ type runForkSelectedContractRouteRecoveryScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanRunForkSelectedContractRouteRecovery(row runForkSelectedContractRouteRecoveryScanner) (RunForkSelectedContractRouteRecovery, error) {
-	var record RunForkSelectedContractRouteRecovery
-	var selection RunForkContractSelection
+func scanRunForkSelectedContractRouteRecovery(row runForkSelectedContractRouteRecoveryScanner) (runfork.RunForkSelectedContractRouteRecovery, error) {
+	var record runfork.RunForkSelectedContractRouteRecovery
+	var selection runfork.RunForkContractSelection
 	var routeTopology, recipientPlanning []byte
 	err := row.Scan(
 		&record.Owner,
@@ -473,7 +441,7 @@ func scanRunForkSelectedContractRouteRecovery(row runForkSelectedContractRouteRe
 		&record.CreatedAt,
 	)
 	if err != nil {
-		return RunForkSelectedContractRouteRecovery{}, err
+		return runfork.RunForkSelectedContractRouteRecovery{}, err
 	}
 	record.ContractSelection = selection
 	record.RouteTopology = append(json.RawMessage(nil), routeTopology...)

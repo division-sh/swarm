@@ -5,13 +5,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -32,6 +33,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -620,10 +622,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:        module,
-		DeliveryStore: pg,
-	})
+	pc = newEventBusWorkflowCoordinator(eb, db, pg, module)
 	if pc == nil {
 		t.Fatal("expected pipeline coordinator")
 	}
@@ -2450,9 +2449,9 @@ func TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability(t *tes
 	}
 	assertSelectedForkDispatchNotReached(t, deliveries, providerReached)
 
-	outcome, err := pg.CommitSelectedForkEvent(ctx, store.CommitSelectedForkEventRequest{
+	outcome, err := pg.CommitSelectedForkEvent(ctx, runtimebus.CommitSelectedForkEventRequest{
 		Commit: prepared.CommitRequest(),
-		Lineage: store.RunForkSelectedContractExecutionLineage{
+		Lineage: runfork.RunForkSelectedContractExecutionLineage{
 			ForkRunID: forkRunID, SourceRunID: sourceRunID, SourceEventID: sourceEventID,
 			ForkEventID: event.ID(), EventName: string(event.Type()), SelectionAuthority: lineage.AuthorityStamp(), CreatedAt: event.CreatedAt(),
 		},
@@ -3200,11 +3199,24 @@ func exactEventBusWorkflowFixtures(instances []runtimepipeline.WorkflowInstance)
 	return instances
 }
 
-func newEventBusWorkflowStore(db *sql.DB, selected *store.PostgresStore) *runtimepipeline.WorkflowInstanceStore {
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	workflowStore.ConfigureRuntimeMutationRunner(selected)
-	workflowStore.ConfigureRunLifecycle(selected)
-	return workflowStore
+func newEventBusWorkflowCoordinator(
+	eventBus *runtimebus.EventBus,
+	db *sql.DB,
+	selected *store.PostgresStore,
+	module runtimepipeline.WorkflowModule,
+) *runtimepipeline.PipelineCoordinator {
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:                  module,
+		Persistence:             runtimepipeline.NewPostgresWorkflowPersistence(db, selected),
+		RunLifecycle:            selected,
+		PipelineObligations:     selected.PipelineObligations(),
+		DeliveryStore:           selected,
+		GatePublisher:           eventBus,
+		DirectDecisionPublisher: eventBus,
+		DeliveryRuntime:         eventBus,
+		PinRoutingDescriptors:   eventBus,
+		FlowRoutes:              eventBus,
+	})
 }
 
 func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnects(t *testing.T) {
@@ -3233,10 +3245,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:        module,
-		DeliveryStore: pg,
-	})
+	pc = newEventBusWorkflowCoordinator(eb, db, pg, module)
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
@@ -3244,7 +3253,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	const rootEntityID = "11111111-1111-1111-1111-111111111111"
 	childEntityID := runtimepipeline.FlowInstanceEntityID("child")
 	grandchildEntityID := runtimepipeline.FlowInstanceEntityID("child/grandchild")
-	store := newEventBusWorkflowStore(db, pg)
+	workflowStore := pc
 	ctx := eventBusTestRunContext(t, db)
 	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
@@ -3275,7 +3284,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 			CurrentState:    "finished",
 		},
 	}) {
-		if err := store.Upsert(ctx, instance); err != nil {
+		if _, err := workflowStore.MaterializeInitialEntry(ctx, instance, instance.CreatedAt); err != nil {
 			t.Fatalf("seed workflow instance %q: %v", instance.InstanceID, err)
 		}
 	}
@@ -3297,7 +3306,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		t.Fatalf("WaitForQuiescence: %v", err)
 	}
 
-	child, found, err := store.Load(ctx, childEntityID)
+	child, found, err := workflowStore.Load(ctx, childEntityID)
 	if err != nil {
 		t.Fatalf("load child instance: %v", err)
 	}
@@ -3308,7 +3317,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		t.Fatalf("child current_state = %q, want completed", got)
 	}
 
-	root, found, err := store.Load(ctx, rootEntityID)
+	root, found, err := workflowStore.Load(ctx, rootEntityID)
 	if err != nil {
 		t.Fatalf("load root instance: %v", err)
 	}
@@ -3390,14 +3399,11 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:        module,
-		DeliveryStore: pg,
-	})
+	pc = newEventBusWorkflowCoordinator(eb, db, pg, module)
 	if _, ok := any(pc).(runtimebus.DeliveryRouteInterceptor); !ok {
 		t.Fatal("PipelineCoordinator does not implement DeliveryRouteInterceptor")
 	}
-	workflowStore := newEventBusWorkflowStore(db, pg)
+	workflowStore := pc
 	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
 			InstanceID:      rootEntityID,
@@ -3414,7 +3420,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 			CurrentState:    "active",
 		},
 	}) {
-		if err := workflowStore.Upsert(ctx, instance); err != nil {
+		if _, err := workflowStore.MaterializeInitialEntry(ctx, instance, instance.CreatedAt); err != nil {
 			t.Fatalf("seed workflow instance %s: %v", instance.InstanceID, err)
 		}
 	}
@@ -3636,17 +3642,14 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:        module,
-		DeliveryStore: pg,
-	})
+	pc = newEventBusWorkflowCoordinator(eb, db, pg, module)
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
 
 	const rootEntityID = "11111111-1111-1111-1111-111111111111"
 	ctx := eventBusTestRunContext(t, db)
-	workflowStore := newEventBusWorkflowStore(db, pg)
+	workflowStore := pc
 	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
 			InstanceID:      rootEntityID,
@@ -3673,7 +3676,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 			CurrentState:    "ready",
 		},
 	}) {
-		if err := workflowStore.Upsert(ctx, instance); err != nil {
+		if _, err := workflowStore.MaterializeInitialEntry(ctx, instance, instance.CreatedAt); err != nil {
 			t.Fatalf("seed workflow instance %q: %v", instance.InstanceID, err)
 		}
 	}
@@ -3825,18 +3828,20 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 				}
 			}
 		}
-		instances, _ := workflowStore.List(ctx)
-		t.Fatalf("root current_state = %q, want done through declared ancestor connects; events=%v instances=%#v", got, dump, instances)
+		t.Fatalf("root current_state = %q, want done through declared ancestor connects; events=%v", got, dump)
 	}
 
-	instances, err := workflowStore.List(ctx)
-	if err != nil {
-		t.Fatalf("list workflow instances: %v", err)
+	childInstance, childFound, err := workflowStore.Load(ctx, runtimeflowidentity.EntityID("child"))
+	if err != nil || !childFound {
+		t.Fatalf("load child workflow instance: found=%t err=%v", childFound, err)
 	}
-	var (
-		childState      string
-		grandchildState string
-	)
+	grandchildInstance, grandchildFound, err := workflowStore.Load(ctx, runtimeflowidentity.EntityID("child/grandchild"))
+	if err != nil || !grandchildFound {
+		t.Fatalf("load grandchild workflow instance: found=%t err=%v", grandchildFound, err)
+	}
+	childState := strings.TrimSpace(childInstance.CurrentState)
+	grandchildState := strings.TrimSpace(grandchildInstance.CurrentState)
+	instances := []runtimepipeline.WorkflowInstance{childInstance, grandchildInstance}
 	var emitted []string
 	rows, err := db.QueryContext(context.Background(), `SELECT event_name FROM events ORDER BY created_at ASC, event_id ASC`)
 	if err != nil {
@@ -3852,14 +3857,6 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("iterate events: %v", err)
-	}
-	for _, instance := range instances {
-		switch strings.TrimSpace(instance.WorkflowName) {
-		case "child":
-			childState = strings.TrimSpace(instance.CurrentState)
-		case "grandchild":
-			grandchildState = strings.TrimSpace(instance.CurrentState)
-		}
 	}
 	if childState != "completed" {
 		t.Fatalf("child current_state = %q, want completed; events=%v instances=%#v", childState, emitted, instances)
@@ -3901,18 +3898,15 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:        module,
-		DeliveryStore: pg,
-	})
+	pc = newEventBusWorkflowCoordinator(eb, db, pg, module)
 	if pc == nil {
 		t.Fatal("expected coordinator")
 	}
 
 	const rootEntityID = "11111111-1111-1111-1111-111111111111"
 	ctx := eventBusTestRunContext(t, db)
-	workflowStore := newEventBusWorkflowStore(db, pg)
-	if err := workflowStore.Upsert(ctx, exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{{
+	workflowStore := pc
+	rootFixture := exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{{
 		InstanceID:      rootEntityID,
 		StorageRef:      rootEntityID,
 		WorkflowName:    bundle.WorkflowName(),
@@ -3921,7 +3915,8 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 		Metadata: map[string]any{
 			"entity_id": rootEntityID,
 		},
-	}})[0]); err != nil {
+	}})[0]
+	if _, err := workflowStore.MaterializeInitialEntry(ctx, rootFixture, rootFixture.CreatedAt); err != nil {
 		t.Fatalf("seed root instance: %v", err)
 	}
 
@@ -3977,8 +3972,7 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 				}
 			}
 		}
-		instances, _ := workflowStore.List(ctx)
-		t.Fatalf("root current_state = %q, want pending without subject-link back-propagation; root metadata=%#v events=%v instances=%#v", got, root.Metadata, dump, instances)
+		t.Fatalf("root current_state = %q, want pending without subject-link back-propagation; root metadata=%#v events=%v", got, root.Metadata, dump)
 	}
 }
 

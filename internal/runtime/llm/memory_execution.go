@@ -65,12 +65,12 @@ func resolveMemoryExecution(ctx context.Context, agentID string) (resolvedMemory
 	return resolvedMemoryExecution{Plan: plan, Identity: identity}, nil
 }
 
-func startMemory(ctx context.Context, registry sessions.Registry, conversations ConversationPersistence, agentID, lockOwner string) (*sessions.Lease, ConversationRecord, resolvedMemoryExecution, error) {
+func startMemory(ctx context.Context, acquirer LiveSessionAcquirer, agentID, lockOwner string) (*sessions.Lease, ConversationRecord, resolvedMemoryExecution, error) {
 	resolved, err := resolveMemoryExecution(ctx, agentID)
 	if err != nil || !resolved.Enabled() {
 		return nil, ConversationRecord{}, resolved, err
 	}
-	lease, hydrated, err := acquireLiveSessionAndConversation(ctx, registry, conversations, resolved.Identity, lockOwner)
+	lease, hydrated, err := acquireLiveSessionAndConversation(ctx, acquirer, resolved.Identity, lockOwner)
 	return lease, hydrated, resolved, err
 }
 

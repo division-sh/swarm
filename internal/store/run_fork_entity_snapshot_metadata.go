@@ -3,25 +3,13 @@ package store
 import (
 	"fmt"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
-
-const (
-	RunForkMaterializedEntitySnapshotMetadataOwner = "runtime.run_fork.materialized_entity_snapshot_metadata"
-
-	RunForkMaterializedEntitySnapshotMetadataSourceEvent       = "source_event"
-	RunForkMaterializedEntitySnapshotMetadataSourceEntityState = "source_entity_state"
-)
-
-type RunForkMaterializedEntitySnapshotMetadata struct {
-	Owner        string `json:"owner"`
-	FlowInstance string `json:"flow_instance"`
-	EntityType   string `json:"entity_type"`
-	Source       string `json:"source"`
-}
 
 type runForkMaterializedEntitySnapshotMetadataAdmission struct {
-	Dispositions []RunForkReplayResumeDisposition
-	Blockers     []RunForkUnsupportedBlocker
+	Dispositions []runfork.RunForkReplayResumeDisposition
+	Blockers     []runfork.RunForkUnsupportedBlocker
 }
 
 type runForkSourceEntityStateMetadata struct {
@@ -30,14 +18,14 @@ type runForkSourceEntityStateMetadata struct {
 	Exists       bool
 }
 
-func attachRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnapshot, entities []RunForkEntityState) ([]RunForkEntityState, runForkMaterializedEntitySnapshotMetadataAdmission, error) {
-	out := make([]RunForkEntityState, len(entities))
+func attachRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnapshot, entities []runfork.RunForkEntityState) ([]runfork.RunForkEntityState, runForkMaterializedEntitySnapshotMetadataAdmission, error) {
+	out := make([]runfork.RunForkEntityState, len(entities))
 	copy(out, entities)
 	admission := runForkMaterializedEntitySnapshotMetadataAdmission{}
 	for i := range out {
 		entityID := strings.TrimSpace(out[i].EntityID)
 		if entityID == "" {
-			blocker := runForkReplayResumeBlocker(RunForkBlockerEntitySnapshotMetadataUnproven)
+			blocker := runForkReplayResumeBlocker(runfork.RunForkBlockerEntitySnapshotMetadataUnproven)
 			blocker.Message = "fork materialization requires a reconstructed entity_id before snapshot metadata can be classified"
 			admission.Blockers = appendRunForkBlocker(admission.Blockers, blocker)
 			admission.Dispositions = append(admission.Dispositions, runForkMaterializedEntitySnapshotMetadataBlockerDisposition("", blocker.Message))
@@ -45,7 +33,7 @@ func attachRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSn
 		}
 		metadata, message, ok := loadRunForkMaterializedEntitySnapshotMetadata(snapshot, out[i])
 		if !ok {
-			blocker := runForkReplayResumeBlocker(RunForkBlockerEntitySnapshotMetadataUnproven)
+			blocker := runForkReplayResumeBlocker(runfork.RunForkBlockerEntitySnapshotMetadataUnproven)
 			blocker.Message = message
 			admission.Blockers = appendRunForkBlocker(admission.Blockers, blocker)
 			admission.Dispositions = append(admission.Dispositions, runForkMaterializedEntitySnapshotMetadataBlockerDisposition(entityID, message))
@@ -56,29 +44,29 @@ func attachRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSn
 	return out, admission, nil
 }
 
-func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnapshot, entity RunForkEntityState) (RunForkMaterializedEntitySnapshotMetadata, string, bool) {
+func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnapshot, entity runfork.RunForkEntityState) (runfork.RunForkMaterializedEntitySnapshotMetadata, string, bool) {
 	entityID := strings.TrimSpace(entity.EntityID)
 	eventFlow := loadRunForkEntityEventFlowInstance(snapshot, entityID)
 	sourceState := loadRunForkSourceEntityStateMetadata(snapshot, entityID)
 
 	flowInstance := strings.TrimSpace(eventFlow)
-	source := RunForkMaterializedEntitySnapshotMetadataSourceEvent
+	source := runfork.RunForkMaterializedEntitySnapshotMetadataSourceEvent
 	if flowInstance == "" {
 		flowInstance = strings.TrimSpace(sourceState.FlowInstance)
-		source = RunForkMaterializedEntitySnapshotMetadataSourceEntityState
+		source = runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState
 	}
 	if !sourceState.Exists {
-		return RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-revision entity metadata for entity %s", entityID), false
+		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-revision entity metadata for entity %s", entityID), false
 	}
 	entityType := strings.TrimSpace(sourceState.EntityType)
 	if reconstructedEntityType := stringFieldValue(entity.Fields, "entity_type"); reconstructedEntityType != "" && reconstructedEntityType != entityType {
-		return RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot reconcile reconstructed entity_type %q with source-at-revision entity metadata %q for entity %s", reconstructedEntityType, entityType, entityID), false
+		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot reconcile reconstructed entity_type %q with source-at-revision entity metadata %q for entity %s", reconstructedEntityType, entityType, entityID), false
 	}
 	if flowInstance == "" || entityType == "" {
-		return RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-revision flow_instance/entity_type metadata for entity %s", entityID), false
+		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-revision flow_instance/entity_type metadata for entity %s", entityID), false
 	}
-	return RunForkMaterializedEntitySnapshotMetadata{
-		Owner:        RunForkMaterializedEntitySnapshotMetadataOwner,
+	return runfork.RunForkMaterializedEntitySnapshotMetadata{
+		Owner:        runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
 		FlowInstance: flowInstance,
 		EntityType:   entityType,
 		Source:       source,
@@ -119,46 +107,46 @@ func loadRunForkSourceEntityStateMetadata(snapshot *runForkRevisionSnapshot, ent
 	return runForkSourceEntityStateMetadata{}
 }
 
-func runForkMaterializedEntitySnapshotMetadataBlockerDisposition(entityID, message string) RunForkReplayResumeDisposition {
-	return RunForkReplayResumeDisposition{
-		Fact:        RunForkReplayResumeFactEntityStateSnapshot,
+func runForkMaterializedEntitySnapshotMetadataBlockerDisposition(entityID, message string) runfork.RunForkReplayResumeDisposition {
+	return runfork.RunForkReplayResumeDisposition{
+		Fact:        runfork.RunForkReplayResumeFactEntityStateSnapshot,
 		EntityID:    strings.TrimSpace(entityID),
-		Disposition: RunForkReplayResumeDispositionFailClosedBlocker,
-		Owner:       RunForkMaterializedEntitySnapshotMetadataOwner,
-		BlockerCode: RunForkBlockerEntitySnapshotMetadataUnproven,
+		Disposition: runfork.RunForkReplayResumeDispositionFailClosedBlocker,
+		Owner:       runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
+		BlockerCode: runfork.RunForkBlockerEntitySnapshotMetadataUnproven,
 		Message:     strings.TrimSpace(message),
 	}
 }
 
-func runForkReplayResumeAdmissionWithMaterializedEntitySnapshotMetadata(admission RunForkReplayResumeAdmission, metadataAdmission runForkMaterializedEntitySnapshotMetadataAdmission) RunForkReplayResumeAdmission {
+func runForkReplayResumeAdmissionWithMaterializedEntitySnapshotMetadata(admission runfork.RunForkReplayResumeAdmission, metadataAdmission runForkMaterializedEntitySnapshotMetadataAdmission) runfork.RunForkReplayResumeAdmission {
 	if strings.TrimSpace(admission.Owner) == "" {
-		admission.Owner = RunForkReplayResumeAdmissionOwner
+		admission.Owner = runfork.RunForkReplayResumeAdmissionOwner
 	}
 	updatedSnapshotDisposition := false
 	for i := range admission.Dispositions {
 		disposition := &admission.Dispositions[i]
-		if strings.TrimSpace(disposition.Fact) != RunForkReplayResumeFactEntityStateSnapshot {
+		if strings.TrimSpace(disposition.Fact) != runfork.RunForkReplayResumeFactEntityStateSnapshot {
 			continue
 		}
-		if strings.TrimSpace(disposition.Disposition) != RunForkReplayResumeDispositionReconstruct {
+		if strings.TrimSpace(disposition.Disposition) != runfork.RunForkReplayResumeDispositionReconstruct {
 			continue
 		}
-		disposition.Owner = RunForkMaterializedEntitySnapshotMetadataOwner
-		disposition.Message = RunForkMaterializedEntitySnapshotMetadataOwner + " authorizes reconstructed fork current-state snapshots by carrying source-at-T materialization metadata for every planned entity"
+		disposition.Owner = runfork.RunForkMaterializedEntitySnapshotMetadataOwner
+		disposition.Message = runfork.RunForkMaterializedEntitySnapshotMetadataOwner + " authorizes reconstructed fork current-state snapshots by carrying source-at-T materialization metadata for every planned entity"
 		updatedSnapshotDisposition = true
 		break
 	}
 	if !updatedSnapshotDisposition {
-		admission.Dispositions = append(admission.Dispositions, RunForkReplayResumeDisposition{
-			Fact:        RunForkReplayResumeFactEntityStateSnapshot,
-			Disposition: RunForkReplayResumeDispositionReconstruct,
-			Owner:       RunForkMaterializedEntitySnapshotMetadataOwner,
-			Message:     RunForkMaterializedEntitySnapshotMetadataOwner + " authorizes reconstructed fork current-state snapshots by carrying source-at-T materialization metadata for every planned entity",
+		admission.Dispositions = append(admission.Dispositions, runfork.RunForkReplayResumeDisposition{
+			Fact:        runfork.RunForkReplayResumeFactEntityStateSnapshot,
+			Disposition: runfork.RunForkReplayResumeDispositionReconstruct,
+			Owner:       runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
+			Message:     runfork.RunForkMaterializedEntitySnapshotMetadataOwner + " authorizes reconstructed fork current-state snapshots by carrying source-at-T materialization metadata for every planned entity",
 		})
 	}
 	admission.Dispositions = append(admission.Dispositions, metadataAdmission.Dispositions...)
 	for _, blocker := range metadataAdmission.Blockers {
 		admission.UnsupportedBlockers = appendRunForkBlocker(admission.UnsupportedBlockers, blocker)
 	}
-	return runForkReplayResumeAdmissionRecalculateReadiness(admission)
+	return runfork.RecalculateReplayResumeAdmission(admission)
 }

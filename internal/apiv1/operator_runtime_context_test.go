@@ -19,11 +19,12 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/runbundle"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -453,8 +454,8 @@ func TestRunForkExecutorForBundleContextRebindsSelectedContractSelection(t *test
 	targetBundle.Semantics.Version = "2.0.0"
 	targetSource := semanticview.Wrap(targetBundle)
 	executor := SelectedContractRunForkExecutor{
-		ContractSelection: store.RunForkContractSelection{
-			Mode:            store.RunForkContractSelectionModeSelectedContracts,
+		ContractSelection: runfork.RunForkContractSelection{
+			Mode:            runfork.RunForkContractSelectionModeSelectedContracts,
 			ContractsRoot:   "/tmp/primary-contracts",
 			WorkflowName:    primarySource.WorkflowName(),
 			WorkflowVersion: primarySource.WorkflowVersion(),
@@ -471,7 +472,7 @@ func TestRunForkExecutorForBundleContextRebindsSelectedContractSelection(t *test
 	if !ok {
 		t.Fatalf("rebound executor type = %T, want SelectedContractRunForkExecutor", rebound)
 	}
-	if selected.ContractSelection.Mode != store.RunForkContractSelectionModeSelectedContracts ||
+	if selected.ContractSelection.Mode != runfork.RunForkContractSelectionModeSelectedContracts ||
 		selected.ContractSelection.ContractsRoot != "/tmp/target-contracts" ||
 		selected.ContractSelection.WorkflowName != "target-review" ||
 		selected.ContractSelection.WorkflowVersion != "2.0.0" {
@@ -508,7 +509,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 		result: RunForkExecutionResult{
 			Owner:              "runtime.run_fork.selected_contract_execution",
 			SourceRunID:        runForkTestSourceRunID,
-			SourceRunStatus:    store.RunForkSourceFrozenStatus,
+			SourceRunStatus:    runfork.RunForkSourceFrozenStatus,
 			SourceFrozen:       true,
 			ForkRunID:          runForkTestForkRunID,
 			ForkEventID:        runForkTestEventID,
@@ -539,7 +540,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 	}
 	if executor.last.BundleHash != runtimeContextTestBundleHashB ||
 		!executor.last.ConfirmSourceFreeze ||
-		executor.last.ContractSelection.Mode != store.RunForkContractSelectionModeBundleHash ||
+		executor.last.ContractSelection.Mode != runfork.RunForkContractSelectionModeBundleHash ||
 		executor.last.ContractSelection.BundleHash != runtimeContextTestBundleHashB {
 		t.Fatalf("run.fork executor request = %#v", executor.last)
 	}
@@ -688,7 +689,14 @@ func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *
 	t.Helper()
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
-	}, runtimemanager.AgentManagerOptions{BaseContext: testAuthorActivityContextForSource(context.Background(), fact), WorkOwner: workOwner}, pg)
+	}, runtimemanager.AgentManagerOptions{
+		BaseContext: testAuthorActivityContextForSource(context.Background(), fact),
+		WorkOwner:   workOwner,
+		PersistenceRoles: runtimemanager.PersistenceRoles{
+			DirectiveOperations: pg,
+			DirectiveTargets:    pg,
+		},
+	}, pg)
 	t.Cleanup(func() {
 		if err := manager.Shutdown(); err != nil {
 			t.Errorf("shutdown runtime context agent manager: %v", err)

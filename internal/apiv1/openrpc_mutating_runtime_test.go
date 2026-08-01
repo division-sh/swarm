@@ -31,11 +31,12 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
 const mutatingRuntimeProbeTestName = "TestOpenRPCMutatingHTTPRuntimeProbes"
@@ -908,7 +909,7 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 	state.standing = &mutatingProbeStandingController{state: state, errs: map[string]error{}}
 	state.mailbox = newMutatingProbeMailboxStore(state)
 	state.decisionCards = newMutatingProbeDecisionCardStore(state)
-	state.workflowStore = &mutatingProbeDecisionWorkflowStore{}
+	state.workflowStore = &mutatingProbeDecisionWorkflowStore{state: state, cards: state.decisionCards, events: state.events}
 	state.bundleCatalog = &mutatingProbeBundleCatalog{state: state, details: map[string]store.BundleCatalogDetail{}}
 	state.forks = &fakeConversationForkLifecycleStore{
 		createResult: store.OperatorConversationForkSession{
@@ -1379,7 +1380,7 @@ func (e *mutatingProbeRunForkExecutor) ExecuteRunFork(_ context.Context, req Run
 	return RunForkExecutionResult{
 		Owner:              "runtime.run_fork.selected_contract_execution",
 		SourceRunID:        strings.TrimSpace(req.SourceRunID),
-		SourceRunStatus:    store.RunForkSourceFrozenStatus,
+		SourceRunStatus:    runfork.RunForkSourceFrozenStatus,
 		SourceFrozen:       true,
 		ForkRunID:          runForkTestForkRunID,
 		ForkEventID:        strings.TrimSpace(req.ForkEventID),
@@ -1610,18 +1611,100 @@ func (s *mutatingProbeMailboxStore) MarkMailboxItemNotified(_ context.Context, m
 }
 
 type mutatingProbeDecisionWorkflowStore struct {
-	err error
+	state  *mutatingRuntimeProbeState
+	cards  *mutatingProbeDecisionCardStore
+	events *mutatingProbeEventPublisher
+	err    error
 }
 
-func (s *mutatingProbeDecisionWorkflowStore) RunPipelineMutation(ctx context.Context, fn func(context.Context) error) error {
+func (s *mutatingProbeDecisionWorkflowStore) CommitDecisionCardMutation(
+	ctx context.Context,
+	idempotency runtimepipeline.DecisionCardMutationIdempotency,
+	idempotencyRequest runtimepipeline.DecisionCardMutationIdempotencyRequest,
+	mutation runtimepipeline.DecisionCardMutation,
+) (json.RawMessage, bool, error) {
 	if s.err != nil {
-		return s.err
+		return nil, false, s.err
 	}
-	return fn(ctx)
+	completion, replayed, err := idempotency.WithDecisionCardMutationIdempotency(ctx, idempotencyRequest, func(callbackCtx context.Context) (runtimepipeline.DecisionCardMutationIdempotencyCompletion, error) {
+		result, event, err := s.apply(callbackCtx, mutation)
+		if err != nil {
+			return runtimepipeline.DecisionCardMutationIdempotencyCompletion{}, err
+		}
+		if event.Type() != "" {
+			if err := s.events.PublishInMutation(callbackCtx, event); err != nil {
+				return runtimepipeline.DecisionCardMutationIdempotencyCompletion{}, err
+			}
+		}
+		raw, err := canonicaljson.Bytes(result)
+		return runtimepipeline.DecisionCardMutationIdempotencyCompletion{ResourceID: idempotencyRequest.ResourceID, Response: raw}, err
+	})
+	return completion.Response, replayed, err
 }
 
-func (s *mutatingProbeDecisionWorkflowStore) CommitDecision(context.Context, decisioncard.Card, string, time.Time) error {
-	return s.err
+func (s *mutatingProbeDecisionWorkflowStore) apply(ctx context.Context, mutation runtimepipeline.DecisionCardMutation) (any, events.Event, error) {
+	var noEvent events.Event
+	if req, ok := mutation.Decision(); ok {
+		card, err := s.cards.GetDecisionCard(ctx, req.CardID)
+		if err != nil {
+			return nil, noEvent, err
+		}
+		outcome, err := s.cards.DecideDecisionCard(ctx, req)
+		if err != nil {
+			return nil, noEvent, err
+		}
+		payload, err := canonicaljson.Bytes(map[string]any{
+			"card_id": card.CardID, "anchor_kind": string(card.Anchor.Kind()), "anchor": card.Anchor.SemanticValue().Interface(),
+		})
+		if err != nil {
+			return nil, noEvent, err
+		}
+		scope, _ := card.Anchor.Scope()
+		evt := eventtest.RuntimeControl(req.DecisionEventID, decisionCardEventName, "platform", "", payload, 0, card.RunID, "",
+			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance), req.Now)
+		return map[string]any{
+			"ok": true, "card_id": card.CardID, "status": outcome.Card.Status, "verdict": req.Verdict,
+			"decision_event_id": req.DecisionEventID, "change_id": outcome.ChangeID,
+		}, evt, nil
+	}
+	if req, ok := mutation.Deferral(); ok {
+		outcome, err := s.cards.DeferDecisionCard(ctx, req)
+		if err != nil {
+			return nil, noEvent, err
+		}
+		payload, err := canonicaljson.Bytes(map[string]any{"card_id": req.CardID, "until": req.Until})
+		if err != nil {
+			return nil, noEvent, err
+		}
+		evt := eventtest.RuntimeControl(eventtest.UUID("mailbox-card-deferred"), "mailbox.card_deferred", "platform", "", payload, 0, outcome.Card.RunID, "", events.EventEnvelope{}, req.Now)
+		return map[string]any{"ok": true, "card_id": req.CardID, "status": outcome.Card.Status, "change_id": outcome.ChangeID}, evt, nil
+	}
+	if req, observedHash, ok := mutation.InputBegin(); ok {
+		card, err := s.cards.GetDecisionCard(ctx, req.CardID)
+		if err != nil {
+			return nil, noEvent, err
+		}
+		if observedHash == "" || observedHash != card.CardContentHash {
+			return nil, noEvent, decisioncard.ErrStaleContent
+		}
+		req.TTL, err = time.ParseDuration(card.EffectiveCadence.InputDraftTTL)
+		if err != nil {
+			return nil, noEvent, err
+		}
+		draft, err := s.cards.BeginDecisionCardInput(ctx, req)
+		return map[string]any{
+			"ok": true, "card_id": req.CardID, "input_draft_id": draft.InputDraftID,
+			"verdict": draft.Verdict, "status": draft.Status, "expires_at": draft.ExpiresAt.UTC().Format(time.RFC3339Nano),
+		}, noEvent, err
+	}
+	if req, ok := mutation.InputCancellation(); ok {
+		draft, err := s.cards.CancelDecisionCardInput(ctx, req)
+		return map[string]any{
+			"ok": true, "card_id": req.CardID, "input_draft_id": draft.InputDraftID,
+			"verdict": draft.Verdict, "status": draft.Status, "expires_at": draft.ExpiresAt.UTC().Format(time.RFC3339Nano),
+		}, noEvent, err
+	}
+	return nil, noEvent, errors.New("unsupported decision-card mutation")
 }
 
 type mutatingProbeDecisionCardStore struct {

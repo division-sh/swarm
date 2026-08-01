@@ -1,4 +1,4 @@
-package store
+package runfork
 
 import (
 	"fmt"
@@ -121,6 +121,10 @@ func runForkSelectedContractActiveSourceDeliveryConversationCouplingAdmitted(pla
 	return runForkSelectedContractActiveSourceDeliveryConversationCouplingPolicy(plan).admitted[runForkSelectedContractPendingWorkKey(item)]
 }
 
+func ActiveSourceDeliveryConversationCouplingAdmitted(plan RunForkPlan, item RunForkPendingWork) bool {
+	return runForkSelectedContractActiveSourceDeliveryConversationCouplingAdmitted(plan, item)
+}
+
 func runForkSelectedContractActiveSourceDeliveryConversationCouplingFacts(admission RunForkReplayResumeAdmission) []string {
 	facts := []string{}
 	for _, disposition := range admission.Dispositions {
@@ -139,7 +143,11 @@ func runForkSelectedContractActiveSourceDeliveryConversationCouplingFacts(admiss
 		}
 		facts = append(facts, classification)
 	}
-	return uniqueNonEmptyStrings(facts)
+	return sortedTrimmedStrings(facts)
+}
+
+func ActiveSourceDeliveryConversationCouplingFacts(admission RunForkReplayResumeAdmission) []string {
+	return runForkSelectedContractActiveSourceDeliveryConversationCouplingFacts(admission)
 }
 
 type runForkSelectedContractActiveSourceDeliveryConversationCouplingPolicyResult struct {
@@ -180,6 +188,10 @@ func runForkSelectedContractPendingWorkHasActiveDeliverySessionCoupling(item Run
 		strings.TrimSpace(item.ReceiptOutcome) != ""
 }
 
+func PendingWorkHasActiveDeliverySessionCoupling(item RunForkPendingWork) bool {
+	return runForkSelectedContractPendingWorkHasActiveDeliverySessionCoupling(item)
+}
+
 func runForkSelectedContractSameSourceDeliveryForkPointEmission(plan RunForkPlan, item RunForkPendingWork) bool {
 	if strings.TrimSpace(item.Classification) != RunForkPendingClassificationInProgress {
 		return false
@@ -215,6 +227,10 @@ func runForkSelectedContractPendingWorkKey(item RunForkPendingWork) string {
 	}, "\x00")
 }
 
+func PendingWorkKey(item RunForkPendingWork) string {
+	return runForkSelectedContractPendingWorkKey(item)
+}
+
 func runForkSelectedContractDispositionKey(item RunForkReplayResumeDisposition) string {
 	return strings.Join([]string{
 		strings.TrimSpace(item.EventID),
@@ -222,6 +238,10 @@ func runForkSelectedContractDispositionKey(item RunForkReplayResumeDisposition) 
 		strings.TrimSpace(item.SubscriberType),
 		strings.TrimSpace(item.SubscriberID),
 	}, "\x00")
+}
+
+func ReplayResumeDispositionKey(item RunForkReplayResumeDisposition) string {
+	return runForkSelectedContractDispositionKey(item)
 }
 
 func runForkReplayResumeAdmissionPruneResolvedBlockers(admission RunForkReplayResumeAdmission) RunForkReplayResumeAdmission {
@@ -268,4 +288,8 @@ func runForkReplayResumeAdmissionRecalculateReadiness(admission RunForkReplayRes
 	admission.ReplayResumeFactsPresent = hasHistoricalReplayRequirement
 	admission.BoundedReplaySupported = admission.DeliveryEventReplayReady
 	return admission
+}
+
+func RecalculateReplayResumeAdmission(admission RunForkReplayResumeAdmission) RunForkReplayResumeAdmission {
+	return runForkReplayResumeAdmissionRecalculateReadiness(admission)
 }

@@ -52,7 +52,7 @@ type ActivityAttemptRecord struct {
 	UpdatedAt       time.Time
 }
 
-func (s *WorkflowInstanceStore) StartActivityAttempt(ctx context.Context, rec ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {
+func (s *workflowInstanceStore) StartActivityAttempt(ctx context.Context, rec ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {
 	rec = rec.normalized()
 	rec.Status = ActivityAttemptStatusStarted
 	if err := rec.validateStart(); err != nil {
@@ -118,7 +118,7 @@ func (s *WorkflowInstanceStore) StartActivityAttempt(ctx context.Context, rec Ac
 	return out, inserted, nil
 }
 
-func (s *WorkflowInstanceStore) ClaimActivityAttemptForLoopGeneration(ctx context.Context, rec ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {
+func (s *workflowInstanceStore) ClaimActivityAttemptForLoopGeneration(ctx context.Context, rec ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {
 	rec = rec.normalized()
 	if !rec.Generation.Valid() {
 		return s.StartActivityAttempt(ctx, rec)
@@ -179,7 +179,7 @@ func validateActivityAttemptClaimIdentity(actual, expected ActivityAttemptRecord
 	})
 }
 
-func (s *WorkflowInstanceStore) CompleteActivityAttempt(ctx context.Context, rec ActivityAttemptRecord) (ActivityAttemptRecord, error) {
+func (s *workflowInstanceStore) CompleteActivityAttempt(ctx context.Context, rec ActivityAttemptRecord) (ActivityAttemptRecord, error) {
 	rec = rec.normalized()
 	if err := rec.validateTerminal(); err != nil {
 		return ActivityAttemptRecord{}, err
@@ -259,7 +259,7 @@ func requireActiveActivityRun(ctx context.Context, tx *sql.Tx, runID string, sql
 	return runtimerunlifecycle.RequireActive(ctx, runID)
 }
 
-func (s *WorkflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context, rec ActivityAttemptRecord) (ActivityAttemptRecord, error) {
+func (s *workflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context, rec ActivityAttemptRecord) (ActivityAttemptRecord, error) {
 	rec = rec.normalized()
 	rec.Status = ActivityAttemptStatusUncertain
 	if err := rec.validateTerminal(); err != nil {
@@ -340,7 +340,7 @@ func validateActivityAttemptTerminalMode(actual, expected ActivityAttemptRecord)
 	)
 }
 
-func (s *WorkflowInstanceStore) LoadActivityAttempt(ctx context.Context, requestEventID string) (ActivityAttemptRecord, bool, error) {
+func (s *workflowInstanceStore) LoadActivityAttempt(ctx context.Context, requestEventID string) (ActivityAttemptRecord, bool, error) {
 	requestEventID = strings.TrimSpace(requestEventID)
 	if requestEventID == "" || s == nil || s.db == nil {
 		return ActivityAttemptRecord{}, false, nil

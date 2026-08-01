@@ -15,7 +15,7 @@ func TestWorkflowInstanceStore_RequiresRunContext(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 
-	err := store.Upsert(testAuthorActivityContext(t, context.Background()), materializedWorkflowInstanceForTest(WorkflowInstance{
+	err := store.upsert(testAuthorActivityContext(t, context.Background()), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      uuid.NewString(),
 		StorageRef:      uuid.NewString(),
 		WorkflowName:    "run-scope",
@@ -45,7 +45,7 @@ func TestWorkflowInstanceStore_RunScopedCurrentStateRowsDoNotBleed(t *testing.T)
 		{ctx: ctxA, state: "source_state"},
 		{ctx: ctxB, state: "fork_state"},
 	} {
-		if err := store.Upsert(tc.ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+		if err := store.upsert(tc.ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 			InstanceID:      entityID,
 			StorageRef:      entityID,
 			WorkflowName:    "run-scope",

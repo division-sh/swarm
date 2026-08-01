@@ -369,7 +369,6 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"RetirePublishedFlowInstanceRoute":       operationMutation,
 		"RouteTable":                             operationRetained,
 		"RunLifecycleCandidateOwner":             operationRetained,
-		"RuntimeMutationRunner":                  operationRetained,
 		"SetDeliveryAuthority":                   operationRetained,
 		"SetDeliveryContinuationOwner":           operationRetained,
 		"SetInterceptors":                        operationRetained,

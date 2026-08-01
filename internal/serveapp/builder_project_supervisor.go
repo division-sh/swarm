@@ -179,7 +179,10 @@ func newRuntimeProjectSupervisor(
 			if predecessor == nil {
 				return nil, nil, fmt.Errorf("predecessor runtime is required")
 			}
-			restored, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{Config: predecessor.Config, Stores: predecessor.Stores, Options: predecessor.Options})
+			deps := stores.runtimeDeps()
+			deps.Config = predecessor.Config
+			deps.Options = predecessor.Options
+			restored, err := runtime.NewRuntime(ctx, deps)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -366,24 +369,23 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if s.processWorkOwner == nil {
 		return builderpkg.ProjectStatus{}, errors.New("served process work owner is required for project runtime replacement")
 	}
-	newRT, err := s.createRuntime(ctx, runtime.RuntimeDeps{
-		Config: s.cfg,
-		Stores: s.stores.runtimeStores(),
-		Options: runtime.RuntimeOptions{
-			SelfCheck:               false,
-			ProcessWorkOwner:        s.processWorkOwner,
-			WorkflowModule:          module,
-			WorkspaceLifecycle:      workspaces,
-			BundleSourceFact:        bundleSourceFact,
-			RuntimeInstanceID:       s.runtimeInstanceID,
-			Credentials:             s.credentials,
-			ManagedCredentials:      managedCredentialStore,
-			ProviderCredentials:     s.providerCredentials,
-			ProviderTriggerCatalog:  candidateCatalog,
-			ChannelPlans:            candidateChannelPlans,
-			ChannelOutboundBindings: candidateChannelBindings,
-		},
-	})
+	deps := s.stores.runtimeDeps()
+	deps.Config = s.cfg
+	deps.Options = runtime.RuntimeOptions{
+		SelfCheck:               false,
+		ProcessWorkOwner:        s.processWorkOwner,
+		WorkflowModule:          module,
+		WorkspaceLifecycle:      workspaces,
+		BundleSourceFact:        bundleSourceFact,
+		RuntimeInstanceID:       s.runtimeInstanceID,
+		Credentials:             s.credentials,
+		ManagedCredentials:      managedCredentialStore,
+		ProviderCredentials:     s.providerCredentials,
+		ProviderTriggerCatalog:  candidateCatalog,
+		ChannelPlans:            candidateChannelPlans,
+		ChannelOutboundBindings: candidateChannelBindings,
+	}
+	newRT, err := s.createRuntime(ctx, deps)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
@@ -798,7 +800,10 @@ func (s *runtimeProjectSupervisor) restoreQuiescedPredecessor(ctx context.Contex
 	clone := s.cloneRuntime
 	if clone == nil {
 		clone = func(ctx context.Context, predecessor *runtime.Runtime) (*runtime.Runtime, *worklifetime.RuntimeOccurrence, error) {
-			restored, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{Config: predecessor.Config, Stores: predecessor.Stores, Options: predecessor.Options})
+			deps := s.stores.runtimeDeps()
+			deps.Config = predecessor.Config
+			deps.Options = predecessor.Options
+			restored, err := runtime.NewRuntime(ctx, deps)
 			if err != nil {
 				return nil, nil, err
 			}

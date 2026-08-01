@@ -16,7 +16,7 @@ type WorkflowInstanceRouteRecoveryProjection struct {
 	Config   map[string]any
 }
 
-func (s *WorkflowInstanceStore) LoadRouteRecoveryProjection(
+func (s *workflowInstanceStore) LoadRouteRecoveryProjection(
 	ctx context.Context,
 	route runtimeflowidentity.Route,
 ) (WorkflowInstanceRouteRecoveryProjection, error) {

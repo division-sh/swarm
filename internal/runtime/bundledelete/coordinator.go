@@ -61,7 +61,7 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out Result, ret
 		return Result{}, fmt.Errorf("bundle delete lock lease is missing")
 	}
 	defer func() {
-		retErr = errors.Join(retErr, lease.Release(context.Background()))
+		retErr = errors.Join(retErr, lease.Release(context.WithoutCancel(ctx)))
 	}()
 
 	plan, err := c.Planner.PlanBundleDelete(ctx, req)

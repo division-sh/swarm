@@ -6,17 +6,19 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -49,7 +51,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON(t *testing.T)
 	if code != 0 {
 		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
 	}
-	var plan store.RunForkPlan
+	var plan runfork.RunForkPlan
 	if err := json.Unmarshal(buf.Bytes(), &plan); err != nil {
 		t.Fatalf("decode fork plan json: %v\n%s", err, buf.String())
 	}
@@ -68,7 +70,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON(t *testing.T)
 	if plan.UnsupportedBlockerCount != 0 {
 		t.Fatalf("UnsupportedBlockerCount = %d, want 0; blockers=%#v", plan.UnsupportedBlockerCount, plan.UnsupportedBlockers)
 	}
-	if plan.ReplayResumeAdmission.Owner != store.RunForkReplayResumeAdmissionOwner || !plan.ReplayResumeAdmission.StateOnlyExecutionReady {
+	if plan.ReplayResumeAdmission.Owner != runfork.RunForkReplayResumeAdmissionOwner || !plan.ReplayResumeAdmission.StateOnlyExecutionReady {
 		t.Fatalf("taxonomy = %#v, want canonical owner and state-only ready", plan.ReplayResumeAdmission)
 	}
 }
@@ -102,7 +104,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 	if code != 0 {
 		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
 	}
-	var plan store.RunForkPlan
+	var plan runfork.RunForkPlan
 	if err := json.Unmarshal(buf.Bytes(), &plan); err != nil {
 		t.Fatalf("decode fork plan json: %v\n%s", err, buf.String())
 	}
@@ -141,7 +143,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 	if code != 0 {
 		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
 	}
-	var plan store.RunForkPlan
+	var plan runfork.RunForkPlan
 	if err := json.Unmarshal(buf.Bytes(), &plan); err != nil {
 		t.Fatalf("decode fork plan json: %v\n%s", err, buf.String())
 	}
@@ -149,7 +151,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 		t.Fatalf("ContractFrontierAdmission = nil; output=%s", buf.String())
 	}
 	admission := plan.ContractFrontierAdmission
-	if admission.Owner != store.RunForkContractFrontierAdmissionOwner || !admission.NonMutating || admission.HistoricalExecutionSupported {
+	if admission.Owner != runfork.RunForkContractFrontierAdmissionOwner || !admission.NonMutating || admission.HistoricalExecutionSupported {
 		t.Fatalf("contract frontier admission = %#v", admission)
 	}
 	if admission.FrontierEventCount != 1 || len(admission.FrontierEvents) != 1 {
@@ -158,111 +160,111 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 	if !runForkPlanHasString(admission.FrontierEvents[0].RuntimeEventOwners, "alpha-intake") {
 		t.Fatalf("runtime event owners = %#v, want alpha-intake from selected contract", admission.FrontierEvents[0].RuntimeEventOwners)
 	}
-	if !runForkPlanHasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierExecutionUnsupported) {
+	if !runForkPlanHasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierExecutionUnsupported) {
 		t.Fatalf("contract frontier blockers = %#v, want execution unsupported", admission.UnsupportedBlockers)
 	}
 	model := plan.SelectedContractExecution
 	if model == nil {
 		t.Fatalf("SelectedContractExecution = nil; output=%s", buf.String())
 	}
-	if model.Owner != store.RunForkSelectedContractExecutionModelOwner ||
-		model.FutureExecutionOwner != store.RunForkSelectedContractExecutionOwner ||
+	if model.Owner != runfork.RunForkSelectedContractExecutionModelOwner ||
+		model.FutureExecutionOwner != runfork.RunForkSelectedContractExecutionOwner ||
 		!model.NonMutating ||
 		model.ExecutionSupported {
 		t.Fatalf("selected-contract execution model = %#v", model)
 	}
-	if model.AdmissionOwner != store.RunForkContractFrontierAdmissionOwner ||
-		model.AdmissionUse != store.RunForkSelectedContractExecutionAdmissionUseEvidenceOnly {
+	if model.AdmissionOwner != runfork.RunForkContractFrontierAdmissionOwner ||
+		model.AdmissionUse != runfork.RunForkSelectedContractExecutionAdmissionUseEvidenceOnly {
 		t.Fatalf("selected-contract execution admission use = %#v", model)
 	}
 	if model.RouteTopology == nil ||
-		model.RouteTopology.Owner != store.RunForkSelectedContractRouteTopologyOwner ||
-		model.RouteTopology.RouteAdmissionOwner != store.RunForkSelectedContractRouteAdmissionOwner ||
+		model.RouteTopology.Owner != runfork.RunForkSelectedContractRouteTopologyOwner ||
+		model.RouteTopology.RouteAdmissionOwner != runfork.RunForkSelectedContractRouteAdmissionOwner ||
 		!model.RouteTopology.NonMutating ||
 		model.RouteTopology.RoutePersistenceSupported ||
 		model.RouteTopology.ExecutableRecipientsSupported {
 		t.Fatalf("selected-contract route topology = %#v", model.RouteTopology)
 	}
-	if !runForkPlanHasBoundary(model.RouteTopology.InvalidPaths, "copy_source_routing_rules", store.RunForkSelectedContractDispositionInvalid) {
+	if !runForkPlanHasBoundary(model.RouteTopology.InvalidPaths, "copy_source_routing_rules", runfork.RunForkSelectedContractDispositionInvalid) {
 		t.Fatalf("selected-contract route invalid paths = %#v", model.RouteTopology.InvalidPaths)
 	}
 	if model.RecipientPlanning == nil ||
-		model.RecipientPlanning.Owner != store.RunForkSelectedContractRecipientPlanningOwner ||
+		model.RecipientPlanning.Owner != runfork.RunForkSelectedContractRecipientPlanningOwner ||
 		!model.RecipientPlanning.NonMutating ||
 		!model.RecipientPlanning.RecipientPlanningSupported ||
 		model.RecipientPlanning.DeliveryWritesSupported {
 		t.Fatalf("selected-contract recipient planning = %#v", model.RecipientPlanning)
 	}
-	if !runForkPlanHasBoundary(model.RecipientPlanning.RequiredConsumers, "eventbus_publish_recipient_guard", store.RunForkSelectedContractDispositionPrerequisite) {
+	if !runForkPlanHasBoundary(model.RecipientPlanning.RequiredConsumers, "eventbus_publish_recipient_guard", runfork.RunForkSelectedContractDispositionPrerequisite) {
 		t.Fatalf("selected-contract recipient planning consumers = %#v", model.RecipientPlanning.RequiredConsumers)
 	}
-	if !runForkPlanHasBlocker(model.UnsupportedBlockers, store.RunForkBlockerSelectedContractRouteTopologyNonMutating) {
+	if !runForkPlanHasBlocker(model.UnsupportedBlockers, runfork.RunForkBlockerSelectedContractRouteTopologyNonMutating) {
 		t.Fatalf("selected-contract execution blockers = %#v, want route topology non-mutating blocker", model.UnsupportedBlockers)
 	}
-	if !runForkPlanHasBlocker(model.UnsupportedBlockers, store.RunForkBlockerSelectedContractRouteAdmissionNonMutating) {
+	if !runForkPlanHasBlocker(model.UnsupportedBlockers, runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating) {
 		t.Fatalf("selected-contract execution blockers = %#v, want route admission non-mutating blocker", model.UnsupportedBlockers)
 	}
-	if !runForkPlanHasBoundary(model.InvalidPaths, "copy_source_event_deliveries", store.RunForkSelectedContractDispositionInvalid) {
+	if !runForkPlanHasBoundary(model.InvalidPaths, "copy_source_event_deliveries", runfork.RunForkSelectedContractDispositionInvalid) {
 		t.Fatalf("selected-contract execution invalid paths = %#v", model.InvalidPaths)
 	}
-	if !runForkPlanHasBoundary(model.RequiredConsumers, "fork_local_runtime_container", store.RunForkSelectedContractDispositionPrerequisite) ||
-		!runForkPlanHasBoundary(model.RequiredConsumers, "fork_run_id_runtime_context", store.RunForkSelectedContractDispositionPrerequisite) ||
-		!runForkPlanHasBoundary(model.RequiredConsumers, "fork_local_event_delivery_writes", store.RunForkSelectedContractDispositionPrerequisite) ||
-		!runForkPlanHasBoundary(model.RequiredConsumers, "handler_execution", store.RunForkSelectedContractDispositionPrerequisite) ||
-		!runForkPlanHasBoundary(model.RequiredConsumers, "emitted_follow_up_events", store.RunForkSelectedContractDispositionPrerequisite) {
+	if !runForkPlanHasBoundary(model.RequiredConsumers, "fork_local_runtime_container", runfork.RunForkSelectedContractDispositionPrerequisite) ||
+		!runForkPlanHasBoundary(model.RequiredConsumers, "fork_run_id_runtime_context", runfork.RunForkSelectedContractDispositionPrerequisite) ||
+		!runForkPlanHasBoundary(model.RequiredConsumers, "fork_local_event_delivery_writes", runfork.RunForkSelectedContractDispositionPrerequisite) ||
+		!runForkPlanHasBoundary(model.RequiredConsumers, "handler_execution", runfork.RunForkSelectedContractDispositionPrerequisite) ||
+		!runForkPlanHasBoundary(model.RequiredConsumers, "emitted_follow_up_events", runfork.RunForkSelectedContractDispositionPrerequisite) {
 		t.Fatalf("selected-contract execution consumers = %#v", model.RequiredConsumers)
 	}
-	if !runForkPlanHasBlocker(model.UnsupportedBlockers, store.RunForkBlockerSelectedContractExecutionModelNonMutating) {
+	if !runForkPlanHasBlocker(model.UnsupportedBlockers, runfork.RunForkBlockerSelectedContractExecutionModelNonMutating) {
 		t.Fatalf("selected-contract execution blockers = %#v", model.UnsupportedBlockers)
 	}
 	readiness := plan.SelectedContractReadiness
 	if readiness == nil {
 		t.Fatalf("SelectedContractReadiness = nil; output=%s", buf.String())
 	}
-	if readiness.Owner != store.RunForkSelectedContractReadinessClassifierOwner ||
+	if readiness.Owner != runfork.RunForkSelectedContractReadinessClassifierOwner ||
 		!readiness.NonMutating ||
-		readiness.PlannerOwner != store.RunForkPlanningOwner ||
-		readiness.ReplayResumeAdmissionOwner != store.RunForkReplayResumeAdmissionOwner ||
-		readiness.ContractFrontierAdmissionOwner != store.RunForkContractFrontierAdmissionOwner ||
-		readiness.RouteTopologyOwner != store.RunForkSelectedContractRouteTopologyOwner ||
-		readiness.RecipientPlanningOwner != store.RunForkSelectedContractRecipientPlanningOwner ||
-		readiness.SelectedExecutionModelOwner != store.RunForkSelectedContractExecutionModelOwner ||
-		readiness.FutureExecutionOwner != store.RunForkSelectedContractExecutionOwner {
+		readiness.PlannerOwner != runfork.RunForkPlanningOwner ||
+		readiness.ReplayResumeAdmissionOwner != runfork.RunForkReplayResumeAdmissionOwner ||
+		readiness.ContractFrontierAdmissionOwner != runfork.RunForkContractFrontierAdmissionOwner ||
+		readiness.RouteTopologyOwner != runfork.RunForkSelectedContractRouteTopologyOwner ||
+		readiness.RecipientPlanningOwner != runfork.RunForkSelectedContractRecipientPlanningOwner ||
+		readiness.SelectedExecutionModelOwner != runfork.RunForkSelectedContractExecutionModelOwner ||
+		readiness.FutureExecutionOwner != runfork.RunForkSelectedContractExecutionOwner {
 		t.Fatalf("selected-contract readiness = %#v", readiness)
 	}
 	if len(readiness.FactMatrix) != 20 {
 		t.Fatalf("readiness facts = %d, want complete matrix; facts=%#v", len(readiness.FactMatrix), readiness.FactMatrix)
 	}
 	for _, fact := range []string{
-		store.RunForkSelectedContractReadinessFactSourceEvents,
-		store.RunForkSelectedContractReadinessFactForkEvents,
-		store.RunForkSelectedContractReadinessFactSourceDeliveries,
-		store.RunForkSelectedContractReadinessFactForkDeliveries,
-		store.RunForkSelectedContractReadinessFactSelectedRecipientsRoutes,
-		store.RunForkSelectedContractReadinessFactTimers,
-		store.RunForkSelectedContractReadinessFactSessions,
-		store.RunForkSelectedContractReadinessFactTurns,
-		store.RunForkSelectedContractReadinessFactAudits,
-		store.RunForkSelectedContractReadinessFactCommittedReplayScopeMarkers,
-		store.RunForkSelectedContractReadinessFactPlatformRuntimeDiagnostics,
-		store.RunForkSelectedContractReadinessFactReceipts,
-		store.RunForkSelectedContractReadinessFactDeadLetters,
-		store.RunForkSelectedContractReadinessFactRetryIdempotency,
-		store.RunForkSelectedContractReadinessFactEmittedFollowUps,
-		store.RunForkSelectedContractReadinessFactSourcePostTFacts,
-		store.RunForkSelectedContractReadinessFactCurrentStateSnapshots,
-		store.RunForkSelectedContractReadinessFactNonAgentNodeSystemWork,
-		store.RunForkSelectedContractReadinessFactRestartRecovery,
-		store.RunForkSelectedContractReadinessFactOperatorConsumers,
+		runfork.RunForkSelectedContractReadinessFactSourceEvents,
+		runfork.RunForkSelectedContractReadinessFactForkEvents,
+		runfork.RunForkSelectedContractReadinessFactSourceDeliveries,
+		runfork.RunForkSelectedContractReadinessFactForkDeliveries,
+		runfork.RunForkSelectedContractReadinessFactSelectedRecipientsRoutes,
+		runfork.RunForkSelectedContractReadinessFactTimers,
+		runfork.RunForkSelectedContractReadinessFactSessions,
+		runfork.RunForkSelectedContractReadinessFactTurns,
+		runfork.RunForkSelectedContractReadinessFactAudits,
+		runfork.RunForkSelectedContractReadinessFactCommittedReplayScopeMarkers,
+		runfork.RunForkSelectedContractReadinessFactPlatformRuntimeDiagnostics,
+		runfork.RunForkSelectedContractReadinessFactReceipts,
+		runfork.RunForkSelectedContractReadinessFactDeadLetters,
+		runfork.RunForkSelectedContractReadinessFactRetryIdempotency,
+		runfork.RunForkSelectedContractReadinessFactEmittedFollowUps,
+		runfork.RunForkSelectedContractReadinessFactSourcePostTFacts,
+		runfork.RunForkSelectedContractReadinessFactCurrentStateSnapshots,
+		runfork.RunForkSelectedContractReadinessFactNonAgentNodeSystemWork,
+		runfork.RunForkSelectedContractReadinessFactRestartRecovery,
+		runfork.RunForkSelectedContractReadinessFactOperatorConsumers,
 	} {
 		if !runForkReadinessFactHas(readiness.FactMatrix, fact) {
 			t.Fatalf("readiness fact %q missing from %#v", fact, readiness.FactMatrix)
 		}
 	}
-	if !runForkReadinessFactHasDisposition(readiness.FactMatrix, store.RunForkSelectedContractReadinessFactSourceDeliveries, store.RunForkSelectedContractReadinessDispositionFailClosedBlocker) {
+	if !runForkReadinessFactHasDisposition(readiness.FactMatrix, runfork.RunForkSelectedContractReadinessFactSourceDeliveries, runfork.RunForkSelectedContractReadinessDispositionFailClosedBlocker) {
 		t.Fatalf("source delivery readiness = %#v, want fail-closed blocker for source node delivery", readiness.FactMatrix)
 	}
-	if !runForkReadinessFactHasDisposition(readiness.FactMatrix, store.RunForkSelectedContractReadinessFactSelectedRecipientsRoutes, store.RunForkSelectedContractReadinessDispositionReconstructedForkState) {
+	if !runForkReadinessFactHasDisposition(readiness.FactMatrix, runfork.RunForkSelectedContractReadinessFactSelectedRecipientsRoutes, runfork.RunForkSelectedContractReadinessDispositionReconstructedForkState) {
 		t.Fatalf("route/recipient readiness = %#v, want reconstructed fork-local evidence", readiness.FactMatrix)
 	}
 }
@@ -363,12 +365,12 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("decode selected execution json: %v\n%s", err, buf.String())
 	}
-	if result.Owner != store.RunForkSelectedContractExecutionOwner || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
+	if result.Owner != runfork.RunForkSelectedContractExecutionOwner || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
 		t.Fatalf("selected execution result = %#v", result)
 	}
 	if result.SelectedContractExecutionAdmission == nil ||
 		result.SelectedContractExecutionAdmission.RecipientPlanning == nil ||
-		result.SelectedContractExecutionAdmission.RecipientPlanning.Owner != store.RunForkSelectedContractRecipientPlanningOwner {
+		result.SelectedContractExecutionAdmission.RecipientPlanning.Owner != runfork.RunForkSelectedContractRecipientPlanningOwner {
 		t.Fatalf("selected execution recipient planning admission = %#v", result.SelectedContractExecutionAdmission)
 	}
 	var lineageRows int
@@ -407,7 +409,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 		  AND event_name = 'platform.runtime_log'
 		  AND source_event_id = $2::uuid
 		  AND payload->'details'->>'runtime_lineage_owner' = $3
-	`, result.Materialization.ForkRunID, result.ForkEvents[0].ForkEventID, store.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner).Scan(&typedRuntimeDiagnostics); err != nil {
+	`, result.Materialization.ForkRunID, result.ForkEvents[0].ForkEventID, runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner).Scan(&typedRuntimeDiagnostics); err != nil {
 		t.Fatalf("count typed fork-local runtime diagnostics: %v", err)
 	}
 	if typedRuntimeDiagnostics == 0 {
@@ -461,8 +463,8 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvance
 	if result.Activation.BranchDivergence == nil || result.Activation.SourceFrozen {
 		t.Fatalf("branch activation = %#v", result.Activation)
 	}
-	if result.Activation.BranchDivergence.Owner != store.RunForkSelectedContractBranchDivergenceOwner ||
-		result.Activation.BranchDivergence.Policy != store.RunForkSelectedContractSourceAdvancedBranchPolicy {
+	if result.Activation.BranchDivergence.Owner != runfork.RunForkSelectedContractBranchDivergenceOwner ||
+		result.Activation.BranchDivergence.Policy != runfork.RunForkSelectedContractSourceAdvancedBranchPolicy {
 		t.Fatalf("branch divergence = %#v", result.Activation.BranchDivergence)
 	}
 	var sourceStatus string
@@ -524,20 +526,20 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	if code != 0 {
 		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
 	}
-	var result store.RunForkMaterialization
+	var result runfork.RunForkMaterialization
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("decode fork materialization json: %v\n%s", err, buf.String())
 	}
-	if result.SourceRunID != runID || result.ForkRunID == "" || result.ForkRunStatus != store.RunForkMaterializedStatus {
+	if result.SourceRunID != runID || result.ForkRunID == "" || result.ForkRunStatus != runfork.RunForkMaterializedStatus {
 		t.Fatalf("materialization result = %#v", result)
 	}
-	if result.ReplayResumeAdmission.Owner != store.RunForkReplayResumeAdmissionOwner || !result.ReplayResumeAdmission.StateOnlyExecutionReady {
+	if result.ReplayResumeAdmission.Owner != runfork.RunForkReplayResumeAdmissionOwner || !result.ReplayResumeAdmission.StateOnlyExecutionReady {
 		t.Fatalf("materialization taxonomy = %#v, want canonical owner and state-only ready", result.ReplayResumeAdmission)
 	}
 	if result.SelectedContractBinding == nil {
 		t.Fatalf("SelectedContractBinding = nil; output=%s", buf.String())
 	}
-	if result.SelectedContractBinding.Owner != store.RunForkSelectedContractBindingOwner ||
+	if result.SelectedContractBinding.Owner != runfork.RunForkSelectedContractBindingOwner ||
 		result.SelectedContractBinding.ForkRunID != result.ForkRunID ||
 		result.SelectedContractBinding.SourceRunID != runID ||
 		result.SelectedContractBinding.ForkEventID != eventID ||
@@ -580,7 +582,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON(t *testi
 	at := time.Unix(1700000320, 0).UTC()
 	ctx := runForkRuntimeOwnerContext(context.Background())
 	seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
-	materialized, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{SourceRunID: runID, At: eventID})
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -596,14 +598,14 @@ func TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON(t *testi
 	if code != 0 {
 		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
 	}
-	var result store.RunForkActivation
+	var result runfork.RunForkActivation
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("decode fork activation json: %v\n%s", err, buf.String())
 	}
 	if !result.Activated || !result.SourceFrozen || !result.ReplayResumeBlocked {
 		t.Fatalf("activation result = %#v", result)
 	}
-	if result.ReplayResumeAdmission.Owner != store.RunForkReplayResumeAdmissionOwner || !result.ReplayResumeAdmission.StateOnlyExecutionReady {
+	if result.ReplayResumeAdmission.Owner != runfork.RunForkReplayResumeAdmissionOwner || !result.ReplayResumeAdmission.StateOnlyExecutionReady {
 		t.Fatalf("activation taxonomy = %#v, want canonical owner and state-only ready", result.ReplayResumeAdmission)
 	}
 	if result.SourceRunID != runID || result.ForkRunID != materialized.ForkRunID {
@@ -616,7 +618,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON(t *testi
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status: %v", err)
 	}
-	if sourceStatus != store.RunForkSourceFrozenStatus || forkStatus != store.RunForkActivatedStatus {
+	if sourceStatus != runfork.RunForkSourceFrozenStatus || forkStatus != runfork.RunForkActivatedStatus {
 		t.Fatalf("source/fork status = %s/%s, want forked/running", sourceStatus, forkStatus)
 	}
 }
@@ -631,7 +633,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateNonSelectedWithEmptySelectedAuthorit
 	at := time.Unix(1700000325, 0).UTC()
 	ctx := runForkRuntimeOwnerContext(context.Background())
 	seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
-	materialized, err := pg.MaterializeRunFork(ctx, store.RunForkMaterializeRequest{SourceRunID: runID, At: eventID})
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -646,7 +648,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateNonSelectedWithEmptySelectedAuthorit
 	if code != 0 {
 		t.Fatalf("runForkRuntimeOwnerHarness code=%d output=%s", code, buf.String())
 	}
-	var result store.RunForkActivation
+	var result runfork.RunForkActivation
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("decode fork activation json: %v\n%s", err, buf.String())
 	}
@@ -679,7 +681,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmiss
 	if materializeCode != 0 {
 		t.Fatalf("materialize code=%d output=%s", materializeCode, materializeOut.String())
 	}
-	var materialized store.RunForkMaterialization
+	var materialized runfork.RunForkMaterialization
 	if err := json.Unmarshal(materializeOut.Bytes(), &materialized); err != nil {
 		t.Fatalf("decode materialization: %v\n%s", err, materializeOut.String())
 	}
@@ -696,9 +698,9 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmiss
 		t.Fatalf("activate code=%d output=%s", activateCode, activateOut.String())
 	}
 	var result struct {
-		store.RunForkActivation
-		Owner     string                                           `json:"selected_contract_activation_gate_owner"`
-		Admission *store.RunForkSelectedContractExecutionAdmission `json:"selected_contract_execution_admission"`
+		runfork.RunForkActivation
+		Owner     string                                             `json:"selected_contract_activation_gate_owner"`
+		Admission *runfork.RunForkSelectedContractExecutionAdmission `json:"selected_contract_execution_admission"`
 	}
 	if err := json.Unmarshal(activateOut.Bytes(), &result); err != nil {
 		t.Fatalf("decode activation: %v\n%s", err, activateOut.String())
@@ -706,13 +708,13 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmiss
 	if !result.Activated || !result.SourceFrozen || result.ForkRunID != materialized.ForkRunID {
 		t.Fatalf("activation = %#v", result.RunForkActivation)
 	}
-	if result.Owner != store.RunForkSelectedContractExecutionActivationGateOwner {
-		t.Fatalf("selected activation owner = %q, want %q", result.Owner, store.RunForkSelectedContractExecutionActivationGateOwner)
+	if result.Owner != runfork.RunForkSelectedContractExecutionActivationGateOwner {
+		t.Fatalf("selected activation owner = %q, want %q", result.Owner, runfork.RunForkSelectedContractExecutionActivationGateOwner)
 	}
 	if result.Admission == nil ||
-		result.Admission.Owner != store.RunForkSelectedContractExecutionAdmissionOwner ||
+		result.Admission.Owner != runfork.RunForkSelectedContractExecutionAdmissionOwner ||
 		result.Admission.FrontierEventCount != 0 ||
-		result.Admission.ContractBindingOwner != store.RunForkSelectedContractBindingOwner {
+		result.Admission.ContractBindingOwner != runfork.RunForkSelectedContractBindingOwner {
 		t.Fatalf("selected admission = %#v", result.Admission)
 	}
 }
@@ -749,7 +751,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingRejectsDeliveryReplay
 	if materializeCode != 0 {
 		t.Fatalf("materialize code=%d output=%s", materializeCode, materializeOut.String())
 	}
-	var materialized store.RunForkMaterialization
+	var materialized runfork.RunForkMaterialization
 	if err := json.Unmarshal(materializeOut.Bytes(), &materialized); err != nil {
 		t.Fatalf("decode materialization: %v\n%s", err, materializeOut.String())
 	}
@@ -774,7 +776,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingRejectsDeliveryReplay
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status: %v", err)
 	}
-	if sourceStatus != "running" || forkStatus != store.RunForkMaterializedStatus {
+	if sourceStatus != "running" || forkStatus != runfork.RunForkMaterializedStatus {
 		t.Fatalf("source/fork status = %s/%s, want running/paused", sourceStatus, forkStatus)
 	}
 	var replayRows, forkEvents, forkDeliveries int
@@ -868,7 +870,7 @@ func seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, d
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.FamilyEvents, runforkrevision.FamilyEventReceipts)
 }
 
-func runForkPlanHasBlocker(blockers []store.RunForkUnsupportedBlocker, code string) bool {
+func runForkPlanHasBlocker(blockers []runfork.RunForkUnsupportedBlocker, code string) bool {
 	for _, blocker := range blockers {
 		if blocker.Code == code {
 			return true
@@ -886,7 +888,7 @@ func runForkPlanHasString(values []string, want string) bool {
 	return false
 }
 
-func runForkPlanHasBoundary(values []store.RunForkSelectedContractExecutionBoundary, concept, disposition string) bool {
+func runForkPlanHasBoundary(values []runfork.RunForkSelectedContractExecutionBoundary, concept, disposition string) bool {
 	for _, value := range values {
 		if value.Concept == concept && value.Disposition == disposition {
 			return true
@@ -895,7 +897,7 @@ func runForkPlanHasBoundary(values []store.RunForkSelectedContractExecutionBound
 	return false
 }
 
-func runForkReadinessFactHas(values []store.RunForkSelectedContractReadinessFact, fact string) bool {
+func runForkReadinessFactHas(values []runfork.RunForkSelectedContractReadinessFact, fact string) bool {
 	for _, value := range values {
 		if value.Fact == fact {
 			return true
@@ -904,7 +906,7 @@ func runForkReadinessFactHas(values []store.RunForkSelectedContractReadinessFact
 	return false
 }
 
-func runForkReadinessFactHasDisposition(values []store.RunForkSelectedContractReadinessFact, fact, disposition string) bool {
+func runForkReadinessFactHasDisposition(values []runfork.RunForkSelectedContractReadinessFact, fact, disposition string) bool {
 	for _, value := range values {
 		if value.Fact == fact && value.Disposition == disposition {
 			return true

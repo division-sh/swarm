@@ -51,15 +51,18 @@ func (s *PostgresStore) WithAPIIdempotency(
 	req APIIdempotencyRequest,
 	execute func(context.Context) (APIIdempotencyCompletion, error),
 ) (APIIdempotencyCompletion, bool, error) {
+	if execute == nil {
+		return APIIdempotencyCompletion{}, false, fmt.Errorf("api idempotency executor is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if strings.TrimSpace(req.IdempotencyKey) == "" {
 		completion, err := execute(ctx)
 		return completion, false, err
 	}
 	if s == nil || s.DB == nil {
 		return APIIdempotencyCompletion{}, false, fmt.Errorf("postgres store is required")
-	}
-	if execute == nil {
-		return APIIdempotencyCompletion{}, false, fmt.Errorf("api idempotency executor is required")
 	}
 	req.Method = strings.TrimSpace(req.Method)
 	req.ActorTokenID = strings.TrimSpace(req.ActorTokenID)
@@ -90,7 +93,7 @@ func (s *PostgresStore) WithAPIIdempotency(
 		return APIIdempotencyCompletion{}, false, fmt.Errorf("lock api idempotency key: %w", err)
 	}
 	defer func() {
-		_, _ = conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock(hashtext($1))`, lockKey)
+		_, _ = conn.ExecContext(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock(hashtext($1))`, lockKey)
 	}()
 
 	if err := purgeExpiredAPIIdempotency(ctx, conn, req.Now); err != nil {

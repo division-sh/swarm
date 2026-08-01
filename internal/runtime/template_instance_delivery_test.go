@@ -21,10 +21,12 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
@@ -59,9 +61,14 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	}
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
-		Module:        module,
-		DeliveryStore: pg,
+		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
+		Module:              module,
+		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		RunLifecycle:        pg,
+		PipelineObligations: pg.PipelineObligations(),
+		DeliveryStore:       pg,
+		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
+		PinRoutingDescriptors: bus, FlowRoutes: bus,
 	})
 	if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
@@ -170,30 +177,38 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	manager := ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-		BaseContext:       ctx,
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
-		SemanticSource:    source,
-		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		WorkflowInstances: workflowStore,
-		LifecycleStore:    pg,
-		DeliveryStore:     pg,
-	}))
+	var manager *runtimemanager.AgentManager
 	activationCalls := 0
 	var activationErr error
 	module := newRuntimeTestWorkflowModule(t, source)
 	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
-		Module:        module,
-		DeliveryStore: pg,
+		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
+		Module:              module,
+		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		RunLifecycle:        pg,
+		PipelineObligations: pg.PipelineObligations(),
+		DeliveryStore:       pg,
+		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
+		PinRoutingDescriptors: bus, FlowRoutes: bus,
 		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+			if manager == nil {
+				return errors.New("agent manager is required")
+			}
 			activationCalls++
 			activationErr = manager.ActivateFlowInstance(ctx, req)
 			return activationErr
 		},
-		WorkflowStore: workflowStore,
 	})
+	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		BaseContext:       ctx,
+		BundleSourceFact:  authorActivityTestBundleSourceFact,
+		SemanticSource:    source,
+		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
+		WorkflowInstances: pc,
+		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
+		LifecycleStore:    pg,
+		DeliveryStore:     pg,
+	}))
 	bus.SetInterceptors(pc)
 
 	spinup := eventtest.ExistingRunRootIngress(
@@ -259,28 +274,41 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	proofStore := routeMaterializationDBProofStore{pg: pg}
-	bus, err := newScopedTestEventBus(t, proofStore, runtimebus.EventBusOptions{ContractBundle: source})
+	durable := externalRuntimeTestDurableDependencies(pg)
+	durable.FlowRoutes = proofStore
+	durable.FlowRouteSets = proofStore
+	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source, Durable: durable})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	manager := ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+	var manager *runtimemanager.AgentManager
+	module := newRuntimeTestWorkflowModule(t, source)
+	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		WorkOwner: runtimeTestEventBusWorkOwner(t, bus),
+		Module:    module,
+		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+			if manager == nil {
+				return errors.New("agent manager is required")
+			}
+			return manager.ActivateFlowInstance(ctx, req)
+		},
+		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		RunLifecycle:        pg,
+		PipelineObligations: pg.PipelineObligations(),
+		DeliveryStore:       pg,
+		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
+		PinRoutingDescriptors: bus, FlowRoutes: bus,
+	})
+	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		BaseContext:       ctx,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
 		SemanticSource:    source,
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		WorkflowInstances: workflowStore,
+		WorkflowInstances: pc,
+		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
 		LifecycleStore:    pg,
 		DeliveryStore:     pg,
 	}, pg))
-	module := newRuntimeTestWorkflowModule(t, source)
-	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		Module:            module,
-		InstanceActivator: manager.ActivateFlowInstance,
-		WorkflowStore:     workflowStore,
-		DeliveryStore:     pg,
-	})
 	bus.SetInterceptors(pc)
 
 	spinup := eventtest.ExistingRunRootIngress(
@@ -340,7 +368,6 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		Invariant: "store.event_record.named_operation_atomicity",
 		Reason:    "prove late delivery failure rolls back the event and connect-created lifecycle facts",
 	}, "consumer")
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
@@ -354,19 +381,23 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              newRuntimeTestWorkflowModule(t, source),
-		WorkflowStore:       workflowStore,
+		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		RunLifecycle:        pg,
 		DeliveryStore:       pg,
 		PipelineObligations: pg.PipelineObligations(),
+		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
+		PinRoutingDescriptors: bus, FlowRoutes: bus,
 	})
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		BaseContext:       ctx,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
 		SemanticSource:    source,
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		WorkflowInstances: workflowStore,
+		WorkflowInstances: pc,
+		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
 		LifecycleStore:    pg,
 	}))
 	evt := eventtest.ExistingRunRootIngress(
@@ -425,24 +456,34 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	manager := ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+	var manager *runtimemanager.AgentManager
+	module := newRuntimeTestWorkflowModule(t, source)
+	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		WorkOwner: runtimeTestEventBusWorkOwner(t, bus),
+		Module:    module,
+		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+			if manager == nil {
+				return errors.New("agent manager is required")
+			}
+			return manager.ActivateFlowInstance(ctx, req)
+		},
+		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		RunLifecycle:        pg,
+		PipelineObligations: pg.PipelineObligations(),
+		DeliveryStore:       pg,
+		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
+		PinRoutingDescriptors: bus, FlowRoutes: bus,
+	})
+	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		BaseContext:       ctx,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
 		SemanticSource:    source,
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		WorkflowInstances: workflowStore,
+		WorkflowInstances: pc,
+		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
 		LifecycleStore:    pg,
 		DeliveryStore:     pg,
 	}))
-	module := newRuntimeTestWorkflowModule(t, source)
-	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		Module:            module,
-		InstanceActivator: manager.ActivateFlowInstance,
-		WorkflowStore:     workflowStore,
-		DeliveryStore:     pg,
-	})
 
 	mailbox := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999913",
@@ -532,24 +573,34 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	manager := ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+	var manager *runtimemanager.AgentManager
+	module := newRuntimeTestWorkflowModule(t, source)
+	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		WorkOwner: runtimeTestEventBusWorkOwner(t, bus),
+		Module:    module,
+		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+			if manager == nil {
+				return errors.New("agent manager is required")
+			}
+			return manager.ActivateFlowInstance(ctx, req)
+		},
+		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		RunLifecycle:        pg,
+		PipelineObligations: pg.PipelineObligations(),
+		DeliveryStore:       pg,
+		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
+		PinRoutingDescriptors: bus, FlowRoutes: bus,
+	})
+	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		BaseContext:       ctx,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
 		SemanticSource:    source,
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		WorkflowInstances: workflowStore,
+		WorkflowInstances: pc,
+		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
 		LifecycleStore:    pg,
 		DeliveryStore:     pg,
 	}))
-	module := newRuntimeTestWorkflowModule(t, source)
-	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		Module:            module,
-		InstanceActivator: manager.ActivateFlowInstance,
-		WorkflowStore:     workflowStore,
-		DeliveryStore:     pg,
-	})
 
 	mailbox := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999912",
@@ -821,7 +872,10 @@ auto_emit_on_create:
 type providerRollbackBackend interface {
 	runtimebus.EventStore
 	runtimeinbound.Runner
-	runtimepipeline.RuntimeMutationRunner
+	externalRuntimeTestMutationOwner
+	runtimerunlifecycle.OperationOwner
+	runtimedelivery.Store
+	PipelineObligations() runtimepipelineobligation.Store
 }
 
 func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
@@ -883,9 +937,9 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 				if len(issues) != 0 || len(plans) != 1 {
 					t.Fatalf("target-free rollback fixture plans=%#v issues=%#v, want one plan", plans, issues)
 				}
-				workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+				workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, eventStore)
 				if backend.name == "sqlite" {
-					workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, eventStore)
+					workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, eventStore)
 				}
 				var manager *runtimemanager.AgentManager
 				var coordinator *runtimepipeline.PipelineCoordinator
@@ -909,24 +963,30 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 				}
 				workOwner := runtimeTestEventBusWorkOwner(t, bus)
 				coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-					WorkOwner:     workOwner,
-					Module:        newRuntimeTestWorkflowModule(t, source),
-					WorkflowStore: workflowStore,
+					WorkOwner:           workOwner,
+					Module:              newRuntimeTestWorkflowModule(t, source),
+					Persistence:         workflowPersistence,
+					RunLifecycle:        eventStore,
+					PipelineObligations: eventStore.PipelineObligations(),
+					DeliveryStore:       eventStore,
+					GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
+					PinRoutingDescriptors: bus, FlowRoutes: bus,
 				})
 				manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 					BaseContext:       ctx,
 					BundleSourceFact:  providerRollbackBundleSourceFact(),
 					SemanticSource:    source,
 					WorkOwner:         workOwner,
-					WorkflowInstances: workflowStore,
+					WorkflowInstances: coordinator,
+					PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
 				}))
 
 				candidate := providerRollbackStandingCandidate(ctx)
-				standing, err := workflowStore.ReconcileStandingService(ctx, candidate)
+				standing, err := coordinator.ReconcileStandingService(ctx, candidate)
 				if err != nil {
 					t.Fatalf("ReconcileStandingService: %v", err)
 				}
-				sequence, err := workflowStore.PublishStandingService(ctx, candidate.ServiceID, standing.RunID, standing.Generation)
+				sequence, err := coordinator.PublishStandingService(ctx, candidate.ServiceID, standing.RunID, standing.Generation)
 				if err != nil {
 					t.Fatalf("PublishStandingService: %v", err)
 				}
@@ -1018,6 +1078,18 @@ func (s *providerRollbackPostgresStore) ReplaceFlowInstanceRouteRecords(
 	)
 }
 
+func (s *providerRollbackPostgresStore) ReplaceFlowInstanceRouteTopology(
+	ctx context.Context,
+	sets []runtimebus.FlowInstanceRouteRecordSet,
+) error {
+	return replaceProviderRollbackFlowInstanceRouteTopology(
+		ctx,
+		sets,
+		s.proof,
+		s.PostgresStore.ReplaceFlowInstanceRouteTopology,
+	)
+}
+
 func (s *providerRollbackPostgresStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
 	return s.PostgresStore.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
 		if err := fn(newProviderRollbackMutation(mutation, s.proof)); err != nil {
@@ -1047,6 +1119,18 @@ func (s *providerRollbackSQLiteStore) ReplaceFlowInstanceRouteRecords(
 		routes,
 		s.proof,
 		s.SQLiteRuntimeStore.ReplaceFlowInstanceRouteRecords,
+	)
+}
+
+func (s *providerRollbackSQLiteStore) ReplaceFlowInstanceRouteTopology(
+	ctx context.Context,
+	sets []runtimebus.FlowInstanceRouteRecordSet,
+) error {
+	return replaceProviderRollbackFlowInstanceRouteTopology(
+		ctx,
+		sets,
+		s.proof,
+		s.SQLiteRuntimeStore.ReplaceFlowInstanceRouteTopology,
 	)
 }
 
@@ -1109,6 +1193,36 @@ func replaceProviderRollbackFlowInstanceRoutes(
 		return proof.fail(providerRollbackAfterEntityCreation)
 	}
 	if err := replace(ctx, identity, routes); err != nil {
+		return err
+	}
+	if proof.checkpoint == providerRollbackAfterRouteMaterialization {
+		if err := requireProviderRollbackRowVisible(ctx, "routing_rules"); err != nil {
+			return err
+		}
+		return proof.fail(providerRollbackAfterRouteMaterialization)
+	}
+	return nil
+}
+
+func replaceProviderRollbackFlowInstanceRouteTopology(
+	ctx context.Context,
+	sets []runtimebus.FlowInstanceRouteRecordSet,
+	proof *providerRollbackProof,
+	replace func(context.Context, []runtimebus.FlowInstanceRouteRecordSet) error,
+) error {
+	switch proof.checkpoint {
+	case providerRollbackAfterFlowInstanceCreation:
+		if err := requireProviderRollbackRowVisible(ctx, "flow_instances"); err != nil {
+			return err
+		}
+		return proof.fail(providerRollbackAfterFlowInstanceCreation)
+	case providerRollbackAfterEntityCreation:
+		if err := requireProviderRollbackRowVisible(ctx, "entity_state"); err != nil {
+			return err
+		}
+		return proof.fail(providerRollbackAfterEntityCreation)
+	}
+	if err := replace(ctx, sets); err != nil {
 		return err
 	}
 	if proof.checkpoint == providerRollbackAfterRouteMaterialization {

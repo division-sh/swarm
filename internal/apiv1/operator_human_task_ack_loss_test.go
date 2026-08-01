@@ -3,15 +3,20 @@ package apiv1
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -21,7 +26,7 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
-			cardStore, humanStore, idempotency, mailbox, workflowStore, db := newHumanTaskAckLossOwners(t, ctx, backend)
+			cardStore, humanStore, idempotency, mailbox, workflowStore, publisher, db := newHumanTaskAckLossOwners(t, ctx, backend)
 			now := time.Date(2026, 7, 14, 14, 0, 0, 0, time.UTC)
 			runID := uuid.NewString()
 			if backend == "postgres" {
@@ -34,7 +39,6 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 				t.Fatalf("create human-task card: %v", err)
 			}
 
-			publisher := &humanTaskAckLossPublisher{}
 			authority := &humanTaskAckLossAuthority{delegate: workflowStore}
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
@@ -81,19 +85,51 @@ func newHumanTaskAckLossOwners(
 	t *testing.T,
 	ctx context.Context,
 	backend string,
-) (decisioncard.Store, decisioncard.HumanTaskStore, APIIdempotencyStore, MailboxAPIStore, *runtimepipeline.WorkflowInstanceStore, *sql.DB) {
+) (decisioncard.Store, decisioncard.HumanTaskStore, APIIdempotencyStore, MailboxAPIStore, DecisionCardAuthority, *humanTaskAckLossPublisher, *sql.DB) {
 	t.Helper()
+	publisher := &humanTaskAckLossPublisher{}
 	if backend == "postgres" {
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-		workflowStore.ConfigureRuntimeMutationRunner(pg)
-		return pg, pg, pg, pg, workflowStore, db
+		return pg, pg, pg, pg, newHumanTaskAckLossDecisionAuthority(t, db, pg, runtimepipeline.NewPostgresWorkflowPersistence(db, pg), pg, pg, publisher), publisher, db
 	}
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
-	return sqliteStore, sqliteStore, sqliteStore, sqliteStore, workflowStore, sqliteStore.DB
+	return sqliteStore, sqliteStore, sqliteStore, sqliteStore,
+		newHumanTaskAckLossDecisionAuthority(t, sqliteStore.DB, sqliteStore, runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore), sqliteStore, sqliteStore, publisher), publisher, sqliteStore.DB
+}
+
+type humanTaskAckLossPersistence interface {
+	runtimebus.EventStore
+	apiTestRuntimeMutationOwner
+	runtimerunlifecycle.OperationOwner
+	PipelineObligations() runtimepipelineobligation.Store
+}
+
+func newHumanTaskAckLossDecisionAuthority(
+	t *testing.T,
+	db *sql.DB,
+	selected humanTaskAckLossPersistence,
+	persistence runtimepipeline.WorkflowPersistence,
+	cards decisioncard.Store,
+	humanTasks decisioncard.HumanTaskStore,
+	publisher runtimepipeline.WorkflowGateMutationPublisher,
+) DecisionCardAuthority {
+	t.Helper()
+	source := semanticview.Wrap(runCompletionSystemNodeBundle(t))
+	eventBus, err := newScopedAPITestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("construct human-task acknowledgment-loss event bus: %v", err)
+	}
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:              newRunCompletionSystemNodeModule(t, source),
+		Persistence:         persistence,
+		DecisionCards:       cards,
+		HumanTasks:          humanTasks,
+		GatePublisher:       publisher,
+		RunLifecycle:        selected,
+		PipelineObligations: selected.PipelineObligations(),
+	})
 }
 
 func newAPIHumanTaskAckLossCard(t *testing.T, runID string, now time.Time) (decisioncard.Card, decisioncard.HumanTaskContinuation) {
@@ -127,26 +163,27 @@ func newAPIHumanTaskAckLossCard(t *testing.T, runID string, now time.Time) (deci
 }
 
 type humanTaskAckLossAuthority struct {
-	delegate            *runtimepipeline.WorkflowInstanceStore
+	delegate            DecisionCardAuthority
 	lost                bool
 	successfulMutations int
 }
 
-func (a *humanTaskAckLossAuthority) RunPipelineMutation(ctx context.Context, fn func(context.Context) error) error {
-	err := a.delegate.RunPipelineMutation(ctx, fn)
+func (a *humanTaskAckLossAuthority) CommitDecisionCardMutation(
+	ctx context.Context,
+	idempotency runtimepipeline.DecisionCardMutationIdempotency,
+	idempotencyRequest runtimepipeline.DecisionCardMutationIdempotencyRequest,
+	mutation runtimepipeline.DecisionCardMutation,
+) (json.RawMessage, bool, error) {
+	completion, replayed, err := a.delegate.CommitDecisionCardMutation(ctx, idempotency, idempotencyRequest, mutation)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	a.successfulMutations++
 	if !a.lost {
 		a.lost = true
-		return errors.New("simulated post-commit acknowledgment loss")
+		return nil, false, errors.New("simulated post-commit acknowledgment loss")
 	}
-	return nil
-}
-
-func (a *humanTaskAckLossAuthority) CommitDecision(ctx context.Context, card decisioncard.Card, eventID string, now time.Time) error {
-	return a.delegate.CommitDecision(ctx, card, eventID, now)
+	return completion, replayed, nil
 }
 
 type humanTaskAckLossPublisher struct{ calls int }

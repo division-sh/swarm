@@ -73,6 +73,12 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore) (*runtimebus.Ev
 		WorkOwner:           workOwner,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryAuthority:   authority,
+		Durable: runtimebus.DurableDependencies{
+			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
+			FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteSets: pg, FlowRouteTopology: pg, FlowRouteRollback: pg,
+			ActiveAgents: pg, ActiveFlows: pg, DeliveryTargets: pg, DeliveryRouteSets: pg,
+			TargetFailureRecorder: pg, RunOrigins: pg,
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -241,7 +247,12 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 			t.Fatalf("unexpected agent id: %q", cfg.ID)
 		}
 		return testAgent, nil
-	}, runtimemanager.AgentManagerOptions{DeliveryStore: pg, WorkOwner: workOwner}, pg)
+	}, runtimemanager.AgentManagerOptions{
+		DeliveryStore:    pg,
+		SessionResetter:  pg,
+		PersistenceRoles: selectedStoreManagerPersistenceRoles(pg, eb),
+		WorkOwner:        workOwner,
+	}, pg)
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            testAgent.id,
@@ -359,7 +370,12 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 			t.Fatalf("unexpected agent id: %q", cfg.ID)
 		}
 		return testAgent, nil
-	}, runtimemanager.AgentManagerOptions{DeliveryStore: pg, WorkOwner: workOwner}, pg)
+	}, runtimemanager.AgentManagerOptions{
+		DeliveryStore:    pg,
+		SessionResetter:  pg,
+		PersistenceRoles: selectedStoreManagerPersistenceRoles(pg, eb),
+		WorkOwner:        workOwner,
+	}, pg)
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            testAgent.id,

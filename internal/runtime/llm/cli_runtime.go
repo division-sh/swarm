@@ -22,6 +22,7 @@ import (
 type ClaudeCLIRuntime struct {
 	cfg                  *config.Config
 	sessions             sessions.Registry
+	liveSessions         LiveSessionAcquirer
 	conversations        ConversationPersistence
 	lockOwner            string
 	workspaces           workspace.Resolver
@@ -82,6 +83,7 @@ func NewClaudeCLIRuntimeWithOptions(
 	return &ClaudeCLIRuntime{
 		cfg:                  cfg,
 		sessions:             sessions,
+		liveSessions:         newTransientLiveSessionAcquirer(sessions),
 		conversations:        conversations,
 		lockOwner:            lockOwner,
 		workspaces:           workspaces,
@@ -156,7 +158,7 @@ func (r *ClaudeCLIRuntime) PersistConversationSnapshot(ctx context.Context, s *S
 }
 
 func (r *ClaudeCLIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
-	lease, hydrated, resolved, err := startMemory(ctx, r.sessions, r.conversations, agentID, r.lockOwner)
+	lease, hydrated, resolved, err := startMemory(ctx, r.liveSessions, agentID, r.lockOwner)
 	if err != nil {
 		return nil, err
 	}

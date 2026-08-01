@@ -7,80 +7,63 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
 const (
-	RunForkSelectedContractBindingOwner = "store.run_fork.selected_contract_binding"
-
 	runForkSelectedContractBindingTable = "run_fork_selected_contract_bindings"
 )
-
-type RunForkSelectedContractBindingRequest struct {
-	ForkRunID         string
-	SourceRunID       string
-	ForkEventID       string
-	ContractSelection RunForkContractSelection
-}
-
-type RunForkSelectedContractBinding struct {
-	Owner             string                   `json:"owner"`
-	ForkRunID         string                   `json:"fork_run_id"`
-	SourceRunID       string                   `json:"source_run_id"`
-	ForkEventID       string                   `json:"fork_event_id"`
-	ContractSelection RunForkContractSelection `json:"contract_selection"`
-	CreatedAt         time.Time                `json:"created_at"`
-}
 
 func (s *PostgresStore) requireRunForkSelectedContractBindingAccess() error {
 	return s.requireCurrentSchema()
 }
 
-func (s *PostgresStore) LoadRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (RunForkSelectedContractBinding, bool, error) {
+func (s *PostgresStore) LoadRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractBinding, bool, error) {
 	if s == nil || s.DB == nil {
-		return RunForkSelectedContractBinding{}, false, fmt.Errorf("postgres store is required")
+		return runfork.RunForkSelectedContractBinding{}, false, fmt.Errorf("postgres store is required")
 	}
 	forkRunID = strings.TrimSpace(forkRunID)
 	if forkRunID == "" {
-		return RunForkSelectedContractBinding{}, false, fmt.Errorf("fork run_id is required")
+		return runfork.RunForkSelectedContractBinding{}, false, fmt.Errorf("fork run_id is required")
 	}
 	if _, err := uuid.Parse(forkRunID); err != nil {
-		return RunForkSelectedContractBinding{}, false, fmt.Errorf("fork run_id must be a UUID: %w", err)
+		return runfork.RunForkSelectedContractBinding{}, false, fmt.Errorf("fork run_id must be a UUID: %w", err)
 	}
 	if err := s.requireCurrentSchema(); err != nil {
-		return RunForkSelectedContractBinding{}, false, err
+		return runfork.RunForkSelectedContractBinding{}, false, err
 	}
 	binding, err := loadRunForkSelectedContractBinding(ctx, s.DB, forkRunID)
 	if err == sql.ErrNoRows {
-		return RunForkSelectedContractBinding{}, false, nil
+		return runfork.RunForkSelectedContractBinding{}, false, nil
 	}
 	if err != nil {
-		return RunForkSelectedContractBinding{}, false, err
+		return runfork.RunForkSelectedContractBinding{}, false, err
 	}
 	return binding, true, nil
 }
 
-func (s *PostgresStore) RequireRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (RunForkSelectedContractBinding, error) {
+func (s *PostgresStore) RequireRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractBinding, error) {
 	if err := s.requireRunForkSelectedContractBindingAccess(); err != nil {
-		return RunForkSelectedContractBinding{}, err
+		return runfork.RunForkSelectedContractBinding{}, err
 	}
 	binding, ok, err := s.LoadRunForkSelectedContractBinding(ctx, forkRunID)
 	if err != nil {
-		return RunForkSelectedContractBinding{}, err
+		return runfork.RunForkSelectedContractBinding{}, err
 	}
 	if !ok {
-		return RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding for fork run %s not found", strings.TrimSpace(forkRunID))
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding for fork run %s not found", strings.TrimSpace(forkRunID))
 	}
 	return binding, nil
 }
 
-func insertRunForkSelectedContractBinding(ctx context.Context, tx *sql.Tx, req RunForkSelectedContractBindingRequest, createdAt time.Time) (RunForkSelectedContractBinding, error) {
+func insertRunForkSelectedContractBinding(ctx context.Context, tx *sql.Tx, req runfork.RunForkSelectedContractBindingRequest, createdAt time.Time) (runfork.RunForkSelectedContractBinding, error) {
 	if tx == nil {
-		return RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding transaction is required")
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding transaction is required")
 	}
 	binding, err := normalizeRunForkSelectedContractBinding(req, createdAt)
 	if err != nil {
-		return RunForkSelectedContractBinding{}, err
+		return runfork.RunForkSelectedContractBinding{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings (
@@ -98,16 +81,16 @@ func insertRunForkSelectedContractBinding(ctx context.Context, tx *sql.Tx, req R
 		binding.ContractSelection.WorkflowName,
 		binding.ContractSelection.WorkflowVersion,
 		binding.CreatedAt); err != nil {
-		return RunForkSelectedContractBinding{}, fmt.Errorf("insert selected contract binding: %w", err)
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("insert selected contract binding: %w", err)
 	}
 	return binding, nil
 }
 
 func loadRunForkSelectedContractBinding(ctx context.Context, querier interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, forkRunID string) (RunForkSelectedContractBinding, error) {
-	var binding RunForkSelectedContractBinding
-	var selection RunForkContractSelection
+}, forkRunID string) (runfork.RunForkSelectedContractBinding, error) {
+	var binding runfork.RunForkSelectedContractBinding
+	var selection runfork.RunForkContractSelection
 	err := querier.QueryRowContext(ctx, `
 		SELECT
 			fork_run_id::text,
@@ -133,45 +116,45 @@ func loadRunForkSelectedContractBinding(ctx context.Context, querier interface {
 		&binding.CreatedAt,
 	)
 	if err != nil {
-		return RunForkSelectedContractBinding{}, err
+		return runfork.RunForkSelectedContractBinding{}, err
 	}
-	binding.Owner = RunForkSelectedContractBindingOwner
+	binding.Owner = runfork.RunForkSelectedContractBindingOwner
 	binding.ContractSelection = selection
 	return binding, nil
 }
 
-func normalizeRunForkSelectedContractBinding(req RunForkSelectedContractBindingRequest, createdAt time.Time) (RunForkSelectedContractBinding, error) {
+func normalizeRunForkSelectedContractBinding(req runfork.RunForkSelectedContractBindingRequest, createdAt time.Time) (runfork.RunForkSelectedContractBinding, error) {
 	forkRunID := strings.TrimSpace(req.ForkRunID)
 	if forkRunID == "" {
-		return RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding requires fork run_id")
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding requires fork run_id")
 	}
 	if _, err := uuid.Parse(forkRunID); err != nil {
-		return RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding fork run_id must be a UUID: %w", err)
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding fork run_id must be a UUID: %w", err)
 	}
 	sourceRunID := strings.TrimSpace(req.SourceRunID)
 	if sourceRunID == "" {
-		return RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding requires source run_id")
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding requires source run_id")
 	}
 	if _, err := uuid.Parse(sourceRunID); err != nil {
-		return RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding source run_id must be a UUID: %w", err)
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding source run_id must be a UUID: %w", err)
 	}
 	forkEventID := strings.TrimSpace(req.ForkEventID)
 	if forkEventID == "" {
-		return RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding requires fork event_id")
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding requires fork event_id")
 	}
 	if _, err := uuid.Parse(forkEventID); err != nil {
-		return RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding fork event_id must be a UUID: %w", err)
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding fork event_id must be a UUID: %w", err)
 	}
 	selection, err := normalizeRunForkSelectedContractSelection(req.ContractSelection)
 	if err != nil {
-		return RunForkSelectedContractBinding{}, err
+		return runfork.RunForkSelectedContractBinding{}, err
 	}
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
 	createdAt = createdAt.UTC().Round(time.Microsecond)
-	return RunForkSelectedContractBinding{
-		Owner:             RunForkSelectedContractBindingOwner,
+	return runfork.RunForkSelectedContractBinding{
+		Owner:             runfork.RunForkSelectedContractBindingOwner,
 		ForkRunID:         forkRunID,
 		SourceRunID:       sourceRunID,
 		ForkEventID:       forkEventID,
@@ -180,41 +163,41 @@ func normalizeRunForkSelectedContractBinding(req RunForkSelectedContractBindingR
 	}, nil
 }
 
-func normalizeRunForkSelectedContractSelection(selection RunForkContractSelection) (RunForkContractSelection, error) {
+func normalizeRunForkSelectedContractSelection(selection runfork.RunForkContractSelection) (runfork.RunForkContractSelection, error) {
 	selection.Mode = strings.TrimSpace(selection.Mode)
 	if selection.Mode == "" {
-		selection.Mode = RunForkContractSelectionModeSelectedContracts
+		selection.Mode = runfork.RunForkContractSelectionModeSelectedContracts
 	}
 	selection.ContractsRoot = strings.TrimSpace(selection.ContractsRoot)
 	selection.BundleHash = strings.TrimSpace(selection.BundleHash)
 	selection.WorkflowName = strings.TrimSpace(selection.WorkflowName)
 	selection.WorkflowVersion = strings.TrimSpace(selection.WorkflowVersion)
 	switch selection.Mode {
-	case RunForkContractSelectionModeSelectedContracts:
+	case runfork.RunForkContractSelectionModeSelectedContracts:
 		if selection.ContractsRoot == "" {
-			return RunForkContractSelection{}, fmt.Errorf("selected contract binding requires contracts_root")
+			return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding requires contracts_root")
 		}
 		if selection.BundleHash != "" {
-			return RunForkContractSelection{}, fmt.Errorf("selected contract binding selected_contracts mode cannot carry bundle_hash")
+			return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding selected_contracts mode cannot carry bundle_hash")
 		}
-	case RunForkContractSelectionModeBundleHash:
+	case runfork.RunForkContractSelectionModeBundleHash:
 		if selection.BundleHash == "" {
-			return RunForkContractSelection{}, fmt.Errorf("selected contract binding bundle_hash mode requires bundle_hash")
+			return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding bundle_hash mode requires bundle_hash")
 		}
 		if !canonicalBundleHashPattern.MatchString(selection.BundleHash) {
-			return RunForkContractSelection{}, fmt.Errorf("selected contract binding bundle_hash must be bundle-v1:sha256:<64 lowercase hex>")
+			return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding bundle_hash must be bundle-v1:sha256:<64 lowercase hex>")
 		}
 		if selection.ContractsRoot != "" {
-			return RunForkContractSelection{}, fmt.Errorf("selected contract binding bundle_hash mode cannot carry contracts_root")
+			return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding bundle_hash mode cannot carry contracts_root")
 		}
 	default:
-		return RunForkContractSelection{}, fmt.Errorf("selected contract binding requires mode selected_contracts or bundle_hash; got %q", selection.Mode)
+		return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding requires mode selected_contracts or bundle_hash; got %q", selection.Mode)
 	}
 	if selection.WorkflowName == "" {
-		return RunForkContractSelection{}, fmt.Errorf("selected contract binding requires workflow_name")
+		return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding requires workflow_name")
 	}
 	if selection.WorkflowVersion == "" {
-		return RunForkContractSelection{}, fmt.Errorf("selected contract binding requires workflow_version")
+		return runfork.RunForkContractSelection{}, fmt.Errorf("selected contract binding requires workflow_version")
 	}
 	return selection, nil
 }

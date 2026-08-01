@@ -68,7 +68,7 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 		},
 	}
 
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), instance); err != nil {
+	if err := store.upsert(testWorkflowStoreRunContext(t, store), instance); err != nil {
 		t.Fatalf("upsert workflow instance: %v", err)
 	}
 
@@ -181,7 +181,7 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 		},
 	}
 
-	if err := workflowStore.Upsert(ctx, instance); err != nil {
+	if err := workflowStore.upsert(ctx, instance); err != nil {
 		t.Fatalf("upsert workflow instance: %v", err)
 	}
 
@@ -251,7 +251,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 			"score": map[string]any{"value": float64(1)},
 		},
 	})
-	if err := store.Create(ctx, first); err != nil {
+	if err := store.create(ctx, first); err != nil {
 		t.Fatalf("create workflow instance: %v", err)
 	}
 
@@ -269,7 +269,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 	duplicate.StateBuckets = map[string]any{
 		"score": map[string]any{"value": float64(99)},
 	}
-	err := store.Create(ctx, duplicate)
+	err := store.create(ctx, duplicate)
 	failure, ok := runtimefailures.As(err)
 	if err == nil || !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate || failure.Failure.Detail.Code != "flow_instance_already_exists" || failure.Failure.Detail.Attributes["flow_instance"] != storageRef {
 		t.Fatalf("duplicate create failure = %#v, want canonical already-exists failure", failure)
@@ -342,7 +342,7 @@ func TestWorkflowInstanceStoreProjection_StaticRowsDoNotGainMaterializedFlowPath
 		StateBuckets: map[string]any{},
 	})
 
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), instance); err != nil {
+	if err := store.upsert(testWorkflowStoreRunContext(t, store), instance); err != nil {
 		t.Fatalf("upsert static workflow instance: %v", err)
 	}
 
@@ -430,7 +430,7 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 
 			store := newPostgresWorkflowInstanceStoreForTest(db)
 			storageRef := "storage-ref"
-			if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
+			if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID:      "inst-1",
 				StorageRef:      storageRef,
 				WorkflowName:    "projection-flow",

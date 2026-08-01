@@ -2,21 +2,24 @@ package runtime_test
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -31,26 +34,58 @@ type testAuthorActivityCatalogRegistrar interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
 
-type runtimeTestSelectedMutationOwner interface {
-	runtimepipeline.RuntimeMutationRunner
-	runtimerunlifecycle.OperationOwner
+type externalRuntimeTestMutationOwner interface {
+	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
 }
 
-func configureRuntimeTestWorkflowStore(
-	t testing.TB,
-	workflowStore *runtimepipeline.WorkflowInstanceStore,
-	selected runtimeTestSelectedMutationOwner,
-) *runtimepipeline.WorkflowInstanceStore {
-	t.Helper()
-	if workflowStore == nil {
-		t.Fatal("runtime test workflow store is required")
+type externalRuntimeTestDurableEventStore interface {
+	runtimebus.EventStore
+	runtimereplycontext.Store
+	runtimerunlifecycle.OperationOwner
+	runtimedelivery.Store
+	runtimebus.FlowInstanceRoutePersistence
+	runtimebus.FlowInstanceRouteRecordReader
+	runtimebus.FlowInstanceRouteSetPersistence
+	runtimebus.FlowInstanceRouteTopologyPersistence
+	runtimebus.FlowInstanceRouteRollbackPersistence
+	runtimebus.ActiveAgentDescriptorLister
+	runtimebus.ActiveFlowInstanceDescriptorLister
+	runtimebus.EventDeliveryTargetReader
+	runtimebus.EventDeliveryRouteSetReader
+	runtimebus.TargetFailureDeadLetterRecorder
+	runtimebus.RunOriginReader
+}
+
+func externalRuntimeTestDurableDependencies(durable externalRuntimeTestDurableEventStore) runtimebus.DurableDependencies {
+	return runtimebus.DurableDependencies{
+		ReplyContext: durable, RunLifecycle: durable,
+		DeliveryLifecycle: durable, FlowRoutes: durable, FlowRouteRecords: durable,
+		FlowRouteSets: durable, FlowRouteTopology: durable, FlowRouteRollback: durable, ActiveAgents: durable,
+		ActiveFlows: durable, DeliveryTargets: durable, DeliveryRouteSets: durable,
+		TargetFailureRecorder: durable, RunOrigins: durable,
 	}
-	if selected == nil {
-		t.Fatal("runtime test selected mutation owner is required")
+}
+
+func externalRuntimeTestManagerBusRoles(bus *runtimebus.EventBus) runtimemanager.PersistenceRoles {
+	return runtimemanager.PersistenceRoles{
+		AgentRoutes: bus, RouteInstaller: bus, RouteVerifier: bus,
+		RouteRestorer: bus, RouteRetirer: bus, RouteRemover: bus,
+		CreationPublisher: bus, DeliveryRuntime: bus,
 	}
-	workflowStore.ConfigureRuntimeMutationRunner(selected)
-	workflowStore.ConfigureRunLifecycle(selected)
-	return workflowStore
+}
+
+func externalRuntimeTestSelectedManagerRoles(selected any) runtimemanager.PersistenceRoles {
+	var roles runtimemanager.PersistenceRoles
+	roles.LifecycleState, _ = selected.(runtimemanager.AgentLifecycleStateReader)
+	roles.LifecycleEffects, _ = selected.(runtimeeffects.Store)
+	roles.LifecycleDiagnostics, _ = selected.(runtimemanager.AgentLifecycleDiagnosticPersistence)
+	roles.EffectsRecovery, _ = selected.(runtimeeffects.RecoveryStore)
+	roles.DeliveryQuiescence, _ = selected.(runtimemanager.ActiveRunDeliveryQuiescenceReader)
+	roles.EventExistence, _ = selected.(runtimemanager.EventExistenceReader)
+	roles.DirectiveOperations, _ = selected.(runtimeagentcontrol.DirectiveOperationStore)
+	roles.DirectiveTargets, _ = selected.(runtimemanager.AgentDirectiveRunTargetResolver)
+	roles.FlowRoutes, _ = selected.(runtimebus.FlowInstanceRoutePersistence)
+	return roles
 }
 
 func testAuthorActivityContext(ctx context.Context) context.Context {
@@ -142,6 +177,15 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 			PipelineObligations() runtimepipelineobligation.Store
 		}); ok {
 			opts.PipelineObligations = provider.PipelineObligations()
+		}
+	}
+	if opts.PipelineObligations != nil {
+		if opts.Durable.FlowRouteTopology == nil {
+			durable, ok := store.(externalRuntimeTestDurableEventStore)
+			if !ok {
+				return nil, fmt.Errorf("external runtime durable event-store fixture %T lacks exact durable roles", store)
+			}
+			opts.Durable = externalRuntimeTestDurableDependencies(durable)
 		}
 	}
 	var bus *runtimebus.EventBus

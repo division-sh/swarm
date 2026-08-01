@@ -51,11 +51,7 @@ type connectRoutePlanDispatch struct {
 	ReplyContextConsumed bool
 }
 
-func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader, activator runtimepipeline.FlowInstanceActivator, stores ...any) connectRoutePlanResolver {
-	var replyStore runtimereplycontext.Store
-	if len(stores) > 0 {
-		replyStore, _ = stores[0].(runtimereplycontext.Store)
-	}
+func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader, activator runtimepipeline.FlowInstanceActivator, replyStore runtimereplycontext.Store) connectRoutePlanResolver {
 	if source == nil {
 		return connectRoutePlanResolver{routeTable: routeTable, loadDescriptors: loadDescriptors, replyStore: replyStore}
 	}

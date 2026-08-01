@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -74,18 +75,56 @@ func (proposedEffectProofModule) GuardRegistry() runtimepipeline.GuardRegistry  
 func (proposedEffectProofModule) ActionRegistry() runtimepipeline.ActionRegistry { return nil }
 
 type gateRecoveryStoreCase struct {
-	name          string
-	postgres      bool
-	db            *sql.DB
-	events        runtimebus.EventStore
-	lifecycle     runtimerunlifecycle.CandidateStore
-	cards         decisioncard.Store
-	workflowStore *runtimepipeline.WorkflowInstanceStore
+	name        string
+	postgres    bool
+	db          *sql.DB
+	events      gateRecoverySelectedStore
+	lifecycle   runtimerunlifecycle.CandidateStore
+	cards       gateRecoveryDecisionStore
+	persistence runtimepipeline.WorkflowPersistence
+}
+
+type gateRecoverySelectedStore interface {
+	scopedTestDurableStore
+	runtimepipeline.SchedulePersistence
+}
+
+type gateRecoveryDecisionStore interface {
+	decisioncard.Store
+	decisioncard.ProposedEffectStore
+	decisioncard.HumanTaskStore
+	decisioncard.HumanTaskExpiryStore
+	ExpireDecisionCardInputDrafts(context.Context, time.Time) (int, error)
+}
+
+type gateRecoveryRuntimeBus interface {
+	runtimepipeline.Bus
+	runtimepipeline.WorkflowGateMutationPublisher
+	runtimepipeline.DecisionCardDirectMutationPublisher
+	runtimepipeline.WorkflowDeliveryRuntime
 }
 
 type proposedEffectProofCredentialStore struct {
 	value string
 	gets  atomic.Int32
+}
+
+func newGateRecoveryCoordinator(bus gateRecoveryRuntimeBus, selected gateRecoveryStoreCase, opts runtimepipeline.PipelineCoordinatorOptions) *runtimepipeline.PipelineCoordinator {
+	opts.Persistence = selected.persistence
+	opts.DeliveryStore = selected.events
+	opts.DecisionCards = selected.cards
+	opts.ProposedEffects = selected.cards
+	opts.HumanTasks = selected.cards
+	opts.DecisionCardDraftExpiry = selected.cards
+	opts.HumanTaskExpiry = selected.cards
+	opts.GatePublisher = bus
+	opts.DirectDecisionPublisher = bus
+	opts.DeliveryRuntime = bus
+	opts.RunLifecycle = selected.events
+	if opts.PipelineObligations == nil {
+		opts.PipelineObligations = selected.events.PipelineObligations()
+	}
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, opts)
 }
 
 type proposedEffectRouteProofBus struct {
@@ -123,12 +162,6 @@ func (b *proposedEffectRouteProofBus) EngineOutbox() runtimeengine.OutboxWriter 
 func (b *proposedEffectRouteProofBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return proposedEffectRouteProofDispatcher{bus: b}
 }
-func (b *proposedEffectRouteProofBus) RuntimeMutationRunner() runtimepipeline.RuntimeMutationRunner {
-	if b == nil || b.eventBus == nil {
-		return nil
-	}
-	return b.eventBus.RuntimeMutationRunner()
-}
 func (b *proposedEffectRouteProofBus) PublishInMutation(ctx context.Context, evt events.Event) error {
 	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
 	if !ok || tx == nil {
@@ -143,6 +176,36 @@ func (b *proposedEffectRouteProofBus) PublishInMutation(ctx context.Context, evt
 	b.published = append(b.published, events.NewContextDeliveryEvent(evt, events.DeliveryContextFromContext(ctx)).Event())
 	b.publishContexts = append(b.publishContexts, events.DeliveryContextFromContext(ctx))
 	return nil
+}
+func (b *proposedEffectRouteProofBus) PublishDirectInMutation(ctx context.Context, evt events.Event, recipients []string) error {
+	if b == nil || b.eventBus == nil {
+		return errors.New("proposed-effect proof direct publication requires event bus")
+	}
+	return b.eventBus.PublishDirectInMutation(ctx, evt, recipients)
+}
+func (b *proposedEffectRouteProofBus) DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error) {
+	if b == nil || b.eventBus == nil {
+		return runtimedelivery.ExecutionAuthority{}, errors.New("proposed-effect proof delivery authority requires event bus")
+	}
+	return b.eventBus.DeliveryAuthority()
+}
+func (b *proposedEffectRouteProofBus) AcquireDeliveryContinuation(deliveryID string) (worklifetime.DeliveryContinuation, error) {
+	if b == nil || b.eventBus == nil {
+		return nil, errors.New("proposed-effect proof delivery continuation requires event bus")
+	}
+	return b.eventBus.AcquireDeliveryContinuation(deliveryID)
+}
+func (b *proposedEffectRouteProofBus) ReleaseDeliveryContinuation(deliveryID string) error {
+	if b == nil || b.eventBus == nil {
+		return errors.New("proposed-effect proof delivery continuation requires event bus")
+	}
+	return b.eventBus.ReleaseDeliveryContinuation(deliveryID)
+}
+func (b *proposedEffectRouteProofBus) RetainDeliveryContinuation(snapshot runtimedelivery.Snapshot) error {
+	if b == nil || b.eventBus == nil {
+		return errors.New("proposed-effect proof delivery continuation requires event bus")
+	}
+	return b.eventBus.RetainDeliveryContinuation(snapshot)
 }
 func (o proposedEffectRouteProofOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.EmitIntent) error {
 	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
@@ -305,8 +368,8 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				}},
 			}
 			newCoordinator := func(bundleHash string) *runtimepipeline.PipelineCoordinator {
-				return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-					Module: module, WorkflowStore: selected.workflowStore, DecisionCards: selected.cards,
+				return newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
+					Module: module, Persistence: selected.persistence, DecisionCards: selected.cards,
 					BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(bundleHash),
 					Credentials:      credentials,
 				})
@@ -319,11 +382,11 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			ctx := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(t, context.Background()), bundleSource)
 			ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 			enteredAt := time.Now().UTC()
-			if err := selected.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
 				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
 				Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "root", "instance_id": entityID},
-			}); err != nil {
+			}, enteredAt); err != nil {
 				t.Fatal(err)
 			}
 			const replyContextID = "reply-context-proposed-effect"
@@ -368,7 +431,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			if !ok || input.Kind() == 0 {
 				t.Fatalf("frozen effect input missing from card: %#v", card.Snapshot.Context)
 			}
-			continuation, err := selected.cards.(decisioncard.ProposedEffectStore).LoadProposedEffectContinuation(ctx, card.CardID)
+			continuation, err := selected.cards.LoadProposedEffectContinuation(ctx, card.CardID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -412,7 +475,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			if got := credentials.gets.Load(); got != 0 {
 				t.Fatalf("credential resolutions under changed bundle = %d, want 0", got)
 			}
-			deferred, err := selected.cards.(decisioncard.ProposedEffectStore).LoadProposedEffectContinuation(ctx, card.CardID)
+			deferred, err := selected.cards.LoadProposedEffectContinuation(ctx, card.CardID)
 			if err != nil || deferred.State != decisioncard.ProposedEffectDecisionCommitted || deferred.RouteEventID != "" {
 				t.Fatalf("bundle-deferred proposed effect = %#v, %v", deferred, err)
 			}
@@ -452,7 +515,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			case <-time.After(2 * time.Second):
 				t.Fatal("provider body was not observed")
 			}
-			readback, err := selected.cards.(decisioncard.ProposedEffectStore).ProposedEffectReadback(ctx, card.CardID)
+			readback, err := selected.cards.ProposedEffectReadback(ctx, card.CardID)
 			if err != nil || readback.DispatchState != "succeeded" {
 				t.Fatalf("proposed-effect readback = %#v, %v", readback, err)
 			}
@@ -507,7 +570,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				if routeErr != nil {
 					t.Fatal(routeErr)
 				}
-				pendingContinuation, routeErr := selected.cards.(decisioncard.ProposedEffectStore).LoadProposedEffectContinuation(ctx, pendingCard.CardID)
+				pendingContinuation, routeErr := selected.cards.LoadProposedEffectContinuation(ctx, pendingCard.CardID)
 				if routeErr != nil || pendingContinuation.ReplyContextID != replyContextID {
 					t.Fatalf("%s proposed-effect reply context = %q, %v; want %q", verdict, pendingContinuation.ReplyContextID, routeErr, replyContextID)
 				}
@@ -539,7 +602,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				if got := calls.Load(); got != 1 {
 					t.Fatalf("provider calls after %s = %d, want 1", verdict, got)
 				}
-				readback, routeErr := selected.cards.(decisioncard.ProposedEffectStore).ProposedEffectReadback(ctx, pendingCard.CardID)
+				readback, routeErr := selected.cards.ProposedEffectReadback(ctx, pendingCard.CardID)
 				if routeErr != nil || readback.DispatchState != "not_dispatched" {
 					t.Fatalf("%s readback = %#v, %v", verdict, readback, routeErr)
 				}
@@ -620,7 +683,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				if err != nil {
 					t.Fatal(err)
 				}
-				proposedStore := selected.cards.(decisioncard.ProposedEffectStore)
+				proposedStore := selected.cards
 				if err := proposedStore.CreateProposedEffectCard(ctx, card, continuation); err != nil {
 					t.Fatal(err)
 				}
@@ -648,8 +711,8 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					t.Fatal(err)
 				}
 				bus := &proposedEffectRouteProofBus{eventBus: canonicalBus}
-				coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-					Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
+				coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
+					Module: gateRecoveryModule{source: source}, Persistence: selected.persistence,
 					DecisionCards: selected.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle),
 				})
 				forward, emitted, _, err := coordinator.Intercept(ctx, decisionEvent)
@@ -681,8 +744,8 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					}
 				}
 				beforeOutbox, beforePublished := len(bus.outbox), len(bus.published)
-				changed := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-					Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
+				changed := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
+					Module: gateRecoveryModule{source: source}, Persistence: selected.persistence,
 					DecisionCards: selected.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(otherGateBundle),
 				})
 				if _, _, _, err := changed.Intercept(ctx, decisionEvent); err != nil {
@@ -729,8 +792,8 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 					Policies:      map[string]runtimepipeline.WorkflowEventPolicy{"support.reply_drafted": {Consume: true, RequireEntity: true}},
 				}},
 			}
-			coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-				Module: module, WorkflowStore: selected.workflowStore, DecisionCards: selected.cards,
+			coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
+				Module: module, Persistence: selected.persistence, DecisionCards: selected.cards,
 				BundleSourceFact: bundleSource,
 			})
 			bus.SetInterceptors(coordinator)
@@ -740,11 +803,11 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			ctx := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(t, context.Background()), bundleSource)
 			ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 			enteredAt := time.Now().UTC()
-			if err := selected.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
 				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
 				Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "root", "instance_id": entityID},
-			}); err != nil {
+			}, enteredAt); err != nil {
 				t.Fatal(err)
 			}
 			installProposedEffectCreateFailure(t, selected)
@@ -766,7 +829,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 				t.Fatalf("proposal failure disposition = %#v, present=%v; want typed dead letter", disposition, disposed)
 			}
 
-			instance, ok, err := selected.workflowStore.Load(ctx, entityID)
+			instance, ok, err := coordinator.Load(ctx, entityID)
 			if err != nil || !ok || instance.CurrentState != "drafting" {
 				t.Fatalf("workflow after rollback = %#v, %v, %v", instance, ok, err)
 			}
@@ -957,7 +1020,7 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 
 				assertGateRecoveryObligationStatus(t, selected, fixture.event.ID(), "quarantined")
 				assertGateRecoveryErrorReceipt(t, selected, fixture.event.ID(), "event_interceptor_failed")
-				assertGateRecoveryActivation(t, selected.workflowStore, runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), fixture.entityID, "awaiting_review", gateruntime.StatusDecisionCommitted)
+				assertGateRecoveryActivation(t, fixture.coordinator, runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), fixture.entityID, "awaiting_review", gateruntime.StatusDecisionCommitted)
 				card, err := selected.cards.GetDecisionCard(testAuthorActivityContext(t, context.Background()), fixture.cardID)
 				if err != nil {
 					t.Fatalf("read quarantined decision card: %v", err)
@@ -981,9 +1044,10 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 }
 
 type gateRecoveryForegroundFixture struct {
-	event    events.Event
-	entityID string
-	cardID   string
+	event       events.Event
+	entityID    string
+	cardID      string
+	coordinator *runtimepipeline.PipelineCoordinator
 }
 
 func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, runID string, at time.Time) gateRecoveryForegroundFixture {
@@ -995,11 +1059,11 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimepipeline.NewPipelineCoordinatorWithOptions(setupBus, tc.db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, WorkflowStore: tc.workflowStore,
+	setupCoordinator := newGateRecoveryCoordinator(setupBus, tc, runtimepipeline.PipelineCoordinatorOptions{
+		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, Persistence: tc.persistence,
 		DecisionCards: tc.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle),
 	})
-	if _, err := tc.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := setupCoordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: "launch/foreground-" + uuid.NewString(), StorageRef: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: at,
 		Metadata: map[string]any{"entity_id": entityID, "run_id": runID},
@@ -1025,7 +1089,7 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 		t.Fatal(err)
 	}
 	eventID := uuid.NewString()
-	if err := tc.workflowStore.CommitDecision(ctx, card, eventID, at); err != nil {
+	if err := setupCoordinator.CommitDecision(ctx, card, eventID, at); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tc.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
@@ -1037,7 +1101,7 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 	payload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
 	evt := eventtest.RuntimeControl(eventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), recoveryStageAnchor(t, card).FlowInstance), at)
-	return gateRecoveryForegroundFixture{event: evt, entityID: entityID, cardID: card.CardID}
+	return gateRecoveryForegroundFixture{event: evt, entityID: entityID, cardID: card.CardID, coordinator: setupCoordinator}
 }
 
 func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, runID string, at time.Time) string {
@@ -1128,14 +1192,14 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 		t.Fatal(err)
 	}
 	newCoordinator := func(bundleHash string) *runtimepipeline.PipelineCoordinator {
-		return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, tc.db, runtimepipeline.PipelineCoordinatorOptions{
-			Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, WorkflowStore: tc.workflowStore,
+		return newGateRecoveryCoordinator(bus, tc, runtimepipeline.PipelineCoordinatorOptions{
+			Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, Persistence: tc.persistence,
 			DecisionCards: tc.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(bundleHash),
 		})
 	}
 	matching := newCoordinator(gateRecoveryBundle)
 	enteredAt := time.Now().UTC().Add(-25 * time.Hour)
-	if _, err := tc.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := matching.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: "launch/review-terminal", StorageRef: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: enteredAt,
 		Metadata: map[string]any{"entity_id": entityID, "run_id": runID},
@@ -1152,7 +1216,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	}
 	eventID := uuid.NewString()
 	decidedAt := enteredAt.Add(time.Minute)
-	if err := tc.workflowStore.CommitDecision(ctx, card, eventID, decidedAt); err != nil {
+	if err := matching.CommitDecision(ctx, card, eventID, decidedAt); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tc.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: eventID, Now: decidedAt}); err != nil {
@@ -1175,7 +1239,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	if err := runtimepipeline.NewRecoveryManagerWith(bus).Recover(ctx); err != nil {
 		t.Fatal(err)
 	}
-	assertGateRecoveryActivation(t, tc.workflowStore, ctx, entityID, "completed", gateruntime.StatusRouted)
+	assertGateRecoveryActivation(t, matching, ctx, entityID, "completed", gateruntime.StatusRouted)
 	completion, err := storetest.ExecuteRunCompletionCandidate(
 		ctx,
 		tc.lifecycle,
@@ -1224,9 +1288,9 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	t.Cleanup(func() { runtimebustest.Unsubscribe(bus, outcomeAgent) })
 
 	newCoordinator := func(bundleHash string) *runtimepipeline.PipelineCoordinator {
-		return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, tc.db, runtimepipeline.PipelineCoordinatorOptions{
+		return newGateRecoveryCoordinator(bus, tc, runtimepipeline.PipelineCoordinatorOptions{
 			Module:           gateRecoveryModule{source: semanticview.Wrap(bundle)},
-			WorkflowStore:    tc.workflowStore,
+			Persistence:      tc.persistence,
 			DecisionCards:    tc.cards,
 			BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(bundleHash),
 		})
@@ -1234,7 +1298,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	matching := newCoordinator(gateRecoveryBundle)
 
 	scenarioAt := time.Now().UTC().Add(-25 * time.Hour)
-	if _, err := tc.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := matching.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: "launch/review-1", StorageRef: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: scenarioAt,
 		Metadata: map[string]any{"entity_id": entityID, "run_id": runID},
@@ -1251,7 +1315,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	}
 	decisionEventID := uuid.NewString()
 	decidedAt := scenarioAt.Add(time.Minute)
-	if err := tc.workflowStore.CommitDecision(ctx, card, decisionEventID, decidedAt); err != nil {
+	if err := matching.CommitDecision(ctx, card, decisionEventID, decidedAt); err != nil {
 		t.Fatalf("CommitDecision: %v", err)
 	}
 	if _, err := tc.cards.DecideDecisionCard(ctx, decisioncard.DecideRequest{
@@ -1275,7 +1339,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	if err := bus.WaitForQuiescence(waitCtx); err != nil {
 		t.Fatalf("wait for unavailable-pin dispatch: %v", err)
 	}
-	assertGateRecoveryActivation(t, tc.workflowStore, ctx, entityID, "awaiting_review", gateruntime.StatusDecisionCommitted)
+	assertGateRecoveryActivation(t, matching, ctx, entityID, "awaiting_review", gateruntime.StatusDecisionCommitted)
 	if got := gateRecoveryPipelineReceiptCount(t, tc, decisionEventID); got != 0 {
 		t.Fatalf("unavailable pin pipeline receipt count = %d, want 0", got)
 	}
@@ -1292,7 +1356,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	if err := recovery.Recover(ctx); err != nil {
 		t.Fatalf("Recover after pin restore: %v", err)
 	}
-	assertGateRecoveryActivation(t, tc.workflowStore, ctx, entityID, "operating", gateruntime.StatusRouted)
+	assertGateRecoveryActivation(t, matching, ctx, entityID, "operating", gateruntime.StatusRouted)
 	outcomeEventID := gateRecoveryOutcomeEventID(t, tc, decisionEventID)
 	if got := gateRecoveryDeliveryCount(t, tc, outcomeEventID, outcomeAgent); got != 1 {
 		t.Fatalf("outcome delivery manifest count = %d, want 1", got)
@@ -1331,26 +1395,24 @@ func makeGateRecoveryRouteDue(t *testing.T, tc gateRecoveryStoreCase, eventID st
 
 func openSQLiteGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 	selected := storetest.StartSQLiteRuntimeStore(t)
-	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(selected.DB, selected)
-	workflowStore.ConfigureDeliveryLifecycleStore(selected)
-	return gateRecoveryStoreCase{
+	persistence := runtimepipeline.NewSQLiteWorkflowPersistence(selected.DB, selected)
+	result := gateRecoveryStoreCase{
 		name: "sqlite", db: selected.DB, events: selected, cards: selected,
-		lifecycle: selected, workflowStore: workflowStore,
+		lifecycle: selected, persistence: persistence,
 	}
+	return result
 }
 
 func openPostgresGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	workflowStore.ConfigureRuntimeMutationRunner(selected)
-	workflowStore.ConfigureRunLifecycle(selected)
-	workflowStore.ConfigureDeliveryLifecycleStore(selected)
-	return gateRecoveryStoreCase{
+	persistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+	result := gateRecoveryStoreCase{
 		name: "postgres", postgres: true, db: db, events: selected, cards: selected,
-		lifecycle: selected, workflowStore: workflowStore,
+		lifecycle: selected, persistence: persistence,
 	}
+	return result
 }
 
 func proposedEffectProofBundle(serverURL string) *runtimecontracts.WorkflowContractBundle {
@@ -1457,13 +1519,7 @@ func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCas
 	ctx := testAuthorActivityContext(t, context.Background())
 	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected.events, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
-	handoffStore, ok := selected.events.(interface {
-		ProveHandoff(context.Context, string, events.DeliveryRoute) (runtimedelivery.DurableHandoffProof, error)
-	})
-	if !ok {
-		t.Fatalf("proposed-effect selected store %T lacks exact delivery handoff proof", selected.events)
-	}
-	proof, err := handoffStore.ProveHandoff(ctx, evt.ID(), route)
+	proof, err := selected.events.ProveHandoff(ctx, evt.ID(), route)
 	if err != nil {
 		t.Fatalf("prove proposed-effect delivery handoff: %v", err)
 	}
@@ -1549,7 +1605,7 @@ func insertGateRecoveryRun(t *testing.T, tc gateRecoveryStoreCase, runID string)
 	}
 }
 
-func assertGateRecoveryActivation(t *testing.T, workflowStore *runtimepipeline.WorkflowInstanceStore, ctx context.Context, entityID, stage string, status gateruntime.Status) {
+func assertGateRecoveryActivation(t *testing.T, workflowStore *runtimepipeline.PipelineCoordinator, ctx context.Context, entityID, stage string, status gateruntime.Status) {
 	t.Helper()
 	instance, ok, err := workflowStore.Load(ctx, entityID)
 	if err != nil || !ok {

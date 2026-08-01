@@ -11,7 +11,7 @@ import (
 
 func (pc *PipelineCoordinator) persistWorkflowStateForTest(ctx context.Context, entityID, nextState, sourceEvent string) error {
 	if _, ok := PipelineSQLTxFromContext(ctx); !ok {
-		return pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+		return pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
 			return pc.persistWorkflowStateForTest(txctx, entityID, nextState, sourceEvent)
 		})
 	}
@@ -20,7 +20,7 @@ func (pc *PipelineCoordinator) persistWorkflowStateForTest(ctx context.Context, 
 		return fmt.Errorf("test transition requires an inbound event")
 	}
 	var currentState string
-	if err := pc.workflowStore.MutateE(ctx, entityID, func(instance *WorkflowInstance) error {
+	if err := pc.workflowStore.mutateE(ctx, entityID, func(instance *WorkflowInstance) error {
 		currentState = strings.TrimSpace(instance.CurrentState)
 		instance.CurrentState = strings.TrimSpace(nextState)
 		instance.EnteredStageAt = inbound.CreatedAt()
@@ -35,7 +35,7 @@ func (pc *PipelineCoordinator) persistWorkflowStateForTest(ctx context.Context, 
 }
 
 func (pc *PipelineCoordinator) applyWorkflowGateForTest(ctx context.Context, entityID, _ string, setGate string, clearAll bool) error {
-	return pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
+	return pc.workflowStore.mutate(ctx, entityID, func(instance *WorkflowInstance) {
 		metadata := cloneStringAnyMap(instance.Metadata)
 		gates := payloadMap(metadata["gates"])
 		if clearAll {
@@ -68,7 +68,7 @@ func fireTypedWorkflowTimerTestWakeup(ctx context.Context, pc *PipelineCoordinat
 
 func applyTestInitialEntryEffect(ctx context.Context, pc *PipelineCoordinator, entityID string) error {
 	if _, ok := PipelineSQLTxFromContext(ctx); !ok {
-		return pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+		return pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
 			return applyTestInitialEntryEffect(txctx, pc, entityID)
 		})
 	}

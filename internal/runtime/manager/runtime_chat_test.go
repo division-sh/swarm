@@ -59,6 +59,12 @@ func (s *chatTestStore) LoadAgents(context.Context) ([]PersistedAgent, error) {
 	return nil, nil
 }
 func (s *chatTestStore) EnsureEntitySchema(context.Context, string) error { return nil }
+func (s *chatTestStore) ResolveAgentDirectiveRunTarget(context.Context, runtimeagentidentity.Identity, string) (runtimeagentcontrol.RunTargetResolution, error) {
+	return runtimeagentcontrol.RunTargetResolution{
+		RunID: "00000000-0000-0000-0000-000000000700",
+		Mode:  runtimeagentcontrol.RunResolutionSpecified,
+	}, nil
+}
 
 type directiveTargetStore struct {
 	chatTestStore
@@ -109,6 +115,14 @@ func (b *directiveTestBus) Store() runtimebus.EventStore {
 	}
 	return b.store
 }
+
+func (b *directiveTestBus) managerTestDirectiveOperations() runtimeagentcontrol.DirectiveOperationStore {
+	if b.store == nil {
+		b.store = &directiveEventStore{}
+	}
+	return b.store
+}
+
 func (b *directiveTestBus) ResetInMemoryState() error { return nil }
 func (b *directiveTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
 	return nil

@@ -30,7 +30,7 @@ func TestRuntimeStart_AgentFreeCLITestDoesNotRequireClaudeStartupEnv(t *testing.
 		t.Fatalf("agent-free fixture has %d semantic agents", got)
 	}
 
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
@@ -50,7 +50,7 @@ func TestNewRuntimeRejectsRetiredLLMRuntimeMode(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.RuntimeMode = "cli_test"
 
-	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
+	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: loadAgentFreeRuntimeWorkflowModule(t),
 		LLMRuntime:     noopLLMRuntime{},
@@ -67,7 +67,7 @@ func TestNewRuntime_AgentPresentRequiresSelectedBackendCredential(t *testing.T) 
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	module := semanticOnlyWorkflowRuntime{source: loadPackageBackedRuntimeAgentMemorySource(t)}
 
-	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
+	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 	}})
@@ -91,7 +91,7 @@ func TestNewRuntime_AgentPresentCLITestStillRequiresClaudeStartupEnv(t *testing.
 		t.Fatal("agent-present fixture unexpectedly has zero semantic agents")
 	}
 
-	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
+	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
@@ -111,7 +111,7 @@ func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupBinding(t *test
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: loadAgentFreeRuntimeWorkflowModule(t),
 		LLMRuntime:     noopLLMRuntime{},
@@ -140,7 +140,7 @@ func TestNewRuntimeToolGatewayRequiresBindingToken(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 
-	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
+	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: cfg, Options: RuntimeOptions{
 		SelfCheck:          false,
 		WorkflowModule:     loadAgentFreeRuntimeWorkflowModule(t),
 		LLMRuntime:         noopLLMRuntime{},

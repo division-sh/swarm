@@ -36,10 +36,8 @@ import (
 )
 
 type nodeDeliveryRecoveryStore interface {
-	runtimebus.EventStore
-	runtimedelivery.Store
-	runtimepipeline.RuntimeMutationRunner
-	runtimerunlifecycle.OperationOwner
+	externalRuntimeTestDurableEventStore
+	externalRuntimeTestMutationOwner
 	PipelineObligations() runtimepipelineobligation.Store
 }
 
@@ -111,6 +109,8 @@ func (d *settlingDeliveryContinuationDispatcher) DispatchDeliveryContinuation(
 
 type startupRecoveryOrderStore interface {
 	nodeDeliveryRecoveryStore
+	swarmruntime.EventPayloadValidationBinder
+	swarmruntime.AuthorActivityCatalogRegistrar
 	runtimerunlifecycle.CandidateOwner
 	runtimemanager.ManagerPersistence
 	runtimemanager.AgentLifecyclePersistence
@@ -148,11 +148,11 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 	persistedBundleHash, persistedBundleSource := persistedSource.StorageValues()
 	for _, backend := range []struct {
 		name  string
-		setup func(*testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore, *runtimepipeline.WorkflowInstanceStore)
+		setup func(*testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore)
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore, *runtimepipeline.WorkflowInstanceStore) {
+			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				selected := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -163,13 +163,12 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
 					BundleHash: persistedBundleHash, BundleSource: persistedBundleSource,
 				})
-				workflowStore := configureRuntimeTestWorkflowStore(t, runtimepipeline.NewWorkflowInstanceStore(db), selected)
-				return ctx, db, db, selected, workflowStore
+				return ctx, db, db, selected
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore, *runtimepipeline.WorkflowInstanceStore) {
+			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithBundleSourceFact(ctx, persistedSource)
@@ -178,14 +177,16 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
 					BundleHash: persistedBundleHash, BundleSource: persistedBundleSource,
 				})
-				workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(selected.DB, selected)
-				workflowStore.ConfigureRunLifecycle(selected)
-				return ctx, nil, selected.DB, selected, workflowStore
+				return ctx, nil, selected.DB, selected
 			},
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			ctx, runtimeSQLDB, _, selected, workflowStore := backend.setup(t)
+			ctx, runtimeSQLDB, workflowDB, selected := backend.setup(t)
+			workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(workflowDB, selected)
+			if runtimeSQLDB == nil {
+				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(workflowDB, selected)
+			}
 			repoRoot := filepath.Clean(filepath.Join("..", ".."))
 			fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
 			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
@@ -226,11 +227,14 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			hydrated := atomic.Bool{}
 			runtime, err := swarmruntime.NewRuntime(ctx, swarmruntime.RuntimeDeps{
 				Config: &config.Config{Runtime: config.RuntimeConfig{RecoveryOnStartup: true}, LLM: config.LLMConfig{Backend: "anthropic"}},
-				Stores: swarmruntime.Stores{
-					SQLDB: runtimeSQLDB, EventStore: selected, RunLifecycleCandidates: selected, PipelineStore: workflowStore,
-					ManagerStore: selected, DeliveryStore: selected,
-					PipelineObligations: selected.PipelineObligations(),
-				},
+
+				SQLDB: runtimeSQLDB, EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
+				EventPayloadValidationBinder: selected, AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+				RunLifecycleCandidates: selected, WorkflowPersistence: workflowPersistence,
+				ManagerStore: selected, ManagerLifecycleStore: selected,
+				ManagerPersistenceRoles: externalRuntimeTestSelectedManagerRoles(selected), DeliveryStore: selected,
+				PipelineObligations: selected.PipelineObligations(),
+
 				Options: swarmruntime.RuntimeOptions{
 					SelfCheck: false, WorkflowModule: module, LLMRuntime: startupRecoveryOrderLLM{},
 					RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleSourceFact: persistedSource,
@@ -266,7 +270,8 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				return startupRecoveryOrderAgent{id: cfg.ID, subscriptions: subscriptions}, nil
 			}, runtimemanager.AgentManagerOptions{
 				BaseContext: ctx, LifecycleStore: selected, DeliveryStore: selected, SemanticSource: source,
-				WorkflowInstances: workflowStore, WorkOwner: runtime.WorkOccurrence(),
+				PersistenceRoles:  externalRuntimeTestManagerBusRoles(runtime.Bus),
+				WorkflowInstances: runtime.Pipeline, WorkOwner: runtime.WorkOccurrence(),
 			}, selected)
 
 			if err := runtime.Start(ctx); err != nil {
@@ -401,11 +406,10 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 						}
 					}
 
-					workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+					workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
 					if backend == "sqlite" {
-						workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, selected)
+						workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
 					}
-					configureRuntimeTestWorkflowStore(t, workflowStore, selected)
 					module := loadStartupRecoveryWorkflowModule(t)
 					processOwner := worklifetime.NewProcess()
 					activationProbe := &startupRecoveryActivationProbe{Store: selected}
@@ -415,11 +419,14 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 							Runtime: config.RuntimeConfig{RecoveryOnStartup: mode.recoveryOnStartup},
 							LLM:     config.LLMConfig{Backend: "anthropic"},
 						},
-						Stores: swarmruntime.Stores{
-							SQLDB: runtimeSQLDB, EventStore: selected, RunLifecycleCandidates: selected,
-							PipelineStore: workflowStore, ManagerStore: selected, DeliveryStore: activationProbe,
-							PipelineObligations: selected.PipelineObligations(),
-						},
+
+						SQLDB: runtimeSQLDB, EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
+						EventPayloadValidationBinder: selected, AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+						RunLifecycleCandidates: selected, WorkflowPersistence: workflowPersistence,
+						ManagerStore: selected, ManagerLifecycleStore: selected,
+						ManagerPersistenceRoles: externalRuntimeTestSelectedManagerRoles(selected), DeliveryStore: activationProbe,
+						PipelineObligations: selected.PipelineObligations(),
+
 						Options: swarmruntime.RuntimeOptions{
 							SelfCheck: false, WorkflowModule: module, LLMRuntime: startupRecoveryOrderLLM{},
 							RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleSourceFact: currentSource,
@@ -771,22 +778,28 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+			workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
 			if backend.name == "sqlite" {
-				workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, selected)
-			}
-			configureRuntimeTestWorkflowStore(t, workflowStore, selected)
-			if err := workflowStore.Upsert(ctx, artifactActionResultWorkflowInstance()); err != nil {
-				t.Fatalf("seed workflow instance: %v", err)
+				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
 			}
 			deliveryOwner := &renewalTrackingDeliveryStore{Store: selected}
 			workOwner := runtimeTestEventBusWorkOwner(t, bus)
 			pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-				WorkOwner:     workOwner,
-				Module:        newRuntimeTestWorkflowModule(t, source),
-				WorkflowStore: workflowStore,
-				DeliveryStore: deliveryOwner,
+				WorkOwner:               workOwner,
+				Module:                  newRuntimeTestWorkflowModule(t, source),
+				Persistence:             workflowPersistence,
+				RunLifecycle:            selected,
+				PipelineObligations:     selected.PipelineObligations(),
+				DeliveryStore:           deliveryOwner,
+				GatePublisher:           bus,
+				DirectDecisionPublisher: bus,
+				DeliveryRuntime:         bus,
+				PinRoutingDescriptors:   bus,
+				FlowRoutes:              bus,
 			})
+			if _, err := pc.MaterializeInitialEntry(ctx, artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
+				t.Fatalf("seed workflow instance: %v", err)
+			}
 
 			eventID := "99999999-9999-4999-8999-999999999981"
 			target := events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/inst-1", EntityID: artifactActionResultEntityID}
@@ -859,21 +872,27 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+			workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
 			if backend.name == "sqlite" {
-				workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, selected)
-			}
-			configureRuntimeTestWorkflowStore(t, workflowStore, selected)
-			if err := workflowStore.Upsert(ctx, artifactActionResultWorkflowInstance()); err != nil {
-				t.Fatalf("seed healthy workflow instance: %v", err)
+				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
 			}
 			workOwner := runtimeTestEventBusWorkOwner(t, bus)
 			pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-				WorkOwner:     workOwner,
-				Module:        newRuntimeTestWorkflowModule(t, source),
-				WorkflowStore: workflowStore,
-				DeliveryStore: selected,
+				WorkOwner:               workOwner,
+				Module:                  newRuntimeTestWorkflowModule(t, source),
+				Persistence:             workflowPersistence,
+				RunLifecycle:            selected,
+				PipelineObligations:     selected.PipelineObligations(),
+				DeliveryStore:           selected,
+				GatePublisher:           bus,
+				DirectDecisionPublisher: bus,
+				DeliveryRuntime:         bus,
+				PinRoutingDescriptors:   bus,
+				FlowRoutes:              bus,
 			})
+			if _, err := pc.MaterializeInitialEntry(ctx, artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
+				t.Fatalf("seed healthy workflow instance: %v", err)
+			}
 
 			poisonEntityID := eventtest.UUID("node-recovery-poison-entity")
 			poisonTarget := events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/poison", EntityID: poisonEntityID}
@@ -884,7 +903,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				"repo_id": "poison-repo", "namespace": "tenant-alpha", "partition_key": "poison",
 				"display_slug": "Poison", "source_record_id": "poison-record", "flow_path": poisonTarget.FlowInstance,
 			}
-			if err := workflowStore.Upsert(ctx, poisonInstance); err != nil {
+			if _, err := pc.MaterializeInitialEntry(ctx, poisonInstance, time.Now().UTC()); err != nil {
 				t.Fatalf("seed poison workflow instance: %v", err)
 			}
 			installNodeRecoveryPoisonMutation(t, ctx, db, backend.name == "postgres", poisonEntityID)
@@ -1001,22 +1020,25 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+			workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
 			if backend.name == "sqlite" {
-				workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, selected)
-			}
-			configureRuntimeTestWorkflowStore(t, workflowStore, selected)
-			if err := workflowStore.Upsert(ctx, artifactActionResultWorkflowInstance()); err != nil {
-				t.Fatalf("seed workflow instance: %v", err)
+				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
 			}
 			handlerStarted := make(chan struct{}, 4)
 			deliveryOwner := &renewalTrackingDeliveryStore{Store: selected}
 			workOwner := runtimeTestEventBusWorkOwner(t, bus)
 			pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-				WorkOwner:     workOwner,
-				Module:        newRuntimeTestWorkflowModule(t, source),
-				WorkflowStore: workflowStore,
-				DeliveryStore: deliveryOwner,
+				WorkOwner:               workOwner,
+				Module:                  newRuntimeTestWorkflowModule(t, source),
+				Persistence:             workflowPersistence,
+				RunLifecycle:            selected,
+				PipelineObligations:     selected.PipelineObligations(),
+				DeliveryStore:           deliveryOwner,
+				GatePublisher:           bus,
+				DirectDecisionPublisher: bus,
+				DeliveryRuntime:         bus,
+				PinRoutingDescriptors:   bus,
+				FlowRoutes:              bus,
 				TestWorkflowNodeHandlerStartHook: func(context.Context, string, events.Event) error {
 					select {
 					case handlerStarted <- struct{}{}:
@@ -1025,6 +1047,9 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 					return nil
 				},
 			})
+			if _, err := pc.MaterializeInitialEntry(ctx, artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
+				t.Fatalf("seed workflow instance: %v", err)
+			}
 
 			eventID := "99999999-9999-4999-8999-999999999982"
 			target := events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/inst-1", EntityID: artifactActionResultEntityID}

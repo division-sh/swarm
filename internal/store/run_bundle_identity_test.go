@@ -10,8 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/store/runbundle"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
@@ -109,7 +109,7 @@ func TestPostgresStore_ActiveRunBundleAvailabilityConflicts(t *testing.T) {
 	if len(conflicts) != 2 {
 		t.Fatalf("conflicts = %#v, want persisted-missing and deleted active conflicts", conflicts)
 	}
-	byRunID := map[string]ActiveRunBundleAvailabilityConflict{}
+	byRunID := map[string]runbundle.Availability{}
 	for _, conflict := range conflicts {
 		byRunID[conflict.RunID] = conflict
 	}

@@ -33,7 +33,6 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
@@ -47,18 +46,22 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              newRuntimeTestWorkflowModule(t, source),
-		WorkflowStore:       workflowStore,
+		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		RunLifecycle:        pg,
 		DeliveryStore:       pg,
 		PipelineObligations: pg.PipelineObligations(),
+		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
+		PinRoutingDescriptors: bus, FlowRoutes: bus,
 	})
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
 		SemanticSource:    source,
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		WorkflowInstances: workflowStore,
+		WorkflowInstances: pc,
+		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
 	}))
 
 	evt := eventtest.ExistingRunRootIngress(
@@ -116,7 +119,7 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 		FlowInstance: flowInstance,
 		EntityID:     entityID,
 	}))
-	loaded, ok, err := workflowStore.Load(ctx, entityID)
+	loaded, ok, err := pc.Load(ctx, entityID)
 	if err != nil {
 		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
 	}
@@ -159,6 +162,7 @@ func TestTemplateFlowPilotRuntime_FailsClosedForMissingAndAmbiguousKeys(t *testi
 			store := &templateFlowPilotMemoryStore{source: source, flowInstances: tc.flowInstances}
 			bus, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 				ContractBundle: source,
+				Durable:        runtimebus.DurableDependencies{ActiveFlows: store},
 				TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 					t.Fatal("fail-closed route must not activate a template instance")
 					return nil

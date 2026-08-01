@@ -9,9 +9,9 @@ import (
 	swruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
 func runtimeContextManager(opts OperatorReadOptions) *swruntime.RuntimeContextManager {
@@ -95,12 +95,6 @@ func runForkExecutorForBundleContext(executor RunForkExecutor, contextDef *swrun
 	}
 	apply := func(selected SelectedContractRunForkExecutor) SelectedContractRunForkExecutor {
 		selected.AgentRuntime.Config = selectedRuntime.Config
-		selected.AgentRuntime.EntityStore = selectedRuntime.Stores.ToolEntityStore
-		selected.AgentRuntime.HumanTaskStore = selectedRuntime.Stores.HumanTaskStore
-		selected.AgentRuntime.SessionRegistry = selectedRuntime.Stores.SessionRegistry
-		selected.AgentRuntime.ConversationStore = selectedRuntime.Stores.ConversationStore
-		selected.AgentRuntime.ScheduleStore = selectedRuntime.Stores.ScheduleStore
-		selected.AgentRuntime.MailboxStore = selectedRuntime.Stores.MailboxStore
 		selected.AgentRuntime.Workspace = selectedRuntime.Workspace
 		selected.AgentRuntime.Credentials = selectedRuntime.Credentials
 		selected.AgentRuntime.LLMRuntime = selectedRuntime.LLM

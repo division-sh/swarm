@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
 	"gopkg.in/yaml.v3"
 )
 
@@ -42,12 +43,6 @@ type BundleCatalogDetail struct {
 	HasData       bool           `json:"has_data"`
 	DataSizeBytes int64          `json:"data_size_bytes"`
 	IngestedAt    time.Time      `json:"ingested_at"`
-}
-
-type BundleCatalogRuntimeRecord struct {
-	BundleHash  string
-	ContentYAML string
-	DataBlob    []byte
 }
 
 type BundleCatalogAgentsResult struct {
@@ -197,15 +192,15 @@ func (s *PostgresStore) LoadBundleCatalog(ctx context.Context, bundleHash string
 	return scanned.toDetail()
 }
 
-func (s *PostgresStore) LoadBundleCatalogRuntimeRecord(ctx context.Context, bundleHash string) (BundleCatalogRuntimeRecord, error) {
+func (s *PostgresStore) LoadBundleCatalogRuntimeRecord(ctx context.Context, bundleHash string) (runtimerunbundle.BundleCatalogRuntimeRecord, error) {
 	if err := s.requireBundleCatalogAccess(); err != nil {
-		return BundleCatalogRuntimeRecord{}, err
+		return runtimerunbundle.BundleCatalogRuntimeRecord{}, err
 	}
 	bundleHash = strings.TrimSpace(bundleHash)
 	if bundleHash == "" {
-		return BundleCatalogRuntimeRecord{}, ErrBundleNotFound
+		return runtimerunbundle.BundleCatalogRuntimeRecord{}, runtimerunbundle.ErrBundleNotFound
 	}
-	var out BundleCatalogRuntimeRecord
+	var out runtimerunbundle.BundleCatalogRuntimeRecord
 	var dataBlob []byte
 	var hasData bool
 	err := s.DB.QueryRowContext(ctx, `
@@ -218,10 +213,10 @@ func (s *PostgresStore) LoadBundleCatalogRuntimeRecord(ctx context.Context, bund
 		WHERE bundle_hash = $1
 	`, bundleHash).Scan(&out.BundleHash, &out.ContentYAML, &dataBlob, &hasData)
 	if errors.Is(err, sql.ErrNoRows) {
-		return BundleCatalogRuntimeRecord{}, ErrBundleNotFound
+		return runtimerunbundle.BundleCatalogRuntimeRecord{}, runtimerunbundle.ErrBundleNotFound
 	}
 	if err != nil {
-		return BundleCatalogRuntimeRecord{}, fmt.Errorf("load bundle catalog runtime record: %w", err)
+		return runtimerunbundle.BundleCatalogRuntimeRecord{}, fmt.Errorf("load bundle catalog runtime record: %w", err)
 	}
 	out.BundleHash = strings.TrimSpace(out.BundleHash)
 	if hasData {

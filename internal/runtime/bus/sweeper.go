@@ -410,8 +410,8 @@ func (eb *EventBus) bindClaimedRunWork(
 	if runID == "" {
 		return ctx, nil, nil
 	}
-	reader, ok := eb.store.(RunOriginReader)
-	if !ok || reader == nil {
+	reader := eb.durable.RunOrigins
+	if reader == nil {
 		return ctx, nil, errors.New("persisted pipeline recovery requires typed run origin readback")
 	}
 	origin, err := reader.LoadRunOrigin(ctx, runID)

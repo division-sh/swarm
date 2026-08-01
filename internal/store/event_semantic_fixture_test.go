@@ -14,6 +14,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/eventrecord/sqlite"
@@ -28,7 +29,7 @@ type semanticEventFixtureStore interface {
 }
 
 type selectedForkEventFixtureStore interface {
-	CommitSelectedForkEvent(context.Context, CommitSelectedForkEventRequest) (runtimebus.EventAppendOutcome, error)
+	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.EventAppendOutcome, error)
 }
 
 func commitSemanticEventFixture(ctx context.Context, store any, event events.Event) error {
@@ -169,7 +170,7 @@ func commitSelectedForkEventFixture(
 	ctx context.Context,
 	store selectedForkEventFixtureStore,
 	event events.Event,
-	lineage RunForkSelectedContractExecutionLineage,
+	lineage runfork.RunForkSelectedContractExecutionLineage,
 ) (err error) {
 	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
@@ -188,7 +189,7 @@ func commitSelectedForkEventFixture(
 	defer func() {
 		err = errors.Join(err, owner.Release(context.WithoutCancel(ctx), claim))
 	}()
-	outcome, err := store.CommitSelectedForkEvent(ctx, CommitSelectedForkEventRequest{
+	outcome, err := store.CommitSelectedForkEvent(ctx, runtimebus.CommitSelectedForkEventRequest{
 		Commit: runtimebus.CommitPublishRequest{
 			Event:         admitted,
 			ReplayScope:   runtimepipelineobligation.ScopeDirect,
@@ -258,8 +259,8 @@ func commitDeliveryReplayEventFixture(
 		inserted, err := insertRunForkReplayDelivery(txctx, tx, runForkActivationLineage{
 			SourceRunID: source.RunID(),
 			ForkRunID:   forkRunID,
-		}, RunForkHistoricalReplayExecutableWork{
-			Fact:             RunForkHistoricalReplayFactEventDeliveries,
+		}, runfork.RunForkHistoricalReplayExecutableWork{
+			Fact:             runfork.RunForkHistoricalReplayFactEventDeliveries,
 			SourceEventID:    source.ID(),
 			SourceDeliveryID: sourceDeliveryID,
 			SubscriberType:   subscriberType,

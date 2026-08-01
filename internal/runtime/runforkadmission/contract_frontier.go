@@ -10,18 +10,18 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 type ContractFrontierRequest struct {
-	Plan              store.RunForkPlan
+	Plan              runfork.RunForkPlan
 	Source            semanticview.Source
-	ContractSelection store.RunForkContractSelection
+	ContractSelection runfork.RunForkContractSelection
 }
 
-func SelectedContractSelection(source semanticview.Source, contractsRoot string) store.RunForkContractSelection {
-	selection := store.RunForkContractSelection{
+func SelectedContractSelection(source semanticview.Source, contractsRoot string) runfork.RunForkContractSelection {
+	selection := runfork.RunForkContractSelection{
 		Mode:          "selected_contracts",
 		ContractsRoot: strings.TrimSpace(contractsRoot),
 	}
@@ -32,9 +32,9 @@ func SelectedContractSelection(source semanticview.Source, contractsRoot string)
 	return selection
 }
 
-func AdmitContractFrontier(req ContractFrontierRequest) (store.RunForkContractFrontierAdmission, error) {
+func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContractFrontierAdmission, error) {
 	if req.Source == nil {
-		return store.RunForkContractFrontierAdmission{}, fmt.Errorf("selected contract semantic source is required")
+		return runfork.RunForkContractFrontierAdmission{}, fmt.Errorf("selected contract semantic source is required")
 	}
 	selection := req.ContractSelection
 	if strings.TrimSpace(selection.Mode) == "" {
@@ -49,18 +49,18 @@ func AdmitContractFrontier(req ContractFrontierRequest) (store.RunForkContractFr
 
 	routeTable, err := runtimebus.DeriveRouteTable(req.Source)
 	if err != nil {
-		return store.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract fork routes: %w", err)
+		return runfork.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract fork routes: %w", err)
 	}
 	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Source, req.Plan.PendingWork); err != nil {
-		return store.RunForkContractFrontierAdmission{}, err
+		return runfork.RunForkContractFrontierAdmission{}, err
 	}
 	workflowNodes, err := runtimepipeline.LoadWorkflowNodes(req.Source)
 	if err != nil {
-		return store.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract workflow nodes: %w", err)
+		return runfork.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract workflow nodes: %w", err)
 	}
 	connectPlans, connectIssues := runtimepinrouting.LowerCompositionConnectRoutePlans(req.Source)
 	if len(connectIssues) != 0 {
-		return store.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract connect routes: %#v", connectIssues)
+		return runfork.RunForkContractFrontierAdmission{}, fmt.Errorf("derive selected-contract connect routes: %#v", connectIssues)
 	}
 	frontier, lineageOnly := runForkFrontierEvents(req.Plan.PendingWork)
 	incompleteRoutes := map[string]bool{}
@@ -81,17 +81,17 @@ func AdmitContractFrontier(req ContractFrontierRequest) (store.RunForkContractFr
 		return frontier[i].SourceEventID < frontier[j].SourceEventID
 	})
 
-	blockers := []store.RunForkUnsupportedBlocker{}
+	blockers := []runfork.RunForkUnsupportedBlocker{}
 	if len(frontier) > 0 {
-		blockers = appendRunForkBlocker(blockers, store.RunForkUnsupportedBlocker{
-			Code:    store.RunForkBlockerContractFrontierExecutionUnsupported,
+		blockers = appendRunForkBlocker(blockers, runfork.RunForkUnsupportedBlocker{
+			Code:    runfork.RunForkBlockerContractFrontierExecutionUnsupported,
 			Message: "selected-contract frontier admission is non-mutating; handler execution and fork-local delivery writes remain separately gated",
 		})
 	}
 	for _, event := range frontier {
 		if incompleteRoutes[event.SourceEventID] {
-			blockers = appendRunForkBlocker(blockers, store.RunForkUnsupportedBlocker{
-				Code:    store.RunForkBlockerContractFrontierRouteUnresolved,
+			blockers = appendRunForkBlocker(blockers, runfork.RunForkUnsupportedBlocker{
+				Code:    runfork.RunForkBlockerContractFrontierRouteUnresolved,
 				Message: "selected-contract frontier has a matched connect receiver that still requires runtime resolution",
 			})
 			continue
@@ -99,14 +99,14 @@ func AdmitContractFrontier(req ContractFrontierRequest) (store.RunForkContractFr
 		if len(event.DerivedRecipients) > 0 || len(event.RuntimeEventOwners) > 0 || len(event.WorkflowNodeSubscribers) > 0 {
 			continue
 		}
-		blockers = appendRunForkBlocker(blockers, store.RunForkUnsupportedBlocker{
-			Code:    store.RunForkBlockerContractFrontierRouteUnresolved,
+		blockers = appendRunForkBlocker(blockers, runfork.RunForkUnsupportedBlocker{
+			Code:    runfork.RunForkBlockerContractFrontierRouteUnresolved,
 			Message: "selected-contract frontier event has no derived route, workflow subscriber, or runtime event owner",
 		})
 	}
 
-	return store.RunForkContractFrontierAdmission{
-		Owner:                        store.RunForkContractFrontierAdmissionOwner,
+	return runfork.RunForkContractFrontierAdmission{
+		Owner:                        runfork.RunForkContractFrontierAdmissionOwner,
 		ContractSelection:            selection,
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
@@ -117,16 +117,16 @@ func AdmitContractFrontier(req ContractFrontierRequest) (store.RunForkContractFr
 	}, nil
 }
 
-func runForkFrontierEvents(pending []store.RunForkPendingWork) ([]store.RunForkContractFrontierEvent, []store.RunForkContractFrontierLineageEvent) {
+func runForkFrontierEvents(pending []runfork.RunForkPendingWork) ([]runfork.RunForkContractFrontierEvent, []runfork.RunForkContractFrontierLineageEvent) {
 	type aggregate struct {
-		event           store.RunForkContractFrontierEvent
+		event           runfork.RunForkContractFrontierEvent
 		classifications map[string]struct{}
 		flowInstances   map[string]struct{}
 		subscriberTypes map[string]struct{}
 		subscriberIDs   map[string]struct{}
 	}
 	type lineageAggregate struct {
-		event           store.RunForkContractFrontierLineageEvent
+		event           runfork.RunForkContractFrontierLineageEvent
 		classifications map[string]struct{}
 		flowInstances   map[string]struct{}
 		subscriberTypes map[string]struct{}
@@ -136,22 +136,22 @@ func runForkFrontierEvents(pending []store.RunForkPendingWork) ([]store.RunForkC
 	lineageByEvent := map[string]*lineageAggregate{}
 	for _, item := range pending {
 		switch strings.TrimSpace(item.Classification) {
-		case store.RunForkPendingClassificationDeliveredCompleted, store.RunForkPendingClassificationCommittedReplay:
+		case runfork.RunForkPendingClassificationDeliveredCompleted, runfork.RunForkPendingClassificationCommittedReplay:
 			continue
 		}
 		eventID := strings.TrimSpace(item.EventID)
 		if eventID == "" {
 			continue
 		}
-		if store.RunForkSelectedContractDiagnosticPlatformOutcomePolicyApplies(item) {
+		if runfork.RunForkSelectedContractDiagnosticPlatformOutcomePolicyApplies(item) {
 			agg := lineageByEvent[eventID]
 			if agg == nil {
 				agg = &lineageAggregate{
-					event: store.RunForkContractFrontierLineageEvent{
+					event: runfork.RunForkContractFrontierLineageEvent{
 						SourceEventID: eventID,
 						EventName:     strings.TrimSpace(item.EventName),
-						Owner:         store.RunForkSelectedContractDiagnosticPlatformOutcomePolicyOwner,
-						Disposition:   store.RunForkContractFrontierDispositionLineageNoAction,
+						Owner:         runfork.RunForkSelectedContractDiagnosticPlatformOutcomePolicyOwner,
+						Disposition:   runfork.RunForkContractFrontierDispositionLineageNoAction,
 						Reason:        "spec-declared diagnostic platform outcome facts are persisted for lineage and are not selected-contract frontier work",
 					},
 					classifications: map[string]struct{}{},
@@ -170,7 +170,7 @@ func runForkFrontierEvents(pending []store.RunForkPendingWork) ([]store.RunForkC
 		agg := byEvent[eventID]
 		if agg == nil {
 			agg = &aggregate{
-				event: store.RunForkContractFrontierEvent{
+				event: runfork.RunForkContractFrontierEvent{
 					SourceEventID: eventID,
 					EventName:     strings.TrimSpace(item.EventName),
 				},
@@ -186,7 +186,7 @@ func runForkFrontierEvents(pending []store.RunForkPendingWork) ([]store.RunForkC
 		addString(agg.subscriberTypes, item.SubscriberType)
 		addString(agg.subscriberIDs, item.SubscriberID)
 	}
-	out := make([]store.RunForkContractFrontierEvent, 0, len(byEvent))
+	out := make([]runfork.RunForkContractFrontierEvent, 0, len(byEvent))
 	for _, agg := range byEvent {
 		agg.event.SourceClassifications = sortedSet(agg.classifications)
 		agg.event.SourceFlowInstances = sortedSet(agg.flowInstances)
@@ -194,7 +194,7 @@ func runForkFrontierEvents(pending []store.RunForkPendingWork) ([]store.RunForkC
 		agg.event.SourceSubscriberIDs = sortedSet(agg.subscriberIDs)
 		out = append(out, agg.event)
 	}
-	lineage := make([]store.RunForkContractFrontierLineageEvent, 0, len(lineageByEvent))
+	lineage := make([]runfork.RunForkContractFrontierLineageEvent, 0, len(lineageByEvent))
 	for _, agg := range lineageByEvent {
 		agg.event.SourceClassifications = sortedSet(agg.classifications)
 		agg.event.SourceFlowInstances = sortedSet(agg.flowInstances)
@@ -211,7 +211,7 @@ func runForkFrontierEvents(pending []store.RunForkPendingWork) ([]store.RunForkC
 	return out, lineage
 }
 
-func installContractFrontierFlowInstanceRoutes(routeTable *runtimebus.RouteTable, source semanticview.Source, pending []store.RunForkPendingWork) error {
+func installContractFrontierFlowInstanceRoutes(routeTable *runtimebus.RouteTable, source semanticview.Source, pending []runfork.RunForkPendingWork) error {
 	for _, route := range contractFrontierFlowInstanceRoutes(source, pending) {
 		if err := routeTable.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route}); err != nil {
 			return fmt.Errorf("derive selected-contract flow-instance route %s: %w", route.InstancePath, err)
@@ -220,7 +220,7 @@ func installContractFrontierFlowInstanceRoutes(routeTable *runtimebus.RouteTable
 	return nil
 }
 
-func contractFrontierFlowInstanceRoutes(source semanticview.Source, pending []store.RunForkPendingWork) []runtimeflowidentity.Route {
+func contractFrontierFlowInstanceRoutes(source semanticview.Source, pending []runfork.RunForkPendingWork) []runtimeflowidentity.Route {
 	seen := map[string]struct{}{}
 	out := make([]runtimeflowidentity.Route, 0)
 	for _, item := range pending {
@@ -244,7 +244,7 @@ func contractFrontierFlowInstanceRoutes(source semanticview.Source, pending []st
 	return out
 }
 
-func contractFrontierFlowInstances(source semanticview.Source, item store.RunForkPendingWork) []string {
+func contractFrontierFlowInstances(source semanticview.Source, item runfork.RunForkPendingWork) []string {
 	instancePath := item.SourceRoute.Normalized().FlowInstance
 	if isContractFrontierTemplateInstancePath(source, instancePath) {
 		return []string{instancePath}
@@ -272,7 +272,7 @@ func isContractFrontierTemplateInstancePath(source semanticview.Source, instance
 	return false
 }
 
-func contractFrontierSourceRoute(pending []store.RunForkPendingWork, eventID string) events.RouteIdentity {
+func contractFrontierSourceRoute(pending []runfork.RunForkPendingWork, eventID string) events.RouteIdentity {
 	eventID = strings.TrimSpace(eventID)
 	for _, item := range pending {
 		if strings.TrimSpace(item.EventID) == eventID {
@@ -408,11 +408,11 @@ func workflowNodeSubscribers(nodes []runtimepipeline.WorkflowNode, eventNames ..
 	return sortedSet(seen)
 }
 
-func contractFrontierRecipients(in []runtimebus.Subscriber) []store.RunForkContractFrontierRecipient {
-	out := make([]store.RunForkContractFrontierRecipient, 0, len(in))
+func contractFrontierRecipients(in []runtimebus.Subscriber) []runfork.RunForkContractFrontierRecipient {
+	out := make([]runfork.RunForkContractFrontierRecipient, 0, len(in))
 	seen := map[string]struct{}{}
 	for _, subscriber := range in {
-		recipient := store.RunForkContractFrontierRecipient{
+		recipient := runfork.RunForkContractFrontierRecipient{
 			SubscriberType: strings.TrimSpace(subscriber.Type),
 			SubscriberID:   strings.TrimSpace(subscriber.ID),
 			Path:           strings.TrimSpace(subscriber.Path),
@@ -437,7 +437,7 @@ func contractFrontierRecipients(in []runtimebus.Subscriber) []store.RunForkContr
 	return out
 }
 
-func appendRunForkBlocker(blockers []store.RunForkUnsupportedBlocker, blocker store.RunForkUnsupportedBlocker) []store.RunForkUnsupportedBlocker {
+func appendRunForkBlocker(blockers []runfork.RunForkUnsupportedBlocker, blocker runfork.RunForkUnsupportedBlocker) []runfork.RunForkUnsupportedBlocker {
 	code := strings.TrimSpace(blocker.Code)
 	if code == "" {
 		return blockers

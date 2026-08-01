@@ -19,11 +19,11 @@ import (
 	"github.com/google/uuid"
 )
 
-type workflowGateMutationPublisher interface {
+type WorkflowGateMutationPublisher interface {
 	PublishInMutation(context.Context, events.Event) error
 }
 
-type decisionCardDirectMutationPublisher interface {
+type DecisionCardDirectMutationPublisher interface {
 	PublishDirectInMutation(context.Context, events.Event, []string) error
 }
 
@@ -33,7 +33,7 @@ type workflowGateIntent struct {
 }
 
 func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string, occurredAt time.Time) error {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || pc.SemanticSource() == nil {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.SemanticSource() == nil {
 		return nil
 	}
 	entityID = strings.TrimSpace(entityID)
@@ -43,7 +43,7 @@ func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, ent
 		return nil
 	}
 	if _, ok := PipelineSQLTxFromContext(ctx); !ok {
-		return pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+		return pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
 			return pc.applyWorkflowGateIntents(txctx, entityID, currentStage, nextStage, sourceEvent, occurredAt)
 		})
 	}
@@ -54,7 +54,7 @@ func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, ent
 	if now.IsZero() {
 		return fmt.Errorf("workflow gate lifecycle requires an exact occurrence time")
 	}
-	err := pc.workflowStore.MutateE(ctx, entityID, func(instance *WorkflowInstance) error {
+	err := pc.workflowStore.mutateE(ctx, entityID, func(instance *WorkflowInstance) error {
 		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 		if err != nil {
 			return fmt.Errorf("decode gate state: %w", err)
@@ -159,8 +159,8 @@ func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, ent
 }
 
 func (pc *PipelineCoordinator) publishWorkflowGateSuperseded(ctx context.Context, card decisioncard.Card, activation gateruntime.Activation, now time.Time) error {
-	publisher, ok := pc.bus.(workflowGateMutationPublisher)
-	if !ok || publisher == nil {
+	publisher := pc.gatePublisher
+	if publisher == nil {
 		return fmt.Errorf("transactional event publisher is required to supersede decision card %s", activation.CardID)
 	}
 	payload, err := canonicaljson.Bytes(map[string]any{

@@ -1,4 +1,4 @@
-package store
+package runfork
 
 import (
 	"fmt"
@@ -72,4 +72,8 @@ func runForkSelectedContractCommittedReplayScopeMarkerAdmitted(admission RunFork
 		}
 	}
 	return false
+}
+
+func CommittedReplayScopeMarkerAdmitted(admission RunForkReplayResumeAdmission) bool {
+	return runForkSelectedContractCommittedReplayScopeMarkerAdmitted(admission)
 }

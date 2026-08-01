@@ -732,24 +732,10 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 			},
 		},
 		{
-			name: "store boundary blocker",
-			deps: RuntimeDeps{
-				Config: &config.Config{},
-				Stores: Stores{
-					ConstructionBlocker: "sqlite selected runtime persistence remains blocked",
-				},
-				Options: RuntimeOptions{
-					WorkflowModule:   validModule,
-					BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),
-				},
-			},
-			errContains: "runtime store boundary is not construction-ready: sqlite selected runtime persistence remains blocked",
-		},
-		{
 			name: "inbound store without admitted provider registry",
 			deps: RuntimeDeps{
-				Config: &config.Config{},
-				Stores: Stores{InboundStore: &recordingInboundStore{}},
+				Config:       &config.Config{},
+				InboundStore: &recordingInboundStore{},
 				Options: RuntimeOptions{
 					WorkflowModule:   validModule,
 					BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),

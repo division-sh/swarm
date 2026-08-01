@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -167,7 +168,7 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 	`, forkRunID, sourceContinuation.EntityID, now); err != nil {
 		t.Fatal(err)
 	}
-	point := RunForkPoint{EventID: uuid.NewString(), Timestamp: now.Add(time.Minute)}
+	point := runfork.RunForkPoint{EventID: uuid.NewString(), Timestamp: now.Add(time.Minute)}
 	if err := cards.runAuthorActivityMutation(ctx, "test materialize fork proposed-effect card", func(txctx context.Context, tx *sql.Tx) error {
 		return materializeRunForkProposedEffectCards(txctx, tx, sourceRunID, forkRunID, sourceContinuation.EntityID, point, now.Add(2*time.Minute))
 	}); err != nil {
@@ -285,10 +286,10 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 			if err != nil {
 				t.Fatal(err)
 			}
-			var prepared RunForkSelectedContractSourceEvent
+			var prepared runfork.RunForkSelectedContractSourceEvent
 			err = cards.runAuthorActivityMutation(ctx, "test prepare fork proposed-effect source event", func(txctx context.Context, tx *sql.Tx) error {
 				var inner error
-				prepared, inner = prepareRunForkSelectedContractSourceEvent(txctx, tx, forkRunID, RunForkSelectedContractSourceEvent{
+				prepared, inner = prepareRunForkSelectedContractSourceEvent(txctx, tx, forkRunID, runfork.RunForkSelectedContractSourceEvent{
 					SourceEventID: continuation.RequestEventID, EventName: runForkActivityRequestEvent,
 					ExecutionMode: continuation.ExecutionMode,
 					EntityID:      continuation.EntityID, FlowInstance: "root", Payload: payload,

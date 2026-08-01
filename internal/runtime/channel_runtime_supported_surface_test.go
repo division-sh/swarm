@@ -31,6 +31,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -49,23 +50,24 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			entityID := uuid.NewString()
 			flowInstance := "channel-runtime-" + selected
 			var (
-				db            *sql.DB
-				eventStore    runtimebus.EventStore
-				workflowStore *runtimepipeline.WorkflowInstanceStore
-				deliveryStore runtimedelivery.Store
+				db                  *sql.DB
+				eventStore          runtimebus.EventStore
+				workflowPersistence runtimepipeline.WorkflowPersistence
+				runLifecycle        runtimerunlifecycle.OperationOwner
+				deliveryStore       runtimedelivery.Store
 			)
 			if selected == "postgres" {
 				_, postgresDB, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				pg := storetest.AdmitPostgresRuntimeStore(t, postgresDB)
 				seedPostgresInboundGatewayRuntime(t, ctx, postgresDB, pg, runID, entityID, flowInstance, "channel-runtime", "telegram", "unused", "channel-runtime-observer")
-				db, eventStore, workflowStore, deliveryStore = postgresDB, pg, runtimepipeline.NewWorkflowInstanceStore(postgresDB), pg
+				db, eventStore, workflowPersistence, runLifecycle, deliveryStore = postgresDB, pg, runtimepipeline.NewPostgresWorkflowPersistence(postgresDB, pg), pg, pg
 			} else {
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 				seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "channel-runtime", "telegram", "unused", "channel-runtime-observer")
 				db, eventStore = sqliteStore.DB, sqliteStore
-				workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
-				deliveryStore = sqliteStore
+				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore)
+				runLifecycle, deliveryStore = sqliteStore, sqliteStore
 			}
 			seedConfiguredChannelBundleIdentity(t, ctx, db, selected, runID, bundleHash)
 			obligationProvider, ok := eventStore.(interface {
@@ -139,11 +141,14 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:            runtimeTestEventBusWorkOwner(t, bus),
 				Module:               telegramConnectorSupportedSurfaceModule{source: source},
-				WorkflowStore:        workflowStore,
+				Persistence:          workflowPersistence,
+				RunLifecycle:         runLifecycle,
 				DeliveryStore:        deliveryStore,
 				PipelineObligations:  pipelineObligations,
 				Credentials:          credentialStore,
 				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{privateToolID: privateTarget},
+				GatePublisher:        bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
+				PinRoutingDescriptors: bus, FlowRoutes: bus,
 			})
 			stopActivityNode := startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
 			executor := configuredChannelExecutor(source, binding, credentialStore, coordinator)
@@ -253,10 +258,13 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			mismatchedCoordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              telegramConnectorSupportedSurfaceModule{source: source},
-				WorkflowStore:       workflowStore,
+				Persistence:         workflowPersistence,
+				RunLifecycle:        runLifecycle,
 				DeliveryStore:       deliveryStore,
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
+				GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
+				PinRoutingDescriptors: bus, FlowRoutes: bus,
 				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{
 					privateToolID: replacementTarget,
 				},
@@ -275,10 +283,13 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			reloadedCoordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              telegramConnectorSupportedSurfaceModule{source: source},
-				WorkflowStore:       workflowStore,
+				Persistence:         workflowPersistence,
+				RunLifecycle:        runLifecycle,
 				DeliveryStore:       deliveryStore,
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
+				GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
+				PinRoutingDescriptors: bus, FlowRoutes: bus,
 				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{
 					replacementToolID: replacementTarget,
 				},

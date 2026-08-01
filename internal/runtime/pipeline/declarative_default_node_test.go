@@ -14,7 +14,7 @@ import (
 
 func TestCoordinatorHandlerExecutionEngineUsesRuntimeEnginePath(t *testing.T) {
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
 		Module: NewGenericTestWorkflowModule(),
 	})
 

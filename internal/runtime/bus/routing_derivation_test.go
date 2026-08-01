@@ -147,6 +147,18 @@ func (s *routePersistenceTestStore) ReplaceFlowInstanceRouteRecords(
 	return nil
 }
 
+func (s *routePersistenceTestStore) ReplaceFlowInstanceRouteTopology(
+	ctx context.Context,
+	sets []runtimebus.FlowInstanceRouteRecordSet,
+) error {
+	for _, set := range sets {
+		if err := s.ReplaceFlowInstanceRouteRecords(ctx, set.Identity, set.Routes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *routePersistenceTestStore) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
 	return fn(ctx)
 }

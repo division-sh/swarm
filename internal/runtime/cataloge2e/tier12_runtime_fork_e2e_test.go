@@ -20,6 +20,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -93,6 +94,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 		At:                  forkAt,
 		ConfirmSourceFreeze: true,
 		Store:               h.pg,
+		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(h.db, h.pg),
 		SourceLoader:        loader,
 		ContractSelection:   selection,
 		AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
@@ -110,7 +112,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
 	}
-	if result.Owner != store.RunForkSelectedContractExecutionOwner ||
+	if result.Owner != runfork.RunForkSelectedContractExecutionOwner ||
 		result.Materialization.ForkRunID == "" ||
 		!result.Activation.Activated ||
 		result.ExecutedEventCount != 1 ||
@@ -118,7 +120,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 		t.Fatalf("selected execution result = %#v", result)
 	}
 	if result.AgentRuntimeMaterialization == nil ||
-		result.AgentRuntimeMaterialization.Owner != store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner ||
+		result.AgentRuntimeMaterialization.Owner != runfork.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner ||
 		!result.AgentRuntimeMaterialization.MaterializationRequired ||
 		!result.AgentRuntimeMaterialization.MaterializationSupported ||
 		!containsTier12AgentID(result.AgentRuntimeMaterialization.AgentRecipients, "test-agent") ||
@@ -126,8 +128,8 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 		t.Fatalf("agent runtime materialization = %#v", result.AgentRuntimeMaterialization)
 	}
 	if result.ForkLocalRuntimeContainer == nil ||
-		result.ForkLocalRuntimeContainer.Owner != store.RunForkSelectedContractForkLocalRuntimeContainerOwner ||
-		result.ForkLocalRuntimeContainer.TypedRuntimeLineageOwner != store.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner ||
+		result.ForkLocalRuntimeContainer.Owner != runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner ||
+		result.ForkLocalRuntimeContainer.TypedRuntimeLineageOwner != runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner ||
 		result.ForkLocalRuntimeContainer.ForkRunID != result.Materialization.ForkRunID {
 		t.Fatalf("fork-local runtime container proof = %#v", result.ForkLocalRuntimeContainer)
 	}
@@ -175,13 +177,13 @@ func TestTier12RuntimeForkFixtures_AreExplicitlyClassified(t *testing.T) {
 	}
 }
 
-func selectedContractForkFixtureSelection(t testing.TB, ctx context.Context, repoRoot, fixtureRoot string) (runtimerunforkexecution.ContractBundleSourceLoader, store.RunForkContractSelection) {
+func selectedContractForkFixtureSelection(t testing.TB, ctx context.Context, repoRoot, fixtureRoot string) (runtimerunforkexecution.ContractBundleSourceLoader, runfork.RunForkContractSelection) {
 	t.Helper()
 	loader := runtimerunforkexecution.ContractBundleSourceLoader{
 		RepoRoot:         repoRoot,
 		PlatformSpecPath: platformSpecPathFromCatalogE2E(t),
 	}
-	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode:          "selected_contracts",
 		ContractsRoot: fixtureRoot,
 	})
@@ -196,12 +198,14 @@ func materializeSelectedContractForkCleanupProbe(
 	ctx context.Context,
 	pg *store.PostgresStore,
 	loader runtimerunforkexecution.SelectedContractSourceLoader,
-	selection store.RunForkContractSelection,
+	selection runfork.RunForkContractSelection,
 	sourceRunID,
 	forkAt string,
-) (store.RunForkMaterialization, error) {
+) (runfork.RunForkMaterialization, error) {
 	t.Helper()
-	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, selection)
+	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runtimerunforkexecution.SelectedContractSourceLoadRequest{
+		Selection: selection,
+	})
 	if err != nil {
 		t.Fatalf("load cleanup-probe selected source: %v", err)
 	}
@@ -213,7 +217,7 @@ func materializeSelectedContractForkCleanupProbe(
 		}()
 	}
 	selection = loaded.Selection
-	plan, err := pg.PlanRunFork(ctx, store.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkAt})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkAt})
 	if err != nil {
 		t.Fatalf("plan cleanup-probe fork: %v", err)
 	}
@@ -252,7 +256,7 @@ func materializeSelectedContractForkCleanupProbe(
 	if model.RecipientPlanning == nil {
 		t.Fatal("cleanup-probe execution model has no recipient planning")
 	}
-	return pg.MaterializeRunForkForSelectedContractExecution(ctx, store.RunForkSelectedContractExecutionMaterializeRequest{
+	return pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID:       sourceRunID,
 		At:                forkAt,
 		ContractSelection: selection,
@@ -354,7 +358,7 @@ func assertSelectedContractForkRuntimeRows(t testing.TB, db *sql.DB, forkRunID, 
 		  AND payload->'details'->>'runtime_lineage_owner' = $3
 		  AND payload->'details'->>'runtime_lineage_row_category' = 'diagnostic'
 		  AND payload->'details'->>'runtime_lineage_classification' = 'fork_local'
-	`, forkRunID, forkEventID, store.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner).Scan(&typedRuntimeDiagnostics); err != nil {
+	`, forkRunID, forkEventID, runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner).Scan(&typedRuntimeDiagnostics); err != nil {
 		t.Fatalf("count typed fork runtime diagnostics: %v", err)
 	}
 	if typedRuntimeDiagnostics == 0 {
@@ -491,7 +495,7 @@ func assertUnsupportedHistoricalReplayFailsClosed(t *testing.T, fixtureRoot stri
 	pauseCatalogRun(t, h)
 	h.seedEntityFields(expected)
 	sourceEventID := publishCatalogTrigger(t, h, expected.triggerSequence()[0], catalogRuntimePublishTimeout)
-	plan, err := h.pg.PlanRunFork(h.ctx, store.RunForkPlanRequest{
+	plan, err := h.pg.PlanRunFork(h.ctx, runfork.RunForkPlanRequest{
 		SourceRunID: catalogRuntimeRunID,
 		At:          sourceEventID,
 	})
@@ -504,13 +508,13 @@ func assertUnsupportedHistoricalReplayFailsClosed(t *testing.T, fixtureRoot stri
 	// gate this negative fixture is proving: selected-contract forks must not
 	// silently replay source facts that lack a supported fork-local owner.
 	if plan.ExecutionReady || !runForkPlanHasAnyTier12Blocker(plan.UnsupportedBlockers,
-		store.RunForkBlockerNonAgentDeliveryReplayUnsupported,
-		store.RunForkBlockerCommittedReplayScopeReplayUnsupported,
+		runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported,
+		runfork.RunForkBlockerCommittedReplayScopeReplayUnsupported,
 	) {
 		t.Fatalf("negative replay plan ready=%v blockers=%#v, want fail-closed %s or %s",
 			plan.ExecutionReady, plan.UnsupportedBlockers,
-			store.RunForkBlockerNonAgentDeliveryReplayUnsupported,
-			store.RunForkBlockerCommittedReplayScopeReplayUnsupported)
+			runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported,
+			runfork.RunForkBlockerCommittedReplayScopeReplayUnsupported)
 	}
 }
 
@@ -647,7 +651,7 @@ func containsTier12AgentID(values []agentidentity.Identity, want string) bool {
 	return false
 }
 
-func runForkPlanHasTier12Blocker(blockers []store.RunForkUnsupportedBlocker, code string) bool {
+func runForkPlanHasTier12Blocker(blockers []runfork.RunForkUnsupportedBlocker, code string) bool {
 	for _, blocker := range blockers {
 		if strings.TrimSpace(blocker.Code) == code {
 			return true
@@ -656,7 +660,7 @@ func runForkPlanHasTier12Blocker(blockers []store.RunForkUnsupportedBlocker, cod
 	return false
 }
 
-func runForkPlanHasAnyTier12Blocker(blockers []store.RunForkUnsupportedBlocker, codes ...string) bool {
+func runForkPlanHasAnyTier12Blocker(blockers []runfork.RunForkUnsupportedBlocker, codes ...string) bool {
 	for _, code := range codes {
 		if runForkPlanHasTier12Blocker(blockers, code) {
 			return true

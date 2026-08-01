@@ -14,11 +14,11 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
 func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testing.T) {
@@ -51,8 +51,8 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	if sourceLoader.requestedSelection != binding.ContractSelection {
 		t.Fatalf("source loader selection = %#v, want binding selection %#v", sourceLoader.requestedSelection, binding.ContractSelection)
 	}
-	if admission.Owner != store.RunForkSelectedContractExecutionAdmissionOwner ||
-		admission.FutureExecutionOwner != store.RunForkSelectedContractExecutionOwner ||
+	if admission.Owner != runfork.RunForkSelectedContractExecutionAdmissionOwner ||
+		admission.FutureExecutionOwner != runfork.RunForkSelectedContractExecutionOwner ||
 		!admission.NonMutating ||
 		admission.ExecutionSupported {
 		t.Fatalf("admission ownership = %#v", admission)
@@ -60,13 +60,13 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	if admission.ForkRunID != forkRunID ||
 		admission.SourceRunID != binding.SourceRunID ||
 		admission.ForkEventID != binding.ForkEventID ||
-		admission.ContractBindingOwner != store.RunForkSelectedContractBindingOwner {
+		admission.ContractBindingOwner != runfork.RunForkSelectedContractBindingOwner {
 		t.Fatalf("admission binding lineage = %#v", admission)
 	}
-	if admission.AdmissionOwner != store.RunForkContractFrontierAdmissionOwner ||
-		admission.ExecutionModelOwner != store.RunForkSelectedContractExecutionModelOwner ||
-		admission.DeferredWorkAdmissionOwner != store.RunForkSelectedContractDeferredWorkAdmissionOwner ||
-		admission.AdmissionUse != store.RunForkSelectedContractExecutionAdmissionUseDurableBinding {
+	if admission.AdmissionOwner != runfork.RunForkContractFrontierAdmissionOwner ||
+		admission.ExecutionModelOwner != runfork.RunForkSelectedContractExecutionModelOwner ||
+		admission.DeferredWorkAdmissionOwner != runfork.RunForkSelectedContractDeferredWorkAdmissionOwner ||
+		admission.AdmissionUse != runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding {
 		t.Fatalf("admission evidence accounting = %#v", admission)
 	}
 	if admission.SourceWorkflowName != binding.ContractSelection.WorkflowName ||
@@ -76,29 +76,29 @@ func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testin
 	if admission.FrontierEventCount != 1 || len(admission.FrontierEvents) != 1 {
 		t.Fatalf("frontier events = %#v", admission.FrontierEvents)
 	}
-	if admission.RouteTopology == nil || admission.RouteTopology.Owner != store.RunForkSelectedContractRouteTopologyOwner {
+	if admission.RouteTopology == nil || admission.RouteTopology.Owner != runfork.RunForkSelectedContractRouteTopologyOwner {
 		t.Fatalf("route topology = %#v, want canonical selected-contract route topology", admission.RouteTopology)
 	}
-	if admission.RecipientPlanning == nil || admission.RecipientPlanning.Owner != store.RunForkSelectedContractRecipientPlanningOwner {
+	if admission.RecipientPlanning == nil || admission.RecipientPlanning.Owner != runfork.RunForkSelectedContractRecipientPlanningOwner {
 		t.Fatalf("recipient planning = %#v, want canonical selected-contract recipient planning", admission.RecipientPlanning)
 	}
-	if !executionBoundaryHas(admission.InvalidPaths, "copy_source_event_deliveries", store.RunForkSelectedContractDispositionInvalid) {
+	if !executionBoundaryHas(admission.InvalidPaths, "copy_source_event_deliveries", runfork.RunForkSelectedContractDispositionInvalid) {
 		t.Fatalf("invalid paths = %#v, want source delivery copy invalid", admission.InvalidPaths)
 	}
-	if !executionBoundaryHas(admission.RequiredConsumers, "fork_local_runtime_container", store.RunForkSelectedContractDispositionPrerequisite) ||
-		!executionBoundaryHas(admission.RequiredConsumers, "fork_run_id_runtime_context", store.RunForkSelectedContractDispositionPrerequisite) ||
-		!executionBoundaryHas(admission.RequiredConsumers, "fork_local_event_delivery_writes", store.RunForkSelectedContractDispositionPrerequisite) ||
-		!executionBoundaryHas(admission.RequiredConsumers, "handler_execution", store.RunForkSelectedContractDispositionPrerequisite) ||
-		!executionBoundaryHas(admission.RequiredConsumers, "emitted_follow_up_events", store.RunForkSelectedContractDispositionPrerequisite) {
+	if !executionBoundaryHas(admission.RequiredConsumers, "fork_local_runtime_container", runfork.RunForkSelectedContractDispositionPrerequisite) ||
+		!executionBoundaryHas(admission.RequiredConsumers, "fork_run_id_runtime_context", runfork.RunForkSelectedContractDispositionPrerequisite) ||
+		!executionBoundaryHas(admission.RequiredConsumers, "fork_local_event_delivery_writes", runfork.RunForkSelectedContractDispositionPrerequisite) ||
+		!executionBoundaryHas(admission.RequiredConsumers, "handler_execution", runfork.RunForkSelectedContractDispositionPrerequisite) ||
+		!executionBoundaryHas(admission.RequiredConsumers, "emitted_follow_up_events", runfork.RunForkSelectedContractDispositionPrerequisite) {
 		t.Fatalf("required consumers = %#v, want current runtime container prerequisites", admission.RequiredConsumers)
 	}
-	if !executionBoundaryHas(admission.BlockedSiblings, "sessions_turns_audits", store.RunForkSelectedContractDispositionBlockedSibling) {
+	if !executionBoundaryHas(admission.BlockedSiblings, "sessions_turns_audits", runfork.RunForkSelectedContractDispositionBlockedSibling) {
 		t.Fatalf("blocked siblings = %#v, want sessions/turns blocked", admission.BlockedSiblings)
 	}
-	if !unsupportedBlockerHas(admission.UnsupportedBlockers, store.RunForkBlockerSelectedContractExecutionAdmissionNonMutating) {
+	if !unsupportedBlockerHas(admission.UnsupportedBlockers, runfork.RunForkBlockerSelectedContractExecutionAdmissionNonMutating) {
 		t.Fatalf("unsupported blockers = %#v, want non-mutating admission blocker", admission.UnsupportedBlockers)
 	}
-	if !unsupportedBlockerHas(admission.UnsupportedBlockers, store.RunForkBlockerSelectedContractRouteAdmissionNonMutating) {
+	if !unsupportedBlockerHas(admission.UnsupportedBlockers, runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating) {
 		t.Fatalf("unsupported blockers = %#v, want non-mutating route admission blocker", admission.UnsupportedBlockers)
 	}
 }
@@ -121,7 +121,7 @@ func TestBuildSelectedContractExecutionAdmissionRequiresDeferredWorkAdmission(t 
 		RouteTopology:     routeTopology,
 		ExecutionModel:    testSelectedContractExecutionModel(t, frontier),
 	})
-	if err == nil || !strings.Contains(err.Error(), store.RunForkSelectedContractDeferredWorkAdmissionOwner) {
+	if err == nil || !strings.Contains(err.Error(), runfork.RunForkSelectedContractDeferredWorkAdmissionOwner) {
 		t.Fatalf("error = %v, want deferred-work admission failure", err)
 	}
 }
@@ -241,7 +241,7 @@ func TestBuildSelectedContractExecutionAdmissionRequiresCanonicalEvidence(t *tes
 		RouteTopology:     routeTopology,
 		ExecutionModel:    model,
 	})
-	if err == nil || !strings.Contains(err.Error(), store.RunForkContractFrontierAdmissionOwner) {
+	if err == nil || !strings.Contains(err.Error(), runfork.RunForkContractFrontierAdmissionOwner) {
 		t.Fatalf("error = %v, want canonical frontier failure", err)
 	}
 }
@@ -289,7 +289,7 @@ func TestBuildSelectedContractExecutionAdmissionRequiresCanonicalRouteTopology(t
 		RouteTopology:     routeTopology,
 		ExecutionModel:    model,
 	})
-	if err == nil || !strings.Contains(err.Error(), store.RunForkSelectedContractRouteTopologyOwner) {
+	if err == nil || !strings.Contains(err.Error(), runfork.RunForkSelectedContractRouteTopologyOwner) {
 		t.Fatalf("error = %v, want canonical route topology failure", err)
 	}
 }
@@ -324,7 +324,7 @@ func TestBuildSelectedContractExecutionAdmissionFailsClosedOnStaleRouteTopologyF
 	binding := testSelectedContractBinding(forkRunID)
 	frontier := testContractFrontierAdmission(binding.ContractSelection)
 	frontier.FrontierEvents[0].EventName = "review/inst-1/task.started"
-	frontier.FrontierEvents[0].SourceClassifications = []string{store.RunForkPendingClassificationPending}
+	frontier.FrontierEvents[0].SourceClassifications = []string{runfork.RunForkPendingClassificationPending}
 	frontier.FrontierEvents[0].SourceFlowInstances = []string{"review/inst-1"}
 	frontier.FrontierEvents[0].SourceSubscriberTypes = []string{"node"}
 	frontier.FrontierEvents[0].SourceSubscriberIDs = []string{"source-node"}
@@ -353,7 +353,7 @@ func TestBuildSelectedContractExecutionAdmissionRejectsForgedRouteTopology(t *te
 	binding := testSelectedContractBinding(forkRunID)
 	frontier := testContractFrontierAdmission(binding.ContractSelection)
 	frontier.FrontierEvents[0].EventName = "review/inst-1/task.started"
-	frontier.FrontierEvents[0].SourceClassifications = []string{store.RunForkPendingClassificationPending}
+	frontier.FrontierEvents[0].SourceClassifications = []string{runfork.RunForkPendingClassificationPending}
 	frontier.FrontierEvents[0].SourceFlowInstances = []string{"review/inst-1"}
 	frontier.FrontierEvents[0].SourceSubscriberTypes = []string{"node"}
 	frontier.FrontierEvents[0].SourceSubscriberIDs = []string{"source-node"}
@@ -370,8 +370,8 @@ func TestBuildSelectedContractExecutionAdmissionRejectsForgedRouteTopology(t *te
 	}
 	routeTopology.DynamicFlowInstances = nil
 	routeTopology.DynamicTopologySupported = true
-	routeTopology.DynamicTopologyDisposition = store.RunForkSelectedContractDispositionForkLocalTruth
-	routeTopology.UnsupportedBlockers = removeUnsupportedBlocker(routeTopology.UnsupportedBlockers, store.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven)
+	routeTopology.DynamicTopologyDisposition = runfork.RunForkSelectedContractDispositionForkLocalTruth
+	routeTopology.UnsupportedBlockers = removeUnsupportedBlocker(routeTopology.UnsupportedBlockers, runfork.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven)
 
 	_, err = BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:         forkRunID,
@@ -406,7 +406,7 @@ func TestBuildSelectedContractExecutionAdmissionRejectsForgedRecipientPlanning(t
 		RouteTopology:     routeTopology,
 		ExecutionModel:    model,
 	})
-	if err == nil || !strings.Contains(err.Error(), store.RunForkSelectedContractRecipientPlanningOwner) {
+	if err == nil || !strings.Contains(err.Error(), runfork.RunForkSelectedContractRecipientPlanningOwner) {
 		t.Fatalf("error = %v, want canonical recipient planning failure", err)
 	}
 }
@@ -428,7 +428,7 @@ func TestBundleCatalogSelectedContractSourceLoaderLoadsPersistedSourceForRequest
 			BundleSource:     runbundle.AvailabilitySourcePersisted,
 			BundleRowPresent: true,
 		},
-		record: store.BundleCatalogRuntimeRecord{
+		record: runbundle.BundleCatalogRuntimeRecord{
 			BundleHash:  projection.BundleHash,
 			ContentYAML: projection.ContentYAML,
 			DataBlob:    projection.DataBlob,
@@ -469,8 +469,8 @@ func TestContractBundleSourceLoaderRejectsIncompatiblePlatformVersion(t *testing
 	contractsRoot := writeSelectedContractPlatformVersionFixture(t, ">=0.8.0")
 	loader := ContractBundleSourceLoader{RepoRoot: repoRoot}
 
-	_, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
-		Mode:            store.RunForkContractSelectionModeSelectedContracts,
+	_, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
+		Mode:            runfork.RunForkContractSelectionModeSelectedContracts,
 		ContractsRoot:   contractsRoot,
 		WorkflowName:    "selected-platform-version",
 		WorkflowVersion: "1.0.0",
@@ -497,7 +497,7 @@ func TestBundleCatalogSelectedContractSourceLoaderUsesRunningPlatformVersionForA
 		t.Fatalf("BuildBundleCatalogProjection: %v", err)
 	}
 	catalogStore := &fakeBundleCatalogSelectedContractSourceStore{
-		record: store.BundleCatalogRuntimeRecord{
+		record: runbundle.BundleCatalogRuntimeRecord{
 			BundleHash:  projection.BundleHash,
 			ContentYAML: projection.ContentYAML,
 			DataBlob:    projection.DataBlob,
@@ -511,8 +511,8 @@ func TestBundleCatalogSelectedContractSourceLoaderUsesRunningPlatformVersionForA
 
 	_, err = loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
 		BundleHash: projection.BundleHash,
-		Selection: store.RunForkContractSelection{
-			Mode:       store.RunForkContractSelectionModeBundleHash,
+		Selection: runfork.RunForkContractSelection{
+			Mode:       runfork.RunForkContractSelectionModeBundleHash,
 			BundleHash: projection.BundleHash,
 		},
 	})
@@ -546,15 +546,15 @@ func TestBundleCatalogSelectedContractSourceLoaderLoadsCrossBundleTargetSelectio
 			BundleSource:     runbundle.AvailabilitySourcePersisted,
 			BundleRowPresent: true,
 		},
-		record: store.BundleCatalogRuntimeRecord{
+		record: runbundle.BundleCatalogRuntimeRecord{
 			BundleHash:  projection.BundleHash,
 			ContentYAML: projection.ContentYAML,
 			DataBlob:    projection.DataBlob,
 		},
 	}
 	loader := BundleCatalogSelectedContractSourceLoader{RepoRoot: repoRoot, Store: catalogStore}
-	selection := store.RunForkContractSelection{
-		Mode:       store.RunForkContractSelectionModeBundleHash,
+	selection := runfork.RunForkContractSelection{
+		Mode:       runfork.RunForkContractSelectionModeBundleHash,
 		BundleHash: projection.BundleHash,
 	}
 
@@ -575,7 +575,7 @@ func TestBundleCatalogSelectedContractSourceLoaderLoadsCrossBundleTargetSelectio
 		t.Fatalf("requested target hash = %q, want %q", catalogStore.requestedBundleHash, projection.BundleHash)
 	}
 	if loaded.BundleSourceFact.BundleHash() != projection.BundleHash ||
-		loaded.Selection.Mode != store.RunForkContractSelectionModeBundleHash ||
+		loaded.Selection.Mode != runfork.RunForkContractSelectionModeBundleHash ||
 		loaded.Selection.BundleHash != projection.BundleHash ||
 		loaded.Selection.WorkflowName != "test-selected-contract-fork-execution" ||
 		loaded.Selection.WorkflowVersion != "1.0.0" {
@@ -599,8 +599,8 @@ func TestSelectedContractSourceLoadersCompileExactEffectiveConnectorResponses(t 
 			}
 
 			t.Run("disk", func(t *testing.T) {
-				loaded, err := (ContractBundleSourceLoader{RepoRoot: repoRoot}).LoadRunForkSelectedContractSource(context.Background(), store.RunForkContractSelection{
-					Mode:          store.RunForkContractSelectionModeSelectedContracts,
+				loaded, err := (ContractBundleSourceLoader{RepoRoot: repoRoot}).LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{
+					Mode:          runfork.RunForkContractSelectionModeSelectedContracts,
 					ContractsRoot: contractsRoot,
 				})
 				if err != nil {
@@ -620,12 +620,12 @@ func TestSelectedContractSourceLoadersCompileExactEffectiveConnectorResponses(t 
 				}
 				loader := BundleCatalogSelectedContractSourceLoader{
 					RepoRoot: repoRoot,
-					Store: &fakeBundleCatalogSelectedContractSourceStore{record: store.BundleCatalogRuntimeRecord{
+					Store: &fakeBundleCatalogSelectedContractSourceStore{record: runbundle.BundleCatalogRuntimeRecord{
 						BundleHash: projection.BundleHash, ContentYAML: projection.ContentYAML, DataBlob: projection.DataBlob,
 					}},
 				}
-				loaded, err := loader.LoadRunForkSelectedContractSource(context.Background(), store.RunForkContractSelection{
-					Mode: store.RunForkContractSelectionModeBundleHash, BundleHash: projection.BundleHash,
+				loaded, err := loader.LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{
+					Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: projection.BundleHash,
 				})
 				if err != nil {
 					t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
@@ -766,7 +766,7 @@ func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnMissingCatalogByt
 				BundleSource:     runbundle.AvailabilitySourcePersisted,
 				BundleRowPresent: true,
 			},
-			recordErr: store.ErrBundleNotFound,
+			recordErr: runbundle.ErrBundleNotFound,
 		},
 	}
 
@@ -783,7 +783,7 @@ func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnMissingCatalogByt
 func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnMissingCrossBundleTarget(t *testing.T) {
 	ctx := context.Background()
 	targetHash := "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-	catalogStore := &fakeBundleCatalogSelectedContractSourceStore{recordErr: store.ErrBundleNotFound}
+	catalogStore := &fakeBundleCatalogSelectedContractSourceStore{recordErr: runbundle.ErrBundleNotFound}
 	loader := BundleCatalogSelectedContractSourceLoader{
 		RepoRoot: runForkExecutionRepoRoot(t),
 		Store:    catalogStore,
@@ -792,8 +792,8 @@ func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnMissingCrossBundl
 	_, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
 		SourceRunID: uuid.NewString(),
 		BundleHash:  targetHash,
-		Selection: store.RunForkContractSelection{
-			Mode:       store.RunForkContractSelectionModeBundleHash,
+		Selection: runfork.RunForkContractSelection{
+			Mode:       runfork.RunForkContractSelectionModeBundleHash,
 			BundleHash: targetHash,
 		},
 	})
@@ -811,7 +811,7 @@ func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnCorruptCrossBundl
 	loader := BundleCatalogSelectedContractSourceLoader{
 		RepoRoot: runForkExecutionRepoRoot(t),
 		Store: &fakeBundleCatalogSelectedContractSourceStore{
-			record: store.BundleCatalogRuntimeRecord{
+			record: runbundle.BundleCatalogRuntimeRecord{
 				BundleHash:  targetHash,
 				ContentYAML: "projection_version: swarm.bundle.catalog.v1\nfiles: []\ncanonical_inputs: []\n",
 			},
@@ -821,8 +821,8 @@ func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnCorruptCrossBundl
 	_, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
 		SourceRunID: uuid.NewString(),
 		BundleHash:  targetHash,
-		Selection: store.RunForkContractSelection{
-			Mode:       store.RunForkContractSelectionModeBundleHash,
+		Selection: runfork.RunForkContractSelection{
+			Mode:       runfork.RunForkContractSelectionModeBundleHash,
 			BundleHash: targetHash,
 		},
 	})
@@ -832,7 +832,7 @@ func TestBundleCatalogSelectedContractSourceLoaderFailsClosedOnCorruptCrossBundl
 }
 
 type fakeSelectedContractBindingReader struct {
-	binding            store.RunForkSelectedContractBinding
+	binding            runfork.RunForkSelectedContractBinding
 	err                error
 	requestedForkRunID string
 }
@@ -840,7 +840,7 @@ type fakeSelectedContractBindingReader struct {
 type fakeSelectedContractSourceLoader struct {
 	loaded             LoadedSelectedContractSource
 	err                error
-	requestedSelection store.RunForkContractSelection
+	requestedSelection runfork.RunForkContractSelection
 }
 
 func TestLoadRunForkSelectedContractSourceRejectsExpectedIdentityMismatch(t *testing.T) {
@@ -875,7 +875,7 @@ func TestLoadRunForkSelectedContractSourceRejectsExpectedIdentityMismatch(t *tes
 	}
 }
 
-func (l *fakeSelectedContractSourceLoader) LoadRunForkSelectedContractSource(_ context.Context, selection store.RunForkContractSelection) (LoadedSelectedContractSource, error) {
+func (l *fakeSelectedContractSourceLoader) LoadRunForkSelectedContractSource(_ context.Context, selection runfork.RunForkContractSelection) (LoadedSelectedContractSource, error) {
 	l.requestedSelection = selection
 	if l.err != nil {
 		return LoadedSelectedContractSource{}, l.err
@@ -883,10 +883,14 @@ func (l *fakeSelectedContractSourceLoader) LoadRunForkSelectedContractSource(_ c
 	return l.loaded, nil
 }
 
-func (r *fakeSelectedContractBindingReader) RequireRunForkSelectedContractBinding(_ context.Context, forkRunID string) (store.RunForkSelectedContractBinding, error) {
+func (l *fakeSelectedContractSourceLoader) LoadRunForkSelectedContractSourceForRequest(ctx context.Context, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
+	return l.LoadRunForkSelectedContractSource(ctx, req.Selection)
+}
+
+func (r *fakeSelectedContractBindingReader) RequireRunForkSelectedContractBinding(_ context.Context, forkRunID string) (runfork.RunForkSelectedContractBinding, error) {
 	r.requestedForkRunID = forkRunID
 	if r.err != nil {
-		return store.RunForkSelectedContractBinding{}, r.err
+		return runfork.RunForkSelectedContractBinding{}, r.err
 	}
 	return r.binding, nil
 }
@@ -894,7 +898,7 @@ func (r *fakeSelectedContractBindingReader) RequireRunForkSelectedContractBindin
 type fakeBundleCatalogSelectedContractSourceStore struct {
 	availability        runbundle.Availability
 	availabilityErr     error
-	record              store.BundleCatalogRuntimeRecord
+	record              runbundle.BundleCatalogRuntimeRecord
 	recordErr           error
 	requestedRunID      string
 	requestedBundleHash string
@@ -908,16 +912,16 @@ func (s *fakeBundleCatalogSelectedContractSourceStore) LoadRunBundleAvailability
 	return s.availability, nil
 }
 
-func (s *fakeBundleCatalogSelectedContractSourceStore) LoadBundleCatalogRuntimeRecord(_ context.Context, bundleHash string) (store.BundleCatalogRuntimeRecord, error) {
+func (s *fakeBundleCatalogSelectedContractSourceStore) LoadBundleCatalogRuntimeRecord(_ context.Context, bundleHash string) (runbundle.BundleCatalogRuntimeRecord, error) {
 	s.requestedBundleHash = bundleHash
 	if s.recordErr != nil {
-		return store.BundleCatalogRuntimeRecord{}, s.recordErr
+		return runbundle.BundleCatalogRuntimeRecord{}, s.recordErr
 	}
 	return s.record, nil
 }
 
-func testDBLoadedContractSelection(contractsRoot string) store.RunForkContractSelection {
-	return store.RunForkContractSelection{
+func testDBLoadedContractSelection(contractsRoot string) runfork.RunForkContractSelection {
+	return runfork.RunForkContractSelection{
 		Mode:          "selected_contracts",
 		ContractsRoot: contractsRoot,
 	}
@@ -980,13 +984,13 @@ func writeRunForkExecutionPlatformSpecVersion(t *testing.T, repoRoot, version st
 	return path
 }
 
-func testSelectedContractBinding(forkRunID string) store.RunForkSelectedContractBinding {
-	return store.RunForkSelectedContractBinding{
-		Owner:       store.RunForkSelectedContractBindingOwner,
+func testSelectedContractBinding(forkRunID string) runfork.RunForkSelectedContractBinding {
+	return runfork.RunForkSelectedContractBinding{
+		Owner:       runfork.RunForkSelectedContractBindingOwner,
 		ForkRunID:   forkRunID,
 		SourceRunID: uuid.NewString(),
 		ForkEventID: uuid.NewString(),
-		ContractSelection: store.RunForkContractSelection{
+		ContractSelection: runfork.RunForkContractSelection{
 			Mode:            "selected_contracts",
 			ContractsRoot:   "/tmp/selected-contracts",
 			WorkflowName:    "selected-workflow",
@@ -996,11 +1000,11 @@ func testSelectedContractBinding(forkRunID string) store.RunForkSelectedContract
 	}
 }
 
-func testContractSelection() store.RunForkContractSelection {
+func testContractSelection() runfork.RunForkContractSelection {
 	return testSelectedContractBinding(uuid.NewString()).ContractSelection
 }
 
-func testSelectedSource(selection store.RunForkContractSelection) semanticview.Source {
+func testSelectedSource(selection runfork.RunForkContractSelection) semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:    selection.WorkflowName,
@@ -1009,7 +1013,7 @@ func testSelectedSource(selection store.RunForkContractSelection) semanticview.S
 	})
 }
 
-func testLoadedSelectedSource(selection store.RunForkContractSelection) LoadedSelectedContractSource {
+func testLoadedSelectedSource(selection runfork.RunForkContractSelection) LoadedSelectedContractSource {
 	return LoadedSelectedContractSource{
 		Selection:        selection,
 		Source:           testSelectedSource(selection),
@@ -1035,9 +1039,9 @@ func testPersistedBundleSourceFact(bundleHash string) runtimecorrelation.BundleS
 
 func selectedContractDeferredWorkAdmissionForTest(t testing.TB, sourceRunID, forkEventID string, source semanticview.Source) selectedContractDeferredWorkAdmission {
 	t.Helper()
-	admission, err := admitSelectedContractDeferredWork(store.RunForkPlan{
+	admission, err := admitSelectedContractDeferredWork(runfork.RunForkPlan{
 		SourceRunID: sourceRunID,
-		ForkPoint:   store.RunForkPoint{EventID: forkEventID},
+		ForkPoint:   runfork.RunForkPoint{EventID: forkEventID},
 	}, source)
 	if err != nil {
 		t.Fatalf("admit selected-contract deferred work: %v", err)
@@ -1045,19 +1049,19 @@ func selectedContractDeferredWorkAdmissionForTest(t testing.TB, sourceRunID, for
 	return admission
 }
 
-func testContractFrontierAdmission(selection store.RunForkContractSelection) store.RunForkContractFrontierAdmission {
-	return store.RunForkContractFrontierAdmission{
-		Owner:                        store.RunForkContractFrontierAdmissionOwner,
+func testContractFrontierAdmission(selection runfork.RunForkContractSelection) runfork.RunForkContractFrontierAdmission {
+	return runfork.RunForkContractFrontierAdmission{
+		Owner:                        runfork.RunForkContractFrontierAdmissionOwner,
 		ContractSelection:            selection,
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
 		FrontierEventCount:           1,
-		FrontierEvents: []store.RunForkContractFrontierEvent{{
+		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
 			SourceEventID:           uuid.NewString(),
 			EventName:               "work.begin",
 			RuntimeEventOwners:      []string{"alpha-intake"},
 			WorkflowNodeSubscribers: []string{"beta-intake"},
-			DerivedRecipients: []store.RunForkContractFrontierRecipient{{
+			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{{
 				SubscriberType: "node",
 				SubscriberID:   "alpha-intake",
 				Path:           "flow-a/alpha-intake",
@@ -1067,11 +1071,11 @@ func testContractFrontierAdmission(selection store.RunForkContractSelection) sto
 	}
 }
 
-func testSelectedContractRouteAdmission(frontier store.RunForkContractFrontierAdmission) store.RunForkSelectedContractRouteAdmission {
-	frontierEventCount, frontierSourceEventIDs, frontierFingerprint := store.RunForkContractFrontierEvidenceBinding(frontier)
-	return store.RunForkSelectedContractRouteAdmission{
-		Owner:                          store.RunForkSelectedContractRouteAdmissionOwner,
-		FutureRouteReconstructionOwner: store.RunForkSelectedContractExecutionOwner + ".route_reconstruction",
+func testSelectedContractRouteAdmission(frontier runfork.RunForkContractFrontierAdmission) runfork.RunForkSelectedContractRouteAdmission {
+	frontierEventCount, frontierSourceEventIDs, frontierFingerprint := runfork.RunForkContractFrontierEvidenceBinding(frontier)
+	return runfork.RunForkSelectedContractRouteAdmission{
+		Owner:                          runfork.RunForkSelectedContractRouteAdmissionOwner,
+		FutureRouteReconstructionOwner: runfork.RunForkSelectedContractExecutionOwner + ".route_reconstruction",
 		NonMutating:                    true,
 		RouteReconstructionSupported:   false,
 		ContractSelection:              frontier.ContractSelection,
@@ -1079,31 +1083,31 @@ func testSelectedContractRouteAdmission(frontier store.RunForkContractFrontierAd
 		FrontierEventCount:             frontierEventCount,
 		FrontierSourceEventIDs:         frontierSourceEventIDs,
 		FrontierEvidenceFingerprint:    frontierFingerprint,
-		RequiredConsumers: []store.RunForkSelectedContractExecutionBoundary{{
+		RequiredConsumers: []runfork.RunForkSelectedContractExecutionBoundary{{
 			Concept:     "selected_source_route_derivation",
-			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
+			Disposition: runfork.RunForkSelectedContractDispositionPrerequisite,
 			Owner:       "internal/runtime/bus.DeriveRouteTable",
 			Reason:      "test route admission consumes selected-source route derivation",
 		}},
-		BlockedSiblings: []store.RunForkSelectedContractExecutionBoundary{{
+		BlockedSiblings: []runfork.RunForkSelectedContractExecutionBoundary{{
 			Concept:     "mutating_route_reconstruction",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
-			Owner:       store.RunForkSelectedContractExecutionOwner + ".route_reconstruction",
+			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
+			Owner:       runfork.RunForkSelectedContractExecutionOwner + ".route_reconstruction",
 			Reason:      "test route admission remains non-mutating",
 		}},
-		InvalidPaths: []store.RunForkSelectedContractExecutionBoundary{{
+		InvalidPaths: []runfork.RunForkSelectedContractExecutionBoundary{{
 			Concept:     "copy_source_routing_rules",
-			Disposition: store.RunForkSelectedContractDispositionInvalid,
+			Disposition: runfork.RunForkSelectedContractDispositionInvalid,
 			Reason:      "test route admission rejects source route row copy",
 		}},
-		UnsupportedBlockers: []store.RunForkUnsupportedBlocker{{
-			Code:    store.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
+		UnsupportedBlockers: []runfork.RunForkUnsupportedBlocker{{
+			Code:    runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
 			Message: "selected-contract route admission is non-mutating",
 		}},
 	}
 }
 
-func testSelectedContractExecutionModel(t *testing.T, frontier store.RunForkContractFrontierAdmission) store.RunForkSelectedContractExecution {
+func testSelectedContractExecutionModel(t *testing.T, frontier runfork.RunForkContractFrontierAdmission) runfork.RunForkSelectedContractExecution {
 	t.Helper()
 	routeAdmission := testSelectedContractRouteAdmission(frontier)
 	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{
@@ -1117,12 +1121,12 @@ func testSelectedContractExecutionModel(t *testing.T, frontier store.RunForkCont
 	return model
 }
 
-func testSelectedContractRouteTopology(t *testing.T, frontier store.RunForkContractFrontierAdmission) store.RunForkSelectedContractRouteTopology {
+func testSelectedContractRouteTopology(t *testing.T, frontier runfork.RunForkContractFrontierAdmission) runfork.RunForkSelectedContractRouteTopology {
 	t.Helper()
 	return testSelectedContractRouteTopologyFromAdmission(t, frontier, testSelectedContractRouteAdmission(frontier))
 }
 
-func testSelectedContractRouteTopologyFromAdmission(t *testing.T, frontier store.RunForkContractFrontierAdmission, routeAdmission store.RunForkSelectedContractRouteAdmission) store.RunForkSelectedContractRouteTopology {
+func testSelectedContractRouteTopologyFromAdmission(t *testing.T, frontier runfork.RunForkContractFrontierAdmission, routeAdmission runfork.RunForkSelectedContractRouteAdmission) runfork.RunForkSelectedContractRouteTopology {
 	t.Helper()
 	routeTopology, err := BuildSelectedContractRouteTopology(SelectedContractRouteTopologyRequest{
 		Admission:      frontier,

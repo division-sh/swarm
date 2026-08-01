@@ -39,7 +39,7 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 		time.Now().UTC(),
 	)
 
-	if err := workflowStore.Create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      parentEntityID,
 		StorageRef:      parentEntityID,
 		WorkflowName:    "root",
@@ -107,14 +107,19 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	}
 }
 
-func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowStore *WorkflowInstanceStore) (*PipelineCoordinator, *recordingPipelineBus) {
+func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowStore *workflowInstanceStore) (*PipelineCoordinator, *recordingPipelineBus) {
 	t.Helper()
 	bus := &recordingPipelineBus{}
 	bundle := sqliteDynamicActivationBundle()
+	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
+	bus.configurePipelineTestDeliveryOwner(deliveryStore)
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		WorkflowStore: workflowStore,
+		Persistence:         workflowPersistenceForTest(workflowStore),
+		DeliveryStore:       deliveryStore,
+		DeliveryRuntime:     bus,
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
 		InstanceActivator: func(ctx context.Context, req FlowInstanceActivationRequest) error {
-			return workflowStore.Create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+			return workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID:      strings.TrimSpace(req.Instance.InstanceID),
 				StorageRef:      strings.TrimSpace(req.Instance.InstancePath),
 				WorkflowName:    strings.TrimSpace(req.Instance.TemplateID),
@@ -228,7 +233,7 @@ func sqliteDynamicActivationBundle() *runtimecontracts.WorkflowContractBundle {
 	}
 }
 
-func assertSQLiteWorkflowInstancePersisted(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, storageRef string) {
+func assertSQLiteWorkflowInstancePersisted(t *testing.T, store *workflowInstanceStore, ctx context.Context, storageRef string) {
 	t.Helper()
 	instance, ok, err := store.Load(ctx, storageRef)
 	if err != nil {

@@ -138,7 +138,7 @@ func TestCompletionControllerRequiresSettlementProjectionOwner(t *testing.T) {
 	if NewController(store).CompletionEnabled() {
 		t.Fatal("generic effect controller enabled completion without a spend projection owner")
 	}
-	if !NewCompletionController(store, completionProjectionProbe{}).CompletionEnabled() {
+	if !NewCompletionController(store, store, store, completionProjectionProbe{}).CompletionEnabled() {
 		t.Fatal("completion controller with settlement and projection owners is disabled")
 	}
 }
@@ -166,7 +166,8 @@ func TestBeginCompletionRejectsCapabilitySurfaceFromDifferentRun(t *testing.T) {
 		t.Fatalf("build managed capability surface: %v", err)
 	}
 	ctx := WithLifecycleToken(context.Background(), token)
-	ctx = WithController(ctx, NewCompletionController(&completionStoreProbe{}, completionProjectionProbe{}))
+	store := &completionStoreProbe{}
+	ctx = WithController(ctx, NewCompletionController(store, store, store, completionProjectionProbe{}))
 	ctx = WithLogicalOperationIdentity(ctx, "event-123")
 	ctx = managedexecution.WithAdmission(ctx, admission)
 	ctx = WithUsageTarget(ctx, target)

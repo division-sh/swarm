@@ -233,7 +233,7 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 			t.Errorf("join tier-8 runtime process owner: %v", err)
 		}
 	})
-	return runtime.NewRuntime(testAuthorActivityContext(context.Background()), runtime.RuntimeDeps{Config: testRuntimeConfig(), Stores: runtime.Stores{}, Options: runtime.RuntimeOptions{
+	return runtime.NewRuntime(testAuthorActivityContext(context.Background()), runtime.RuntimeDeps{Config: testRuntimeConfig(), Options: runtime.RuntimeOptions{
 		SelfCheck:           false,
 		WorkflowModule:      module,
 		LLMRuntime:          runtimellm.NoopRuntime{},

@@ -2,74 +2,39 @@ package store
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
 const selectedContractRuntimeExecutionLease = 2 * time.Minute
 
-type SelectedContractRuntimeExecutionIssueRequest struct {
-	Admission                  RunForkSelectedContractExecutionAdmission
-	ContainerPlanFingerprint   string
-	ActorCensusFingerprint     string
-	EffectiveConfigFingerprint string
-	Now                        time.Time
-}
-
-type SelectedContractRuntimeExecution struct {
-	ExecutionID                     string
-	ForkRunID                       string
-	SourceRunID                     string
-	ForkEventID                     string
-	Generation                      uint64
-	ExecutableCoordinateFingerprint string
-	AdmissionFingerprint            string
-	ContainerPlanFingerprint        string
-	ActorCensusFingerprint          string
-	EffectiveConfigFingerprint      string
-	State                           string
-	ExecutionOwner                  string
-	LeaseExpiresAt                  time.Time
-	FenceGeneration                 uint64
-}
-
-func RunForkSelectedContractRuntimeFingerprint(value any) (string, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return "", fmt.Errorf("marshal selected-contract runtime fingerprint: %w", err)
-	}
-	sum := sha256.Sum256(raw)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
-}
-
-func (s *PostgresStore) IssueRunForkSelectedContractRuntimeExecution(ctx context.Context, req SelectedContractRuntimeExecutionIssueRequest) (SelectedContractRuntimeExecution, error) {
+func (s *PostgresStore) IssueRunForkSelectedContractRuntimeExecution(ctx context.Context, req runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error) {
 	if s == nil || s.DB == nil {
-		return SelectedContractRuntimeExecution{}, fmt.Errorf("postgres store is required")
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("postgres store is required")
 	}
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
-		return SelectedContractRuntimeExecution{}, fmt.Errorf("begin selected-contract runtime issuance: %w", err)
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("begin selected-contract runtime issuance: %w", err)
 	}
 	defer tx.Rollback()
 	issued, err := issueSelectedContractRuntimeExecution(ctx, tx, postgresDialect{}, req)
 	if err != nil {
-		return SelectedContractRuntimeExecution{}, err
+		return runfork.SelectedContractRuntimeExecution{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return SelectedContractRuntimeExecution{}, fmt.Errorf("commit selected-contract runtime issuance: %w", err)
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("commit selected-contract runtime issuance: %w", err)
 	}
 	return issued, nil
 }
 
-func (s *SQLiteRuntimeStore) IssueRunForkSelectedContractRuntimeExecution(ctx context.Context, req SelectedContractRuntimeExecutionIssueRequest) (issued SelectedContractRuntimeExecution, err error) {
+func (s *SQLiteRuntimeStore) IssueRunForkSelectedContractRuntimeExecution(ctx context.Context, req runfork.SelectedContractRuntimeExecutionIssueRequest) (issued runfork.SelectedContractRuntimeExecution, err error) {
 	err = s.runRuntimeMutation(ctx, "sqlite selected-contract runtime issuance", func(txctx context.Context, tx *sql.Tx) error {
 		var issueErr error
 		issued, issueErr = issueSelectedContractRuntimeExecution(txctx, tx, sqliteDialect{}, req)
@@ -121,59 +86,59 @@ func (sqliteDialect) insertSQL() string {
 	return `INSERT INTO run_fork_selected_contract_runtime_executions (execution_id,fork_run_id,source_run_id,binding_id,fork_event_id,generation,executable_coordinate_fingerprint,admission_fingerprint,container_plan_fingerprint,actor_census_fingerprint,effective_config_fingerprint,state,execution_owner,lease_expires_at,fence_generation,evidence,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'prepared',?,?,1,'{}',?,?)`
 }
 
-func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dialect selectedRuntimeDialect, req SelectedContractRuntimeExecutionIssueRequest) (SelectedContractRuntimeExecution, error) {
+func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dialect selectedRuntimeDialect, req runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error) {
 	if tx == nil {
-		return SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime issuance transaction is required")
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime issuance transaction is required")
 	}
 	admission := req.Admission
 	if err := validateSelectedRuntimeAdmission(admission); err != nil {
-		return SelectedContractRuntimeExecution{}, err
+		return runfork.SelectedContractRuntimeExecution{}, err
 	}
 	if err := requireSelectedRuntimeRunActive(ctx, tx, admission.ForkRunID, dialect); err != nil {
-		return SelectedContractRuntimeExecution{}, err
+		return runfork.SelectedContractRuntimeExecution{}, err
 	}
 	if !nonEmptyStrings(req.ContainerPlanFingerprint, req.ActorCensusFingerprint, req.EffectiveConfigFingerprint) {
-		return SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime issuance requires container, actor, and config fingerprints")
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime issuance requires container, actor, and config fingerprints")
 	}
 	var bindingID, sourceRunID, forkEventID, mode, contractsRoot, bundleHash, workflowName, workflowVersion string
 	if err := tx.QueryRowContext(ctx, dialect.lockBindingSQL(), dialect.uuid(admission.ForkRunID)).Scan(
 		&bindingID, &sourceRunID, &forkEventID, &mode, &contractsRoot, &bundleHash, &workflowName, &workflowVersion,
 	); err != nil {
-		return SelectedContractRuntimeExecution{}, fmt.Errorf("lock selected-contract runtime binding: %w", err)
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("lock selected-contract runtime binding: %w", err)
 	}
 	if sourceRunID != admission.SourceRunID || forkEventID != admission.ForkEventID ||
 		mode != admission.ContractSelection.Mode || strings.TrimSpace(contractsRoot) != strings.TrimSpace(admission.ContractSelection.ContractsRoot) ||
 		strings.TrimSpace(bundleHash) != strings.TrimSpace(admission.ContractSelection.BundleHash) || workflowName != admission.ContractSelection.WorkflowName || workflowVersion != admission.ContractSelection.WorkflowVersion {
-		return SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime admission does not match durable binding")
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime admission does not match durable binding")
 	}
 	var current string
 	if err := tx.QueryRowContext(ctx, dialect.currentSQL(), dialect.uuid(admission.ForkRunID)).Scan(&current); err == nil {
-		return SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime fork %s already has current execution %s", admission.ForkRunID, current)
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("selected-contract runtime fork %s already has current execution %s", admission.ForkRunID, current)
 	} else if err != sql.ErrNoRows {
-		return SelectedContractRuntimeExecution{}, fmt.Errorf("check selected-contract current runtime: %w", err)
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("check selected-contract current runtime: %w", err)
 	}
 	var generation uint64
 	if err := tx.QueryRowContext(ctx, dialect.maxGenerationSQL(), dialect.uuid(admission.ForkRunID)).Scan(&generation); err != nil {
-		return SelectedContractRuntimeExecution{}, fmt.Errorf("load selected-contract runtime generation: %w", err)
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("load selected-contract runtime generation: %w", err)
 	}
 	generation++
-	admissionFingerprint, err := RunForkSelectedContractRuntimeFingerprint(admission)
+	admissionFingerprint, err := runfork.RunForkSelectedContractRuntimeFingerprint(admission)
 	if err != nil {
-		return SelectedContractRuntimeExecution{}, err
+		return runfork.SelectedContractRuntimeExecution{}, err
 	}
-	executableFingerprint, err := RunForkSelectedContractRuntimeFingerprint(struct {
+	executableFingerprint, err := runfork.RunForkSelectedContractRuntimeFingerprint(struct {
 		ForkRunID, Admission, Container, Actors, Config string
 		Generation                                      uint64
 	}{admission.ForkRunID, admissionFingerprint, req.ContainerPlanFingerprint, req.ActorCensusFingerprint, req.EffectiveConfigFingerprint, generation})
 	if err != nil {
-		return SelectedContractRuntimeExecution{}, err
+		return runfork.SelectedContractRuntimeExecution{}, err
 	}
 	now := req.Now.UTC()
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
 	executionID := uuid.NewString()
-	issued := SelectedContractRuntimeExecution{
+	issued := runfork.SelectedContractRuntimeExecution{
 		ExecutionID: executionID, ForkRunID: admission.ForkRunID, SourceRunID: admission.SourceRunID, ForkEventID: admission.ForkEventID,
 		Generation: generation, ExecutableCoordinateFingerprint: executableFingerprint, AdmissionFingerprint: admissionFingerprint,
 		ContainerPlanFingerprint: req.ContainerPlanFingerprint, ActorCensusFingerprint: req.ActorCensusFingerprint,
@@ -187,16 +152,16 @@ func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dial
 		args = append(args, now)
 	}
 	if _, err := tx.ExecContext(ctx, dialect.insertSQL(), args...); err != nil {
-		return SelectedContractRuntimeExecution{}, fmt.Errorf("insert selected-contract runtime execution: %w", err)
+		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("insert selected-contract runtime execution: %w", err)
 	}
 	return issued, nil
 }
 
-func validateSelectedRuntimeAdmission(admission RunForkSelectedContractExecutionAdmission) error {
-	if admission.Owner != RunForkSelectedContractExecutionAdmissionOwner || admission.FutureExecutionOwner != RunForkSelectedContractExecutionOwner ||
-		!admission.NonMutating || admission.ExecutionSupported || admission.ContractBindingOwner != RunForkSelectedContractBindingOwner ||
-		admission.AdmissionUse != RunForkSelectedContractExecutionAdmissionUseDurableBinding ||
-		admission.DeferredWorkAdmissionOwner != RunForkSelectedContractDeferredWorkAdmissionOwner {
+func validateSelectedRuntimeAdmission(admission runfork.RunForkSelectedContractExecutionAdmission) error {
+	if admission.Owner != runfork.RunForkSelectedContractExecutionAdmissionOwner || admission.FutureExecutionOwner != runfork.RunForkSelectedContractExecutionOwner ||
+		!admission.NonMutating || admission.ExecutionSupported || admission.ContractBindingOwner != runfork.RunForkSelectedContractBindingOwner ||
+		admission.AdmissionUse != runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding ||
+		admission.DeferredWorkAdmissionOwner != runfork.RunForkSelectedContractDeferredWorkAdmissionOwner {
 		return fmt.Errorf("selected-contract runtime issuance requires exact non-mutating execution admission")
 	}
 	if !validUUIDStrings(admission.ForkRunID, admission.SourceRunID, admission.ForkEventID) {
@@ -205,14 +170,14 @@ func validateSelectedRuntimeAdmission(admission RunForkSelectedContractExecution
 	return nil
 }
 
-func (s *PostgresStore) ClaimRunForkSelectedContractRuntimeExecution(ctx context.Context, issued SelectedContractRuntimeExecution, owner string, lease time.Duration) (runtimeeffects.Authority, error) {
+func (s *PostgresStore) ClaimRunForkSelectedContractRuntimeExecution(ctx context.Context, issued runfork.SelectedContractRuntimeExecution, owner string, lease time.Duration) (runtimeeffects.Authority, error) {
 	if s == nil || s.DB == nil {
 		return runtimeeffects.Authority{}, fmt.Errorf("postgres store is required")
 	}
 	return claimSelectedContractRuntimeExecutionPostgres(ctx, s.DB, issued, owner, lease)
 }
 
-func (s *SQLiteRuntimeStore) ClaimRunForkSelectedContractRuntimeExecution(ctx context.Context, issued SelectedContractRuntimeExecution, owner string, lease time.Duration) (authority runtimeeffects.Authority, err error) {
+func (s *SQLiteRuntimeStore) ClaimRunForkSelectedContractRuntimeExecution(ctx context.Context, issued runfork.SelectedContractRuntimeExecution, owner string, lease time.Duration) (authority runtimeeffects.Authority, err error) {
 	err = s.runRuntimeMutation(ctx, "sqlite selected-contract runtime claim", func(txctx context.Context, tx *sql.Tx) error {
 		var claimErr error
 		authority, claimErr = claimSelectedContractRuntimeExecutionTx(txctx, tx, true, issued, owner, lease)
@@ -221,7 +186,7 @@ func (s *SQLiteRuntimeStore) ClaimRunForkSelectedContractRuntimeExecution(ctx co
 	return authority, err
 }
 
-func claimSelectedContractRuntimeExecutionPostgres(ctx context.Context, db *sql.DB, issued SelectedContractRuntimeExecution, owner string, lease time.Duration) (runtimeeffects.Authority, error) {
+func claimSelectedContractRuntimeExecutionPostgres(ctx context.Context, db *sql.DB, issued runfork.SelectedContractRuntimeExecution, owner string, lease time.Duration) (runtimeeffects.Authority, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return runtimeeffects.Authority{}, err
@@ -237,7 +202,7 @@ func claimSelectedContractRuntimeExecutionPostgres(ctx context.Context, db *sql.
 	return authority, nil
 }
 
-func claimSelectedContractRuntimeExecutionTx(ctx context.Context, tx *sql.Tx, sqlite bool, issued SelectedContractRuntimeExecution, owner string, lease time.Duration) (runtimeeffects.Authority, error) {
+func claimSelectedContractRuntimeExecutionTx(ctx context.Context, tx *sql.Tx, sqlite bool, issued runfork.SelectedContractRuntimeExecution, owner string, lease time.Duration) (runtimeeffects.Authority, error) {
 	owner = strings.TrimSpace(owner)
 	if owner == "" || strings.TrimSpace(issued.ExecutionOwner) == "" || issued.LeaseExpiresAt.IsZero() || !validUUIDStrings(issued.ExecutionID, issued.ForkRunID) {
 		return runtimeeffects.Authority{}, fmt.Errorf("selected-contract runtime claim requires execution identity and owner")

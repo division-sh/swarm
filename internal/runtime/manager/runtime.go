@@ -32,7 +32,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type agentDirectiveRunTargetResolver interface {
+type AgentDirectiveRunTargetResolver interface {
 	ResolveAgentDirectiveRunTarget(ctx context.Context, identity runtimeagentidentity.Identity, explicitRunID string) (runtimeagentcontrol.RunTargetResolution, error)
 }
 
@@ -361,17 +361,17 @@ func flowPathFromAgentConfig(cfg runtimeactors.AgentConfig) string {
 	return cfg.CanonicalFlowPath()
 }
 
-type eventExistenceReader interface {
+type EventExistenceReader interface {
 	EventExists(ctx context.Context, eventID string) (bool, error)
 }
 
 func (am *AgentManager) shouldSkipAlreadyPublishedOutput(ctx context.Context, eventID string) bool {
 	eventID = strings.TrimSpace(eventID)
-	if eventID == "" || am.store == nil {
+	if eventID == "" {
 		return false
 	}
-	reader, ok := am.store.(eventExistenceReader)
-	if !ok {
+	reader := am.roles.EventExistence
+	if reader == nil {
 		return false
 	}
 	exists, err := reader.EventExists(ctx, eventID)
@@ -539,14 +539,10 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 }
 
 func (am *AgentManager) directiveOperationStore() (runtimeagentcontrol.DirectiveOperationStore, error) {
-	if am == nil || am.bus == nil || am.bus.Store() == nil {
+	if am == nil || am.roles.DirectiveOperations == nil {
 		return nil, errors.New("directive operation store is required")
 	}
-	store, ok := am.bus.Store().(runtimeagentcontrol.DirectiveOperationStore)
-	if !ok || store == nil {
-		return nil, errors.New("selected store does not support directive operations")
-	}
-	return store, nil
+	return am.roles.DirectiveOperations, nil
 }
 
 func (am *AgentManager) directiveBoardAgentIdentity(identity runtimeagentidentity.Identity) (BoardInteractiveAgent, error) {
@@ -745,25 +741,15 @@ func (am *AgentManager) resolveAgentDirectiveRunTarget(ctx context.Context, iden
 		return runtimeagentcontrol.RunTargetResolution{}, err
 	}
 	explicitRunID = strings.TrimSpace(explicitRunID)
-	if resolver, ok := am.store.(agentDirectiveRunTargetResolver); ok && resolver != nil {
-		target, err := resolver.ResolveAgentDirectiveRunTarget(ctx, identity, explicitRunID)
-		if err != nil {
-			return runtimeagentcontrol.RunTargetResolution{}, err
-		}
-		return target.Normalized(), nil
+	resolver := am.roles.DirectiveTargets
+	if resolver == nil {
+		return runtimeagentcontrol.RunTargetResolution{}, errors.New("directive run target resolver is required")
 	}
-	if explicitRunID != "" {
-		return runtimeagentcontrol.RunTargetResolution{}, &runtimeagentcontrol.StateError{
-			Err:          runtimeagentcontrol.ErrRunNotFound,
-			AgentID:      identity.AgentID(),
-			FlowInstance: identity.FlowInstance(),
-			RunID:        explicitRunID,
-		}
+	target, err := resolver.ResolveAgentDirectiveRunTarget(ctx, identity, explicitRunID)
+	if err != nil {
+		return runtimeagentcontrol.RunTargetResolution{}, err
 	}
-	return runtimeagentcontrol.RunTargetResolution{
-		RunID: uuid.NewString(),
-		Mode:  runtimeagentcontrol.RunResolutionNewRunAllocated,
-	}, nil
+	return target.Normalized(), nil
 }
 
 func (am *AgentManager) Run(ctx context.Context) error {
@@ -902,13 +888,10 @@ func (am *AgentManager) RecoverWithStartupReplayDiagnostics(ctx context.Context)
 }
 
 func (am *AgentManager) ReconcileDirectiveOperations(ctx context.Context) error {
-	if am == nil || am.bus == nil || am.bus.Store() == nil {
+	if am == nil || am.roles.DirectiveOperations == nil {
 		return nil
 	}
-	operationStore, ok := am.bus.Store().(runtimeagentcontrol.DirectiveOperationStore)
-	if !ok || operationStore == nil {
-		return nil
-	}
+	operationStore := am.roles.DirectiveOperations
 	if _, err := operationStore.ReconcileDirectiveOperations(ctx, time.Now().UTC(), directiveOperationTTL); err != nil {
 		return fmt.Errorf("reconcile directive operations: %w", err)
 	}
@@ -919,8 +902,8 @@ func (am *AgentManager) projectLifecycleDiagnostics(ctx context.Context) error {
 	if am == nil || am.bus == nil || am.lifecycle == nil {
 		return nil
 	}
-	store, ok := am.lifecycle.store.(AgentLifecycleDiagnosticPersistence)
-	if !ok || store == nil {
+	store := am.roles.LifecycleDiagnostics
+	if store == nil {
 		return nil
 	}
 	for {
@@ -957,7 +940,7 @@ func (am *AgentManager) HydrateForStartup(ctx context.Context) (StartupReplaySum
 	if am.store == nil {
 		return summary, nil
 	}
-	if recoveryStore, ok := am.lifecycle.store.(runtimeeffects.RecoveryStore); ok && recoveryStore != nil {
+	if recoveryStore := am.roles.EffectsRecovery; recoveryStore != nil {
 		if _, err := recoveryStore.ReconcileExternalEffectAttempts(ctx, time.Now().UTC()); err != nil {
 			return summary, fmt.Errorf("reconcile external effect attempts: %w", err)
 		}
@@ -1115,12 +1098,12 @@ func (am *AgentManager) restoreFlowInstanceRoutes(ctx context.Context) error {
 	if am == nil || am.bus == nil {
 		return nil
 	}
-	restorer, ok := am.bus.(persistedFlowInstanceRouteRestorer)
-	if !ok || restorer == nil {
+	restorer := am.roles.RouteRestorer
+	if restorer == nil {
 		return nil
 	}
-	routeStore, ok := am.bus.Store().(runtimebus.FlowInstanceRoutePersistence)
-	if !ok || routeStore == nil {
+	routeStore := am.roles.FlowRoutes
+	if routeStore == nil {
 		return nil
 	}
 	routes, err := routeStore.ListFlowInstanceRoutes(ctx)
@@ -1285,8 +1268,11 @@ func (am *AgentManager) executeResetRuntimeState(source string) (bool, error) {
 			return false, fmt.Errorf("kill workspace orphan processes: %w", err)
 		}
 	}
-	if resetter, ok := am.sessions.(sessions.Resetter); ok && resetter != nil {
-		summary, err := resetter.ResetAll(sessions.ResetMetadata{
+	if am.sessionResetter == nil {
+		return false, fmt.Errorf("session reset owner is required")
+	}
+	{
+		summary, err := am.sessionResetter.ResetAll(sessions.ResetMetadata{
 			Source: source,
 		})
 		if err != nil {
@@ -1776,10 +1762,8 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								return true
 							}
 							defer releaseLane()
-							authorityProvider, ok := am.bus.(interface {
-								DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error)
-							})
-							if !ok {
+							authorityProvider := am.roles.DeliveryRuntime
+							if authorityProvider == nil {
 								return true
 							}
 							authority, authorityErr := authorityProvider.DeliveryAuthority()
@@ -1804,10 +1788,8 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								if _, completionErr := carrier.Complete(reportCarrierFailure); completionErr != nil {
 									return true
 								}
-								releaser, ok := am.bus.(interface {
-									ReleaseDeliveryContinuation(string) error
-								})
-								if !ok || releaser.ReleaseDeliveryContinuation(claimResult.Snapshot.DeliveryID) != nil {
+								releaser := am.roles.DeliveryRuntime
+								if releaser == nil || releaser.ReleaseDeliveryContinuation(claimResult.Snapshot.DeliveryID) != nil {
 									return true
 								}
 								return false
@@ -1833,10 +1815,8 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								return true
 							}
 							if resolution == worklifetime.DeliveryContinuationTerminal {
-								releaser, ok := am.bus.(interface {
-									ReleaseDeliveryContinuation(string) error
-								})
-								if !ok || releaser.ReleaseDeliveryContinuation(claimed.Claim.DeliveryID()) != nil {
+								releaser := am.roles.DeliveryRuntime
+								if releaser == nil || releaser.ReleaseDeliveryContinuation(claimed.Claim.DeliveryID()) != nil {
 									return true
 								}
 								return false

@@ -22,7 +22,7 @@ import (
 )
 
 type flowInstanceDescriptorAuthorityStore interface {
-	runtimebus.EventStore
+	externalStoreTestDurableEventBusStore
 	runtimebus.FlowInstanceRouteSetPersistence
 	runtimebus.FlowInstanceRouteRecordReader
 	runtimebus.ActiveFlowInstanceDescriptorLister

@@ -40,6 +40,94 @@ type targetRouteMemoryStore struct {
 	claims      map[string]runtimepipelineobligation.Claim
 	scans       map[string]runtimepipelineobligation.ScanRequest
 	active      map[string]bool
+	flowRoutes  []FlowInstanceRouteRecord
+}
+
+func targetRouteIdentity(route runtimeflowidentity.Route) runtimeflowidentity.Route {
+	return runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+}
+
+func sameTargetRoute(left, right runtimeflowidentity.Route) bool {
+	return targetRouteIdentity(left) == targetRouteIdentity(right)
+}
+
+func (s *targetRouteMemoryStore) UpsertFlowInstanceRoute(_ context.Context, route FlowInstanceRouteRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	route.Identity = targetRouteIdentity(route.Identity)
+	for i, existing := range s.flowRoutes {
+		if sameTargetRoute(existing.Identity, route.Identity) && existing.EventPattern == route.EventPattern && existing.SubscriberType == route.SubscriberType && existing.SubscriberID == route.SubscriberID {
+			s.flowRoutes[i] = route
+			return nil
+		}
+	}
+	s.flowRoutes = append(s.flowRoutes, route)
+	return nil
+}
+
+func (s *targetRouteMemoryStore) DeleteFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.Route) error {
+	return s.RollbackFlowInstanceRoute(context.Background(), identity)
+}
+
+func (s *targetRouteMemoryStore) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := make(map[runtimeflowidentity.Route]struct{}, len(s.flowRoutes))
+	routes := make([]runtimeflowidentity.Route, 0, len(s.flowRoutes))
+	for _, record := range s.flowRoutes {
+		identity := targetRouteIdentity(record.Identity)
+		if _, ok := seen[identity]; ok {
+			continue
+		}
+		seen[identity] = struct{}{}
+		routes = append(routes, identity)
+	}
+	return routes, nil
+}
+
+func (s *targetRouteMemoryStore) ReplaceFlowInstanceRouteRecords(_ context.Context, identity runtimeflowidentity.Route, routes []FlowInstanceRouteRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	identity = targetRouteIdentity(identity)
+	retained := s.flowRoutes[:0]
+	for _, existing := range s.flowRoutes {
+		if !sameTargetRoute(existing.Identity, identity) {
+			retained = append(retained, existing)
+		}
+	}
+	s.flowRoutes = retained
+	for _, route := range routes {
+		route.Identity = targetRouteIdentity(route.Identity)
+		s.flowRoutes = append(s.flowRoutes, route)
+	}
+	return nil
+}
+
+func (s *targetRouteMemoryStore) ListFlowInstanceRouteRecords(_ context.Context, identity runtimeflowidentity.Route) ([]FlowInstanceRouteRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	identity = targetRouteIdentity(identity)
+	var routes []FlowInstanceRouteRecord
+	for _, route := range s.flowRoutes {
+		if sameTargetRoute(route.Identity, identity) {
+			routes = append(routes, route)
+		}
+	}
+	return routes, nil
+}
+
+func (s *targetRouteMemoryStore) RollbackFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.Route) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	identity = targetRouteIdentity(identity)
+	retained := s.flowRoutes[:0]
+	for _, existing := range s.flowRoutes {
+		if !sameTargetRoute(existing.Identity, identity) {
+			retained = append(retained, existing)
+		}
+	}
+	s.flowRoutes = retained
+	return nil
 }
 
 type targetRouteMemoryPublishTransaction struct {

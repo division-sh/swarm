@@ -121,7 +121,7 @@ func TestSingletonCoordinatorPilotPipelineRejectsContainedItemDeliveryTarget(t *
 	}
 }
 
-func newSingletonCoordinatorPilotPipelineCoordinator(t *testing.T, db *sql.DB, bundle *runtimecontracts.WorkflowContractBundle, source semanticview.Source) (*PipelineCoordinator, *WorkflowInstanceStore) {
+func newSingletonCoordinatorPilotPipelineCoordinator(t *testing.T, db *sql.DB, bundle *runtimecontracts.WorkflowContractBundle, source semanticview.Source) (*PipelineCoordinator, *workflowInstanceStore) {
 	t.Helper()
 	workflow, err := LoadWorkflowDefinition(source)
 	if err != nil {
@@ -133,7 +133,9 @@ func newSingletonCoordinatorPilotPipelineCoordinator(t *testing.T, db *sql.DB, b
 	}
 	workflowStore := newPostgresWorkflowInstanceStoreForTest(db)
 	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
-	pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+	bus := &recordingPipelineBus{}
+	bus.configurePipelineTestDeliveryOwner(deliveryStore)
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{
 			bundle:         bundle,
 			workflow:       workflow,
@@ -141,15 +143,17 @@ func newSingletonCoordinatorPilotPipelineCoordinator(t *testing.T, db *sql.DB, b
 			guardRegistry:  NewContractGuardRegistry(source),
 			actionRegistry: NewContractActionRegistry(source),
 		},
-		WorkflowStore: workflowStore,
-		DeliveryStore: deliveryStore,
+		Persistence:         workflowPersistenceForTest(workflowStore),
+		DeliveryStore:       deliveryStore,
+		DeliveryRuntime:     bus,
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
 	})
 	return pc, workflowStore
 }
 
-func seedSingletonCoordinatorPilotInstance(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle, entityID string) {
+func seedSingletonCoordinatorPilotInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, bundle *runtimecontracts.WorkflowContractBundle, entityID string) {
 	t.Helper()
-	if err := store.Create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := store.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      singletoncoordinatorpilot.FlowInstance,
 		WorkflowName:    singletoncoordinatorpilot.FlowID,
@@ -212,7 +216,7 @@ func assertNoSingletonCoordinatorPilotContainedRouteRows(t *testing.T, db *sql.D
 	}
 }
 
-func assertNoSingletonCoordinatorPilotContainedWorkflowInstance(t *testing.T, db *sql.DB, store *WorkflowInstanceStore, ctx context.Context, flowInstance string) {
+func assertNoSingletonCoordinatorPilotContainedWorkflowInstance(t *testing.T, db *sql.DB, store *workflowInstanceStore, ctx context.Context, flowInstance string) {
 	t.Helper()
 	entityID := FlowInstanceEntityID(flowInstance)
 	if _, ok, err := store.Load(ctx, entityID); err != nil {

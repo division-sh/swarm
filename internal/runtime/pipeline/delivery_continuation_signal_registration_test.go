@@ -11,7 +11,7 @@ import (
 )
 
 func TestDeliveryContinuationSignalRegistrationRejectsDuplicateAuthority(t *testing.T) {
-	store := &WorkflowInstanceStore{}
+	store := &workflowInstanceStore{}
 	authority := deliveryContinuationSignalTestAuthority(t, 1)
 	registration, err := store.RegisterDeliveryContinuationSignal(authority, func() {})
 	if err != nil {
@@ -25,7 +25,7 @@ func TestDeliveryContinuationSignalRegistrationRejectsDuplicateAuthority(t *test
 }
 
 func TestDeliveryContinuationSignalRegistrationRoutesCommitToCurrentAuthorities(t *testing.T) {
-	store := &WorkflowInstanceStore{}
+	store := &workflowInstanceStore{}
 	predecessorAuthority := deliveryContinuationSignalTestAuthority(t, 1)
 	var predecessorSignals atomic.Int32
 	predecessor, err := store.RegisterDeliveryContinuationSignal(predecessorAuthority, func() { predecessorSignals.Add(1) })
@@ -71,7 +71,7 @@ func TestDeliveryContinuationSignalRegistrationRoutesCommitToCurrentAuthorities(
 }
 
 func TestDeliveryContinuationSignalQueuedBeforeRegistrationSignalsCurrentAuthority(t *testing.T) {
-	store := &WorkflowInstanceStore{}
+	store := &workflowInstanceStore{}
 	postCommit := make([]OwnerAction, 0, 1)
 	rollback := make([]OwnerAction, 0, 1)
 	ctx := withPipelinePostCommitActions(context.Background(), &postCommit)
@@ -93,7 +93,7 @@ func TestDeliveryContinuationSignalQueuedBeforeRegistrationSignalsCurrentAuthori
 }
 
 func TestDeliveryContinuationSignalCallbackBeforeGenerationAdmissionDoesNotReplay(t *testing.T) {
-	store := &WorkflowInstanceStore{}
+	store := &workflowInstanceStore{}
 	postCommit := make([]OwnerAction, 0, 1)
 	rollback := make([]OwnerAction, 0, 1)
 	ctx := withPipelinePostCommitActions(context.Background(), &postCommit)
@@ -115,7 +115,7 @@ func TestDeliveryContinuationSignalCallbackBeforeGenerationAdmissionDoesNotRepla
 }
 
 func TestDeliveryContinuationSignalWithoutTransactionAuthorityFailsClosed(t *testing.T) {
-	store := &WorkflowInstanceStore{}
+	store := &workflowInstanceStore{}
 	if err := store.queueDeliveryContinuationSignal(context.Background()); err == nil {
 		t.Fatal("standing signal without transaction-owned callback succeeded")
 	}

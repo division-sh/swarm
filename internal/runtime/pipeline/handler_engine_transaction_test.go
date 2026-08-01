@@ -630,7 +630,7 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 
 	pc, bus := newEmitPersistenceTestCoordinator(db)
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "validation",
@@ -693,7 +693,7 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 
 	pc, bus := newEmitPersistenceTestCoordinator(db)
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "validation",
@@ -781,7 +781,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 		}},
 	})
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "validation",
@@ -855,7 +855,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 		}},
 	})
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "validation",
@@ -922,7 +922,7 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 		}},
 	})
 	const entityID = "11111111-1111-1111-1111-111111111111"
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "validation",
@@ -1629,9 +1629,9 @@ node-a:
 	}
 }
 
-func seedQueryEntitiesGuardInstance(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, entityID, storageRef, requestID string) {
+func seedQueryEntitiesGuardInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, entityID, storageRef, requestID string) {
 	t.Helper()
-	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      storageRef,
 		WorkflowName:    "validation",
@@ -2224,7 +2224,7 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 	)
 	childEntityID := FlowInstanceEntityID("child/inst-1")
 	grandchildEntityID := FlowInstanceEntityID("child/grandchild/inst-1")
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      childEntityID,
 		StorageRef:      "child/inst-1",
 		WorkflowName:    "child",
@@ -2238,7 +2238,7 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 	})); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      grandchildEntityID,
 		StorageRef:      "child/grandchild/inst-1",
 		WorkflowName:    "grandchild",
@@ -2410,7 +2410,7 @@ func TestExecuteNodeContractHandlerOnCompleteDoesNotSeeCurrentHandlerTopLevelWri
 
 func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 	bus := &recordingPipelineBus{}
-	pc := newPostgresPipelineCoordinatorForTest(bus, nil, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
 		Module: NewGenericTestWorkflowModule(),
 	})
 	entityID := "ent-1"
@@ -2434,7 +2434,7 @@ func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 
 func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) {
 	bus := &recordingPipelineBus{}
-	pc := newPostgresPipelineCoordinatorForTest(bus, nil, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: additiveOnSuccessContractBundle()},
 	})
 	entityID := "ent-1"
@@ -2464,7 +2464,7 @@ func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) 
 
 func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *testing.T) {
 	bus := &recordingPipelineBus{}
-	pc := newPostgresPipelineCoordinatorForTest(bus, nil, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: rulesEmitTemplateContractBundle()},
 	})
 	entityID := "ent-1"
@@ -2545,7 +2545,7 @@ func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *t
 
 func TestExecuteNodeContractHandlerOnSuccessOutboxFailureDoesNotPartiallyPublish(t *testing.T) {
 	bus := &recordingPipelineBus{outboxErr: errors.New("outbox failed")}
-	pc := newPostgresPipelineCoordinatorForTest(bus, nil, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: additiveOnSuccessContractBundle()},
 	})
 

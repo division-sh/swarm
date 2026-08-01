@@ -41,29 +41,29 @@ type flowInstancePersistence interface {
 	LoadRouteRecoveryProjection(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
 }
 
-type flowInstanceRouteContextInstaller interface {
+type FlowInstanceRouteContextInstaller interface {
 	StageFlowInstanceRouteContext(context.Context, runtimebus.FlowInstanceRouteMaterializationRequest) error
 }
 
-type flowInstanceRouteContextVerifier interface {
+type FlowInstanceRouteContextVerifier interface {
 	HasFlowInstanceRoute(runtimeflowidentity.Route) bool
 	VerifyFlowInstanceRoute(context.Context, runtimeflowidentity.Route) error
 }
 
-type persistedFlowInstanceRouteRestorer interface {
+type PersistedFlowInstanceRouteRestorer interface {
 	PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest) error
 }
 
-type publishedFlowInstanceRouteRetirer interface {
+type PublishedFlowInstanceRouteRetirer interface {
 	RetirePublishedFlowInstanceRoute(runtimeflowidentity.Route) error
 }
 
-type flowInstanceRouteContextRemover interface {
+type FlowInstanceRouteContextRemover interface {
 	RemoveFlowInstanceRouteContext(context.Context, runtimeflowidentity.Route) error
 }
 
-type flowInstanceTerminalMutationOwner interface {
-	RunPipelineMutation(context.Context, func(context.Context) error) error
+type FlowInstanceTerminalMutationOwner interface {
+	CommitFlowInstanceTermination(context.Context, runtimepipeline.FlowInstanceTerminationRequest) (runtimepipeline.FlowInstanceTermination, error)
 }
 
 type terminalFlowInstanceSideEffectPlan struct {
@@ -333,8 +333,8 @@ func (am *AgentManager) installFlowInstanceRoute(ctx context.Context, req runtim
 	instance := req.Instance
 	vars := flowActivationVars(req)
 	request := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: instance.Route(), ActivationVariables: vars}
-	if installer, ok := am.bus.(flowInstanceRouteContextInstaller); ok && installer != nil {
-		return installer.StageFlowInstanceRouteContext(ctx, request)
+	if am.roles.RouteInstaller != nil {
+		return am.roles.RouteInstaller.StageFlowInstanceRouteContext(ctx, request)
 	}
 	return fmt.Errorf("event bus does not support context-aware derived flow-instance routing for %s", instance.InstancePath)
 }
@@ -721,49 +721,47 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 	if templateID == "" || instanceID == "" || flowPath == "" || entityID == "" {
 		return fmt.Errorf("template_id, instance_id, flow_path, and entity_id are required")
 	}
-	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); active {
-		return am.deactivateFlowInstanceModelInMutation(ctx, req)
-	}
-	owner, ok := am.workflowInstances.(flowInstanceTerminalMutationOwner)
-	if !ok || owner == nil {
+	owner := am.roles.FlowTermination
+	if owner == nil {
 		return fmt.Errorf("flow instance terminalization requires selected pipeline mutation ownership")
 	}
-	return owner.RunPipelineMutation(ctx, func(txctx context.Context) error {
-		if _, active := runtimepipeline.PipelineSQLTxFromContext(txctx); !active {
-			return fmt.Errorf("flow instance terminalization mutation did not provide selected transaction")
-		}
-		return am.deactivateFlowInstanceModelInMutation(txctx, req)
+	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	termination, err := owner.CommitFlowInstanceTermination(ctx, runtimepipeline.FlowInstanceTerminationRequest{
+		StorageRef: flowPath, RunID: runID, TerminatedAt: time.Now().UTC(),
 	})
+	if err != nil {
+		return fmt.Errorf("persist flow instance terminalization %s: %w", flowPath, err)
+	}
+	plan, err := am.terminalFlowInstanceSideEffectPlan(ctx, req, termination)
+	if err != nil {
+		return err
+	}
+	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); active {
+		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
+			if err := am.applyTerminalFlowInstanceSideEffects(actionCtx, plan); err != nil {
+				am.logTerminalFlowInstanceSideEffectFailure(plan, err)
+			}
+		}) {
+			return fmt.Errorf("terminal flow-instance side effects require selected mutation post-commit ownership")
+		}
+		return nil
+	}
+	return am.applyTerminalFlowInstanceSideEffects(ctx, plan)
 }
 
-func (am *AgentManager) deactivateFlowInstanceModelInMutation(
+func (am *AgentManager) terminalFlowInstanceSideEffectPlan(
 	ctx context.Context,
 	req runtimepipeline.FlowInstanceDeactivationRequest,
-) error {
+	termination runtimepipeline.FlowInstanceTermination,
+) (terminalFlowInstanceSideEffectPlan, error) {
 	instance := req.Instance
 	entityID := strings.TrimSpace(instance.EntityID)
-	flowPath := strings.TrimSpace(instance.InstancePath)
-	if err := am.workflowInstances.MarkTerminated(ctx, flowPath, time.Now().UTC()); err != nil {
-		return fmt.Errorf("persist flow instance terminal state %s: %w", flowPath, err)
-	}
-	canonicalInstance, ok, err := am.workflowInstances.Load(ctx, flowPath)
-	if err != nil {
-		return fmt.Errorf("load canonical terminal flow instance %s: %w", flowPath, err)
-	}
-	if !ok {
-		return fmt.Errorf("load canonical terminal flow instance %s: not found", flowPath)
-	}
-	if strings.TrimSpace(canonicalInstance.Status) != "terminated" || canonicalInstance.TerminatedAt.IsZero() {
-		return fmt.Errorf("canonical terminal flow instance %s not persisted", flowPath)
-	}
+	canonicalInstance := termination.Instance
 	canonicalFlowPath := strings.TrimSpace(canonicalInstance.StorageRef)
 	if canonicalFlowPath == "" {
-		return fmt.Errorf("canonical terminal flow instance %s missing storage_ref", flowPath)
+		return terminalFlowInstanceSideEffectPlan{}, fmt.Errorf("canonical terminal flow instance missing storage_ref")
 	}
-	canonicalRoute := runtimeflowidentity.StoredRoute("", "", canonicalFlowPath)
-	if !canonicalRoute.Valid() {
-		return fmt.Errorf("derive canonical route identity for flow path %s", canonicalFlowPath)
-	}
+	canonicalRoute := termination.Route
 	configs := am.lifecycle.executionConfigs()
 	agentIdentities := make([]runtimeagentidentity.Identity, 0, len(configs))
 	for _, cfg := range configs {
@@ -772,7 +770,7 @@ func (am *AgentManager) deactivateFlowInstanceModelInMutation(
 		}
 		identity, err := cfg.ConcreteIdentity()
 		if err != nil {
-			return fmt.Errorf("terminal flow instance agent %q identity: %w", cfg.ID, err)
+			return terminalFlowInstanceSideEffectPlan{}, fmt.Errorf("terminal flow instance agent %q identity: %w", cfg.ID, err)
 		}
 		agentIdentities = append(agentIdentities, identity)
 	}
@@ -782,17 +780,9 @@ func (am *AgentManager) deactivateFlowInstanceModelInMutation(
 		}
 		return agentIdentities[i].FlowInstance() < agentIdentities[j].FlowInstance()
 	})
-	remover, ok := am.bus.(flowInstanceRouteContextRemover)
-	if !ok || remover == nil {
-		return fmt.Errorf("event bus does not support derived flow-instance route removal for %s", canonicalFlowPath)
-	}
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 	if runID == "" {
-		return fmt.Errorf("derived flow-instance route removal requires canonical run_id for %s", canonicalFlowPath)
-	}
-	ctx = runtimecorrelation.WithRunID(ctx, runID)
-	if err := remover.RemoveFlowInstanceRouteContext(ctx, canonicalRoute); err != nil {
-		return fmt.Errorf("stage exact terminal flow-instance route topology %s: %w", canonicalFlowPath, err)
+		return terminalFlowInstanceSideEffectPlan{}, fmt.Errorf("flow instance terminalization requires canonical run_id for %s", canonicalFlowPath)
 	}
 	plan := terminalFlowInstanceSideEffectPlan{
 		EntityID:        entityID,
@@ -802,14 +792,7 @@ func (am *AgentManager) deactivateFlowInstanceModelInMutation(
 		RunID:           runID,
 		FinalState:      req.FinalState,
 	}
-	if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
-		if err := am.applyTerminalFlowInstanceSideEffects(actionCtx, plan); err != nil {
-			am.logTerminalFlowInstanceSideEffectFailure(plan, err)
-		}
-	}) {
-		return fmt.Errorf("terminal flow-instance side effects require selected mutation post-commit ownership")
-	}
-	return nil
+	return plan, nil
 }
 
 func (am *AgentManager) applyTerminalFlowInstanceSideEffects(ctx context.Context, plan terminalFlowInstanceSideEffectPlan) error {

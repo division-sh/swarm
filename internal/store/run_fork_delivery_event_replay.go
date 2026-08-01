@@ -13,35 +13,27 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
 const (
-	RunForkDeliveryEventReplayOwner = "store.run_fork.delivery_event_replay"
 	runForkDeliveryEventReplayTable = "run_fork_delivery_event_replays"
 )
 
-type RunForkDeliveryEventReplayResult struct {
-	Owner                 string `json:"owner"`
-	SourceRunID           string `json:"source_run_id"`
-	ForkRunID             string `json:"fork_run_id"`
-	ReplayedEventCount    int    `json:"replayed_event_count"`
-	ReplayedDeliveryCount int    `json:"replayed_delivery_count"`
-}
-
-func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *PostgresStore, lineage runForkActivationLineage, execution RunForkHistoricalReplayExecution, now time.Time) (RunForkDeliveryEventReplayResult, error) {
-	result := RunForkDeliveryEventReplayResult{
-		Owner:       RunForkDeliveryEventReplayOwner,
+func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *PostgresStore, lineage runForkActivationLineage, execution runfork.RunForkHistoricalReplayExecution, now time.Time) (runfork.RunForkDeliveryEventReplayResult, error) {
+	result := runfork.RunForkDeliveryEventReplayResult{
+		Owner:       runfork.RunForkDeliveryEventReplayOwner,
 		SourceRunID: lineage.SourceRunID,
 		ForkRunID:   lineage.ForkRunID,
 	}
-	if strings.TrimSpace(execution.Owner) != RunForkHistoricalReplayExecutionOwner ||
-		strings.TrimSpace(execution.AdmissionOwner) != RunForkHistoricalReplayExecutionAdmissionOwner ||
+	if strings.TrimSpace(execution.Owner) != runfork.RunForkHistoricalReplayExecutionOwner ||
+		strings.TrimSpace(execution.AdmissionOwner) != runfork.RunForkHistoricalReplayExecutionAdmissionOwner ||
 		!execution.DeliveryEventReplayReady ||
-		execution.EventDeliveriesAdmission.Fact != RunForkHistoricalReplayFactEventDeliveries ||
-		execution.EventDeliveriesAdmission.Admission != RunForkHistoricalReplayAdmissionExecutableForkWork {
-		return result, fmt.Errorf("store.run_fork.delivery_event_replay requires %s owner-authorized executable event_deliveries", RunForkHistoricalReplayExecutionOwner)
+		execution.EventDeliveriesAdmission.Fact != runfork.RunForkHistoricalReplayFactEventDeliveries ||
+		execution.EventDeliveriesAdmission.Admission != runfork.RunForkHistoricalReplayAdmissionExecutableForkWork {
+		return result, fmt.Errorf("store.run_fork.delivery_event_replay requires %s owner-authorized executable event_deliveries", runfork.RunForkHistoricalReplayExecutionOwner)
 	}
 	if err := runtimeauthoractivity.Require(ctx); err != nil {
 		return result, err
@@ -61,7 +53,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *Pos
 		return result, fmt.Errorf("construct fork replay bundle source: %w", err)
 	}
 	deliveryAuthority, err := runtimedelivery.NewNormalExecutionAuthority(
-		bundleSource, RunForkDeliveryEventReplayOwner+":"+lineage.ForkRunID, 1,
+		bundleSource, runfork.RunForkDeliveryEventReplayOwner+":"+lineage.ForkRunID, 1,
 	)
 	if err != nil {
 		return result, fmt.Errorf("construct fork replay activation delivery authority: %w", err)
@@ -69,7 +61,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *Pos
 	for _, item := range replayable {
 		sourceEventID := strings.TrimSpace(item.SourceEventID)
 		sourceDeliveryID := strings.TrimSpace(item.SourceDeliveryID)
-		if item.Fact != RunForkHistoricalReplayFactEventDeliveries || sourceEventID == "" || sourceDeliveryID == "" {
+		if item.Fact != runfork.RunForkHistoricalReplayFactEventDeliveries || sourceEventID == "" || sourceDeliveryID == "" {
 			return result, fmt.Errorf("store.run_fork.delivery_event_replay requires owner-authorized source event and delivery identity")
 		}
 		sourceEvent, ok := sourceEvents[sourceEventID]
@@ -125,8 +117,8 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *Pos
 	return result, nil
 }
 
-func validateRunForkDeliveryEventReplayWorkAgainstPlan(pending []RunForkPendingWork, work []RunForkHistoricalReplayExecutableWork) error {
-	evidenceByDeliveryID := make(map[string]RunForkPendingWork, len(pending))
+func validateRunForkDeliveryEventReplayWorkAgainstPlan(pending []runfork.RunForkPendingWork, work []runfork.RunForkHistoricalReplayExecutableWork) error {
+	evidenceByDeliveryID := make(map[string]runfork.RunForkPendingWork, len(pending))
 	for _, item := range pending {
 		deliveryID := strings.TrimSpace(item.DeliveryID)
 		if deliveryID == "" {
@@ -153,10 +145,10 @@ func validateRunForkDeliveryEventReplayWorkAgainstPlan(pending []RunForkPendingW
 		if !ok {
 			return fmt.Errorf("store.run_fork.delivery_event_replay owner work source delivery %s is not in current pending evidence", sourceDeliveryID)
 		}
-		if item.Fact != RunForkHistoricalReplayFactEventDeliveries {
-			return fmt.Errorf("store.run_fork.delivery_event_replay owner work for source delivery %s has fact %q; want %q", sourceDeliveryID, item.Fact, RunForkHistoricalReplayFactEventDeliveries)
+		if item.Fact != runfork.RunForkHistoricalReplayFactEventDeliveries {
+			return fmt.Errorf("store.run_fork.delivery_event_replay owner work for source delivery %s has fact %q; want %q", sourceDeliveryID, item.Fact, runfork.RunForkHistoricalReplayFactEventDeliveries)
 		}
-		if !RunForkPendingWorkReplayableForHistoricalReplay(evidence) {
+		if !runfork.RunForkPendingWorkReplayableForHistoricalReplay(evidence) {
 			return fmt.Errorf("store.run_fork.delivery_event_replay owner work source delivery %s is not replayable pending agent work", sourceDeliveryID)
 		}
 		if strings.TrimSpace(item.SourceEventID) != strings.TrimSpace(evidence.EventID) ||
@@ -193,7 +185,7 @@ func projectRunForkReplayEvent(source events.Event, lineage runForkActivationLin
 		lineage.ForkRunID,
 		lineage.SourceRunID,
 		source.ID(),
-		RunForkDeliveryEventReplayOwner,
+		runfork.RunForkDeliveryEventReplayOwner,
 		source.TaskID(),
 		source.ExecutionMode(),
 	)
@@ -219,7 +211,7 @@ func projectRunForkReplayEvent(source events.Event, lineage runForkActivationLin
 	return admitted, nil
 }
 
-func insertRunForkReplayDelivery(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage, item RunForkHistoricalReplayExecutableWork, sourceEventID, forkEventID string, obligation runtimedelivery.Obligation, now time.Time) (bool, error) {
+func insertRunForkReplayDelivery(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage, item runfork.RunForkHistoricalReplayExecutableWork, sourceEventID, forkEventID string, obligation runtimedelivery.Obligation, now time.Time) (bool, error) {
 	if _, err := postgresDeliveryAdapter.CommitInitial(ctx, tx, forkEventID, lineage.ForkRunID, []events.DeliveryRoute{obligation.Route()}, obligation.Authority()); err != nil {
 		return false, fmt.Errorf("insert fork replay delivery %s from source delivery %s: %w", obligation.DeliveryID(), item.SourceDeliveryID, err)
 	}
@@ -236,7 +228,7 @@ func insertRunForkReplayDelivery(ctx context.Context, tx *sql.Tx, lineage runFor
 		ON CONFLICT (fork_run_id, source_delivery_id) DO NOTHING
 	`, deterministicRunForkReplayLineageID(lineage.ForkRunID, item.SourceDeliveryID), lineage.ForkRunID, lineage.SourceRunID,
 		sourceEventID, item.SourceDeliveryID, forkEventID, obligation.DeliveryID(), item.SubscriberType, item.SubscriberID,
-		RunForkDeliveryEventReplayOwner, now)
+		runfork.RunForkDeliveryEventReplayOwner, now)
 	if err != nil {
 		return false, fmt.Errorf("insert fork delivery/event replay lineage for source delivery %s: %w", item.SourceDeliveryID, err)
 	}

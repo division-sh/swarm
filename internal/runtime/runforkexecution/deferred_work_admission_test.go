@@ -13,18 +13,18 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
-	basePlan := store.RunForkPlan{
+	basePlan := runfork.RunForkPlan{
 		SourceRunID: uuid.NewString(),
-		ForkPoint:   store.RunForkPoint{EventID: uuid.NewString()},
+		ForkPoint:   runfork.RunForkPoint{EventID: uuid.NewString()},
 	}
 	for _, tc := range []struct {
 		name       string
-		plan       store.RunForkPlan
+		plan       runfork.RunForkPlan
 		source     semanticview.Source
 		wantCode   string
 		capability string
@@ -36,15 +36,15 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 		},
 		{
 			name: "revision timer history",
-			plan: store.RunForkPlan{
+			plan: runfork.RunForkPlan{
 				SourceRunID: basePlan.SourceRunID,
 				ForkPoint:   basePlan.ForkPoint,
-				UnsupportedBlockers: []store.RunForkUnsupportedBlocker{{
-					Code: store.RunForkBlockerTimerHistoryUnproven,
+				UnsupportedBlockers: []runfork.RunForkUnsupportedBlocker{{
+					Code: runfork.RunForkBlockerTimerHistoryUnproven,
 				}},
 			},
 			source:     selectedDeferredWorkTestSource(nil, nil),
-			wantCode:   store.RunForkBlockerTimerHistoryUnproven,
+			wantCode:   runfork.RunForkBlockerTimerHistoryUnproven,
 			capability: selectedContractDeferredWorkRevisionTimerHistory,
 		},
 		{
@@ -82,7 +82,7 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 				if err != nil {
 					t.Fatalf("admitSelectedContractDeferredWork: %v", err)
 				}
-				if admission.owner != store.RunForkSelectedContractDeferredWorkAdmissionOwner {
+				if admission.owner != runfork.RunForkSelectedContractDeferredWorkAdmissionOwner {
 					t.Fatalf("admission = %#v", admission)
 				}
 				return
@@ -154,9 +154,9 @@ func TestSelectedContractFlowInputResolutionDynamicFlowOwnerMatrix(t *testing.T)
 }
 
 func TestSelectedContractDeferredWorkAdmissionRejectsSourceDrift(t *testing.T) {
-	plan := store.RunForkPlan{
+	plan := runfork.RunForkPlan{
 		SourceRunID: uuid.NewString(),
-		ForkPoint:   store.RunForkPoint{EventID: uuid.NewString()},
+		ForkPoint:   runfork.RunForkPoint{EventID: uuid.NewString()},
 	}
 	admission, err := admitSelectedContractDeferredWork(plan, selectedDeferredWorkTestSource(nil, nil))
 	if err != nil {

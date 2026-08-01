@@ -290,8 +290,8 @@ func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context, observedA
 				}
 			}
 			intrinsic := false
-			if rt.Stores.PipelineStore != nil {
-				intrinsic, err = rt.Stores.PipelineStore.StandingRunUsesIntrinsicRecovery(ctx, run.RunID)
+			if rt.Pipeline != nil {
+				intrinsic, err = rt.Pipeline.StandingRunUsesIntrinsicRecovery(ctx, run.RunID)
 				if err != nil {
 					snapshot.InspectionComplete = false
 					return snapshot, fmt.Errorf("classify standing timer obligations: %w", err)
@@ -317,10 +317,10 @@ func (rt *Runtime) inspectStartupRecoverySnapshot(ctx context.Context, observedA
 }
 
 func (rt *Runtime) inspectDeliveryRecoveryInventory(ctx context.Context) (runtimedelivery.RecoveryInventory, error) {
-	if rt == nil || rt.Stores.DeliveryStore == nil {
+	if rt == nil || rt.deliveryStore == nil {
 		return runtimedelivery.RecoveryInventory{}, nil
 	}
-	inventory, err := rt.Stores.DeliveryStore.InspectDeliveryRecovery(ctx, rt.Options.BundleSourceFact)
+	inventory, err := rt.deliveryStore.InspectDeliveryRecovery(ctx, rt.Options.BundleSourceFact)
 	if err != nil {
 		return runtimedelivery.RecoveryInventory{}, fmt.Errorf("inspect executable delivery recovery: %w", err)
 	}
@@ -331,15 +331,15 @@ func (rt *Runtime) startupTimerObligationReader() (runtimetimerobligation.Reader
 	if rt == nil {
 		return nil, nil
 	}
-	if rt.Stores.ScheduleStore != nil {
-		reader, ok := rt.Stores.ScheduleStore.(runtimetimerobligation.Reader)
-		if !ok {
+	if rt.scheduleStore != nil {
+		reader := rt.timerObligationReader
+		if reader == nil {
 			return nil, fmt.Errorf("inspect timer obligations: selected schedule store lacks timer obligation authority")
 		}
 		return reader, nil
 	}
-	if rt.Stores.PipelineStore != nil && rt.Stores.PipelineStore.Enabled() {
-		return rt.Stores.PipelineStore, nil
+	if rt.Pipeline != nil {
+		return rt.Pipeline, nil
 	}
 	return nil, nil
 }

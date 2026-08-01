@@ -85,7 +85,7 @@ type agentExecutionProjection struct {
 	leaseDrained     chan struct{}
 }
 
-type agentRouteBus interface {
+type AgentRouteBus interface {
 	PrepareAgentRoute(runtimeeffects.LifecycleToken, semanticview.FlowOwnedAgentSubscriptionAdmission) runtimebus.AgentRoutePreparation
 	FenceAgentRoute(runtimeeffects.LifecycleToken)
 	RemoveAgentRoute(runtimeeffects.LifecycleToken)
@@ -120,6 +120,8 @@ type agentLifecycleCoordinator struct {
 	workMu             sync.Mutex
 	executionPublishMu sync.Mutex
 	store              AgentLifecyclePersistence
+	stateReader        AgentLifecycleStateReader
+	effectsStore       runtimeeffects.Store
 	sessions           runtimesessions.LifecycleProjection
 	phase              runtimeLifecyclePhase
 	runMode            AgentRunMode
@@ -137,7 +139,7 @@ type agentLifecycleCoordinator struct {
 	pendingReset       *runtimeLifecycleTransition
 	retryDone          <-chan struct{}
 	cells              map[runtimeagentidentity.Identity]*agentLifecycleCell
-	routes             agentRouteBus
+	routes             AgentRouteBus
 }
 
 func (c *agentLifecycleCoordinator) context() context.Context {
@@ -147,13 +149,11 @@ func (c *agentLifecycleCoordinator) context() context.Context {
 	return context.Background()
 }
 
-func newAgentLifecycleCoordinator(store AgentLifecyclePersistence, registry runtimesessions.Registry) *agentLifecycleCoordinator {
+func newAgentLifecycleCoordinator(store AgentLifecyclePersistence, sessionLifecycle runtimesessions.LifecycleProjection, routes AgentRouteBus, stateReader AgentLifecycleStateReader, effectsStore runtimeeffects.Store) *agentLifecycleCoordinator {
 	coordinator := &agentLifecycleCoordinator{
 		store: store, phase: runtimeLifecycleStopped, runMode: AgentRunModeStopped,
-		cells: map[runtimeagentidentity.Identity]*agentLifecycleCell{},
-	}
-	if store == nil {
-		coordinator.sessions, _ = registry.(runtimesessions.LifecycleProjection)
+		cells: map[runtimeagentidentity.Identity]*agentLifecycleCell{}, sessions: sessionLifecycle,
+		routes: routes, stateReader: stateReader, effectsStore: effectsStore,
 	}
 	return coordinator
 }
@@ -229,14 +229,6 @@ func (c *agentLifecycleCoordinator) resolveAgentTarget(agentID, flowInstance str
 	defer c.mu.Unlock()
 	identity, _, err := c.resolveAgentTargetLocked(agentID, flowInstance, includeTerminated)
 	return identity, err
-}
-
-func (c *agentLifecycleCoordinator) bindRoutes(bus Bus) {
-	if c == nil || bus == nil {
-		return
-	}
-	routes, _ := bus.(agentRouteBus)
-	c.routes = routes
 }
 
 func (c *agentLifecycleCoordinator) prepareRunOwner(parent context.Context, owner worklifetime.Occurrence) error {
@@ -609,8 +601,8 @@ func (c *agentLifecycleCoordinator) terminatedLifecycleState(
 			Phase: cell.phase, ConfigRevision: cell.configRevision, RunMode: cell.runMode,
 		}, cell.phase == AgentLifecycleTerminated, nil
 	}
-	reader, ok := c.store.(AgentLifecycleStateReader)
-	if !ok || reader == nil {
+	reader := c.stateReader
+	if reader == nil {
 		return AgentLifecycleState{}, false, nil
 	}
 	state, found, err := reader.LoadAgentLifecycleState(ctx, identity)
@@ -1171,8 +1163,8 @@ func (c *agentLifecycleCoordinator) acquireExecutionLocked(ctx context.Context, 
 		leaseCtx = managedexecution.WithAdmission(leaseCtx, admission)
 	}
 	leaseCtx = runtimeeffects.WithLifecycleToken(leaseCtx, snapshot.Token)
-	if store, ok := c.store.(runtimeeffects.Store); ok && store != nil {
-		leaseCtx = runtimeeffects.WithController(leaseCtx, runtimeeffects.NewController(store))
+	if c.effectsStore != nil {
+		leaseCtx = runtimeeffects.WithController(leaseCtx, runtimeeffects.NewController(c.effectsStore))
 	}
 	lease := &agentExecutionLease{agentExecutionSnapshot: snapshot, Context: leaseCtx}
 	lease.release = sync.OnceFunc(func() {
@@ -1393,8 +1385,8 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 		return nil, token, nil, nil
 	}
 	loopCtx := runtimeeffects.WithLifecycleToken(generationCtx, token)
-	if store, ok := c.store.(runtimeeffects.Store); ok && store != nil {
-		loopCtx = runtimeeffects.WithController(loopCtx, runtimeeffects.NewController(store))
+	if c.effectsStore != nil {
+		loopCtx = runtimeeffects.WithController(loopCtx, runtimeeffects.NewController(c.effectsStore))
 	}
 	done := make(chan struct{})
 	settled := make(chan struct{})

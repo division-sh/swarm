@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/store/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 )
 
 const (

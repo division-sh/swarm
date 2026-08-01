@@ -17,7 +17,7 @@ func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, entityI
 		Stage:    NormalizeWorkflowStateID(""),
 		Metadata: map[string]any{},
 	}
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || entityID == "" {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || entityID == "" {
 		return state
 	}
 	instance, ok, err := pc.workflowStore.Load(ctx, entityID)
@@ -33,7 +33,7 @@ func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, entityI
 }
 
 func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entityID string, flowID string, bucketID string, payload map[string]any) error {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return nil
 	}
 	entityID = strings.TrimSpace(entityID)
@@ -76,7 +76,7 @@ func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entit
 			return err
 		}
 	}
-	return pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
+	return pc.workflowStore.mutate(ctx, entityID, func(instance *WorkflowInstance) {
 		instance.Metadata = workflowMaterializeEntityMetadata(pc.SemanticSource(), flowID, instance.Metadata)
 		bucket := workflowMutableStateBucket(instance, "evidence")
 		workflowAppendEvidence(bucket, bucketID, payload)

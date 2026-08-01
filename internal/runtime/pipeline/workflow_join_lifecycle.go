@@ -20,7 +20,7 @@ const (
 )
 
 func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, entityID, currentStage, nextStage string, occurredAt time.Time) error {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || pc.SemanticSource() == nil {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.SemanticSource() == nil {
 		return nil
 	}
 	entityID = strings.TrimSpace(entityID)
@@ -36,7 +36,7 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, ent
 	if now.IsZero() {
 		return fmt.Errorf("workflow join lifecycle requires an exact occurrence time")
 	}
-	err := pc.workflowStore.MutateE(ctx, entityID, func(instance *WorkflowInstance) error {
+	err := pc.workflowStore.mutateE(ctx, entityID, func(instance *WorkflowInstance) error {
 		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 		if err != nil {
 			return fmt.Errorf("decode join state: %w", err)
@@ -169,7 +169,7 @@ func (pc *PipelineCoordinator) reconcileClosedJoinSchedules(ctx context.Context,
 		changed = true
 	}
 	if changed {
-		return pc.workflowStore.Mutate(ctx, strings.TrimSpace(entityID), func(instance *WorkflowInstance) {
+		return pc.workflowStore.mutate(ctx, strings.TrimSpace(entityID), func(instance *WorkflowInstance) {
 			instance.StateBuckets = carrier.PersistedStateBuckets()
 		})
 	}

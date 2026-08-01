@@ -117,7 +117,7 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 	seedFanInBarrierRun(t, ctx, backend, backend.DB, runID)
 	runtime := newFanInBarrierRuntime(t, backend, backend.DB, source)
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	if err := runtime.workflowStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := runtime.pipeline.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      templatefanin.ReceiverFlowInstance,
 		StorageRef:      templatefanin.ReceiverFlowInstance,
 		WorkflowName:    templatefanin.ReceiverFlowID,
@@ -132,7 +132,7 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 			"instance_id":   templatefanin.ReceiverFlowInstance,
 			"instance_kind": "singleton",
 		},
-	}); err != nil {
+	}, enteredAt); err != nil {
 		t.Fatalf("seed fan-in stream singleton: %v", err)
 	}
 
@@ -169,7 +169,7 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 	if len(routes) != 1 || routes[0].PayloadProjection.Fields()["operating_id"] != requestEventID {
 		t.Fatalf("producer request delivery routes = %#v, want stamped operating_id %s", routes, requestEventID)
 	}
-	portfolio := loadFanInBarrierPortfolio(t, ctx, runtime.workflowStore)
+	portfolio := loadFanInBarrierPortfolio(t, ctx, runtime.pipeline)
 	carrier, err := runtimeengine.StateCarrierFromPersisted(portfolio.Metadata, portfolio.StateBuckets)
 	if err != nil {
 		t.Fatalf("load producer-driven stream state: %v", err)

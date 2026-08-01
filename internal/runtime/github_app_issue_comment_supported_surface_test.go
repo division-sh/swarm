@@ -47,7 +47,6 @@ func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *te
 		)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 		seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "github", "github-webhook-secret", "github-app-issue-comment-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, db, flowInstance, false)
 
@@ -58,7 +57,9 @@ func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *te
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
-			workflowStore: workflowStore,
+			persistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+			runLifecycle:  pg,
+			obligations:   pg.PipelineObligations(),
 			runID:         runID,
 			entityID:      entityID,
 			flowInstance:  flowInstance,
@@ -74,7 +75,6 @@ func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *te
 		)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-		workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 		seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "github", "github-webhook-secret", "github-app-issue-comment-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, sqliteStore.DB, flowInstance, true)
 
@@ -85,7 +85,9 @@ func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *te
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
-			workflowStore: workflowStore,
+			persistence:   runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore),
+			runLifecycle:  sqliteStore,
+			obligations:   sqliteStore.PipelineObligations(),
 			runID:         runID,
 			entityID:      entityID,
 			flowInstance:  flowInstance,
@@ -122,6 +124,7 @@ func runGitHubAppIssueCommentSurface(t *testing.T, backend slackManagedConnector
 	})
 	source := githubAppIssueCommentSource(t, fake.server.URL, backend.flowInstance)
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
+	backend.activityAttempts = pc
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/github", backend.entityID)
 
@@ -459,7 +462,8 @@ func assertGitHubAppIssueCommentManagedCredentialFailureBeforeDispatch(t *testin
 	beforeTokens := fake.tokenRequestCount()
 	beforeComments := fake.commentRequestCount()
 	source := githubAppIssueCommentSource(t, fake.server.URL, backend.flowInstance)
-	bus, _ := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
+	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
+	backend.activityAttempts = pc
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/github", backend.entityID)
 	publishGitHubIssueComment(t, backend, bus, gateway, webhookPath, deliveryID, installationID, label)
@@ -586,7 +590,7 @@ func tryLoadGitHubAppIssueCommentActivityAttempt(backend slackManagedConnectorBa
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
-	rec, ok, err := backend.workflowStore.LoadActivityAttempt(backend.ctx, requestEventID)
+	rec, ok, err := backend.activityAttempts.LoadActivityAttempt(backend.ctx, requestEventID)
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}

@@ -19,6 +19,11 @@ type flowRouteTestExecutor interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
+type flowRouteTopologyTestStore interface {
+	ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) error
+	ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.Route) ([]runtimebus.FlowInstanceRouteRecord, error)
+}
+
 func seedFlowRouteTestAuthority(t *testing.T, ctx context.Context, exec flowRouteTestExecutor, postgres bool, flowInstances ...string) context.Context {
 	t.Helper()
 	runID := uuid.NewString()
@@ -368,6 +373,154 @@ func TestSQLiteRuntimeStoreReplaceFlowInstanceRouteRecordsIsExactAndTransactiona
 	got, err = store.ListFlowInstanceRouteRecords(ctx, identity)
 	if err != nil || len(got) != 1 || got[0].SubscriberID != "reviewer" {
 		t.Fatalf("route set after rollback: routes=%#v err=%v", got, err)
+	}
+}
+
+func TestPostgresStoreReplaceFlowInstanceRouteTopologyIsAtomic(t *testing.T) {
+	ctx := testAuthorActivityContext()
+	_, db, _ := testutil.StartPostgres(t)
+	selected := admitTestPostgresStore(t, db)
+	ensureFlowInstanceRouteTables(t, ctx, db)
+	testFlowInstanceRouteTopologyAtomicity(t, ctx, db, selected, true)
+}
+
+func TestSQLiteRuntimeStoreReplaceFlowInstanceRouteTopologyIsAtomic(t *testing.T) {
+	ctx := testAuthorActivityContext()
+	selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	testFlowInstanceRouteTopologyAtomicity(t, ctx, selected.DB, selected, false)
+}
+
+func testFlowInstanceRouteTopologyAtomicity(
+	t *testing.T,
+	ctx context.Context,
+	db *sql.DB,
+	selected flowRouteTopologyTestStore,
+	postgres bool,
+) {
+	t.Helper()
+	identities := []runtimeflowidentity.Route{
+		runtimeflowidentity.DeriveRoute("review", "topology-a"),
+		runtimeflowidentity.DeriveRoute("review", "topology-b"),
+	}
+	for _, identity := range identities {
+		if postgres {
+			if _, err := db.ExecContext(ctx, `
+				INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+				VALUES ($1, 'review', 'template', '{}'::jsonb, 'active', NOW())
+			`, identity.InstancePath); err != nil {
+				t.Fatalf("seed postgres flow instance %s: %v", identity.InstancePath, err)
+			}
+			continue
+		}
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+			VALUES (?, 'review', 'template', '{}', 'active', ?)
+		`, identity.InstancePath, time.Now().UTC()); err != nil {
+			t.Fatalf("seed sqlite flow instance %s: %v", identity.InstancePath, err)
+		}
+	}
+	ctx = seedFlowRouteTestAuthority(t, ctx, db, postgres, identities[0].InstancePath, identities[1].InstancePath)
+
+	initial := flowRouteTopologySets(identities, "initial")
+	replacement := flowRouteTopologySets(identities, "replacement")
+	if err := selected.ReplaceFlowInstanceRouteTopology(ctx, initial); err != nil {
+		t.Fatalf("seed route topology: %v", err)
+	}
+
+	removeFailure := installFlowRouteTopologySecondOwnerFailure(t, ctx, db, postgres)
+	if err := selected.ReplaceFlowInstanceRouteTopology(ctx, replacement); err == nil {
+		t.Fatal("replace route topology with second-owner failure unexpectedly succeeded")
+	}
+	removeFailure()
+	assertFlowRouteTopologySubscribers(t, ctx, selected, identities, "initial")
+
+	if err := selected.ReplaceFlowInstanceRouteTopology(ctx, replacement); err != nil {
+		t.Fatalf("commit route topology replacement: %v", err)
+	}
+	assertFlowRouteTopologySubscribers(t, ctx, selected, identities, "replacement")
+}
+
+func installFlowRouteTopologySecondOwnerFailure(t *testing.T, ctx context.Context, db *sql.DB, postgres bool) func() {
+	t.Helper()
+	if postgres {
+		if _, err := db.ExecContext(ctx, `
+			CREATE OR REPLACE FUNCTION reject_flow_route_topology_second_owner()
+			RETURNS trigger AS $$
+			BEGIN
+				IF NEW.subscriber_id = 'replacement-b' THEN
+					RAISE EXCEPTION 'reject second topology owner';
+				END IF;
+				RETURN NEW;
+			END;
+			$$ LANGUAGE plpgsql;
+			CREATE TRIGGER reject_flow_route_topology_second_owner
+			BEFORE INSERT OR UPDATE ON routing_rules
+			FOR EACH ROW EXECUTE FUNCTION reject_flow_route_topology_second_owner();
+		`); err != nil {
+			t.Fatalf("install postgres route topology failure: %v", err)
+		}
+		return func() {
+			t.Helper()
+			if _, err := db.ExecContext(ctx, `
+				DROP TRIGGER reject_flow_route_topology_second_owner ON routing_rules;
+				DROP FUNCTION reject_flow_route_topology_second_owner();
+			`); err != nil {
+				t.Fatalf("remove postgres route topology failure: %v", err)
+			}
+		}
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TRIGGER reject_flow_route_topology_second_owner
+		BEFORE INSERT ON routing_rules
+		WHEN NEW.subscriber_id = 'replacement-b'
+		BEGIN
+			SELECT RAISE(ABORT, 'reject second topology owner');
+		END
+	`); err != nil {
+		t.Fatalf("install sqlite route topology failure: %v", err)
+	}
+	return func() {
+		t.Helper()
+		if _, err := db.ExecContext(ctx, `DROP TRIGGER reject_flow_route_topology_second_owner`); err != nil {
+			t.Fatalf("remove sqlite route topology failure: %v", err)
+		}
+	}
+}
+
+func flowRouteTopologySets(identities []runtimeflowidentity.Route, subscriberPrefix string) []runtimebus.FlowInstanceRouteRecordSet {
+	sets := make([]runtimebus.FlowInstanceRouteRecordSet, 0, len(identities))
+	for index, identity := range identities {
+		sets = append(sets, runtimebus.FlowInstanceRouteRecordSet{
+			Identity: identity,
+			Routes: []runtimebus.FlowInstanceRouteRecord{{
+				Identity:       identity,
+				EventPattern:   identity.InstancePath + "/task.started",
+				SubscriberType: "node",
+				SubscriberID:   subscriberPrefix + "-" + string(rune('a'+index)),
+				SourceFlow:     identity.ScopeKey,
+			}},
+		})
+	}
+	return sets
+}
+
+func assertFlowRouteTopologySubscribers(
+	t *testing.T,
+	ctx context.Context,
+	selected flowRouteTopologyTestStore,
+	identities []runtimeflowidentity.Route,
+	wantPrefix string,
+) {
+	t.Helper()
+	for index, identity := range identities {
+		routes, err := selected.ListFlowInstanceRouteRecords(ctx, identity)
+		if err != nil {
+			t.Fatalf("list route topology owner %s: %v", identity.InstancePath, err)
+		}
+		want := wantPrefix + "-" + string(rune('a'+index))
+		if len(routes) != 1 || routes[0].SubscriberID != want {
+			t.Fatalf("route topology owner %s = %#v, want subscriber %q", identity.InstancePath, routes, want)
+		}
 	}
 }
 

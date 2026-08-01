@@ -19,6 +19,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
@@ -121,21 +122,21 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	}
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
 
-	result, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: secondEventID})
+	result, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: secondEventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
 	if result.ForkRunID == "" {
 		t.Fatal("ForkRunID is empty")
 	}
-	if result.ForkRunStatus != RunForkMaterializedStatus {
-		t.Fatalf("ForkRunStatus = %q, want %q", result.ForkRunStatus, RunForkMaterializedStatus)
+	if result.ForkRunStatus != runfork.RunForkMaterializedStatus {
+		t.Fatalf("ForkRunStatus = %q, want %q", result.ForkRunStatus, runfork.RunForkMaterializedStatus)
 	}
 	if !result.DeliveryResumeBlocked || !result.SourceRunStatusUnchanged {
 		t.Fatalf("boundary flags = resume_blocked:%v source_unchanged:%v", result.DeliveryResumeBlocked, result.SourceRunStatusUnchanged)
 	}
-	if result.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner {
-		t.Fatalf("taxonomy owner = %q, want %q", result.ReplayResumeAdmission.Owner, RunForkReplayResumeAdmissionOwner)
+	if result.ReplayResumeAdmission.Owner != runfork.RunForkReplayResumeAdmissionOwner {
+		t.Fatalf("taxonomy owner = %q, want %q", result.ReplayResumeAdmission.Owner, runfork.RunForkReplayResumeAdmissionOwner)
 	}
 	if !result.ReplayResumeAdmission.StateOnlyExecutionReady || result.ReplayResumeAdmission.BoundedReplaySupported {
 		t.Fatalf("taxonomy flags = state_only:%v bounded_supported:%v, want true/false",
@@ -331,7 +332,7 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	}
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
 
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
@@ -342,14 +343,14 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 		t.Fatalf("plan entities = %#v, want materialization metadata", plan.Entities)
 	}
 	metadata := plan.Entities[0].MaterializationMetadata
-	if metadata.Owner != RunForkMaterializedEntitySnapshotMetadataOwner ||
-		metadata.Source != RunForkMaterializedEntitySnapshotMetadataSourceEntityState ||
+	if metadata.Owner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner ||
+		metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState ||
 		metadata.FlowInstance != "state-flow/at-T" ||
 		metadata.EntityType != "validation_case" {
 		t.Fatalf("materialization metadata = %#v", metadata)
 	}
 
-	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -403,17 +404,17 @@ func TestRunForkPlanner_FailsClosedWithoutSourceAtTEntitySnapshotMetadata(t *tes
 	}
 
 	captureRunForkTestRevision(t, db, sourceRunID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
 	if plan.ExecutionReady {
 		t.Fatalf("ExecutionReady = true, want false for missing metadata")
 	}
-	if !runForkTestHasPlanBlocker(plan, RunForkBlockerEntitySnapshotMetadataUnproven) {
-		t.Fatalf("plan blockers = %#v, want %s", plan.UnsupportedBlockers, RunForkBlockerEntitySnapshotMetadataUnproven)
+	if !runForkTestHasPlanBlocker(plan, runfork.RunForkBlockerEntitySnapshotMetadataUnproven) {
+		t.Fatalf("plan blockers = %#v, want %s", plan.UnsupportedBlockers, runfork.RunForkBlockerEntitySnapshotMetadataUnproven)
 	}
-	if _, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID}); err == nil || !strings.Contains(err.Error(), RunForkBlockerEntitySnapshotMetadataUnproven) {
+	if _, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID}); err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerEntitySnapshotMetadataUnproven) {
 		t.Fatalf("MaterializeRunFork error = %v, want metadata blocker", err)
 	}
 	var forks int
@@ -448,15 +449,15 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeHasNoSourceMetadataAuthori
 	}
 
 	captureRunForkTestRevision(t, db, sourceRunID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
 	if plan.ExecutionReady {
 		t.Fatalf("ExecutionReady = true, want false for field-only entity_type authority")
 	}
-	if !runForkTestHasPlanBlocker(plan, RunForkBlockerEntitySnapshotMetadataUnproven) {
-		t.Fatalf("plan blockers = %#v, want %s", plan.UnsupportedBlockers, RunForkBlockerEntitySnapshotMetadataUnproven)
+	if !runForkTestHasPlanBlocker(plan, runfork.RunForkBlockerEntitySnapshotMetadataUnproven) {
+		t.Fatalf("plan blockers = %#v, want %s", plan.UnsupportedBlockers, runfork.RunForkBlockerEntitySnapshotMetadataUnproven)
 	}
 }
 
@@ -497,15 +498,15 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeConflictsWithSourceMetadat
 	}
 
 	captureRunForkTestRevision(t, db, sourceRunID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
 	if plan.ExecutionReady {
 		t.Fatalf("ExecutionReady = true, want false for conflicting entity_type authority")
 	}
-	if !runForkTestHasPlanBlocker(plan, RunForkBlockerEntitySnapshotMetadataUnproven) {
-		t.Fatalf("plan blockers = %#v, want %s", plan.UnsupportedBlockers, RunForkBlockerEntitySnapshotMetadataUnproven)
+	if !runForkTestHasPlanBlocker(plan, runfork.RunForkBlockerEntitySnapshotMetadataUnproven) {
+		t.Fatalf("plan blockers = %#v, want %s", plan.UnsupportedBlockers, runfork.RunForkBlockerEntitySnapshotMetadataUnproven)
 	}
 }
 
@@ -521,13 +522,13 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	selection := RunForkContractSelection{
+	selection := runfork.RunForkContractSelection{
 		Mode:            "selected_contracts",
 		ContractsRoot:   "/tmp/selected-contracts",
 		WorkflowName:    "selected-workflow",
 		WorkflowVersion: "v2",
 	}
-	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
 		SourceRunID:       sourceRunID,
 		At:                eventID,
 		ContractSelection: &selection,
@@ -538,7 +539,7 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 	if materialized.SelectedContractBinding == nil {
 		t.Fatalf("SelectedContractBinding = nil")
 	}
-	if materialized.SelectedContractBinding.Owner != RunForkSelectedContractBindingOwner ||
+	if materialized.SelectedContractBinding.Owner != runfork.RunForkSelectedContractBindingOwner ||
 		materialized.SelectedContractBinding.ForkRunID != materialized.ForkRunID ||
 		materialized.SelectedContractBinding.SourceRunID != sourceRunID ||
 		materialized.SelectedContractBinding.ForkEventID != eventID {
@@ -549,19 +550,19 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 	if err != nil {
 		t.Fatalf("RequireRunForkSelectedContractBinding: %v", err)
 	}
-	if loaded.Owner != RunForkSelectedContractBindingOwner ||
+	if loaded.Owner != runfork.RunForkSelectedContractBindingOwner ||
 		loaded.ContractSelection.ContractsRoot != selection.ContractsRoot ||
 		loaded.ContractSelection.WorkflowName != selection.WorkflowName ||
 		loaded.ContractSelection.WorkflowVersion != selection.WorkflowVersion {
 		t.Fatalf("loaded selected binding = %#v", loaded)
 	}
 
-	activated, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID, ConfirmSourceFreeze: true})
+	activated, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, ConfirmSourceFreeze: true})
 	if err != nil {
 		t.Fatalf("ActivateRunFork: %v", err)
 	}
 	if activated.SelectedContractBinding == nil ||
-		activated.SelectedContractBinding.Owner != RunForkSelectedContractBindingOwner ||
+		activated.SelectedContractBinding.Owner != runfork.RunForkSelectedContractBindingOwner ||
 		activated.SelectedContractBinding.ForkRunID != materialized.ForkRunID {
 		t.Fatalf("activated selected binding = %#v", activated.SelectedContractBinding)
 	}
@@ -592,8 +593,8 @@ func TestRunForkSelectedContractBinding_MaterializesDurableBundleHashBinding(t *
 
 	targetHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	seedStoreTestPersistedBundle(t, db, targetHash)
-	selection := RunForkContractSelection{
-		Mode:            RunForkContractSelectionModeBundleHash,
+	selection := runfork.RunForkContractSelection{
+		Mode:            runfork.RunForkContractSelectionModeBundleHash,
 		BundleHash:      targetHash,
 		WorkflowName:    "selected-workflow",
 		WorkflowVersion: "v2",
@@ -602,7 +603,7 @@ func TestRunForkSelectedContractBinding_MaterializesDurableBundleHashBinding(t *
 	if err != nil {
 		t.Fatalf("NewPersistedBundleSourceFact: %v", err)
 	}
-	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
 		SourceRunID:       sourceRunID,
 		At:                eventID,
 		BundleSourceFact:  targetSource,
@@ -615,7 +616,7 @@ func TestRunForkSelectedContractBinding_MaterializesDurableBundleHashBinding(t *
 	if err != nil {
 		t.Fatalf("RequireRunForkSelectedContractBinding: %v", err)
 	}
-	if loaded.ContractSelection.Mode != RunForkContractSelectionModeBundleHash ||
+	if loaded.ContractSelection.Mode != runfork.RunForkContractSelectionModeBundleHash ||
 		loaded.ContractSelection.BundleHash != targetHash ||
 		loaded.ContractSelection.ContractsRoot != "" ||
 		loaded.ContractSelection.WorkflowName != selection.WorkflowName ||
@@ -650,12 +651,12 @@ func TestRunForkSelectedContractBinding_FailsClosedOnMissingDuplicateAndInvalidS
 	at := time.Unix(1700000520, 0).UTC()
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
-	invalidSelection := RunForkContractSelection{
+	invalidSelection := runfork.RunForkContractSelection{
 		Mode:            "selected_contracts",
 		WorkflowName:    "selected-workflow",
 		WorkflowVersion: "v2",
 	}
-	if _, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{
+	if _, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
 		SourceRunID:       sourceRunID,
 		At:                eventID,
 		ContractSelection: &invalidSelection,
@@ -663,13 +664,13 @@ func TestRunForkSelectedContractBinding_FailsClosedOnMissingDuplicateAndInvalidS
 		t.Fatalf("MaterializeRunFork invalid selection error = %v, want contracts_root failure", err)
 	}
 
-	validSelection := RunForkContractSelection{
+	validSelection := runfork.RunForkContractSelection{
 		Mode:            "selected_contracts",
 		ContractsRoot:   "/tmp/selected-contracts",
 		WorkflowName:    "selected-workflow",
 		WorkflowVersion: "v2",
 	}
-	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
 		SourceRunID:       sourceRunID,
 		At:                eventID,
 		ContractSelection: &validSelection,
@@ -727,14 +728,14 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "in-progress-node"}, runtimedelivery.StateLaunching, nil)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	blocked, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
-	if err == nil || !strings.Contains(err.Error(), RunForkBlockerNonAgentDeliveryReplayUnsupported) {
+	blocked, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) {
 		t.Fatalf("MaterializeRunFork error = %v, want non-agent delivery blocker", err)
 	}
-	if blocked.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner || !blocked.ReplayResumeAdmission.ReplayResumeFactsPresent {
+	if blocked.ReplayResumeAdmission.Owner != runfork.RunForkReplayResumeAdmissionOwner || !blocked.ReplayResumeAdmission.ReplayResumeFactsPresent {
 		t.Fatalf("blocked taxonomy = %#v, want owner and historical replay required", blocked.ReplayResumeAdmission)
 	}
-	if !runForkTestHasDisposition(blocked.ReplayResumeAdmission, RunForkReplayResumeFactDeliveryInProgressHistory) {
+	if !runForkTestHasDisposition(blocked.ReplayResumeAdmission, runfork.RunForkReplayResumeFactDeliveryInProgressHistory) {
 		t.Fatalf("blocked taxonomy missing in-progress delivery disposition: %#v", blocked.ReplayResumeAdmission)
 	}
 	var forkCount int
@@ -752,14 +753,14 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	deletePostgresDeliveryFixturesForRun(t, ctx, db, sourceRunID)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, clearEventID, sourceRunID, "fork.delivery_cleared", events.EventProducerPlatform, "test", entityID, "", at.Add(time.Second))
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEventDeliveries)
-	if _, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID}); err == nil || !strings.Contains(err.Error(), RunForkBlockerNonAgentDeliveryReplayUnsupported) {
+	if _, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID}); err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) {
 		t.Fatalf("MaterializeRunFork original frontier after delete error = %v, want immutable non-agent delivery blocker", err)
 	}
-	first, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: clearEventID})
+	first, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: clearEventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork first: %v", err)
 	}
-	repeated, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: clearEventID})
+	repeated, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: clearEventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork exact replay: %v", err)
 	}
@@ -783,7 +784,7 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	runlifecyclefixture.CorruptPostgresOrigin(
 		t, ctx, db, first.ForkRunID, storerunlifecycle.ScenarioSetupRunOrigin(),
 	)
-	if _, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{
+	if _, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
 		SourceRunID: sourceRunID,
 		At:          clearEventID,
 	}); err == nil || !strings.Contains(err.Error(), "conflicts with persisted lifecycle state") {
@@ -803,7 +804,7 @@ func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -813,7 +814,7 @@ func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.
 	}
 	requireRunOriginHeader(t, ctx, pg, materialized.ForkRunID, forkOrigin, 0)
 	requireListedRunOrigin(t, ctx, pg, materialized.ForkRunID, forkOrigin)
-	activated, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID, ConfirmSourceFreeze: true})
+	activated, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, ConfirmSourceFreeze: true})
 	if err != nil {
 		t.Fatalf("ActivateRunFork: %v", err)
 	}
@@ -823,13 +824,13 @@ func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.
 	if !activated.ReplayResumeBlocked {
 		t.Fatal("ReplayResumeBlocked = false, want true for activation-only boundary")
 	}
-	if activated.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner || !activated.ReplayResumeAdmission.StateOnlyExecutionReady {
+	if activated.ReplayResumeAdmission.Owner != runfork.RunForkReplayResumeAdmissionOwner || !activated.ReplayResumeAdmission.StateOnlyExecutionReady {
 		t.Fatalf("activation taxonomy = %#v, want owner and state-only ready", activated.ReplayResumeAdmission)
 	}
 	if activated.SourceRunID != sourceRunID || activated.ForkRunID != materialized.ForkRunID {
 		t.Fatalf("activation lineage = %#v", activated)
 	}
-	if activated.ForkRunStatus != RunForkActivatedStatus || activated.SourceRunStatus != RunForkSourceFrozenStatus {
+	if activated.ForkRunStatus != runfork.RunForkActivatedStatus || activated.SourceRunStatus != runfork.RunForkSourceFrozenStatus {
 		t.Fatalf("activation statuses = fork:%s source:%s", activated.ForkRunStatus, activated.SourceRunStatus)
 	}
 	requireRunOriginHeader(t, ctx, pg, materialized.ForkRunID, forkOrigin, 0)
@@ -856,10 +857,10 @@ func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status: %v", err)
 	}
-	if sourceStatus != RunForkSourceFrozenStatus || !sourceEndedAt.Valid {
+	if sourceStatus != runfork.RunForkSourceFrozenStatus || !sourceEndedAt.Valid {
 		t.Fatalf("source status/ended_at = %s/%v, want forked/valid", sourceStatus, sourceEndedAt.Valid)
 	}
-	if forkStatus != RunForkActivatedStatus {
+	if forkStatus != runfork.RunForkActivatedStatus {
 		t.Fatalf("fork status = %q, want running", forkStatus)
 	}
 
@@ -934,20 +935,20 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	sourceDeliveryID := sourceDelivery.DeliveryID
 	captureRunForkTestRevision(t, db, sourceRunID)
 
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
 	if !plan.ExecutionReady || !plan.ReplayResumeAdmission.DeliveryEventReplayReady {
 		t.Fatalf("plan replay readiness = execution:%v admission:%#v", plan.ExecutionReady, plan.ReplayResumeAdmission)
 	}
-	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
-	blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
-	if err == nil || !strings.Contains(err.Error(), RunForkHistoricalReplayExecutionOwner) {
-		t.Fatalf("ActivateRunFork without historical replay owner error = %v, want %s", err, RunForkHistoricalReplayExecutionOwner)
+	blocked, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	if err == nil || !strings.Contains(err.Error(), runfork.RunForkHistoricalReplayExecutionOwner) {
+		t.Fatalf("ActivateRunFork without historical replay owner error = %v, want %s", err, runfork.RunForkHistoricalReplayExecutionOwner)
 	}
 	if blocked.Activated || blocked.SourceFrozen {
 		t.Fatalf("blocked activation mutated lifecycle: %#v", blocked)
@@ -961,7 +962,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	}
 
 	admitter := &fakeRunForkHistoricalReplayExecutionAdmitter{}
-	activated, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{
+	activated, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
 		ForkRunID:                         materialized.ForkRunID,
 		ConfirmSourceFreeze:               true,
 		HistoricalReplayExecutionAdmitter: admitter,
@@ -981,8 +982,8 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 		t.Fatalf("historical replay execution request = %#v", admitter.request)
 	}
 	if activated.HistoricalReplayExecution == nil ||
-		activated.HistoricalReplayExecution.Owner != RunForkHistoricalReplayExecutionOwner ||
-		activated.HistoricalReplayExecution.AdmissionOwner != RunForkHistoricalReplayExecutionAdmissionOwner ||
+		activated.HistoricalReplayExecution.Owner != runfork.RunForkHistoricalReplayExecutionOwner ||
+		activated.HistoricalReplayExecution.AdmissionOwner != runfork.RunForkHistoricalReplayExecutionAdmissionOwner ||
 		len(activated.HistoricalReplayExecution.DeliveryEventReplayWork) != 1 ||
 		activated.HistoricalReplayExecution.DeliveryEventReplay == nil {
 		t.Fatalf("HistoricalReplayExecution = %#v", activated.HistoricalReplayExecution)
@@ -990,7 +991,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if activated.DeliveryEventReplay == nil {
 		t.Fatalf("DeliveryEventReplay = nil, want fork-local replay result: %#v", activated)
 	}
-	if activated.DeliveryEventReplay.Owner != RunForkDeliveryEventReplayOwner ||
+	if activated.DeliveryEventReplay.Owner != runfork.RunForkDeliveryEventReplayOwner ||
 		activated.DeliveryEventReplay.ReplayedEventCount != 1 ||
 		activated.DeliveryEventReplay.ReplayedDeliveryCount != 1 {
 		t.Fatalf("DeliveryEventReplay = %#v", activated.DeliveryEventReplay)
@@ -1201,7 +1202,7 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 	for _, tc := range []struct {
 		name     string
 		seed     func(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, eventID string, at time.Time) string
-		work     func(req RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []RunForkHistoricalReplayExecutableWork
+		work     func(req runfork.RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []runfork.RunForkHistoricalReplayExecutableWork
 		wantText string
 	}{
 		{
@@ -1210,10 +1211,10 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 				t.Helper()
 				return uuid.NewString()
 			},
-			work: func(req RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []RunForkHistoricalReplayExecutableWork {
+			work: func(req runfork.RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []runfork.RunForkHistoricalReplayExecutableWork {
 				item := req.PendingWork[0]
 				item.DeliveryID = targetDeliveryID
-				return []RunForkHistoricalReplayExecutableWork{runForkHistoricalReplayWorkFromPending(item)}
+				return []runfork.RunForkHistoricalReplayExecutableWork{runForkHistoricalReplayWorkFromPending(item)}
 			},
 			wantText: "is not in current pending evidence",
 		},
@@ -1227,10 +1228,10 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 				foreignEvent := seedPostgresSemanticEventRecordFixture(t, ctx, db, foreignEventID, foreignRunID, "foreign.ready", events.EventProducerPlatform, "test", "", "", at)
 				return seedDeliveryStateFixture(t, ctx, postgresDeliveryFixtureStore(db), foreignEvent, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "foreign-agent"}, runtimedelivery.StateQueued, nil).DeliveryID
 			},
-			work: func(req RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []RunForkHistoricalReplayExecutableWork {
+			work: func(req runfork.RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []runfork.RunForkHistoricalReplayExecutableWork {
 				item := req.PendingWork[0]
 				item.DeliveryID = targetDeliveryID
-				return []RunForkHistoricalReplayExecutableWork{runForkHistoricalReplayWorkFromPending(item)}
+				return []runfork.RunForkHistoricalReplayExecutableWork{runForkHistoricalReplayWorkFromPending(item)}
 			},
 			wantText: "is not in current pending evidence",
 		},
@@ -1241,8 +1242,8 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 				event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 				return seedDeliveryStateFixture(t, ctx, postgresDeliveryFixtureStore(db), event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "done-agent"}, runtimedelivery.StateDelivered, nil).DeliveryID
 			},
-			work: func(req RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []RunForkHistoricalReplayExecutableWork {
-				return []RunForkHistoricalReplayExecutableWork{runForkHistoricalReplayWorkForDelivery(req, targetDeliveryID)}
+			work: func(req runfork.RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []runfork.RunForkHistoricalReplayExecutableWork {
+				return []runfork.RunForkHistoricalReplayExecutableWork{runForkHistoricalReplayWorkForDelivery(req, targetDeliveryID)}
 			},
 			wantText: "is not replayable pending agent work",
 		},
@@ -1252,9 +1253,9 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 				t.Helper()
 				return ""
 			},
-			work: func(req RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []RunForkHistoricalReplayExecutableWork {
+			work: func(req runfork.RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []runfork.RunForkHistoricalReplayExecutableWork {
 				item := runForkHistoricalReplayWorkFromPending(req.PendingWork[0])
-				return []RunForkHistoricalReplayExecutableWork{item, item}
+				return []runfork.RunForkHistoricalReplayExecutableWork{item, item}
 			},
 			wantText: "duplicate source delivery",
 		},
@@ -1264,10 +1265,10 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 				t.Helper()
 				return ""
 			},
-			work: func(req RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []RunForkHistoricalReplayExecutableWork {
+			work: func(req runfork.RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []runfork.RunForkHistoricalReplayExecutableWork {
 				item := runForkHistoricalReplayWorkFromPending(req.PendingWork[0])
 				item.SubscriberID = "wrong-agent"
-				return []RunForkHistoricalReplayExecutableWork{item}
+				return []runfork.RunForkHistoricalReplayExecutableWork{item}
 			},
 			wantText: "does not exactly match current pending evidence",
 		},
@@ -1287,17 +1288,17 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 			seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "safe-agent"}, runtimedelivery.StateQueued, nil)
 			targetDeliveryID := tc.seed(t, ctx, db, sourceRunID, eventID, at)
 			captureRunForkTestRevision(t, db, sourceRunID)
-			materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+			materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 			if err != nil {
 				t.Fatalf("MaterializeRunFork: %v", err)
 			}
 
 			admitter := &fakeRunForkHistoricalReplayExecutionAdmitter{
-				work: func(req RunForkHistoricalReplayExecutionRequest) []RunForkHistoricalReplayExecutableWork {
+				work: func(req runfork.RunForkHistoricalReplayExecutionRequest) []runfork.RunForkHistoricalReplayExecutableWork {
 					return tc.work(req, targetDeliveryID)
 				},
 			}
-			blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{
+			blocked, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
 				ForkRunID:                         materialized.ForkRunID,
 				HistoricalReplayExecutionAdmitter: admitter,
 			})
@@ -1313,40 +1314,40 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 }
 
 func TestRunForkDeliveryEventReplayValidationRejectsUnsafeCurrentEvidence(t *testing.T) {
-	base := RunForkPendingWork{
+	base := runfork.RunForkPendingWork{
 		EventID:        uuid.NewString(),
 		DeliveryID:     uuid.NewString(),
 		SubscriberType: "agent",
 		SubscriberID:   "safe-agent",
-		Classification: RunForkPendingClassificationPending,
+		Classification: runfork.RunForkPendingClassificationPending,
 		Status:         "pending",
 		RetryCount:     0,
 		CreatedAt:      time.Unix(1700000880, 0).UTC(),
 	}
 	for _, tc := range []struct {
 		name   string
-		mutate func(*RunForkPendingWork)
+		mutate func(*runfork.RunForkPendingWork)
 	}{
 		{
 			name: "in-progress",
-			mutate: func(item *RunForkPendingWork) {
+			mutate: func(item *runfork.RunForkPendingWork) {
 				started := item.CreatedAt
 				item.Status = "in_progress"
 				item.ActiveSessionID = uuid.NewString()
 				item.StartedAt = &started
-				item.Classification = RunForkPendingClassificationInProgress
+				item.Classification = runfork.RunForkPendingClassificationInProgress
 			},
 		},
 		{
 			name: "non-agent",
-			mutate: func(item *RunForkPendingWork) {
+			mutate: func(item *runfork.RunForkPendingWork) {
 				item.SubscriberType = "node"
 				item.SubscriberID = "node-worker"
 			},
 		},
 		{
 			name: "retry",
-			mutate: func(item *RunForkPendingWork) {
+			mutate: func(item *runfork.RunForkPendingWork) {
 				item.RetryCount = 1
 			},
 		},
@@ -1355,8 +1356,8 @@ func TestRunForkDeliveryEventReplayValidationRejectsUnsafeCurrentEvidence(t *tes
 			item := base
 			tc.mutate(&item)
 			err := validateRunForkDeliveryEventReplayWorkAgainstPlan(
-				[]RunForkPendingWork{item},
-				[]RunForkHistoricalReplayExecutableWork{runForkHistoricalReplayWorkFromPending(item)},
+				[]runfork.RunForkPendingWork{item},
+				[]runfork.RunForkHistoricalReplayExecutableWork{runForkHistoricalReplayWorkFromPending(item)},
 			)
 			if err == nil || !strings.Contains(err.Error(), "is not replayable pending agent work") {
 				t.Fatalf("validateRunForkDeliveryEventReplayWorkAgainstPlan error = %v, want unsafe pending-agent rejection", err)
@@ -1378,7 +1379,7 @@ func TestRunForkActivation_IgnoresExcludedSourceSessionColumnChanges(t *testing.
 	seedRunForkSessionProjection(t, db, sourceRunID, "generic-session-agent", sessionID, "terminated", at)
 	selectedRevision := captureRunForkTestRevision(t, db, sourceRunID)
 
-	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -1391,7 +1392,7 @@ func TestRunForkActivation_IgnoresExcludedSourceSessionColumnChanges(t *testing.
 		t.Fatalf("source revision after excluded session update = %d, want %d", afterExcluded, selectedRevision)
 	}
 
-	activation, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID, ConfirmSourceFreeze: true})
+	activation, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, ConfirmSourceFreeze: true})
 	if err != nil {
 		t.Fatalf("ActivateRunFork after excluded session update: %v", err)
 	}
@@ -1412,27 +1413,27 @@ func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	at := time.Unix(1700000900, 0).UTC()
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, afterEventID, sourceRunID, "fork.after", events.EventProducerPlatform, "test", entityID, "flow-a/1", at.Add(time.Second))
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents)
-	blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	blocked, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
 	if err == nil || !strings.Contains(err.Error(), "source_events_advanced_after_fork_point") {
 		t.Fatalf("ActivateRunFork advanced source error = %v, want source advanced blocker", err)
 	}
 	if !blocked.SourceAdvancedAfterFork || !runForkTestHasActivationBlocker(blocked, "source_events_advanced_after_fork_point") {
 		t.Fatalf("advanced-source activation result = %#v, want taxonomy-backed source advanced blocker", blocked)
 	}
-	if !runForkTestHasDisposition(blocked.ReplayResumeAdmission, RunForkReplayResumeFactSourceAdvanced) {
+	if !runForkTestHasDisposition(blocked.ReplayResumeAdmission, runfork.RunForkReplayResumeFactSourceAdvanced) {
 		t.Fatalf("advanced-source taxonomy missing source-advanced disposition: %#v", blocked.ReplayResumeAdmission)
 	}
 	var forkStatus string
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status after blocked activation: %v", err)
 	}
-	if forkStatus != RunForkMaterializedStatus {
+	if forkStatus != runfork.RunForkMaterializedStatus {
 		t.Fatalf("fork status after blocked activation = %q, want paused", forkStatus)
 	}
 
@@ -1441,14 +1442,14 @@ func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	cleanEventID := uuid.NewString()
 	seedActivationReadySourceRun(t, db, cleanSourceRunID, cleanEntityID, cleanEventID, at.Add(time.Minute))
 	captureRunForkTestRevision(t, db, cleanSourceRunID)
-	cleanMaterialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: cleanSourceRunID, At: cleanEventID})
+	cleanMaterialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: cleanSourceRunID, At: cleanEventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork clean: %v", err)
 	}
-	if _, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: cleanMaterialized.ForkRunID, ConfirmSourceFreeze: true}); err != nil {
+	if _, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: cleanMaterialized.ForkRunID, ConfirmSourceFreeze: true}); err != nil {
 		t.Fatalf("ActivateRunFork clean: %v", err)
 	}
-	_, err = pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: cleanMaterialized.ForkRunID})
+	_, err = pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: cleanMaterialized.ForkRunID})
 	if err == nil || !strings.Contains(err.Error(), "requires materialized fork status") {
 		t.Fatalf("ActivateRunFork repeat error = %v, want materialized-status failure", err)
 	}
@@ -1465,14 +1466,14 @@ func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndUsesTypedOriginLi
 	at := time.Unix(1700001000, 0).UTC()
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
 	sourceEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "blocked-node"}, runtimedelivery.StateLaunching, nil)
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEventDeliveries)
-	blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	blocked, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
 	if err == nil || !strings.Contains(err.Error(), "source_deliveries_advanced_after_fork_point") {
 		t.Fatalf("ActivateRunFork delivery advancement error = %v, want source delivery advancement blocker", err)
 	}
@@ -1510,7 +1511,7 @@ func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndUsesTypedOriginLi
 	`, orphanRunID, orphanEntityID, at); err != nil {
 		t.Fatalf("seed orphan fork entity_state: %v", err)
 	}
-	activated, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: orphanRunID, ConfirmSourceFreeze: true})
+	activated, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: orphanRunID, ConfirmSourceFreeze: true})
 	if err != nil {
 		t.Fatalf("ActivateRunFork typed-origin lineage: %v", err)
 	}
@@ -1531,20 +1532,20 @@ func TestRunForkActivation_FailsClosedForForkReplayStateWithTaxonomy(t *testing.
 	at := time.Unix(1700001050, 0).UTC()
 	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
-	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkEventID, materialized.ForkRunID, "fork.replay_state", events.EventProducerPlatform, "test", "", "", at.Add(time.Second))
 
-	blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+	blocked, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
 	if err == nil || !strings.Contains(err.Error(), "fork_events_already_exist") {
 		t.Fatalf("ActivateRunFork fork replay state error = %v, want fork event blocker", err)
 	}
 	if !runForkTestHasActivationBlocker(blocked, "fork_events_already_exist") {
 		t.Fatalf("activation blockers = %#v, want fork_events_already_exist", blocked.UnsupportedBlockers)
 	}
-	if !runForkTestHasDisposition(blocked.ReplayResumeAdmission, RunForkReplayResumeFactForkReplayState) {
+	if !runForkTestHasDisposition(blocked.ReplayResumeAdmission, runfork.RunForkReplayResumeFactForkReplayState) {
 		t.Fatalf("fork replay-state taxonomy missing disposition: %#v", blocked.ReplayResumeAdmission)
 	}
 }
@@ -1632,7 +1633,7 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 			at := time.Unix(1700001060, 0).UTC()
 			seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 			captureRunForkTestRevision(t, db, sourceRunID)
-			materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
+			materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 			if err != nil {
 				t.Fatalf("MaterializeRunFork: %v", err)
 			}
@@ -1641,14 +1642,14 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 				t.Fatalf("seed %s: %v", tc.name, err)
 			}
 
-			blocked, err := pg.ActivateRunFork(ctx, RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
+			blocked, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
 			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
 				t.Fatalf("ActivateRunFork error = %v, want %s", err, tc.wantError)
 			}
 			if !runForkTestHasActivationBlocker(blocked, tc.wantCode) {
 				t.Fatalf("activation blockers = %#v, want %s", blocked.UnsupportedBlockers, tc.wantCode)
 			}
-			if !runForkTestHasDisposition(blocked.ReplayResumeAdmission, RunForkReplayResumeFactForkReplayState) {
+			if !runForkTestHasDisposition(blocked.ReplayResumeAdmission, runfork.RunForkReplayResumeFactForkReplayState) {
 				t.Fatalf("fork replay-state taxonomy missing disposition: %#v", blocked.ReplayResumeAdmission)
 			}
 		})
@@ -1662,45 +1663,45 @@ type sqlNullTime struct {
 
 type fakeRunForkHistoricalReplayExecutionAdmitter struct {
 	called  bool
-	request RunForkHistoricalReplayExecutionRequest
+	request runfork.RunForkHistoricalReplayExecutionRequest
 	err     error
-	work    func(RunForkHistoricalReplayExecutionRequest) []RunForkHistoricalReplayExecutableWork
+	work    func(runfork.RunForkHistoricalReplayExecutionRequest) []runfork.RunForkHistoricalReplayExecutableWork
 }
 
-func (a *fakeRunForkHistoricalReplayExecutionAdmitter) AdmitRunForkHistoricalReplayExecution(_ context.Context, req RunForkHistoricalReplayExecutionRequest) (RunForkHistoricalReplayExecution, error) {
+func (a *fakeRunForkHistoricalReplayExecutionAdmitter) AdmitRunForkHistoricalReplayExecution(_ context.Context, req runfork.RunForkHistoricalReplayExecutionRequest) (runfork.RunForkHistoricalReplayExecution, error) {
 	a.called = true
 	a.request = req
 	if a.err != nil {
-		return RunForkHistoricalReplayExecution{}, a.err
+		return runfork.RunForkHistoricalReplayExecution{}, a.err
 	}
-	deliveryEventReplayWork := []RunForkHistoricalReplayExecutableWork{
+	deliveryEventReplayWork := []runfork.RunForkHistoricalReplayExecutableWork{
 		runForkHistoricalReplayWorkFromPending(req.PendingWork[0]),
 	}
 	if a.work != nil {
 		deliveryEventReplayWork = a.work(req)
 	}
-	return RunForkHistoricalReplayExecution{
-		Owner:                      RunForkHistoricalReplayExecutionOwner,
-		AdmissionOwner:             RunForkHistoricalReplayExecutionAdmissionOwner,
+	return runfork.RunForkHistoricalReplayExecution{
+		Owner:                      runfork.RunForkHistoricalReplayExecutionOwner,
+		AdmissionOwner:             runfork.RunForkHistoricalReplayExecutionAdmissionOwner,
 		ReplayResumeAdmissionOwner: req.ReplayResumeAdmission.Owner,
 		ForkRunID:                  req.ForkRunID,
 		SourceRunID:                req.SourceRunID,
 		ForkEventID:                req.ForkEventID,
 		ClosureLevel:               "canonical_owner_promotion_with_delivery_event_replay_ready_only",
 		DeliveryEventReplayReady:   true,
-		EventDeliveriesAdmission: RunForkHistoricalReplayFactAdmission{
-			Fact:        RunForkHistoricalReplayFactEventDeliveries,
-			Admission:   RunForkHistoricalReplayAdmissionExecutableForkWork,
-			SourceOwner: RunForkReplayResumeAdmissionOwner,
+		EventDeliveriesAdmission: runfork.RunForkHistoricalReplayFactAdmission{
+			Fact:        runfork.RunForkHistoricalReplayFactEventDeliveries,
+			Admission:   runfork.RunForkHistoricalReplayAdmissionExecutableForkWork,
+			SourceOwner: runfork.RunForkReplayResumeAdmissionOwner,
 			Message:     "test admission",
 		},
 		DeliveryEventReplayWork: deliveryEventReplayWork,
 	}, nil
 }
 
-func runForkHistoricalReplayWorkFromPending(item RunForkPendingWork) RunForkHistoricalReplayExecutableWork {
-	return RunForkHistoricalReplayExecutableWork{
-		Fact:             RunForkHistoricalReplayFactEventDeliveries,
+func runForkHistoricalReplayWorkFromPending(item runfork.RunForkPendingWork) runfork.RunForkHistoricalReplayExecutableWork {
+	return runfork.RunForkHistoricalReplayExecutableWork{
+		Fact:             runfork.RunForkHistoricalReplayFactEventDeliveries,
 		SourceEventID:    item.EventID,
 		SourceDeliveryID: item.DeliveryID,
 		SubscriberType:   item.SubscriberType,
@@ -1710,14 +1711,14 @@ func runForkHistoricalReplayWorkFromPending(item RunForkPendingWork) RunForkHist
 	}
 }
 
-func runForkHistoricalReplayWorkForDelivery(req RunForkHistoricalReplayExecutionRequest, deliveryID string) RunForkHistoricalReplayExecutableWork {
+func runForkHistoricalReplayWorkForDelivery(req runfork.RunForkHistoricalReplayExecutionRequest, deliveryID string) runfork.RunForkHistoricalReplayExecutableWork {
 	for _, item := range req.PendingWork {
 		if item.DeliveryID == deliveryID {
 			return runForkHistoricalReplayWorkFromPending(item)
 		}
 	}
-	return RunForkHistoricalReplayExecutableWork{
-		Fact:             RunForkHistoricalReplayFactEventDeliveries,
+	return runfork.RunForkHistoricalReplayExecutableWork{
+		Fact:             runfork.RunForkHistoricalReplayFactEventDeliveries,
 		SourceEventID:    req.PendingWork[0].EventID,
 		SourceDeliveryID: deliveryID,
 		SubscriberType:   req.PendingWork[0].SubscriberType,
@@ -1737,8 +1738,8 @@ func assertRunForkActivationReplayMutationAbsent(t *testing.T, db *sql.DB, sourc
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, forkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status after blocked activation: %v", err)
 	}
-	if sourceStatus != "running" || forkStatus != RunForkMaterializedStatus {
-		t.Fatalf("blocked activation lifecycle = source:%s fork:%s, want running/%s", sourceStatus, forkStatus, RunForkMaterializedStatus)
+	if sourceStatus != "running" || forkStatus != runfork.RunForkMaterializedStatus {
+		t.Fatalf("blocked activation lifecycle = source:%s fork:%s, want running/%s", sourceStatus, forkStatus, runfork.RunForkMaterializedStatus)
 	}
 	for name, query := range map[string]string{
 		"fork events":     `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`,
@@ -1804,7 +1805,7 @@ func seedActivationReadySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityI
 	}
 }
 
-func runForkTestHasActivationBlocker(result RunForkActivation, code string) bool {
+func runForkTestHasActivationBlocker(result runfork.RunForkActivation, code string) bool {
 	for _, blocker := range result.UnsupportedBlockers {
 		if blocker.Code == code {
 			return true

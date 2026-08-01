@@ -17,7 +17,7 @@ type GateDecisionFence interface {
 	CommitDecision(context.Context, decisioncard.Card, string, time.Time) error
 }
 
-func (s *WorkflowInstanceStore) CommitDecision(ctx context.Context, card decisioncard.Card, eventID string, now time.Time) error {
+func (s *workflowInstanceStore) CommitDecision(ctx context.Context, card decisioncard.Card, eventID string, now time.Time) error {
 	switch card.Anchor.Kind() {
 	case decisioncard.AnchorKindStageGate:
 		return s.commitGateDecision(ctx, card, eventID, now)
@@ -28,15 +28,15 @@ func (s *WorkflowInstanceStore) CommitDecision(ctx context.Context, card decisio
 	}
 }
 
-func (s *WorkflowInstanceStore) commitGateDecision(ctx context.Context, card decisioncard.Card, eventID string, now time.Time) error {
-	if s == nil || !s.Enabled() {
+func (s *workflowInstanceStore) commitGateDecision(ctx context.Context, card decisioncard.Card, eventID string, now time.Time) error {
+	if s == nil || !s.enabled() {
 		return fmt.Errorf("workflow instance store is required for gate decision")
 	}
 	anchor, err := card.Anchor.StageGate()
 	if err != nil {
 		return err
 	}
-	return s.MutateE(ctx, anchor.EntityID, func(instance *WorkflowInstance) error {
+	return s.mutateE(ctx, anchor.EntityID, func(instance *WorkflowInstance) error {
 		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 		if err != nil {
 			return err
@@ -59,8 +59,8 @@ func (s *WorkflowInstanceStore) commitGateDecision(ctx context.Context, card dec
 	})
 }
 
-func (s *WorkflowInstanceStore) RequireGateRouteAdmitted(ctx context.Context, runID string) error {
-	if s == nil || !s.Enabled() {
+func (s *workflowInstanceStore) RequireGateRouteAdmitted(ctx context.Context, runID string) error {
+	if s == nil || !s.enabled() {
 		return fmt.Errorf("workflow instance store is required for gate routing")
 	}
 	runID = strings.TrimSpace(runID)

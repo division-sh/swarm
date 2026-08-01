@@ -309,6 +309,69 @@ func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteRecords(
 	})
 }
 
+func (s *PostgresStore) ReplaceFlowInstanceRouteTopology(
+	ctx context.Context,
+	sets []runtimebus.FlowInstanceRouteRecordSet,
+) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("postgres store is required for flow-instance route topology")
+	}
+	sets, err := normalizeFlowInstanceRouteTopology(sets)
+	if err != nil {
+		return err
+	}
+	return s.runAuthorActivityMutation(ctx, "postgres flow-instance route topology replacement", func(txctx context.Context, _ *sql.Tx) error {
+		for _, set := range sets {
+			if err := s.ReplaceFlowInstanceRouteRecords(txctx, set.Identity, set.Routes); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteTopology(
+	ctx context.Context,
+	sets []runtimebus.FlowInstanceRouteRecordSet,
+) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("sqlite runtime store is required for flow-instance route topology")
+	}
+	sets, err := normalizeFlowInstanceRouteTopology(sets)
+	if err != nil {
+		return err
+	}
+	return s.runAuthorActivityMutation(ctx, "sqlite flow-instance route topology replacement", func(txctx context.Context, _ *sql.Tx) error {
+		for _, set := range sets {
+			if err := s.ReplaceFlowInstanceRouteRecords(txctx, set.Identity, set.Routes); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func normalizeFlowInstanceRouteTopology(sets []runtimebus.FlowInstanceRouteRecordSet) ([]runtimebus.FlowInstanceRouteRecordSet, error) {
+	normalized := make([]runtimebus.FlowInstanceRouteRecordSet, 0, len(sets))
+	seen := make(map[runtimeflowidentity.Route]struct{}, len(sets))
+	for _, set := range sets {
+		identity := runtimeflowidentity.StoredRoute(set.Identity.ScopeKey, set.Identity.InstanceID, set.Identity.InstancePath)
+		if !identity.Valid() {
+			return nil, fmt.Errorf("flow-instance route topology requires an exact owner")
+		}
+		if _, exists := seen[identity]; exists {
+			return nil, fmt.Errorf("flow-instance route topology repeats owner %s", identity.InstancePath)
+		}
+		seen[identity] = struct{}{}
+		routes, err := normalizeFlowInstanceRouteSet(identity, set.Routes)
+		if err != nil {
+			return nil, err
+		}
+		normalized = append(normalized, runtimebus.FlowInstanceRouteRecordSet{Identity: identity, Routes: routes})
+	}
+	return normalized, nil
+}
+
 func normalizeFlowInstanceRouteSet(
 	identity runtimeflowidentity.Route,
 	routes []runtimebus.FlowInstanceRouteRecord,

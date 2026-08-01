@@ -51,7 +51,7 @@ func New() *Harness {
 func (h *Harness) Context(identity string) context.Context {
 	ctx := runtimeeffects.WithLifecycleToken(context.Background(), h.Token)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
-	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewCompletionController(h, h))
+	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewCompletionController(h, h, h, h))
 	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, h.Token.AgentID, h.Token.Generation, "", "effect-test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 	if err != nil {
 		panic(err)

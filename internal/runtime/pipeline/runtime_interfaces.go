@@ -3,10 +3,8 @@ package pipeline
 import (
 	"context"
 	"strings"
-	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -22,7 +20,6 @@ type WorkflowRuntime interface {
 	SemanticSource() semanticview.Source
 	WorkflowDefinition() *WorkflowDefinition
 	WorkflowNodes() []WorkflowNode
-	WorkflowInstanceStore() WorkflowInstancePersistence
 	TransitionEvaluator() TransitionEvaluator
 	GuardRegistry() GuardRegistry
 	ActionRegistry() ActionRegistry
@@ -50,34 +47,6 @@ type SubscriptionReadyBackgroundNode interface {
 
 type BackgroundWorkflowExecutorProvider interface {
 	BackgroundWorkflowExecutor() WorkflowNodeExecutor
-}
-
-type WorkflowInstancePersistence interface {
-	Enabled() bool
-	Load(ctx context.Context, instanceID string) (WorkflowInstance, bool, error)
-	LoadRouteRecoveryProjection(ctx context.Context, route runtimeflowidentity.Route) (WorkflowInstanceRouteRecoveryProjection, error)
-	List(ctx context.Context) ([]WorkflowInstance, error)
-	SelectActiveByFields(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error)
-	Create(ctx context.Context, instance WorkflowInstance) error
-	MaterializeInitialEntry(ctx context.Context, instance WorkflowInstance, occurredAt time.Time) (WorkflowInitialMaterializationResult, error)
-	ArmInitialEntryTimers(ctx context.Context, instanceID string) error
-	ReconcileInitialEntryTimers(ctx context.Context, instanceID string) error
-	RetireInitialEntryTimerWakeups(ctx context.Context, instanceID string) error
-	ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error)
-	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID, instanceID string) (DynamicFlowRuntimeReadiness, bool, error)
-	ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error)
-	ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error)
-	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error
-	CommitDynamicFlowRuntimeCreationOccurrence(context.Context, DynamicFlowRuntimeCreationOccurrenceRequest, DynamicFlowRuntimeCreationOccurrencePublisher) error
-	Upsert(ctx context.Context, instance WorkflowInstance) error
-	MarkTerminated(ctx context.Context, instanceID string, terminatedAt time.Time) error
-	Mutate(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error
-	Delete(ctx context.Context, instanceID string) error
-}
-
-type Store interface {
-	WorkflowInstancePersistence
-	RunPipelineMutation(ctx context.Context, fn func(context.Context) error) error
 }
 
 type TransitionEvaluator interface {
@@ -118,13 +87,6 @@ func (pc *PipelineCoordinator) WorkflowNodes() []WorkflowNode {
 		return nil
 	}
 	return pc.module.WorkflowNodes()
-}
-
-func (pc *PipelineCoordinator) WorkflowInstanceStore() WorkflowInstancePersistence {
-	if pc == nil {
-		return nil
-	}
-	return pc.workflowStore
 }
 
 func (pc *PipelineCoordinator) TransitionEvaluator() TransitionEvaluator {

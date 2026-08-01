@@ -8,8 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
 const (
@@ -25,7 +26,7 @@ func TestOperatorRunForkHandlersUseAvailabilityAndSelectedExecutor(t *testing.T)
 		result: RunForkExecutionResult{
 			Owner:              "runtime.run_fork.selected_contract_execution",
 			SourceRunID:        runForkTestSourceRunID,
-			SourceRunStatus:    store.RunForkSourceFrozenStatus,
+			SourceRunStatus:    runfork.RunForkSourceFrozenStatus,
 			SourceFrozen:       true,
 			ForkRunID:          runForkTestForkRunID,
 			ForkEventID:        runForkTestEventID,
@@ -47,7 +48,7 @@ func TestOperatorRunForkHandlersUseAvailabilityAndSelectedExecutor(t *testing.T)
 	if result["fork_run_id"] != runForkTestForkRunID || result["source_run_id"] != runForkTestSourceRunID {
 		t.Fatalf("run.fork result = %#v", result)
 	}
-	if result["source_run_status"] != store.RunForkSourceFrozenStatus || result["source_frozen"] != true {
+	if result["source_run_status"] != runfork.RunForkSourceFrozenStatus || result["source_frozen"] != true {
 		t.Fatalf("run.fork source outcome = %#v, want frozen/forked", result)
 	}
 	if result["bundle_hash"] != runForkTestBundleHash {
@@ -107,7 +108,7 @@ func TestValidateRunForkExecutionResultRejectsContradictorySourceOutcome(t *test
 	for _, result := range []RunForkExecutionResult{
 		{SourceRunStatus: "", SourceFrozen: false},
 		{SourceRunStatus: "running", SourceFrozen: true},
-		{SourceRunStatus: store.RunForkSourceFrozenStatus, SourceFrozen: false},
+		{SourceRunStatus: runfork.RunForkSourceFrozenStatus, SourceFrozen: false},
 	} {
 		if err := validateRunForkExecutionResult(result); err == nil {
 			t.Fatalf("validateRunForkExecutionResult(%#v) error = nil", result)

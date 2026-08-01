@@ -91,7 +91,7 @@ func proveSelectedCurrentAuthorityTransition(t *testing.T, sqlite bool) {
 	providerAuthority := authority
 	providerAuthority.Target = selectedAgentTurnTarget(fixture.forkRun)
 	providerCtx := runtimeeffects.WithLogicalOperationIdentity(
-		runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, providerAuthority), runtimeeffects.NewController(fixture.store)),
+		runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, providerAuthority), newCompletionControllerForTest(fixture.store)),
 		"review:selected-live-attempt",
 	)
 	providerCtx = withManagedCompletionTestSurface(t, providerCtx, providerAuthority, "anthropic_api")
@@ -175,7 +175,7 @@ func proveClaudeRetryGenerationAuthority(t *testing.T, sqlite bool) {
 	nextAuthority.FenceGeneration = 2
 	nextAuthority.Target.ID = uuid.NewString()
 	nextCtx := runtimeeffects.WithLogicalOperationIdentity(
-		runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), nextAuthority), runtimeeffects.NewController(fixture.store)),
+		runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), nextAuthority), newCompletionControllerForTest(fixture.store)),
 		logicalID,
 	)
 	nextCtx = withManagedCompletionTestSurface(t, nextCtx, nextAuthority, "claude_cli")
@@ -211,7 +211,7 @@ func proveCommittedCompletionBudgetProjection(t *testing.T, sqlite bool) {
 	fixture := newCompletionReviewFixture(t, sqlite)
 	projection := &completionProjectionCapture{}
 	ctx := runtimeeffects.WithLogicalOperationIdentity(
-		runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), fixture.authority), runtimeeffects.NewCompletionController(fixture.store, projection)),
+		runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), fixture.authority), runtimeeffects.NewCompletionController(fixture.store, fixture.store, fixture.store, projection)),
 		"review:budget-projection",
 	)
 	handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "budget-projection")

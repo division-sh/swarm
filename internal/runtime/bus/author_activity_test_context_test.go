@@ -87,6 +87,9 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 			opts.PipelineObligations = provider.PipelineObligations()
 		}
 	}
+	if opts.PipelineObligations != nil {
+		opts.Durable = ExactDurableTestDependencies(store)
+	}
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	}

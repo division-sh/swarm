@@ -63,7 +63,7 @@ func newWorkflowInitialMaterializationProjection(
 	return projection, nil
 }
 
-func (s *WorkflowInstanceStore) insertWorkflowInitialMaterializationProjection(
+func (s *workflowInstanceStore) insertWorkflowInitialMaterializationProjection(
 	ctx context.Context,
 	projection workflowInitialMaterializationProjection,
 ) error {
@@ -94,7 +94,7 @@ func (s *WorkflowInstanceStore) insertWorkflowInitialMaterializationProjection(
 	return nil
 }
 
-func (s *WorkflowInstanceStore) workflowInitialMaterializationProjectionEqual(
+func (s *workflowInstanceStore) workflowInitialMaterializationProjectionEqual(
 	ctx context.Context,
 	expected workflowInitialMaterializationProjection,
 ) (bool, error) {
@@ -116,23 +116,38 @@ func (s *WorkflowInstanceStore) workflowInitialMaterializationProjectionEqual(
 		projectionVersion int
 		raw               []byte
 		occurredAt        time.Time
+		occurredAtRaw     any
 	)
 	tx, ok := sqlTxFromContext(ctx)
 	if !ok || tx == nil {
 		return false, fmt.Errorf("workflow initial materialization comparison requires selected mutation")
+	}
+	occurredAtDestination := any(&occurredAt)
+	if s.isSQLite() {
+		occurredAtDestination = &occurredAtRaw
 	}
 	err := tx.QueryRowContext(ctx, query, expected.RunID, expected.EntityID).Scan(
 		&entityID,
 		&instanceID,
 		&projectionVersion,
 		&raw,
-		&occurredAt,
+		occurredAtDestination,
 	)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("load workflow initial materialization %s: %w", expected.FlowInstance, err)
+	}
+	if s.isSQLite() {
+		var ok bool
+		occurredAt, ok, err = sqliteWorkflowTimeValue(occurredAtRaw)
+		if err != nil {
+			return false, fmt.Errorf("decode workflow initial materialization occurrence %s: %w", expected.FlowInstance, err)
+		}
+		if !ok {
+			return false, fmt.Errorf("workflow initial materialization %s has no occurrence time", expected.FlowInstance)
+		}
 	}
 	admitted, err := canonicaljson.Decode(raw)
 	if err != nil {

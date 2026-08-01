@@ -44,15 +44,13 @@ import (
 )
 
 type notifyAllChildrenStore interface {
-	runtimebus.EventStore
-	runtimedelivery.Store
+	conformanceDurableEventBusStore
 	runtimemanager.ManagerPersistence
 	runtimemanager.AgentLifecyclePersistence
 	runtimemanager.AgentLifecycleStateReader
 	ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error)
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 	ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.Route) ([]runtimebus.FlowInstanceRouteRecord, error)
-	PipelineObligations() runtimepipelineobligation.Store
 }
 
 type lifecycleTransitionRecordingStore interface {
@@ -120,6 +118,20 @@ func (s *failingNotifyAllChildrenPostgresStore) ReplaceFlowInstanceRouteRecords(
 	return s.PostgresStore.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
 }
 
+func (s *failingNotifyAllChildrenPostgresStore) ReplaceFlowInstanceRouteTopology(
+	ctx context.Context,
+	sets []runtimebus.FlowInstanceRouteRecordSet,
+) error {
+	if s.failNextRouteReplacement.Swap(false) {
+		s.transientRouteFailures.Add(1)
+		return fmt.Errorf("injected transient postgres exact route replacement failure")
+	}
+	if s.failExactRouteReplacement.Load() {
+		return fmt.Errorf("injected postgres exact route replacement failure")
+	}
+	return s.PostgresStore.ReplaceFlowInstanceRouteTopology(ctx, sets)
+}
+
 type failingNotifyAllChildrenSQLiteStore struct {
 	*store.SQLiteRuntimeStore
 	lifecycle                 lifecycleTransitionRecorder
@@ -158,12 +170,25 @@ func (s *failingNotifyAllChildrenSQLiteStore) ReplaceFlowInstanceRouteRecords(
 	return s.SQLiteRuntimeStore.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
 }
 
+func (s *failingNotifyAllChildrenSQLiteStore) ReplaceFlowInstanceRouteTopology(
+	ctx context.Context,
+	sets []runtimebus.FlowInstanceRouteRecordSet,
+) error {
+	if s.failNextRouteReplacement.Swap(false) {
+		s.transientRouteFailures.Add(1)
+		return fmt.Errorf("injected transient sqlite exact route replacement failure")
+	}
+	if s.failExactRouteReplacement.Load() {
+		return fmt.Errorf("injected sqlite exact route replacement failure")
+	}
+	return s.SQLiteRuntimeStore.ReplaceFlowInstanceRouteTopology(ctx, sets)
+}
+
 type notifyAllChildrenRuntime struct {
 	bus         *runtimebus.EventBus
 	diagnostics *fanInBarrierDiagnosticBus
 	manager     *runtimemanager.AgentManager
 	pipeline    *runtimepipeline.PipelineCoordinator
-	workflow    *runtimepipeline.WorkflowInstanceStore
 	workOwner   *worklifetime.RuntimeOccurrence
 }
 
@@ -348,7 +373,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if _, err := runtimeV1.manager.HydrateForStartup(ctx); err != nil {
 		t.Fatalf("finalize v1 readiness through startup owner: %v", err)
 	}
-	initialReadiness := waitNotifyAllChildrenRuntimeReadiness(t, ctx, runtimeV1.workflow, runID, descriptor.FlowInstance)
+	initialReadiness := waitNotifyAllChildrenRuntimeReadiness(t, ctx, runtimeV1.pipeline, runID, descriptor.FlowInstance)
 	if got := !initialReadiness.CreationEventEmittedAt.IsZero(); got != autoEmit {
 		t.Fatalf("initial creation completion = %t, want %t", got, autoEmit)
 	}
@@ -387,9 +412,9 @@ func proveDynamicFlowSourceRevisionConvergence(
 	go func() {
 		defer mutations.Done()
 		<-start
-		sourceRevisionErr <- runtimeV2.workflow.RunPipelineMutation(reconcileCtx, func(txctx context.Context) error {
-			return runtimeV2.manager.ReconcileDynamicFlowRuntimeReadinessPlansForRun(txctx, time.Now().UTC())
-		})
+		sourceRevisionErr <- runtimeV2.pipeline.CommitDynamicFlowRuntimeReadinessReconciliation(
+			reconcileCtx, time.Now().UTC(), runtimeV2.manager,
+		)
 	}()
 	go func() {
 		defer mutations.Done()
@@ -439,7 +464,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 			t.Fatal("generic dynamic-agent mutation bypassed readiness-owned desired topology")
 		}
 	}
-	revisedReadiness := waitNotifyAllChildrenRuntimeReadiness(t, ctx, runtimeV2.workflow, runID, descriptor.FlowInstance)
+	revisedReadiness := waitNotifyAllChildrenRuntimeReadiness(t, ctx, runtimeV2.pipeline, runID, descriptor.FlowInstance)
 	if failures := transientRouteFailures(); failures != 1 {
 		t.Fatalf("transient revised-route failures = %d, want exactly one automatic-retry trigger", failures)
 	}
@@ -572,15 +597,14 @@ func proveDynamicFlowSourceRevisionConvergence(
 		t.Fatalf("run v3 manager: %v", err)
 	}
 	failNextRouteReplacement()
-	if err := runtimeV4.workflow.RunPipelineMutation(
+	if err := runtimeV4.pipeline.CommitDynamicFlowRuntimeReadinessReconciliation(
 		worklifetime.WithOccurrence(ctx, runtimeV4.workOwner),
-		func(txctx context.Context) error {
-			return runtimeV4.manager.ReconcileDynamicFlowRuntimeReadinessPlansForRun(txctx, time.Now().UTC())
-		},
+		time.Now().UTC(),
+		runtimeV4.manager,
 	); err != nil {
 		t.Fatalf("reconcile reintroduced source: %v", err)
 	}
-	waitNotifyAllChildrenRuntimeReadiness(t, ctx, runtimeV4.workflow, runID, descriptor.FlowInstance)
+	waitNotifyAllChildrenRuntimeReadiness(t, ctx, runtimeV4.pipeline, runID, descriptor.FlowInstance)
 	if failures := transientRouteFailures(); failures != 2 {
 		t.Fatalf("transient revised-route failures = %d, want one per revised source", failures)
 	}
@@ -812,7 +836,7 @@ func snapshotNotifyAllChildrenTopology(
 	descriptor runtimebus.ActiveFlowInstanceDescriptor,
 ) notifyAllChildrenTopologySnapshot {
 	t.Helper()
-	readiness, found, err := runtime.workflow.LoadDynamicFlowRuntimeReadiness(ctx, runID, descriptor.FlowInstance)
+	readiness, found, err := runtime.pipeline.LoadDynamicFlowRuntimeReadiness(ctx, runID, descriptor.FlowInstance)
 	if err != nil || !found {
 		t.Fatalf("snapshot readiness: readiness=%#v found=%t err=%v", readiness, found, err)
 	}
@@ -1348,7 +1372,7 @@ func newNotifyAllChildrenRuntime(
 	var coordinator *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
 	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
-	eventBus, err := newScopedTestEventBus(t, backend, runtimebus.EventBusOptions{
+	eventBus, err := newScopedTestEventBus(t, backend, durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		WorkOwner:      workOwner,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
@@ -1363,7 +1387,7 @@ func newNotifyAllChildrenRuntime(
 			}
 			return manager.ActivateFlowInstance(ctx, req)
 		},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1393,6 +1417,14 @@ func newNotifyAllChildrenRuntime(
 		if !ok {
 			t.Fatalf("notify-all-children store %T does not implement completion effect persistence", backend)
 		}
+		completionStore, ok := backend.(runtimeeffects.CompletionStore)
+		if !ok {
+			t.Fatalf("notify-all-children store %T does not implement completion settlement persistence", backend)
+		}
+		heartbeatStore, ok := backend.(runtimeeffects.CompletionHeartbeatStore)
+		if !ok {
+			t.Fatalf("notify-all-children store %T does not implement completion heartbeat persistence", backend)
+		}
 		conversations, ok := backend.(runtimellm.ConversationPersistence)
 		if !ok {
 			t.Fatalf("notify-all-children store %T does not implement conversation persistence", backend)
@@ -1407,7 +1439,7 @@ func newNotifyAllChildrenRuntime(
 			"notify-all-children-conformance",
 			conversations,
 			eventBus,
-			runtimeeffects.NewCompletionController(effectStore, discardCompletionSpendProjection{}),
+			runtimeeffects.NewCompletionController(effectStore, completionStore, heartbeatStore, discardCompletionSpendProjection{}),
 		)
 		authority := runtimeauthority.NewSourceProvider(source)
 		emitRegistry := runtimetools.NewEmitRegistry(source, authority)
@@ -1429,25 +1461,13 @@ func newNotifyAllChildrenRuntime(
 		}
 		llmBackend = llmselection.BackendMock
 	}
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, backend)
 	switch sqliteStore := backend.(type) {
 	case *store.SQLiteRuntimeStore:
-		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, sqliteStore)
+		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, sqliteStore)
 	case *failingNotifyAllChildrenSQLiteStore:
-		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, sqliteStore)
+		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, sqliteStore)
 	}
-	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, agentFactory, runtimemanager.AgentManagerOptions{
-		BaseContext:       testAuthorActivityContext(context.Background()),
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
-		WorkflowInstances: workflowStore,
-		WorkOwner:         workOwner,
-		DeliveryStore:     backend,
-		LifecycleStore:    backend,
-		SemanticSource:    source,
-		PromptResolver:    promptResolver,
-		Sessions:          sessionStore,
-		LLMBackend:        llmBackend,
-	}, backend))
 	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
 	if err != nil {
 		t.Fatalf("LoadWorkflowDefinition: %v", err)
@@ -1465,17 +1485,45 @@ func newNotifyAllChildrenRuntime(
 	}
 	diagnosticBus := &fanInBarrierDiagnosticBus{EventBus: eventBus}
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(diagnosticBus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:              module,
-		InstanceActivator:   manager.ActivateFlowInstance,
-		InstanceDeactivator: manager.DeactivateFlowInstanceModel,
-		WorkflowStore:       workflowStore,
-		DeliveryStore:       backend,
-		TestEngineEmitNow:   engineNow,
-		WorkOwner:           workOwner,
+		Module: module,
+		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+			if manager == nil {
+				return fmt.Errorf("agent manager is not initialized")
+			}
+			return manager.ActivateFlowInstance(ctx, req)
+		},
+		InstanceDeactivator: func(ctx context.Context, req runtimepipeline.FlowInstanceDeactivationRequest) error {
+			if manager == nil {
+				return fmt.Errorf("agent manager is not initialized")
+			}
+			return manager.DeactivateFlowInstanceModel(ctx, req)
+		},
+		Persistence:           workflowPersistence,
+		RunLifecycle:          backend,
+		PipelineObligations:   backend.PipelineObligations(),
+		DeliveryStore:         backend,
+		DeliveryRuntime:       eventBus,
+		PinRoutingDescriptors: eventBus,
+		FlowRoutes:            eventBus,
+		TestEngineEmitNow:     engineNow,
+		WorkOwner:             workOwner,
 	})
+	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, agentFactory, runtimemanager.AgentManagerOptions{
+		BaseContext:       testAuthorActivityContext(context.Background()),
+		BundleSourceFact:  authorActivityTestBundleSourceFact,
+		WorkflowInstances: coordinator,
+		WorkOwner:         workOwner,
+		DeliveryStore:     backend,
+		LifecycleStore:    backend,
+		SemanticSource:    source,
+		PromptResolver:    promptResolver,
+		Sessions:          sessionStore,
+		LLMBackend:        llmBackend,
+		PersistenceRoles:  conformanceManagerPersistenceRoles(backend, eventBus, coordinator),
+	}, backend))
 	return notifyAllChildrenRuntime{
 		bus: eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator,
-		workflow: workflowStore, workOwner: workOwner,
+		workOwner: workOwner,
 	}
 }
 
@@ -1534,7 +1582,7 @@ func assertNotifyAllChildrenConcreteAgentSet(
 func waitNotifyAllChildrenRuntimeReadiness(
 	t testing.TB,
 	ctx context.Context,
-	workflow *runtimepipeline.WorkflowInstanceStore,
+	workflow *runtimepipeline.PipelineCoordinator,
 	runID string,
 	instancePath string,
 ) runtimepipeline.DynamicFlowRuntimeReadiness {

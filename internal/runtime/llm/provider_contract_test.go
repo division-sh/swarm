@@ -106,6 +106,7 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.backend, func(t *testing.T) {
 			harness := effecttest.New()
+			registry := sessions.NewInMemoryRegistry(0)
 			cfg := &config.Config{
 				LLM: config.LLMConfig{
 					Backend: tt.backend,
@@ -117,7 +118,9 @@ func TestRuntimeFactoryValidatesProviderContract(t *testing.T) {
 			}
 			runtime, err := RuntimeFactory{
 				Cfg:                  cfg,
-				CompletionController: runtimeeffects.NewCompletionController(harness, harness),
+				Sessions:             registry,
+				LiveSessions:         NewTransientLiveSessionAcquirer(registry),
+				CompletionController: runtimeeffects.NewCompletionController(harness, harness, harness, harness),
 			}.Build()
 			if err != nil {
 				t.Fatalf("Build: %v", err)
@@ -139,7 +142,7 @@ func TestRuntimeFactoryRejectsRetiredRuntimeMode(t *testing.T) {
 		Cfg: &config.Config{
 			LLM: config.LLMConfig{RuntimeMode: "cli_test"},
 		},
-		CompletionController: runtimeeffects.NewCompletionController(harness, harness),
+		CompletionController: runtimeeffects.NewCompletionController(harness, harness, harness, harness),
 	}.Build()
 	if err == nil || !strings.Contains(err.Error(), "llm.runtime_mode is retired") {
 		t.Fatalf("Build error = %v, want retired runtime mode rejection", err)

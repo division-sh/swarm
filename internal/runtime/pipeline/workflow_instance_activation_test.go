@@ -89,18 +89,18 @@ func (*concurrentWorkflowInitialMaterializationTestOwner) RetireInitialEntryTime
 func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffectsSQLitePostgres(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T) (*WorkflowInstanceStore, context.Context)
+		setup func(*testing.T) (*workflowInstanceStore, context.Context)
 	}{
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+			setup: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 				db := newSQLiteWorkflowInstanceStoreTestDB(t)
 				return newSQLiteWorkflowInstanceStoreForTest(t, db), sqliteExactOnceRunContext(t, db)
 			},
 		},
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+			setup: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				return newPostgresWorkflowInstanceStoreForTest(db), testPipelineRunContext(t, db)
@@ -110,7 +110,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.setup(t)
 			owner := &workflowInitialMaterializationTestOwner{}
-			store.ConfigureWorkflowInstanceLifecycle(owner)
+			store.lifecycleOwner = owner
 			occurredAt := time.Date(2026, time.July, 26, 12, 0, 0, 987654321, time.UTC)
 			instance := WorkflowInstance{
 				InstanceID:      "inst-1",
@@ -165,7 +165,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 				TriggerEventID: "event-2",
 				FiredAt:        occurredAt.Add(time.Minute),
 			})
-			if err := store.Upsert(ctx, progressed); err != nil {
+			if err := store.upsert(ctx, progressed); err != nil {
 				t.Fatalf("persist legitimate workflow progress: %v", err)
 			}
 			replay, err := store.MaterializeInitialEntry(ctx, instance, occurredAt)
@@ -220,7 +220,7 @@ func TestWorkflowInitialMaterializationConcurrentExactReplayPostgres(t *testing.
 	defer cancel()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 	owner := &concurrentWorkflowInitialMaterializationTestOwner{}
-	store.ConfigureWorkflowInstanceLifecycle(owner)
+	store.lifecycleOwner = owner
 	occurredAt := time.Date(2026, time.July, 28, 14, 0, 0, 123456000, time.UTC)
 	const storageRef = "review/inst-1"
 	newInstance := func() WorkflowInstance {
@@ -320,18 +320,18 @@ func waitForWorkflowInstanceAdvisoryWaiters(t *testing.T, ctx context.Context, d
 func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T) (*WorkflowInstanceStore, context.Context)
+		setup func(*testing.T) (*workflowInstanceStore, context.Context)
 	}{
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+			setup: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 				db := newSQLiteWorkflowInstanceStoreTestDB(t)
 				return newSQLiteWorkflowInstanceStoreForTest(t, db), sqliteExactOnceRunContext(t, db)
 			},
 		},
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+			setup: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				return newPostgresWorkflowInstanceStoreForTest(db), testPipelineRunContext(t, db)
@@ -340,7 +340,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.setup(t)
-			store.ConfigureWorkflowInstanceLifecycle(&workflowInitialMaterializationTestOwner{})
+			store.lifecycleOwner = &workflowInitialMaterializationTestOwner{}
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			occurredAt := time.Date(2026, time.July, 26, 13, 0, 0, 123456000, time.UTC)
 			sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
@@ -619,7 +619,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 
 func transitionWorkflowActivationRunForTest(
 	t *testing.T,
-	store *WorkflowInstanceStore,
+	store *workflowInstanceStore,
 	ctx context.Context,
 	runID string,
 	state runtimerunlifecycle.State,
@@ -750,8 +750,8 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 			return err
 		},
 	}
-	pc.workflowTimers = newWorkflowTimerLifecycle(store, pc.SemanticSource(), pc.bus, pc.workOwner, pc.timerScheduler)
-	store.ConfigureWorkflowInstanceLifecycle(pipelineWorkflowLifecycleOwner{coordinator: pc})
+	pc.workflowTimers = newWorkflowTimerLifecycle(store, pc.SemanticSource(), pc.bus, pc.gatePublisher, pc.workOwner, pc.timerScheduler)
+	store.lifecycleOwner = pipelineWorkflowLifecycleOwner{coordinator: pc}
 	trigger := eventtest.RunCreatingRootIngress(
 		"",
 		events.EventType("spawn.requested"),
@@ -1458,7 +1458,7 @@ states: [initializing, ready]
 		module:         staticSemanticWorkflowModule{source: source},
 	}
 	ctx := testPipelineCoordinatorRunContext(t, pc)
-	if err := workflowStore.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "operating",

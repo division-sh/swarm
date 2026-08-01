@@ -64,8 +64,8 @@ func (pc *PipelineCoordinator) handleWorkflowGateDecisionEvent(ctx context.Conte
 }
 
 func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Context, evt events.Event, card decisioncard.Card) ([]events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
-	store, ok := pc.decisionCards.(decisioncard.ProposedEffectStore)
-	if !ok || store == nil {
+	store := pc.proposedEffects
+	if store == nil {
 		return nil, runtimepipelineobligation.Continue(), fmt.Errorf("proposed-effect continuation store is not configured")
 	}
 	continuation, err := store.LoadProposedEffectContinuation(ctx, card.CardID)
@@ -86,7 +86,7 @@ func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Cont
 		return nil, runtimepipelineobligation.DeferExecution("decision_card_bundle_unavailable", time.Now().UTC().Add(runtimepipelineobligation.DecisionRouteRetryDelay), &failure), nil
 	}
 	var released []runtimeengine.EmitIntent
-	err = pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	err = pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
 		continuation, err := store.LoadProposedEffectContinuation(txctx, card.CardID)
 		if err != nil {
 			return err
@@ -117,8 +117,8 @@ func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Cont
 			if err != nil {
 				return err
 			}
-			publisher, ok := pc.bus.(workflowGateMutationPublisher)
-			if !ok || publisher == nil {
+			publisher := pc.gatePublisher
+			if publisher == nil {
 				return fmt.Errorf("transactional event publisher is required for proposed-effect outcome")
 			}
 			if continuation.ReplyContextID != "" {
@@ -224,8 +224,8 @@ func (pc *PipelineCoordinator) handleDecisionCardDeferredEvent(ctx context.Conte
 	if card.Anchor.Kind() != decisioncard.AnchorKindHumanTask {
 		return nil, nil
 	}
-	store, ok := pc.decisionCards.(decisioncard.HumanTaskStore)
-	if !ok || store == nil {
+	store := pc.humanTasks
+	if store == nil {
 		return nil, fmt.Errorf("human-task continuation store is not configured")
 	}
 	anchor, err := card.Anchor.HumanTask()
@@ -252,13 +252,13 @@ func (pc *PipelineCoordinator) handleDecisionCardDeferredEvent(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	return nil, pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	return nil, pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
 		if continuation.ReplyContextID != "" {
 			delivery := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: continuation.ReplyContextID}}
 			txctx = events.WithDeliveryContext(txctx, delivery)
 		}
-		publisher, ok := pc.bus.(decisionCardDirectMutationPublisher)
-		if !ok || publisher == nil {
+		publisher := pc.directDecisionPublisher
+		if publisher == nil {
 			return fmt.Errorf("transactional direct event publisher is required for human-task defer")
 		}
 		return publisher.PublishDirectInMutation(txctx, product, []string{anchor.RequesterAgentID})
@@ -280,8 +280,8 @@ func (pc *PipelineCoordinator) handleDecisionCardExpiredEvent(ctx context.Contex
 	if card.Anchor.Kind() != decisioncard.AnchorKindHumanTask || card.Status != decisioncard.StatusExpired {
 		return nil, fmt.Errorf("mailbox.card_expired does not match an authoritative expired human-task card")
 	}
-	store, ok := pc.decisionCards.(decisioncard.HumanTaskStore)
-	if !ok || store == nil {
+	store := pc.humanTasks
+	if store == nil {
 		return nil, fmt.Errorf("human-task continuation store is not configured")
 	}
 	anchor, err := card.Anchor.HumanTask()
@@ -308,13 +308,13 @@ func (pc *PipelineCoordinator) handleDecisionCardExpiredEvent(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	return nil, pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	return nil, pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
 		if continuation.ReplyContextID != "" {
 			delivery := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: continuation.ReplyContextID}}
 			txctx = events.WithDeliveryContext(txctx, delivery)
 		}
-		publisher, ok := pc.bus.(decisionCardDirectMutationPublisher)
-		if !ok || publisher == nil {
+		publisher := pc.directDecisionPublisher
+		if publisher == nil {
 			return fmt.Errorf("transactional direct event publisher is required for human-task expiry")
 		}
 		if err := publisher.PublishDirectInMutation(txctx, product, []string{anchor.RequesterAgentID}); err != nil {
@@ -400,8 +400,8 @@ func (pc *PipelineCoordinator) loadStageGateRoute(ctx context.Context, card deci
 }
 
 func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, evt events.Event, card decisioncard.Card) ([]events.Event, error) {
-	store, ok := pc.decisionCards.(decisioncard.HumanTaskStore)
-	if !ok || store == nil {
+	store := pc.humanTasks
+	if store == nil {
 		return nil, fmt.Errorf("human-task continuation store is not configured")
 	}
 	anchor, err := card.Anchor.HumanTask()
@@ -426,7 +426,7 @@ func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	return nil, pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	return nil, pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
 		continuation, err := store.LoadHumanTaskContinuation(txctx, card.CardID)
 		if err != nil {
 			return err
@@ -441,8 +441,8 @@ func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, 
 			delivery := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: continuation.ReplyContextID}}
 			txctx = events.WithDeliveryContext(txctx, delivery)
 		}
-		publisher, ok := pc.bus.(decisionCardDirectMutationPublisher)
-		if !ok || publisher == nil {
+		publisher := pc.directDecisionPublisher
+		if publisher == nil {
 			return fmt.Errorf("transactional direct event publisher is required for human-task outcome")
 		}
 		if err := publisher.PublishDirectInMutation(txctx, product, []string{anchor.RequesterAgentID}); err != nil {
@@ -458,13 +458,13 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 	if err != nil {
 		return err
 	}
-	return pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	return pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
 		if err := pc.workflowStore.RequireGateRouteAdmitted(txctx, card.RunID); err != nil {
 			return err
 		}
 		currentStage := ""
 		alreadyRouted := false
-		if err := pc.workflowStore.MutateE(txctx, anchor.EntityID, func(instance *WorkflowInstance) error {
+		if err := pc.workflowStore.mutateE(txctx, anchor.EntityID, func(instance *WorkflowInstance) error {
 			currentStage = strings.TrimSpace(instance.CurrentState)
 			carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 			if err != nil {
@@ -510,8 +510,8 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 			return err
 		}
 		if emitted != nil {
-			publisher, ok := pc.bus.(workflowGateMutationPublisher)
-			if !ok || publisher == nil {
+			publisher := pc.gatePublisher
+			if publisher == nil {
 				return fmt.Errorf("transactional event publisher is required for gate outcome")
 			}
 			if err := publisher.PublishInMutation(txctx, *emitted); err != nil {

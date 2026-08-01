@@ -20,6 +20,8 @@ import (
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -208,14 +210,22 @@ func newMailboxWriteSupportedSurfaceHandler(
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	module := newRunCompletionSystemNodeModule(t, source)
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, persistence.(apiTestRuntimeMutationOwner))
 	if sqliteStore, ok := persistence.(*store.SQLiteRuntimeStore); ok {
-		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, sqliteStore)
+		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, sqliteStore)
 	}
+	deliveryOwner := persistence.(runtimedelivery.Store)
+	obligationOwner := persistence.(interface {
+		PipelineObligations() runtimepipelineobligation.Store
+	}).PipelineObligations()
+	runLifecycle := persistence.(runtimerunlifecycle.OperationOwner)
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
 		Module:              module,
-		WorkflowStore:       workflowStore,
-		DeliveryStore:       persistence.(runtimedelivery.Store),
+		Persistence:         workflowPersistence,
+		DeliveryStore:       deliveryOwner,
+		DeliveryRuntime:     bus,
+		PipelineObligations: obligationOwner,
+		RunLifecycle:        runLifecycle,
 		MailboxMaterializer: materializer,
 		BundleSourceFact:    fact,
 		TestLifecycleProbe:  probe,

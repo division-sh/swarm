@@ -25,6 +25,7 @@ import (
 type AnthropicAPIRuntime struct {
 	cfg                  *config.Config
 	sessions             sessions.Registry
+	liveSessions         LiveSessionAcquirer
 	conversations        ConversationPersistence
 	lockOwner            string
 	httpClient           *http.Client
@@ -46,6 +47,7 @@ func NewAnthropicAPIRuntimeWithProviderCredentials(cfg *config.Config, sessions 
 	return &AnthropicAPIRuntime{
 		cfg:           cfg,
 		sessions:      sessions,
+		liveSessions:  newTransientLiveSessionAcquirer(sessions),
 		conversations: conversations,
 		lockOwner:     lockOwner,
 		httpClient: &http.Client{
@@ -112,7 +114,7 @@ func (r *AnthropicAPIRuntime) PersistConversationSnapshot(ctx context.Context, s
 }
 
 func (r *AnthropicAPIRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
-	lease, hydrated, resolved, err := startMemory(ctx, r.sessions, r.conversations, agentID, r.lockOwner)
+	lease, hydrated, resolved, err := startMemory(ctx, r.liveSessions, agentID, r.lockOwner)
 	if err != nil {
 		return nil, err
 	}

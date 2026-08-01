@@ -827,8 +827,8 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err != nil {
 		return err
 	}
-	publisher, ok := am.bus.(runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher)
-	if !ok || publisher == nil {
+	publisher := am.roles.CreationPublisher
+	if publisher == nil {
 		return fmt.Errorf("dynamic flow creation occurrence requires transactional event publisher")
 	}
 	creationCtx := events.WithDeliveryContext(ctx, plan.CreationEvent.DeliveryContext)
@@ -909,16 +909,16 @@ func dynamicFlowRuntimeReadinessPlanMatches(
 }
 
 func (am *AgentManager) publishPersistedDynamicFlowRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
-	publisher, ok := am.bus.(persistedFlowInstanceRouteRestorer)
-	if !ok || publisher == nil {
+	publisher := am.roles.RouteRestorer
+	if publisher == nil {
 		return fmt.Errorf("event bus does not support process publication for persisted flow-instance route %s", req.Identity.InstancePath)
 	}
 	return publisher.PublishPersistedFlowInstanceRoute(req)
 }
 
 func (am *AgentManager) retirePublishedDynamicFlowRoute(route runtimeflowidentity.Route) error {
-	retirer, ok := am.bus.(publishedFlowInstanceRouteRetirer)
-	if !ok || retirer == nil {
+	retirer := am.roles.RouteRetirer
+	if retirer == nil {
 		return fmt.Errorf("event bus does not support process retirement for flow-instance route %s", route.InstancePath)
 	}
 	return retirer.RetirePublishedFlowInstanceRoute(route)
@@ -1234,8 +1234,8 @@ func verifyDynamicFlowAgentExpectations(actual []PersistedAgent, expected []runt
 }
 
 func (am *AgentManager) verifyDynamicFlowRoute(ctx context.Context, route runtimeflowidentity.Route) error {
-	verifier, ok := am.bus.(flowInstanceRouteContextVerifier)
-	if !ok || verifier == nil || !verifier.HasFlowInstanceRoute(route) {
+	verifier := am.roles.RouteVerifier
+	if verifier == nil || !verifier.HasFlowInstanceRoute(route) {
 		return fmt.Errorf("dynamic flow route %s is not process-ready", route.InstancePath)
 	}
 	if err := verifier.VerifyFlowInstanceRoute(ctx, route); err != nil {

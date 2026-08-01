@@ -43,7 +43,7 @@ func (e *transactionProbeHumanTaskExpiry) ExpireHumanTaskCardsInMutation(ctx con
 func TestHumanTaskExpiryPublishesInsideSelectedStoreMutation(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	runner := &recordingRuntimeMutationRunner{db: db}
-	workflowStore := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+	workflowStore := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
 	runID := uuid.NewString()
 	expiry := &transactionProbeHumanTaskExpiry{
 		runID: runID,
@@ -53,7 +53,7 @@ func TestHumanTaskExpiryPublishesInsideSelectedStoreMutation(t *testing.T) {
 		),
 	}
 	bus := &recordingPipelineBus{publishErr: errors.New("injected event persistence failure")}
-	coordinator := &PipelineCoordinator{bus: bus, workflowStore: workflowStore}
+	coordinator := &PipelineCoordinator{bus: bus, workflowStore: workflowStore, gatePublisher: bus}
 
 	if err := coordinator.expireHumanTaskCards(context.Background(), expiry, time.Now().UTC(), 10); err == nil {
 		t.Fatal("expiry succeeded when transactional publication failed")

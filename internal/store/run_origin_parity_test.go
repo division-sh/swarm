@@ -119,26 +119,21 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			var (
 				db       *sql.DB
-				selected any
-				workflow *runtimepipeline.WorkflowInstanceStore
+				selected workflowTestSelectedStore
+				workflow *runtimepipeline.PipelineCoordinator
 			)
 			if backend == "sqlite" {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				db = store.DB
 				selected = store
-				workflow = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, store)
-				workflow.ConfigureDeliveryLifecycleStore(store)
-				workflow.ConfigurePipelineObligationStore(store.PipelineObligations())
+				workflow = newSQLiteWorkflowTestCoordinator(t, db, store)
 			} else {
 				_, postgresDB, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				store := admitTestPostgresStore(t, postgresDB)
 				db = postgresDB
 				selected = store
-				workflow = runtimepipeline.NewWorkflowInstanceStore(db)
-				workflow.ConfigureRuntimeMutationRunner(store)
-				workflow.ConfigureDeliveryLifecycleStore(store)
-				workflow.ConfigurePipelineObligationStore(store.PipelineObligations())
+				workflow = newPostgresWorkflowTestCoordinator(t, db, store)
 			}
 			reader := selected.(runOriginReadStore)
 			ctx := testAuthorActivityRuntimeContext()

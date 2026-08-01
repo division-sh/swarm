@@ -28,7 +28,7 @@ func (pipelineTestBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 }
 
 func TestWorkflowRuntime_NodesOwnRegisteredPolicies(t *testing.T) {
-	pc := NewPipelineCoordinatorWithOptions(pipelineTestBus{}, nil, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinator(pipelineTestBus{}, PipelineCoordinatorOptions{
 		Module: NewGenericTestWorkflowModule(),
 	})
 	nodes := pc.WorkflowNodes()

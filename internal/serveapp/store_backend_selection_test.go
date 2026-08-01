@@ -205,7 +205,7 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 		t.Fatalf("buildStores(sqlite): %v", err)
 	}
 	t.Cleanup(func() { closeDB(stores.SQLDB) })
-	if stores.SQLDB == nil || stores.RuntimeLogStore == nil || stores.SchemaBootstrapper == nil || stores.EventStore == nil || stores.PipelineStore == nil || stores.SessionRegistry == nil || stores.ConversationStore == nil || stores.ManagerStore == nil || stores.ScheduleStore == nil || stores.MailboxMaterializer == nil || stores.MailboxStore == nil || stores.BudgetSpendStore == nil || stores.InboundStore == nil || stores.MailboxAPIStore == nil || stores.ObservabilityStore == nil || stores.AgentUsageStore == nil || stores.AgentDeliveryLifecycleStore == nil || stores.RuntimeIngressStore == nil || stores.IdempotencyStore == nil || stores.StartupOwnership == nil || stores.AgentConversationReadStore == nil {
+	if stores.SQLDB == nil || stores.RuntimeLogStore == nil || stores.SchemaBootstrapper == nil || stores.EventStore == nil || !stores.WorkflowPersistence.Valid() || stores.SessionRegistry == nil || stores.ConversationStore == nil || stores.ManagerStore == nil || stores.ScheduleStore == nil || stores.MailboxMaterializer == nil || stores.MailboxStore == nil || stores.BudgetSpendStore == nil || stores.InboundStore == nil || stores.MailboxAPIStore == nil || stores.ObservabilityStore == nil || stores.AgentUsageStore == nil || stores.AgentDeliveryLifecycleStore == nil || stores.RuntimeIngressStore == nil || stores.IdempotencyStore == nil || stores.StartupOwnership == nil || stores.AgentConversationReadStore == nil {
 		t.Fatalf("sqlite store bundle missing selected core owners: %#v", stores)
 	}
 	if stores.Postgres != nil {
@@ -249,39 +249,30 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	if apiCaps.RuntimeContexts != nil {
 		t.Fatalf("sqlite optional capability RuntimeContexts = %T, want nil classified split/postgres-only capability", apiCaps.RuntimeContexts)
 	}
-	runtimeStores := stores.runtimeStores()
-	if runtimeStores.SQLDB != nil {
-		t.Fatalf("sqlite runtimeStores SQLDB = %#v, want nil raw runtime SQL handle", runtimeStores.SQLDB)
+	runtimeDeps := stores.runtimeDeps()
+	if runtimeDeps.SQLDB != nil {
+		t.Fatalf("sqlite runtimeDeps SQLDB = %#v, want nil raw runtime SQL handle", runtimeDeps.SQLDB)
 	}
-	if runtimeStores.RuntimeLogStore == nil {
-		t.Fatal("sqlite runtimeStores RuntimeLogStore missing backend-neutral runtime diagnostics owner")
+	if runtimeDeps.RuntimeLogStore == nil {
+		t.Fatal("sqlite runtimeDeps RuntimeLogStore missing backend-neutral runtime diagnostics owner")
 	}
-	if runtimeStores.MailboxMaterializer == nil {
-		t.Fatal("sqlite runtimeStores MailboxMaterializer missing backend-neutral mailbox_write owner")
+	if runtimeDeps.MailboxMaterializer == nil {
+		t.Fatal("sqlite runtimeDeps MailboxMaterializer missing backend-neutral mailbox_write owner")
 	}
-	if runtimeStores.ConstructionBlocker != "" {
-		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want explicit sqlite construction unblocked after mailbox_write owner", runtimeStores.ConstructionBlocker)
+	if runtimeDeps.BudgetSpendStore == nil {
+		t.Fatal("sqlite runtimeDeps BudgetSpendStore missing backend-neutral budget/spend owner")
 	}
-	if strings.Contains(runtimeStores.ConstructionBlocker, "pipeline coordination/background nodes") {
-		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want #1147 pipeline/background owner removed from residual blocker", runtimeStores.ConstructionBlocker)
+	if runtimeDeps.InboundStore == nil {
+		t.Fatal("sqlite runtimeDeps InboundStore missing backend-neutral inbound webhook owner")
 	}
-	if strings.Contains(runtimeStores.ConstructionBlocker, "budget tracking/spend ledger") {
-		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want #1148 budget/spend owner removed from residual blocker", runtimeStores.ConstructionBlocker)
+	if runtimeDeps.ToolEntityStore == nil {
+		t.Fatal("sqlite runtimeDeps ToolEntityStore missing backend-neutral entity tool owner")
 	}
-	if runtimeStores.BudgetSpendStore == nil {
-		t.Fatal("sqlite runtimeStores BudgetSpendStore missing backend-neutral budget/spend owner")
+	if runtimeDeps.HumanTaskStore == nil {
+		t.Fatal("sqlite runtimeDeps HumanTaskStore missing backend-neutral human-task owner")
 	}
-	if runtimeStores.InboundStore == nil {
-		t.Fatal("sqlite runtimeStores InboundStore missing backend-neutral inbound webhook owner")
-	}
-	if runtimeStores.ToolEntityStore == nil {
-		t.Fatal("sqlite runtimeStores ToolEntityStore missing backend-neutral entity tool owner")
-	}
-	if runtimeStores.HumanTaskStore == nil {
-		t.Fatal("sqlite runtimeStores HumanTaskStore missing backend-neutral human-task owner")
-	}
-	if runtimeStores.PipelineStore == nil || !runtimeStores.PipelineStore.Enabled() {
-		t.Fatal("sqlite runtimeStores PipelineStore missing enabled backend-neutral pipeline owner")
+	if !runtimeDeps.WorkflowPersistence.Valid() {
+		t.Fatal("sqlite runtimeDeps WorkflowPersistence missing backend-neutral pipeline owner")
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("sqlite runtime store did not create file-backed db at %s: %v", path, err)
@@ -452,18 +443,15 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 		t.Fatalf("buildStores(sqlite): %v", err)
 	}
 	t.Cleanup(func() { closeDB(stores.SQLDB) })
-	runtimeStores := stores.runtimeStores()
-	if runtimeStores.SQLDB != nil {
-		t.Fatalf("sqlite runtimeStores SQLDB = %#v, want nil raw runtime SQL handle", runtimeStores.SQLDB)
+	runtimeDeps := stores.runtimeDeps()
+	if runtimeDeps.SQLDB != nil {
+		t.Fatalf("sqlite runtimeDeps SQLDB = %#v, want nil raw runtime SQL handle", runtimeDeps.SQLDB)
 	}
-	if runtimeStores.RuntimeLogStore == nil {
-		t.Fatal("sqlite runtimeStores RuntimeLogStore missing backend-neutral runtime diagnostics owner")
+	if runtimeDeps.RuntimeLogStore == nil {
+		t.Fatal("sqlite runtimeDeps RuntimeLogStore missing backend-neutral runtime diagnostics owner")
 	}
-	if runtimeStores.MailboxMaterializer == nil {
-		t.Fatal("sqlite runtimeStores MailboxMaterializer missing backend-neutral mailbox_write owner")
-	}
-	if runtimeStores.ConstructionBlocker != "" {
-		t.Fatalf("sqlite runtimeStores ConstructionBlocker = %q, want construction blocker removed after mailbox_write owner", runtimeStores.ConstructionBlocker)
+	if runtimeDeps.MailboxMaterializer == nil {
+		t.Fatal("sqlite runtimeDeps MailboxMaterializer missing backend-neutral mailbox_write owner")
 	}
 	bundle := loadStoreBackendSelectionWorkflowBundle(t)
 	if _, err := initializeStateStores(ctx, stores, bundle); err != nil {
@@ -474,19 +462,17 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 		t.Fatalf("BundleHash: %v", err)
 	}
 	processWorkOwner := newSupervisorTestProcessOwner(t)
-	rt, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{
-		Config: &config.Config{},
-		Stores: runtimeStores,
-		Options: runtime.RuntimeOptions{
-			SelfCheck:              true,
-			ProcessWorkOwner:       processWorkOwner,
-			RuntimeInstanceID:      "11111111-1111-4111-8111-111111111111",
-			BundleSourceFact:       mustServeTestEphemeralBundleSourceFact(bundleHash),
-			WorkflowModule:         stubWorkflowModule{source: semanticview.Wrap(bundle)},
-			LLMRuntime:             storeBackendSelectionNoopLLMRuntime{},
-			ProviderTriggerCatalog: testProviderTriggerCatalog(t),
-		},
-	})
+	runtimeDeps.Config = &config.Config{}
+	runtimeDeps.Options = runtime.RuntimeOptions{
+		SelfCheck:              true,
+		ProcessWorkOwner:       processWorkOwner,
+		RuntimeInstanceID:      "11111111-1111-4111-8111-111111111111",
+		BundleSourceFact:       mustServeTestEphemeralBundleSourceFact(bundleHash),
+		WorkflowModule:         stubWorkflowModule{source: semanticview.Wrap(bundle)},
+		LLMRuntime:             storeBackendSelectionNoopLLMRuntime{},
+		ProviderTriggerCatalog: testProviderTriggerCatalog(t),
+	}
+	rt, err := runtime.NewRuntime(ctx, runtimeDeps)
 	if err != nil {
 		t.Fatalf("NewRuntime(sqlite): %v", err)
 	}
@@ -497,12 +483,6 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 	})
 	if rt.Pipeline == nil {
 		t.Fatal("NewRuntime(sqlite) Pipeline = nil, want runtime construction to consume SQLite pipeline store")
-	}
-	if rt.Stores.SQLDB != nil {
-		t.Fatalf("NewRuntime(sqlite) raw SQLDB = %#v, want nil", rt.Stores.SQLDB)
-	}
-	if rt.Stores.MailboxMaterializer == nil {
-		t.Fatal("NewRuntime(sqlite) MailboxMaterializer missing")
 	}
 }
 

@@ -20,7 +20,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -177,18 +180,25 @@ func newProposedEffectMailboxHandler(
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, persistence.(apiTestRuntimeMutationOwner))
 	if sqliteStore, ok := persistence.(*store.SQLiteRuntimeStore); ok {
-		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, sqliteStore)
+		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, sqliteStore)
 	}
+	deliveryOwner := persistence.(runtimedelivery.Store)
+	obligationOwner := persistence.(interface {
+		PipelineObligations() runtimepipelineobligation.Store
+	}).PipelineObligations()
+	runLifecycle := persistence.(runtimerunlifecycle.OperationOwner)
 	cards, ok := persistence.(decisioncard.Store)
 	if !ok {
 		t.Fatal("persistence store does not implement decisioncard.Store")
 	}
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: newRunCompletionSystemNodeModule(t, source), WorkflowStore: workflowStore,
-		DecisionCards:    cards,
-		BundleSourceFact: fact,
+		Module: newRunCompletionSystemNodeModule(t, source), Persistence: workflowPersistence,
+		DecisionCards: cards, ProposedEffects: persistence.(decisioncard.ProposedEffectStore),
+		DeliveryStore: deliveryOwner, DeliveryRuntime: bus, PipelineObligations: obligationOwner,
+		GatePublisher: bus, DirectDecisionPublisher: bus,
+		RunLifecycle: runLifecycle, BundleSourceFact: fact,
 	})
 	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
 		Identity: runtimebustest.Identity(t, "workflow-runtime", ""),
@@ -216,7 +226,7 @@ func newProposedEffectMailboxHandler(
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
 			Now: func() time.Time { return time.Now().UTC() }, Ready: func() bool { return true }, Database: fakePinger{},
 			Runs: runs, Observability: observability, Idempotency: idempotency, Events: bus, Source: source,
-			RunBundleContext: runBundleContext, Mailbox: mailbox, DecisionCards: cards, DecisionAuthority: workflowStore,
+			RunBundleContext: runBundleContext, Mailbox: mailbox, DecisionCards: cards, DecisionAuthority: coordinator,
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
 				BundleHash: fact.BundleHash(),

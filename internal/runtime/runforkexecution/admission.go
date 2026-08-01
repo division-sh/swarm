@@ -13,20 +13,16 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
 type SelectedContractBindingReader interface {
-	RequireRunForkSelectedContractBinding(context.Context, string) (store.RunForkSelectedContractBinding, error)
+	RequireRunForkSelectedContractBinding(context.Context, string) (runfork.RunForkSelectedContractBinding, error)
 }
 
 type SelectedContractSourceLoader interface {
-	LoadRunForkSelectedContractSource(context.Context, store.RunForkContractSelection) (LoadedSelectedContractSource, error)
-}
-
-type SelectedContractSourceRequestLoader interface {
 	LoadRunForkSelectedContractSourceForRequest(context.Context, SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error)
 }
 
@@ -34,11 +30,11 @@ type SelectedContractSourceLoadRequest struct {
 	SourceRunID      string
 	BundleHash       string
 	BundleSourceFact runtimecorrelation.BundleSourceFact
-	Selection        store.RunForkContractSelection
+	Selection        runfork.RunForkContractSelection
 }
 
 type LoadedSelectedContractSource struct {
-	Selection              store.RunForkContractSelection
+	Selection              runfork.RunForkContractSelection
 	Source                 semanticview.Source
 	Module                 runtimepipeline.WorkflowModule
 	BundleSourceFact       runtimecorrelation.BundleSourceFact
@@ -81,7 +77,7 @@ type ContractBundleSourceLoader struct {
 
 type BundleCatalogSelectedContractSourceStore interface {
 	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
-	LoadBundleCatalogRuntimeRecord(context.Context, string) (store.BundleCatalogRuntimeRecord, error)
+	LoadBundleCatalogRuntimeRecord(context.Context, string) (runbundle.BundleCatalogRuntimeRecord, error)
 }
 
 type BundleCatalogSelectedContractSourceLoader struct {
@@ -90,14 +86,14 @@ type BundleCatalogSelectedContractSourceLoader struct {
 	Store            BundleCatalogSelectedContractSourceStore
 }
 
-func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx context.Context, selection store.RunForkContractSelection) (LoadedSelectedContractSource, error) {
+func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx context.Context, selection runfork.RunForkContractSelection) (LoadedSelectedContractSource, error) {
 	if err := ctx.Err(); err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
 	if err := validateSelectedSourceLoaderSelection(selection); err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
-	if strings.TrimSpace(selection.Mode) == store.RunForkContractSelectionModeBundleHash {
+	if strings.TrimSpace(selection.Mode) == runfork.RunForkContractSelectionModeBundleHash {
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: disk selected-contract source loader cannot load bundle_hash mode %s", runbundle.CodeBundleUnavailable, strings.TrimSpace(selection.BundleHash))
 	}
 	repoRoot := strings.TrimSpace(l.RepoRoot)
@@ -159,7 +155,11 @@ func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx contex
 	}, nil
 }
 
-func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSource(ctx context.Context, selection store.RunForkContractSelection) (LoadedSelectedContractSource, error) {
+func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSourceForRequest(ctx context.Context, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
+	return l.LoadRunForkSelectedContractSource(ctx, req.Selection)
+}
+
+func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSource(ctx context.Context, selection runfork.RunForkContractSelection) (LoadedSelectedContractSource, error) {
 	return l.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Selection: selection})
 }
 
@@ -177,7 +177,7 @@ func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSo
 	sourceRunID := strings.TrimSpace(req.SourceRunID)
 	requestedHash := strings.TrimSpace(req.BundleHash)
 	bundleHash := strings.TrimSpace(selection.BundleHash)
-	if selection.Mode == store.RunForkContractSelectionModeSelectedContracts {
+	if selection.Mode == runfork.RunForkContractSelectionModeSelectedContracts {
 		if sourceRunID == "" {
 			return LoadedSelectedContractSource{}, fmt.Errorf("DB-loaded selected-contract source loader requires source run_id")
 		}
@@ -207,8 +207,8 @@ func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSo
 		}
 	}
 	record, err := l.Store.LoadBundleCatalogRuntimeRecord(ctx, bundleHash)
-	if errors.Is(err, store.ErrBundleNotFound) {
-		if selection.Mode == store.RunForkContractSelectionModeBundleHash {
+	if errors.Is(err, runbundle.ErrBundleNotFound) {
+		if selection.Mode == runfork.RunForkContractSelectionModeBundleHash {
 			return LoadedSelectedContractSource{}, fmt.Errorf("%s: target bundle %s is not available", runbundle.CodeBundleUnavailable, bundleHash)
 		}
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: source run %s bundle row missing for %s", runbundle.CodeBundleDataIntegrityError, sourceRunID, bundleHash)
@@ -284,15 +284,7 @@ func compileSelectedContractSource(source semanticview.Source) (semanticview.Sou
 }
 
 func loadRunForkSelectedContractSource(ctx context.Context, loader SelectedContractSourceLoader, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
-	var (
-		loaded LoadedSelectedContractSource
-		err    error
-	)
-	if requestLoader, ok := loader.(SelectedContractSourceRequestLoader); ok {
-		loaded, err = requestLoader.LoadRunForkSelectedContractSourceForRequest(ctx, req)
-	} else {
-		loaded, err = loader.LoadRunForkSelectedContractSource(ctx, req.Selection)
-	}
+	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, req)
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
@@ -342,33 +334,33 @@ type SelectedContractExecutionAdmissionRequest struct {
 	BundleSourceFact      runtimecorrelation.BundleSourceFact
 	BindingReader         SelectedContractBindingReader
 	SourceLoader          SelectedContractSourceLoader
-	FrontierAdmission     store.RunForkContractFrontierAdmission
-	RouteAdmission        store.RunForkSelectedContractRouteAdmission
-	RouteTopology         store.RunForkSelectedContractRouteTopology
-	ExecutionModel        store.RunForkSelectedContractExecution
+	FrontierAdmission     runfork.RunForkContractFrontierAdmission
+	RouteAdmission        runfork.RunForkSelectedContractRouteAdmission
+	RouteTopology         runfork.RunForkSelectedContractRouteTopology
+	ExecutionModel        runfork.RunForkSelectedContractExecution
 	DeferredWorkAdmission selectedContractDeferredWorkAdmission
 }
 
-func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedContractExecutionAdmissionRequest) (store.RunForkSelectedContractExecutionAdmission, error) {
+func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedContractExecutionAdmissionRequest) (runfork.RunForkSelectedContractExecutionAdmission, error) {
 	forkRunID := strings.TrimSpace(req.ForkRunID)
 	if forkRunID == "" {
-		return store.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission requires fork run_id")
+		return runfork.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission requires fork run_id")
 	}
 	if _, err := uuid.Parse(forkRunID); err != nil {
-		return store.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission fork run_id must be a UUID: %w", err)
+		return runfork.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission fork run_id must be a UUID: %w", err)
 	}
 	if req.BindingReader == nil {
-		return store.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission requires %s reader", store.RunForkSelectedContractBindingOwner)
+		return runfork.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission requires %s reader", runfork.RunForkSelectedContractBindingOwner)
 	}
 	binding, err := req.BindingReader.RequireRunForkSelectedContractBinding(ctx, forkRunID)
 	if err != nil {
-		return store.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("load selected-contract binding for execution admission: %w", err)
+		return runfork.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("load selected-contract binding for execution admission: %w", err)
 	}
 	if err := validateSelectedContractExecutionBinding(forkRunID, binding); err != nil {
-		return store.RunForkSelectedContractExecutionAdmission{}, err
+		return runfork.RunForkSelectedContractExecutionAdmission{}, err
 	}
 	if req.SourceLoader == nil {
-		return store.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission requires selected source loader bound to %s", store.RunForkSelectedContractBindingOwner)
+		return runfork.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission requires selected source loader bound to %s", runfork.RunForkSelectedContractBindingOwner)
 	}
 	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
 		SourceRunID:      firstNonEmpty(req.SourceRunID, binding.SourceRunID),
@@ -377,41 +369,41 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 		Selection:        binding.ContractSelection,
 	})
 	if err != nil {
-		return store.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("load selected semantic source for execution admission: %w", err)
+		return runfork.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("load selected semantic source for execution admission: %w", err)
 	}
 	defer cleanupLoadedSelectedContractSource(loadedSource)
 	if err := validateSelectedContractExecutionSource(binding, loadedSource); err != nil {
-		return store.RunForkSelectedContractExecutionAdmission{}, err
+		return runfork.RunForkSelectedContractExecutionAdmission{}, err
 	}
 	if err := validateSelectedContractExecutionFrontier(binding, req.FrontierAdmission); err != nil {
-		return store.RunForkSelectedContractExecutionAdmission{}, err
+		return runfork.RunForkSelectedContractExecutionAdmission{}, err
 	}
 	if err := validateSelectedContractExecutionRouteTopology(binding, req.FrontierAdmission, req.RouteAdmission, req.RouteTopology); err != nil {
-		return store.RunForkSelectedContractExecutionAdmission{}, err
+		return runfork.RunForkSelectedContractExecutionAdmission{}, err
 	}
 	if err := validateSelectedContractExecutionModel(binding, req.FrontierAdmission, req.RouteAdmission, req.RouteTopology, req.ExecutionModel); err != nil {
-		return store.RunForkSelectedContractExecutionAdmission{}, err
+		return runfork.RunForkSelectedContractExecutionAdmission{}, err
 	}
 	recipientPlanning := req.ExecutionModel.RecipientPlanning
 	if recipientPlanning == nil {
-		return store.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission model must carry %s", store.RunForkSelectedContractRecipientPlanningOwner)
+		return runfork.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission model must carry %s", runfork.RunForkSelectedContractRecipientPlanningOwner)
 	}
 	if err := validateSelectedContractRecipientPlanning(req.FrontierAdmission, req.RouteAdmission, req.RouteTopology, *recipientPlanning); err != nil {
-		return store.RunForkSelectedContractExecutionAdmission{}, err
+		return runfork.RunForkSelectedContractExecutionAdmission{}, err
 	}
 	if err := req.DeferredWorkAdmission.validate(binding.SourceRunID, binding.ForkEventID, loadedSource.Source); err != nil {
-		return store.RunForkSelectedContractExecutionAdmission{}, err
+		return runfork.RunForkSelectedContractExecutionAdmission{}, err
 	}
 
-	unsupportedBlockers := append([]store.RunForkUnsupportedBlocker(nil), req.ExecutionModel.UnsupportedBlockers...)
-	unsupportedBlockers = appendRunForkUnsupportedBlocker(unsupportedBlockers, store.RunForkUnsupportedBlocker{
-		Code:    store.RunForkBlockerSelectedContractExecutionAdmissionNonMutating,
+	unsupportedBlockers := append([]runfork.RunForkUnsupportedBlocker(nil), req.ExecutionModel.UnsupportedBlockers...)
+	unsupportedBlockers = appendRunForkUnsupportedBlocker(unsupportedBlockers, runfork.RunForkUnsupportedBlocker{
+		Code:    runfork.RunForkBlockerSelectedContractExecutionAdmissionNonMutating,
 		Message: "selected-contract execution admission is non-mutating; handler execution and fork-local writes remain separately gated",
 	})
 
-	return store.RunForkSelectedContractExecutionAdmission{
-		Owner:                      store.RunForkSelectedContractExecutionAdmissionOwner,
-		FutureExecutionOwner:       store.RunForkSelectedContractExecutionOwner,
+	return runfork.RunForkSelectedContractExecutionAdmission{
+		Owner:                      runfork.RunForkSelectedContractExecutionAdmissionOwner,
+		FutureExecutionOwner:       runfork.RunForkSelectedContractExecutionOwner,
 		NonMutating:                true,
 		ExecutionSupported:         false,
 		ForkRunID:                  binding.ForkRunID,
@@ -420,24 +412,24 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 		ContractSelection:          binding.ContractSelection,
 		ContractBindingOwner:       binding.Owner,
 		AdmissionOwner:             req.FrontierAdmission.Owner,
-		AdmissionUse:               store.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
+		AdmissionUse:               runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
 		ExecutionModelOwner:        req.ExecutionModel.Owner,
 		DeferredWorkAdmissionOwner: req.DeferredWorkAdmission.owner,
 		SourceWorkflowName:         strings.TrimSpace(loadedSource.Source.WorkflowName()),
 		SourceWorkflowVersion:      strings.TrimSpace(loadedSource.Source.WorkflowVersion()),
 		FrontierEventCount:         req.ExecutionModel.FrontierEventCount,
-		FrontierEvents:             append([]store.RunForkSelectedContractFrontierEvent(nil), req.ExecutionModel.FrontierEvents...),
+		FrontierEvents:             append([]runfork.RunForkSelectedContractFrontierEvent(nil), req.ExecutionModel.FrontierEvents...),
 		RouteTopology:              &req.RouteTopology,
 		RecipientPlanning:          recipientPlanning,
-		ContractBinding: store.RunForkSelectedContractExecutionBoundary{
+		ContractBinding: runfork.RunForkSelectedContractExecutionBoundary{
 			Concept:     "selected_contract_binding",
-			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
-			Owner:       store.RunForkSelectedContractBindingOwner,
+			Disposition: runfork.RunForkSelectedContractDispositionPrerequisite,
+			Owner:       runfork.RunForkSelectedContractBindingOwner,
 			Reason:      "execution admission consumes the durable selected contract source bound to the fork run before any mutation",
 		},
-		RequiredConsumers:   append([]store.RunForkSelectedContractExecutionBoundary(nil), req.ExecutionModel.RequiredConsumers...),
-		BlockedSiblings:     append([]store.RunForkSelectedContractExecutionBoundary(nil), req.ExecutionModel.BlockedSiblings...),
-		InvalidPaths:        append([]store.RunForkSelectedContractExecutionBoundary(nil), req.ExecutionModel.InvalidPaths...),
+		RequiredConsumers:   append([]runfork.RunForkSelectedContractExecutionBoundary(nil), req.ExecutionModel.RequiredConsumers...),
+		BlockedSiblings:     append([]runfork.RunForkSelectedContractExecutionBoundary(nil), req.ExecutionModel.BlockedSiblings...),
+		InvalidPaths:        append([]runfork.RunForkSelectedContractExecutionBoundary(nil), req.ExecutionModel.InvalidPaths...),
 		UnsupportedBlockers: unsupportedBlockers,
 	}, nil
 }
@@ -451,9 +443,9 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func validateSelectedContractExecutionBinding(forkRunID string, binding store.RunForkSelectedContractBinding) error {
-	if strings.TrimSpace(binding.Owner) != store.RunForkSelectedContractBindingOwner {
-		return fmt.Errorf("selected-contract execution admission requires %s binding; got %q", store.RunForkSelectedContractBindingOwner, binding.Owner)
+func validateSelectedContractExecutionBinding(forkRunID string, binding runfork.RunForkSelectedContractBinding) error {
+	if strings.TrimSpace(binding.Owner) != runfork.RunForkSelectedContractBindingOwner {
+		return fmt.Errorf("selected-contract execution admission requires %s binding; got %q", runfork.RunForkSelectedContractBindingOwner, binding.Owner)
 	}
 	if strings.TrimSpace(binding.ForkRunID) != forkRunID {
 		return fmt.Errorf("selected-contract execution admission binding fork run_id mismatch: got %q want %q", binding.ForkRunID, forkRunID)
@@ -472,7 +464,7 @@ func validateSelectedContractExecutionBinding(forkRunID string, binding store.Ru
 	return validateSelectedContractSelection("binding", binding.ContractSelection)
 }
 
-func validateSelectedContractExecutionSource(binding store.RunForkSelectedContractBinding, loaded LoadedSelectedContractSource) error {
+func validateSelectedContractExecutionSource(binding runfork.RunForkSelectedContractBinding, loaded LoadedSelectedContractSource) error {
 	if err := validateSelectionMatches("selected source", binding.ContractSelection, loaded.Selection); err != nil {
 		return err
 	}
@@ -495,9 +487,9 @@ func validateSelectedContractExecutionSource(binding store.RunForkSelectedContra
 	return nil
 }
 
-func validateSelectedContractExecutionFrontier(binding store.RunForkSelectedContractBinding, admission store.RunForkContractFrontierAdmission) error {
-	if strings.TrimSpace(admission.Owner) != store.RunForkContractFrontierAdmissionOwner {
-		return fmt.Errorf("selected-contract execution admission requires %s frontier admission; got %q", store.RunForkContractFrontierAdmissionOwner, admission.Owner)
+func validateSelectedContractExecutionFrontier(binding runfork.RunForkSelectedContractBinding, admission runfork.RunForkContractFrontierAdmission) error {
+	if strings.TrimSpace(admission.Owner) != runfork.RunForkContractFrontierAdmissionOwner {
+		return fmt.Errorf("selected-contract execution admission requires %s frontier admission; got %q", runfork.RunForkContractFrontierAdmissionOwner, admission.Owner)
 	}
 	if !admission.NonMutating {
 		return fmt.Errorf("selected-contract execution admission requires non-mutating frontier admission")
@@ -508,7 +500,7 @@ func validateSelectedContractExecutionFrontier(binding store.RunForkSelectedCont
 	return validateSelectionMatches("frontier admission", binding.ContractSelection, admission.ContractSelection)
 }
 
-func validateSelectedContractExecutionRouteTopology(binding store.RunForkSelectedContractBinding, frontier store.RunForkContractFrontierAdmission, routeAdmission store.RunForkSelectedContractRouteAdmission, routeTopology store.RunForkSelectedContractRouteTopology) error {
+func validateSelectedContractExecutionRouteTopology(binding runfork.RunForkSelectedContractBinding, frontier runfork.RunForkContractFrontierAdmission, routeAdmission runfork.RunForkSelectedContractRouteAdmission, routeTopology runfork.RunForkSelectedContractRouteTopology) error {
 	if err := validateSelectedContractRouteAdmission(frontier, routeAdmission); err != nil {
 		return err
 	}
@@ -518,12 +510,12 @@ func validateSelectedContractExecutionRouteTopology(binding store.RunForkSelecte
 	return validateSelectionMatches("route topology", binding.ContractSelection, routeTopology.ContractSelection)
 }
 
-func validateSelectedContractExecutionModel(binding store.RunForkSelectedContractBinding, frontier store.RunForkContractFrontierAdmission, routeAdmission store.RunForkSelectedContractRouteAdmission, routeTopology store.RunForkSelectedContractRouteTopology, model store.RunForkSelectedContractExecution) error {
-	if strings.TrimSpace(model.Owner) != store.RunForkSelectedContractExecutionModelOwner {
-		return fmt.Errorf("selected-contract execution admission requires %s model; got %q", store.RunForkSelectedContractExecutionModelOwner, model.Owner)
+func validateSelectedContractExecutionModel(binding runfork.RunForkSelectedContractBinding, frontier runfork.RunForkContractFrontierAdmission, routeAdmission runfork.RunForkSelectedContractRouteAdmission, routeTopology runfork.RunForkSelectedContractRouteTopology, model runfork.RunForkSelectedContractExecution) error {
+	if strings.TrimSpace(model.Owner) != runfork.RunForkSelectedContractExecutionModelOwner {
+		return fmt.Errorf("selected-contract execution admission requires %s model; got %q", runfork.RunForkSelectedContractExecutionModelOwner, model.Owner)
 	}
-	if strings.TrimSpace(model.FutureExecutionOwner) != store.RunForkSelectedContractExecutionOwner {
-		return fmt.Errorf("selected-contract execution admission model must point to %s; got %q", store.RunForkSelectedContractExecutionOwner, model.FutureExecutionOwner)
+	if strings.TrimSpace(model.FutureExecutionOwner) != runfork.RunForkSelectedContractExecutionOwner {
+		return fmt.Errorf("selected-contract execution admission model must point to %s; got %q", runfork.RunForkSelectedContractExecutionOwner, model.FutureExecutionOwner)
 	}
 	if !model.NonMutating || model.ExecutionSupported {
 		return fmt.Errorf("selected-contract execution admission requires non-mutating unsupported execution model")
@@ -538,7 +530,7 @@ func validateSelectedContractExecutionModel(binding store.RunForkSelectedContrac
 		return fmt.Errorf("selected-contract execution admission model frontier events do not match durable frontier evidence")
 	}
 	if model.RouteTopology == nil {
-		return fmt.Errorf("selected-contract execution admission model must carry %s", store.RunForkSelectedContractRouteTopologyOwner)
+		return fmt.Errorf("selected-contract execution admission model must carry %s", runfork.RunForkSelectedContractRouteTopologyOwner)
 	}
 	if err := validateSelectedContractRouteTopology(frontier, routeAdmission, *model.RouteTopology); err != nil {
 		return err
@@ -547,19 +539,19 @@ func validateSelectedContractExecutionModel(binding store.RunForkSelectedContrac
 		return fmt.Errorf("selected-contract execution admission model route topology does not match canonical route topology truth")
 	}
 	if model.RecipientPlanning == nil {
-		return fmt.Errorf("selected-contract execution admission model must carry %s", store.RunForkSelectedContractRecipientPlanningOwner)
+		return fmt.Errorf("selected-contract execution admission model must carry %s", runfork.RunForkSelectedContractRecipientPlanningOwner)
 	}
 	if err := validateSelectedContractRecipientPlanning(frontier, routeAdmission, routeTopology, *model.RecipientPlanning); err != nil {
 		return err
 	}
-	if model.ContractBinding.Owner != store.RunForkSelectedContractBindingOwner ||
-		model.ContractBinding.Disposition != store.RunForkSelectedContractDispositionPrerequisite {
-		return fmt.Errorf("selected-contract execution admission model must consume %s as prerequisite", store.RunForkSelectedContractBindingOwner)
+	if model.ContractBinding.Owner != runfork.RunForkSelectedContractBindingOwner ||
+		model.ContractBinding.Disposition != runfork.RunForkSelectedContractDispositionPrerequisite {
+		return fmt.Errorf("selected-contract execution admission model must consume %s as prerequisite", runfork.RunForkSelectedContractBindingOwner)
 	}
 	return validateSelectionMatches("execution model", binding.ContractSelection, model.ContractSelection)
 }
 
-func validateSelectionMatches(label string, want, got store.RunForkContractSelection) error {
+func validateSelectionMatches(label string, want, got runfork.RunForkContractSelection) error {
 	if err := validateSelectedContractSelection("binding", want); err != nil {
 		return err
 	}
@@ -576,16 +568,16 @@ func validateSelectionMatches(label string, want, got store.RunForkContractSelec
 	return nil
 }
 
-func validateSelectedContractSelection(label string, selection store.RunForkContractSelection) error {
+func validateSelectedContractSelection(label string, selection runfork.RunForkContractSelection) error {
 	switch strings.TrimSpace(selection.Mode) {
-	case store.RunForkContractSelectionModeSelectedContracts:
+	case runfork.RunForkContractSelectionModeSelectedContracts:
 		if strings.TrimSpace(selection.ContractsRoot) == "" {
 			return fmt.Errorf("selected-contract execution admission %s requires contracts_root", label)
 		}
 		if strings.TrimSpace(selection.BundleHash) != "" {
 			return fmt.Errorf("selected-contract execution admission %s selected_contracts mode cannot carry bundle_hash", label)
 		}
-	case store.RunForkContractSelectionModeBundleHash:
+	case runfork.RunForkContractSelectionModeBundleHash:
 		if strings.TrimSpace(selection.BundleHash) == "" {
 			return fmt.Errorf("selected-contract execution admission %s requires bundle_hash", label)
 		}
@@ -607,13 +599,13 @@ func validateSelectedContractSelection(label string, selection store.RunForkCont
 	return nil
 }
 
-func validateSelectedSourceLoaderSelection(selection store.RunForkContractSelection) error {
+func validateSelectedSourceLoaderSelection(selection runfork.RunForkContractSelection) error {
 	switch strings.TrimSpace(selection.Mode) {
-	case store.RunForkContractSelectionModeSelectedContracts:
+	case runfork.RunForkContractSelectionModeSelectedContracts:
 		if strings.TrimSpace(selection.ContractsRoot) == "" {
 			return fmt.Errorf("selected-contract execution admission selected source loader requires contracts_root")
 		}
-	case store.RunForkContractSelectionModeBundleHash:
+	case runfork.RunForkContractSelectionModeBundleHash:
 		if strings.TrimSpace(selection.BundleHash) == "" {
 			return fmt.Errorf("selected-contract execution admission selected source loader requires bundle_hash")
 		}

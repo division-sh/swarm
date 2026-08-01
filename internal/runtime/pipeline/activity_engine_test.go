@@ -43,7 +43,7 @@ import (
 func TestPipelineActivityIntentWriterPersistsDurableActivityRequestEvent(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	intent := testActivityIntent("https://example.com/source")
@@ -184,7 +184,7 @@ func activityRequestEventWithPayload(t *testing.T, original events.Event, payloa
 
 func TestPipelineActivityContractPinUnavailableRequestsClaimRelease(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
-	pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, nil, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinator(&recordingPipelineBus{}, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	intent := testActivityIntent("https://example.com/source")
@@ -266,7 +266,7 @@ func TestActivityExecutionContextRejectsCausalModeConflict(t *testing.T) {
 func TestPipelineActivityIntentWriterDefersRuntimeLogUntilPostCommit(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	writer := pipelineActivityIntentWriter{coordinator: pc}
@@ -552,7 +552,7 @@ func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t 
 				"channel.ops.deliver": testCompiledChannelActivityTool(server.URL),
 			}})
 			bus := &recordingPipelineBus{}
-			pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, WorkflowStore: store})
+			pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{}})
 			intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
 			intent.Tool = "channel.ops.deliver"
 			intent.ActivityID = "channel_deliver"
@@ -603,7 +603,7 @@ func TestChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossS
 				"channel.ops.deliver": testCompiledChannelActivityTool(server.URL),
 			}})
 			bus := &recordingPipelineBus{}
-			pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, WorkflowStore: store})
+			pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{}})
 			intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
 			intent.Tool = "channel.ops.deliver"
 			intent.ActivityID = "channel_deliver"
@@ -626,7 +626,7 @@ func TestChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossS
 	}
 }
 
-func newActivityJournalStoreForCase(t *testing.T, ctx context.Context, kind activityBoringStoreKind) (*sql.DB, *WorkflowInstanceStore, bool) {
+func newActivityJournalStoreForCase(t *testing.T, ctx context.Context, kind activityBoringStoreKind) (*sql.DB, *workflowInstanceStore, bool) {
 	t.Helper()
 	if kind == activityBoringStoreSQLite {
 		db, store := newSQLiteActivityJournalStore(t, ctx)
@@ -654,7 +654,7 @@ func testCompiledChannelActivityTool(url string) runtimecontracts.ToolSchemaEntr
 func TestPipelineActivityDispatcherDispatchesDurableActivityRequestEvent(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 
@@ -698,7 +698,7 @@ func TestPipelineActivityRequestEventExecutesHTTPToolAndPublishesGeneratedSucces
 		},
 	})
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	intent := testActivityIntent(inputURL)
@@ -770,7 +770,7 @@ func TestPipelineActivityRequestRetriesReadOnlyHTTPTool(t *testing.T) {
 		},
 	})
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	intent := testActivityIntent("https://example.com/source")
@@ -817,7 +817,7 @@ func TestPipelineActivityRequestFailsClosedForWriteEffectClass(t *testing.T) {
 		},
 	})
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	intent := testActivityIntent("https://example.com/source")
@@ -884,9 +884,10 @@ func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCrede
 	db, store := newSQLiteActivityJournalStore(t, ctx)
 	seedActivityRun(t, db, true, runID)
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module:        staticSemanticWorkflowModule{source: source},
-		WorkflowStore: store,
-		Credentials:   credentialStore,
+		Module:              staticSemanticWorkflowModule{source: source},
+		Persistence:         workflowPersistenceForTest(store),
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
+		Credentials:         credentialStore,
 	})
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
 	request, err := activityRequestEmitIntent(intent)
@@ -966,7 +967,8 @@ func TestPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedRespo
 	credentialStore := &countingActivityCredentialStore{}
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		Module:                 staticSemanticWorkflowModule{source: source},
-		WorkflowStore:          store,
+		Persistence:            workflowPersistenceForTest(store),
+		PipelineObligations:    unavailablePipelineTestObligationOwner{},
 		MockConnectorResponses: plan,
 		Credentials:            credentialStore,
 	})
@@ -1013,13 +1015,13 @@ func TestPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedRespo
 func TestPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponsePlan(t *testing.T) {
 	backends := []struct {
 		name  string
-		store func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool)
+		store func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool)
 	}{
-		{name: "sqlite", store: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
+		{name: "sqlite", store: func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool) {
 			db, journal := newSQLiteActivityJournalStore(t, ctx)
 			return db, journal, true
 		}},
-		{name: "postgres", store: func(t *testing.T, _ context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
+		{name: "postgres", store: func(t *testing.T, _ context.Context) (*sql.DB, *workflowInstanceStore, bool) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			return db, newPostgresWorkflowInstanceStoreForTest(db), false
@@ -1057,7 +1059,8 @@ func TestPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponseP
 
 			firstBus := &recordingPipelineBus{}
 			first := NewPipelineCoordinatorWithOptions(firstBus, db, PipelineCoordinatorOptions{
-				Module: staticSemanticWorkflowModule{source: source}, WorkflowStore: journal,
+				Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(journal),
+				PipelineObligations:    unavailablePipelineTestObligationOwner{},
 				MockConnectorResponses: plan,
 			})
 			if err := (pipelineActivityDispatcher{coordinator: first}).executeActivityIntent(ctx, intent); err != nil {
@@ -1070,8 +1073,9 @@ func TestPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponseP
 			restartBus := &recordingPipelineBus{}
 			credentials := &countingActivityCredentialStore{}
 			restarted := NewPipelineCoordinatorWithOptions(restartBus, db, PipelineCoordinatorOptions{
-				Module: staticSemanticWorkflowModule{source: source}, WorkflowStore: journal,
-				Credentials: credentials,
+				Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(journal),
+				PipelineObligations: unavailablePipelineTestObligationOwner{},
+				Credentials:         credentials,
 			})
 			if err := (pipelineActivityDispatcher{coordinator: restarted}).executeActivityIntent(ctx, intent); err != nil {
 				t.Fatalf("replay terminal mock activity without current plan: %v", err)
@@ -1089,13 +1093,13 @@ func TestPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponseP
 func TestPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTTP(t *testing.T) {
 	backends := []struct {
 		name  string
-		store func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool)
+		store func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool)
 	}{
-		{name: "sqlite", store: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
+		{name: "sqlite", store: func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool) {
 			db, journal := newSQLiteActivityJournalStore(t, ctx)
 			return db, journal, true
 		}},
-		{name: "postgres", store: func(t *testing.T, _ context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
+		{name: "postgres", store: func(t *testing.T, _ context.Context) (*sql.DB, *workflowInstanceStore, bool) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			return db, newPostgresWorkflowInstanceStoreForTest(db), false
@@ -1131,7 +1135,8 @@ func TestPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTT
 					bus := &recordingPipelineBus{}
 					credentialStore := &countingActivityCredentialStore{}
 					pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-						Module: staticSemanticWorkflowModule{source: source}, WorkflowStore: store,
+						Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
+						PipelineObligations:    unavailablePipelineTestObligationOwner{},
 						MockConnectorResponses: plan, Credentials: credentialStore,
 					})
 					intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
@@ -1218,9 +1223,10 @@ func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *test
 	seedActivityRun(t, db, true, runID)
 	bus := &recordingPipelineBus{}
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module:        staticSemanticWorkflowModule{source: source},
-		WorkflowStore: store,
-		Credentials:   testActivityCredentialStore(t, "acme_api_key", "acme-secret"),
+		Module:              staticSemanticWorkflowModule{source: source},
+		Persistence:         workflowPersistenceForTest(store),
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
+		Credentials:         testActivityCredentialStore(t, "acme_api_key", "acme-secret"),
 	})
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
 	intent.Tool = "acme.create_widget"
@@ -1252,18 +1258,18 @@ func TestPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDelivery
 	ctx := testAuthorActivityContext(t, context.Background())
 	for _, tc := range []struct {
 		name  string
-		setup func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool)
+		setup func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool)
 	}{
 		{
 			name: "sqlite",
-			setup: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
+			setup: func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool) {
 				db, store := newSQLiteActivityJournalStore(t, ctx)
 				return db, store, true
 			},
 		},
 		{
 			name: "postgres",
-			setup: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
+			setup: func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool) {
 				_, db, _ := testutil.StartPostgres(t)
 				return db, newPostgresWorkflowInstanceStoreForTest(db), false
 			},
@@ -1276,7 +1282,7 @@ func TestPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDelivery
 	}
 }
 
-func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, ctx context.Context, db *sql.DB, store *WorkflowInstanceStore, sqlite bool) {
+func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, ctx context.Context, db *sql.DB, store *workflowInstanceStore, sqlite bool) {
 	t.Helper()
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1326,9 +1332,10 @@ func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, ctx conte
 	})
 	bus := &recordingPipelineBus{}
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module:        staticSemanticWorkflowModule{source: source},
-		WorkflowStore: store,
-		Credentials:   credentialStore,
+		Module:              staticSemanticWorkflowModule{source: source},
+		Persistence:         workflowPersistenceForTest(store),
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
+		Credentials:         credentialStore,
 	})
 	intent := testNonIdempotentActivityIntent(runID, inboundEvent.ID(), entityID)
 	intent.Tool = "telegram.send_message"
@@ -1415,8 +1422,9 @@ func TestPipelineActivityRequestNonIdempotentFailureDoesNotRetry(t *testing.T) {
 	db, store := newSQLiteActivityJournalStore(t, ctx)
 	seedActivityRun(t, db, true, runID)
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module:        staticSemanticWorkflowModule{source: source},
-		WorkflowStore: store,
+		Module:              staticSemanticWorkflowModule{source: source},
+		Persistence:         workflowPersistenceForTest(store),
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
 	})
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
 	intent.RetryMaxAttempts = 3
@@ -1457,8 +1465,9 @@ func TestPipelineActivityRequestNonIdempotentTransportErrorMarksUncertain(t *tes
 	db, store := newSQLiteActivityJournalStore(t, ctx)
 	seedActivityRun(t, db, true, runID)
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module:        staticSemanticWorkflowModule{source: source},
-		WorkflowStore: store,
+		Module:              staticSemanticWorkflowModule{source: source},
+		Persistence:         workflowPersistenceForTest(store),
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
 	})
 	client := &http.Client{Transport: activityRoundTripFunc(func(req *http.Request) (*http.Response, error) {
 		calls++
@@ -1524,8 +1533,9 @@ func TestPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTer
 	db, store := newSQLiteActivityJournalStore(t, ctx)
 	seedActivityRun(t, db, true, runID)
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module:        staticSemanticWorkflowModule{source: source},
-		WorkflowStore: store,
+		Module:              staticSemanticWorkflowModule{source: source},
+		Persistence:         workflowPersistenceForTest(store),
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
 	})
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
 	if _, inserted, err := store.StartActivityAttempt(ctx, activityAttemptStartRecord(intent, activityInputHash(intent.Input))); err != nil {
@@ -1561,7 +1571,7 @@ func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *t
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 	runner := &activityCommitAckLossRunner{db: db}
-	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+	store := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
 	activation, entityID := seedLoopActivityInstance(t, store, ctx, "review")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -1573,7 +1583,7 @@ func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *t
 		"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL})),
 	}})
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, WorkflowStore: store})
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{}})
 	intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), entityID)
 	intent.Generation, intent.LoopStage = activation.Generation(), activation.CurrentStage
 	runner.failNext.Store(true)
@@ -1665,8 +1675,9 @@ func TestPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResu
 	db, store := newSQLiteActivityJournalStore(t, ctx)
 	seedActivityRun(t, db, true, runID)
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module:        staticSemanticWorkflowModule{source: source},
-		WorkflowStore: store,
+		Module:              staticSemanticWorkflowModule{source: source},
+		Persistence:         workflowPersistenceForTest(store),
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
 	})
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
 	request, err := activityRequestEmitIntent(intent)
@@ -1742,9 +1753,10 @@ func TestPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatch(t
 	seedActivityRun(t, db, true, runID)
 	emptyCredentials := testActivityCredentialStore(t, "", "")
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module:        staticSemanticWorkflowModule{source: source},
-		WorkflowStore: store,
-		Credentials:   emptyCredentials,
+		Module:              staticSemanticWorkflowModule{source: source},
+		Persistence:         workflowPersistenceForTest(store),
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
+		Credentials:         emptyCredentials,
 	})
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
 	request, err := activityRequestEmitIntent(intent)
@@ -1792,9 +1804,10 @@ func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBefo
 	db, store := newSQLiteActivityJournalStore(t, ctx)
 	seedActivityRun(t, db, true, runID)
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module:        staticSemanticWorkflowModule{source: source},
-		WorkflowStore: store,
-		Credentials:   testActivityCredentialStore(t, "", ""),
+		Module:              staticSemanticWorkflowModule{source: source},
+		Persistence:         workflowPersistenceForTest(store),
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
+		Credentials:         testActivityCredentialStore(t, "", ""),
 	})
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
 	intent.Tool = "telegram.send_message"
@@ -2035,7 +2048,7 @@ func activityTestPlaceholder(sqlite bool, position int) string {
 	return fmt.Sprintf("$%d::uuid", position)
 }
 
-func newSQLiteActivityJournalStore(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore) {
+func newSQLiteActivityJournalStore(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore) {
 	t.Helper()
 	name := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
 	db, err := sql.Open("sqlite", "file:"+name+"?mode=memory&cache=shared")
@@ -2044,7 +2057,7 @@ func newSQLiteActivityJournalStore(t *testing.T, ctx context.Context) (*sql.DB, 
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	createActivityJournalSQLiteSchema(t, ctx, db)
-	return db, NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db})
+	return db, newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db})
 }
 
 func seedActivityRun(t *testing.T, db *sql.DB, sqlite bool, runID string) {

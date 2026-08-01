@@ -21,18 +21,18 @@ func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {
 	ctx := testAuthorActivityContext(t, context.Background())
 	cases := []struct {
 		name  string
-		store func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool)
+		store func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool)
 	}{
 		{
 			name: "sqlite",
-			store: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
+			store: func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool) {
 				db, journal := newSQLiteActivityJournalStore(t, ctx)
 				return db, journal, true
 			},
 		},
 		{
 			name: "postgres",
-			store: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
+			store: func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				return db, newPostgresWorkflowInstanceStoreForTest(db), false
@@ -113,18 +113,18 @@ func TestActivityAttemptJournalPreservesReplyContextAcrossRestart(t *testing.T) 
 	ctx := testAuthorActivityContext(t, context.Background())
 	cases := []struct {
 		name  string
-		store func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool)
+		store func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool)
 	}{
 		{
 			name: "sqlite",
-			store: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
+			store: func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool) {
 				db, journal := newSQLiteActivityJournalStore(t, ctx)
 				return db, journal, true
 			},
 		},
 		{
 			name: "postgres",
-			store: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
+			store: func(t *testing.T, ctx context.Context) (*sql.DB, *workflowInstanceStore, bool) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				return db, newPostgresWorkflowInstanceStoreForTest(db), false
@@ -147,7 +147,7 @@ func TestActivityAttemptJournalPreservesReplyContextAcrossRestart(t *testing.T) 
 			}
 			restarted := newPostgresWorkflowInstanceStoreForTest(db)
 			if sqlite {
-				restarted = NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db})
+				restarted = newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db})
 			}
 			loaded, ok, err := restarted.LoadActivityAttempt(ctx, start.RequestEventID)
 			if err != nil || !ok || loaded.ReplyContextID != replyContextID {
@@ -204,7 +204,7 @@ func TestLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStores(t *testing.T) 
 	}
 }
 
-func seedLoopActivityInstance(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, stage string) (loopruntime.Activation, string) {
+func seedLoopActivityInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, stage string) (loopruntime.Activation, string) {
 	t.Helper()
 	runID := runtimecorrelation.RunIDFromContext(ctx)
 	path := "validation/" + uuid.NewString()
@@ -218,7 +218,7 @@ func seedLoopActivityInstance(t *testing.T, store *WorkflowInstanceStore, ctx co
 		t.Fatal(err)
 	}
 	carrier := runtimeengine.NewStateCarrier(map[string]any{}, nil, buckets)
-	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "validation", WorkflowVersion: "1.0.0",
 		CurrentState: stage, EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID},
 		StateBuckets: carrier.PersistedStateBuckets(),
@@ -235,9 +235,9 @@ func loopActivityStartRecord(ctx context.Context, activation loopruntime.Activat
 	return activityAttemptStartRecord(intent, activityInputHash(intent.Input))
 }
 
-func advanceLoopActivityInstance(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, entityID, operation string) {
+func advanceLoopActivityInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, entityID, operation string) {
 	t.Helper()
-	if err := store.MutateE(ctx, entityID, func(instance *WorkflowInstance) error {
+	if err := store.mutateE(ctx, entityID, func(instance *WorkflowInstance) error {
 		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 		if err != nil {
 			return err

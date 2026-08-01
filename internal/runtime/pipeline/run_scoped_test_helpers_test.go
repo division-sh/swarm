@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 	"database/sql"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"strings"
 	"testing"
 	"time"
@@ -12,9 +11,31 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
+
+func newTestWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
+	return NewPostgresWorkflowPersistence(db, &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectPostgres}).store
+}
+
+func newTestSQLiteWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
+	return &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite}
+}
+
+func newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, runner runtimeMutationRunner) *workflowInstanceStore {
+	store := NewSQLiteWorkflowPersistence(db, runner).store
+	if owner, ok := runner.(runtimerunlifecycle.OperationOwner); ok {
+		store.runLifecycle = owner
+	}
+	return store
+}
+
+func workflowPersistenceForTest(store *workflowInstanceStore) WorkflowPersistence {
+	return WorkflowPersistence{store: store}
+}
 
 const testPipelineRunID = "77777777-7777-7777-7777-777777777777"
 
@@ -54,7 +75,7 @@ func testPipelineRunContextNoSeed(t *testing.T) context.Context {
 	return runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), testPipelineRunID)
 }
 
-func testWorkflowStoreRunContext(t *testing.T, store *WorkflowInstanceStore) context.Context {
+func testWorkflowStoreRunContext(t *testing.T, store *workflowInstanceStore) context.Context {
 	t.Helper()
 	if store == nil {
 		t.Fatal("test workflow store run context requires store")
@@ -82,10 +103,10 @@ func configureWorkflowLifecycleForTest(t testing.TB, pc *PipelineCoordinator) {
 		return
 	}
 	if pc.workflowTimers == nil {
-		pc.workflowTimers = newWorkflowTimerLifecycle(pc.workflowStore, pc.SemanticSource(), pc.bus, pc.workOwner, pc.timerScheduler)
+		pc.workflowTimers = newWorkflowTimerLifecycle(pc.workflowStore, pc.SemanticSource(), pc.bus, pc.gatePublisher, pc.workOwner, pc.timerScheduler)
 	}
 	if pc.workflowStore.lifecycleOwner == nil {
-		pc.workflowStore.ConfigureWorkflowInstanceLifecycle(pipelineWorkflowLifecycleOwner{coordinator: pc})
+		pc.workflowStore.lifecycleOwner = pipelineWorkflowLifecycleOwner{coordinator: pc}
 	}
 }
 
@@ -115,7 +136,7 @@ func testWorkflowStateTransitionContext(ctx context.Context, entityID, eventType
 	return runtimecorrelation.WithInboundEvent(ctx, evt)
 }
 
-func testPersistedWorkflowStateTransitionContext(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, entityID, eventType string) context.Context {
+func testPersistedWorkflowStateTransitionContext(t *testing.T, store *workflowInstanceStore, ctx context.Context, entityID, eventType string) context.Context {
 	t.Helper()
 	transitionCtx := testWorkflowStateTransitionContext(ctx, entityID, eventType)
 	evt, ok := runtimecorrelation.InboundEventFromContext(transitionCtx)

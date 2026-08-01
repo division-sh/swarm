@@ -57,8 +57,8 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 		if _, ok := PipelineSQLTxFromContext(ctx); !ok {
 			return fmt.Errorf("approved activity %s must be materialized in the workflow mutation", intent.ActivityID)
 		}
-		store, ok := w.coordinator.decisionCards.(decisioncard.ProposedEffectStore)
-		if !ok || store == nil {
+		store := w.coordinator.proposedEffects
+		if store == nil {
 			return fmt.Errorf("proposed-effect continuation store is required for approved activity %s", intent.ActivityID)
 		}
 		card, continuation, err := w.coordinator.buildProposedEffectCard(ctx, intent)
@@ -373,7 +373,7 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 }
 
 func (d pipelineActivityDispatcher) reuseExistingNonIdempotentActivityAttempt(ctx context.Context, intent runtimeengine.ActivityIntent) (bool, error) {
-	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.Enabled() {
+	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.enabled() {
 		return false, nil
 	}
 	intent.Attempt = 1
@@ -442,12 +442,12 @@ func (d pipelineActivityDispatcher) admitReadOnlyActivityGeneration(ctx context.
 	if !intent.Generation.Valid() {
 		return nil
 	}
-	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.Enabled() {
+	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.enabled() {
 		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "activity_loop_store_unavailable", "activity-runtime", "admit_read_only_activity", nil)
 	}
 	unlock := d.coordinator.lockWorkflowEntity(intent.EntityID.String())
 	defer unlock()
-	return d.coordinator.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	return d.coordinator.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
 		instance, ok, err := d.coordinator.workflowStore.Load(txctx, intent.EntityID.String())
 		if err != nil {
 			return err
@@ -470,7 +470,7 @@ func (d pipelineActivityDispatcher) admitReadOnlyActivityGeneration(ctx context.
 }
 
 func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx context.Context, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry, mockResponse *providerconnectors.AdmittedMockResponse) error {
-	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.Enabled() {
+	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.enabled() {
 		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "activity_journal_unavailable", "activity-runtime", "load_activity_attempt", map[string]any{"tool": strings.TrimSpace(intent.Tool)}))
 	}
 	intent.Attempt = 1
@@ -562,7 +562,7 @@ func (d pipelineActivityDispatcher) rejectChannelActivityTarget(ctx context.Cont
 	if intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		return d.publishActivityFailure(ctx, intent, cause)
 	}
-	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.Enabled() {
+	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.enabled() {
 		return d.publishActivityFailure(ctx, intent, cause)
 	}
 	intent.Attempt = 1
@@ -762,7 +762,7 @@ func activityRequestEmitIntents(intents []runtimeengine.ActivityIntent) ([]runti
 // A terminal journal record is authoritative when publish acknowledgment is
 // lost, and replay never re-executes a completed non-idempotent activity.
 func (pc *PipelineCoordinator) ExecuteDurableActivity(ctx context.Context, intent runtimeengine.ActivityIntent) (ActivityAttemptRecord, error) {
-	if pc == nil || pc.bus == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+	if pc == nil || pc.bus == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return ActivityAttemptRecord{}, runtimefailures.New(
 			runtimefailures.ClassDependencyUnavailable,
 			"activity_journal_unavailable",

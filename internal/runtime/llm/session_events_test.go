@@ -116,25 +116,33 @@ type sessionStarter interface {
 
 func TestProviderRuntimesFailBeforeAgentStartedWhenExactAcquireHydrateFails(t *testing.T) {
 	wantErr := errors.New("exact acquire-hydrate failed")
-	constructors := map[string]func(sessions.Registry, EventPublisher) sessionStarter{
-		"anthropic_api": func(registry sessions.Registry, publisher EventPublisher) sessionStarter {
-			return NewAnthropicAPIRuntime(&config.Config{}, registry, "worker-1", nil, publisher)
+	constructors := map[string]func(sessions.Registry, LiveSessionAcquirer, EventPublisher) sessionStarter{
+		"anthropic_api": func(registry sessions.Registry, acquirer LiveSessionAcquirer, publisher EventPublisher) sessionStarter {
+			runtime := NewAnthropicAPIRuntime(&config.Config{}, registry, "worker-1", nil, publisher)
+			runtime.liveSessions = acquirer
+			return runtime
 		},
-		"claude_cli": func(registry sessions.Registry, publisher EventPublisher) sessionStarter {
-			return NewClaudeCLIRuntime(&config.Config{}, registry, "worker-1", nil, nil, publisher)
+		"claude_cli": func(registry sessions.Registry, acquirer LiveSessionAcquirer, publisher EventPublisher) sessionStarter {
+			runtime := NewClaudeCLIRuntime(&config.Config{}, registry, "worker-1", nil, nil, publisher)
+			runtime.liveSessions = acquirer
+			return runtime
 		},
-		"openai_compatible": func(registry sessions.Registry, publisher EventPublisher) sessionStarter {
-			return NewOpenAICompatibleRuntime(&config.Config{}, registry, "worker-1", nil, publisher)
+		"openai_compatible": func(registry sessions.Registry, acquirer LiveSessionAcquirer, publisher EventPublisher) sessionStarter {
+			runtime := NewOpenAICompatibleRuntime(&config.Config{}, registry, "worker-1", nil, publisher)
+			runtime.liveSessions = acquirer
+			return runtime
 		},
-		"openai_responses": func(registry sessions.Registry, publisher EventPublisher) sessionStarter {
-			return NewOpenAIResponsesRuntime(&config.Config{}, registry, "worker-1", nil, publisher)
+		"openai_responses": func(registry sessions.Registry, acquirer LiveSessionAcquirer, publisher EventPublisher) sessionStarter {
+			runtime := NewOpenAIResponsesRuntime(&config.Config{}, registry, "worker-1", nil, publisher)
+			runtime.liveSessions = acquirer
+			return runtime
 		},
 	}
 	for name, construct := range constructors {
 		t.Run(name, func(t *testing.T) {
 			publisher := &eventPublisherStub{}
 			registry := exactAcquireFailureRegistry{InMemoryRegistry: sessions.NewInMemoryRegistry(0), err: wantErr}
-			runtime := construct(registry, publisher)
+			runtime := construct(registry, registry, publisher)
 			ctx := withTestMemory(unmanagedLLMTestContext(), "agent-1", "support/instance-1")
 			ctx = runtimeactors.WithActor(ctx, runtimeactors.AgentConfig{
 				ExecutionMode: "live",
@@ -567,7 +575,9 @@ func TestAnthropicAPIRuntime_PersistConversationIncludesExactMemoryIdentity(t *t
 
 func TestClaudeCLIRuntime_PersistConversationIncludesExactMemoryIdentity(t *testing.T) {
 	store := &captureConversationStore{}
-	runtime := NewClaudeCLIRuntime(&config.Config{}, atomicLiveSessionTestRegistry{Registry: sessions.NewInMemoryRegistry(0), hydrated: store.load}, "worker-1", nil, store, nil)
+	registry := atomicLiveSessionTestRegistry{Registry: sessions.NewInMemoryRegistry(0), hydrated: store.load}
+	runtime := NewClaudeCLIRuntime(&config.Config{}, registry, "worker-1", nil, store, nil)
+	runtime.liveSessions = registry
 
 	runtime.persistConversation(unmanagedLLMTestContext(), &Session{
 		ID:             "session-4",
@@ -613,7 +623,9 @@ func TestClaudeCLIRuntime_StartSessionLoadsRetryLineage(t *testing.T) {
 		},
 		loadOK: true,
 	}
-	runtime := NewClaudeCLIRuntime(&config.Config{}, atomicLiveSessionTestRegistry{Registry: sessions.NewInMemoryRegistry(0), hydrated: store.load}, "worker-1", nil, store, nil)
+	registry := atomicLiveSessionTestRegistry{Registry: sessions.NewInMemoryRegistry(0), hydrated: store.load}
+	runtime := NewClaudeCLIRuntime(&config.Config{}, registry, "worker-1", nil, store, nil)
+	runtime.liveSessions = registry
 	ctx := withTestMemory(unmanagedLLMTestContext(), "agent-4", "review/inst-4")
 
 	s, err := runtime.StartSession(ctx, "agent-4", "system", nil)
@@ -656,7 +668,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 	runtime.httpClient = server.Client()
-	runtime.completionController = runtimeeffects.NewCompletionController(effects, effects)
+	runtime.completionController = runtimeeffects.NewCompletionController(effects, effects, effects, effects)
 
 	ctx := runtimeactors.WithActor(
 		runtimebus.WithInboundEvent(

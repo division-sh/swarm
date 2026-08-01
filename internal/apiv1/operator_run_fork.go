@@ -9,10 +9,11 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/runbundle"
 	"github.com/google/uuid"
 )
 
@@ -36,7 +37,7 @@ type RunForkExecutionRequest struct {
 	ForkEventID         string
 	BundleHash          string
 	ConfirmSourceFreeze bool
-	ContractSelection   store.RunForkContractSelection
+	ContractSelection   runfork.RunForkContractSelection
 }
 
 type RunForkExecutionResult struct {
@@ -56,7 +57,7 @@ type SelectedContractRunForkExecutionFunc func(context.Context, runtimerunforkex
 type SelectedContractRunForkExecutor struct {
 	ExecuteSelectedContractRunFork SelectedContractRunForkExecutionFunc
 	SourceLoader                   runtimerunforkexecution.SelectedContractSourceLoader
-	ContractSelection              store.RunForkContractSelection
+	ContractSelection              runfork.RunForkContractSelection
 	AgentRuntime                   runtimerunforkexecution.SelectedContractAgentRuntimeOptions
 }
 
@@ -149,7 +150,7 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 	}
 	selectedOpts := opts
 	selectedCtx := ctx
-	var contractSelection store.RunForkContractSelection
+	var contractSelection runfork.RunForkContractSelection
 	if runtimeContextManager(opts) != nil {
 		var contextErr error
 		selectedCtx, selectedOpts, _, contextErr = runtimeBundleContextByHash(ctx, opts, targetBundleHash, params.SourceRunID)
@@ -166,8 +167,8 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 		})
 	}
 	if targetBundleHash != sourceBundleHash {
-		contractSelection = store.RunForkContractSelection{
-			Mode:       store.RunForkContractSelectionModeBundleHash,
+		contractSelection = runfork.RunForkContractSelection{
+			Mode:       runfork.RunForkContractSelectionModeBundleHash,
 			BundleHash: targetBundleHash,
 		}
 	}
@@ -337,7 +338,7 @@ func runForkError(sourceRunID, forkEventID string, err error) error {
 	}
 	msg := err.Error()
 	switch {
-	case errors.Is(err, store.ErrRunForkSourceFreezeConfirmationRequired):
+	case errors.Is(err, runfork.ErrRunForkSourceFreezeConfirmationRequired):
 		return NewInvalidParamsError(map[string]any{
 			"field":  "confirm_source_freeze",
 			"reason": "must be true when the selected fork freezes a running or paused source",

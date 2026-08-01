@@ -26,7 +26,7 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 	entityID := uuid.NewString()
 	instanceID := "ti-template-flow-pilot"
 	flowInstance := "account/" + instanceID
-	if err := workflowStore.Create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      instanceID,
 		StorageRef:      flowInstance,
 		WorkflowName:    "account",
@@ -84,7 +84,7 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 	assertTemplateFlowPilotPipelineDeliveryStatus(t, db, evt.ID(), "account-node", "delivered")
 }
 
-func newTemplateFlowPilotPipelineCoordinator(t *testing.T, db *sql.DB, bundle *runtimecontracts.WorkflowContractBundle, source semanticview.Source) (*PipelineCoordinator, *WorkflowInstanceStore) {
+func newTemplateFlowPilotPipelineCoordinator(t *testing.T, db *sql.DB, bundle *runtimecontracts.WorkflowContractBundle, source semanticview.Source) (*PipelineCoordinator, *workflowInstanceStore) {
 	t.Helper()
 	workflow, err := LoadWorkflowDefinition(source)
 	if err != nil {
@@ -96,7 +96,9 @@ func newTemplateFlowPilotPipelineCoordinator(t *testing.T, db *sql.DB, bundle *r
 	}
 	workflowStore := newPostgresWorkflowInstanceStoreForTest(db)
 	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
-	pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+	bus := &recordingPipelineBus{}
+	bus.configurePipelineTestDeliveryOwner(deliveryStore)
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{
 			bundle:         bundle,
 			workflow:       workflow,
@@ -104,8 +106,10 @@ func newTemplateFlowPilotPipelineCoordinator(t *testing.T, db *sql.DB, bundle *r
 			guardRegistry:  NewContractGuardRegistry(source),
 			actionRegistry: NewContractActionRegistry(source),
 		},
-		WorkflowStore: workflowStore,
-		DeliveryStore: deliveryStore,
+		Persistence:         workflowPersistenceForTest(workflowStore),
+		DeliveryStore:       deliveryStore,
+		DeliveryRuntime:     bus,
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
 	})
 	return pc, workflowStore
 }

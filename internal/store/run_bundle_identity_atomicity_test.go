@@ -11,6 +11,7 @@ import (
 	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -69,7 +70,7 @@ func TestRunForkMaterializerRejectsMissingAndDeletedRequestedPersistedBundleBefo
 				}
 			}
 
-			_, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{
+			_, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
 				SourceRunID:      sourceRunID,
 				At:               eventID,
 				BundleSourceFact: mustStoreTestPersistedBundleSourceFact(targetHash),
@@ -119,10 +120,7 @@ func TestPostgresStandingRevisionFailsAfterDeleteFirstSerializationWithoutMutati
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	selected := admitTestPostgresStore(t, db)
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	workflowStore.ConfigureRuntimeMutationRunner(selected)
-	workflowStore.ConfigureDeliveryLifecycleStore(selected)
-	workflowStore.ConfigurePipelineObligationStore(selected.PipelineObligations())
+	workflowStore := newPostgresWorkflowTestCoordinator(t, db, selected)
 	ctx := testAuthorActivityRuntimeContext()
 
 	firstHash := "bundle-v1:sha256:" + strings.Repeat("e", 64)

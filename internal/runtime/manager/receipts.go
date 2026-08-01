@@ -20,7 +20,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type activeRunDeliveryQuiescenceReader interface {
+type ActiveRunDeliveryQuiescenceReader interface {
 	ActiveRunDeliveryQuiesced(ctx context.Context, eventID string, route events.DeliveryRoute) (string, bool, error)
 }
 
@@ -244,8 +244,8 @@ func receiptStatusForAgentFailure(err error) ReceiptStatus {
 }
 
 func (am *AgentManager) activeRunDeliveryQuiesced(ctx context.Context, eventID string, route events.DeliveryRoute) (startupManagerReplayReasonCode, bool) {
-	reader, ok := am.store.(activeRunDeliveryQuiescenceReader)
-	if !ok || reader == nil {
+	reader := am.roles.DeliveryQuiescence
+	if reader == nil {
 		return "", false
 	}
 	if _, err := uuid.Parse(strings.TrimSpace(eventID)); err != nil {
@@ -502,20 +502,16 @@ func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, stat
 		if finishErr != nil {
 			return runtimedelivery.Snapshot{}, finishErr
 		}
-		ownerProvider, ok := am.bus.(interface {
-			RetainDeliveryContinuation(runtimedelivery.Snapshot) error
-		})
-		if !ok {
+		ownerProvider := am.roles.DeliveryRuntime
+		if ownerProvider == nil {
 			return runtimedelivery.Snapshot{}, errors.New("retry settlement requires the normal generation continuation owner")
 		}
 		if err := ownerProvider.RetainDeliveryContinuation(snapshot); err != nil {
 			return runtimedelivery.Snapshot{}, fmt.Errorf("transfer retry continuation: %w", err)
 		}
 	} else if snapshot.Terminal() {
-		ownerProvider, ok := am.bus.(interface {
-			ReleaseDeliveryContinuation(string) error
-		})
-		if !ok {
+		ownerProvider := am.roles.DeliveryRuntime
+		if ownerProvider == nil {
 			return runtimedelivery.Snapshot{}, errors.Join(
 				finishErr,
 				errors.New("terminal settlement requires the exact continuation owner"),

@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -83,8 +84,12 @@ type TestSetupStore interface {
 }
 
 type DecisionCardAuthority interface {
-	RunPipelineMutation(context.Context, func(context.Context) error) error
-	CommitDecision(context.Context, decisioncard.Card, string, time.Time) error
+	CommitDecisionCardMutation(
+		context.Context,
+		runtimepipeline.DecisionCardMutationIdempotency,
+		runtimepipeline.DecisionCardMutationIdempotencyRequest,
+		runtimepipeline.DecisionCardMutation,
+	) (json.RawMessage, bool, error)
 }
 
 type StandingServiceController interface {

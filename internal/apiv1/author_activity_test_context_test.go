@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -16,6 +17,8 @@ import (
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -48,6 +51,28 @@ scan.followup scan.requested thing.created trace.visible triage.requested
 
 type authorActivityTestCatalogRegistrar interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
+}
+
+type apiTestRuntimeMutationOwner interface {
+	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
+}
+
+type apiTestDurableEventStore interface {
+	runtimebus.EventStore
+	runtimereplycontext.Store
+	runtimerunlifecycle.OperationOwner
+	runtimedelivery.Store
+	runtimebus.FlowInstanceRoutePersistence
+	runtimebus.FlowInstanceRouteRecordReader
+	runtimebus.FlowInstanceRouteSetPersistence
+	runtimebus.FlowInstanceRouteTopologyPersistence
+	runtimebus.FlowInstanceRouteRollbackPersistence
+	runtimebus.ActiveAgentDescriptorLister
+	runtimebus.ActiveFlowInstanceDescriptorLister
+	runtimebus.EventDeliveryTargetReader
+	runtimebus.EventDeliveryRouteSetReader
+	runtimebus.TargetFailureDeadLetterRecorder
+	runtimebus.RunOriginReader
 }
 
 func testAuthorActivityRuntimeContext(ctx context.Context) context.Context {
@@ -99,6 +124,28 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 			PipelineObligations() runtimepipelineobligation.Store
 		}); ok {
 			opts.PipelineObligations = provider.PipelineObligations()
+		}
+	}
+	if opts.PipelineObligations != nil {
+		durable, ok := eventStore.(apiTestDurableEventStore)
+		if !ok {
+			return nil, fmt.Errorf("API durable event-store fixture %T lacks exact durable roles", eventStore)
+		}
+		opts.Durable = runtimebus.DurableDependencies{
+			ReplyContext:          durable,
+			RunLifecycle:          durable,
+			DeliveryLifecycle:     durable,
+			FlowRoutes:            durable,
+			FlowRouteRecords:      durable,
+			FlowRouteSets:         durable,
+			FlowRouteTopology:     durable,
+			FlowRouteRollback:     durable,
+			ActiveAgents:          durable,
+			ActiveFlows:           durable,
+			DeliveryTargets:       durable,
+			DeliveryRouteSets:     durable,
+			TargetFailureRecorder: durable,
+			RunOrigins:            durable,
 		}
 	}
 	deliveryStore, hasDeliveryStore := eventStore.(runtimedelivery.Store)

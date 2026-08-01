@@ -293,6 +293,8 @@ type RecoveryStore interface {
 
 type Controller struct {
 	store                    Store
+	completionStore          CompletionStore
+	completionHeartbeatStore CompletionHeartbeatStore
 	completionSpendProjector CompletionSpendProjector
 }
 
@@ -302,8 +304,13 @@ func NewController(store Store) *Controller {
 	return &Controller{store: store}
 }
 
-func NewCompletionController(store Store, projector CompletionSpendProjector) *Controller {
-	return &Controller{store: store, completionSpendProjector: projector}
+func NewCompletionController(store Store, completionStore CompletionStore, heartbeatStore CompletionHeartbeatStore, projector CompletionSpendProjector) *Controller {
+	return &Controller{
+		store:                    store,
+		completionStore:          completionStore,
+		completionHeartbeatStore: heartbeatStore,
+		completionSpendProjector: projector,
+	}
 }
 
 func WithController(ctx context.Context, controller *Controller) context.Context {
@@ -327,9 +334,7 @@ func (c *Controller) CompletionEnabled() bool {
 	if !c.Enabled() {
 		return false
 	}
-	_, canHeartbeat := c.store.(CompletionHeartbeatStore)
-	_, canSettle := c.store.(CompletionStore)
-	return canHeartbeat && canSettle && c.completionSpendProjector != nil
+	return c.completionHeartbeatStore != nil && c.completionStore != nil && c.completionSpendProjector != nil
 }
 
 func (c *Controller) IsCurrent(ctx context.Context, token LifecycleToken) (bool, error) {
@@ -491,7 +496,7 @@ func BeginCompletion(ctx context.Context, adapter string, request []byte, lineag
 	if !ok {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_controller_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)})
 	}
-	if _, ok := controller.store.(CompletionHeartbeatStore); !ok {
+	if controller.completionHeartbeatStore == nil {
 		return nil, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_heartbeat_store_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": strings.TrimSpace(adapter)})
 	}
 	authority, ok := completionAuthorityFromContext(ctx)
@@ -633,8 +638,8 @@ func (h *Handle) Heartbeat(ctx context.Context, lease time.Duration) error {
 	if lease <= 0 {
 		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_heartbeat_lease_invalid", "llm-completion-authority", "heartbeat_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
-	store, ok := h.controller.store.(CompletionHeartbeatStore)
-	if !ok {
+	store := h.controller.completionHeartbeatStore
+	if store == nil {
 		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_heartbeat_store_missing", "llm-completion-authority", "heartbeat_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
 	return store.HeartbeatCompletionAttempt(ctx, h.attempt, time.Now().UTC(), lease)
@@ -672,8 +677,8 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 	if h == nil || h.controller == nil || h.controller.store == nil {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "llm-completion-authority", "settle_completion", nil)
 	}
-	store, ok := h.controller.store.(CompletionStore)
-	if !ok {
+	store := h.controller.completionStore
+	if store == nil {
 		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_settlement_store_missing", "llm-completion-authority", "settle_completion", nil)
 	}
 	settlement.Settlement.OperationID = h.attempt.OperationID

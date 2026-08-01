@@ -169,6 +169,21 @@ func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, 
 	return exists, nil
 }
 
+func (s *SQLiteRuntimeStore) EventExists(ctx context.Context, eventID string) (bool, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return false, err
+	}
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return false, nil
+	}
+	var exists bool
+	if err := eventReadQueryerFromContext(ctx, s.DB).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE event_id = ?)`, eventID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("event exists lookup: %w", err)
+	}
+	return exists, nil
+}
+
 func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err

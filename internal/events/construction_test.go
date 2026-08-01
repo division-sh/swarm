@@ -28,7 +28,7 @@ var productionRouteProbeEventAllowlist = map[eventConstructorCallsite]int{
 }
 
 var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
-	{Path: "internal/apiv1/operator_decision_cards.go", Scope: "newMailboxRuntimeControlEvent", Constructor: "NewRunScopedRuntimeControlEvent"}:                                  1,
+	{Path: "internal/runtime/pipeline/decision_card_mutation.go", Scope: "decisionCardRuntimeControlEvent", Constructor: "NewRunScopedRuntimeControlEvent"}:                      1,
 	{Path: "internal/runtime/agentcontrol/control.go", Scope: "NewDirectiveEvent", Constructor: "NewRunCreatingDiagnosticDirectEvent"}:                                           1,
 	{Path: "internal/runtime/agentcontrol/control.go", Scope: "NewDirectiveEvent", Constructor: "NewRunScopedDiagnosticDirectEvent"}:                                             1,
 	{Path: "internal/runtime/budget.go", Scope: "BudgetTracker.evaluateScope", Constructor: "NewCausalRuntimeDiagnosticEvent"}:                                                   1,
@@ -47,7 +47,7 @@ var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
 	{Path: "internal/runtime/manager/event_construction.go", Scope: "newPlatformStandaloneRuntimeDiagnosticEvent", Constructor: "NewStandaloneRuntimeDiagnosticEvent"}:           1,
 	{Path: "internal/runtime/pipeline/coordinator.go", Scope: "newPipelineRuntimeDiagnostic", Constructor: "NewCausalRuntimeDiagnosticEvent"}:                                    1,
 	{Path: "internal/runtime/pipeline/workflow_gate_lifecycle.go", Scope: "PipelineCoordinator.publishWorkflowGateSuperseded", Constructor: "NewRunScopedRuntimeControlEvent"}:   1,
-	{Path: "internal/runtime/pipeline/workflow_gate_terminal.go", Scope: "WorkflowInstanceStore.supersedeWorkflowInstanceGates", Constructor: "NewRunScopedRuntimeControlEvent"}: 1,
+	{Path: "internal/runtime/pipeline/workflow_gate_terminal.go", Scope: "workflowInstanceStore.supersedeWorkflowInstanceGates", Constructor: "NewRunScopedRuntimeControlEvent"}: 1,
 	{Path: "internal/runtime/pipeline/workflow_timer_owner.go", Scope: "WorkflowTimerLifecycle.fireWakeup", Constructor: "NewRunScopedRuntimeControlEvent"}:                      1,
 	{Path: "internal/runtime/runstalled/monitor.go", Scope: "Monitor.eventForSnapshot", Constructor: "NewRunScopedRuntimeDiagnosticEvent"}:                                       1,
 	{Path: "internal/runtime/runtime.go", Scope: "scheduledEvent", Constructor: "NewRunScopedRuntimeControlEvent"}:                                                               1,

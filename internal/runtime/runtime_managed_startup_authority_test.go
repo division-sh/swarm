@@ -27,7 +27,8 @@ func TestManagedProviderPreflightAuthorityCarriesLiveExecutionIdentity(t *testin
 		Generation:   7,
 		StateVersion: 11,
 	}
-	rt := &Runtime{Stores: Stores{ManagerStore: &managedStartupAuthorityStoreStub{}}}
+	store := &managedStartupAuthorityStoreStub{}
+	rt := &Runtime{effectsStore: store, managedCapabilitiesStore: store}
 	preflight, err := rt.managedProviderPreflightAuthority(startupAuthority)
 	if err != nil {
 		t.Fatalf("build managed provider preflight authority: %v", err)

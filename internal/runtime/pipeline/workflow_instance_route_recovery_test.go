@@ -16,16 +16,16 @@ import (
 func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 	tests := []struct {
 		name  string
-		setup func(*testing.T) (*sql.DB, *WorkflowInstanceStore)
+		setup func(*testing.T) (*sql.DB, *workflowInstanceStore)
 		bind  string
 		json  string
 		now   string
 	}{
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (*sql.DB, *WorkflowInstanceStore) {
+			setup: func(t *testing.T) (*sql.DB, *workflowInstanceStore) {
 				db := newSQLiteWorkflowInstanceStoreTestDB(t)
-				return db, NewSQLiteWorkflowInstanceStore(db)
+				return db, newTestSQLiteWorkflowInstanceStore(db)
 			},
 			bind: "?",
 			json: "?",
@@ -33,7 +33,7 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 		},
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (*sql.DB, *WorkflowInstanceStore) {
+			setup: func(t *testing.T) (*sql.DB, *workflowInstanceStore) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				return db, newPostgresWorkflowInstanceStoreForTest(db)
@@ -155,7 +155,7 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 
 func TestWorkflowInstanceStoreLoadRouteRecoveryProjectionRejectsTerminatedTimestamp(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	store := NewSQLiteWorkflowInstanceStore(db)
+	store := newTestSQLiteWorkflowInstanceStore(db)
 	route := runtimeflowidentity.StoredRoute("review", "inst-1", "review/inst-1")
 	config := `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"review/inst-1","flow_path":"review/inst-1"}`
 	if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `

@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
@@ -27,17 +28,17 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			for _, failure := range []struct {
 				name   string
-				mutate func(*CommitSelectedForkEventRequest)
+				mutate func(*runtimebus.CommitSelectedForkEventRequest)
 			}{
 				{
 					name: "lineage",
-					mutate: func(req *CommitSelectedForkEventRequest) {
+					mutate: func(req *runtimebus.CommitSelectedForkEventRequest) {
 						// The event and request agree, but the declared source fact does not exist.
 					},
 				},
 				{
 					name: "delivery_manifest",
-					mutate: func(req *CommitSelectedForkEventRequest) {
+					mutate: func(req *runtimebus.CommitSelectedForkEventRequest) {
 						first, _ := events.NewDeliveryPayloadProjection(map[string]string{"summary": "one"})
 						second, _ := events.NewDeliveryPayloadProjection(map[string]string{"summary": "two"})
 						worker := testAgentDeliveryRoute(t, "worker", "fixture/worker")
@@ -49,20 +50,20 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 				},
 				{
 					name: "replay_scope",
-					mutate: func(req *CommitSelectedForkEventRequest) {
+					mutate: func(req *runtimebus.CommitSelectedForkEventRequest) {
 						req.Commit.ReplayScope = "unsupported"
 					},
 				},
 				{
 					name: "pipeline_receipt",
-					mutate: func(req *CommitSelectedForkEventRequest) {
+					mutate: func(req *runtimebus.CommitSelectedForkEventRequest) {
 						disposition := runtimepipelineobligation.Terminal("fixture_error", &runtimefailures.Envelope{})
 						req.Commit.Disposition = &disposition
 					},
 				},
 				{
 					name: "dead_letter",
-					mutate: func(req *CommitSelectedForkEventRequest) {
+					mutate: func(req *runtimebus.CommitSelectedForkEventRequest) {
 						req.Commit.DeadLetter = &runtimedeadletters.Record{OriginalEventID: uuid.NewString()}
 					},
 				},
@@ -240,7 +241,7 @@ func TestSQLiteCommitSelectedForkEventSerializesWithClaimAbandonment(t *testing.
 	})
 }
 
-func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, persistSource bool) CommitSelectedForkEventRequest {
+func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, persistSource bool) runtimebus.CommitSelectedForkEventRequest {
 	t.Helper()
 	store := fixture.store.(eventRecordContractStore)
 	createdAt := time.Date(2026, 7, 18, 19, 0, 0, 0, time.UTC)
@@ -282,23 +283,23 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 			}
 		}
 		authorityStore, ok := fixture.store.(interface {
-			IssueRunForkSelectedContractRuntimeExecution(context.Context, SelectedContractRuntimeExecutionIssueRequest) (SelectedContractRuntimeExecution, error)
+			IssueRunForkSelectedContractRuntimeExecution(context.Context, runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error)
 		})
 		if !ok {
 			t.Fatal("selected-fork atomicity fixture has no selected execution authority owner")
 		}
-		selection := RunForkContractSelection{
+		selection := runfork.RunForkContractSelection{
 			Mode: "selected_contracts", ContractsRoot: "/tmp/contracts",
 			WorkflowName: "workflow", WorkflowVersion: "v1",
 		}
-		issued, err := authorityStore.IssueRunForkSelectedContractRuntimeExecution(ctx, SelectedContractRuntimeExecutionIssueRequest{
-			Admission: RunForkSelectedContractExecutionAdmission{
-				Owner: RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: RunForkSelectedContractExecutionOwner,
+		issued, err := authorityStore.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
+			Admission: runfork.RunForkSelectedContractExecutionAdmission{
+				Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
 				NonMutating: true, ExecutionSupported: false, ForkRunID: forkRunID, SourceRunID: sourceRunID, ForkEventID: sourceEventID,
-				ContractSelection: selection, ContractBindingOwner: RunForkSelectedContractBindingOwner,
-				AdmissionOwner: "runtime.run_fork.frontier", AdmissionUse: RunForkSelectedContractExecutionAdmissionUseDurableBinding,
-				ExecutionModelOwner: RunForkSelectedContractExecutionModelOwner, SourceWorkflowName: "workflow", SourceWorkflowVersion: "v1",
-				DeferredWorkAdmissionOwner: RunForkSelectedContractDeferredWorkAdmissionOwner,
+				ContractSelection: selection, ContractBindingOwner: runfork.RunForkSelectedContractBindingOwner,
+				AdmissionOwner: "runtime.run_fork.frontier", AdmissionUse: runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
+				ExecutionModelOwner: runfork.RunForkSelectedContractExecutionModelOwner, SourceWorkflowName: "workflow", SourceWorkflowVersion: "v1",
+				DeferredWorkAdmissionOwner: runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
 			},
 			ContainerPlanFingerprint:   "sha256:container",
 			ActorCensusFingerprint:     "sha256:actors",
@@ -332,19 +333,19 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = owner.Release(context.WithoutCancel(ctx), claim) })
-	return CommitSelectedForkEventRequest{
+	return runtimebus.CommitSelectedForkEventRequest{
 		Commit: runtimebus.CommitPublishRequest{
 			Event: admitted, ReplayScope: runtimepipelineobligation.ScopeDirect, PipelineClaim: claim,
 			DeliveryAuthority: deliveryAuthority, DeliveryReceipt: &runtimebus.DeliveryCommitReceipt{},
 		},
-		Lineage: RunForkSelectedContractExecutionLineage{
+		Lineage: runfork.RunForkSelectedContractExecutionLineage{
 			ForkRunID: forkRunID, SourceRunID: sourceRunID, SourceEventID: sourceEventID,
 			ForkEventID: event.ID(), EventName: string(event.Type()), SelectionAuthority: lineage.AuthorityStamp(), CreatedAt: event.CreatedAt(),
 		},
 	}
 }
 
-func selectedForkEventForRequest(t *testing.T, req CommitSelectedForkEventRequest, payload []byte) events.Event {
+func selectedForkEventForRequest(t *testing.T, req runtimebus.CommitSelectedForkEventRequest, payload []byte) events.Event {
 	t.Helper()
 	event := req.Commit.Event.Event()
 	lineage, ok := event.SelectedForkLineage()

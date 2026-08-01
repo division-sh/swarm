@@ -140,7 +140,7 @@ type standingServiceRow struct {
 	RunControlReason   string
 }
 
-func (s *WorkflowInstanceStore) requireStandingRunSourceTx(
+func (s *workflowInstanceStore) requireStandingRunSourceTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	current standingServiceRow,
@@ -168,7 +168,7 @@ func (s *WorkflowInstanceStore) requireStandingRunSourceTx(
 	return fact, nil
 }
 
-func (s *WorkflowInstanceStore) ReconcileStandingService(ctx context.Context, candidate StandingServiceCandidate) (StandingServiceReconciliation, error) {
+func (s *workflowInstanceStore) ReconcileStandingService(ctx context.Context, candidate StandingServiceCandidate) (StandingServiceReconciliation, error) {
 	if s == nil || s.db == nil {
 		return StandingServiceReconciliation{}, fmt.Errorf("workflow instance store is required")
 	}
@@ -185,7 +185,7 @@ func (s *WorkflowInstanceStore) ReconcileStandingService(ctx context.Context, ca
 	return result, err
 }
 
-func (s *WorkflowInstanceStore) LoadReconciledStandingService(ctx context.Context, candidate StandingServiceCandidate) (StandingServiceReconciliation, bool, error) {
+func (s *workflowInstanceStore) LoadReconciledStandingService(ctx context.Context, candidate StandingServiceCandidate) (StandingServiceReconciliation, bool, error) {
 	candidate = candidate.Normalized()
 	if err := candidate.Validate(); err != nil {
 		return StandingServiceReconciliation{}, false, err
@@ -228,7 +228,7 @@ func (s *WorkflowInstanceStore) LoadReconciledStandingService(ctx context.Contex
 // ReconcileStandingServiceSet is the startup desired-state owner. It validates
 // the full declaration set before mutation and orphans persisted services that
 // are no longer declared in that same selected-store transaction.
-func (s *WorkflowInstanceStore) ReconcileStandingServiceSet(ctx context.Context, candidates []StandingServiceCandidate) ([]StandingServiceReconciliation, error) {
+func (s *workflowInstanceStore) ReconcileStandingServiceSet(ctx context.Context, candidates []StandingServiceCandidate) ([]StandingServiceReconciliation, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("workflow instance store is required")
 	}
@@ -277,7 +277,7 @@ func (s *WorkflowInstanceStore) ReconcileStandingServiceSet(ctx context.Context,
 // ReconcileStandingServiceReplacement is the hot-reload desired-state owner.
 // It mutates only the predecessor declaration set so independently loaded
 // runtime contexts remain outside the replacement transaction.
-func (s *WorkflowInstanceStore) ReconcileStandingServiceReplacement(ctx context.Context, previous, candidates []StandingServiceCandidate) ([]StandingServiceReconciliation, error) {
+func (s *workflowInstanceStore) ReconcileStandingServiceReplacement(ctx context.Context, previous, candidates []StandingServiceCandidate) ([]StandingServiceReconciliation, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("workflow instance store is required")
 	}
@@ -357,7 +357,7 @@ func normalizeStandingServiceCandidates(candidates []StandingServiceCandidate) (
 	return normalized, nil
 }
 
-func (s *WorkflowInstanceStore) SuspendStandingService(ctx context.Context, operation StandingServiceOperation) (StandingServiceReconciliation, error) {
+func (s *workflowInstanceStore) SuspendStandingService(ctx context.Context, operation StandingServiceOperation) (StandingServiceReconciliation, error) {
 	operation = operation.normalized()
 	if operation.ServiceID == "" {
 		return StandingServiceReconciliation{}, fmt.Errorf("standing service_id is required")
@@ -412,7 +412,7 @@ func (s *WorkflowInstanceStore) SuspendStandingService(ctx context.Context, oper
 	return result, err
 }
 
-func (s *WorkflowInstanceStore) ResumeStandingService(ctx context.Context, operation StandingServiceOperation) (StandingServiceReconciliation, error) {
+func (s *workflowInstanceStore) ResumeStandingService(ctx context.Context, operation StandingServiceOperation) (StandingServiceReconciliation, error) {
 	operation = operation.normalized()
 	if operation.ServiceID == "" {
 		return StandingServiceReconciliation{}, fmt.Errorf("standing service_id is required")
@@ -461,7 +461,7 @@ func (s *WorkflowInstanceStore) ResumeStandingService(ctx context.Context, opera
 	return result, err
 }
 
-func (s *WorkflowInstanceStore) ResetStandingService(ctx context.Context, operation StandingServiceOperation) (StandingServiceReconciliation, error) {
+func (s *workflowInstanceStore) ResetStandingService(ctx context.Context, operation StandingServiceOperation) (StandingServiceReconciliation, error) {
 	operation = operation.normalized()
 	if operation.ServiceID == "" {
 		return StandingServiceReconciliation{}, fmt.Errorf("standing service_id is required")
@@ -546,7 +546,7 @@ func (s *WorkflowInstanceStore) ResetStandingService(ctx context.Context, operat
 	return result, err
 }
 
-func (s *WorkflowInstanceStore) reconcileStandingServiceTx(ctx context.Context, tx *sql.Tx, candidate StandingServiceCandidate) (StandingServiceReconciliation, error) {
+func (s *workflowInstanceStore) reconcileStandingServiceTx(ctx context.Context, tx *sql.Tx, candidate StandingServiceCandidate) (StandingServiceReconciliation, error) {
 	current, found, err := s.loadStandingServiceTx(ctx, tx, candidate.ServiceID)
 	if err != nil {
 		return StandingServiceReconciliation{}, err
@@ -579,7 +579,7 @@ func (s *WorkflowInstanceStore) reconcileStandingServiceTx(ctx context.Context, 
 	}
 }
 
-func (s *WorkflowInstanceStore) PublishStandingService(ctx context.Context, serviceID, runID string, generation int64) (int64, error) {
+func (s *workflowInstanceStore) PublishStandingService(ctx context.Context, serviceID, runID string, generation int64) (int64, error) {
 	serviceID = strings.TrimSpace(serviceID)
 	runID = strings.TrimSpace(runID)
 	if serviceID == "" || runID == "" || generation <= 0 {
@@ -614,7 +614,7 @@ func (s *WorkflowInstanceStore) PublishStandingService(ctx context.Context, serv
 	return sequence, err
 }
 
-func (s *WorkflowInstanceStore) StandingRunUsesIntrinsicRecovery(ctx context.Context, runID string) (bool, error) {
+func (s *workflowInstanceStore) StandingRunUsesIntrinsicRecovery(ctx context.Context, runID string) (bool, error) {
 	runID = strings.TrimSpace(runID)
 	if s == nil || s.db == nil || runID == "" {
 		return false, nil
@@ -644,7 +644,7 @@ func (s *WorkflowInstanceStore) StandingRunUsesIntrinsicRecovery(ctx context.Con
 	return active, err
 }
 
-func (s *WorkflowInstanceStore) ListStandingServiceStatuses(ctx context.Context) ([]StandingServiceStatus, error) {
+func (s *workflowInstanceStore) ListStandingServiceStatuses(ctx context.Context) ([]StandingServiceStatus, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("workflow instance store is required")
 	}
@@ -729,7 +729,7 @@ func parseStandingTimestamp(raw string) (time.Time, error) {
 	return time.Time{}, lastErr
 }
 
-func (s *WorkflowInstanceStore) loadStandingServiceTx(ctx context.Context, tx *sql.Tx, serviceID string) (standingServiceRow, bool, error) {
+func (s *workflowInstanceStore) loadStandingServiceTx(ctx context.Context, tx *sql.Tx, serviceID string) (standingServiceRow, bool, error) {
 	var row standingServiceRow
 	var query string
 	if s.isSQLite() {
@@ -774,7 +774,7 @@ func (s *WorkflowInstanceStore) loadStandingServiceTx(ctx context.Context, tx *s
 	return row, true, nil
 }
 
-func (s *WorkflowInstanceStore) loadAllStandingServicesTx(ctx context.Context, tx *sql.Tx) ([]standingServiceRow, error) {
+func (s *workflowInstanceStore) loadAllStandingServicesTx(ctx context.Context, tx *sql.Tx) ([]standingServiceRow, error) {
 	query := `
 		SELECT ss.service_id, ss.package_key, ss.flow_id, ss.instance_id, ss.entity_id,
 		       ss.current_run_id, ss.current_generation, ss.publication_sequence,
@@ -825,7 +825,7 @@ func (s *WorkflowInstanceStore) loadAllStandingServicesTx(ctx context.Context, t
 	return out, nil
 }
 
-func (s *WorkflowInstanceStore) createStandingServiceTx(ctx context.Context, tx *sql.Tx, candidate StandingServiceCandidate) (StandingServiceReconciliation, error) {
+func (s *workflowInstanceStore) createStandingServiceTx(ctx context.Context, tx *sql.Tx, candidate StandingServiceCandidate) (StandingServiceReconciliation, error) {
 	generation := int64(1)
 	runID := runtimeflowidentity.StandingGenerationRunID(candidate.ServiceID, generation)
 	now := time.Now().UTC()
@@ -883,7 +883,7 @@ func (s *WorkflowInstanceStore) createStandingServiceTx(ctx context.Context, tx 
 	return result, nil
 }
 
-func (s *WorkflowInstanceStore) resumeStandingServiceTx(ctx context.Context, tx *sql.Tx, current standingServiceRow, candidate StandingServiceCandidate) (StandingServiceReconciliation, error) {
+func (s *workflowInstanceStore) resumeStandingServiceTx(ctx context.Context, tx *sql.Tx, current standingServiceRow, candidate StandingServiceCandidate) (StandingServiceReconciliation, error) {
 	if _, err := s.requireStandingRunSourceTx(ctx, tx, current, true); err != nil {
 		return StandingServiceReconciliation{}, err
 	}
@@ -941,7 +941,7 @@ func (s *WorkflowInstanceStore) resumeStandingServiceTx(ctx context.Context, tx 
 	return result, nil
 }
 
-func (s *WorkflowInstanceStore) repairStandingServiceTx(ctx context.Context, tx *sql.Tx, current standingServiceRow, candidate StandingServiceCandidate) (StandingServiceReconciliation, error) {
+func (s *workflowInstanceStore) repairStandingServiceTx(ctx context.Context, tx *sql.Tx, current standingServiceRow, candidate StandingServiceCandidate) (StandingServiceReconciliation, error) {
 	if _, err := s.requireStandingRunSourceTx(ctx, tx, current, false); err != nil {
 		return StandingServiceReconciliation{}, err
 	}
@@ -1005,7 +1005,7 @@ func (s *WorkflowInstanceStore) repairStandingServiceTx(ctx context.Context, tx 
 	return result, nil
 }
 
-func (s *WorkflowInstanceStore) orphanStandingServiceTx(ctx context.Context, tx *sql.Tx, current standingServiceRow) (StandingServiceReconciliation, error) {
+func (s *workflowInstanceStore) orphanStandingServiceTx(ctx context.Context, tx *sql.Tx, current standingServiceRow) (StandingServiceReconciliation, error) {
 	currentState, err := runtimerunlifecycle.ParseState(current.RunStatus)
 	if err != nil {
 		return StandingServiceReconciliation{}, err
@@ -1039,7 +1039,7 @@ func (s *WorkflowInstanceStore) orphanStandingServiceTx(ctx context.Context, tx 
 	return result, nil
 }
 
-func (s *WorkflowInstanceStore) standingRunHasLiveWorkTx(ctx context.Context, tx *sql.Tx, runID string, observedAt time.Time) (bool, error) {
+func (s *workflowInstanceStore) standingRunHasLiveWorkTx(ctx context.Context, tx *sql.Tx, runID string, observedAt time.Time) (bool, error) {
 	if s.deliveryStore == nil {
 		return false, fmt.Errorf("inspect standing run live work: delivery lifecycle store is required")
 	}
@@ -1088,7 +1088,7 @@ func (s *WorkflowInstanceStore) standingRunHasLiveWorkTx(ctx context.Context, tx
 	return run.Totals().ActiveCount > 0, nil
 }
 
-func (s *WorkflowInstanceStore) quiesceStandingRunTx(ctx context.Context, tx *sql.Tx, runID, bundleHash, reason, sessionReason string, now time.Time) error {
+func (s *workflowInstanceStore) quiesceStandingRunTx(ctx context.Context, tx *sql.Tx, runID, bundleHash, reason, sessionReason string, now time.Time) error {
 	if s.deliveryStore == nil {
 		return fmt.Errorf("quiesce standing run: delivery lifecycle store is required")
 	}
@@ -1124,7 +1124,7 @@ func (s *WorkflowInstanceStore) quiesceStandingRunTx(ctx context.Context, tx *sq
 	return nil
 }
 
-func (s *WorkflowInstanceStore) setStandingRunPausedTx(ctx context.Context, tx *sql.Tx, runID, reason, actor string, now time.Time) error {
+func (s *workflowInstanceStore) setStandingRunPausedTx(ctx context.Context, tx *sql.Tx, runID, reason, actor string, now time.Time) error {
 	if s.runLifecycle == nil {
 		return errors.New("standing run pause requires run lifecycle owner")
 	}
@@ -1142,7 +1142,7 @@ func (s *WorkflowInstanceStore) setStandingRunPausedTx(ctx context.Context, tx *
 	return err
 }
 
-func (s *WorkflowInstanceStore) setStandingRunRunningTx(ctx context.Context, tx *sql.Tx, runID, reason, actor string, now time.Time) error {
+func (s *workflowInstanceStore) setStandingRunRunningTx(ctx context.Context, tx *sql.Tx, runID, reason, actor string, now time.Time) error {
 	if s.runLifecycle == nil {
 		return errors.New("standing run resume requires run lifecycle owner")
 	}
@@ -1160,7 +1160,7 @@ func (s *WorkflowInstanceStore) setStandingRunRunningTx(ctx context.Context, tx 
 	return err
 }
 
-func (s *WorkflowInstanceStore) setStandingRunCancelledTx(ctx context.Context, tx *sql.Tx, runID, reason, actor string, now time.Time) error {
+func (s *workflowInstanceStore) setStandingRunCancelledTx(ctx context.Context, tx *sql.Tx, runID, reason, actor string, now time.Time) error {
 	if s.runLifecycle == nil {
 		return errors.New("standing run cancellation requires run lifecycle owner")
 	}
@@ -1179,7 +1179,7 @@ func (s *WorkflowInstanceStore) setStandingRunCancelledTx(ctx context.Context, t
 	return err
 }
 
-func (s *WorkflowInstanceStore) copyStandingEntityStateTx(ctx context.Context, tx *sql.Tx, oldRunID, newRunID, entityID string) error {
+func (s *workflowInstanceStore) copyStandingEntityStateTx(ctx context.Context, tx *sql.Tx, oldRunID, newRunID, entityID string) error {
 	var result sql.Result
 	var err error
 	if s.isSQLite() {
@@ -1208,7 +1208,7 @@ func (s *WorkflowInstanceStore) copyStandingEntityStateTx(ctx context.Context, t
 	return nil
 }
 
-func (s *WorkflowInstanceStore) insertStandingJournalTx(ctx context.Context, tx *sql.Tx, result StandingServiceReconciliation, previousState, actor string, now time.Time) error {
+func (s *workflowInstanceStore) insertStandingJournalTx(ctx context.Context, tx *sql.Tx, result StandingServiceReconciliation, previousState, actor string, now time.Time) error {
 	operationID := uuid.NewString()
 	if s.isSQLite() {
 		_, err := tx.ExecContext(ctx, `

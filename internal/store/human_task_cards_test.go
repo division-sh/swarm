@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -365,13 +364,8 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 
 func expireHumanTaskCardsInTestMutation(t *testing.T, ctx context.Context, cardStore decisioncard.Store, expiryStore decisioncard.HumanTaskExpiryStore, at time.Time, limit int) []events.Event {
 	t.Helper()
-	db, postgres := decisionCardStoreDB(t, cardStore)
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	if !postgres {
-		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, cardStore.(*SQLiteRuntimeStore))
-	}
 	var eventsOut []events.Event
-	if err := workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	if err := runDecisionCardTestPipelineMutation(t, ctx, cardStore, func(txctx context.Context, _ *sql.Tx) error {
 		var err error
 		eventsOut, err = expiryStore.ExpireHumanTaskCardsInMutation(txctx, at, limit)
 		return err

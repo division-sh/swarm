@@ -54,7 +54,7 @@ func (o pipelineWorkflowLifecycleOwner) ApplyWorkflowLifecycleEffects(ctx contex
 	if pc == nil || len(effects) == 0 {
 		return nil
 	}
-	if pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+	if pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return nil
 	}
 	if _, ok := PipelineSQLTxFromContext(ctx); !ok {

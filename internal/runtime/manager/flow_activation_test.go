@@ -92,16 +92,6 @@ func (flowActivationTestRunLifecycleOwner) MarkTerminalRun(
 	return runtimerunlifecycle.MarkTerminal(ctx, request)
 }
 
-func configureFlowActivationWorkflowStore(
-	db *sql.DB,
-	workflowStore *runtimepipeline.WorkflowInstanceStore,
-) *runtimepipeline.WorkflowInstanceStore {
-	owner := flowActivationTestRunLifecycleOwner{db: db}
-	workflowStore.ConfigureRuntimeMutationRunner(owner)
-	workflowStore.ConfigureRunLifecycle(owner)
-	return workflowStore
-}
-
 func TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSchema(t *testing.T) {
 	sourceV2 := notifyallchildren.LoadSource(t, notifyallchildren.Options{
 		AgentTopologyRevision: 2,
@@ -291,52 +281,65 @@ type flowActivationTestInstanceStore struct {
 	respectReadinessContext bool
 }
 
-func (s *flowActivationTestInstanceStore) RunPipelineMutation(ctx context.Context, fn func(context.Context) error) error {
-	if fn == nil {
-		return nil
-	}
-	creates := append([]runtimepipeline.WorkflowInstance(nil), s.creates...)
-	upserts := append([]runtimepipeline.WorkflowInstance(nil), s.upserts...)
-	terminatedPaths := append([]string(nil), s.terminatedPaths...)
-	terminatedAtSeen := append([]time.Time(nil), s.terminatedAtSeen...)
-	byStorageRef := make(map[string]runtimepipeline.WorkflowInstance, len(s.byStorageRef))
-	for key, value := range s.byStorageRef {
-		byStorageRef[key] = value
-	}
-	s.readinessMu.Lock()
-	readiness := make(map[string]runtimepipeline.DynamicFlowRuntimeReadiness, len(s.readiness))
-	for key, value := range s.readiness {
-		readiness[key] = value
-	}
-	s.readinessMu.Unlock()
-
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
-	rollback := make([]runtimepipeline.OwnerAction, 0, 1)
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, &sql.Tx{})
-	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
-	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollback)
-	if err := fn(txctx); err != nil {
-		s.creates = creates
-		s.upserts = upserts
-		s.terminatedPaths = terminatedPaths
-		s.terminatedAtSeen = terminatedAtSeen
-		s.byStorageRef = byStorageRef
-		s.readinessMu.Lock()
-		s.readiness = readiness
-		s.readinessMu.Unlock()
-		runtimepipeline.FlushPipelineRollbackActions(rollback)
-		return err
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return nil
-}
-
 type flowActivationTestStore struct {
 	upserts      []PersistedAgent
 	terminated   []string
 	terminal     map[string]bool
 	terminateErr error
 	failAgentID  string
+}
+
+type flowActivationTestTerminationOwner struct {
+	instances *flowActivationTestInstanceStore
+	routes    FlowInstanceRouteContextRemover
+}
+
+func (o flowActivationTestTerminationOwner) CommitFlowInstanceTermination(ctx context.Context, req runtimepipeline.FlowInstanceTerminationRequest) (runtimepipeline.FlowInstanceTermination, error) {
+	if o.instances == nil || o.routes == nil {
+		return runtimepipeline.FlowInstanceTermination{}, errors.New("flow activation test termination owner is incomplete")
+	}
+	storageRef := strings.TrimSpace(req.StorageRef)
+	if storageRef == "" || strings.TrimSpace(req.RunID) == "" {
+		return runtimepipeline.FlowInstanceTermination{}, errors.New("flow activation test termination requires storage_ref and run_id")
+	}
+	priorInstance, found, err := o.instances.Load(ctx, storageRef)
+	if err != nil || !found {
+		return runtimepipeline.FlowInstanceTermination{}, errors.Join(err, fmt.Errorf("flow activation test instance %s not found", storageRef))
+	}
+	priorPaths := append([]string(nil), o.instances.terminatedPaths...)
+	priorTimes := append([]time.Time(nil), o.instances.terminatedAtSeen...)
+	o.instances.readinessMu.Lock()
+	priorReadiness := make(map[string]runtimepipeline.DynamicFlowRuntimeReadiness, len(o.instances.readiness))
+	for key, readiness := range o.instances.readiness {
+		priorReadiness[key] = readiness
+	}
+	o.instances.readinessMu.Unlock()
+	rollback := func() {
+		o.instances.terminatedPaths = priorPaths
+		o.instances.terminatedAtSeen = priorTimes
+		o.instances.byStorageRef[storageRef] = priorInstance
+		o.instances.readinessMu.Lock()
+		o.instances.readiness = priorReadiness
+		o.instances.readinessMu.Unlock()
+	}
+	if err := o.instances.MarkTerminated(ctx, storageRef, req.TerminatedAt); err != nil {
+		return runtimepipeline.FlowInstanceTermination{}, err
+	}
+	instance, found, err := o.instances.Load(ctx, storageRef)
+	if err != nil || !found || strings.TrimSpace(instance.Status) != "terminated" || instance.TerminatedAt.IsZero() {
+		rollback()
+		return runtimepipeline.FlowInstanceTermination{}, errors.Join(err, fmt.Errorf("canonical terminal flow instance %s was not persisted", storageRef))
+	}
+	route := runtimeflowidentity.StoredRoute("", "", instance.StorageRef)
+	if !route.Valid() {
+		rollback()
+		return runtimepipeline.FlowInstanceTermination{}, fmt.Errorf("derive canonical route identity for flow path %s", instance.StorageRef)
+	}
+	if err := o.routes.RemoveFlowInstanceRouteContext(ctx, route); err != nil {
+		rollback()
+		return runtimepipeline.FlowInstanceTermination{}, err
+	}
+	return runtimepipeline.FlowInstanceTermination{Instance: instance, Route: route}, nil
 }
 
 func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersistence, stores ...ManagerPersistence) *AgentManager {
@@ -346,12 +349,21 @@ func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersi
 	}
 	var lifecycleStore AgentLifecyclePersistence
 	lifecycleStore, _ = stores[0].(AgentLifecyclePersistence)
+	var terminalOwner FlowInstanceTerminalMutationOwner
+	terminalOwner, _ = instances.(FlowInstanceTerminalMutationOwner)
+	if terminalOwner == nil {
+		if testInstances, ok := instances.(*flowActivationTestInstanceStore); ok {
+			routes, _ := bus.(FlowInstanceRouteContextRemover)
+			terminalOwner = flowActivationTestTerminationOwner{instances: testInstances, routes: routes}
+		}
+	}
 	return newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
 		WorkflowInstances: instances,
 		LifecycleStore:    lifecycleStore,
 		WorkOwner:         newTestManagerWorkOwner(t),
 		BaseContext:       testAuthorActivityContext(context.Background()),
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
+		PersistenceRoles:  PersistenceRoles{FlowTermination: terminalOwner},
 	}, stores...)
 }
 
@@ -3164,12 +3176,15 @@ func TestActivateFlowInstanceCanonicalStoreFinalizesIdenticalReplayWithoutDuplic
 	routeStore := &flowActivationTestRouteStore{}
 	bus := &flowActivationTestBus{routeStore: routeStore}
 	agentStore := &flowActivationTestStore{}
-	workflowStore := configureFlowActivationWorkflowStore(db, runtimepipeline.NewWorkflowInstanceStore(db))
+	workflowOwner := flowActivationTestRunLifecycleOwner{db: db}
 	bundle := testFlowBundle("task.started")
-	runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:        newFlowActivationWorkflowModule(t, bundle),
-		WorkflowStore: workflowStore,
-		WorkOwner:     newTestManagerWorkOwner(t),
+	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:              newFlowActivationWorkflowModule(t, bundle),
+		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, workflowOwner),
+		RunLifecycle:        workflowOwner,
+		PipelineObligations: bus.PipelineObligationOwner(),
+		FlowRoutes:          bus,
+		WorkOwner:           newTestManagerWorkOwner(t),
 	})
 	am := newFlowActivationManager(t, bus, workflowStore, agentStore)
 	req := testActivationRequest(bundle, "review", "inst-1", "11111111-1111-1111-1111-111111111111", "review/inst-1")
@@ -3606,6 +3621,7 @@ func TestDeactivateFlowInstanceLogsPostCommitAgentFailureAfterRouteRetirement(t 
 	}
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(flowActivationRunContext(), &postCommit)
+	ctx = runtimepipeline.WithPipelineSQLTxContext(ctx, &sql.Tx{})
 	if err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance returned pre-commit error: %v", err)
 	}
@@ -3642,7 +3658,7 @@ func TestDeactivateFlowInstanceFailsBeforePostCommitSideEffectsWhenRoutePersiste
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(flowActivationRunContext(), &postCommit)
 	err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1")
-	if err == nil || !strings.Contains(err.Error(), "stage exact terminal flow-instance route topology") {
+	if err == nil || !strings.Contains(err.Error(), "persist flow instance terminalization") || !strings.Contains(err.Error(), "route removal failed") {
 		t.Fatalf("DeactivateFlowInstance error = %v, want exact route persistence failure", err)
 	}
 
@@ -3698,14 +3714,17 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 
 	routeStore := &flowActivationTestRouteStore{}
 	bus := &flowActivationTestBus{routeStore: routeStore}
-	store := configureFlowActivationWorkflowStore(db, runtimepipeline.NewWorkflowInstanceStore(db))
+	workflowOwner := flowActivationTestRunLifecycleOwner{db: db}
 	bundle := testFlowBundle("")
-	runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:        newFlowActivationWorkflowModule(t, bundle),
-		WorkflowStore: store,
-		WorkOwner:     newTestManagerWorkOwner(t),
+	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:              newFlowActivationWorkflowModule(t, bundle),
+		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, workflowOwner),
+		RunLifecycle:        workflowOwner,
+		PipelineObligations: bus.PipelineObligationOwner(),
+		FlowRoutes:          bus,
+		WorkOwner:           newTestManagerWorkOwner(t),
 	})
-	am := newFlowActivationManager(t, bus, store)
+	am := newFlowActivationManager(t, bus, workflowStore)
 	ctx = worklifetime.WithOccurrence(ctx, am.workOwner)
 	const subjectID = "11111111-1111-1111-1111-111111111111"
 	req := testActivationRequest(bundle, "review", "inst-1", subjectID, "review/inst-1")
@@ -3713,11 +3732,6 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
-	}
-	if err := store.Mutate(ctx, req.Instance.EntityID, func(instance *runtimepipeline.WorkflowInstance) {
-		instance.CurrentState = "completed"
-	}); err != nil {
-		t.Fatalf("Mutate: %v", err)
 	}
 	sharedAgent := flowActivationStubAgent{id: "shared-subject-agent"}
 	sharedConfig := models.AgentConfig{
@@ -3767,15 +3781,15 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 		t.Fatalf("routing_rules.status = %q, want inactive", routeStatus)
 	}
 
-	instance, ok, err := store.Load(ctx, req.Instance.EntityID)
+	instance, ok, err := workflowStore.Load(ctx, req.Instance.EntityID)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if !ok {
 		t.Fatal("expected workflow instance")
 	}
-	if got := strings.TrimSpace(instance.CurrentState); got != "completed" {
-		t.Fatalf("current_state = %q, want completed", got)
+	if got := strings.TrimSpace(instance.CurrentState); got != "pending" {
+		t.Fatalf("current_state = %q, want pending", got)
 	}
 	if strings.TrimSpace(instance.Status) != "terminated" {
 		t.Fatalf("loaded workflow instance status = %q, want terminated", instance.Status)
@@ -3801,14 +3815,17 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 	routeStore := &flowActivationTestRouteStore{}
 	bus := &flowActivationTestBus{routeStore: routeStore}
 	managerStore := &flowActivationTestStore{}
-	store := configureFlowActivationWorkflowStore(db, runtimepipeline.NewWorkflowInstanceStore(db))
+	workflowOwner := flowActivationTestRunLifecycleOwner{db: db}
 	bundle := testFlowBundle("")
-	runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:        newFlowActivationWorkflowModule(t, bundle),
-		WorkflowStore: store,
-		WorkOwner:     newTestManagerWorkOwner(t),
+	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:              newFlowActivationWorkflowModule(t, bundle),
+		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, workflowOwner),
+		RunLifecycle:        workflowOwner,
+		PipelineObligations: bus.PipelineObligationOwner(),
+		FlowRoutes:          bus,
+		WorkOwner:           newTestManagerWorkOwner(t),
 	})
-	am := newFlowActivationManager(t, bus, store, managerStore)
+	am := newFlowActivationManager(t, bus, workflowStore, managerStore)
 	ctx = worklifetime.WithOccurrence(ctx, am.workOwner)
 	const subjectID = "22222222-2222-2222-2222-222222222222"
 	req := testActivationRequest(bundle, "review", "inst-1", subjectID, "review/inst-1")
@@ -3817,12 +3834,7 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if err := store.RunPipelineMutation(ctx, func(txctx context.Context) error {
-		if err := store.Mutate(txctx, req.Instance.EntityID, func(instance *runtimepipeline.WorkflowInstance) {
-			instance.CurrentState = "completed"
-		}); err != nil {
-			return err
-		}
+	if err := workflowOwner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 		if err := am.DeactivateFlowInstanceModel(txctx, runtimepipeline.FlowInstanceDeactivationRequest{
 			ContractBundle: semanticview.Wrap(bundle),
 			Instance:       req.Instance,
@@ -3857,7 +3869,7 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 		}
 		return nil
 	}); err != nil {
-		t.Fatalf("RunPipelineMutation: %v", err)
+		t.Fatalf("RunRuntimeMutationContext: %v", err)
 	}
 
 	var status string

@@ -336,7 +336,7 @@ func TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothSt
 				}
 				completeProposedEffectRouteInTestMutation(t, ctx, cards, card.CardID, decisionEventID, now.Add(2*time.Minute))
 
-				journal := proposedEffectTestJournal(cards)
+				journal := proposedEffectTestJournal(t, cards)
 				started, inserted, err := journal.StartActivityAttempt(ctx, runtimepipeline.ActivityAttemptRecord{
 					RequestEventID: continuation.RequestEventID, RunID: runID, ExecutionMode: continuation.ExecutionMode, SourceEventID: continuation.SourceEventID,
 					EntityID: continuation.EntityID, FlowInstance: continuation.FlowInstance, NodeID: continuation.NodeID,
@@ -397,14 +397,13 @@ func overwriteProposedEffectAttemptMode(t *testing.T, ctx context.Context, cards
 	}
 }
 
-func proposedEffectTestJournal(cards decisioncard.Store) *runtimepipeline.WorkflowInstanceStore {
+func proposedEffectTestJournal(t *testing.T, cards decisioncard.Store) *runtimepipeline.PipelineCoordinator {
+	t.Helper()
 	switch selected := cards.(type) {
 	case *SQLiteRuntimeStore:
-		return runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(selected.DB, selected)
+		return newSQLiteWorkflowTestCoordinator(t, selected.DB, selected)
 	case *PostgresStore:
-		store := runtimepipeline.NewWorkflowInstanceStore(selected.DB)
-		store.ConfigureRuntimeMutationRunner(selected)
-		return store
+		return newPostgresWorkflowTestCoordinator(t, selected.DB, selected)
 	default:
 		panic("unsupported proposed-effect test store")
 	}

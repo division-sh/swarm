@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -26,18 +27,23 @@ import (
 	"github.com/google/uuid"
 )
 
+func newWorkflowJoinPipelineCoordinator(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
+	opts.PipelineObligations = unavailablePipelineTestObligationOwner{}
+	return NewPipelineCoordinatorWithOptions(bus, db, opts)
+}
+
 func TestWorkflowJoinRequiresGenericScheduleOwnerBeforeMutationOnBothStores(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			bundle := workflowJoinLifecycleBundle()
-			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
-				Module:        &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
-				WorkflowStore: store,
+			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+				Module:      &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
+				Persistence: workflowPersistenceForTest(store),
 			})
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
-			if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0",
 				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a"}},
 			})); err != nil {
@@ -89,7 +95,7 @@ func TestArmWorkflowJoinPersistsActivationAndScheduleAtomically(t *testing.T) {
 			runID := uuid.NewString()
 			ensurePipelineTestRun(t, store, runID)
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
-			if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: "order-1", StorageRef: "orders/order-1", WorkflowName: "orders", WorkflowVersion: "1.0.0",
 				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": tc.members},
 			})); err != nil {
@@ -152,7 +158,7 @@ func TestArmWorkflowJoinPostgresParity(t *testing.T) {
 			pc := &PipelineCoordinator{module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowJoinLifecycleBundle())}, workflowStore: store, timerScheduleStore: schedules}
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
-			if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": tc.members}})); err != nil {
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": tc.members}})); err != nil {
 				t.Fatal(err)
 			}
 			if err := applyTestInitialEntryEffect(ctx, pc, entityID); err != nil {
@@ -194,14 +200,14 @@ func TestWorkflowJoinCustomCompletionControlsExpectedZeroOnBothStores(t *testing
 			bundle.Semantics.NodeHandlers["join-node"] = node.EventHandlers
 
 			schedules := &recordingSchedulePersistence{}
-			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
 				Module:             &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
-				WorkflowStore:      store,
+				Persistence:        workflowPersistenceForTest(store),
 				TimerScheduleStore: schedules,
 			})
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
-			if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0",
 				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{}},
 			})); err != nil {
@@ -257,7 +263,7 @@ func TestWorkflowJoinArmRejectsCatalogInvalidNamedResultExpression(t *testing.T)
 	runID := uuid.NewString()
 	ensurePipelineTestRun(t, store, runID)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
-	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: "order-typed", StorageRef: "orders/order-typed", WorkflowName: "orders", WorkflowVersion: "1.0.0",
 		CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{}},
 	})); err != nil {
@@ -295,14 +301,14 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 			bundle.Semantics.EffectiveNodes["join-node"] = runtimecontracts.SystemNodeEffectiveSemantics{ID: "join-node", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(node)}
 
 			schedules := &recordingSchedulePersistence{}
-			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
 				Module:             &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
-				WorkflowStore:      store,
+				Persistence:        workflowPersistenceForTest(store),
 				TimerScheduleStore: schedules,
 			})
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
-			if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0",
 				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a"}},
 			})); err != nil {
@@ -339,16 +345,16 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 
 type workflowJoinStoreCase struct {
 	name string
-	open func(*testing.T) (*WorkflowInstanceStore, context.Context)
+	open func(*testing.T) (*workflowInstanceStore, context.Context)
 }
 
 func workflowJoinStoreCases() []workflowJoinStoreCase {
 	return []workflowJoinStoreCase{
-		{name: "sqlite", open: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+		{name: "sqlite", open: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 			store, ctx := newSQLiteWorkflowJoinStore(t)
 			return store, runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 		}},
-		{name: "postgres", open: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+		{name: "postgres", open: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
@@ -359,7 +365,7 @@ func workflowJoinStoreCases() []workflowJoinStoreCase {
 	}
 }
 
-func newSQLiteWorkflowJoinStore(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+func newSQLiteWorkflowJoinStore(t *testing.T) (*workflowInstanceStore, context.Context) {
 	t.Helper()
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
@@ -371,12 +377,12 @@ func newSQLiteWorkflowJoinStore(t *testing.T) (*WorkflowInstanceStore, context.C
 func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.T) {
 	tests := []struct {
 		name  string
-		store func(*testing.T) (*WorkflowInstanceStore, context.Context)
+		store func(*testing.T) (*workflowInstanceStore, context.Context)
 	}{
-		{name: "sqlite", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+		{name: "sqlite", store: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 			return newSQLiteWorkflowJoinStore(t)
 		}},
-		{name: "postgres", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+		{name: "postgres", store: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
@@ -389,7 +395,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			store, ctx := tc.store(t)
 			bundle := workflowJoinLifecycleBundle()
 			bus := &recordingPipelineBus{}
-			pc := NewPipelineCoordinatorWithOptions(bus, store.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, WorkflowStore: store})
+			pc := newWorkflowJoinPipelineCoordinator(bus, store.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store)})
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
 			now := time.Now().UTC()
@@ -401,7 +407,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 				t.Fatal(err)
 			}
-			if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "awaiting", EnteredStageAt: now, Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a"}}, StateBuckets: carrier.PersistedStateBuckets()})); err != nil {
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "awaiting", EnteredStageAt: now, Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a"}}, StateBuckets: carrier.PersistedStateBuckets()})); err != nil {
 				t.Fatal(err)
 			}
 			handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
@@ -466,12 +472,12 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 	tests := []struct {
 		name  string
-		store func(*testing.T) (*WorkflowInstanceStore, context.Context)
+		store func(*testing.T) (*workflowInstanceStore, context.Context)
 	}{
-		{name: "sqlite", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+		{name: "sqlite", store: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 			return newSQLiteWorkflowJoinStore(t)
 		}},
-		{name: "postgres", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+		{name: "postgres", store: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
@@ -485,10 +491,10 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 			bundle := workflowJoinLifecycleBundle()
 			bus := &recordingPipelineBus{}
 			schedules := &recordingSchedulePersistence{}
-			pc := NewPipelineCoordinatorWithOptions(bus, store.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, WorkflowStore: store, TimerScheduleStore: schedules})
+			pc := newWorkflowJoinPipelineCoordinator(bus, store.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store), TimerScheduleStore: schedules})
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
-			if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a", "b"}}})); err != nil {
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a", "b"}}})); err != nil {
 				t.Fatal(err)
 			}
 			handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
@@ -548,12 +554,12 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 	tests := []struct {
 		name  string
-		store func(*testing.T) (*WorkflowInstanceStore, context.Context)
+		store func(*testing.T) (*workflowInstanceStore, context.Context)
 	}{
-		{name: "sqlite", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+		{name: "sqlite", store: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 			return newSQLiteWorkflowJoinStore(t)
 		}},
-		{name: "postgres", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+		{name: "postgres", store: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
@@ -567,12 +573,12 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			bundle := workflowJoinLifecycleBundle()
 			schedules := &recordingSchedulePersistence{}
 			newCoordinator := func() *PipelineCoordinator {
-				return NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, WorkflowStore: store, TimerScheduleStore: schedules})
+				return newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store), TimerScheduleStore: schedules})
 			}
 			pc := newCoordinator()
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
-			if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a", "b"}}})); err != nil {
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a", "b"}}})); err != nil {
 				t.Fatal(err)
 			}
 			handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
@@ -637,12 +643,12 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T) {
 	tests := []struct {
 		name  string
-		store func(*testing.T) (*WorkflowInstanceStore, context.Context)
+		store func(*testing.T) (*workflowInstanceStore, context.Context)
 	}{
-		{name: "sqlite", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+		{name: "sqlite", store: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 			return newSQLiteWorkflowJoinStore(t)
 		}},
-		{name: "postgres", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+		{name: "postgres", store: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
@@ -656,12 +662,12 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			bundle := workflowJoinLifecycleBundle()
 			schedules := &recordingSchedulePersistence{}
 			newCoordinator := func() *PipelineCoordinator {
-				return NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, WorkflowStore: store, TimerScheduleStore: schedules})
+				return newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store), TimerScheduleStore: schedules})
 			}
 			pc := newCoordinator()
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
-			if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{}}})); err != nil {
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{}}})); err != nil {
 				t.Fatal(err)
 			}
 			dispatchHandler := bundle.Nodes["dispatcher"].EventHandlers["order.accepted"]
@@ -722,12 +728,12 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t *testing.T) {
 	tests := []struct {
 		name  string
-		store func(*testing.T) (*WorkflowInstanceStore, context.Context)
+		store func(*testing.T) (*workflowInstanceStore, context.Context)
 	}{
-		{name: "sqlite", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+		{name: "sqlite", store: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 			return newSQLiteWorkflowJoinStore(t)
 		}},
-		{name: "postgres", store: func(t *testing.T) (*WorkflowInstanceStore, context.Context) {
+		{name: "postgres", store: func(t *testing.T) (*workflowInstanceStore, context.Context) {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
@@ -740,14 +746,14 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 			store, ctx := tc.store(t)
 			bundle := workflowJoinLifecycleBundle()
 			schedules := &recordingSchedulePersistence{}
-			pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
 				Module:             &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
-				WorkflowStore:      store,
+				Persistence:        workflowPersistenceForTest(store),
 				TimerScheduleStore: schedules,
 			})
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
-			if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0",
 				CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{}},
 			})); err != nil {
@@ -803,14 +809,14 @@ func TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog(t *tes
 	ctx := sqliteExactOnceRunContext(t, db)
 	bundle := workflowJoinLifecycleBundle()
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module:        &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
-		WorkflowStore: store,
+	pc := newWorkflowJoinPipelineCoordinator(bus, db, PipelineCoordinatorOptions{
+		Module:      &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
+		Persistence: workflowPersistenceForTest(store),
 	})
 	configurePipelineTestDeliveryOwner(t, pc)
 	path := "orders/" + uuid.NewString()
 	entityID := FlowInstanceEntityID(path)
-	if err := store.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a"}}})); err != nil {
+	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a"}}})); err != nil {
 		t.Fatal(err)
 	}
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
@@ -819,7 +825,7 @@ func TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog(t *tes
 	if resolved := workflowNodeEventHandlerResolutionForDelivery(pc.SemanticSource(), "join-node", evt); !resolved.Matched {
 		t.Fatalf("join handler did not resolve: %#v", resolved)
 	}
-	if _, err := store.DeliveryLifecycleStore().ProveHandoff(ctx, evt.ID(), route); err != nil {
+	if _, err := store.deliveryStore.ProveHandoff(ctx, evt.ID(), route); err != nil {
 		t.Fatalf("seeded join delivery was not authorized: %v", err)
 	}
 	ctx = withWorkflowNodeDeliveryRoute(ctx, route)

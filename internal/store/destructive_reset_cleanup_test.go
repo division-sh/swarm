@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -617,7 +618,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("seed preserved predecessor session: %v", err)
 	}
 	captureRunForkTestRevision(t, pg.DB, runID)
-	materialized, err := pg.MaterializeRunFork(ctx, RunForkMaterializeRequest{
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
 		SourceRunID: runID,
 		At:          eventID,
 	})
@@ -787,7 +788,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 	}
 	selectedLineage, err := events.NewSelectedForkLineage(
 		cleanupRunID, preservedSourceRunID, preservedSourceEventID,
-		RunForkSelectedContractExecutionLineageOwner, "", executionmode.Live,
+		runfork.RunForkSelectedContractExecutionLineageOwner, "", executionmode.Live,
 	)
 	if err != nil {
 		t.Fatalf("construct selected-fork lineage: %v", err)
@@ -796,10 +797,10 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 		cleanupEventID, events.EventType("source.event"), eventtest.Producer(events.EventProducerPlatform, "cleanup-selected-contract"), "",
 		[]byte(`{}`), 0, selectedLineage, entityEnvelope, seededAt.Add(2*time.Second),
 	)
-	if err := commitSelectedForkEventFixture(ctx, pg, selectedEvent, RunForkSelectedContractExecutionLineage{
+	if err := commitSelectedForkEventFixture(ctx, pg, selectedEvent, runfork.RunForkSelectedContractExecutionLineage{
 		ForkRunID: cleanupRunID, SourceRunID: preservedSourceRunID, SourceEventID: preservedSourceEventID,
 		ForkEventID: cleanupEventID, EventName: "source.event",
-		SelectionAuthority: RunForkSelectedContractExecutionLineageOwner, CreatedAt: seededAt.Add(2 * time.Second),
+		SelectionAuthority: runfork.RunForkSelectedContractExecutionLineageOwner, CreatedAt: seededAt.Add(2 * time.Second),
 	}); err != nil {
 		t.Fatalf("seed selected-contract event: %v", err)
 	}
@@ -1214,7 +1215,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("seed delivery replay event: %v", err)
 	}
 	selectedLineage, err := events.NewSelectedForkLineage(
-		runB, runA, sourceEvent, RunForkSelectedContractExecutionLineageOwner, "", executionmode.Live,
+		runB, runA, sourceEvent, runfork.RunForkSelectedContractExecutionLineageOwner, "", executionmode.Live,
 	)
 	if err != nil {
 		t.Fatalf("construct selected-fork lineage: %v", err)
@@ -1223,9 +1224,9 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		forkEvent, events.EventType("source.event"), eventtest.Producer(events.EventProducerPlatform, "selected-contract-runtime"), "",
 		[]byte(`{}`), 0, selectedLineage, entityEnvelope, seededAt.Add(5*time.Second),
 	)
-	if err := commitSelectedForkEventFixture(ctx, pg, selectedSemanticEvent, RunForkSelectedContractExecutionLineage{
+	if err := commitSelectedForkEventFixture(ctx, pg, selectedSemanticEvent, runfork.RunForkSelectedContractExecutionLineage{
 		ForkRunID: runB, SourceRunID: runA, SourceEventID: sourceEvent, ForkEventID: forkEvent,
-		EventName: "source.event", SelectionAuthority: RunForkSelectedContractExecutionLineageOwner,
+		EventName: "source.event", SelectionAuthority: runfork.RunForkSelectedContractExecutionLineageOwner,
 		CreatedAt: seededAt.Add(5 * time.Second),
 	}); err != nil {
 		t.Fatalf("seed selected-contract fork event: %v", err)

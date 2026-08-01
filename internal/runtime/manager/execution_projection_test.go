@@ -549,7 +549,8 @@ func TestEphemeralCloneConsumesAdmittedBaseSubscriptions(t *testing.T) {
 
 func TestExecutionProjectionDirectiveLeaseFencesReplacement(t *testing.T) {
 	bus := newProjectionTestBus()
-	bus.store = &directiveEventStore{}
+	directiveStore := &directiveEventStore{}
+	bus.store = directiveStore
 	boardStarted := make(chan runtimeeffects.LifecycleToken, 1)
 	boardRelease := make(chan struct{})
 	build := 0
@@ -561,7 +562,15 @@ func TestExecutionProjectionDirectiveLeaseFencesReplacement(t *testing.T) {
 		}, nil
 	}
 	targetStore := &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{RunID: "00000000-0000-0000-0000-000000009901", Mode: runtimeagentcontrol.RunResolutionSpecified}}
-	am := newProjectionTestManager(t, bus, factory, targetStore)
+	owner := newTestManagerWorkOwner(t)
+	bus.owner = owner
+	am := newTestAgentManagerWithOptions(t, bus, factory, AgentManagerOptions{
+		WorkOwner: owner,
+		PersistenceRoles: PersistenceRoles{
+			DirectiveOperations: directiveStore,
+			DirectiveTargets:    targetStore,
+		},
+	}, targetStore)
 	const agentID = "projection-directive"
 	if err := am.SpawnAgent(models.AgentConfig{
 		ExecutionMode: "live",

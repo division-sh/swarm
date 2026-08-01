@@ -214,20 +214,28 @@ func configurePipelineTestDeliveryOwner(t interface {
 	if pc == nil || pc.workflowStore == nil || pc.workflowStore.db == nil {
 		t.Fatalf("pipeline test delivery owner requires a configured workflow store")
 	}
-	if owner, ok := pc.workflowStore.DeliveryLifecycleStore().(*pipelineTestDeliveryOwner); ok {
+	if owner, ok := pc.deliveryStore.(*pipelineTestDeliveryOwner); ok {
 		if bus, ok := pc.bus.(interface {
 			configurePipelineTestDeliveryOwner(*pipelineTestDeliveryOwner)
 		}); ok {
 			bus.configurePipelineTestDeliveryOwner(owner)
 		}
+		if runtime, ok := pc.bus.(WorkflowDeliveryRuntime); ok {
+			pc.deliveryRuntime = runtime
+		}
+		pc.workflowStore.deliveryStore = owner
 		return owner
 	}
 	owner := newPipelineTestDeliveryOwnerForDB(t, pc.workflowStore.db)
-	pc.workflowStore.ConfigureDeliveryLifecycleStore(owner)
+	pc.deliveryStore = owner
+	pc.workflowStore.deliveryStore = owner
 	if bus, ok := pc.bus.(interface {
 		configurePipelineTestDeliveryOwner(*pipelineTestDeliveryOwner)
 	}); ok {
 		bus.configurePipelineTestDeliveryOwner(owner)
+	}
+	if runtime, ok := pc.bus.(WorkflowDeliveryRuntime); ok {
+		pc.deliveryRuntime = runtime
 	}
 	return owner
 }

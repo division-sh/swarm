@@ -263,7 +263,7 @@ func TestAnthropicProviderAdmissionNeverRedispatchesAmbiguousFailure(t *testing.
 	runtime := NewAnthropicAPIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
 	harness := effecttest.New()
 	setEffectHarnessAgent(t, harness, "agent-1", "test/stateless")
-	runtime.completionController = runtimeeffects.NewCompletionController(harness, harness)
+	runtime.completionController = runtimeeffects.NewCompletionController(harness, harness, harness, harness)
 	runtime.apiURL = server.URL
 	runtime.apiKey = "test-key"
 
@@ -307,7 +307,7 @@ func TestOpenAICompatibleProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T
 
 	runtime := NewOpenAICompatibleRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
 	harness := effecttest.New()
-	runtime.completionController = runtimeeffects.NewCompletionController(harness, harness)
+	runtime.completionController = runtimeeffects.NewCompletionController(harness, harness, harness, harness)
 	runtime.apiKey = "test-key"
 	profile := mustAdmissionProfile(t, llmselection.BackendOpenAICompatible)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
@@ -355,7 +355,7 @@ func TestOpenAIResponsesProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T)
 
 	runtime := NewOpenAIResponsesRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
 	harness := effecttest.New()
-	runtime.completionController = runtimeeffects.NewCompletionController(harness, harness)
+	runtime.completionController = runtimeeffects.NewCompletionController(harness, harness, harness, harness)
 	runtime.apiKey = "test-key"
 	profile := mustAdmissionProfile(t, llmselection.BackendOpenAIResponses)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)

@@ -18,6 +18,7 @@ import (
 type forkChatCompletionAuthorityStore interface {
 	runtimeeffects.Store
 	runtimeeffects.CompletionStore
+	runtimeeffects.CompletionHeartbeatStore
 	runtimeeffects.RecoveryStore
 	CreateOperatorConversationFork(context.Context, ConversationForkCreateRequest) (OperatorConversationForkSession, error)
 	PrepareOperatorConversationForkChat(context.Context, ConversationForkChatPrepareRequest) (ConversationForkChatPrepared, error)
@@ -296,7 +297,7 @@ func forkChatCompletionAuthority(prepared ConversationForkChatPrepared, ordinal 
 }
 
 func forkChatCompletionContext(fixture forkChatCompletionAuthorityFixture, authority runtimeeffects.Authority, suffix string) context.Context {
-	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), runtimeeffects.NewController(fixture.store))
+	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), newCompletionControllerForTest(fixture.store))
 	return runtimeeffects.WithLogicalOperationIdentity(ctx, "forkchat:"+authority.ForkChat.RequestOccurrenceID+":"+suffix)
 }
 

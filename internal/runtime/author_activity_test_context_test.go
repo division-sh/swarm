@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -14,7 +15,9 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
@@ -31,6 +34,52 @@ var runtimeTestEventBusOwners sync.Map
 type runtimeTestCandidateOwner struct{}
 
 type runtimeTestCandidateRegistration struct{}
+
+type runtimeTestMutationOwner interface {
+	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
+}
+
+type runtimeTestRejectedMutationOwner struct{}
+
+func (runtimeTestRejectedMutationOwner) RunRuntimeMutationContext(context.Context, func(context.Context) error) error {
+	return errors.New("unexpected runtime test workflow mutation")
+}
+
+type runtimeTestDurableEventStore interface {
+	runtimebus.EventStore
+	runtimereplycontext.Store
+	runtimerunlifecycle.OperationOwner
+	runtimedelivery.Store
+	runtimebus.FlowInstanceRoutePersistence
+	runtimebus.FlowInstanceRouteRecordReader
+	runtimebus.FlowInstanceRouteSetPersistence
+	runtimebus.FlowInstanceRouteTopologyPersistence
+	runtimebus.FlowInstanceRouteRollbackPersistence
+	runtimebus.ActiveAgentDescriptorLister
+	runtimebus.ActiveFlowInstanceDescriptorLister
+	runtimebus.EventDeliveryTargetReader
+	runtimebus.EventDeliveryRouteSetReader
+	runtimebus.TargetFailureDeadLetterRecorder
+	runtimebus.RunOriginReader
+}
+
+func runtimeTestDurableDependencies(durable runtimeTestDurableEventStore) runtimebus.DurableDependencies {
+	return runtimebus.DurableDependencies{
+		ReplyContext: durable, RunLifecycle: durable,
+		DeliveryLifecycle: durable, FlowRoutes: durable, FlowRouteRecords: durable,
+		FlowRouteSets: durable, FlowRouteTopology: durable, FlowRouteRollback: durable, ActiveAgents: durable,
+		ActiveFlows: durable, DeliveryTargets: durable, DeliveryRouteSets: durable,
+		TargetFailureRecorder: durable, RunOrigins: durable,
+	}
+}
+
+func runtimeTestManagerBusRoles(bus *runtimebus.EventBus) runtimemanager.PersistenceRoles {
+	return runtimemanager.PersistenceRoles{
+		AgentRoutes: bus, RouteInstaller: bus, RouteVerifier: bus,
+		RouteRestorer: bus, RouteRetirer: bus, RouteRemover: bus,
+		CreationPublisher: bus, DeliveryRuntime: bus,
+	}
+}
 
 func (runtimeTestCandidateOwner) ListCompletionCandidates(
 	context.Context,
@@ -134,6 +183,13 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 			opts.PipelineObligations = provider.PipelineObligations()
 		}
 	}
+	if opts.PipelineObligations != nil {
+		durable, ok := store.(runtimeTestDurableEventStore)
+		if !ok {
+			return nil, fmt.Errorf("runtime durable event-store fixture %T lacks exact durable roles", store)
+		}
+		opts.Durable = runtimeTestDurableDependencies(durable)
+	}
 	var bus *runtimebus.EventBus
 	var err error
 	if opts.PipelineObligations == nil {
@@ -203,18 +259,11 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 	if deps.Options.ProcessWorkOwner == nil {
 		deps.Options.ProcessWorkOwner = runtimeTestProcessWorkOwner(t)
 	}
-	if deps.Stores.SQLDB != nil && deps.Stores.RunLifecycleCandidates == nil {
-		if candidates, ok := deps.Stores.EventStore.(runtimerunlifecycle.CandidateOwner); ok {
-			deps.Stores.RunLifecycleCandidates = candidates
+	if deps.SQLDB != nil && deps.RunLifecycleCandidates == nil {
+		if candidates, ok := deps.EventStore.(runtimerunlifecycle.CandidateOwner); ok {
+			deps.RunLifecycleCandidates = candidates
 		} else {
-			deps.Stores.RunLifecycleCandidates = runtimeTestCandidateOwner{}
-		}
-	}
-	if deps.Stores.PipelineObligations == nil {
-		if provider, ok := deps.Stores.EventStore.(interface {
-			PipelineObligations() runtimepipelineobligation.Store
-		}); ok {
-			deps.Stores.PipelineObligations = provider.PipelineObligations()
+			deps.RunLifecycleCandidates = runtimeTestCandidateOwner{}
 		}
 	}
 	runtime, err := NewRuntime(ctx, deps)

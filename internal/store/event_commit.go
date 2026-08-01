@@ -12,6 +12,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 type eventCommitTxStore interface {
@@ -121,12 +122,7 @@ func (c sqlPublishCommitter) commitInitialSideEffects(ctx context.Context, req r
 	return nil
 }
 
-type CommitSelectedForkEventRequest struct {
-	Commit  runtimebus.CommitPublishRequest
-	Lineage RunForkSelectedContractExecutionLineage
-}
-
-func validateSelectedForkCommitRequest(req CommitSelectedForkEventRequest) error {
+func validateSelectedForkCommitRequest(req runtimebus.CommitSelectedForkEventRequest) error {
 	if err := events.ValidatePersistentEvent(req.Commit.Event.Event()); err != nil {
 		return err
 	}
@@ -154,8 +150,8 @@ func commitSelectedForkEvent(
 	ctx context.Context,
 	store eventCommitTxStore,
 	run func(context.Context, func(context.Context, *sql.Tx) error) error,
-	insertLineage func(context.Context, *sql.Tx, RunForkSelectedContractExecutionLineage) error,
-	req CommitSelectedForkEventRequest,
+	insertLineage func(context.Context, *sql.Tx, runfork.RunForkSelectedContractExecutionLineage) error,
+	req runtimebus.CommitSelectedForkEventRequest,
 ) (runtimebus.EventAppendOutcome, error) {
 	if err := validateSelectedForkCommitRequest(req); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
@@ -182,7 +178,7 @@ func commitSelectedForkEvent(
 	return outcome, nil
 }
 
-func (s *PostgresStore) CommitSelectedForkEvent(ctx context.Context, req CommitSelectedForkEventRequest) (runtimebus.EventAppendOutcome, error) {
+func (s *PostgresStore) CommitSelectedForkEvent(ctx context.Context, req runtimebus.CommitSelectedForkEventRequest) (runtimebus.EventAppendOutcome, error) {
 	state, err := s.lockPostgresPipelineClaim(req.Commit.PipelineClaim)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
@@ -195,7 +191,7 @@ func (s *PostgresStore) CommitSelectedForkEvent(ctx context.Context, req CommitS
 	return commitSelectedForkEvent(claimCtx, s, s.runEventTransaction, insertPostgresSelectedForkExecutionLineageTx, req)
 }
 
-func (s *SQLiteRuntimeStore) CommitSelectedForkEvent(ctx context.Context, req CommitSelectedForkEventRequest) (runtimebus.EventAppendOutcome, error) {
+func (s *SQLiteRuntimeStore) CommitSelectedForkEvent(ctx context.Context, req runtimebus.CommitSelectedForkEventRequest) (runtimebus.EventAppendOutcome, error) {
 	state, err := s.lockSQLitePipelineClaim(req.Commit.PipelineClaim)
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err

@@ -24,7 +24,6 @@ const ScheduleOwnerAgent = runtimepipeline.ScheduleOwnerAgent
 type SchedulePersistence = runtimepipeline.SchedulePersistence
 
 type WorkflowInstanceLoader interface {
-	Enabled() bool
 	Load(ctx context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error)
 }
 

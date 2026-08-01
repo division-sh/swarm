@@ -5,13 +5,14 @@ import (
 	"testing"
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
 func TestDeletedAvailabilityCannotBecomeExecutableFact(t *testing.T) {
-	source, err := DecodeAvailabilitySource("deleted")
+	source, err := runtimerunbundle.DecodeAvailabilitySource("deleted")
 	if err != nil {
 		t.Fatalf("DecodeAvailabilitySource: %v", err)
 	}
@@ -52,9 +53,9 @@ func TestLoadAvailabilityClassifiesBundleSourceStates(t *testing.T) {
 		rowPresent bool
 	}{
 		{name: "persisted present", runID: persistedPresent, available: true, rowPresent: true},
-		{name: "persisted missing", runID: persistedMissing, code: CodeBundleDataIntegrityError, cause: "persisted_missing_bundle_row"},
-		{name: "ephemeral", runID: ephemeral, code: CodeBundleUnavailable, cause: "ephemeral"},
-		{name: "deleted", runID: deleted, code: CodeBundleUnavailable, cause: "deleted"},
+		{name: "persisted missing", runID: persistedMissing, code: runtimerunbundle.CodeBundleDataIntegrityError, cause: "persisted_missing_bundle_row"},
+		{name: "ephemeral", runID: ephemeral, code: runtimerunbundle.CodeBundleUnavailable, cause: "ephemeral"},
+		{name: "deleted", runID: deleted, code: runtimerunbundle.CodeBundleUnavailable, cause: "deleted"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			availability, err := LoadAvailability(ctx, db, tc.runID)
@@ -89,7 +90,7 @@ func TestLoadAvailabilityReadsSourceBeforeBundleRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAvailability deleted without bundles table: %v", err)
 	}
-	if availability.ErrorCode != CodeBundleUnavailable || availability.Cause != "deleted" {
+	if availability.ErrorCode != runtimerunbundle.CodeBundleUnavailable || availability.Cause != "deleted" {
 		t.Fatalf("availability = %#v, want deleted unavailable without bundle lookup", availability)
 	}
 }
@@ -115,7 +116,7 @@ func TestListActiveConflictsUsesAvailabilityOwner(t *testing.T) {
 	if len(conflicts) != 1 {
 		t.Fatalf("conflicts = %#v, want only active ephemeral conflict; persisted=%s completed=%s", conflicts, persistedPresent, completedDeleted)
 	}
-	if conflicts[0].RunID != ephemeral || conflicts[0].ErrorCode != CodeBundleUnavailable || conflicts[0].Cause != "ephemeral" {
+	if conflicts[0].RunID != ephemeral || conflicts[0].ErrorCode != runtimerunbundle.CodeBundleUnavailable || conflicts[0].Cause != "ephemeral" {
 		t.Fatalf("conflict = %#v, want active ephemeral run", conflicts[0])
 	}
 }

@@ -6,9 +6,10 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
-func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]RunForkPendingWork, error) {
+func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]runfork.RunForkPendingWork, error) {
 	if snapshot == nil {
 		return nil, nil
 	}
@@ -23,7 +24,7 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]Ru
 		}
 	}
 	deliveryKeys := make(map[string]struct{}, len(snapshot.Deliveries))
-	out := make([]RunForkPendingWork, 0, len(snapshot.Deliveries)+len(snapshot.Receipts))
+	out := make([]runfork.RunForkPendingWork, 0, len(snapshot.Deliveries)+len(snapshot.Receipts))
 	for _, delivery := range snapshot.Deliveries {
 		durable := delivery.Snapshot
 		event, ok := events[strings.TrimSpace(durable.EventID)]
@@ -32,7 +33,7 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]Ru
 		}
 		key := runForkRevisionSubscriberKey(durable.EventID, string(durable.SubscriberClass), durable.SubscriberID)
 		deliveryKeys[key] = struct{}{}
-		item := RunForkPendingWork{
+		item := runfork.RunForkPendingWork{
 			EventID:         strings.TrimSpace(durable.EventID),
 			EventName:       strings.TrimSpace(event.EventName),
 			FlowInstance:    strings.TrimSpace(event.FlowInstance),
@@ -65,7 +66,7 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]Ru
 			return nil, runForkRevisionLineageError("event_receipts", receipt.ReceiptID, receipt.EventID)
 		}
 		receiptAt := receipt.ProcessedAt
-		item := RunForkPendingWork{
+		item := runfork.RunForkPendingWork{
 			EventID:        strings.TrimSpace(receipt.EventID),
 			EventName:      strings.TrimSpace(event.EventName),
 			FlowInstance:   strings.TrimSpace(event.FlowInstance),
@@ -79,9 +80,9 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]Ru
 			ReceiptAt:      &receiptAt,
 		}
 		if item.ReceiptOutcome == "dead_letter" {
-			item.Classification = RunForkPendingClassificationDeadLetter
+			item.Classification = runfork.RunForkPendingClassificationDeadLetter
 		} else {
-			item.Classification = RunForkPendingClassificationDeliveredCompleted
+			item.Classification = runfork.RunForkPendingClassificationDeliveredCompleted
 		}
 		out = append(out, item)
 	}
@@ -95,23 +96,23 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]Ru
 
 func classifyRunForkDeliverySnapshot(snapshot runtimedelivery.Snapshot, deadLetter bool) string {
 	if deadLetter || snapshot.Status == runtimedelivery.StatusDeadLetter {
-		return RunForkPendingClassificationDeadLetter
+		return runfork.RunForkPendingClassificationDeadLetter
 	}
 	switch snapshot.Status {
 	case runtimedelivery.StatusPending:
-		return RunForkPendingClassificationPending
+		return runfork.RunForkPendingClassificationPending
 	case runtimedelivery.StatusInProgress:
-		return RunForkPendingClassificationInProgress
+		return runfork.RunForkPendingClassificationInProgress
 	case runtimedelivery.StatusFailed:
-		return RunForkPendingClassificationFailedRetryable
+		return runfork.RunForkPendingClassificationFailedRetryable
 	case runtimedelivery.StatusDelivered:
-		return RunForkPendingClassificationDeliveredCompleted
+		return runfork.RunForkPendingClassificationDeliveredCompleted
 	default:
 		return ""
 	}
 }
 
-func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot, entities []RunForkEntityState, pending []RunForkPendingWork) (runForkAdmissionEvidence, error) {
+func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot, entities []runfork.RunForkEntityState, pending []runfork.RunForkPendingWork) (runForkAdmissionEvidence, error) {
 	facts := loadRunForkSourceFactsFromRevision(snapshot, entities)
 	relevantTimer := false
 	entityIDs := stringSliceSet(facts.EntityIDs)
@@ -126,9 +127,9 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 			break
 		}
 	}
-	routeState := RunForkRouteHistoryNotApplicable
+	routeState := runfork.RunForkRouteHistoryNotApplicable
 	if len(facts.FlowInstances) > 0 || len(facts.SourceFlows) > 0 {
-		routeState = RunForkRouteHistoryUnknownUnversioned
+		routeState = runfork.RunForkRouteHistoryUnknownUnversioned
 	}
 	activeSessions := map[string]struct{}{}
 	for _, session := range snapshot.Sessions {
@@ -156,7 +157,7 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 	return runForkAdmissionEvidence{
 		Pending:                 pending,
 		RelevantTimer:           relevantTimer,
-		RouteHistory:            RunForkRouteHistoryProjection{State: routeState},
+		RouteHistory:            runfork.RunForkRouteHistoryProjection{State: routeState},
 		ActiveSession:           activeSession,
 		ActiveConversationAudit: len(snapshot.ConversationAudits) > 0,
 		ActiveTurn:              activeTurn,
@@ -164,7 +165,7 @@ func loadRunForkAdmissionEvidenceFromRevision(snapshot *runForkRevisionSnapshot,
 	}, nil
 }
 
-func loadRunForkSourceFactsFromRevision(snapshot *runForkRevisionSnapshot, entities []RunForkEntityState) runForkSourceFacts {
+func loadRunForkSourceFactsFromRevision(snapshot *runForkRevisionSnapshot, entities []runfork.RunForkEntityState) runForkSourceFacts {
 	entitySet := map[string]struct{}{}
 	flowSet := map[string]struct{}{}
 	sourceFlowSet := map[string]struct{}{}
@@ -204,8 +205,8 @@ func runForkRevisionSubscriberKey(eventID, subscriberType, subscriberID string) 
 
 func runForkRevisionLineageError(family, factKey, eventID string) error {
 	return runForkReplayResumeError(
-		RunForkBlockerDeliveryHistoryUnproven,
-		RunForkReplayResumeFactDeliveryPendingHistory,
+		runfork.RunForkBlockerDeliveryHistoryUnproven,
+		runfork.RunForkReplayResumeFactDeliveryPendingHistory,
 		"revisioned "+strings.TrimSpace(family)+" fact "+strings.TrimSpace(factKey)+" has no revisioned source event "+strings.TrimSpace(eventID),
 	)
 }

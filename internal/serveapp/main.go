@@ -28,6 +28,7 @@ import (
 	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -43,6 +44,8 @@ import (
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -51,12 +54,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimestartuprecovery "github.com/division-sh/swarm/internal/runtime/startuprecovery"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	"github.com/division-sh/swarm/internal/store/runbundle"
 	"github.com/division-sh/swarm/internal/versionmetadata"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
@@ -114,48 +117,67 @@ func (noWorkspaceStartupRecoveryContainers) StopManagedContainer(context.Context
 }
 
 type storeBundle struct {
-	Postgres                     *store.PostgresStore
-	SQLDB                        *sql.DB
-	RuntimeSQLDB                 *sql.DB
-	Database                     apiv1.Pinger
-	RuntimeLogStore              runtime.RuntimeLogPersistence
-	RuntimeBlocker               string
-	SchemaBootstrapper           store.SchemaBootstrapper
-	EventStore                   runtimebus.EventStore
-	RunLifecycleCandidates       runtimerunlifecycle.CandidateOwner
-	PipelineStore                *runtimepipeline.WorkflowInstanceStore
-	SessionRegistry              sessions.Registry
-	ConversationStore            runtimellm.ConversationPersistence
-	ManagerStore                 runtimemanager.ManagerPersistence
-	DeliveryStore                runtimedelivery.Store
-	PipelineObligations          runtimepipelineobligation.Store
-	ScheduleStore                runtimepipeline.SchedulePersistence
-	MailboxMaterializer          runtimepipeline.MailboxWriteMaterializationStore
-	MailboxStore                 runtimetools.MailboxPersistence
-	ToolEntityStore              runtimetools.EntityPersistence
-	HumanTaskStore               runtimetools.HumanTaskCardStore
-	BudgetSpendStore             budgetspend.Store
-	InboundStore                 runtime.InboundPersistence
-	MailboxAPIStore              apiv1.MailboxAPIStore
-	DecisionCards                decisioncard.Store
-	ObservabilityStore           apiv1.ObservabilityReadStore
-	AgentUsageStore              apiv1.AgentUsageReadStore
-	AgentDeliveryLifecycleStore  apiv1.AgentDeliveryLifecycleReadStore
-	RuntimeIngressStore          runtimeingress.Store
-	IdempotencyStore             apiv1.APIIdempotencyStore
-	StartupOwnership             runtimestartupownership.Store
-	RunQuiescenceStore           runtimerunquiescence.ServeAbandonStore
-	RunReadStore                 apiv1.RunReadStore
-	EntityReadStore              apiv1.EntityReadStore
-	AgentConversationReadStore   apiv1.AgentConversationReadStore
-	RunBundleContextStore        apiv1.RunBundleContextStore
-	BundleRuntimeCatalogStore    selectedBundleRuntimeCatalogStore
-	BundleSourceCatalogStore     selectedBundleSourceCatalogStore
-	RunBundleAvailabilityStore   selectedRunBundleAvailabilityStore
-	StartupRecoveryStore         selectedStartupRecoveryStore
-	RunStalledReader             runStalledReadStore
-	APIOptionalCapabilityBuilder selectedAPIOptionalCapabilityBuilder
-	RunForkRuntimeOwner          selectedRunForkRuntimeOwner
+	Postgres                       *store.PostgresStore
+	SQLDB                          *sql.DB
+	RuntimeSQLDB                   *sql.DB
+	Database                       apiv1.Pinger
+	RuntimeLogStore                runtime.RuntimeLogPersistence
+	SchemaBootstrapper             store.SchemaBootstrapper
+	EventStore                     runtimebus.EventStore
+	EventBusDurable                runtimebus.DurableDependencies
+	EventPayloadValidationBinder   runtime.EventPayloadValidationBinder
+	InboundPayloadValidationBinder runtime.EventPayloadValidationBinder
+	AuthorActivityRegistrars       []runtime.AuthorActivityCatalogRegistrar
+	RunControlStore                runtimeruncontrol.Store
+	RunLifecycleCandidates         runtimerunlifecycle.CandidateOwner
+	WorkflowPersistence            runtimepipeline.WorkflowPersistence
+	SessionRegistry                sessions.Registry
+	LiveSessionAcquirer            runtimellm.LiveSessionAcquirer
+	SessionResetter                sessions.Resetter
+	ConversationStore              runtimellm.ConversationPersistence
+	ManagerStore                   runtimemanager.ManagerPersistence
+	ManagerLifecycleStore          runtimemanager.AgentLifecyclePersistence
+	ManagerLifecycleDiagnostics    runtimemanager.AgentLifecycleDiagnosticPersistence
+	ManagerPersistenceRoles        runtimemanager.PersistenceRoles
+	EffectsStore                   runtimeeffects.Store
+	CompletionStore                runtimeeffects.CompletionStore
+	CompletionHeartbeatStore       runtimeeffects.CompletionHeartbeatStore
+	EffectsRecoveryStore           runtimeeffects.RecoveryStore
+	ManagedCapabilitiesStore       managedcapabilities.Persistence
+	DeliveryStore                  runtimedelivery.Store
+	PipelineObligations            runtimepipelineobligation.Store
+	ScheduleStore                  runtimepipeline.SchedulePersistence
+	TimerObligationReader          runtimetimerobligation.Reader
+	MailboxMaterializer            runtimepipeline.MailboxWriteMaterializationStore
+	MailboxStore                   runtimetools.MailboxPersistence
+	ToolEntityStore                runtimetools.EntityPersistence
+	HumanTaskStore                 runtimetools.HumanTaskCardStore
+	BudgetSpendStore               budgetspend.Store
+	InboundStore                   runtime.InboundPersistence
+	MailboxAPIStore                apiv1.MailboxAPIStore
+	DecisionCards                  decisioncard.Store
+	ProposedEffects                decisioncard.ProposedEffectStore
+	DecisionCardHumanTasks         decisioncard.HumanTaskStore
+	DecisionCardDraftExpiry        runtimepipeline.DecisionCardDraftExpiry
+	HumanTaskExpiry                runtimepipeline.HumanTaskExpiry
+	ObservabilityStore             apiv1.ObservabilityReadStore
+	AgentUsageStore                apiv1.AgentUsageReadStore
+	AgentDeliveryLifecycleStore    apiv1.AgentDeliveryLifecycleReadStore
+	RuntimeIngressStore            runtimeingress.Store
+	IdempotencyStore               apiv1.APIIdempotencyStore
+	StartupOwnership               runtimestartupownership.Store
+	RunQuiescenceStore             runtimerunquiescence.ServeAbandonStore
+	RunReadStore                   apiv1.RunReadStore
+	EntityReadStore                apiv1.EntityReadStore
+	AgentConversationReadStore     apiv1.AgentConversationReadStore
+	RunBundleContextStore          apiv1.RunBundleContextStore
+	BundleRuntimeCatalogStore      selectedBundleRuntimeCatalogStore
+	BundleSourceCatalogStore       selectedBundleSourceCatalogStore
+	RunBundleAvailabilityStore     selectedRunBundleAvailabilityStore
+	StartupRecoveryStore           selectedStartupRecoveryStore
+	RunStalledReader               runStalledReadStore
+	APIOptionalCapabilityBuilder   selectedAPIOptionalCapabilityBuilder
+	RunForkRuntimeOwner            selectedRunForkRuntimeOwner
 }
 
 type sqlDBPinger struct {
@@ -206,7 +228,7 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 			ConversationForkLifecycle: pg,
 			RunForkAvailability:       pg,
 			RunFork: apiv1.SelectedContractRunForkExecutor{
-				ExecuteSelectedContractRunFork: selectedPostgresRunForkExecutionFunc(pg),
+				ExecuteSelectedContractRunFork: selectedPostgresRunForkExecutionFunc(pg, stores.WorkflowPersistence),
 				SourceLoader:                   runForkSourceLoader,
 				ContractSelection:              runtimerunforkadmission.SelectedContractSelection(req.Source, req.ContractsRoot),
 				AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
@@ -245,28 +267,32 @@ func selectedSQLiteAPIOptionalCapabilityBuilder(sqliteStore *store.SQLiteRuntime
 	}
 }
 
-func selectedPostgresRunForkExecutionFunc(pg *store.PostgresStore) apiv1.SelectedContractRunForkExecutionFunc {
+func selectedPostgresRunForkExecutionFunc(pg *store.PostgresStore, persistence runtimepipeline.WorkflowPersistence) apiv1.SelectedContractRunForkExecutionFunc {
 	if pg == nil {
 		return nil
 	}
 	return func(ctx context.Context, req runtimerunforkexecution.SelectedContractExecutionRequest) (runtimerunforkexecution.SelectedContractExecutionResult, error) {
 		req.Store = pg
+		req.WorkflowPersistence = persistence
 		return runtimerunforkexecution.ExecuteSelectedContractRunFork(ctx, req)
 	}
 }
 
-func selectedPostgresRunForkRuntimeOwner(pg *store.PostgresStore) selectedRunForkRuntimeOwner {
+func selectedPostgresRunForkRuntimeOwner(pg *store.PostgresStore, persistence runtimepipeline.WorkflowPersistence) selectedRunForkRuntimeOwner {
 	if pg == nil {
 		return selectedRunForkRuntimeOwner{}
 	}
 	return selectedRunForkRuntimeOwner{
 		activateFunc: func(ctx context.Context, req runtimerunforkexecution.SelectedContractActivationGateRequest) (runtimerunforkexecution.SelectedContractActivationGateResult, error) {
 			req.Store = pg
+			req.ExecutionStore = pg
+			req.WorkflowPersistence = persistence
 			return runtimerunforkexecution.ActivateSelectedContractRunFork(ctx, req)
 		},
 		materializeFunc: pg.MaterializeRunFork,
 		executeFunc: func(ctx context.Context, req runtimerunforkexecution.SelectedContractExecutionRequest) (runtimerunforkexecution.SelectedContractExecutionResult, error) {
 			req.Store = pg
+			req.WorkflowPersistence = persistence
 			return runtimerunforkexecution.ExecuteSelectedContractRunFork(ctx, req)
 		},
 		planFunc: pg.PlanRunFork,
@@ -281,22 +307,48 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) st
 		cfg = &config.Config{}
 	}
 	pg.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
+	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(pg.DB, pg)
 	bundle := storeBundle{
-		Postgres:                    pg,
-		SQLDB:                       pg.DB,
-		RuntimeSQLDB:                pg.DB,
-		Database:                    pg,
-		RuntimeLogStore:             pg,
-		SchemaBootstrapper:          pg,
-		EventStore:                  pg,
-		RunLifecycleCandidates:      pg,
-		PipelineStore:               runtimepipeline.NewWorkflowInstanceStore(pg.DB),
-		SessionRegistry:             pg,
-		ConversationStore:           pg,
-		ManagerStore:                pg,
+		Postgres:           pg,
+		SQLDB:              pg.DB,
+		RuntimeSQLDB:       pg.DB,
+		Database:           pg,
+		RuntimeLogStore:    pg,
+		SchemaBootstrapper: pg,
+		EventStore:         pg,
+		EventBusDurable: runtimebus.DurableDependencies{
+			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
+			FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteSets: pg, FlowRouteTopology: pg, FlowRouteRollback: pg,
+			ActiveAgents: pg, ActiveFlows: pg, DeliveryTargets: pg, DeliveryRouteSets: pg,
+			TargetFailureRecorder: pg, RunOrigins: pg,
+		},
+		EventPayloadValidationBinder:   pg,
+		InboundPayloadValidationBinder: pg,
+		AuthorActivityRegistrars:       []runtime.AuthorActivityCatalogRegistrar{pg},
+		RunControlStore:                pg,
+		RunLifecycleCandidates:         pg,
+		WorkflowPersistence:            workflowPersistence,
+		SessionRegistry:                pg,
+		LiveSessionAcquirer:            pg,
+		SessionResetter:                pg,
+		ConversationStore:              pg,
+		ManagerStore:                   pg,
+		ManagerLifecycleStore:          pg,
+		ManagerLifecycleDiagnostics:    pg,
+		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
+			LifecycleState: pg, LifecycleEffects: pg,
+			LifecycleDiagnostics: pg, EffectsRecovery: pg, DeliveryQuiescence: pg,
+			EventExistence: pg, DirectiveOperations: pg, DirectiveTargets: pg, FlowRoutes: pg,
+		},
+		EffectsStore:                pg,
+		CompletionStore:             pg,
+		CompletionHeartbeatStore:    pg,
+		EffectsRecoveryStore:        pg,
+		ManagedCapabilitiesStore:    pg,
 		DeliveryStore:               pg,
 		PipelineObligations:         pg.PipelineObligations(),
 		ScheduleStore:               pg,
+		TimerObligationReader:       pg,
 		MailboxMaterializer:         pg,
 		MailboxStore:                pg,
 		ToolEntityStore:             pg,
@@ -305,6 +357,10 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) st
 		InboundStore:                pg,
 		MailboxAPIStore:             pg,
 		DecisionCards:               pg,
+		ProposedEffects:             pg,
+		DecisionCardHumanTasks:      pg,
+		DecisionCardDraftExpiry:     pg,
+		HumanTaskExpiry:             pg,
 		ObservabilityStore:          pg,
 		AgentUsageStore:             pg,
 		AgentDeliveryLifecycleStore: pg,
@@ -321,14 +377,14 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) st
 		RunBundleAvailabilityStore:  pg,
 		StartupRecoveryStore:        pg,
 		RunStalledReader:            pg,
-		RunForkRuntimeOwner:         selectedPostgresRunForkRuntimeOwner(pg),
+		RunForkRuntimeOwner:         selectedPostgresRunForkRuntimeOwner(pg, workflowPersistence),
 	}
 	bundle.APIOptionalCapabilityBuilder = selectedPostgresAPIOptionalCapabilityBuilder(pg, bundle)
 	return bundle
 }
 
-func (s storeBundle) runtimeStores() runtime.Stores {
-	return s.facade().runtimeStores()
+func (s storeBundle) runtimeDeps() runtime.RuntimeDeps {
+	return s.facade().runtimeDeps()
 }
 
 type serveRuntimeBundle struct {
@@ -538,7 +594,7 @@ func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores 
 		return serveRuntimeBundle{}, err
 	}
 	record, err := catalog.LoadBundleCatalogRuntimeRecord(ctx, bundleHash)
-	if errors.Is(err, store.ErrBundleNotFound) {
+	if errors.Is(err, runbundle.ErrBundleNotFound) {
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: bundle_hash %s is not present in bundles", bundleHash)
 	}
 	if err != nil {
@@ -681,39 +737,37 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			return serveRuntimeBundleContext{}, fmt.Errorf("artifact repo root startup validation failed: %w", err)
 		}
 	}
-	runtimeStores := req.Stores.runtimeStores()
+	runtimeDeps := req.Stores.runtimeDeps()
+	runtimeDeps.Config = req.Config
 	if !req.UseStartupOwnership {
-		runtimeStores.StartupOwnership = nil
+		runtimeDeps.StartupOwnership = nil
 	}
-	rt, err := runtime.NewRuntime(req.Ctx, runtime.RuntimeDeps{
-		Config: req.Config,
-		Stores: runtimeStores,
-		Options: runtime.RuntimeOptions{
-			SelfCheck:                        req.Options.SelfCheck,
-			WorkflowModule:                   loaded.module,
-			WorkspaceLifecycle:               workspaces,
-			EnableToolGateway:                req.EnableToolGateway,
-			ToolGatewayBinding:               req.ToolGatewayBinding,
-			BundleSourceFact:                 bundleSourceFact,
-			RuntimeInstanceID:                strings.TrimSpace(req.RuntimeInstanceID),
-			ProcessWorkOwner:                 req.ProcessWorkOwner,
-			Credentials:                      req.Credentials,
-			ManagedCredentials:               req.ManagedCredentials,
-			ProviderCredentials:              req.ProviderCredentials,
-			ProviderTriggerCatalog:           req.ProviderTriggerCatalog,
-			ChannelPlans:                     req.ChannelPlans,
-			ChannelOutboundBindings:          req.ChannelBindings,
-			BootStartedAt:                    req.BootStartedAt,
-			BootProgress:                     req.BootProgress,
-			SystemContainers:                 systemWorkspaceContainers(workspaces),
-			DisablePersistentStartupRecovery: !req.UseStartupRecovery,
-			TestEntityStateHook:              req.Options.TestEntityStateHook,
-			TestWorkflowNodeHandlerStartHook: req.Options.TestWorkflowNodeHandlerStartHook,
-			TestLifecycleProbe:               req.Options.TestLifecycleProbe,
-			LLMRuntime:                       req.Options.TestLLMRuntime,
-			TestOutboxSweeperConfig:          req.Options.TestOutboxSweeperConfig,
-		},
-	})
+	runtimeDeps.Options = runtime.RuntimeOptions{
+		SelfCheck:                        req.Options.SelfCheck,
+		WorkflowModule:                   loaded.module,
+		WorkspaceLifecycle:               workspaces,
+		EnableToolGateway:                req.EnableToolGateway,
+		ToolGatewayBinding:               req.ToolGatewayBinding,
+		BundleSourceFact:                 bundleSourceFact,
+		RuntimeInstanceID:                strings.TrimSpace(req.RuntimeInstanceID),
+		ProcessWorkOwner:                 req.ProcessWorkOwner,
+		Credentials:                      req.Credentials,
+		ManagedCredentials:               req.ManagedCredentials,
+		ProviderCredentials:              req.ProviderCredentials,
+		ProviderTriggerCatalog:           req.ProviderTriggerCatalog,
+		ChannelPlans:                     req.ChannelPlans,
+		ChannelOutboundBindings:          req.ChannelBindings,
+		BootStartedAt:                    req.BootStartedAt,
+		BootProgress:                     req.BootProgress,
+		SystemContainers:                 systemWorkspaceContainers(workspaces),
+		DisablePersistentStartupRecovery: !req.UseStartupRecovery,
+		TestEntityStateHook:              req.Options.TestEntityStateHook,
+		TestWorkflowNodeHandlerStartHook: req.Options.TestWorkflowNodeHandlerStartHook,
+		TestLifecycleProbe:               req.Options.TestLifecycleProbe,
+		LLMRuntime:                       req.Options.TestLLMRuntime,
+		TestOutboxSweeperConfig:          req.Options.TestOutboxSweeperConfig,
+	}
+	rt, err := runtime.NewRuntime(req.Ctx, runtimeDeps)
 	if err != nil {
 		return serveRuntimeBundleContext{}, err
 	}
@@ -729,18 +783,20 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}, nil
 }
 
-func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding, providerCredentials runtimecredentials.Store, effectStore runtimeeffects.Store, projector runtimeeffects.CompletionSpendProjector) (runtimellm.Runtime, error) {
+func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding, providerCredentials runtimecredentials.Store, effectStore runtimeeffects.Store, completionStore runtimeeffects.CompletionStore, heartbeatStore runtimeeffects.CompletionHeartbeatStore, projector runtimeeffects.CompletionSpendProjector) (runtimellm.Runtime, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
 	}
+	registry := sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL)
 	return runtimellm.RuntimeFactory{
 		Cfg:                  cfg,
-		Sessions:             sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL),
+		Sessions:             registry,
+		LiveSessions:         runtimellm.NewTransientLiveSessionAcquirer(registry),
 		LockOwner:            "forkchat-sandbox",
 		Workspaces:           workspaces,
 		ToolGateway:          binding,
 		Credentials:          providerCredentials,
-		CompletionController: runtimeeffects.NewCompletionController(effectStore, projector),
+		CompletionController: runtimeeffects.NewCompletionController(effectStore, completionStore, heartbeatStore, projector),
 	}.Build()
 }
 
@@ -1071,7 +1127,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
-	standingReconciliations, err := reconcileServeStandingServices(ctx, runtimeContexts)
+	standingReconciliations, err := reconcileServeStandingServices(ctx, rt.Pipeline, runtimeContexts)
 	if err != nil {
 		presenter.fail(5, "runtime_context", err)
 		return 1
@@ -1110,12 +1166,11 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		return 1
 	}
 
-	effectStore, ok := stores.ManagerStore.(runtimeeffects.Store)
-	if !ok || effectStore == nil {
+	if stores.EffectsStore == nil || stores.CompletionStore == nil || stores.CompletionHeartbeatStore == nil {
 		presenter.fail(5, "forkchat_sandbox", fmt.Errorf("selected runtime store does not implement completion execution authority"))
 		return 1
 	}
-	forkChatLLM, err := buildForkChatSandboxLLMRuntime(cfg, workspaces, toolGatewayBinding, providerCredentialStore, effectStore, rt.Budget)
+	forkChatLLM, err := buildForkChatSandboxLLMRuntime(cfg, workspaces, toolGatewayBinding, providerCredentialStore, stores.EffectsStore, stores.CompletionStore, stores.CompletionHeartbeatStore, rt.Budget)
 	if err != nil {
 		presenter.fail(5, "forkchat_sandbox", err)
 		return 1
@@ -1208,11 +1263,11 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		AgentControl:              dashboardDynamicAgentControl{supervisor: supervisor},
 		Mailbox:                   stores.MailboxAPIStore,
 		DecisionCards:             stores.DecisionCards,
-		DecisionAuthority:         stores.PipelineStore,
+		DecisionAuthority:         rt.Pipeline,
 		Idempotency:               stores.IdempotencyStore,
 		Events:                    rt.Bus,
 		RunControl:                rt.RunControl,
-		StandingServices:          &serveStandingServiceController{store: rt.Stores.PipelineStore, manager: runtimeContextManager},
+		StandingServices:          &serveStandingServiceController{store: rt.Pipeline, manager: runtimeContextManager},
 		RuntimeIngress:            rt.RuntimeIngress,
 		RuntimeContexts:           apiStoreCaps.RuntimeContexts,
 		ResetCoordinator:          apiStoreCaps.ResetCoordinator,
@@ -1280,7 +1335,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(22, "ready", err)
 		return 1
 	}
-	if err := reportServeStandingReadiness(ctx, rt.Stores.PipelineStore, opts.Output); err != nil {
+	if err := reportServeStandingReadiness(ctx, rt.Pipeline, opts.Output); err != nil {
 		presenter.fail(22, "ready", err)
 		return 1
 	}
@@ -1362,17 +1417,15 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	return 0
 }
 
-func reconcileServeStandingServices(ctx context.Context, contexts []serveRuntimeBundleContext) (map[string]runtimepipeline.StandingServiceReconciliation, error) {
-	var owner *runtimepipeline.WorkflowInstanceStore
+type standingServiceSetReconciler interface {
+	ReconcileStandingServiceSet(context.Context, []runtimepipeline.StandingServiceCandidate) ([]runtimepipeline.StandingServiceReconciliation, error)
+}
+
+func reconcileServeStandingServices(ctx context.Context, owner standingServiceSetReconciler, contexts []serveRuntimeBundleContext) (map[string]runtimepipeline.StandingServiceReconciliation, error) {
 	var candidates []runtimepipeline.StandingServiceCandidate
 	for _, contextDef := range contexts {
-		if contextDef.runtime == nil || contextDef.runtime.Stores.PipelineStore == nil {
+		if contextDef.runtime == nil || owner == nil {
 			continue
-		}
-		if owner == nil {
-			owner = contextDef.runtime.Stores.PipelineStore
-		} else if owner != contextDef.runtime.Stores.PipelineStore {
-			return nil, fmt.Errorf("standing service reconciliation requires one selected-store owner")
 		}
 		planned, err := contextDef.runtime.PlanStandingServiceCandidates()
 		if err != nil {
@@ -1441,7 +1494,7 @@ func reconcileServeRuntimeStandingTargets(
 }
 
 type serveStandingServiceController struct {
-	store   *runtimepipeline.WorkflowInstanceStore
+	store   apiv1.StandingServiceController
 	manager *runtime.RuntimeContextManager
 	mu      sync.Mutex
 }
@@ -1652,7 +1705,11 @@ func (c *serveStandingServiceController) publishActiveService(ctx context.Contex
 	return nil
 }
 
-func reportServeStandingReadiness(ctx context.Context, owner *runtimepipeline.WorkflowInstanceStore, out io.Writer) error {
+type standingServiceStatusReader interface {
+	ListStandingServiceStatuses(context.Context) ([]runtimepipeline.StandingServiceStatus, error)
+}
+
+func reportServeStandingReadiness(ctx context.Context, owner standingServiceStatusReader, out io.Writer) error {
 	if owner == nil {
 		return nil
 	}
@@ -2120,20 +2177,46 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			return storeBundle{}, err
 		}
 		sqliteStore.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
+		workflowPersistence := runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore)
 		bundle := storeBundle{
-			SQLDB:                       sqliteStore.DB,
-			Database:                    sqlDBPinger{db: sqliteStore.DB},
-			RuntimeLogStore:             sqliteStore,
-			SchemaBootstrapper:          sqliteStore,
-			EventStore:                  sqliteStore,
-			RunLifecycleCandidates:      sqliteStore,
-			PipelineStore:               runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore),
-			SessionRegistry:             sqliteStore,
-			ConversationStore:           sqliteStore,
-			ManagerStore:                sqliteStore,
+			SQLDB:              sqliteStore.DB,
+			Database:           sqlDBPinger{db: sqliteStore.DB},
+			RuntimeLogStore:    sqliteStore,
+			SchemaBootstrapper: sqliteStore,
+			EventStore:         sqliteStore,
+			EventBusDurable: runtimebus.DurableDependencies{
+				ReplyContext: sqliteStore, RunLifecycle: sqliteStore, DeliveryLifecycle: sqliteStore,
+				FlowRoutes: sqliteStore, FlowRouteRecords: sqliteStore, FlowRouteSets: sqliteStore, FlowRouteTopology: sqliteStore, FlowRouteRollback: sqliteStore,
+				ActiveAgents: sqliteStore, ActiveFlows: sqliteStore, DeliveryTargets: sqliteStore, DeliveryRouteSets: sqliteStore,
+				TargetFailureRecorder: sqliteStore, RunOrigins: sqliteStore,
+			},
+			EventPayloadValidationBinder:   sqliteStore,
+			InboundPayloadValidationBinder: sqliteStore,
+			AuthorActivityRegistrars:       []runtime.AuthorActivityCatalogRegistrar{sqliteStore},
+			RunControlStore:                sqliteStore,
+			RunLifecycleCandidates:         sqliteStore,
+			WorkflowPersistence:            workflowPersistence,
+			SessionRegistry:                sqliteStore,
+			LiveSessionAcquirer:            sqliteStore,
+			SessionResetter:                sqliteStore,
+			ConversationStore:              sqliteStore,
+			ManagerStore:                   sqliteStore,
+			ManagerLifecycleStore:          sqliteStore,
+			ManagerLifecycleDiagnostics:    sqliteStore,
+			ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
+				LifecycleState: sqliteStore, LifecycleEffects: sqliteStore,
+				LifecycleDiagnostics: sqliteStore, EffectsRecovery: sqliteStore, DeliveryQuiescence: sqliteStore,
+				EventExistence: sqliteStore, DirectiveOperations: sqliteStore, DirectiveTargets: sqliteStore, FlowRoutes: sqliteStore,
+			},
+			EffectsStore:                sqliteStore,
+			CompletionStore:             sqliteStore,
+			CompletionHeartbeatStore:    sqliteStore,
+			EffectsRecoveryStore:        sqliteStore,
+			ManagedCapabilitiesStore:    sqliteStore,
 			DeliveryStore:               sqliteStore,
 			PipelineObligations:         sqliteStore.PipelineObligations(),
 			ScheduleStore:               sqliteStore,
+			TimerObligationReader:       sqliteStore,
 			MailboxMaterializer:         sqliteStore,
 			MailboxStore:                sqliteStore,
 			ToolEntityStore:             sqliteStore,
@@ -2142,6 +2225,10 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			InboundStore:                sqliteStore,
 			MailboxAPIStore:             sqliteStore,
 			DecisionCards:               sqliteStore,
+			ProposedEffects:             sqliteStore,
+			DecisionCardHumanTasks:      sqliteStore,
+			DecisionCardDraftExpiry:     sqliteStore,
+			HumanTaskExpiry:             sqliteStore,
 			ObservabilityStore:          sqliteStore,
 			AgentUsageStore:             sqliteStore,
 			AgentDeliveryLifecycleStore: sqliteStore,

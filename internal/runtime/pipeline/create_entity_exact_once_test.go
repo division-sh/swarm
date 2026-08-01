@@ -176,7 +176,7 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 	}
 }
 
-func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *WorkflowInstanceStore) *PipelineCoordinator {
+func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *workflowInstanceStore) *PipelineCoordinator {
 	t.Helper()
 	root := canonicalrouting.CopyLegacyStaticCreate(t, true)
 	repoRoot := contractComplianceRepoRoot(t)
@@ -196,8 +196,10 @@ func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *WorkflowInstanceSt
 	bus := &recordingPipelineBus{}
 	deliveryStore := newPipelineTestDeliveryOwner(t, db, store.isSQLite())
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		WorkflowStore:       store,
+		Persistence:         workflowPersistenceForTest(store),
 		DeliveryStore:       deliveryStore,
+		DeliveryRuntime:     bus,
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
 		TimerScheduleStore:  &recordingScheduleStore{},
 		MailboxMaterializer: &recordingMailboxWriteMaterializer{},
 		Module: &previewWorkflowModule{
@@ -260,13 +262,13 @@ func sqliteExactOnceRunContext(t *testing.T, db *sql.DB) context.Context {
 	return ctx
 }
 
-func seedExactOnceEventDelivery(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, evt events.Event, nodeID string) events.DeliveryRoute {
+func seedExactOnceEventDelivery(t *testing.T, store *workflowInstanceStore, ctx context.Context, evt events.Event, nodeID string) events.DeliveryRoute {
 	t.Helper()
 	seedExactOnceEvent(t, store, ctx, evt)
-	owner, ok := store.DeliveryLifecycleStore().(*pipelineTestDeliveryOwner)
+	owner, ok := store.deliveryStore.(*pipelineTestDeliveryOwner)
 	if !ok {
 		owner = newPipelineTestDeliveryOwner(t, store.db, store.isSQLite())
-		store.ConfigureDeliveryLifecycleStore(owner)
+		store.deliveryStore = owner
 	}
 	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID}
 	if err := owner.commitInitial(ctx, evt, route); err != nil {
@@ -275,7 +277,7 @@ func seedExactOnceEventDelivery(t *testing.T, store *WorkflowInstanceStore, ctx 
 	return route
 }
 
-func seedExactOnceEvent(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, evt events.Event) {
+func seedExactOnceEvent(t *testing.T, store *workflowInstanceStore, ctx context.Context, evt events.Event) {
 	t.Helper()
 	if store.isSQLite() {
 		seedPipelineEventRecordForDialect(t, ctx, store.db, "sqlite", evt)
@@ -284,7 +286,7 @@ func seedExactOnceEvent(t *testing.T, store *WorkflowInstanceStore, ctx context.
 	seedPipelineEventRecord(t, ctx, store.db, evt)
 }
 
-func assertMutationCount(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, eventID, field, writerID, handlerStep string, want int) {
+func assertMutationCount(t *testing.T, store *workflowInstanceStore, ctx context.Context, eventID, field, writerID, handlerStep string, want int) {
 	t.Helper()
 	var (
 		got int
@@ -317,7 +319,7 @@ func assertMutationCount(t *testing.T, store *WorkflowInstanceStore, ctx context
 	}
 }
 
-func assertDeliveryOutcomeCount(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, eventID, nodeID string, want int) {
+func assertDeliveryOutcomeCount(t *testing.T, store *workflowInstanceStore, ctx context.Context, eventID, nodeID string, want int) {
 	t.Helper()
 	var got int
 	var err error
@@ -348,7 +350,7 @@ func assertDeliveryOutcomeCount(t *testing.T, store *WorkflowInstanceStore, ctx 
 	}
 }
 
-func assertDeliveryStatusCount(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, eventID, nodeID, status string, want int) {
+func assertDeliveryStatusCount(t *testing.T, store *workflowInstanceStore, ctx context.Context, eventID, nodeID, status string, want int) {
 	t.Helper()
 	var got int
 	var err error

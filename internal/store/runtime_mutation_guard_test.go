@@ -188,11 +188,11 @@ import (
 	"database/sql"
 )
 
-type WorkflowInstanceStore struct {
+type workflowInstanceStore struct {
 	db *sql.DB
 }
 
-func (s *WorkflowInstanceStore) BadPipelineBypass(ctx context.Context) error {
+func (s *workflowInstanceStore) BadPipelineBypass(ctx context.Context) error {
 	_, err := dbExecContext(ctx, s.db, "UPDATE flow_instances SET status = 'terminated'")
 	return err
 }
@@ -236,22 +236,31 @@ func badSQLitePipelineHelper(ctx context.Context, db *sql.DB) error {
 	}
 }
 
-func TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary(t *testing.T) {
+func TestSelectedRuntimeConstructionUsesOpaqueWorkflowPersistence(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
 	mainData, err := os.ReadFile(filepath.Join(root, "internal", "serveapp", "main.go"))
 	if err != nil {
 		t.Fatalf("read internal/serveapp/main.go: %v", err)
 	}
 	mainText := string(mainData)
-	if !strings.Contains(mainText, "NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)") {
-		t.Fatal("serve runtime SQLite store construction must wire WorkflowInstanceStore through SQLiteRuntimeStore.RunRuntimeMutation")
+	if !strings.Contains(mainText, "NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore)") {
+		t.Fatal("serve runtime SQLite construction must wire the selected private transaction executor into opaque workflow persistence")
 	}
-	if strings.Contains(mainText, "NewSQLiteWorkflowInstanceStore(sqliteStore.DB)") {
-		t.Fatal("serve runtime SQLite store construction uses legacy WorkflowInstanceStore without the runtime mutation boundary")
+	if !strings.Contains(mainText, "NewPostgresWorkflowPersistence(pg.DB, pg)") {
+		t.Fatal("serve runtime PostgreSQL construction must wire opaque workflow persistence")
+	}
+	for _, forbidden := range []string{
+		"NewSQLiteWorkflowInstanceStore",
+		"NewPostgresWorkflowInstanceStore",
+		"WorkflowInstanceStoreWithRuntimeMutationRunner",
+	} {
+		if strings.Contains(mainText, forbidden) {
+			t.Fatalf("serve runtime construction retains concrete workflow-store constructor %s", forbidden)
+		}
 	}
 	sqliteBlock := runtimeWriterSnippetAfter(mainText, "case storebackend.BackendSQLite:", "default:")
 	if strings.Contains(sqliteBlock, "RuntimeSQLDB:") {
-		t.Fatal("SQLite runtime construction must not expose raw runtime SQLDB to runtime.Stores")
+		t.Fatal("SQLite runtime construction must not expose the PostgreSQL-only RuntimeSQLDB exception")
 	}
 
 	facadeData, err := os.ReadFile(filepath.Join(root, "internal", "serveapp", "store_facade.go"))
@@ -259,8 +268,11 @@ func TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary(t *testing.T)
 		t.Fatalf("read internal/serveapp/store_facade.go: %v", err)
 	}
 	facadeText := string(facadeData)
-	if !strings.Contains(facadeText, "SQLDB:                  s.RuntimeSQLDB,") {
-		t.Fatal("selected runtime facade must use RuntimeSQLDB, leaving runtime.Stores.SQLDB nil for SQLite")
+	if !strings.Contains(facadeText, "WorkflowPersistence:            s.WorkflowPersistence,") {
+		t.Fatal("selected runtime facade must project opaque workflow persistence into exact runtime dependencies")
+	}
+	if !strings.Contains(facadeText, "SQLDB:                          s.RuntimeSQLDB,") {
+		t.Fatal("selected runtime facade must project only the named PostgreSQL RuntimeSQLDB exception")
 	}
 
 	publishData, err := os.ReadFile(filepath.Join(root, "internal", "runtime", "bus", "eventbus_publish.go"))
@@ -307,8 +319,8 @@ func TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary(t *testing.T)
 			t.Fatalf("SQLite pipeline store must not own busy/retry policy through %s", forbidden)
 		}
 	}
-	if !strings.Contains(pipelineText, "errSQLiteWorkflowInstanceStoreRuntimeMutationRunnerRequired") {
-		t.Fatal("SQLite pipeline writes must fail closed when no RuntimeMutationRunner is injected")
+	if !strings.Contains(pipelineText, "errSQLiteWorkflowMutationOwnerRequired") {
+		t.Fatal("SQLite workflow persistence must fail closed when its private selected mutation owner is absent")
 	}
 }
 
@@ -402,7 +414,7 @@ func collectRuntimeWriterCallSitesFromSource(path, src string) ([]runtimeWriterC
 				info.callsRuntimeMutation = true
 			case "runEventTransaction", "RunEventPublication":
 				info.callsEventTransaction = true
-			case "RunPipelineMutation", "runInPipelineTransaction":
+			case "runInPipelineTransaction":
 				info.callsPipelineTransaction = true
 			case "PipelineSQLTxFromContext", "sqlTxFromContext":
 				info.usesPipelineTxFromContext = true
@@ -491,7 +503,7 @@ func runtimeWriterPrimitive(call *ast.CallExpr) (string, runtimeWriterPrimitiveK
 		return name, primitiveWrite, true
 	case "Query", "QueryContext", "QueryRow", "QueryRowContext", "Prepare", "PrepareContext":
 		return name, primitiveRead, true
-	case "RunPipelineMutation", "runInPipelineTransaction", "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation", "runEventTransaction", "RunEventPublication", "PipelineSQLTxFromContext", "sqlTxFromContext":
+	case "runInPipelineTransaction", "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation", "runEventTransaction", "RunEventPublication", "PipelineSQLTxFromContext", "sqlTxFromContext":
 		return name, primitiveBoundary, true
 	default:
 		return "", "", false
@@ -515,7 +527,7 @@ func collectRuntimeWriterBoundaryCallbackScopes(body ast.Node) []runtimeWriterBo
 			scope.runtime = true
 		case "runEventTransaction", "RunEventPublication":
 			scope.event = true
-		case "RunPipelineMutation", "runInPipelineTransaction":
+		case "runInPipelineTransaction":
 			scope.pipeline = true
 		default:
 			return true
@@ -689,8 +701,8 @@ func classifyRuntimeWriterCallSite(site runtimeWriterCallSite) (runtimeWriterCla
 		switch site.Primitive {
 		case "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation", "runEventTransaction", "RunEventPublication":
 			return classConsumesCanonical, "canonical runtime mutation/event transaction boundary", true
-		case "RunPipelineMutation", "runInPipelineTransaction":
-			return classConsumesCanonical, "pipeline mutation owner delegates production SQLite writes to RunRuntimeMutationContext", true
+		case "runInPipelineTransaction":
+			return classConsumesCanonical, "private workflow persistence transaction owner delegates SQLite writes to RunRuntimeMutationContext", true
 		case "PipelineSQLTxFromContext", "sqlTxFromContext":
 			return classActiveTxHelper, "active transaction context probe; not a writer by itself", true
 		}
@@ -699,7 +711,7 @@ func classifyRuntimeWriterCallSite(site runtimeWriterCallSite) (runtimeWriterCla
 	if site.Receiver == "SQLiteRuntimeStore" {
 		return classifySQLiteRuntimeStoreCallSite(site)
 	}
-	if site.Receiver == "WorkflowInstanceStore" {
+	if site.Receiver == "workflowInstanceStore" {
 		if classification, reason, ok := classifyWorkflowInstanceStoreCallSite(site); ok {
 			return classification, reason, true
 		}
@@ -732,23 +744,23 @@ func classifyRuntimeWriterCallSite(site runtimeWriterCallSite) (runtimeWriterCla
 
 func classifyWorkflowInstanceStoreCallSite(site runtimeWriterCallSite) (runtimeWriterClassification, string, bool) {
 	if site.Kind == primitiveRead && site.InPipelineTransactionCallback && site.UsesBoundaryCallbackTx {
-		return classConsumesCanonical, "WorkflowInstanceStore selected read executes through the callback transaction", true
+		return classConsumesCanonical, "private workflow persistence read executes through the callback transaction", true
 	}
 	if site.Kind != primitiveWrite && site.Kind != primitiveBegin {
 		return "", "", false
 	}
 	if (site.InPipelineTransactionCallback || site.InRuntimeMutationCallback) && site.UsesBoundaryCallbackTx {
-		return classConsumesCanonical, "WorkflowInstanceStore selected writer executes through the callback transaction", true
+		return classConsumesCanonical, "private workflow persistence writer executes through the callback transaction", true
 	}
 	if sqlitePipelineTxHelper(site) {
-		return classActiveTxHelper, "SQLite WorkflowInstanceStore helper uses caller-provided *sql.Tx", true
+		return classActiveTxHelper, "SQLite workflow persistence helper uses caller-provided *sql.Tx", true
 	}
 	if classification, reason, ok := classifyWorkflowInstanceStoreSpecCallSite(site); ok {
 		return classification, reason, true
 	}
 	if site.Primitive == "dbExecContext" && site.UsesReceiverDBArgument {
 		if site.InPipelineTransactionCallback || site.InRuntimeMutationCallback {
-			return classConsumesCanonical, "WorkflowInstanceStore helper-mediated write executes inside canonical transaction context", true
+			return classConsumesCanonical, "private workflow persistence helper-mediated write executes inside canonical transaction context", true
 		}
 		return "", "", false
 	}

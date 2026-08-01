@@ -264,6 +264,18 @@ func (s *sourceBoundaryProbeStore) ReplaceFlowInstanceRouteRecords(
 	return nil
 }
 
+func (s *sourceBoundaryProbeStore) ReplaceFlowInstanceRouteTopology(
+	ctx context.Context,
+	sets []FlowInstanceRouteRecordSet,
+) error {
+	for _, set := range sets {
+		if err := s.ReplaceFlowInstanceRouteRecords(ctx, set.Identity, set.Routes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (*sourceBoundaryProbeStore) ListActiveFlowInstanceDescriptors(context.Context) ([]ActiveFlowInstanceDescriptor, error) {
 	return nil, nil
 }
@@ -343,6 +355,7 @@ func newSourceMutationProbeBusWithStore(
 		BundleSourceFact:    fact,
 		RuntimeInstanceID:   uuid.NewString(),
 		PipelineObligations: owner,
+		Durable:             ExactDurableTestDependencies(store),
 		WorkOwner:           runtimeOwner,
 		DeliveryAuthority:   mustSourceMutationDeliveryAuthority(t, fact),
 	})
