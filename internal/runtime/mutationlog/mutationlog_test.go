@@ -289,8 +289,8 @@ func TestInsertRejectsMissingRunWithoutCreatingLifecycle(t *testing.T) {
 
 func insertMutationLogRecord(t *testing.T, ctx context.Context, db *sql.DB, record Record) error {
 	t.Helper()
-	return runlifecyclefixture.RunPostgresMutation(ctx, db, func(txctx context.Context, tx *sql.Tx) error {
-		if err := Insert(txctx, tx, record); err != nil {
+	return runlifecyclefixture.RunPostgresMutation(ctx, db, func(txctx context.Context, tx *sql.Tx, owner runlifecyclefixture.ActiveRunSourceOwner) error {
+		if err := Insert(txctx, tx, owner, record); err != nil {
 			return err
 		}
 		_, err := runforkrevision.CaptureCurrentTransaction(txctx, tx)

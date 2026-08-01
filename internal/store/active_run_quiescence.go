@@ -95,7 +95,7 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 	if err != nil {
 		return runtimerunquiescence.Result{}, err
 	}
-	ctx = s.bindRunLifecycleMutation(storyctx, tx)
+	ctx = storyctx
 
 	var runs []runtimerunquiescence.QuiescedRun
 	if req.AllActiveRuns {
@@ -175,7 +175,7 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 		if !activeRunQuiescenceRunStatusActive(run.Status) {
 			continue
 		}
-		if _, _, err := runtimerunlifecycle.MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
+		if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
 			RunID: run.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: now,
 		}); err != nil {
 			return runtimerunquiescence.Result{}, fmt.Errorf("mark active run quiescence run terminal: %w", err)
@@ -327,7 +327,7 @@ func (s *SQLiteRuntimeStore) ApplyActiveRunQuiescence(ctx context.Context, req r
 			if !activeRunQuiescenceRunStatusActive(run.Status) {
 				continue
 			}
-			if _, _, err := runtimerunlifecycle.MarkTerminal(txctx, runtimerunlifecycle.TerminalRequest{
+			if _, _, err := (sqliteRunLifecycleMutation{store: s, tx: tx}).MarkTerminal(txctx, runtimerunlifecycle.TerminalRequest{
 				RunID: run.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: now,
 			}); err != nil {
 				return err

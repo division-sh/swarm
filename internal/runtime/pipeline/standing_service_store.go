@@ -150,10 +150,13 @@ func (s *workflowInstanceStore) requireStandingRunSourceTx(
 		fact runtimecorrelation.BundleSourceFact
 		err  error
 	)
+	if s == nil || s.runLifecycle == nil {
+		return runtimecorrelation.BundleSourceFact{}, errors.New("standing run lifecycle owner is required")
+	}
 	if requireActive {
-		fact, err = runtimerunlifecycle.RequireActiveSource(ctx, current.RunID)
+		fact, err = s.runLifecycle.RequireActiveRunSource(ctx, current.RunID)
 	} else {
-		fact, err = runtimerunlifecycle.RequirePresentSource(ctx, current.RunID)
+		fact, err = s.runLifecycle.RequirePresentRunSource(ctx, current.RunID)
 	}
 	if err != nil {
 		return runtimecorrelation.BundleSourceFact{}, err
@@ -507,7 +510,7 @@ func (s *workflowInstanceStore) ResetStandingService(ctx context.Context, operat
 		if err != nil {
 			return err
 		}
-		if _, err := runtimerunlifecycle.Create(txctx, runtimerunlifecycle.CreateRequest{
+		if _, err := s.runLifecycle.CreateRun(txctx, runtimerunlifecycle.CreateRequest{
 			RunID: nextRunID, Origin: origin, Source: source, StartedAt: now,
 		}); err != nil {
 			return err
@@ -833,7 +836,10 @@ func (s *workflowInstanceStore) createStandingServiceTx(ctx context.Context, tx 
 	if err != nil {
 		return StandingServiceReconciliation{}, err
 	}
-	if _, err := runtimerunlifecycle.Create(ctx, runtimerunlifecycle.CreateRequest{
+	if s.runLifecycle == nil {
+		return StandingServiceReconciliation{}, errors.New("standing run lifecycle owner is required")
+	}
+	if _, err := s.runLifecycle.CreateRun(ctx, runtimerunlifecycle.CreateRequest{
 		RunID: runID, Origin: origin, Source: candidate.Source, StartedAt: now,
 	}); err != nil {
 		return StandingServiceReconciliation{}, err
@@ -899,7 +905,7 @@ func (s *workflowInstanceStore) resumeStandingServiceTx(ctx context.Context, tx 
 	revisionSequence := current.RevisionSequence
 	if transition == "revised" {
 		revisionSequence++
-		if _, err := runtimerunlifecycle.ReviseSource(ctx, runtimerunlifecycle.SourceRevisionRequest{
+		if _, err := s.runLifecycle.ReviseRunSource(ctx, runtimerunlifecycle.SourceRevisionRequest{
 			RunID: current.RunID, Source: candidate.Source,
 		}); err != nil {
 			return StandingServiceReconciliation{}, err
@@ -952,7 +958,10 @@ func (s *workflowInstanceStore) repairStandingServiceTx(ctx context.Context, tx 
 	if err != nil {
 		return StandingServiceReconciliation{}, err
 	}
-	if _, err := runtimerunlifecycle.Create(ctx, runtimerunlifecycle.CreateRequest{
+	if s.runLifecycle == nil {
+		return StandingServiceReconciliation{}, errors.New("standing run lifecycle owner is required")
+	}
+	if _, err := s.runLifecycle.CreateRun(ctx, runtimerunlifecycle.CreateRequest{
 		RunID: nextRunID, Origin: origin, Source: candidate.Source, StartedAt: now,
 	}); err != nil {
 		return StandingServiceReconciliation{}, err

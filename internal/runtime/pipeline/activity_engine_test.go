@@ -1624,7 +1624,6 @@ func (r *activityCommitAckLossRunner) RunRuntimeMutationContext(ctx context.Cont
 	if err != nil {
 		return err
 	}
-	storyctx = bindTestRunLifecycleMutation(storyctx, tx, workflowStoreDialectSQLite)
 	if err := fn(storyctx); err != nil {
 		return err
 	}

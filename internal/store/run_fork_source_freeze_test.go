@@ -74,7 +74,7 @@ func TestRunForkMutationUnsupportedSQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := testAuthorActivityBundleSourceContext()
 	err := store.runAuthorActivityMutation(ctx, "sqlite fork source rejection", func(txctx context.Context, _ *sql.Tx) error {
-		_, _, err := storerunlifecycle.ForkSource(txctx, storerunlifecycle.ForkSourceRequest{
+		_, _, err := store.ForkRunSource(txctx, storerunlifecycle.ForkSourceRequest{
 			RunID:            uuid.NewString(),
 			ContinuedAsRunID: uuid.NewString(),
 			EndedAt:          time.Now().UTC(),

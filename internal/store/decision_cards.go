@@ -168,7 +168,10 @@ func loadDecisionCard(ctx context.Context, db decisionCardSQL, id string, postgr
 }
 
 func requireActiveDecisionRun(ctx context.Context, db decisionCardSQL, runID string, postgres bool) error {
-	return runtimerunlifecycle.RequireActive(ctx, runID)
+	if postgres {
+		return requirePostgresRunActiveQuery(ctx, db, runID)
+	}
+	return requireSQLiteRunActiveQuery(ctx, db, runID)
 }
 
 func requireActiveDecisionCardRun(ctx context.Context, db decisionCardSQL, cardID string, postgres bool) error {
@@ -1335,7 +1338,7 @@ func runPostgresDecisionCardMutation(ctx context.Context, selected *PostgresStor
 		if !runtimeauthoractivity.InMutation(ctx, tx) {
 			return fmt.Errorf("decision card mutation entered from a raw transaction without author activity ownership")
 		}
-		return fn(selected.bindRunLifecycleMutation(ctx, tx), tx)
+		return fn(ctx, tx)
 	}
 	conn, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx)
 	if !borrowed {
@@ -1354,7 +1357,6 @@ func runPostgresDecisionCardMutation(ctx context.Context, selected *PostgresStor
 	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
 	txctx := runtimepipeline.WithPipelineSQLConnContext(ctx, conn)
 	txctx = runtimepipeline.WithPipelineSQLTxContext(txctx, tx)
-	txctx = selected.bindRunLifecycleMutation(txctx, tx)
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
 	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
 	storyctx, err := runtimeauthoractivity.Begin(txctx, tx, runtimeauthoractivity.DialectPostgres)
@@ -1386,7 +1388,7 @@ func (s *SQLiteRuntimeStore) runDecisionCardMutation(ctx context.Context, label 
 		if !runtimeauthoractivity.InMutation(ctx, tx) {
 			return fmt.Errorf("%s entered from a raw transaction without author activity ownership", label)
 		}
-		return fn(s.bindRunLifecycleMutation(ctx, tx), tx)
+		return fn(ctx, tx)
 	}
 	return s.runAuthorActivityMutation(ctx, label, fn)
 }

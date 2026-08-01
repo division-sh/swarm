@@ -163,7 +163,7 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
-	ctx = s.bindRunLifecycleMutation(storyctx, tx)
+	ctx = storyctx
 	var sourceStatus string
 	if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid FOR UPDATE`, plan.SourceRunID).Scan(&sourceStatus); err != nil {
 		if err == sql.ErrNoRows {
@@ -235,7 +235,7 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 
 	forkCtx := runtimecorrelation.WithRunID(ctx, forkRunID)
 	for _, entity := range plan.Entities {
-		if err := materializeRunForkEntityState(forkCtx, tx, forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
+		if err := materializeRunForkEntityState(forkCtx, tx, s, forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
 			return runfork.RunForkMaterialization{}, err
 		}
 	}
@@ -304,7 +304,7 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 	}
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 2)
 	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 2)
-	ctx = s.bindRunLifecycleMutation(storyctx, tx)
+	ctx = storyctx
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
 	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollbackActions)
 	defer func() {
@@ -409,7 +409,7 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 
 	now := time.Now().UTC()
 	if len(sourceAdvancedFacts) > 0 {
-		if _, err := runtimerunlifecycle.TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+		if _, err := (postgresRunLifecycleMutation{store: s, tx: tx}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
 			RunID: lineage.ForkRunID,
 			State: runtimerunlifecycle.StateRunning,
 		}); err != nil {
@@ -489,7 +489,6 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	if err != nil {
 		return err
 	}
-	storyctx = s.bindRunLifecycleMutation(storyctx, tx)
 	ctx = storyctx
 
 	snapshot, err := loadPostgresRunLifecycleSnapshot(ctx, tx, forkRunID, true)
@@ -513,7 +512,7 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 		return fmt.Errorf("terminalize selected-contract fork deliveries before discard: %w", err)
 	}
 	if preserveCompletionEvidence {
-		if _, _, err := runtimerunlifecycle.MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
+		if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
 			RunID: forkRunID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
 		}); err != nil {
 			return fmt.Errorf("retain selected-contract completion run tombstone: %w", err)

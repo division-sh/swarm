@@ -17,7 +17,6 @@ func (s *PostgresStore) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx
 	if tx == nil {
 		return fmt.Errorf("run fork source freeze transaction is required")
 	}
-	ctx = s.bindRunLifecycleMutation(ctx, tx)
 	if err := requirePostgresRunActive(ctx, tx, lineage.SourceRunID); err != nil {
 		return fmt.Errorf("admit run fork source freeze: %w", err)
 	}
@@ -32,14 +31,14 @@ func (s *PostgresStore) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx
 	if err := requireRunForkSourceFreezeReady(ctx, tx, lineage.SourceRunID, now); err != nil {
 		return err
 	}
-	if _, _, err := runtimerunlifecycle.ForkSource(ctx, runtimerunlifecycle.ForkSourceRequest{
+	if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx}).ForkSource(ctx, runtimerunlifecycle.ForkSourceRequest{
 		RunID:            lineage.SourceRunID,
 		ContinuedAsRunID: lineage.ForkRunID,
 		EndedAt:          now,
 	}); err != nil {
 		return fmt.Errorf("freeze source run lifecycle: %w", err)
 	}
-	if _, err := runtimerunlifecycle.TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+	if _, err := (postgresRunLifecycleMutation{store: s, tx: tx}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
 		RunID: lineage.ForkRunID,
 		State: runtimerunlifecycle.StateRunning,
 	}); err != nil {

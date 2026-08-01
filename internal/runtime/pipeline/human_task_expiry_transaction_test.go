@@ -29,7 +29,7 @@ func (e *transactionProbeHumanTaskExpiry) ExpireHumanTaskCardsInMutation(ctx con
 	if err != nil {
 		return nil, err
 	}
-	if _, err := runtimerunlifecycle.Create(ctx, runtimerunlifecycle.CreateRequest{
+	if _, err := (testRunLifecycleMutation{tx: tx, dialect: workflowStoreDialectSQLite}).CreateRun(ctx, runtimerunlifecycle.CreateRequest{
 		RunID:     e.runID,
 		Origin:    runtimerunlifecycle.ScenarioSetupRunOrigin(),
 		Source:    source,

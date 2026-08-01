@@ -630,12 +630,12 @@ func transitionWorkflowActivationRunForTest(
 	}
 	if err := store.runtimeMutation.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 		if state == runtimerunlifecycle.StateCancelled {
-			_, _, err := runtimerunlifecycle.MarkTerminal(txctx, runtimerunlifecycle.TerminalRequest{
+			_, _, err := store.runLifecycle.MarkTerminalRun(txctx, runtimerunlifecycle.TerminalRequest{
 				RunID: runID, State: state, EndedAt: time.Now().UTC(),
 			})
 			return err
 		}
-		_, err := runtimerunlifecycle.TransitionActive(txctx, runtimerunlifecycle.ActiveTransitionRequest{
+		_, err := store.runLifecycle.TransitionActiveRun(txctx, runtimerunlifecycle.ActiveTransitionRequest{
 			RunID: runID, State: state,
 		})
 		return err

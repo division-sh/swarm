@@ -65,17 +65,32 @@ func RequireSQLite(t testing.TB, ctx context.Context, db *sql.DB, fixture Fixtur
 func RunPostgresMutation(
 	ctx context.Context,
 	db *sql.DB,
-	fn func(context.Context, *sql.Tx) error,
+	fn func(context.Context, *sql.Tx, ActiveRunSourceOwner) error,
 ) error {
-	return runMutation(ctx, db, DialectPostgres, fn)
+	return runMutationWithOwner(ctx, db, DialectPostgres, fn)
 }
 
 func RunSQLiteMutation(
 	ctx context.Context,
 	db *sql.DB,
-	fn func(context.Context, *sql.Tx) error,
+	fn func(context.Context, *sql.Tx, ActiveRunSourceOwner) error,
 ) error {
-	return runMutation(ctx, db, DialectSQLite, fn)
+	return runMutationWithOwner(ctx, db, DialectSQLite, fn)
+}
+
+type ActiveRunSourceOwner interface {
+	RequireActiveRunSource(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
+}
+
+func runMutationWithOwner(
+	ctx context.Context,
+	db *sql.DB,
+	dialect Dialect,
+	fn func(context.Context, *sql.Tx, ActiveRunSourceOwner) error,
+) error {
+	return runMutation(ctx, db, dialect, func(txctx context.Context, tx *sql.Tx) error {
+		return fn(txctx, tx, sqlMutation{tx: tx, dialect: dialect})
+	})
 }
 
 func RevisePostgresSource(
@@ -442,7 +457,6 @@ func runMutation(
 	if err != nil {
 		return err
 	}
-	txctx = runtimerunlifecycle.BindMutation(txctx, sqlMutation{tx: tx, dialect: dialect})
 	if err := fn(txctx, tx); err != nil {
 		return err
 	}
@@ -463,8 +477,8 @@ func reviseSource(
 	runID string,
 	source runtimecorrelation.BundleSourceFact,
 ) error {
-	return runMutation(ctx, db, dialect, func(txctx context.Context, _ *sql.Tx) error {
-		_, err := runtimerunlifecycle.ReviseSource(txctx, runtimerunlifecycle.SourceRevisionRequest{
+	return runMutation(ctx, db, dialect, func(txctx context.Context, tx *sql.Tx) error {
+		_, err := (sqlMutation{tx: tx, dialect: dialect}).ReviseSource(txctx, runtimerunlifecycle.SourceRevisionRequest{
 			RunID:  strings.TrimSpace(runID),
 			Source: source,
 		})
@@ -533,8 +547,7 @@ func Materialize(ctx context.Context, db *sql.DB, dialect Dialect, fixture Fixtu
 	if err != nil {
 		return err
 	}
-	txctx = runtimerunlifecycle.BindMutation(txctx, sqlMutation{tx: tx, dialect: dialect})
-	if _, err := runtimerunlifecycle.Create(txctx, runtimerunlifecycle.CreateRequest{
+	if _, err := (sqlMutation{tx: tx, dialect: dialect}).Create(txctx, runtimerunlifecycle.CreateRequest{
 		RunID: fixture.RunID, Origin: fixture.Origin,
 		Source: source, StartedAt: fixture.StartedAt.UTC(),
 	}); err != nil {
@@ -553,6 +566,10 @@ func Materialize(ctx context.Context, db *sql.DB, dialect Dialect, fixture Fixtu
 type sqlMutation struct {
 	tx      *sql.Tx
 	dialect Dialect
+}
+
+func (m sqlMutation) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+	return m.RequireActiveSource(ctx, runID)
 }
 
 func (m sqlMutation) RequirePresent(ctx context.Context, runID string) error {
@@ -892,5 +909,3 @@ func sourceFact(bundleHash, bundleSource string) (runtimecorrelation.BundleSourc
 		)
 	}
 }
-
-var _ runtimerunlifecycle.Mutation = sqlMutation{}

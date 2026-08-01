@@ -94,7 +94,7 @@ func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req ScenarioS
 				}
 				continue
 			}
-			if err := runtimemutationlog.InsertEntityStateDiff(txctx, tx, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+			if err := runtimemutationlog.InsertEntityStateDiff(txctx, tx, s, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
 				CurrentState: entity.CurrentState,
 				Fields:       fieldsAny,
 				Gates:        gatesAny,

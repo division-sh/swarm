@@ -385,13 +385,13 @@ func (s *workflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 		}
 		previousForDiff := previous
 		if createInfo, ok := workflowCreateEntityInitialValuesFromContext(txctx); ok {
-			nextPrevious, err := insertSQLiteWorkflowCreateEntityInitialValueMutations(txctx, tx, rowID, previous, afterProjection, createInfo.Fields)
+			nextPrevious, err := insertSQLiteWorkflowCreateEntityInitialValueMutations(txctx, tx, s.runLifecycle, rowID, previous, afterProjection, createInfo.Fields)
 			if err != nil {
 				return err
 			}
 			previousForDiff = nextPrevious
 		}
-		if err := insertSQLiteEntityStateDiff(txctx, tx, rowID, previousForDiff, afterProjection, runtimemutationlog.Writer{
+		if err := insertSQLiteEntityStateDiff(txctx, tx, s.runLifecycle, rowID, previousForDiff, afterProjection, runtimemutationlog.Writer{
 			Type:        "platform",
 			ID:          "workflow_instance_store",
 			HandlerStep: map[bool]string{true: "create", false: "upsert"}[createOnly],
@@ -579,7 +579,7 @@ func (s *workflowInstanceStore) loadTrackedEntityStateProjectionSQLite(ctx conte
 	}, nil
 }
 
-func insertSQLiteEntityStateDiff(ctx context.Context, tx *sql.Tx, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer) error {
+func insertSQLiteEntityStateDiff(ctx context.Context, tx *sql.Tx, runLifecycle runtimerunlifecycle.OperationOwner, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer) error {
 	records, err := runtimemutationlog.BuildEntityStateDiffRecords(entityID, before, after, writer)
 	if err != nil {
 		return err
@@ -591,7 +591,10 @@ func insertSQLiteEntityStateDiff(ctx context.Context, tx *sql.Tx, entityID strin
 	if err != nil {
 		return err
 	}
-	if err := runtimerunlifecycle.RequireActive(ctx, runID); err != nil {
+	if runLifecycle == nil {
+		return errors.New("SQLite entity mutation run lifecycle owner is required")
+	}
+	if err := runLifecycle.RequireActiveRun(ctx, runID); err != nil {
 		return err
 	}
 	for _, rec := range records {
@@ -605,6 +608,7 @@ func insertSQLiteEntityStateDiff(ctx context.Context, tx *sql.Tx, entityID strin
 func insertSQLiteWorkflowCreateEntityInitialValueMutations(
 	ctx context.Context,
 	tx *sql.Tx,
+	runLifecycle runtimerunlifecycle.OperationOwner,
 	entityID string,
 	before, after runtimemutationlog.EntityStateProjection,
 	initialValues map[string]any,
@@ -616,7 +620,10 @@ func insertSQLiteWorkflowCreateEntityInitialValueMutations(
 	if err != nil {
 		return runtimemutationlog.EntityStateProjection{}, err
 	}
-	if err := runtimerunlifecycle.RequireActive(ctx, runID); err != nil {
+	if runLifecycle == nil {
+		return runtimemutationlog.EntityStateProjection{}, errors.New("SQLite initial-value run lifecycle owner is required")
+	}
+	if err := runLifecycle.RequireActiveRun(ctx, runID); err != nil {
 		return runtimemutationlog.EntityStateProjection{}, err
 	}
 	adjusted := runtimemutationlog.EntityStateProjection{

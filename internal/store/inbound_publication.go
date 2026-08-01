@@ -14,7 +14,6 @@ import (
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 var errInboundPublicationNotFound = errors.New("inbound publication not found")
@@ -159,7 +158,7 @@ func (s *PostgresStore) RunInboundPublicationMutation(ctx context.Context, reque
 			result = existing
 			return nil
 		}
-		allowGenerationRebind, err := admitPostgresInboundStandingTargetTx(txctx, tx, request)
+		allowGenerationRebind, err := admitPostgresInboundStandingTargetTx(txctx, s, tx, request)
 		if err != nil {
 			return err
 		}
@@ -347,7 +346,7 @@ func loadPostgresInboundPublicationChildren(ctx context.Context, db inboundPubli
 	return children, nil
 }
 
-func admitPostgresInboundStandingTargetTx(ctx context.Context, tx *sql.Tx, request runtimeinbound.Request) (bool, error) {
+func admitPostgresInboundStandingTargetTx(ctx context.Context, s *PostgresStore, tx *sql.Tx, request runtimeinbound.Request) (bool, error) {
 	var packageKey, flowID, instanceID, entityID, runID, effectiveState, publicationState string
 	var generation, publicationSequence int64
 	err := tx.QueryRowContext(ctx, `
@@ -367,7 +366,7 @@ func admitPostgresInboundStandingTargetTx(ctx context.Context, tx *sql.Tx, reque
 	if effectiveState != "active" || publicationState != "published" {
 		return false, fmt.Errorf("standing service %s is %s/%s and cannot accept inbound publication", request.StableServiceID, effectiveState, publicationState)
 	}
-	if err := runtimerunlifecycle.RequireActive(ctx, request.ResolvedRunID); err != nil {
+	if err := (postgresRunLifecycleMutation{store: s, tx: tx}).RequireActive(ctx, request.ResolvedRunID); err != nil {
 		return false, fmt.Errorf("admit inbound target run lifecycle: %w", err)
 	}
 	var generationRunID string
@@ -430,7 +429,7 @@ func (s *PostgresStore) finalizeInboundPublicationTx(ctx context.Context, tx *sq
 	if affected, _ := res.RowsAffected(); affected != 1 {
 		return runtimeinbound.Record{}, fmt.Errorf("prepared inbound publication %s was not finalized", request.PublicationID)
 	}
-	if err := runtimerunlifecycle.SyncCounters(ctx, request.ResolvedRunID); err != nil {
+	if err := (postgresRunLifecycleMutation{store: s, tx: tx}).SyncCounters(ctx, request.ResolvedRunID); err != nil {
 		return runtimeinbound.Record{}, fmt.Errorf("synchronize inbound publication event count: %w", err)
 	}
 	record, found, err := loadPostgresInboundPublicationTx(ctx, tx, request.Provider, request.EntityID, request.ProviderEventID, false)

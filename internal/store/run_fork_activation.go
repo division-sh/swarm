@@ -63,7 +63,7 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req runfork.RunFork
 	}
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 2)
 	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 2)
-	ctx = s.bindRunLifecycleMutation(storyctx, tx)
+	ctx = storyctx
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
 	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollbackActions)
 	defer func() {

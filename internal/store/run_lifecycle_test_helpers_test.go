@@ -25,6 +25,40 @@ type runLifecycleTerminalTestStore interface {
 	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
 }
 
+type runLifecycleFixtureMutation interface {
+	CreateRun(context.Context, runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error)
+	TransitionActiveRun(context.Context, runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error)
+	MarkTerminalRun(context.Context, runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
+}
+
+type postgresRunLifecycleFixtureMutation struct{ postgresRunLifecycleMutation }
+
+func (m postgresRunLifecycleFixtureMutation) CreateRun(ctx context.Context, request runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	return m.Create(ctx, request)
+}
+
+func (m postgresRunLifecycleFixtureMutation) TransitionActiveRun(ctx context.Context, request runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	return m.TransitionActive(ctx, request)
+}
+
+func (m postgresRunLifecycleFixtureMutation) MarkTerminalRun(ctx context.Context, request runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return m.MarkTerminal(ctx, request)
+}
+
+type sqliteRunLifecycleFixtureMutation struct{ sqliteRunLifecycleMutation }
+
+func (m sqliteRunLifecycleFixtureMutation) CreateRun(ctx context.Context, request runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	return m.Create(ctx, request)
+}
+
+func (m sqliteRunLifecycleFixtureMutation) TransitionActiveRun(ctx context.Context, request runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	return m.TransitionActive(ctx, request)
+}
+
+func (m sqliteRunLifecycleFixtureMutation) MarkTerminalRun(ctx context.Context, request runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return m.MarkTerminal(ctx, request)
+}
+
 type semanticRunFixture struct {
 	RunID        string
 	State        runtimerunlifecycle.State
@@ -77,7 +111,7 @@ func materializeRunFixtureForTest(
 		return err
 	}
 	err = owner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		if err := materializeRunFixtureInCurrentMutationForTest(txctx, fixture, source); err != nil {
+		if err := materializeRunFixtureInCurrentMutationForTest(txctx, owner, fixture, source); err != nil {
 			return err
 		}
 		if fixture.State != runtimerunlifecycle.StateCompleted {
@@ -204,6 +238,7 @@ func semanticRunFixtureContext(
 
 func materializeRunFixtureInCurrentMutationForTest(
 	ctx context.Context,
+	owner runLifecycleFixtureMutation,
 	fixture semanticRunFixture,
 	source runtimecorrelation.BundleSourceFact,
 ) error {
@@ -213,7 +248,7 @@ func materializeRunFixtureInCurrentMutationForTest(
 	if fixture.EndedAt.IsZero() {
 		fixture.EndedAt = fixture.StartedAt
 	}
-	if _, err := runtimerunlifecycle.Create(ctx, runtimerunlifecycle.CreateRequest{
+	if _, err := owner.CreateRun(ctx, runtimerunlifecycle.CreateRequest{
 		RunID:     fixture.RunID,
 		Origin:    fixture.Origin,
 		Source:    source,
@@ -225,7 +260,7 @@ func materializeRunFixtureInCurrentMutationForTest(
 	case runtimerunlifecycle.StateRunning:
 		return nil
 	case runtimerunlifecycle.StatePaused:
-		_, err := runtimerunlifecycle.TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+		_, err := owner.TransitionActiveRun(ctx, runtimerunlifecycle.ActiveTransitionRequest{
 			RunID: fixture.RunID,
 			State: runtimerunlifecycle.StatePaused,
 		})
@@ -234,7 +269,7 @@ func materializeRunFixtureInCurrentMutationForTest(
 		return nil
 	case runtimerunlifecycle.StateFailed,
 		runtimerunlifecycle.StateCancelled:
-		_, _, err := runtimerunlifecycle.MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
+		_, _, err := owner.MarkTerminalRun(ctx, runtimerunlifecycle.TerminalRequest{
 			RunID:   fixture.RunID,
 			State:   fixture.State,
 			Failure: fixture.Failure,
@@ -249,6 +284,7 @@ func materializeRunFixtureInCurrentMutationForTest(
 func requireRunFixtureInCurrentMutationForTest(
 	t testing.TB,
 	ctx context.Context,
+	owner runLifecycleFixtureMutation,
 	fixture semanticRunFixture,
 ) {
 	t.Helper()
@@ -265,7 +301,7 @@ func requireRunFixtureInCurrentMutationForTest(
 	if fixture.State == runtimerunlifecycle.StateCompleted {
 		t.Fatal("completed semantic run fixtures require the selected-store owner")
 	}
-	if err := materializeRunFixtureInCurrentMutationForTest(ctx, fixture, source); err != nil {
+	if err := materializeRunFixtureInCurrentMutationForTest(ctx, owner, fixture, source); err != nil {
 		t.Fatalf("materialize semantic run fixture %s in current mutation: %v", fixture.RunID, err)
 	}
 }
@@ -279,7 +315,8 @@ func requirePostgresRunFixtureTxForTest(
 	t.Helper()
 	requireRunFixtureInCurrentMutationForTest(
 		t,
-		runtimerunlifecycle.BindMutation(ctx, postgresRunLifecycleMutation{tx: tx}),
+		ctx,
+		postgresRunLifecycleFixtureMutation{postgresRunLifecycleMutation{tx: tx}},
 		fixture,
 	)
 }
@@ -314,7 +351,8 @@ func requireSQLiteRunFixtureTxForTest(
 	t.Helper()
 	requireRunFixtureInCurrentMutationForTest(
 		t,
-		runtimerunlifecycle.BindMutation(ctx, sqliteRunLifecycleMutation{tx: tx}),
+		ctx,
+		sqliteRunLifecycleFixtureMutation{sqliteRunLifecycleMutation{tx: tx}},
 		fixture,
 	)
 }
@@ -484,7 +522,7 @@ func transitionRunForTest(
 	var disposition runtimerunlifecycle.MutationDisposition
 	err := owner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 		var mutationErr error
-		disposition, mutationErr = runtimerunlifecycle.TransitionActive(txctx, request)
+		disposition, mutationErr = owner.TransitionActiveRun(txctx, request)
 		return mutationErr
 	})
 	return disposition, err
@@ -508,7 +546,7 @@ func forkRunForTest(
 	)
 	err := owner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 		var mutationErr error
-		snapshot, disposition, mutationErr = runtimerunlifecycle.ForkSource(txctx, request)
+		snapshot, disposition, mutationErr = owner.ForkRunSource(txctx, request)
 		return mutationErr
 	})
 	return snapshot, disposition, err
@@ -526,7 +564,7 @@ func reviseRunSourceForTest(
 	var disposition runtimerunlifecycle.MutationDisposition
 	err := owner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 		var mutationErr error
-		disposition, mutationErr = runtimerunlifecycle.ReviseSource(txctx, request)
+		disposition, mutationErr = owner.ReviseRunSource(txctx, request)
 		return mutationErr
 	})
 	return disposition, err
@@ -542,7 +580,7 @@ func syncRunCountersForTest(
 		return fmt.Errorf("test run lifecycle owner is required, got %T", selected)
 	}
 	return owner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		return runtimerunlifecycle.SyncCounters(txctx, strings.TrimSpace(runID))
+		return owner.SyncRunCounters(txctx, strings.TrimSpace(runID))
 	})
 }
 

@@ -14,7 +14,6 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -111,7 +110,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *Pos
 			result.ReplayedDeliveryCount++
 		}
 	}
-	if err := syncRunForkReplayEventCount(ctx, tx, lineage.ForkRunID); err != nil {
+	if err := syncRunForkReplayEventCount(ctx, tx, store, lineage.ForkRunID); err != nil {
 		return result, err
 	}
 	return result, nil
@@ -235,8 +234,8 @@ func insertRunForkReplayDelivery(ctx context.Context, tx *sql.Tx, lineage runFor
 	return rowsAffected(res)
 }
 
-func syncRunForkReplayEventCount(ctx context.Context, tx *sql.Tx, forkRunID string) error {
-	if err := runtimerunlifecycle.SyncCounters(ctx, forkRunID); err != nil {
+func syncRunForkReplayEventCount(ctx context.Context, tx *sql.Tx, store *PostgresStore, forkRunID string) error {
+	if err := (postgresRunLifecycleMutation{store: store, tx: tx}).SyncCounters(ctx, forkRunID); err != nil {
 		return fmt.Errorf("sync fork replay event count: %w", err)
 	}
 	return nil

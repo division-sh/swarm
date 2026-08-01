@@ -168,7 +168,7 @@ func MaterializeRun(
 	}
 	ctx = semanticFixtureContext(ctx, source)
 	err = runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		if _, err := runtimerunlifecycle.Create(txctx, runtimerunlifecycle.CreateRequest{
+		if _, err := runner.CreateRun(txctx, runtimerunlifecycle.CreateRequest{
 			RunID:     fixture.RunID,
 			Origin:    fixture.Origin,
 			Source:    source,
@@ -229,7 +229,7 @@ func MaterializeRun(
 
 func EnsureEphemeralRun(
 	ctx context.Context,
-	runner runLifecycleMutationRunner,
+	runner runLifecycleOperationRunner,
 	runID string,
 	startedAt time.Time,
 ) error {
@@ -245,7 +245,7 @@ func EnsureEphemeralRun(
 	}
 	ctx = semanticFixtureContext(ctx, source)
 	return runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		_, err := runtimerunlifecycle.Create(txctx, runtimerunlifecycle.CreateRequest{
+		_, err := runner.CreateRun(txctx, runtimerunlifecycle.CreateRequest{
 			RunID:     strings.TrimSpace(runID),
 			Origin:    runtimerunlifecycle.ScenarioSetupRunOrigin(),
 			Source:    source,
@@ -257,7 +257,7 @@ func EnsureEphemeralRun(
 
 func EnsureRunForAdmittedEvent(
 	ctx context.Context,
-	runner runLifecycleMutationRunner,
+	runner runLifecycleOperationRunner,
 	admitted events.AdmittedEvent,
 	startedAt time.Time,
 ) error {
@@ -275,11 +275,11 @@ func EnsureRunForAdmittedEvent(
 	switch admitted.RunDisposition() {
 	case events.AdmittedRunRequireActive:
 		return runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-			return runtimerunlifecycle.RequireActive(txctx, runID)
+			return runner.RequireActiveRun(txctx, runID)
 		})
 	case events.AdmittedRunRequirePresent:
 		return runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-			return runtimerunlifecycle.RequirePresent(txctx, runID)
+			return runner.RequirePresentRun(txctx, runID)
 		})
 	case events.AdmittedRunCreateAuthorized:
 	default:
@@ -310,7 +310,7 @@ func EnsureRunForAdmittedEvent(
 	}
 	ctx = semanticFixtureContext(ctx, source)
 	return runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		_, err := runtimerunlifecycle.Create(txctx, request)
+		_, err := runner.CreateRun(txctx, request)
 		return err
 	})
 }
@@ -389,7 +389,7 @@ func TerminalizeRun(
 
 func TransitionRun(
 	ctx context.Context,
-	runner runLifecycleMutationRunner,
+	runner runLifecycleOperationRunner,
 	request runtimerunlifecycle.ActiveTransitionRequest,
 ) (runtimerunlifecycle.MutationDisposition, error) {
 	if runner == nil {
@@ -398,7 +398,7 @@ func TransitionRun(
 	var disposition runtimerunlifecycle.MutationDisposition
 	err := runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 		var mutationErr error
-		disposition, mutationErr = runtimerunlifecycle.TransitionActive(txctx, request)
+		disposition, mutationErr = runner.TransitionActiveRun(txctx, request)
 		return mutationErr
 	})
 	return disposition, err
@@ -406,7 +406,7 @@ func TransitionRun(
 
 func ForkRun(
 	ctx context.Context,
-	runner runLifecycleMutationRunner,
+	runner runLifecycleOperationRunner,
 	request runtimerunlifecycle.ForkSourceRequest,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	if runner == nil {
@@ -418,7 +418,7 @@ func ForkRun(
 	)
 	err := runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 		var mutationErr error
-		snapshot, disposition, mutationErr = runtimerunlifecycle.ForkSource(txctx, request)
+		snapshot, disposition, mutationErr = runner.ForkRunSource(txctx, request)
 		return mutationErr
 	})
 	return snapshot, disposition, err
@@ -426,7 +426,7 @@ func ForkRun(
 
 func ReviseRunSource(
 	ctx context.Context,
-	runner runLifecycleMutationRunner,
+	runner runLifecycleOperationRunner,
 	request runtimerunlifecycle.SourceRevisionRequest,
 ) (runtimerunlifecycle.MutationDisposition, error) {
 	if runner == nil {
@@ -435,7 +435,7 @@ func ReviseRunSource(
 	var disposition runtimerunlifecycle.MutationDisposition
 	err := runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 		var mutationErr error
-		disposition, mutationErr = runtimerunlifecycle.ReviseSource(txctx, request)
+		disposition, mutationErr = runner.ReviseRunSource(txctx, request)
 		return mutationErr
 	})
 	return disposition, err
@@ -443,14 +443,14 @@ func ReviseRunSource(
 
 func SyncRunCounters(
 	ctx context.Context,
-	runner runLifecycleMutationRunner,
+	runner runLifecycleOperationRunner,
 	runID string,
 ) error {
 	if runner == nil {
 		return fmt.Errorf("semantic fixture counter synchronization requires mutation owner")
 	}
 	return runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		return runtimerunlifecycle.SyncCounters(txctx, strings.TrimSpace(runID))
+		return runner.SyncRunCounters(txctx, strings.TrimSpace(runID))
 	})
 }
 

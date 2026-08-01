@@ -427,7 +427,7 @@ func TestRunLifecycleTerminalAbsorbsCandidatePostgres(t *testing.T) {
 	)
 	if err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 		var err error
-		snapshot, disposition, err = runtimerunlifecycle.ForkSource(
+		snapshot, disposition, err = fixture.store.ForkRunSource(
 			txctx,
 			runtimerunlifecycle.ForkSourceRequest{
 				RunID: sourceRunID, ContinuedAsRunID: childRunID,
@@ -691,7 +691,7 @@ func ensureRunLifecycleCandidateParityRun(
 		)
 	}
 	if err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		_, err := runtimerunlifecycle.Create(txctx, runtimerunlifecycle.CreateRequest{
+		_, err := fixture.store.CreateRun(txctx, runtimerunlifecycle.CreateRequest{
 			RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
 			Source: source, StartedAt: startedAt,
 		})
@@ -709,7 +709,7 @@ func createRunLifecycleParity(
 	var disposition runtimerunlifecycle.MutationDisposition
 	err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 		var err error
-		disposition, err = runtimerunlifecycle.Create(txctx, request)
+		disposition, err = fixture.store.CreateRun(txctx, request)
 		return err
 	})
 	return disposition, err
@@ -741,7 +741,7 @@ func reviseRunLifecycleSourceParity(
 	var disposition runtimerunlifecycle.MutationDisposition
 	err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 		var err error
-		disposition, err = runtimerunlifecycle.ReviseSource(txctx, runtimerunlifecycle.SourceRevisionRequest{
+		disposition, err = fixture.store.ReviseRunSource(txctx, runtimerunlifecycle.SourceRevisionRequest{
 			RunID: runID, Source: source,
 		})
 		return err

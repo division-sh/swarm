@@ -610,7 +610,7 @@ func sqliteLoadRunControlState(ctx context.Context, tx *sql.Tx, runID string) (r
 	return state, nil
 }
 
-func sqlitePauseRunControl(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+func (s *SQLiteRuntimeStore) sqlitePauseRunControl(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
 	lifecycleState, err := runtimerunlifecycle.ParseState(state.Status)
 	if err != nil {
 		return runtimeruncontrol.State{}, err
@@ -622,7 +622,7 @@ func sqlitePauseRunControl(ctx context.Context, tx *sql.Tx, state runtimeruncont
 	default:
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: state.RunID, CurrentStatus: state.Status}
 	}
-	if _, err := runtimerunlifecycle.TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+	if _, err := (sqliteRunLifecycleMutation{store: s, tx: tx}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
 		RunID: state.RunID,
 		State: runtimerunlifecycle.StatePaused,
 	}); err != nil {
@@ -646,7 +646,7 @@ func sqlitePauseRunControl(ctx context.Context, tx *sql.Tx, state runtimeruncont
 	return state, nil
 }
 
-func sqliteContinueRunControl(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+func (s *SQLiteRuntimeStore) sqliteContinueRunControl(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
 	lifecycleState, err := runtimerunlifecycle.ParseState(state.Status)
 	if err != nil {
 		return runtimeruncontrol.State{}, err
@@ -654,7 +654,7 @@ func sqliteContinueRunControl(ctx context.Context, tx *sql.Tx, state runtimerunc
 	if lifecycleState != runtimerunlifecycle.StatePaused {
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrNotPaused, RunID: state.RunID, CurrentStatus: state.Status}
 	}
-	if _, err := runtimerunlifecycle.TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+	if _, err := (sqliteRunLifecycleMutation{store: s, tx: tx}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
 		RunID: state.RunID,
 		State: runtimerunlifecycle.StateRunning,
 	}); err != nil {
@@ -689,7 +689,7 @@ func (s *SQLiteRuntimeStore) sqliteStopRunControl(ctx context.Context, tx *sql.T
 	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	if _, _, err := runtimerunlifecycle.MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
+	if _, _, err := (sqliteRunLifecycleMutation{store: s, tx: tx}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
 		RunID: state.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: req.Now.UTC(),
 	}); err != nil {
 		return runtimeruncontrol.State{}, err

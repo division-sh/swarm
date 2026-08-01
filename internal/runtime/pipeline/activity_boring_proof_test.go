@@ -867,8 +867,8 @@ func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBor
 	default:
 		return nil
 	}
-	if _, ok := PipelineSQLTxFromContext(ctx); ok {
-		if _, err := runtimerunlifecycle.Create(ctx, runtimerunlifecycle.CreateRequest{
+	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
+		if _, err := (testRunLifecycleMutation{tx: tx, dialect: workflowStoreDialect(kind)}).CreateRun(ctx, runtimerunlifecycle.CreateRequest{
 			RunID:     runID,
 			Origin:    runtimerunlifecycle.ScenarioSetupRunOrigin(),
 			Source:    source,

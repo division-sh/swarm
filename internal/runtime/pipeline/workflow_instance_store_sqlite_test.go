@@ -67,10 +67,10 @@ func TestSQLiteEntityStateDiffRequiresExistingCanonicalRunBeforeMutation(t *test
 	if err != nil {
 		t.Fatalf("begin author activity: %v", err)
 	}
-	ctx = bindTestRunLifecycleMutation(ctx, tx, workflowStoreDialectSQLite)
 	err = insertSQLiteEntityStateDiff(
 		ctx,
 		tx,
+		testRunLifecycleMutation{tx: tx, dialect: workflowStoreDialectSQLite},
 		uuid.NewString(),
 		runtimemutationlog.EntityStateProjection{},
 		runtimemutationlog.EntityStateProjection{Fields: map[string]any{"status": "ready"}},
@@ -96,10 +96,10 @@ func TestSQLiteInitialValueMutationRequiresExistingCanonicalRunBeforeMutation(t 
 	if err != nil {
 		t.Fatalf("begin author activity: %v", err)
 	}
-	ctx = bindTestRunLifecycleMutation(ctx, tx, workflowStoreDialectSQLite)
 	_, err = insertSQLiteWorkflowCreateEntityInitialValueMutations(
 		ctx,
 		tx,
+		testRunLifecycleMutation{tx: tx, dialect: workflowStoreDialectSQLite},
 		uuid.NewString(),
 		runtimemutationlog.EntityStateProjection{},
 		runtimemutationlog.EntityStateProjection{Fields: map[string]any{"region": "west"}},
@@ -242,7 +242,7 @@ func TestSQLiteWorkflowInstanceStore_runPipelineMutationUsesRuntimeMutationRunne
 		if err != nil {
 			return err
 		}
-		_, err = storerunlifecycle.Create(txctx, storerunlifecycle.CreateRequest{
+		_, err = (testRunLifecycleMutation{tx: tx, dialect: workflowStoreDialectSQLite}).CreateRun(txctx, storerunlifecycle.CreateRequest{
 			RunID: uuid.NewString(), Origin: storerunlifecycle.ScenarioSetupRunOrigin(),
 			Source: source, StartedAt: time.Now().UTC(),
 		})
@@ -367,6 +367,105 @@ type recordingRuntimeMutationRunner struct {
 	calls   int32
 }
 
+func (r *recordingRuntimeMutationRunner) lifecycleMutation(ctx context.Context) (testRunLifecycleMutation, error) {
+	tx, ok := PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil {
+		return testRunLifecycleMutation{}, errors.New("test run lifecycle transaction is required")
+	}
+	dialect := r.dialect
+	if dialect == "" {
+		dialect = workflowStoreDialectSQLite
+	}
+	return testRunLifecycleMutation{tx: tx, dialect: dialect}, nil
+}
+
+func (r *recordingRuntimeMutationRunner) RequirePresentRun(ctx context.Context, runID string) error {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return err
+	}
+	return m.RequirePresentRun(ctx, runID)
+}
+
+func (r *recordingRuntimeMutationRunner) RequireActiveRun(ctx context.Context, runID string) error {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return err
+	}
+	return m.RequireActiveRun(ctx, runID)
+}
+
+func (r *recordingRuntimeMutationRunner) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return runtimecorrelation.BundleSourceFact{}, err
+	}
+	return m.RequirePresentRunSource(ctx, runID)
+}
+
+func (r *recordingRuntimeMutationRunner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return runtimecorrelation.BundleSourceFact{}, err
+	}
+	return m.RequireActiveRunSource(ctx, runID)
+}
+
+func (r *recordingRuntimeMutationRunner) CreateRun(ctx context.Context, request storerunlifecycle.CreateRequest) (storerunlifecycle.MutationDisposition, error) {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return "", err
+	}
+	return m.CreateRun(ctx, request)
+}
+
+func (r *recordingRuntimeMutationRunner) RequestCompletionCandidate(ctx context.Context, request storerunlifecycle.CandidateRequest) (storerunlifecycle.CandidateRequestDisposition, error) {
+	if err := r.RequirePresentRun(ctx, request.RunID); err != nil {
+		return "", err
+	}
+	return storerunlifecycle.CandidateRequested, nil
+}
+
+func (r *recordingRuntimeMutationRunner) TransitionActiveRun(ctx context.Context, request storerunlifecycle.ActiveTransitionRequest) (storerunlifecycle.MutationDisposition, error) {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return "", err
+	}
+	return m.TransitionActiveRun(ctx, request)
+}
+
+func (r *recordingRuntimeMutationRunner) MarkTerminalRun(ctx context.Context, request storerunlifecycle.TerminalRequest) (storerunlifecycle.Snapshot, storerunlifecycle.MutationDisposition, error) {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return storerunlifecycle.Snapshot{}, "", err
+	}
+	return m.MarkTerminalRun(ctx, request)
+}
+
+func (r *recordingRuntimeMutationRunner) ForkRunSource(ctx context.Context, request storerunlifecycle.ForkSourceRequest) (storerunlifecycle.Snapshot, storerunlifecycle.MutationDisposition, error) {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return storerunlifecycle.Snapshot{}, "", err
+	}
+	return m.ForkRunSource(ctx, request)
+}
+
+func (r *recordingRuntimeMutationRunner) ReviseRunSource(ctx context.Context, request storerunlifecycle.SourceRevisionRequest) (storerunlifecycle.MutationDisposition, error) {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return "", err
+	}
+	return m.ReviseRunSource(ctx, request)
+}
+
+func (r *recordingRuntimeMutationRunner) SyncRunCounters(ctx context.Context, runID string) error {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return err
+	}
+	return m.SyncRunCounters(ctx, runID)
+}
+
 func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
 	atomic.AddInt32(&r.calls, 1)
 	r.mu.Lock()
@@ -397,7 +496,6 @@ func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.C
 		flushPipelineRollbackActions(rollbackActions)
 		return err
 	}
-	storyctx = bindTestRunLifecycleMutation(storyctx, tx, dialect)
 	if err := fn(storyctx); err != nil {
 		flushPipelineRollbackActions(rollbackActions)
 		return err

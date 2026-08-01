@@ -78,7 +78,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req runfork.RunF
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
-	ctx = s.bindRunLifecycleMutation(storyctx, tx)
+	ctx = storyctx
 	if err := requirePostgresRunActive(ctx, tx, plan.SourceRunID); err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("admit fork materialization source: %w", err)
 	}
@@ -113,7 +113,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req runfork.RunF
 
 	forkCtx := runtimecorrelation.WithRunID(ctx, forkRunID)
 	for _, entity := range plan.Entities {
-		if err := materializeRunForkEntityState(forkCtx, tx, forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
+		if err := materializeRunForkEntityState(forkCtx, tx, s, forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
 			return runfork.RunForkMaterialization{}, err
 		}
 	}
@@ -369,7 +369,7 @@ func stringFieldValue(fields map[string]any, key string) string {
 	return ""
 }
 
-func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time) error {
+func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, runLifecycle storerunlifecycle.OperationOwner, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time) error {
 	entityID := strings.TrimSpace(entity.EntityID)
 	currentState := strings.TrimSpace(entity.CurrentState)
 	if currentState == "" {
@@ -419,7 +419,7 @@ func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, forkRunID st
 	if err := materializeRunForkProposedEffectCards(ctx, tx, plan.SourceRunID, forkRunID, entityID, plan.ForkPoint, now); err != nil {
 		return err
 	}
-	return mutationlog.InsertEntityStateDiff(ctx, tx, entityID, mutationlog.EntityStateProjection{}, mutationlog.EntityStateProjection{
+	return mutationlog.InsertEntityStateDiff(ctx, tx, runLifecycle, entityID, mutationlog.EntityStateProjection{}, mutationlog.EntityStateProjection{
 		CurrentState: currentState,
 		Fields:       entity.Fields,
 		Gates:        entity.Gates,

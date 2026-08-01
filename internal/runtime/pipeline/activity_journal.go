@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,7 +13,6 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -116,7 +116,7 @@ func (s *workflowInstanceStore) StartActivityAttempt(ctx context.Context, rec Ac
 		return ActivityAttemptRecord{}, false, fmt.Errorf("marshal activity loop generation: %w", err)
 	}
 	err = s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := requireActiveActivityRun(txctx, tx, rec.RunID, s.isSQLite()); err != nil {
+		if err := s.requireActiveActivityRun(txctx, rec.RunID); err != nil {
 			return err
 		}
 		query := `
@@ -177,7 +177,7 @@ func (s *workflowInstanceStore) ClaimActivityAttemptForLoopGeneration(ctx contex
 	var out ActivityAttemptRecord
 	var inserted bool
 	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := requireActiveActivityRun(txctx, tx, rec.RunID, s.isSQLite()); err != nil {
+		if err := s.requireActiveActivityRun(txctx, rec.RunID); err != nil {
 			return err
 		}
 		instance, ok, err := s.Load(txctx, rec.EntityID)
@@ -237,7 +237,7 @@ func (s *workflowInstanceStore) CompleteActivityAttempt(ctx context.Context, rec
 	}
 	var out ActivityAttemptRecord
 	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := requireActiveActivityRun(txctx, tx, rec.RunID, s.isSQLite()); err != nil {
+		if err := s.requireActiveActivityRun(txctx, rec.RunID); err != nil {
 			return err
 		}
 		rawPayload, err := json.Marshal(rec.ResultPayload)
@@ -306,8 +306,11 @@ func (s *workflowInstanceStore) CompleteActivityAttempt(ctx context.Context, rec
 	return out, nil
 }
 
-func requireActiveActivityRun(ctx context.Context, tx *sql.Tx, runID string, sqlite bool) error {
-	return runtimerunlifecycle.RequireActive(ctx, runID)
+func (s *workflowInstanceStore) requireActiveActivityRun(ctx context.Context, runID string) error {
+	if s == nil || s.runLifecycle == nil {
+		return errors.New("activity run lifecycle owner is required")
+	}
+	return s.runLifecycle.RequireActiveRun(ctx, runID)
 }
 
 func (s *workflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context, rec ActivityAttemptRecord) (ActivityAttemptRecord, error) {
@@ -318,7 +321,7 @@ func (s *workflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context
 	}
 	var out ActivityAttemptRecord
 	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := requireActiveActivityRun(txctx, tx, rec.RunID, s.isSQLite()); err != nil {
+		if err := s.requireActiveActivityRun(txctx, rec.RunID); err != nil {
 			return err
 		}
 		rawPayload, err := json.Marshal(rec.ResultPayload)

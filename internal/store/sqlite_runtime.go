@@ -522,9 +522,9 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 		}
 		switch action {
 		case "pause":
-			state, err = sqlitePauseRunControl(txctx, tx, state, req)
+			state, err = s.sqlitePauseRunControl(txctx, tx, state, req)
 		case "continue":
-			state, err = sqliteContinueRunControl(txctx, tx, state, req)
+			state, err = s.sqliteContinueRunControl(txctx, tx, state, req)
 		case "stop":
 			if err := rejectSQLiteStandingRunStopTx(txctx, tx, runID); err != nil {
 				return err

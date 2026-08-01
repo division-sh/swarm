@@ -12,7 +12,6 @@ import (
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 func (s *SQLiteRuntimeStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
@@ -39,7 +38,7 @@ func (s *SQLiteRuntimeStore) RunInboundPublicationMutation(ctx context.Context, 
 			result = existing
 			return nil
 		}
-		allowGenerationRebind, err := admitSQLiteInboundStandingTargetTx(txctx, tx, request)
+		allowGenerationRebind, err := admitSQLiteInboundStandingTargetTx(txctx, s, tx, request)
 		if err != nil {
 			return err
 		}
@@ -229,7 +228,7 @@ func loadSQLiteInboundPublicationChildren(ctx context.Context, db inboundPublica
 	return children, nil
 }
 
-func admitSQLiteInboundStandingTargetTx(ctx context.Context, tx *sql.Tx, request runtimeinbound.Request) (bool, error) {
+func admitSQLiteInboundStandingTargetTx(ctx context.Context, s *SQLiteRuntimeStore, tx *sql.Tx, request runtimeinbound.Request) (bool, error) {
 	var packageKey, flowID, instanceID, entityID, runID, effectiveState, publicationState string
 	var generation, publicationSequence int64
 	err := tx.QueryRowContext(ctx, `
@@ -249,7 +248,7 @@ func admitSQLiteInboundStandingTargetTx(ctx context.Context, tx *sql.Tx, request
 	if effectiveState != "active" || publicationState != "published" {
 		return false, fmt.Errorf("standing service %s is %s/%s and cannot accept inbound publication", request.StableServiceID, effectiveState, publicationState)
 	}
-	if err := runtimerunlifecycle.RequireActive(ctx, request.ResolvedRunID); err != nil {
+	if err := (sqliteRunLifecycleMutation{store: s, tx: tx}).RequireActive(ctx, request.ResolvedRunID); err != nil {
 		return false, fmt.Errorf("admit sqlite inbound target run lifecycle: %w", err)
 	}
 	var generationRunID string
@@ -311,7 +310,7 @@ func (s *SQLiteRuntimeStore) finalizeInboundPublicationTx(ctx context.Context, t
 	if affected, _ := res.RowsAffected(); affected != 1 {
 		return runtimeinbound.Record{}, fmt.Errorf("prepared sqlite inbound publication %s was not finalized", request.PublicationID)
 	}
-	if err := runtimerunlifecycle.SyncCounters(ctx, request.ResolvedRunID); err != nil {
+	if err := (sqliteRunLifecycleMutation{store: s, tx: tx}).SyncCounters(ctx, request.ResolvedRunID); err != nil {
 		return runtimeinbound.Record{}, fmt.Errorf("synchronize sqlite inbound publication event count: %w", err)
 	}
 	record, found, err := loadSQLiteInboundPublicationTx(ctx, tx, request.Provider, request.EntityID, request.ProviderEventID)

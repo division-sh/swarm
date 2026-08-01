@@ -375,7 +375,10 @@ func (s *workflowInstanceStore) requireActiveWorkflowRun(ctx context.Context, tx
 	if err != nil {
 		return "", err
 	}
-	if err := runtimerunlifecycle.RequireActive(ctx, runID); err != nil {
+	if s.runLifecycle == nil {
+		return "", errors.New("workflow run lifecycle owner is required")
+	}
+	if err := s.runLifecycle.RequireActiveRun(ctx, runID); err != nil {
 		return "", err
 	}
 	return runID, nil
@@ -1289,13 +1292,13 @@ func (s *workflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	}
 	previousForDiff := previous
 	if createInfo, ok := workflowCreateEntityInitialValuesFromContext(ctx); ok {
-		nextPrevious, err := insertWorkflowCreateEntityInitialValueMutations(ctx, tx, rowID, previous, afterProjection, createInfo.Fields)
+		nextPrevious, err := insertWorkflowCreateEntityInitialValueMutations(ctx, tx, s.runLifecycle, rowID, previous, afterProjection, createInfo.Fields)
 		if err != nil {
 			return err
 		}
 		previousForDiff = nextPrevious
 	}
-	if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, rowID, previousForDiff, afterProjection, runtimemutationlog.Writer{
+	if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, s.runLifecycle, rowID, previousForDiff, afterProjection, runtimemutationlog.Writer{
 		Type:        "platform",
 		ID:          "workflow_instance_store",
 		HandlerStep: "upsert",
@@ -1401,13 +1404,13 @@ func (s *workflowInstanceStore) createSpec(ctx context.Context, rowID, storageRe
 	}
 	previousForDiff := runtimemutationlog.EntityStateProjection{}
 	if createInfo, ok := workflowCreateEntityInitialValuesFromContext(ctx); ok {
-		nextPrevious, err := insertWorkflowCreateEntityInitialValueMutations(ctx, tx, rowID, previousForDiff, afterProjection, createInfo.Fields)
+		nextPrevious, err := insertWorkflowCreateEntityInitialValueMutations(ctx, tx, s.runLifecycle, rowID, previousForDiff, afterProjection, createInfo.Fields)
 		if err != nil {
 			return err
 		}
 		previousForDiff = nextPrevious
 	}
-	if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, rowID, previousForDiff, afterProjection, runtimemutationlog.Writer{
+	if err := runtimemutationlog.InsertEntityStateDiff(ctx, tx, s.runLifecycle, rowID, previousForDiff, afterProjection, runtimemutationlog.Writer{
 		Type:        "platform",
 		ID:          "workflow_instance_store",
 		HandlerStep: "create",
@@ -1486,6 +1489,7 @@ func lockWorkflowInstanceMutation(ctx context.Context, tx *sql.Tx, instanceID st
 func insertWorkflowCreateEntityInitialValueMutations(
 	ctx context.Context,
 	tx *sql.Tx,
+	runLifecycle runtimerunlifecycle.OperationOwner,
 	entityID string,
 	before, after runtimemutationlog.EntityStateProjection,
 	initialValues map[string]any,
@@ -1512,7 +1516,7 @@ func insertWorkflowCreateEntityInitialValueMutations(
 		if hadOld {
 			continue
 		}
-		if err := runtimemutationlog.Insert(ctx, tx, runtimemutationlog.Record{
+		if err := runtimemutationlog.Insert(ctx, tx, runLifecycle, runtimemutationlog.Record{
 			EntityID:    entityID,
 			Field:       field,
 			OldValue:    oldValueOrNil(oldValue, hadOld),

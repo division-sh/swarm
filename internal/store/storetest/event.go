@@ -377,7 +377,7 @@ func commitSemanticEventWithInitialFacts(
 	if db == nil || deliveryAdapter == nil {
 		t.Fatalf("semantic event fixture store %T is not initialized", selectedStore)
 	}
-	runner, ok := selectedStore.(runLifecycleMutationRunner)
+	runner, ok := selectedStore.(runLifecycleOperationRunner)
 	if !ok {
 		t.Fatalf("semantic event fixture store %T has no run lifecycle mutation owner", selectedStore)
 	}

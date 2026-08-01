@@ -158,7 +158,9 @@ type unavailablePipelineTestDirectDecisionPublisher struct {
 	DecisionCardDirectMutationPublisher
 }
 type unavailablePipelineTestDeliveryRuntime struct{ WorkflowDeliveryRuntime }
-type unavailablePipelineTestRunLifecycle struct{}
+type unavailablePipelineTestRunLifecycle struct {
+	runtimerunlifecycle.OperationOwner
+}
 
 func (*unavailablePipelineTestRunLifecycle) RequestCompletionCandidate(context.Context, runtimerunlifecycle.CandidateRequest) (runtimerunlifecycle.CandidateRequestDisposition, error) {
 	return "", nil
@@ -222,7 +224,11 @@ func completeDurablePipelineTestOptions(bus Bus, opts PipelineCoordinatorOptions
 		}
 	}
 	if opts.RunLifecycle == nil {
-		opts.RunLifecycle = &unavailablePipelineTestRunLifecycle{}
+		if opts.Persistence.store != nil && opts.Persistence.store.runLifecycle != nil {
+			opts.RunLifecycle = opts.Persistence.store.runLifecycle
+		} else {
+			opts.RunLifecycle = &unavailablePipelineTestRunLifecycle{}
+		}
 	}
 	return opts
 }

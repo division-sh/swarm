@@ -45,6 +45,7 @@ import (
 )
 
 type flowActivationTestRunLifecycleOwner struct {
+	runtimerunlifecycle.OperationOwner
 	db *sql.DB
 }
 
@@ -94,7 +95,7 @@ func (o flowActivationTestRunLifecycleOwner) RunRuntimeMutationContext(
 ) error {
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 2)
 	rollback := make([]runtimepipeline.OwnerAction, 0, 2)
-	err := runlifecyclefixture.RunPostgresMutation(ctx, o.db, func(txctx context.Context, tx *sql.Tx) error {
+	err := runlifecyclefixture.RunPostgresMutation(ctx, o.db, func(txctx context.Context, tx *sql.Tx, _ runlifecyclefixture.ActiveRunSourceOwner) error {
 		txctx = runtimepipeline.WithPipelineSQLTxContext(txctx, tx)
 		txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
 		txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollback)
@@ -115,8 +116,16 @@ func (flowActivationTestRunLifecycleOwner) RequestCompletionCandidate(
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
-	if _, err := runtimerunlifecycle.RequirePresentSource(ctx, request.RunID); err != nil {
+	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil {
+		return "", errors.New("flow activation lifecycle transaction is required")
+	}
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid)`, request.RunID).Scan(&exists); err != nil {
 		return "", err
+	}
+	if !exists {
+		return "", runtimerunlifecycle.ErrRunNotFound
 	}
 	return runtimerunlifecycle.CandidateRequested, nil
 }
@@ -125,14 +134,58 @@ func (flowActivationTestRunLifecycleOwner) TransitionActiveRun(
 	ctx context.Context,
 	request runtimerunlifecycle.ActiveTransitionRequest,
 ) (runtimerunlifecycle.MutationDisposition, error) {
-	return runtimerunlifecycle.TransitionActive(ctx, request)
+	if err := request.Validate(); err != nil {
+		return "", err
+	}
+	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil {
+		return "", errors.New("flow activation lifecycle transaction is required")
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE runs SET status = $2 WHERE run_id = $1::uuid`, request.RunID, request.State)
+	if err != nil {
+		return "", err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	if rows != 1 {
+		return "", runtimerunlifecycle.ErrRunNotFound
+	}
+	return runtimerunlifecycle.MutationApplied, nil
 }
 
 func (flowActivationTestRunLifecycleOwner) MarkTerminalRun(
 	ctx context.Context,
 	request runtimerunlifecycle.TerminalRequest,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return runtimerunlifecycle.MarkTerminal(ctx, request)
+	if err := request.Validate(); err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
+	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil {
+		return runtimerunlifecycle.Snapshot{}, "", errors.New("flow activation lifecycle transaction is required")
+	}
+	failure, err := json.Marshal(request.Failure)
+	if err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE runs SET status = $2, failure = NULLIF($3, 'null')::jsonb, ended_at = $4
+		WHERE run_id = $1::uuid
+	`, request.RunID, request.State, failure, request.EndedAt.UTC())
+	if err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
+	if rows != 1 {
+		return runtimerunlifecycle.Snapshot{}, "", runtimerunlifecycle.ErrRunNotFound
+	}
+	endedAt := request.EndedAt.UTC()
+	return runtimerunlifecycle.Snapshot{RunID: request.RunID, State: request.State, Failure: request.Failure, EndedAt: &endedAt}, runtimerunlifecycle.MutationApplied, nil
 }
 
 func TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSchema(t *testing.T) {

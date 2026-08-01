@@ -60,7 +60,7 @@ func newForkedPipelineBackend(t *testing.T, backend string) forkedPipelineBacken
 func (b forkedPipelineBackend) freeze(t *testing.T) {
 	t.Helper()
 	if err := b.runner.RunRuntimeMutationContext(b.ctx, func(txctx context.Context) error {
-		_, _, err := storerunlifecycle.ForkSource(txctx, storerunlifecycle.ForkSourceRequest{
+		_, _, err := b.store.runLifecycle.ForkRunSource(txctx, storerunlifecycle.ForkSourceRequest{
 			RunID: b.runID, ContinuedAsRunID: b.continuedRunID, EndedAt: b.frozenAt,
 		})
 		return err

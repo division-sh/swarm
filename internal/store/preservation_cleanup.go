@@ -99,7 +99,7 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 	if err != nil {
 		return preservationcleanup.Result{}, err
 	}
-	ctx = s.bindRunLifecycleMutation(storyctx, tx)
+	ctx = storyctx
 
 	runs, err := lockUnavailableBundlePreservationRunsTx(ctx, tx, runIDs)
 	if err != nil {
@@ -213,7 +213,7 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 	}
 	for _, run := range runs {
 		target := targetByRun[run.RunID]
-		if _, _, err := runtimerunlifecycle.MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
+		if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
 			RunID: run.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: now,
 		}); err != nil {
 			return preservationcleanup.Result{}, err

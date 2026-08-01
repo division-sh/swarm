@@ -12,7 +12,6 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -53,7 +52,11 @@ type ProjectionMutation struct {
 	NewValue any
 }
 
-func Insert(ctx context.Context, db DBTX, rec Record) error {
+type ActiveRunSourceOwner interface {
+	RequireActiveRunSource(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
+}
+
+func Insert(ctx context.Context, db DBTX, runLifecycle ActiveRunSourceOwner, rec Record) error {
 	if db == nil {
 		return ErrInvalidMutationLogWriter("mutation log DB is required")
 	}
@@ -76,7 +79,10 @@ func Insert(ctx context.Context, db DBTX, rec Record) error {
 	if err != nil {
 		return ErrInvalidMutationLogWriter(err.Error())
 	}
-	runFact, err := runtimerunlifecycle.RequireActiveSource(ctx, runID)
+	if runLifecycle == nil {
+		return ErrInvalidMutationLogWriter("run lifecycle owner is required")
+	}
+	runFact, err := runLifecycle.RequireActiveRunSource(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -218,13 +224,13 @@ func BuildEntityStateDiffRecords(entityID string, before, after EntityStateProje
 	return records, nil
 }
 
-func InsertEntityStateDiff(ctx context.Context, db DBTX, entityID string, before, after EntityStateProjection, writer Writer) error {
+func InsertEntityStateDiff(ctx context.Context, db DBTX, runLifecycle ActiveRunSourceOwner, entityID string, before, after EntityStateProjection, writer Writer) error {
 	records, err := BuildEntityStateDiffRecords(entityID, before, after, writer)
 	if err != nil {
 		return err
 	}
 	for _, rec := range records {
-		if err := Insert(ctx, db, rec); err != nil {
+		if err := Insert(ctx, db, runLifecycle, rec); err != nil {
 			return err
 		}
 	}
