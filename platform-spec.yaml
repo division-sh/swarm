@@ -22601,9 +22601,11 @@ cli_specification:
       implementation_status: implemented
       owner: platform-spec.yaml#handler_specification.handler_fields.emit
       behavior: >
-        Deterministically remove only retired `emit.broadcast: true` declarations. Preflight every nodes.yaml in
-        the bundle and refuse emit.target plus false, empty, null, or malformed broadcast values without changing
-        any file; recipient topology remains an explicit author decision.
+        Deterministically remove only retired `emit.broadcast: true` declarations. Preflight every nodes.yaml and
+        schema.yaml in the whole bundle, including schema-owned `loops.*.escape.emit` and
+        `stages.*.gate.outcomes.*.emit` surfaces, before writing any file. Refuse emit.target plus false, empty,
+        null, or malformed broadcast values and leave the entire bundle byte-for-byte unchanged when any blocker
+        exists; recipient topology remains an explicit author decision.
     runs:
       command: swarm run list [filters]
       group: run_operate
