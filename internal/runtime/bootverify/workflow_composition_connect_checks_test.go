@@ -247,6 +247,80 @@ func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
 	}
 }
 
+func TestRun_ValidatesAuthoritativeInstanceSourceTypeMatrix(t *testing.T) {
+	tests := []struct {
+		name      string
+		root      func(*testing.T) string
+		wantError bool
+	}{
+		{
+			name: "select accepts schema string receiver text alias",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{})
+			},
+		},
+		{
+			name: "select rejects omitted annotation with incompatible schema source",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{Invalidity: canonicalrouting.SelectResolutionSourceTypeMismatchWithoutCarryType})
+			},
+			wantError: true,
+		},
+		{
+			name: "select-or-create rejects dishonest annotation",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{Mode: canonicalrouting.SelectResolutionSelectOrCreate, Invalidity: canonicalrouting.SelectResolutionDishonestCarryType})
+			},
+			wantError: true,
+		},
+		{
+			name: "create accepts payload text receiver uuid alias",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintPayload})
+			},
+		},
+		{
+			name: "create accepts intrinsic event id",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintEventID})
+			},
+		},
+		{
+			name: "create payload rejects omitted annotation with incompatible schema source",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintPayload, Invalidity: canonicalrouting.CreateResolutionSourceTypeMismatchWithoutCarryType})
+			},
+			wantError: true,
+		},
+		{
+			name: "create generated uuid rejects incompatible receiver without annotation",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintUUID, Invalidity: canonicalrouting.CreateResolutionSourceTypeMismatchWithoutCarryType})
+			},
+			wantError: true,
+		},
+		{
+			name: "create event id rejects dishonest annotation",
+			root: func(t *testing.T) string {
+				return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintEventID, Invalidity: canonicalrouting.CreateResolutionDishonestCarryType})
+			},
+			wantError: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := tc.root(t)
+			repoRoot := repoRootForBootverifyTest(t)
+			bundle := loadFixtureBundleAt(t, repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			gotError := reportContains(report.Errors(), "composition_connect_validation", "key_types_incompatible")
+			if gotError != tc.wantError {
+				t.Fatalf("key type blocker = %v, want %v; errors = %#v", gotError, tc.wantError, report.Errors())
+			}
+		})
+	}
+}
+
 func TestRun_AllowsFanInStreamInputResolution(t *testing.T) {
 	tests := []struct {
 		name string

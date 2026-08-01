@@ -3334,20 +3334,17 @@ func connectRoutePlanCarriedKeyResolutionSourceWithIdentitySource(
 	identitySource string,
 ) semanticview.Source {
 	t.Helper()
-	source := connectRoutePlanCarriedKeyResolutionSource(t, mode)
-	bundle, ok := semanticview.Bundle(source)
-	if !ok {
-		t.Fatal("canonical carried-key source does not expose a bundle")
+	if strings.TrimSpace(identitySource) != "payload.external_account_id" {
+		t.Fatalf("unsupported canonical carried-key identity source %q", identitySource)
 	}
-	pins := bundle.Semantics.FlowInputEventPins["account"]
-	if len(pins) != 2 {
-		t.Fatalf("account input pins = %#v, want two", pins)
+	resolutionMode := canonicalrouting.SelectResolutionSelect
+	if mode == runtimecontracts.FlowInputResolutionModeSelectOrCreate {
+		resolutionMode = canonicalrouting.SelectResolutionSelectOrCreate
+	} else if mode != runtimecontracts.FlowInputResolutionModeSelect {
+		t.Fatalf("unsupported carried-key resolution mode %q", mode.String())
 	}
-	carry := pins[1].Carries["account_id"]
-	carry.From = identitySource
-	pins[1].Carries["account_id"] = carry
-	bundle.Semantics.FlowInputEventPins["account"] = pins
-	return semanticview.Wrap(bundle)
+	root := canonicalrouting.CopyTemplateSelectResolutionRenamedSource(t, canonicalrouting.TemplateSelectResolutionOptions{Mode: resolutionMode})
+	return loadConnectRoutePlanCanonicalSource(t, root)
 }
 
 func loadConnectRoutePlanCanonicalSource(t testing.TB, root string) semanticview.Source {

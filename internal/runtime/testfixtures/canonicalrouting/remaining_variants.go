@@ -500,6 +500,45 @@ pins:
 	return root
 }
 
+func CopyProviderRollbackRenamedSource(t testing.TB, withCarrier bool) string {
+	t.Helper()
+	root := CopyProviderRollback(t, withCarrier)
+	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "schema.yaml"),
+		"chat_id: {from: payload.chat_id, type: text}",
+		"chat_id: {from: payload.external_chat_id, type: text}")
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
+		"inbound.telegram.text_message:\n  chat_id: text\n",
+		"inbound.telegram.text_message:\n  chat_id: text\n  external_chat_id: text\n")
+	return root
+}
+
+type ProviderRollbackSourceTypeInvalidity uint8
+
+const (
+	ProviderRollbackSourceTypeOmittedMismatch ProviderRollbackSourceTypeInvalidity = iota + 1
+	ProviderRollbackSourceTypeDishonestAnnotation
+)
+
+func CopyProviderRollbackInvalidSourceType(t testing.TB, invalidity ProviderRollbackSourceTypeInvalidity) string {
+	t.Helper()
+	root := CopyProviderRollback(t, true)
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
+		"inbound.telegram.text_message:\n  chat_id: text\n",
+		"inbound.telegram.text_message:\n  chat_id: integer\n")
+	switch invalidity {
+	case ProviderRollbackSourceTypeOmittedMismatch:
+		applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "schema.yaml"),
+			"chat_id: {from: payload.chat_id, type: text}",
+			"chat_id: {from: payload.chat_id}")
+	case ProviderRollbackSourceTypeDishonestAnnotation:
+	case 0:
+		t.Fatal("provider rollback source type invalidity is required")
+	default:
+		t.Fatalf("unsupported provider rollback source type invalidity %d", invalidity)
+	}
+	return root
+}
+
 func CopyStandingTelegramServe(t testing.TB, telegramBaseURL string) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectOrCreate)

@@ -8,7 +8,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -571,25 +570,12 @@ func validateCanonicalInstanceInputPinResolution(source semanticview.Source, flo
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %s requires receiver `instance: <field>`", modeText), location))
 		return findings
 	}
-	key := instance.Field.String()
-	carry, ok := pin.Carries[key]
-	if !ok {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("flow %s is one instance per %s; input pin %s must declare a carry named %s (add carries: %s: {from: payload.<field>})", flowID, key, pin.PinName(), key, key), location))
-		return findings
-	}
-	instanceSource, err := runtimecontracts.ResolveFlowInputInstanceSource(mode, carry.From)
-	if err != nil {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("carry %s source %q is invalid for resolution mode %s: %v", key, strings.TrimSpace(carry.From), modeText, err), location))
-	} else if instanceSource.Kind == runtimecontracts.FlowInputInstanceSourcePayload && !inputPinPayloadFieldExists(source, flowID, pin, instanceSource.Path) {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("carry %s source %s is not declared by input event %s", key, instanceSource.Path, pin.EventType()), location))
-	}
-	if carry.Type != "" {
-		targetType, err := compositionConnectTargetType(source, flowID, "entity."+key)
-		if err != nil {
-			findings = append(findings, inputPinResolutionFinding(flowID, pin, "receiver_instance_key_invalid", err.Error(), location))
-		} else if !compositionConnectTypesCompatible(carry.Type, targetType) {
-			findings = append(findings, inputPinResolutionFinding(flowID, pin, "key_types_incompatible", fmt.Sprintf("carry %s type %s is incompatible with receiver entity.%s type %s", key, carry.Type, key, targetType), location))
+	if _, err := bundle.ResolveFlowInputInstanceSourceType(source, flowID, pin, instance); err != nil {
+		reason := "instance_resolution_invalid"
+		if strings.Contains(err.Error(), "key_types_incompatible") {
+			reason = "key_types_incompatible"
 		}
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, reason, err.Error(), location))
 	}
 	return findings
 }
@@ -606,53 +592,6 @@ func inputPinResolutionFinding(flowID string, pin runtimecontracts.FlowInputEven
 	}
 }
 
-func compositionConnectTargetType(source semanticview.Source, flowID, expr string) (string, error) {
-	expr = strings.TrimSpace(expr)
-	if expr == "" {
-		return "", fmt.Errorf("target expression is required")
-	}
-	if expr == "_entity.id" {
-		return "uuid", nil
-	}
-	if strings.HasPrefix(expr, "entity.") {
-		fieldPath := strings.TrimPrefix(expr, "entity.")
-		contract, ok := entityruntime.ResolveForFlow(source, flowID)
-		if !ok {
-			return "", fmt.Errorf("receiver flow %s has no entity contract for %s", flowID, expr)
-		}
-		field, err := entityruntime.ResolveLeafField(contract, fieldPath)
-		if err != nil {
-			return "", fmt.Errorf("receiver target %s is invalid: %v", expr, err)
-		}
-		return field.Type, nil
-	}
-	if strings.HasPrefix(expr, "config.") {
-		field := strings.TrimPrefix(expr, "config.")
-		schema, ok := source.FlowSchemaByID(flowID)
-		if !ok {
-			return "", fmt.Errorf("receiver flow %s does not exist", flowID)
-		}
-		variable, ok := schema.InstanceVariables.Variables[field]
-		if !ok {
-			return "", fmt.Errorf("receiver config field %s is not declared", field)
-		}
-		if strings.TrimSpace(variable.Type) == "" {
-			return "", fmt.Errorf("receiver config field %s has no type", field)
-		}
-		return variable.Type, nil
-	}
-	if strings.HasPrefix(expr, "instance.") {
-		return "string", nil
-	}
-	return "", fmt.Errorf("target expression %q must be _entity.id, entity.*, config.*, or instance.*", expr)
-}
-
-func compositionConnectTypesCompatible(sourceType, targetType string) bool {
-	sourceType = compositionConnectTypeFamily(sourceType)
-	targetType = compositionConnectTypeFamily(targetType)
-	return sourceType != "" && targetType != "" && sourceType == targetType
-}
-
 func normalizeCompositionFields(in []string) []string {
 	if len(in) == 0 {
 		return nil
@@ -667,6 +606,8 @@ func normalizeCompositionFields(in []string) []string {
 	return out
 }
 
+// compositionConnectTypeFamily remains the output-pin compatibility owner.
+// Instance-key source compatibility is owned by contracts.
 func compositionConnectTypeFamily(raw string) string {
 	raw = strings.ToLower(strings.TrimSpace(raw))
 	switch raw {
