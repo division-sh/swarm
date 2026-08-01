@@ -16,6 +16,7 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -148,6 +149,11 @@ type conformanceDurableEventBusStore interface {
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
+	decisioncard.Store
+	decisioncard.ProposedEffectStore
+	decisioncard.HumanTaskStore
+	runtimepipeline.DecisionCardDraftExpiry
+	runtimepipeline.HumanTaskExpiry
 	runtimebus.FlowInstanceRoutePersistence
 	runtimebus.FlowInstanceRouteRecordReader
 	runtimebus.FlowInstanceRouteSetPersistence
@@ -175,6 +181,28 @@ func conformanceDurableEventBusDependencies(store conformanceDurableEventBusStor
 		ActiveAgents: store, ActiveFlows: store, DeliveryTargets: store, DeliveryRouteSets: store,
 		TargetFailureRecorder: store, RunOrigins: store,
 	}
+}
+
+func completeConformanceWorkflowDeps(store conformanceDurableEventBusStore, deps runtimepkg.RuntimeDeps) runtimepkg.RuntimeDeps {
+	if deps.DeliveryStore == nil {
+		deps.DeliveryStore = store
+	}
+	if deps.DecisionCards == nil {
+		deps.DecisionCards = store
+	}
+	if deps.ProposedEffects == nil {
+		deps.ProposedEffects = store
+	}
+	if deps.DecisionCardHumanTasks == nil {
+		deps.DecisionCardHumanTasks = store
+	}
+	if deps.DecisionCardDraftExpiry == nil {
+		deps.DecisionCardDraftExpiry = store
+	}
+	if deps.HumanTaskExpiry == nil {
+		deps.HumanTaskExpiry = store
+	}
+	return deps
 }
 
 func registerTestAuthorActivityCatalog(t *testing.T, target testAuthorActivityCatalogRegistrar, descriptors []runtimeauthoractivity.EventDescriptor) {

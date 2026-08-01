@@ -257,8 +257,8 @@ func encodeMailboxProjectionCursor(cursor mailboxProjectionCursor) string {
 }
 
 func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opts OperatorReadOptions, cardID string, mutation runtimepipeline.DecisionCardMutation) (any, error) {
-	if opts.DecisionAuthority == nil || opts.Idempotency == nil {
-		return nil, fmt.Errorf("decision card workflow mutation and idempotency owners are required")
+	if opts.Idempotency == nil {
+		return nil, fmt.Errorf("decision card mutation idempotency owner is required")
 	}
 	card, err := opts.DecisionCards.GetDecisionCard(ctx, cardID)
 	if err != nil && !errors.Is(err, decisioncard.ErrNotFound) {
@@ -269,6 +269,9 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 		if err != nil {
 			return nil, err
 		}
+	}
+	if opts.DecisionAuthority == nil {
+		return nil, fmt.Errorf("decision card workflow mutation owner is required for the selected runtime")
 	}
 	if provider, ok := opts.Events.(runtimeBundleSourceFactProvider); ok {
 		ctx, err = provider.AdmitBundleSourceFact(ctx)

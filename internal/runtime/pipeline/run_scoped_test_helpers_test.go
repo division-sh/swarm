@@ -18,17 +18,25 @@ import (
 )
 
 func newTestWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
-	return NewPostgresWorkflowPersistence(db, &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectPostgres}).store
+	store := NewPostgresWorkflowPersistence(db, &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectPostgres}).store
+	store.runLifecycle = &unavailablePipelineTestRunLifecycle{}
+	return store
 }
 
 func newTestSQLiteWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
-	return &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite}
+	return &workflowInstanceStore{
+		db:           db,
+		dialect:      workflowStoreDialectSQLite,
+		runLifecycle: &unavailablePipelineTestRunLifecycle{},
+	}
 }
 
 func newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, runner runtimeMutationRunner) *workflowInstanceStore {
 	store := NewSQLiteWorkflowPersistence(db, runner).store
 	if owner, ok := runner.(runtimerunlifecycle.OperationOwner); ok {
 		store.runLifecycle = owner
+	} else {
+		store.runLifecycle = &unavailablePipelineTestRunLifecycle{}
 	}
 	return store
 }

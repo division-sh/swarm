@@ -54,7 +54,7 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	module := newRuntimeTestWorkflowModule(t, source)
-	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner: runtimeTestEventBusWorkOwner(t, bus),
 		Module:    module,
 		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -70,6 +70,7 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
 		PinRoutingDescriptors: bus, FlowRoutes: bus,
 	})
+
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
 		SemanticSource:    source,

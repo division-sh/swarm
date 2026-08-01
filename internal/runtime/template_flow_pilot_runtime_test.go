@@ -46,7 +46,7 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              newRuntimeTestWorkflowModule(t, source),
 		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
@@ -56,6 +56,7 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
 		PinRoutingDescriptors: bus, FlowRoutes: bus,
 	})
+
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
 		SemanticSource:    source,

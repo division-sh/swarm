@@ -129,9 +129,8 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			}
 			loader := &fakeSelectedContractSourceLoader{loaded: selectedContractActivityLoadedSource(source, selection)}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-				SourceRunID: sourceRunID, At: sourceRequestEventID, ConfirmSourceFreeze: true, Store: pg,
-				WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
-				SourceLoader:        loader, ContractSelection: selection,
+				SourceRunID: sourceRunID, At: sourceRequestEventID, ConfirmSourceFreeze: true, Owner: selectedContractExecutionOwnerForTest(t, pg),
+				SourceLoader: loader, ContractSelection: selection,
 			})
 			if err != nil {
 				t.Fatalf("ExecuteSelectedContractRunFork: %v", err)

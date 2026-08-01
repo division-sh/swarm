@@ -25,8 +25,7 @@ type SelectedContractExecutionRequest struct {
 	ExpectedBundleHash  string
 	BundleSourceFact    runtimecorrelation.BundleSourceFact
 	ConfirmSourceFreeze bool
-	WorkflowPersistence runtimepipeline.WorkflowPersistence
-	Store               SelectedContractExecutionStore
+	Owner               SelectedContractExecutionOwner
 	SourceLoader        SelectedContractSourceLoader
 	ContractSelection   runfork.RunForkContractSelection
 	AgentRuntime        SelectedContractAgentRuntimeOptions
@@ -50,8 +49,9 @@ type SelectedContractExecutionResult struct {
 }
 
 func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExecutionRequest) (SelectedContractExecutionResult, error) {
-	if req.Store == nil {
-		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution requires store")
+	ports, err := req.Owner.require()
+	if err != nil {
+		return SelectedContractExecutionResult{}, err
 	}
 	if req.SourceLoader == nil {
 		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution requires selected source loader")
@@ -102,12 +102,12 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{}, fmt.Errorf("project selected-contract author activity descriptors: %w", err)
 	}
-	descriptorLease, err := req.Store.RegisterAuthorActivityEventCatalog(selectedScope, descriptors)
+	descriptorLease, err := ports.fork.RegisterAuthorActivityEventCatalog(selectedScope, descriptors)
 	if err != nil {
 		return SelectedContractExecutionResult{}, fmt.Errorf("register selected-contract author activity descriptors: %w", err)
 	}
 	defer descriptorLease.Release()
-	plan, err := req.Store.PlanRunFork(ctx, runfork.RunForkPlanRequest{
+	plan, err := ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{
 		SourceRunID: strings.TrimSpace(req.SourceRunID),
 		At:          strings.TrimSpace(req.At),
 	})
@@ -156,9 +156,6 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{}, err
 	}
-	if !req.WorkflowPersistence.Valid() {
-		return SelectedContractExecutionResult{}, fmt.Errorf("selected-contract execution requires opaque workflow persistence")
-	}
 	agentRuntime, err := prepareSelectedContractAgentRuntimeMaterialization(ctx, loadedSource, *model.RecipientPlanning, req.AgentRuntime)
 	if err != nil {
 		return SelectedContractExecutionResult{
@@ -176,7 +173,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		}, err
 	}
 	sourceEventIDs := selectedContractExecutionFrontierEventIDs(frontier.FrontierEvents)
-	materialization, err := req.Store.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
+	materialization, err := ports.fork.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID:       plan.SourceRunID,
 		At:                plan.ForkPoint.EventID,
 		ContractSelection: selection,
@@ -192,7 +189,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		ForkRunID:             materialization.ForkRunID,
 		SourceRunID:           plan.SourceRunID,
 		BundleSourceFact:      loadedSource.BundleSourceFact,
-		BindingReader:         req.Store,
+		BindingReader:         ports.fork,
 		SourceLoader:          req.SourceLoader,
 		FrontierAdmission:     frontier,
 		RouteAdmission:        routeAdmission,
@@ -204,8 +201,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
 	}
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
-		Store:                 req.Store,
-		WorkflowPersistence:   req.WorkflowPersistence,
+		Owner:                 req.Owner,
 		Admission:             admission,
 		LoadedSource:          loadedSource,
 		RecipientPlanning:     *model.RecipientPlanning,
@@ -223,7 +219,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			Materialization:                    materialization,
 			SelectedContractExecutionAdmission: &admission,
 			AgentRuntimeMaterialization:        &agentRuntime.Proof,
-		}, cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
+		}, cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
 	}
 	containerProof := container.Proof()
 	published, err := container.Publish(ctx)
@@ -231,7 +227,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		if authorityErr := container.Fail(ctx, err); authorityErr != nil {
 			err = errors.Join(err, authorityErr)
 		} else {
-			err = cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
+			err = cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
 		}
 		return SelectedContractExecutionResult{
 			Owner:                              runfork.RunForkSelectedContractExecutionOwner,
@@ -247,9 +243,9 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		if authorityErr := container.Fail(ctx, err); authorityErr != nil {
 			return SelectedContractExecutionResult{}, errors.Join(err, authorityErr)
 		}
-		return SelectedContractExecutionResult{}, cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
+		return SelectedContractExecutionResult{}, cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
 	}
-	activation, err := req.Store.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
+	activation, err := ports.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 		ForkRunID:             materialization.ForkRunID,
 		ConfirmSourceFreeze:   req.ConfirmSourceFreeze,
 		AllowedSourceEventIDs: sourceEventIDs,
@@ -261,7 +257,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		if closeErr := container.Close(ctx); closeErr != nil {
 			err = errors.Join(err, closeErr)
 		} else {
-			err = cleanupSelectedContractExecutionFailure(ctx, req.Store, materialization.ForkRunID, err)
+			err = cleanupSelectedContractExecutionFailure(ctx, ports.fork, materialization.ForkRunID, err)
 		}
 		return SelectedContractExecutionResult{
 			Owner:                              runfork.RunForkSelectedContractExecutionOwner,
@@ -306,7 +302,7 @@ func validateSelectedContractExecutionFrontierForMutation(frontier runfork.RunFo
 	return nil
 }
 
-func cleanupSelectedContractExecutionFailure(ctx context.Context, store SelectedContractExecutionStore, forkRunID string, cause error) error {
+func cleanupSelectedContractExecutionFailure(ctx context.Context, store SelectedContractForkLifecycle, forkRunID string, cause error) error {
 	if cause == nil {
 		return nil
 	}
@@ -320,8 +316,7 @@ func cleanupSelectedContractExecutionFailure(ctx context.Context, store Selected
 }
 
 type publishSelectedContractForkEventsRequest struct {
-	Store                 SelectedContractExecutionStore
-	WorkflowPersistence   runtimepipeline.WorkflowPersistence
+	Owner                 SelectedContractExecutionOwner
 	Admission             runfork.RunForkSelectedContractExecutionAdmission
 	LoadedSource          LoadedSelectedContractSource
 	RecipientPlanning     runfork.RunForkSelectedContractRecipientPlanning
@@ -375,19 +370,17 @@ func selectedContractForkEvent(sourceRunID, forkRunID, forkEventID string, sourc
 
 func newSelectedContractPipeline(
 	bus *runtimebus.EventBus,
-	store SelectedContractExecutionStore,
-	persistence runtimepipeline.WorkflowPersistence,
+	ports *selectedContractExecutionPorts,
 	loaded LoadedSelectedContractSource,
 	agentRuntime SelectedContractAgentRuntimeOptions,
 	instanceActivator runtimepipeline.FlowInstanceActivator,
 ) *runtimepipeline.PipelineCoordinator {
-	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, store.RuntimeSQLDB(), selectedContractPipelineCoordinatorOptions(bus, store, persistence, loaded, agentRuntime, instanceActivator))
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, ports.db, selectedContractPipelineCoordinatorOptions(bus, ports, loaded, agentRuntime, instanceActivator))
 }
 
 func selectedContractPipelineCoordinatorOptions(
 	bus *runtimebus.EventBus,
-	store SelectedContractExecutionStore,
-	persistence runtimepipeline.WorkflowPersistence,
+	ports *selectedContractExecutionPorts,
 	loaded LoadedSelectedContractSource,
 	agentRuntime SelectedContractAgentRuntimeOptions,
 	instanceActivator runtimepipeline.FlowInstanceActivator,
@@ -395,22 +388,22 @@ func selectedContractPipelineCoordinatorOptions(
 	return runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:               agentRuntime.AgentManagerOptions.WorkOwner,
 		Module:                  loaded.Module,
-		Persistence:             persistence,
-		DeliveryStore:           store,
-		PipelineObligations:     store.PipelineObligations(),
+		Persistence:             ports.workflow,
+		DeliveryStore:           ports.busDurable.DeliveryLifecycle,
+		PipelineObligations:     ports.pipelineObligations,
 		InstanceActivator:       instanceActivator,
-		MailboxMaterializer:     store,
-		DecisionCards:           store,
-		ProposedEffects:         store,
-		HumanTasks:              store,
-		DecisionCardDraftExpiry: store,
-		HumanTaskExpiry:         store,
+		MailboxMaterializer:     ports.mailbox,
+		DecisionCards:           ports.decisionCards,
+		ProposedEffects:         ports.proposedEffects,
+		HumanTasks:              ports.humanTasks,
+		DecisionCardDraftExpiry: ports.decisionCardDraftExpiry,
+		HumanTaskExpiry:         ports.humanTaskExpiry,
 		GatePublisher:           bus,
 		DirectDecisionPublisher: bus,
 		DeliveryRuntime:         bus,
 		PinRoutingDescriptors:   bus,
 		FlowRoutes:              bus,
-		RunLifecycle:            store,
+		RunLifecycle:            ports.busDurable.RunLifecycle,
 		Credentials:             agentRuntime.Credentials,
 		ManagedCredentials:      agentRuntime.ManagedCredentials,
 		MockConnectorResponses:  loaded.MockConnectorResponses,

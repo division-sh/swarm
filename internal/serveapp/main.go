@@ -271,9 +271,12 @@ func selectedPostgresRunForkExecutionFunc(pg *store.PostgresStore, persistence r
 	if pg == nil {
 		return nil
 	}
+	owner, ownerErr := selectedPostgresContractExecutionOwner(pg, persistence)
 	return func(ctx context.Context, req runtimerunforkexecution.SelectedContractExecutionRequest) (runtimerunforkexecution.SelectedContractExecutionResult, error) {
-		req.Store = pg
-		req.WorkflowPersistence = persistence
+		if ownerErr != nil {
+			return runtimerunforkexecution.SelectedContractExecutionResult{}, ownerErr
+		}
+		req.Owner = owner
 		return runtimerunforkexecution.ExecuteSelectedContractRunFork(ctx, req)
 	}
 }
@@ -282,21 +285,47 @@ func selectedPostgresRunForkRuntimeOwner(pg *store.PostgresStore, persistence ru
 	if pg == nil {
 		return selectedRunForkRuntimeOwner{}
 	}
+	executionOwner, executionOwnerErr := selectedPostgresContractExecutionOwner(pg, persistence)
 	return selectedRunForkRuntimeOwner{
 		activateFunc: func(ctx context.Context, req runtimerunforkexecution.SelectedContractActivationGateRequest) (runtimerunforkexecution.SelectedContractActivationGateResult, error) {
+			if executionOwnerErr != nil {
+				return runtimerunforkexecution.SelectedContractActivationGateResult{}, executionOwnerErr
+			}
 			req.Store = pg
-			req.ExecutionStore = pg
-			req.WorkflowPersistence = persistence
+			req.ExecutionOwner = executionOwner
 			return runtimerunforkexecution.ActivateSelectedContractRunFork(ctx, req)
 		},
 		materializeFunc: pg.MaterializeRunFork,
 		executeFunc: func(ctx context.Context, req runtimerunforkexecution.SelectedContractExecutionRequest) (runtimerunforkexecution.SelectedContractExecutionResult, error) {
-			req.Store = pg
-			req.WorkflowPersistence = persistence
+			if executionOwnerErr != nil {
+				return runtimerunforkexecution.SelectedContractExecutionResult{}, executionOwnerErr
+			}
+			req.Owner = executionOwner
 			return runtimerunforkexecution.ExecuteSelectedContractRunFork(ctx, req)
 		},
 		planFunc: pg.PlanRunFork,
 	}
+}
+
+func selectedPostgresContractExecutionOwner(pg *store.PostgresStore, persistence runtimepipeline.WorkflowPersistence) (runtimerunforkexecution.SelectedContractExecutionOwner, error) {
+	if pg == nil {
+		return runtimerunforkexecution.SelectedContractExecutionOwner{}, errors.New("selected-contract postgres store is required")
+	}
+	durable := runtimebus.DurableDependencies{
+		ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
+		FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteSets: pg, FlowRouteTopology: pg, FlowRouteRollback: pg,
+		ActiveAgents: pg, ActiveFlows: pg, DeliveryTargets: pg, DeliveryRouteSets: pg,
+		TargetFailureRecorder: pg, RunOrigins: pg,
+	}
+	managerRoles := runtimemanager.PersistenceRoles{
+		LifecycleState: pg, LifecycleEffects: pg, LifecycleDiagnostics: pg, EffectsRecovery: pg,
+		DeliveryQuiescence: pg, EventExistence: pg, DirectiveOperations: pg, DirectiveTargets: pg,
+		FlowRoutes: pg,
+	}
+	return runtimerunforkexecution.NewSelectedContractExecutionOwner(
+		pg.DB, persistence, pg, pg, pg, pg, durable, pg.PipelineObligations(), pg, managerRoles,
+		pg, pg, pg, pg, pg, pg, pg, pg, pg, pg, pg, pg, pg,
+	)
 }
 
 func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) storeBundle {
@@ -1267,7 +1296,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		Idempotency:               stores.IdempotencyStore,
 		Events:                    rt.Bus,
 		RunControl:                rt.RunControl,
-		StandingServices:          &serveStandingServiceController{store: rt.Pipeline, manager: runtimeContextManager},
+		StandingServices:          &serveStandingServiceController{manager: runtimeContextManager},
 		RuntimeIngress:            rt.RuntimeIngress,
 		RuntimeContexts:           apiStoreCaps.RuntimeContexts,
 		ResetCoordinator:          apiStoreCaps.ResetCoordinator,
@@ -1494,7 +1523,6 @@ func reconcileServeRuntimeStandingTargets(
 }
 
 type serveStandingServiceController struct {
-	store   apiv1.StandingServiceController
 	manager *runtime.RuntimeContextManager
 	mu      sync.Mutex
 }
@@ -1528,8 +1556,8 @@ func (t *serveStandingServiceTransition) Retire(ctx context.Context) error {
 }
 
 func (c *serveStandingServiceController) SuspendStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
-	if c.store == nil {
-		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("standing service owner is not configured")
+	if c == nil || c.manager == nil {
+		return runtimepipeline.StandingServiceReconciliation{}, errors.New("standing service runtime context manager is required")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1540,11 +1568,14 @@ func (c *serveStandingServiceController) SuspendStandingService(ctx context.Cont
 	defer func() { _ = use.Done() }()
 	ctx = use.WorkContext()
 	owner := use.Runtime()
+	if owner == nil || owner.Pipeline == nil {
+		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("standing service %s selected runtime pipeline is unavailable", strings.TrimSpace(operation.ServiceID))
+	}
 	owner, transition, err := c.closeAndDrain(ctx, operation.ServiceID, owner)
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
-	result, err := c.store.SuspendStandingService(ctx, operation)
+	result, err := owner.Pipeline.SuspendStandingService(ctx, operation)
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, errors.Join(err, c.restoreAdmission(owner, operation.ServiceID, transition))
 	}
@@ -1555,8 +1586,8 @@ func (c *serveStandingServiceController) SuspendStandingService(ctx context.Cont
 }
 
 func (c *serveStandingServiceController) ResumeStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
-	if c.store == nil {
-		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("standing service owner is not configured")
+	if c == nil || c.manager == nil {
+		return runtimepipeline.StandingServiceReconciliation{}, errors.New("standing service runtime context manager is required")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1567,7 +1598,10 @@ func (c *serveStandingServiceController) ResumeStandingService(ctx context.Conte
 	defer func() { _ = use.Done() }()
 	ctx = use.WorkContext()
 	owner := use.Runtime()
-	result, err := c.store.ResumeStandingService(ctx, operation)
+	if owner == nil || owner.Pipeline == nil {
+		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("standing service %s selected runtime pipeline is unavailable", strings.TrimSpace(operation.ServiceID))
+	}
+	result, err := owner.Pipeline.ResumeStandingService(ctx, operation)
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
@@ -1583,8 +1617,8 @@ func (c *serveStandingServiceController) ResumeStandingService(ctx context.Conte
 }
 
 func (c *serveStandingServiceController) ResetStandingService(ctx context.Context, operation runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error) {
-	if c.store == nil {
-		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("standing service owner is not configured")
+	if c == nil || c.manager == nil {
+		return runtimepipeline.StandingServiceReconciliation{}, errors.New("standing service runtime context manager is required")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1595,11 +1629,14 @@ func (c *serveStandingServiceController) ResetStandingService(ctx context.Contex
 	defer func() { _ = use.Done() }()
 	ctx = use.WorkContext()
 	owner := use.Runtime()
+	if owner == nil || owner.Pipeline == nil {
+		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("standing service %s selected runtime pipeline is unavailable", strings.TrimSpace(operation.ServiceID))
+	}
 	owner, transition, err := c.closeAndDrain(ctx, operation.ServiceID, owner)
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
-	result, err := c.store.ResetStandingService(ctx, operation)
+	result, err := owner.Pipeline.ResetStandingService(ctx, operation)
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, errors.Join(err, c.restoreAdmission(owner, operation.ServiceID, transition))
 	}

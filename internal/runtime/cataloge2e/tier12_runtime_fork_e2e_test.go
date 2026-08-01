@@ -18,6 +18,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -89,12 +90,12 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	cfg := testRuntimeConfig()
 	cfg.LLM.Backend = "anthropic"
 	executionCtx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
+	executionOwner := selectedContractExecutionOwnerForCatalogTest(t, h.db, h.pg)
 	result, err := runtimerunforkexecution.ExecuteSelectedContractRunFork(executionCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
 		SourceRunID:         sourceRunID,
 		At:                  forkAt,
 		ConfirmSourceFreeze: true,
-		Store:               h.pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(h.db, h.pg),
+		Owner:               executionOwner,
 		SourceLoader:        loader,
 		ContractSelection:   selection,
 		AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
@@ -151,6 +152,30 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	assertSourceRunLifecycle(t, h.db, sourceRunID, "paused", false)
 	negativeFixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-non-agent-replay-fail-closed")
 	assertUnsupportedHistoricalReplayFailsClosed(t, negativeFixtureRoot)
+}
+
+func selectedContractExecutionOwnerForCatalogTest(t testing.TB, db *sql.DB, selected *store.PostgresStore) runtimerunforkexecution.SelectedContractExecutionOwner {
+	t.Helper()
+	durable := runtimebus.DurableDependencies{
+		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
+		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
+		ActiveAgents: selected, ActiveFlows: selected, DeliveryTargets: selected, DeliveryRouteSets: selected,
+		TargetFailureRecorder: selected, RunOrigins: selected,
+	}
+	managerRoles := runtimemanager.PersistenceRoles{
+		LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected, EffectsRecovery: selected,
+		DeliveryQuiescence: selected, EventExistence: selected, DirectiveOperations: selected, DirectiveTargets: selected,
+		FlowRoutes: selected,
+	}
+	owner, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(
+		db, runtimepipeline.NewPostgresWorkflowPersistence(db, selected), selected, selected, selected,
+		selected, durable, selected.PipelineObligations(), selected, managerRoles,
+		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+	)
+	if err != nil {
+		t.Fatalf("NewSelectedContractExecutionOwner: %v", err)
+	}
+	return owner
 }
 
 func TestTier12RuntimeForkFixtures_AreExplicitlyClassified(t *testing.T) {

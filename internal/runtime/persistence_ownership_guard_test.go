@@ -177,9 +177,51 @@ func TestSelectedContractExecutionUsesSemanticPorts(t *testing.T) {
 	root := persistenceOwnershipRepoRoot(t)
 	dir := filepath.Join(root, "internal", "runtime", "runforkexecution")
 	assertNoProductionImports(t, dir, map[string]bool{"github.com/division-sh/swarm/internal/store": true})
-	source := readOwnershipSource(t, root, "internal/runtime/runforkexecution/store_ports.go")
-	assertOwnershipSourceContains(t, source, "type SelectedContractExecutionStore interface")
-	assertOwnershipSourceExcludes(t, source, "*store.PostgresStore", "*store.SQLiteRuntimeStore")
+	portsPath := filepath.Join(root, "internal", "runtime", "runforkexecution", "store_ports.go")
+	portsFile := parseOwnershipFile(t, portsPath)
+	ownerFound := false
+	for _, decl := range portsFile.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			typeSpec := spec.(*ast.TypeSpec)
+			if typeSpec.Name.Name == "SelectedContractExecutionStore" {
+				t.Fatal("selected-contract execution must not expose a broad store interface")
+			}
+			if typeSpec.Name.Name != "SelectedContractExecutionOwner" {
+				continue
+			}
+			ownerFound = true
+			owner, ok := typeSpec.Type.(*ast.StructType)
+			if !ok {
+				t.Fatal("selected-contract execution owner must be an opaque struct")
+			}
+			for _, field := range owner.Fields.List {
+				for _, name := range field.Names {
+					if name.IsExported() {
+						t.Fatalf("selected-contract execution owner exposes field %s", name.Name)
+					}
+				}
+			}
+		}
+	}
+	if !ownerFound {
+		t.Fatal("opaque SelectedContractExecutionOwner declaration not found")
+	}
+	execution := readOwnershipSource(t, root, "internal/runtime/runforkexecution/execution.go")
+	assertOwnershipSourceContains(t, execution,
+		"Owner               SelectedContractExecutionOwner",
+		"ports, err := req.Owner.require()",
+	)
+	assertOwnershipSourceExcludes(t, execution,
+		"Store               SelectedContractExecutionStore",
+		"Store SelectedContractExecutionStore",
+		"req.Store",
+	)
+	portsSource := readOwnershipSource(t, root, "internal/runtime/runforkexecution/store_ports.go")
+	assertOwnershipSourceExcludes(t, portsSource, "*store.PostgresStore", "*store.SQLiteRuntimeStore")
 }
 
 func TestSelectedContractSourceLoaderIsExact(t *testing.T) {

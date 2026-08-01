@@ -138,7 +138,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				t.Fatalf("NewChannelActivityTarget: %v", err)
 			}
 			privateToolID := privateIdentity.ToolID()
-			coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+			coordinator = newExternalRuntimeTestPipelineCoordinator(t, bus, db, eventStore, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:            runtimeTestEventBusWorkOwner(t, bus),
 				Module:               telegramConnectorSupportedSurfaceModule{source: source},
 				Persistence:          workflowPersistence,
@@ -150,6 +150,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				GatePublisher:        bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
 				PinRoutingDescriptors: bus, FlowRoutes: bus,
 			})
+
 			stopActivityNode := startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
 			executor := configuredChannelExecutor(source, binding, credentialStore, coordinator)
 			actor := models.AgentConfig{
@@ -255,7 +256,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			if replacementToolID == privateToolID || replacementIdentity.Generation().Equal(privateIdentity.Generation()) {
 				t.Fatal("replacement plan reused the prior private target generation")
 			}
-			mismatchedCoordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+			mismatchedCoordinator := newExternalRuntimeTestPipelineCoordinator(t, bus, db, eventStore, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              telegramConnectorSupportedSurfaceModule{source: source},
 				Persistence:         workflowPersistence,
@@ -269,6 +270,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 					privateToolID: replacementTarget,
 				},
 			})
+
 			stopActivityNode()
 			coordinator = mismatchedCoordinator
 			stopActivityNode = startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
@@ -280,7 +282,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			if calls.Load() != 2 {
 				t.Fatalf("mismatched plan generation reached provider: calls=%d", calls.Load())
 			}
-			reloadedCoordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+			reloadedCoordinator := newExternalRuntimeTestPipelineCoordinator(t, bus, db, eventStore, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              telegramConnectorSupportedSurfaceModule{source: source},
 				Persistence:         workflowPersistence,
@@ -294,6 +296,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 					replacementToolID: replacementTarget,
 				},
 			})
+
 			stopActivityNode()
 			coordinator = reloadedCoordinator
 			stopActivityNode = startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)

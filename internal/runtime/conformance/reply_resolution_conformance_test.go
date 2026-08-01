@@ -726,9 +726,11 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
 		Module: module, Persistence: workflowPersistence, RunLifecycle: backend,
 		DeliveryStore: backend, DeliveryRuntime: eb, DecisionCards: cards, HumanTasks: cards,
-		DirectDecisionPublisher: eb,
-		PipelineObligations:     backend.PipelineObligations(),
+		ProposedEffects: backend, DecisionCardDraftExpiry: backend, HumanTaskExpiry: backend,
+		GatePublisher: eb, DirectDecisionPublisher: eb,
+		PipelineObligations: backend.PipelineObligations(),
 	})
+
 	eb.SetInterceptors(coordinator)
 	eb.RegisterRuntimeActiveAgentDescriptor(bus.ActiveAgentDescriptor{
 		Identity: runtimebustest.Identity(t, "provider-agent", ""),

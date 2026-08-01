@@ -99,27 +99,18 @@ type selectedContractAgentRuntimePreflight struct {
 	tools        *runtimetools.Executor
 }
 
-func selectedContractManagerOptions(options runtimemanager.AgentManagerOptions, bus *runtimebus.EventBus, store SelectedContractExecutionStore, pipeline *runtimepipeline.PipelineCoordinator) runtimemanager.AgentManagerOptions {
-	options.PersistenceRoles = runtimemanager.PersistenceRoles{
-		AgentRoutes:          bus,
-		RouteInstaller:       bus,
-		RouteVerifier:        bus,
-		RouteRestorer:        bus,
-		RouteRetirer:         bus,
-		RouteRemover:         bus,
-		FlowTermination:      pipeline,
-		CreationPublisher:    bus,
-		LifecycleState:       store,
-		LifecycleEffects:     store,
-		LifecycleDiagnostics: store,
-		EffectsRecovery:      store,
-		DeliveryQuiescence:   store,
-		DeliveryRuntime:      bus,
-		EventExistence:       store,
-		DirectiveOperations:  store,
-		DirectiveTargets:     store,
-		FlowRoutes:           store,
-	}
+func selectedContractManagerOptions(options runtimemanager.AgentManagerOptions, bus *runtimebus.EventBus, ports *selectedContractExecutionPorts, pipeline *runtimepipeline.PipelineCoordinator) runtimemanager.AgentManagerOptions {
+	roles := ports.managerRoles
+	roles.AgentRoutes = bus
+	roles.RouteInstaller = bus
+	roles.RouteVerifier = bus
+	roles.RouteRestorer = bus
+	roles.RouteRetirer = bus
+	roles.RouteRemover = bus
+	roles.FlowTermination = pipeline
+	roles.CreationPublisher = bus
+	roles.DeliveryRuntime = bus
+	options.PersistenceRoles = roles
 	return options
 }
 
@@ -228,6 +219,10 @@ func agentIdentityDescriptions(identities []agentidentity.Identity) []string {
 }
 
 func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator) (*selectedContractAgentRuntime, managedexecution.Admission, error) {
+	ports, err := req.Owner.require()
+	if err != nil {
+		return nil, managedexecution.Admission{}, err
+	}
 	admission, authority, err := selectedContractManagedExecutionAuthority(ctx)
 	if err != nil {
 		return nil, managedexecution.Admission{}, err
@@ -241,10 +236,10 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			BundleSourceFact:  req.LoadedSource.BundleSourceFact,
 			SemanticSource:    req.LoadedSource.Source,
 			WorkflowInstances: pipeline,
-			DeliveryStore:     req.Store,
+			DeliveryStore:     ports.busDurable.DeliveryLifecycle,
 			WorkOwner:         req.AgentRuntime.Options.AgentManagerOptions.WorkOwner,
-		}, bus, req.Store, pipeline)
-		manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, options, req.Store)
+		}, bus, ports, pipeline)
+		manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, options, ports.manager)
 		return &selectedContractAgentRuntime{manager: manager}, admission, nil
 	}
 	builder, err := buildSelectedContractAgentRuntimeFactory(req, bus, pipeline)
@@ -252,8 +247,8 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		return nil, managedexecution.Admission{}, err
 	}
 	builder.options.BaseContext = context.WithoutCancel(ctx)
-	builder.options.DeliveryStore = req.Store
-	manager := runtimemanager.NewAgentManagerWithOptions(bus, builder.factory, builder.options, req.Store)
+	builder.options.DeliveryStore = ports.busDurable.DeliveryLifecycle
+	manager := runtimemanager.NewAgentManagerWithOptions(bus, builder.factory, builder.options, ports.manager)
 	if builder.bindManager != nil {
 		builder.bindManager(manager)
 	}
@@ -305,7 +300,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 				StartupOwnerID:       authority.ExecutionOwner,
 				StartupGeneration:    authority.SelectedFork.Generation,
 				EffectController:     controller,
-				CapabilityStore:      req.Store,
+				CapabilityStore:      ports.managedCapabilities,
 				EffectAuthority: func(string, string) (runtimeeffects.Authority, error) {
 					return authority, nil
 				},
@@ -343,6 +338,10 @@ func selectedContractManagedExecutionAuthority(ctx context.Context) (managedexec
 }
 
 func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator) (selectedContractAgentRuntimeFactory, error) {
+	ports, err := req.Owner.require()
+	if err != nil {
+		return selectedContractAgentRuntimeFactory{}, err
+	}
 	if pipeline == nil {
 		return selectedContractAgentRuntimeFactory{}, fmt.Errorf("selected-contract workflow lifecycle store is required")
 	}
@@ -358,7 +357,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	}
 	managerOptions.BundleSourceFact = req.LoadedSource.BundleSourceFact
 	managerOptions.WorkflowInstances = pipeline
-	managerOptions = selectedContractManagerOptions(managerOptions, bus, req.Store, pipeline)
+	managerOptions = selectedContractManagerOptions(managerOptions, bus, ports, pipeline)
 	if managerOptions.PromptResolver == nil {
 		managerOptions.PromptResolver = promptResolver
 	}
@@ -375,7 +374,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		}
 		managerOptions.LLMBackend = profile.ID
 	}
-	budget := swaruntime.NewBudgetTracker(req.Store, bus, options.Config, options.MailboxStore, nil, source)
+	budget := swaruntime.NewBudgetTracker(ports.budget, bus, options.Config, options.MailboxStore, nil, source)
 	managerOptions.Budget = budget
 	if options.AgentFactory != nil {
 		return selectedContractAgentRuntimeFactory{factory: options.AgentFactory, options: managerOptions}, nil
@@ -425,14 +424,14 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		modelRuntime, err = runtimellm.RuntimeFactory{
 			Cfg:                  options.Config,
 			Sessions:             options.SessionRegistry,
-			LiveSessions:         req.Store,
+			LiveSessions:         ports.liveSessions,
 			Conversations:        options.ConversationStore,
 			Workspaces:           options.Workspace,
 			Events:               bus,
 			MCPTurns:             mcpTurns,
 			ToolGateway:          binding,
 			Credentials:          options.ProviderCredentials,
-			CompletionController: runtimeeffects.NewCompletionController(req.Store, req.Store, req.Store, budget),
+			CompletionController: runtimeeffects.NewCompletionController(ports.effects, ports.completion, ports.completionHeartbeat, budget),
 		}.Build()
 		if err != nil {
 			if cleanup != nil {

@@ -1043,7 +1043,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 		t.Fatalf("UpsertSchedule: %v", err)
 	}
 
-	rt, err := runtimepkg.NewRuntime(ctx, runtimepkg.RuntimeDeps{Config: &config.Config{
+	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
 			RecoveryOnStartup: false,
 		},
@@ -1071,7 +1071,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 			LLMRuntime:        conformanceNoopLLMRuntime{},
 			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 			BundleSourceFact:  authorActivityTestBundleSourceFact,
-		})})
+		})}))
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1136,7 +1136,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 		claimErr: errors.New("claim failed"),
 	}
 
-	rt, err := runtimepkg.NewRuntime(ctx, runtimepkg.RuntimeDeps{Config: &config.Config{
+	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
 			RecoveryOnStartup: true,
 		},
@@ -1163,7 +1163,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 			LLMRuntime:        conformanceNoopLLMRuntime{},
 			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 			BundleSourceFact:  authorActivityTestBundleSourceFact,
-		})})
+		})}))
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1255,7 +1255,7 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 		},
 	}
 
-	rt, err := runtimepkg.NewRuntime(ctx, runtimepkg.RuntimeDeps{Config: &config.Config{
+	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
 			RecoveryOnStartup: true,
 		},
@@ -1283,7 +1283,7 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 			LLMRuntime:        conformanceNoopLLMRuntime{},
 			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 			BundleSourceFact:  authorActivityTestBundleSourceFact,
-		})})
+		})}))
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1553,7 +1553,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		acknowledgeConformancePipelineEvent(t, ctx, pg.PipelineObligations(), eventIDs[eventType])
 	}
 
-	rt, err := runtimepkg.NewRuntime(ctx, runtimepkg.RuntimeDeps{Config: &config.Config{
+	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{
 			RecoveryOnStartup: true,
 		},
@@ -1580,7 +1580,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 			LLMRuntime:        conformanceNoopLLMRuntime{},
 			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 			BundleSourceFact:  authorActivityTestBundleSourceFact,
-		})})
+		})}))
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1896,11 +1896,21 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 		t.Fatalf("construct workflow mutation event bus: %v", err)
 	}
 	pipeline := runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:              module,
-		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, selected),
-		RunLifecycle:        selected,
-		PipelineObligations: selected.PipelineObligations(),
+		Module:                  module,
+		Persistence:             runtimepipeline.NewPostgresWorkflowPersistence(db, selected),
+		RunLifecycle:            selected,
+		PipelineObligations:     selected.PipelineObligations(),
+		DeliveryStore:           selected,
+		DecisionCards:           selected,
+		ProposedEffects:         selected,
+		HumanTasks:              selected,
+		DecisionCardDraftExpiry: selected,
+		HumanTaskExpiry:         selected,
+		GatePublisher:           eventBus,
+		DirectDecisionPublisher: eventBus,
+		DeliveryRuntime:         eventBus,
 	})
+
 	entityID := uuid.NewString()
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	if _, err := pipeline.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{

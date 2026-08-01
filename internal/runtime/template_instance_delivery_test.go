@@ -60,7 +60,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	module := newRuntimeTestWorkflowModule(t, source)
-	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              module,
 		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
@@ -70,6 +70,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
 		PinRoutingDescriptors: bus, FlowRoutes: bus,
 	})
+
 	if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute: %v", err)
 	}
@@ -181,7 +182,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	activationCalls := 0
 	var activationErr error
 	module := newRuntimeTestWorkflowModule(t, source)
-	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              module,
 		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
@@ -199,6 +200,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 			return activationErr
 		},
 	})
+
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		BaseContext:       ctx,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
@@ -283,7 +285,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	}
 	var manager *runtimemanager.AgentManager
 	module := newRuntimeTestWorkflowModule(t, source)
-	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner: runtimeTestEventBusWorkOwner(t, bus),
 		Module:    module,
 		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -299,6 +301,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
 		PinRoutingDescriptors: bus, FlowRoutes: bus,
 	})
+
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		BaseContext:       ctx,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
@@ -381,7 +384,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              newRuntimeTestWorkflowModule(t, source),
 		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
@@ -391,6 +394,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
 		PinRoutingDescriptors: bus, FlowRoutes: bus,
 	})
+
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		BaseContext:       ctx,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
@@ -458,7 +462,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	}
 	var manager *runtimemanager.AgentManager
 	module := newRuntimeTestWorkflowModule(t, source)
-	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner: runtimeTestEventBusWorkOwner(t, bus),
 		Module:    module,
 		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -474,6 +478,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
 		PinRoutingDescriptors: bus, FlowRoutes: bus,
 	})
+
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		BaseContext:       ctx,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
@@ -575,7 +580,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	}
 	var manager *runtimemanager.AgentManager
 	module := newRuntimeTestWorkflowModule(t, source)
-	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner: runtimeTestEventBusWorkOwner(t, bus),
 		Module:    module,
 		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -591,6 +596,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
 		PinRoutingDescriptors: bus, FlowRoutes: bus,
 	})
+
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		BaseContext:       ctx,
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
@@ -962,7 +968,7 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 					t.Fatalf("NewEventBusWithOptions: %v", err)
 				}
 				workOwner := runtimeTestEventBusWorkOwner(t, bus)
-				coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+				coordinator = newExternalRuntimeTestPipelineCoordinator(t, bus, db, eventStore, runtimepipeline.PipelineCoordinatorOptions{
 					WorkOwner:           workOwner,
 					Module:              newRuntimeTestWorkflowModule(t, source),
 					Persistence:         workflowPersistence,
@@ -972,6 +978,7 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 					GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
 					PinRoutingDescriptors: bus, FlowRoutes: bus,
 				})
+
 				manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 					BaseContext:       ctx,
 					BundleSourceFact:  providerRollbackBundleSourceFact(),

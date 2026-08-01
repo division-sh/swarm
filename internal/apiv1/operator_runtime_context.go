@@ -80,6 +80,7 @@ func operatorOptionsForBundleContext(opts OperatorReadOptions, contextDef *swrun
 	selected.Source = contextDef.Source
 	selected.Bundle = contextDef.BundleIdentity
 	selected.Events = selectedRuntime.Bus
+	selected.DecisionAuthority = selectedRuntime.Pipeline
 	selected.RuntimeIngress = selectedRuntime.RuntimeIngress
 	selected.RunControl = selectedRuntime.RunControl
 	if selectedRuntime.Manager != nil {

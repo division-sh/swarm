@@ -219,7 +219,7 @@ func newMailboxWriteSupportedSurfaceHandler(
 		PipelineObligations() runtimepipelineobligation.Store
 	}).PipelineObligations()
 	runLifecycle := persistence.(runtimerunlifecycle.OperationOwner)
-	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, completeAPITestDurableWorkflowOptions(t, persistence, bus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:              module,
 		Persistence:         workflowPersistence,
 		DeliveryStore:       deliveryOwner,
@@ -229,7 +229,8 @@ func newMailboxWriteSupportedSurfaceHandler(
 		MailboxMaterializer: materializer,
 		BundleSourceFact:    fact,
 		TestLifecycleProbe:  probe,
-	})
+	}))
+
 	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
 		Identity: runtimebustest.Identity(t, "workflow-runtime", ""),
 	})

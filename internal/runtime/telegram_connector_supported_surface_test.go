@@ -440,7 +440,7 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 		guards:  runtimepipeline.NewContractGuardRegistry(source),
 		actions: runtimepipeline.NewContractActionRegistry(source),
 	}
-	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, backend.db, runtimepipeline.PipelineCoordinatorOptions{
+	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, backend.db, backend.eventStore, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              module,
 		Persistence:         backend.persistence,
@@ -451,6 +451,7 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
 		PinRoutingDescriptors: bus, FlowRoutes: bus,
 	})
+
 	startConfiguredChannelActivityNode(t, backend.ctx, pc, bus, backend.db)
 	return pc
 }

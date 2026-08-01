@@ -17,8 +17,11 @@ import (
 )
 
 func (s *workflowInstanceStore) supersedeWorkflowInstanceGates(ctx context.Context, instance *WorkflowInstance, reason string, now time.Time) error {
-	if s == nil || s.decisionCards == nil || instance == nil {
-		return nil
+	if s == nil || s.decisionCards == nil {
+		return fmt.Errorf("workflow decision-card lifecycle owner is required")
+	}
+	if instance == nil {
+		return fmt.Errorf("workflow instance is required for gate supersession")
 	}
 	if now.IsZero() {
 		now = time.Now().UTC()

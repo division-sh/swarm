@@ -103,7 +103,7 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 				runtimeDB = nil
 			}
 			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle())
-			rt, err := swarmruntime.NewRuntime(ctx, swarmruntime.RuntimeDeps{
+			rt, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
 				Config: &config.Config{
 					Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 					LLM:     config.LLMConfig{Backend: "anthropic"},
@@ -132,7 +132,7 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 					BundleSourceFact:  authorActivityTestBundleSourceFact,
 					ProcessWorkOwner:  process,
 				},
-			})
+			}))
 			if err != nil {
 				t.Fatalf("NewRuntime: %v", err)
 			}
@@ -249,7 +249,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			}
 			newRuntime := func(managerStore runtimemanager.ManagerPersistence) (*swarmruntime.Runtime, *worklifetime.Process) {
 				process := worklifetime.NewProcess()
-				rt, err := swarmruntime.NewRuntime(ctx, swarmruntime.RuntimeDeps{
+				rt, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
 					Config: &config.Config{
 						Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 						LLM:     config.LLMConfig{Backend: "anthropic"},
@@ -277,7 +277,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 						BundleSourceFact:  authorActivityTestBundleSourceFact,
 						ProcessWorkOwner:  process,
 					},
-				})
+				}))
 				if err != nil {
 					t.Fatalf("NewRuntime: %v", err)
 				}
@@ -382,7 +382,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			}
 			newRuntime := func() (*swarmruntime.Runtime, *worklifetime.Process) {
 				process := worklifetime.NewProcess()
-				rt, err := swarmruntime.NewRuntime(ctx, swarmruntime.RuntimeDeps{
+				rt, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
 					Config: &config.Config{
 						Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 						LLM:     config.LLMConfig{Backend: "anthropic"},
@@ -413,7 +413,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 							bootProgress = append(bootProgress, event)
 						},
 					},
-				})
+				}))
 				if err != nil {
 					t.Fatalf("NewRuntime: %v", err)
 				}

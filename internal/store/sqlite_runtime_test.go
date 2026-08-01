@@ -591,12 +591,22 @@ func configureSQLiteFlowActivationLifecycle(
 		actions: runtimepipeline.NewContractActionRegistry(source),
 	}
 	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.DB, runtimepipeline.PipelineCoordinatorOptions{
-		Module:              module,
-		Persistence:         runtimepipeline.NewSQLiteWorkflowPersistence(selected.DB, selected),
-		RunLifecycle:        selected,
-		PipelineObligations: selected.PipelineObligations(),
-		WorkOwner:           storeTestWorkOwner(t),
+		Module:                  module,
+		Persistence:             runtimepipeline.NewSQLiteWorkflowPersistence(selected.DB, selected),
+		RunLifecycle:            selected,
+		PipelineObligations:     selected.PipelineObligations(),
+		DeliveryStore:           selected,
+		DecisionCards:           selected,
+		ProposedEffects:         selected,
+		HumanTasks:              selected,
+		DecisionCardDraftExpiry: selected,
+		HumanTaskExpiry:         selected,
+		GatePublisher:           bus,
+		DirectDecisionPublisher: bus,
+		DeliveryRuntime:         workflowTestBus{},
+		WorkOwner:               storeTestWorkOwner(t),
 	})
+
 }
 
 func (m sqliteFlowActivationWorkflowModule) SemanticSource() semanticview.Source {
@@ -626,7 +636,15 @@ func (b *sqliteFlowActivationBus) Publish(_ context.Context, evt events.Event) e
 	return nil
 }
 
+func (b *sqliteFlowActivationBus) PublishInMutation(ctx context.Context, evt events.Event) error {
+	return b.Publish(ctx, evt)
+}
+
 func (*sqliteFlowActivationBus) PublishDirect(context.Context, events.Event, []string) error {
+	return nil
+}
+
+func (*sqliteFlowActivationBus) PublishDirectInMutation(context.Context, events.Event, []string) error {
 	return nil
 }
 

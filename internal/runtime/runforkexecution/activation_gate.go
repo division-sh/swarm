@@ -11,7 +11,6 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -31,8 +30,7 @@ type SelectedContractActivationGateRequest struct {
 	ForkRunID           string
 	ConfirmSourceFreeze bool
 	Store               SelectedContractActivationStore
-	ExecutionStore      SelectedContractExecutionStore
-	WorkflowPersistence runtimepipeline.WorkflowPersistence
+	ExecutionOwner      SelectedContractExecutionOwner
 	SourceLoader        SelectedContractSourceLoader
 }
 
@@ -236,8 +234,9 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		return result, fmt.Errorf("selected-contract activation gate requires execution-ready plan before mutation; blockers: %s", selectedContractBlockerCodes(plan.UnsupportedBlockers))
 	}
 	if plan.ReplayResumeAdmission.DeliveryEventReplayReady {
-		if req.ExecutionStore == nil {
-			return result, fmt.Errorf("%s requires selected-contract execution store", runfork.RunForkHistoricalReplayContractSwapBootResumeOwner)
+		executionPorts, err := req.ExecutionOwner.require()
+		if err != nil {
+			return result, fmt.Errorf("%s: %w", runfork.RunForkHistoricalReplayContractSwapBootResumeOwner, err)
 		}
 		historicalReplayExecution, err := BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
 			Admission:             historicalReplayAdmission,
@@ -260,8 +259,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		result.ContractSwapBootResumeExecution = &contractSwapExecution
 		sourceEventIDs := contractSwapBootResumeSourceEvents(contractSwapExecution)
 		container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
-			Store:                 req.ExecutionStore,
-			WorkflowPersistence:   req.WorkflowPersistence,
+			Owner:                 req.ExecutionOwner,
 			Admission:             admission,
 			LoadedSource:          loadedSource,
 			RecipientPlanning:     *model.RecipientPlanning,
@@ -273,7 +271,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			DeferredWorkAdmission: deferredWorkAdmission,
 		})
 		if err != nil {
-			return result, cleanupSelectedContractExecutionFailure(ctx, req.ExecutionStore, forkRunID, err)
+			return result, cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
 		}
 		containerProof := container.Proof()
 		result.ForkLocalRuntimeContainer = &containerProof
@@ -284,7 +282,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			if authorityErr := container.Fail(ctx, err); authorityErr != nil {
 				err = errors.Join(err, authorityErr)
 			} else {
-				err = cleanupSelectedContractExecutionFailure(ctx, req.ExecutionStore, forkRunID, err)
+				err = cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
 			}
 			return result, err
 		}
@@ -292,9 +290,9 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			if authorityErr := container.Fail(ctx, err); authorityErr != nil {
 				return result, errors.Join(err, authorityErr)
 			}
-			return result, cleanupSelectedContractExecutionFailure(ctx, req.ExecutionStore, forkRunID, err)
+			return result, cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
 		}
-		activation, err := req.ExecutionStore.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
+		activation, err := executionPorts.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 			ForkRunID:             forkRunID,
 			ConfirmSourceFreeze:   req.ConfirmSourceFreeze,
 			AllowedSourceEventIDs: sourceEventIDs,
@@ -307,7 +305,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			if closeErr := container.Close(ctx); closeErr != nil {
 				err = errors.Join(err, closeErr)
 			}
-			return result, cleanupSelectedContractExecutionFailure(ctx, req.ExecutionStore, forkRunID, err)
+			return result, cleanupSelectedContractExecutionFailure(ctx, executionPorts.fork, forkRunID, err)
 		}
 		if err := container.Close(ctx); err != nil {
 			return result, err

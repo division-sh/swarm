@@ -68,7 +68,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			}
 			module := newRuntimeTestWorkflowModule(t, source)
 			resultHandlerStarted := make(chan string, 4)
-			pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              module,
 				Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
@@ -88,6 +88,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 					return nil
 				},
 			})
+
 			if _, err := pc.MaterializeInitialEntry(ctx, artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
@@ -219,7 +220,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			}
 			module := newRuntimeTestWorkflowModule(t, source)
 			resultHandlerStarted := make(chan string, 4)
-			pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              module,
 				Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
@@ -239,6 +240,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 					return nil
 				},
 			})
+
 			if _, err := pc.MaterializeInitialEntry(ctx, artifactActionResultStaticWorkflowInstance(), time.Now().UTC()); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}

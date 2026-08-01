@@ -166,8 +166,7 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 				SourceRunID:         sourceRunID,
 				At:                  sourceEventID,
 				ConfirmSourceFreeze: true,
-				Store:               pg,
-				WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+				Owner:               selectedContractExecutionOwnerForTest(t, pg),
 				SourceLoader:        loader,
 				ContractSelection: runfork.RunForkContractSelection{
 					Mode:          runfork.RunForkContractSelectionModeSelectedContracts,
@@ -333,7 +332,7 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 				ForkRunID:           materialized.ForkRunID,
 				ConfirmSourceFreeze: true,
 				Store:               pg,
-				WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+				ExecutionOwner:      selectedContractExecutionOwnerForTest(t, pg),
 				SourceLoader:        loader,
 			})
 			failure, ok := runtimefailures.EnvelopeFromError(err)
@@ -522,8 +521,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
-		Store:               pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Owner:               selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
@@ -702,8 +700,7 @@ func TestSelectedContractPipelineConsumesExactMockConnectorResponseOwner(t *test
 	}
 	opts := selectedContractPipelineCoordinatorOptions(
 		nil,
-		&store.PostgresStore{},
-		runtimepipeline.WorkflowPersistence{},
+		&selectedContractExecutionPorts{},
 		LoadedSelectedContractSource{
 			BundleSourceFact:       testEphemeralBundleSourceFact("bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
 			MockConnectorResponses: plan,
@@ -791,12 +788,22 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		actions: runtimepipeline.NewContractActionRegistry(loaded.Source),
 	}
 	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(sourceBus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:              workflowOwner,
-		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
-		RunLifecycle:        pg,
-		PipelineObligations: pg.PipelineObligations(),
-		WorkOwner:           workOwner,
+		Module:                  workflowOwner,
+		Persistence:             runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		RunLifecycle:            pg,
+		PipelineObligations:     pg.PipelineObligations(),
+		DeliveryStore:           pg,
+		DecisionCards:           pg,
+		ProposedEffects:         pg,
+		HumanTasks:              pg,
+		DecisionCardDraftExpiry: pg,
+		HumanTaskExpiry:         pg,
+		GatePublisher:           sourceBus,
+		DirectDecisionPublisher: sourceBus,
+		DeliveryRuntime:         sourceBus,
+		WorkOwner:               workOwner,
 	})
+
 	manager = runtimemanager.NewAgentManagerWithOptions(sourceBus, nil, runtimemanager.AgentManagerOptions{
 		SemanticSource:    loaded.Source,
 		WorkflowInstances: workflowStore,
@@ -848,8 +855,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
-		Store:               pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Owner:               selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
@@ -940,8 +946,7 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 		At:                  sourceEventID,
 		BundleSourceFact:    testPersistedBundleSourceFact(projection.BundleHash),
 		ConfirmSourceFreeze: true,
-		Store:               pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Owner:               selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader: BundleCatalogSelectedContractSourceLoader{
 			RepoRoot: repoRoot,
 			Store:    pg,
@@ -1022,7 +1027,7 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID: sourceRunID, At: laterEventID, ConfirmSourceFreeze: true,
-		Store: pg, WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg), SourceLoader: loader,
+		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source, contractsRoot),
 	})
 	if err != nil {
@@ -1062,8 +1067,7 @@ func TestExecuteSelectedContractRunForkFailsClosedBeforeMaterializationForAgentR
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
-		Store:               pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Owner:               selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
@@ -1118,8 +1122,7 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
-		Store:               pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Owner:               selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
@@ -1373,7 +1376,7 @@ func TestExecuteSelectedContractRunForkAPIProvidersPersistExactManagedCapability
 			captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRunID, At: sourceEventID, ConfirmSourceFreeze: true,
-				Store: pg, WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg), SourceLoader: loader,
+				Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source, contractsRoot),
 				AgentRuntime: SelectedContractAgentRuntimeOptions{
 					Config: cfg, ProviderCredentials: providerCredentials, QuiescenceTimeout: selectedForkCapabilityProofQuiescenceTimeout,
@@ -1655,7 +1658,7 @@ fi
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID: sourceRunID, At: sourceEventID, ConfirmSourceFreeze: true,
-		Store: pg, WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg), SourceLoader: loader,
+		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source, contractsRoot),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{
 			Config: cfg, ProviderCredentials: providerCredentials,
@@ -2072,8 +2075,9 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 		Owner: runfork.RunForkSelectedContractRecipientPlanningOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
 		NonMutating: true, RecipientPlanningSupported: true, ContractSelection: selection,
 	}
+	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
-		Admission: admission, RecipientPlanning: planning, Store: storetest.AdmitPostgresRuntimeStore(t, db),
+		Admission: admission, RecipientPlanning: planning, Owner: selectedContractExecutionOwnerForTest(t, selected),
 		LoadedSource: LoadedSelectedContractSource{
 			Selection:        selection,
 			Source:           selectedSource,
@@ -2273,7 +2277,7 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID: sourceRunID, At: sourceEventID, ConfirmSourceFreeze: true,
-		Store: pg, WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg), SourceLoader: loader,
+		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source, contractsRoot),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{
 			Config:              selectedForkAPIProviderConfig(llmselection.BackendOpenAICompatible, "gpt-selected-fork", provider.URL),
@@ -2435,7 +2439,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		go func() {
 			<-start
 			req := baseRequest
-			req.Store = contender.store
+			req.Owner = selectedContractExecutionOwnerForTest(t, contender.store)
 			container, buildErr := buildSelectedContractForkLocalRuntimeContainer(ctx, req)
 			results <- contenderResult{surface: contender.surface, container: container, store: contender.store, err: buildErr}
 		}()
@@ -2666,7 +2670,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	badIdentity := selectedContractTestRootAgentIdentity(t, "bad-agent")
 
 	_, _, err = startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
-		Store: &store.PostgresStore{},
+		Owner: SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{}},
 		AgentRuntime: selectedContractAgentRuntimePlan{
 			Proof: SelectedContractAgentRuntimeMaterialization{
 				AgentRecipients: []agentidentity.Identity{badIdentity},
@@ -2744,8 +2748,7 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
-		Store:               pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Owner:               selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
@@ -2840,8 +2843,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 		ForkRunID:           materialized.ForkRunID,
 		ConfirmSourceFreeze: true,
 		Store:               pg,
-		ExecutionStore:      pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		ExecutionOwner:      selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader:        loader,
 	})
 	if err != nil {
@@ -2955,11 +2957,10 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	)
 
 	result, err := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
-		ForkRunID:           materialized.ForkRunID,
-		Store:               pg,
-		ExecutionStore:      pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
-		SourceLoader:        loader,
+		ForkRunID:      materialized.ForkRunID,
+		Store:          pg,
+		ExecutionOwner: selectedContractExecutionOwnerForTest(t, pg),
+		SourceLoader:   loader,
 	})
 	if err == nil || !strings.Contains(err.Error(), "source_committed_replay_scope_advanced_after_fork_point") {
 		t.Fatalf("ActivateSelectedContractRunFork error = %v, want post-T marker blocker", err)
@@ -3043,8 +3044,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
-		Store:               pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Owner:               selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
@@ -3173,8 +3173,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 		SourceRunID:         sourceRunID,
 		At:                  forkPointEventID,
 		ConfirmSourceFreeze: true,
-		Store:               pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Owner:               selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
@@ -3312,8 +3311,7 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
-		Store:               pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Owner:               selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
@@ -3400,8 +3398,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
-		Store:               pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Owner:               selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
@@ -3488,8 +3485,7 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
-		Store:               pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Owner:               selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
@@ -3532,8 +3528,7 @@ func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterializ
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
-		Store:               pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Owner:               selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
@@ -3598,8 +3593,7 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
-		Store:               pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Owner:               selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
@@ -3666,8 +3660,7 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 		SourceRunID:         sourceRunID,
 		At:                  sourceEventID,
 		ConfirmSourceFreeze: true,
-		Store:               pg,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Owner:               selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader:        loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,

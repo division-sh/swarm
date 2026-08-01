@@ -29,7 +29,22 @@ import (
 
 func newWorkflowJoinPipelineCoordinator(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
 	opts.PipelineObligations = unavailablePipelineTestObligationOwner{}
-	return NewPipelineCoordinatorWithOptions(bus, db, opts)
+	return newDurablePipelineCoordinatorForTest(bus, db, opts)
+}
+
+func TestWorkflowLifecycleOwnerIsConstructedBeforeDurableStoreReachabilityOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, _ := tc.open(t)
+			coordinator := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+				Module:      &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowJoinLifecycleBundle())},
+				Persistence: workflowPersistenceForTest(store),
+			})
+			if coordinator == nil || coordinator.workflowStore == nil || coordinator.workflowStore.lifecycleOwner == nil {
+				t.Fatal("durable workflow store became reachable without its canonical lifecycle owner")
+			}
+		})
+	}
 }
 
 func TestWorkflowJoinRequiresGenericScheduleOwnerBeforeMutationOnBothStores(t *testing.T) {

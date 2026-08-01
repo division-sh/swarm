@@ -193,11 +193,16 @@ func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		panic("pipeline: workflow module is required")
 	}
 	storeTemplate := opts.Persistence.store
-	if storeTemplate == nil && requireObligationOwner {
-		return nil
-	}
-	if requireObligationOwner && opts.PipelineObligations == nil {
-		panic("pipeline: durable pipeline obligation owner is required")
+	if requireObligationOwner {
+		if !opts.Persistence.Valid() {
+			return nil
+		}
+		if opts.DeliveryStore == nil || opts.PipelineObligations == nil || opts.DecisionCards == nil ||
+			opts.ProposedEffects == nil || opts.HumanTasks == nil || opts.GatePublisher == nil ||
+			opts.DecisionCardDraftExpiry == nil || opts.HumanTaskExpiry == nil ||
+			opts.DirectDecisionPublisher == nil || opts.DeliveryRuntime == nil || opts.RunLifecycle == nil {
+			return nil
+		}
 	}
 	credentials := opts.Credentials
 	if credentials == nil {

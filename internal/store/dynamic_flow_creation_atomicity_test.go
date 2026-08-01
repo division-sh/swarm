@@ -19,6 +19,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -35,6 +36,11 @@ type dynamicFlowCreationAtomicityStore interface {
 	externalStoreTestMutationOwner
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
+	decisioncard.Store
+	decisioncard.ProposedEffectStore
+	decisioncard.HumanTaskStore
+	runtimepipeline.DecisionCardDraftExpiry
+	runtimepipeline.HumanTaskExpiry
 	PipelineObligations() runtimepipelineobligation.Store
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
@@ -227,12 +233,21 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
 	}
 	workflow = runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:              dynamicFlowCreationWorkflowModule{source: semanticview.Wrap(dynamicFlowCreationAtomicityBundle())},
-		Persistence:         workflowPersistence,
-		RunLifecycle:        selected,
-		DeliveryStore:       selected,
-		PipelineObligations: selected.PipelineObligations(),
+		Module:                  dynamicFlowCreationWorkflowModule{source: semanticview.Wrap(dynamicFlowCreationAtomicityBundle())},
+		Persistence:             workflowPersistence,
+		RunLifecycle:            selected,
+		DeliveryStore:           selected,
+		PipelineObligations:     selected.PipelineObligations(),
+		DecisionCards:           selected,
+		ProposedEffects:         selected,
+		HumanTasks:              selected,
+		DecisionCardDraftExpiry: selected,
+		HumanTaskExpiry:         selected,
+		GatePublisher:           eventBus,
+		DirectDecisionPublisher: eventBus,
+		DeliveryRuntime:         eventBus,
 	})
+
 	parent := eventtest.ExistingRunRootIngress(
 		plan.CreationEvent.ParentEventID,
 		events.EventType("test.dynamic_flow.triggered"),

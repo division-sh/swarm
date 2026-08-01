@@ -35,7 +35,7 @@ type workflowTimerOwnerTestBus interface {
 func newWorkflowTimerOwnerPipelineCoordinator(bus workflowTimerOwnerTestBus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
 	opts.PipelineObligations = unavailablePipelineTestObligationOwner{}
 	opts.GatePublisher = bus
-	return NewPipelineCoordinatorWithOptions(bus, db, opts)
+	return newDurablePipelineCoordinatorForTest(bus, db, opts)
 }
 
 func TestWorkflowTimerLifecycleOneShotExactCompletionOnBothStores(t *testing.T) {

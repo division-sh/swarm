@@ -552,7 +552,7 @@ func TestChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStores(t 
 				"channel.ops.deliver": testCompiledChannelActivityTool(server.URL),
 			}})
 			bus := &recordingPipelineBus{}
-			pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{}})
+			pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{}})
 			intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
 			intent.Tool = "channel.ops.deliver"
 			intent.ActivityID = "channel_deliver"
@@ -603,7 +603,7 @@ func TestChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossS
 				"channel.ops.deliver": testCompiledChannelActivityTool(server.URL),
 			}})
 			bus := &recordingPipelineBus{}
-			pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{}})
+			pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{}})
 			intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
 			intent.Tool = "channel.ops.deliver"
 			intent.ActivityID = "channel_deliver"
@@ -883,7 +883,7 @@ func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCrede
 	bus := &recordingPipelineBus{}
 	db, store := newSQLiteActivityJournalStore(t, ctx)
 	seedActivityRun(t, db, true, runID)
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module:              staticSemanticWorkflowModule{source: source},
 		Persistence:         workflowPersistenceForTest(store),
 		PipelineObligations: unavailablePipelineTestObligationOwner{},
@@ -965,7 +965,7 @@ func TestPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedRespo
 	db, store := newSQLiteActivityJournalStore(t, ctx)
 	seedActivityRun(t, db, true, runID)
 	credentialStore := &countingActivityCredentialStore{}
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module:                 staticSemanticWorkflowModule{source: source},
 		Persistence:            workflowPersistenceForTest(store),
 		PipelineObligations:    unavailablePipelineTestObligationOwner{},
@@ -1058,7 +1058,7 @@ func TestPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponseP
 			intent.Input = mustActivityInput(map[string]any{"chat_id": "42", "text": "hello"})
 
 			firstBus := &recordingPipelineBus{}
-			first := NewPipelineCoordinatorWithOptions(firstBus, db, PipelineCoordinatorOptions{
+			first := newDurablePipelineCoordinatorForTest(firstBus, db, PipelineCoordinatorOptions{
 				Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(journal),
 				PipelineObligations:    unavailablePipelineTestObligationOwner{},
 				MockConnectorResponses: plan,
@@ -1072,7 +1072,7 @@ func TestPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponseP
 
 			restartBus := &recordingPipelineBus{}
 			credentials := &countingActivityCredentialStore{}
-			restarted := NewPipelineCoordinatorWithOptions(restartBus, db, PipelineCoordinatorOptions{
+			restarted := newDurablePipelineCoordinatorForTest(restartBus, db, PipelineCoordinatorOptions{
 				Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(journal),
 				PipelineObligations: unavailablePipelineTestObligationOwner{},
 				Credentials:         credentials,
@@ -1134,7 +1134,7 @@ func TestPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTT
 					source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"telegram.send_message": tool}})
 					bus := &recordingPipelineBus{}
 					credentialStore := &countingActivityCredentialStore{}
-					pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+					pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 						Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store),
 						PipelineObligations:    unavailablePipelineTestObligationOwner{},
 						MockConnectorResponses: plan, Credentials: credentialStore,
@@ -1222,7 +1222,7 @@ func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *test
 	db, store := newSQLiteActivityJournalStore(t, ctx)
 	seedActivityRun(t, db, true, runID)
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module:              staticSemanticWorkflowModule{source: source},
 		Persistence:         workflowPersistenceForTest(store),
 		PipelineObligations: unavailablePipelineTestObligationOwner{},
@@ -1331,7 +1331,7 @@ func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, ctx conte
 		},
 	})
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module:              staticSemanticWorkflowModule{source: source},
 		Persistence:         workflowPersistenceForTest(store),
 		PipelineObligations: unavailablePipelineTestObligationOwner{},
@@ -1421,7 +1421,7 @@ func TestPipelineActivityRequestNonIdempotentFailureDoesNotRetry(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	db, store := newSQLiteActivityJournalStore(t, ctx)
 	seedActivityRun(t, db, true, runID)
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module:              staticSemanticWorkflowModule{source: source},
 		Persistence:         workflowPersistenceForTest(store),
 		PipelineObligations: unavailablePipelineTestObligationOwner{},
@@ -1464,7 +1464,7 @@ func TestPipelineActivityRequestNonIdempotentTransportErrorMarksUncertain(t *tes
 	bus := &recordingPipelineBus{}
 	db, store := newSQLiteActivityJournalStore(t, ctx)
 	seedActivityRun(t, db, true, runID)
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module:              staticSemanticWorkflowModule{source: source},
 		Persistence:         workflowPersistenceForTest(store),
 		PipelineObligations: unavailablePipelineTestObligationOwner{},
@@ -1532,7 +1532,7 @@ func TestPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTer
 	bus := &recordingPipelineBus{}
 	db, store := newSQLiteActivityJournalStore(t, ctx)
 	seedActivityRun(t, db, true, runID)
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module:              staticSemanticWorkflowModule{source: source},
 		Persistence:         workflowPersistenceForTest(store),
 		PipelineObligations: unavailablePipelineTestObligationOwner{},
@@ -1583,7 +1583,7 @@ func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *t
 		"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL})),
 	}})
 	bus := &recordingPipelineBus{}
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{}})
+	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{}})
 	intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), entityID)
 	intent.Generation, intent.LoopStage = activation.Generation(), activation.CurrentStage
 	runner.failNext.Store(true)
@@ -1674,7 +1674,7 @@ func TestPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResu
 	bus := &recordingPipelineBus{}
 	db, store := newSQLiteActivityJournalStore(t, ctx)
 	seedActivityRun(t, db, true, runID)
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module:              staticSemanticWorkflowModule{source: source},
 		Persistence:         workflowPersistenceForTest(store),
 		PipelineObligations: unavailablePipelineTestObligationOwner{},
@@ -1752,7 +1752,7 @@ func TestPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatch(t
 	db, store := newSQLiteActivityJournalStore(t, ctx)
 	seedActivityRun(t, db, true, runID)
 	emptyCredentials := testActivityCredentialStore(t, "", "")
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module:              staticSemanticWorkflowModule{source: source},
 		Persistence:         workflowPersistenceForTest(store),
 		PipelineObligations: unavailablePipelineTestObligationOwner{},
@@ -1803,7 +1803,7 @@ func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBefo
 	bus := &recordingPipelineBus{}
 	db, store := newSQLiteActivityJournalStore(t, ctx)
 	seedActivityRun(t, db, true, runID)
-	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module:              staticSemanticWorkflowModule{source: source},
 		Persistence:         workflowPersistenceForTest(store),
 		PipelineObligations: unavailablePipelineTestObligationOwner{},

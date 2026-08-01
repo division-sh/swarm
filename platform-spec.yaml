@@ -5211,11 +5211,11 @@ engine:
         capabilities:
         - runtime/bus DurableDependencies and closed event operations
         - RuntimeLogPersistence
-        - opaque runtime/pipeline WorkflowPersistence plus named PipelineCoordinator operations
+        - opaque runtime/pipeline WorkflowPersistence with its private mutation executor, plus named PipelineCoordinator operations
         - sessions.Registry, runtime/llm.LiveSessionAcquirer, and sessions.Resetter as distinct exact roles
         - conversation, manager, effects, schedule, timer, mailbox, tool, budget, ingress, and startup-ownership ports
         - runtime/runfork and runtime/runbundle semantic values owned by their runtime domain packages
-        rule: Runtime and subsystem construction consume exact typed roles and fail closed when a required owner is missing. No broad Stores aggregate, concrete workflow store, predecessor dependency clone, or runtime capability discovery is allowed.
+        rule: Runtime and subsystem construction consume exact typed roles and fail closed when a required owner is missing. Durable PipelineCoordinator construction validates the complete WorkflowPersistence owner and every required workflow role before returning a reachable coordinator. No broad Stores aggregate, concrete workflow store, predecessor dependency clone, or runtime capability discovery is allowed.
       - name: public_api_read_and_control_capabilities
         owner: selectedRuntimeStoreFacade.apiCapabilities and apiv1.OperatorReadOptions
         capabilities:
@@ -5301,7 +5301,7 @@ engine:
       - dependency: ConversationForkReadStore and ConversationForkLifecycleStore
         classification: segregated selected capabilities backed by one shared semantic owner; read availability does not imply lifecycle mutation, while Postgres and local/dev SQLite explicitly wire both roles
       - dependency: selected-contract run.fork exact execution ports with a temporary RuntimeSQLDB mechanic
-        classification: consumer-owned optional product ports; the remaining raw SQL mechanic is explicitly assigned to #2148 and is not concrete-store capability authority
+        classification: consumer-owned optional product ports composed once into an opaque selected-contract execution owner; package-private projections give each constructed subsystem only its exact immutable role group, and the remaining raw SQL mechanic is explicitly assigned to #2148 rather than treated as concrete-store capability authority
       - dependency: private WorkflowPersistence transaction execution, sealed CommitPublish transactions, and backend-local direct transaction helpers
         classification: mutation/unit-of-work implementation class under #1403/#1405; cross-package producers consume closed named operations while callback and raw transaction helpers stay private to their implementation owners
       - dependency: route planning, event admission/defaulting, delivery authority, startup readiness
@@ -5311,6 +5311,7 @@ engine:
       - Serve/API/CLI/runtime producers must consume exact consumer-owned ports such as EventBus durable roles, opaque workflow persistence, API read stores, bundle catalog capabilities, run-fork capabilities, destructive reset capabilities, startup recovery capabilities, and run-stalled read capabilities.
       - Unsupported or not-yet-promoted feature families are represented as absent typed optional capabilities rather than inferred by checking concrete backend identity at the producer.
       - Runtime construction must not reconstruct selected pipeline persistence from a raw SQL handle when buildStores failed to provide the opaque WorkflowPersistence value.
+      - Selected-contract run-fork construction must not accept or propagate a broad selected-store interface. The composition root constructs one opaque execution owner from validated exact port groups; only package-private projections may pass those groups to EventBus, PipelineCoordinator, Manager, replay, and fork-lifecycle consumers.
       - Child issues must consume this model without redefining ownership: #1401 removes producer-side backend branching, #1403 promotes typed runtime mutation unit-of-work, #1405 hides SQLite busy/serialization policy, and #1402 adds guard/proof durability.
       excludes:
       - backend selector precedence and CLI/config parsing
@@ -5373,7 +5374,8 @@ engine:
         contention. The concrete workflow instance store is private to runtime/pipeline and cannot escape through RuntimeDeps,
         subsystem constructors, tests, or service-locator returns. When the selected private backend transaction executor
         is absent, SQLite WorkflowPersistence is not selected runtime write authority and must fail closed for pipeline
-        mutation entry points. Postgres remains authoritative for
+        mutation entry points. Durable coordinator construction validates the private mutation executor and every required
+        workflow role before returning a reachable coordinator. Postgres remains authoritative for
         production cross-runtime transaction and claim semantics.
       excludes:
       - tool executor entity and human-task persistence owned by runtime_tool_entity_and_human_task_rows

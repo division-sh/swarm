@@ -7,8 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -72,19 +77,165 @@ func (pipelineTestBus) PipelineObligationOwner() runtimepipelineobligation.Store
 	return unavailablePipelineTestObligationOwner{}
 }
 
+type unavailablePipelineTestDeliveryStore struct{ runtimedelivery.Store }
+type unavailablePipelineTestDecisionCards struct{}
+
+func (*unavailablePipelineTestDecisionCards) CreateDecisionCard(context.Context, decisioncard.Card) error {
+	return nil
+}
+func (*unavailablePipelineTestDecisionCards) ListDecisionCards(context.Context, decisioncard.ListOptions) ([]decisioncard.ListItem, string, error) {
+	return nil, "", nil
+}
+func (*unavailablePipelineTestDecisionCards) GetDecisionCard(context.Context, string) (decisioncard.Card, error) {
+	return decisioncard.Card{}, decisioncard.ErrNotFound
+}
+func (*unavailablePipelineTestDecisionCards) DecideDecisionCard(context.Context, decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
+	return decisioncard.DecisionOutcome{}, decisioncard.ErrNotFound
+}
+func (*unavailablePipelineTestDecisionCards) DeferDecisionCard(context.Context, decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
+	return decisioncard.DecisionOutcome{}, decisioncard.ErrNotFound
+}
+func (*unavailablePipelineTestDecisionCards) BeginDecisionCardInput(context.Context, decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
+	return decisioncard.InputDraft{}, decisioncard.ErrNotFound
+}
+func (*unavailablePipelineTestDecisionCards) CancelDecisionCardInput(context.Context, decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
+	return decisioncard.InputDraft{}, decisioncard.ErrNotFound
+}
+func (*unavailablePipelineTestDecisionCards) ListDecisionCardChanges(context.Context, decisioncard.SubscriptionOptions) ([]decisioncard.Change, error) {
+	return nil, nil
+}
+func (*unavailablePipelineTestDecisionCards) SupersedeDecisionCardsForStage(context.Context, string, string, string, string, time.Time) error {
+	return nil
+}
+
+type unavailablePipelineTestProposedEffects struct{}
+
+func (*unavailablePipelineTestProposedEffects) CreateProposedEffectCard(context.Context, decisioncard.Card, decisioncard.ProposedEffectContinuation) error {
+	return nil
+}
+func (*unavailablePipelineTestProposedEffects) LoadProposedEffectContinuation(context.Context, string) (decisioncard.ProposedEffectContinuation, error) {
+	return decisioncard.ProposedEffectContinuation{}, decisioncard.ErrNotFound
+}
+func (*unavailablePipelineTestProposedEffects) CompleteProposedEffectRoute(context.Context, string, string, time.Time) (decisioncard.ProposedEffectContinuation, error) {
+	return decisioncard.ProposedEffectContinuation{}, decisioncard.ErrNotFound
+}
+func (*unavailablePipelineTestProposedEffects) SupersedeProposedEffectsForLoopGenerations(context.Context, string, string, []attemptgeneration.Generation, string, time.Time) error {
+	return nil
+}
+func (*unavailablePipelineTestProposedEffects) ProposedEffectReadback(context.Context, string) (decisioncard.ProposedEffectReadback, error) {
+	return decisioncard.ProposedEffectReadback{}, decisioncard.ErrNotFound
+}
+
+type unavailablePipelineTestHumanTasks struct{}
+
+func (*unavailablePipelineTestHumanTasks) CreateHumanTaskCard(context.Context, decisioncard.Card, decisioncard.HumanTaskContinuation) error {
+	return nil
+}
+func (*unavailablePipelineTestHumanTasks) LoadHumanTaskContinuation(context.Context, string) (decisioncard.HumanTaskContinuation, error) {
+	return decisioncard.HumanTaskContinuation{}, decisioncard.ErrNotFound
+}
+func (*unavailablePipelineTestHumanTasks) CompleteHumanTaskOutcome(context.Context, string, string, time.Time) (decisioncard.HumanTaskContinuation, error) {
+	return decisioncard.HumanTaskContinuation{}, decisioncard.ErrNotFound
+}
+
+type unavailablePipelineTestDecisionCardDraftExpiry struct{}
+
+func (*unavailablePipelineTestDecisionCardDraftExpiry) ExpireDecisionCardInputDrafts(context.Context, time.Time) (int, error) {
+	return 0, nil
+}
+
+type unavailablePipelineTestHumanTaskExpiry struct{}
+
+func (*unavailablePipelineTestHumanTaskExpiry) ExpireHumanTaskCardsInMutation(context.Context, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+
+type unavailablePipelineTestGatePublisher struct{ WorkflowGateMutationPublisher }
+type unavailablePipelineTestDirectDecisionPublisher struct {
+	DecisionCardDirectMutationPublisher
+}
+type unavailablePipelineTestDeliveryRuntime struct{ WorkflowDeliveryRuntime }
+type unavailablePipelineTestRunLifecycle struct{}
+
+func (*unavailablePipelineTestRunLifecycle) RequestCompletionCandidate(context.Context, runtimerunlifecycle.CandidateRequest) (runtimerunlifecycle.CandidateRequestDisposition, error) {
+	return "", nil
+}
+
+func (*unavailablePipelineTestRunLifecycle) TransitionActiveRun(context.Context, runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	return "", nil
+}
+
+func (*unavailablePipelineTestRunLifecycle) MarkTerminalRun(context.Context, runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return runtimerunlifecycle.Snapshot{}, "", nil
+}
+
+// completeDurablePipelineTestOptions keeps production construction strict while
+// allowing a focused unit test to state only the durable role it exercises.
+// Calling an unstated role still panics through its nil embedded test interface.
+func completeDurablePipelineTestOptions(bus Bus, opts PipelineCoordinatorOptions) PipelineCoordinatorOptions {
+	if opts.DeliveryStore == nil {
+		opts.DeliveryStore = &unavailablePipelineTestDeliveryStore{}
+	}
+	if opts.PipelineObligations == nil {
+		opts.PipelineObligations = unavailablePipelineTestObligationOwner{}
+	}
+	if opts.DecisionCards == nil {
+		opts.DecisionCards = &unavailablePipelineTestDecisionCards{}
+	}
+	if opts.ProposedEffects == nil {
+		opts.ProposedEffects = &unavailablePipelineTestProposedEffects{}
+	}
+	if opts.HumanTasks == nil {
+		opts.HumanTasks = &unavailablePipelineTestHumanTasks{}
+	}
+	if opts.DecisionCardDraftExpiry == nil {
+		opts.DecisionCardDraftExpiry = &unavailablePipelineTestDecisionCardDraftExpiry{}
+	}
+	if opts.HumanTaskExpiry == nil {
+		opts.HumanTaskExpiry = &unavailablePipelineTestHumanTaskExpiry{}
+	}
+	if opts.GatePublisher == nil {
+		if publisher, ok := bus.(WorkflowGateMutationPublisher); ok {
+			opts.GatePublisher = publisher
+		} else {
+			opts.GatePublisher = &unavailablePipelineTestGatePublisher{}
+		}
+	}
+	if opts.DirectDecisionPublisher == nil {
+		if publisher, ok := bus.(DecisionCardDirectMutationPublisher); ok {
+			opts.DirectDecisionPublisher = publisher
+		} else {
+			opts.DirectDecisionPublisher = &unavailablePipelineTestDirectDecisionPublisher{}
+		}
+	}
+	if opts.DeliveryRuntime == nil {
+		if runtime, ok := bus.(WorkflowDeliveryRuntime); ok {
+			opts.DeliveryRuntime = runtime
+		} else {
+			opts.DeliveryRuntime = &unavailablePipelineTestDeliveryRuntime{}
+		}
+	}
+	if opts.RunLifecycle == nil {
+		opts.RunLifecycle = &unavailablePipelineTestRunLifecycle{}
+	}
+	return opts
+}
+
+func newDurablePipelineCoordinatorForTest(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
+	return NewPipelineCoordinatorWithOptions(bus, db, completeDurablePipelineTestOptions(bus, opts))
+}
+
 func TestPipelineCoordinatorRequiresCanonicalObligationOwner(t *testing.T) {
 	module := staticSemanticWorkflowModule{source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})}
 	if preview := newPreviewPipelineCoordinator(previewBus{}, PipelineCoordinatorOptions{Module: module}); preview == nil {
 		t.Fatal("explicit preview coordinator was not constructed")
 	}
 
-	defer func() {
-		if recover() == nil {
-			t.Fatal("durable coordinator accepted an ownerless bus")
-		}
-	}()
-	_ = NewPipelineCoordinatorWithOptions(previewBus{}, nil, PipelineCoordinatorOptions{
+	if durable := NewPipelineCoordinatorWithOptions(previewBus{}, nil, PipelineCoordinatorOptions{
 		Module:      module,
 		Persistence: WorkflowPersistence{store: &workflowInstanceStore{db: new(sql.DB)}},
-	})
+	}); durable != nil {
+		t.Fatal("durable coordinator accepted incomplete persistence roles")
+	}
+
 }
