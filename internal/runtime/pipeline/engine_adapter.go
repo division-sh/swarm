@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -14,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
-	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -370,143 +368,6 @@ func (e pipelineEngineEvaluator) queryEntityCount(ctx workflowExpressionContext,
 		}
 	}
 	return e.coordinator.workflowStore.QueryEntityCount(context.Background(), runID, e.coordinator.SemanticSource(), contract, parsed)
-}
-
-func queryEntityStateCount(runID string, db *sql.DB, source semanticview.Source, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {
-	if db == nil {
-		return 0, nil
-	}
-	runID, err := runtimecurrentstate.ValidateRunID(runID)
-	if err != nil {
-		return 0, err
-	}
-	flowRoot := runtimeflowidentity.ScopeKey(source, contract.FlowID)
-	where := " WHERE run_id = $1::uuid"
-	args := []any{runID}
-	if flowRoot != "" {
-		args = append(args, flowRoot, flowRoot+"/%")
-		where += " AND (flow_instance = $2 OR flow_instance LIKE $3)"
-	}
-	rows, err := db.QueryContext(context.Background(), `
-		SELECT COALESCE(fields, '{}'::jsonb), current_state
-		FROM entity_state`+where, args...)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	count := 0
-	for rows.Next() {
-		var fieldsRaw []byte
-		var currentState string
-		if err := rows.Scan(&fieldsRaw, &currentState); err != nil {
-			return 0, err
-		}
-		fields := map[string]any{}
-		if len(fieldsRaw) > 0 {
-			if err := json.Unmarshal(fieldsRaw, &fields); err != nil {
-				return 0, err
-			}
-		}
-		materialized, err := entityruntime.Materialize(contract, entityruntime.DeclaredValues(contract, fields))
-		if err != nil {
-			return 0, err
-		}
-		if workflowQueryPredicateMatches(map[string]any{
-			"fields":         materialized,
-			"current_state":  strings.TrimSpace(currentState),
-			"entity_type":    contract.EntityType,
-			"flow_instance":  flowRoot,
-			"workflow_name":  contract.FlowID,
-			"workflow_state": strings.TrimSpace(currentState),
-		}, predicate) {
-			count++
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	return count, nil
-}
-
-func workflowQueryPredicateMatches(row map[string]any, predicate workflowEntityQueryPredicate) bool {
-	left := workflowQuerySelectorValue(row, predicate.Field)
-	switch predicate.Op {
-	case "==":
-		return workflowJSONValuesEqual(left, predicate.Value)
-	case "!=":
-		return !workflowJSONValuesEqual(left, predicate.Value)
-	}
-	leftNum, leftNumOK := workflowNumericEntityValue(left)
-	rightNum, rightNumOK := workflowNumericEntityValue(predicate.Value)
-	if leftNumOK && rightNumOK {
-		switch predicate.Op {
-		case ">=":
-			return leftNum >= rightNum
-		case "<=":
-			return leftNum <= rightNum
-		case ">":
-			return leftNum > rightNum
-		case "<":
-			return leftNum < rightNum
-		}
-	}
-	leftText := fmt.Sprintf("%v", left)
-	rightText := fmt.Sprintf("%v", predicate.Value)
-	switch predicate.Op {
-	case ">=":
-		return leftText >= rightText
-	case "<=":
-		return leftText <= rightText
-	case ">":
-		return leftText > rightText
-	case "<":
-		return leftText < rightText
-	default:
-		return false
-	}
-}
-
-func workflowNumericEntityValue(value any) (float64, bool) {
-	switch typed := value.(type) {
-	case int:
-		return float64(typed), true
-	case int32:
-		return float64(typed), true
-	case int64:
-		return float64(typed), true
-	case float32:
-		return float64(typed), true
-	case float64:
-		return typed, true
-	default:
-		return 0, false
-	}
-}
-
-func workflowQuerySelectorValue(row map[string]any, field string) any {
-	field = strings.TrimSpace(field)
-	if field == "" {
-		return nil
-	}
-	if value, ok := row[field]; ok {
-		return value
-	}
-	fields, _ := row["fields"].(map[string]any)
-	if value, ok := workflowMetadataValue(fields, field); ok {
-		return value
-	}
-	return nil
-}
-
-func sqlComparisonOperator(op string) (string, error) {
-	switch strings.TrimSpace(op) {
-	case "==":
-		return "=", nil
-	case "!=", ">=", "<=", ">", "<":
-		return strings.TrimSpace(op), nil
-	default:
-		return "", fmt.Errorf("unsupported query_entities operator %q", op)
-	}
 }
 
 func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.RuntimeDependencies {

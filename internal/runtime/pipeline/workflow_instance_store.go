@@ -18,6 +18,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/entityquery"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
@@ -122,6 +123,7 @@ type workflowInstanceStore struct {
 	db               *sql.DB
 	dialect          workflowStoreDialect
 	runtimeMutation  runtimeMutationRunner
+	entityQuery      entityquery.Reader
 	timerObligations runtimetimerobligation.Reader
 	deliveryStore    runtimedelivery.Store
 	pipelineStore    runtimepipelineobligation.Store
@@ -201,11 +203,13 @@ type WorkflowPersistence struct {
 }
 
 func NewPostgresWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) WorkflowPersistence {
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner}}
+	reader, _ := runner.(entityquery.Reader)
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader}}
 }
 
 func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) WorkflowPersistence {
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner}}
+	reader, _ := runner.(entityquery.Reader)
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader}}
 }
 
 func (p WorkflowPersistence) empty() bool {
@@ -855,13 +859,19 @@ func (s *workflowInstanceStore) runInPipelineTransactionOnce(ctx context.Context
 }
 
 func (s *workflowInstanceStore) QueryEntityCount(ctx context.Context, runID string, source semanticview.Source, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {
-	if s == nil || s.db == nil {
-		return 0, nil
+	if s == nil || s.entityQuery == nil {
+		return 0, fmt.Errorf("workflow entity query reader is required")
 	}
-	if s.isSQLite() {
-		return s.queryEntityStateCountSQLite(ctx, runID, source, contract, predicate)
-	}
-	return queryEntityStateCount(runID, s.db, source, contract, predicate)
+	return s.entityQuery.CountWorkflowEntities(ctx, entityquery.Request{
+		RunID:    runID,
+		Source:   source,
+		Contract: contract,
+		Predicate: entityquery.Predicate{
+			Field: predicate.Field,
+			Op:    predicate.Op,
+			Value: predicate.Value,
+		},
+	})
 }
 
 func (s *workflowInstanceStore) loadSpec(ctx context.Context, keys []string, forUpdate bool) (WorkflowInstance, bool, error) {

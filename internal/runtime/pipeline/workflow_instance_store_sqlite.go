@@ -10,14 +10,11 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
-	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -717,40 +714,6 @@ func insertSQLiteEntityMutationRecord(ctx context.Context, tx *sql.Tx, runID str
 		return nil
 	}
 	return runtimeauthoractivity.Record(ctx, draft)
-}
-
-func (s *workflowInstanceStore) queryEntityStateCountSQLite(ctx context.Context, runID string, source semanticview.Source, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {
-	runID, err := runtimecurrentstate.ValidateRunID(runID)
-	if err != nil {
-		return 0, err
-	}
-	items, err := s.listSQLite(runtimecorrelation.WithRunID(ctx, runID))
-	if err != nil {
-		return 0, err
-	}
-	flowRoot := runtimeflowidentity.ScopeKey(source, contract.FlowID)
-	count := 0
-	for _, item := range items {
-		storageRef := strings.Trim(strings.TrimSpace(item.StorageRef), "/")
-		if flowRoot != "" && storageRef != flowRoot && !strings.HasPrefix(storageRef, flowRoot+"/") {
-			continue
-		}
-		materialized, err := entityruntime.Materialize(contract, entityruntime.DeclaredValues(contract, item.Metadata))
-		if err != nil {
-			return 0, err
-		}
-		if workflowQueryPredicateMatches(map[string]any{
-			"fields":         materialized,
-			"current_state":  strings.TrimSpace(item.CurrentState),
-			"entity_type":    contract.EntityType,
-			"flow_instance":  flowRoot,
-			"workflow_name":  contract.FlowID,
-			"workflow_state": strings.TrimSpace(item.CurrentState),
-		}, predicate) {
-			count++
-		}
-	}
-	return count, nil
 }
 
 func sqliteWorkflowJSONBytes(raw any) []byte {
