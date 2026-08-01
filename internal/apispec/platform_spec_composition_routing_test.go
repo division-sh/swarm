@@ -152,6 +152,23 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, slice1479, "rule"), "invalid")
 }
 
+func TestPlatformSpecProducerRoutingMigrationCoversWholeBundle(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+	behavior := mustYAMLPath(t, root, "cli_specification", "command_catalog", "migrate_producer_routing", "behavior")
+
+	for _, want := range []string{
+		"nodes.yaml",
+		"schema.yaml",
+		"loops.*.escape.emit",
+		"stages.*.gate.outcomes.*.emit",
+		"whole bundle",
+		"before writing any file",
+		"entire bundle byte-for-byte unchanged",
+	} {
+		assertScalarContains(t, behavior, want)
+	}
+}
+
 func TestPlatformSpecReplyRuntimeStatusDoesNotContradictHistoricalSlice(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 	reply := mustYAMLPath(t, root, "engine", "cross_flow_routing", "reply_resolution")
