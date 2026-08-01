@@ -2182,7 +2182,7 @@ func TestRuntimeProjectSupervisorOpenProjectNoAgentSkipsWorkspaceLifecycle(t *te
 		if err != nil {
 			return nil, cliapp.WorkspaceBackendSelection{}, err
 		}
-		lifecycle, err := cliapp.ConfiguredWorkspaceLifecycleForBackend(stores.facade().workspaceDB(), supervisor.cfg, contractsRoot, source, mountSources, decision)
+		lifecycle, err := cliapp.ConfiguredWorkspaceLifecycleForBackend(stores.facade().workspaceLookup(), supervisor.cfg, contractsRoot, source, mountSources, decision)
 		if err != nil {
 			return nil, decision, err
 		}

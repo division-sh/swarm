@@ -7557,7 +7557,7 @@ func serveDeliveryLifecycleFixtureContext() context.Context {
 func stubServeRuntimeWorkspaceLifecycle(t *testing.T) {
 	t.Helper()
 	oldWorkspaceLifecycle := cliapp.ConfiguredWorkspaceLifecycleForServe
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -7592,7 +7592,7 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return selectedPostgresStoreBundle(runtimePG, cfg), nil
 	}
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *sql.DB, _ *config.Config, _ string, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ workspace.Lookup, _ *config.Config, _ string, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return workspaceFactory(mountSources), nil
 	}
 	t.Cleanup(func() {
@@ -8756,7 +8756,7 @@ func localPreflightReportHasFinding(report cliapp.LocalPreflightReport, code str
 func stubServeWorkspaceLifecycleForTest(t *testing.T) {
 	t.Helper()
 	oldWorkspaceLifecycle := cliapp.ConfiguredWorkspaceLifecycleForServe
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -8843,7 +8843,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 		return selectedPostgresStoreBundle(runtimePG, cfg), nil
 	}
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {

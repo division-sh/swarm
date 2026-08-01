@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log"
 	"sync"
@@ -19,6 +18,7 @@ import (
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartuprecovery "github.com/division-sh/swarm/internal/runtime/startuprecovery"
+	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -231,8 +231,8 @@ func (f selectedRuntimeStoreFacade) closeWithError() error {
 	return f.stores.SQLDB.Close()
 }
 
-func (f selectedRuntimeStoreFacade) workspaceDB() *sql.DB {
-	return f.stores.SQLDB
+func (f selectedRuntimeStoreFacade) workspaceLookup() workspace.Lookup {
+	return f.stores.WorkspaceLookup
 }
 
 func (f selectedRuntimeStoreFacade) pinger() apiv1.Pinger {

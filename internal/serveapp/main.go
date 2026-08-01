@@ -120,6 +120,7 @@ type storeBundle struct {
 	Postgres                       *store.PostgresStore
 	SQLDB                          *sql.DB
 	RuntimeSQLDB                   *sql.DB
+	WorkspaceLookup                workspace.Lookup
 	Database                       apiv1.Pinger
 	RuntimeLogStore                runtime.RuntimeLogPersistence
 	SchemaBootstrapper             store.SchemaBootstrapper
@@ -341,6 +342,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) st
 		Postgres:           pg,
 		SQLDB:              pg.DB,
 		RuntimeSQLDB:       pg.DB,
+		WorkspaceLookup:    pg,
 		Database:           pg,
 		RuntimeLogStore:    pg,
 		SchemaBootstrapper: pg,
@@ -721,7 +723,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}
 	bootIdentity := loaded.bootIdentity
 	bootIdentity.BundleHash = bundleSourceFact.BundleHash()
-	workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(req.Stores.SQLDB, req.Config, loaded.contractsRoot, loaded.source, req.MountSources, req.WorkspaceBackend)
+	workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(req.Stores.WorkspaceLookup, req.Config, loaded.contractsRoot, loaded.source, req.MountSources, req.WorkspaceBackend)
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("configure workspaces: %w", err)
 	}
@@ -1966,7 +1968,7 @@ func runServeUnavailableBundleStartupRecovery(
 	if recoveryStore == nil {
 		return 0
 	}
-	recoveryWorkspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(storeFacade.workspaceDB(), cfg, loaded.contractsRoot, source, mountSources, workspaceBackend)
+	recoveryWorkspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(storeFacade.workspaceLookup(), cfg, loaded.contractsRoot, source, mountSources, workspaceBackend)
 	if err != nil {
 		presenter.fail(5, "recovery_workspace", err)
 		return 1
@@ -2217,6 +2219,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		workflowPersistence := runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore)
 		bundle := storeBundle{
 			SQLDB:              sqliteStore.DB,
+			WorkspaceLookup:    sqliteStore,
 			Database:           sqlDBPinger{db: sqliteStore.DB},
 			RuntimeLogStore:    sqliteStore,
 			SchemaBootstrapper: sqliteStore,

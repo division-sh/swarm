@@ -316,7 +316,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 			return 1
 		}
-		workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForBackend(storeFacade.workspaceDB(), cfg, contractsRoot, source, mountSources, workspaceBackend)
+		workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForBackend(storeFacade.workspaceLookup(), cfg, contractsRoot, source, mountSources, workspaceBackend)
 		if err != nil {
 			if out != nil {
 				fmt.Fprintf(out, "fork failed: configure workspaces: %v\n", err)

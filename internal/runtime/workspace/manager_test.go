@@ -14,8 +14,9 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 func TestWorkspacePrerequisiteRecoveryUsesConfiguredDockerBinaryAndLocalBuild(t *testing.T) {
@@ -335,8 +336,7 @@ func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 }
 
 func TestRuntimeWorkspaceContainersWithoutRunContextReturnsStaticContainers(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	manager := NewDockerManager(db)
+	manager := NewDockerManager(nil)
 	containers, err := manager.RuntimeWorkspaceContainers(context.Background())
 	if err != nil {
 		t.Fatalf("RuntimeWorkspaceContainers: %v", err)
@@ -347,6 +347,44 @@ func TestRuntimeWorkspaceContainersWithoutRunContextReturnsStaticContainers(t *t
 			t.Fatalf("containers = %v, want %s", containers, expected)
 		}
 	}
+}
+
+func TestRuntimeWorkspaceLookupFailsClosed(t *testing.T) {
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+
+	manager := NewDockerManager(nil)
+	if _, err := manager.RuntimeWorkspaceContainers(ctx); err == nil || !strings.Contains(err.Error(), "lookup is required") {
+		t.Fatalf("RuntimeWorkspaceContainers error = %v, want missing lookup failure", err)
+	}
+	if _, err := manager.LookupEntitySlug(ctx, entityID); err == nil || !strings.Contains(err.Error(), "lookup is required") {
+		t.Fatalf("LookupEntitySlug error = %v, want missing lookup failure", err)
+	}
+
+	manager = NewDockerManager(workspaceLookupStub{
+		entity: WorkspaceEntityLookup{},
+		set:    RuntimeWorkspaceContainerSet{EntitySlugs: []string{""}},
+	})
+	if _, err := manager.RuntimeWorkspaceContainers(ctx); err == nil || !strings.Contains(err.Error(), "empty entity slug") {
+		t.Fatalf("RuntimeWorkspaceContainers empty slug error = %v", err)
+	}
+	if _, err := manager.LookupEntitySlug(ctx, entityID); err == nil || !strings.Contains(err.Error(), "empty slug") {
+		t.Fatalf("LookupEntitySlug empty slug error = %v", err)
+	}
+}
+
+type workspaceLookupStub struct {
+	entity WorkspaceEntityLookup
+	set    RuntimeWorkspaceContainerSet
+}
+
+func (s workspaceLookupStub) LookupWorkspaceEntity(context.Context, runtimecurrentstate.Identity) (WorkspaceEntityLookup, error) {
+	return s.entity, nil
+}
+
+func (s workspaceLookupStub) ListRuntimeWorkspaceContainers(context.Context, string) (RuntimeWorkspaceContainerSet, error) {
+	return s.set, nil
 }
 
 func TestResolveWorkspace_UsesInjectedSemanticSourceForRoleLookup(t *testing.T) {
