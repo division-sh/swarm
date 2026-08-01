@@ -273,7 +273,13 @@ func TestPlatformSpecCompositionRoutingRetiresProducerTargetAuthority(t *testing
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "static_failure_reasons", "harness_consumer_conflict"), "combined with a real")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "implementation_slice_1444", "rule"), "Agent emit_events declarations")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "implementation_slice_1444", "rule"), "MUST NOT require producer routing fields")
-	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "implementation_slice_1444", "canonical_code_owner"), "pinRoutingAgentEmitSites")
+	implementationSlice1444 := mustYAMLPath(t, pinTargetResolution, "implementation_slice_1444")
+	assertScalarContains(t, mustYAMLPath(t, implementationSlice1444, "canonical_code_owner"), "ClassifyOutputConsumer")
+	runtimeConsumers := mustYAMLPath(t, implementationSlice1444, "runtime_consumers")
+	if !sequenceContainsScalar(runtimeConsumers, "internal/runtime/bootverify.checkPinTargetResolution") ||
+		!sequenceContainsScalar(runtimeConsumers, "internal/runtime/core/pinrouting.ResolveEnvelope") {
+		t.Fatal("pin target resolution must name the shared bootverify and runtime classifier consumers")
+	}
 
 	fanOut := mustYAMLPath(t, root, "handler_specification", "handler_fields", "fan_out")
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "sub_fields", "items_from"), "missing event catalog entry")

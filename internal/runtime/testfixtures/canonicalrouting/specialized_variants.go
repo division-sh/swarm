@@ -100,11 +100,11 @@ ticket.closed:
   result: string
 ticket.sla_escalated:
   swarm:
-    consumer: [operator]
+    consumer: external
   entity_id: string
 line_item.requested:
   swarm:
-    consumer: [worker]
+    consumer: external
   line_item_id: string
   line_item_index: integer
 `, `ticket:

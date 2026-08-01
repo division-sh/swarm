@@ -121,7 +121,7 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 			"analyst": {ID: "analyst", Role: "analyst", Subscriptions: []string{"analysis.requested"}, EmitEvents: []string{"analysis.completed"}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"external.received": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external", Consumer: []string{"dashboard"}}},
+			"external.received": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external", Consumer: []string{"external"}}},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Timers: []runtimecontracts.WorkflowTimerContract{{ID: "reminder", Event: "timer.fired", StartOn: "event:timer.started"}},

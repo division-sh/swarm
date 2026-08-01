@@ -1,6 +1,6 @@
 ---
 schema_version: producer-routing-retirement/v1
-audited_head: 7684cbbb7f5bf3cc8cd12df87e6338a8ea78c0fa
+audited_head: 481741c07eedb712e66f649adc1fcdf16cda44b2
 historical_source_commit: 8629f242491f569e6facdd5a0cff8959263f03ef^
 historical_removal_commit: 8629f242491f569e6facdd5a0cff8959263f03ef
 historical_merge_commit: 0bd15742df7367bbfba7ca5f5639fcfb3b71ba4c
@@ -9,12 +9,12 @@ rows:
   path: internal/runtime/testdata/generic-swarm-bundle/flows/delivery/nodes.yaml
   event: item.completed
   disposition: same_flow
-  proof: TestGenericBundle_E2EFrameworkShape
+  proof: TestProducerRoutingCanonicalConsumerManifestationsExecute/B001
 - id: B002
   path: internal/runtime/testdata/generic-swarm-bundle/flows/intake/nodes.yaml
   event: item.processed
   disposition: same_flow
-  proof: TestGenericBundle_E2EFrameworkShape
+  proof: TestProducerRoutingCanonicalConsumerManifestationsExecute/B002
 - id: B003
   path: tests/tier1-primitives/test-advances-to-terminal/nodes.yaml
   event: task.finished
@@ -759,12 +759,12 @@ rows:
   path: tests/tier8-boot-verification/test-boot-event-cycle/nodes.yaml
   event: cycle.pong
   disposition: same_flow
-  proof: TestTier8BootCatalogFixtures_RealRuntimeBoot/test-boot-event-cycle
+  proof: TestProducerRoutingCanonicalConsumerManifestationsExecute/B151
 - id: B152
   path: tests/tier8-boot-verification/test-boot-event-cycle/nodes.yaml
   event: cycle.ping
   disposition: same_flow
-  proof: TestTier8BootCatalogFixtures_RealRuntimeBoot/test-boot-event-cycle
+  proof: TestProducerRoutingCanonicalConsumerManifestationsExecute/B152
 - id: B153
   path: tests/tier8-boot-verification/test-boot-event-no-producer/nodes.yaml
   event: task.completed
@@ -824,7 +824,7 @@ rows:
   path: tests/tier8-boot-verification/test-boot-permission-tool-mismatch/nodes.yaml
   event: task.completed
   disposition: same_flow
-  proof: TestTier8BootCatalogFixtures_RealRuntimeBoot/test-boot-permission-tool-mismatch
+  proof: TestProducerRoutingCanonicalConsumerManifestationsExecute/B164
 - id: B165
   path: tests/tier8-boot-verification/test-boot-policy-conflict/flows/sub-flow/nodes.yaml
   event: sub.completed
@@ -849,17 +849,17 @@ rows:
   path: tests/tier8-boot-verification/test-boot-prompt-ref-stub/nodes.yaml
   event: task.completed
   disposition: external
-  proof: TestTier8BootCatalogFixtures_RealRuntimeBoot/test-boot-prompt-ref-stub
+  proof: TestProducerRoutingCanonicalConsumerManifestationsExecute/B169
 - id: B170
   path: tests/tier8-boot-verification/test-boot-prompt-ref/nodes.yaml
   event: task.completed
   disposition: external
-  proof: TestTier8BootCatalogFixtures_RealRuntimeBoot/test-boot-prompt-ref
+  proof: TestProducerRoutingCanonicalConsumerManifestationsExecute/B170
 - id: B171
   path: tests/tier8-boot-verification/test-boot-prompt-stub/nodes.yaml
   event: task.completed
   disposition: external
-  proof: TestTier8BootCatalogFixtures_RealRuntimeBoot/test-boot-prompt-stub
+  proof: TestProducerRoutingCanonicalConsumerManifestationsExecute/B171
 - id: B172
   path: tests/tier8-boot-verification/test-boot-required-agent-missing/nodes.yaml
   event: task.completed
@@ -869,7 +869,7 @@ rows:
   path: tests/tier8-boot-verification/test-boot-self-emit/nodes.yaml
   event: loop.event
   disposition: same_flow
-  proof: TestTier8BootCatalogFixtures_RealRuntimeBoot/test-boot-self-emit
+  proof: TestProducerRoutingCanonicalConsumerManifestationsExecute/B173
 - id: B174
   path: tests/tier8-boot-verification/test-boot-state-machine-invalid/nodes.yaml
   event: task.completed

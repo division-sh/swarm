@@ -1022,9 +1022,9 @@ func (b *endpointCensusBuilder) addMetadataBoundaryEndpoints() {
 			endpoint.SourceLocation = "swarm.source"
 			b.add(endpoint)
 		}
-		for _, consumer := range entry.SwarmConsumer() {
+		if boundary := entry.AcceptedConsumerBoundary(); boundary != runtimecontracts.EventConsumerBoundaryNone {
 			endpoint := b.endpoint(EventEndpointConsumer, EventEndpointExternal, "", eventType)
-			endpoint.Role = strings.TrimSpace(consumer)
+			endpoint.Role = boundary.String()
 			endpoint.SourceLocation = "swarm.consumer"
 			b.add(endpoint)
 		}

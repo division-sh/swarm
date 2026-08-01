@@ -401,7 +401,6 @@ func selectedContractPipelineCoordinatorOptions(
 		GatePublisher:           bus,
 		DirectDecisionPublisher: bus,
 		DeliveryRuntime:         bus,
-		PinRoutingDescriptors:   bus,
 		FlowRoutes:              bus,
 		RunLifecycle:            ports.busDurable.RunLifecycle,
 		Credentials:             agentRuntime.Credentials,

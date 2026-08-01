@@ -62,7 +62,6 @@ type PipelineCoordinator struct {
 	directDecisionPublisher DecisionCardDirectMutationPublisher
 	deliveryStore           runtimedelivery.Store
 	deliveryRuntime         WorkflowDeliveryRuntime
-	pinRoutingDescriptors   PinRoutingDescriptorSource
 	flowRoutes              FlowInstanceRouteOwner
 	credentials             runtimecredentials.Store
 	managedCredentials      runtimemanagedcredentials.Store
@@ -102,7 +101,6 @@ type PipelineCoordinatorOptions struct {
 	GatePublisher                    WorkflowGateMutationPublisher
 	DirectDecisionPublisher          DecisionCardDirectMutationPublisher
 	DeliveryRuntime                  WorkflowDeliveryRuntime
-	PinRoutingDescriptors            PinRoutingDescriptorSource
 	FlowRoutes                       FlowInstanceRouteOwner
 	RunLifecycle                     runtimerunlifecycle.OperationOwner
 	Credentials                      runtimecredentials.Store
@@ -227,7 +225,6 @@ func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		directDecisionPublisher:          opts.DirectDecisionPublisher,
 		deliveryStore:                    opts.DeliveryStore,
 		deliveryRuntime:                  opts.DeliveryRuntime,
-		pinRoutingDescriptors:            opts.PinRoutingDescriptors,
 		flowRoutes:                       opts.FlowRoutes,
 		credentials:                      credentials,
 		managedCredentials:               opts.ManagedCredentials,

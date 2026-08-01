@@ -180,15 +180,10 @@ var detailClasses = map[string]Class{
 
 var targetDetailClasses = map[string]Class{
 	"target_required_missing":                  ClassTargetUnreachable,
-	"target_invalid_syntax":                    ClassTargetUnreachable,
 	"target_unreachable_no_subscriber":         ClassTargetUnreachable,
 	"target_not_subscribed":                    ClassTargetUnreachable,
 	"target_unreachable_terminated":            ClassTargetUnreachable,
 	"parent_route_incomplete":                  ClassTargetUnreachable,
-	"target_ambiguous":                         ClassTargetAmbiguous,
-	"target_unknown_flow":                      ClassTargetUnreachable,
-	"target_sender_no_inbound_runtime":         ClassTargetUnreachable,
-	"target_sender_empty_source_runtime":       ClassTargetUnreachable,
 	"route_plan_instance_source_value_missing": ClassTargetUnreachable,
 	"route_plan_target_unresolved":             ClassTargetUnreachable,
 	"route_plan_target_ambiguous":              ClassTargetAmbiguous,

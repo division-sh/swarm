@@ -106,7 +106,7 @@ func (p FlowOutputEventPin) normalized() FlowOutputEventPin {
 	out := FlowOutputEventPin{
 		Name:    strings.TrimSpace(p.Name),
 		Event:   strings.TrimSpace(p.Event),
-		Sink:    FlowOutputSink(strings.ToLower(p.Sink.String())),
+		Sink:    p.Sink,
 		Key:     strings.TrimSpace(p.Key),
 		Carries: normalizeOutputPinCarries(p.Carries),
 	}

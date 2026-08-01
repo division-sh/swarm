@@ -311,7 +311,7 @@ func TestBuildDoesNotReconstructMissingConnectSourceFromBundlePaths(t *testing.T
 	}
 }
 
-func TestBuildDoesNotInventDeliveryEdgesForMetadataSources(t *testing.T) {
+func TestBuildDoesNotInventExternalConsumerForFreeFormMetadata(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"worker": {ID: "worker", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
@@ -323,8 +323,13 @@ func TestBuildDoesNotInventDeliveryEdgesForMetadataSources(t *testing.T) {
 		},
 	})
 	topology := Build(source)
-	if len(topology.Producers) < 2 || len(topology.Consumers) < 2 {
-		t.Fatalf("metadata endpoints missing from census: producers=%#v consumers=%#v", topology.Producers, topology.Consumers)
+	if len(topology.Producers) < 2 {
+		t.Fatalf("external source endpoint missing from census: producers=%#v", topology.Producers)
+	}
+	for _, consumer := range topology.Consumers {
+		if consumer.Kind == "external" {
+			t.Fatalf("free-form swarm.consumer created external authority: %#v", consumer)
+		}
 	}
 	for _, edge := range topology.Edges {
 		if edge.Producer.Kind == "external" || edge.Producer.Kind == "platform" || edge.Consumer.Kind == "external" || edge.Consumer.Kind == "platform" {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -125,6 +126,82 @@ func TestMigrateProducerRoutingPreflightsWholeBundleBeforeWriting(t *testing.T) 
 		if !bytes.Equal(got, want) {
 			t.Fatalf("bundle preflight changed %s\nbefore:\n%s\nafter:\n%s", relative, want, got)
 		}
+	}
+}
+
+func TestMigrateProducerRoutingIgnoresNestedLiteralEmitMap(t *testing.T) {
+	repo := canonicalrouting.RepoRoot(t)
+	root := writeProducerRoutingCodemodBundle(t, map[string]string{
+		"nodes.yaml": producerRoutingNodes(`
+    request:
+      emit:
+        event: task.done
+        fields:
+          config:
+            literal:
+              emit:
+                broadcast: true`),
+	})
+	path := filepath.Join(root, "nodes.yaml")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	code := executeRootCommand(context.Background(), repo, []string{"migrate-producer-routing", "--contracts", root}, &out, &errOut)
+	if code != 0 || !strings.Contains(out.String(), "no deterministic emit.broadcast: true declarations found") {
+		t.Fatalf("migrate code/stdout/stderr = %d/%q/%q", code, out.String(), errOut.String())
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("nested literal was rewritten\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+func TestMigrateProducerRoutingCoversEveryStructuredNestedEmitSurface(t *testing.T) {
+	repo := canonicalrouting.RepoRoot(t)
+	root := writeProducerRoutingCodemodBundle(t, map[string]string{
+		"nodes.yaml": producerRoutingNodes(`
+    nested:
+      on_success:
+        emit: {event: task.success, broadcast: true}
+      rules:
+        - id: direct
+          emit: {event: task.rule, broadcast: true}
+        - id: expanded
+          fan_out:
+            items_from: payload.items
+            as: item
+            identity: item.id
+            emit: {event: task.rule_item, broadcast: true}
+      on_complete:
+        emit: {event: task.complete, broadcast: true}
+      join:
+        stage: waiting
+        members: {from: entity.ids, by: payload.id}
+        output: payload.result
+        on_complete:
+          emit: {event: task.joined, broadcast: true}
+        timeout:
+          after: 1h
+          emit: {event: task.timed_out, broadcast: true}`),
+	})
+
+	var out, errOut bytes.Buffer
+	code := executeRootCommand(context.Background(), repo, []string{"migrate-producer-routing", "--contracts", root}, &out, &errOut)
+	if code != 0 || !strings.Contains(out.String(), "removed 6 retired emit.broadcast: true declarations") {
+		t.Fatalf("migrate code/stdout/stderr = %d/%q/%q", code, out.String(), errOut.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "nodes.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retired, err := runtimecontracts.HasRetiredProducerRoutingYAML(raw); err != nil || retired {
+		t.Fatalf("retired routing after codemod = %v, err = %v\n%s", retired, err, raw)
 	}
 }
 

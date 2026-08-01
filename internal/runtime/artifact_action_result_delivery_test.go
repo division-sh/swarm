@@ -76,7 +76,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 				PipelineObligations: pg.PipelineObligations(),
 				DeliveryStore:       pg,
 				GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-				PinRoutingDescriptors: bus, FlowRoutes: bus,
+				FlowRoutes:   bus,
 				ArtifactRoot: t.TempDir(),
 				TestWorkflowNodeHandlerStartHook: func(_ context.Context, nodeID string, evt events.Event) error {
 					if strings.TrimSpace(nodeID) == "repo-scaffold-node" && strings.TrimSpace(string(evt.Type())) == resultEventType {
@@ -228,7 +228,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 				PipelineObligations: pg.PipelineObligations(),
 				DeliveryStore:       pg,
 				GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-				PinRoutingDescriptors: bus, FlowRoutes: bus,
+				FlowRoutes:   bus,
 				ArtifactRoot: t.TempDir(),
 				TestWorkflowNodeHandlerStartHook: func(_ context.Context, nodeID string, evt events.Event) error {
 					if strings.TrimSpace(nodeID) == "repo-scaffold-node" && strings.TrimSpace(string(evt.Type())) == resultEventType {

@@ -13,7 +13,6 @@ import (
 
 func checkPinTargetResolution(c *checkerContext) []Finding {
 	findings := []Finding{}
-	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
 	flowIDs := []string{""}
 	for flowID := range c.source.FlowSchemaEntries() {
 		if strings.TrimSpace(flowID) != "" {
@@ -22,7 +21,21 @@ func checkPinTargetResolution(c *checkerContext) []Finding {
 	}
 	for _, flowID := range flowIDs {
 		for _, pin := range c.source.FlowOutputEventPins(flowID) {
-			if pin.Sink != "harness" || !pinRoutingOutputHasCanonicalConsumer(c.source, census, flowID, pin.EventType()) {
+			consumer := runtimepinrouting.ClassifyOutputConsumer(c.source, flowID, pin.EventType())
+			if consumer.InvalidSink() {
+				location := strings.TrimSpace(flowID)
+				if location == "" {
+					location = "root"
+				}
+				findings = append(findings, Finding{
+					CheckID:  "pin_target_resolution",
+					Severity: SeverityHardInvalidity,
+					Message:  fmt.Sprintf("output pin %s in %s declares an invalid sink; the only supported value is sink: harness", pin.PinName(), location),
+					Location: location,
+				})
+				continue
+			}
+			if !consumer.Has(runtimepinrouting.OutputConsumerHarness) || !consumer.HasRuntimeConsumer() {
 				continue
 			}
 			location := strings.TrimSpace(flowID)
@@ -45,8 +58,8 @@ func checkPinTargetResolution(c *checkerContext) []Finding {
 		if runtimepinrouting.OutputHarnessSink(c.source, site.FlowID, eventType) {
 			continue
 		}
-		hasCanonicalConsumer := pinRoutingOutputHasCanonicalConsumer(c.source, census, site.FlowID, eventType)
-		if !hasCanonicalConsumer {
+		consumer := runtimepinrouting.ClassifyOutputConsumer(c.source, site.FlowID, eventType)
+		if !consumer.HasRuntimeConsumer() {
 			findings = append(findings, pinTargetFinding(site, string(runtimepinrouting.FailureTargetRequiredMissing)))
 		}
 	}
@@ -57,21 +70,12 @@ func checkPinTargetResolution(c *checkerContext) []Finding {
 		if runtimepinrouting.OutputHarnessSink(c.source, site.FlowID, site.EventType) {
 			continue
 		}
-		hasCanonicalConsumer := pinRoutingOutputHasCanonicalConsumer(c.source, census, site.FlowID, site.EventType)
-		if !hasCanonicalConsumer {
+		consumer := runtimepinrouting.ClassifyOutputConsumer(c.source, site.FlowID, site.EventType)
+		if !consumer.HasRuntimeConsumer() {
 			findings = append(findings, pinTargetAgentFinding(site, string(runtimepinrouting.FailureTargetRequiredMissing)))
 		}
 	}
 	return findings
-}
-
-func pinRoutingOutputHasCanonicalConsumer(source semanticview.Source, census semanticview.AuthoredEventEndpointCensus, flowID, eventType string) bool {
-	if runtimepinrouting.OutputHasExternalConsumer(source, flowID, eventType) ||
-		compositionConnectsFromOutputEvent(source, flowID, eventType) ||
-		pinRoutingStructuralParentRouteEligible(source, flowID) {
-		return true
-	}
-	return len(census.MatchingConsumers(flowID, eventType)) > 0
 }
 
 func checkRedundantInTopologySelectEntity(c *checkerContext) []Finding {
@@ -216,17 +220,6 @@ func pinTargetAgentFinding(site pinRoutingAgentEmitSite, reason string) Finding 
 	}
 }
 
-func pinRoutingStructuralParentRouteEligible(source semanticview.Source, flowID string) bool {
-	if source == nil {
-		return false
-	}
-	if schema, ok := source.FlowSchemaByID(flowID); ok && strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
-		return true
-	}
-	path := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
-	return strings.Contains(path, "/")
-}
-
 func (c *checkerContext) pinRoutingEventExternalSource(flowID, eventType string) bool {
 	if c.source == nil {
 		return false
@@ -261,7 +254,8 @@ func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eve
 		}
 		producers++
 		connectedToReceiver := topologyConnectsProducerToReceiver(topology, endpoint.ID, flowID)
-		if connectedToReceiver || pinRoutingStructuralParentRouteEligible(source, site.FlowID) {
+		consumer := runtimepinrouting.ClassifyOutputConsumer(source, site.FlowID, site.Spec.EventType())
+		if connectedToReceiver || consumer.Has(runtimepinrouting.OutputConsumerStructuralParent) {
 			targeted++
 		}
 	}

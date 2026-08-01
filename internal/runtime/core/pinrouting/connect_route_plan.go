@@ -913,7 +913,7 @@ func descriptorRouteForReceiver(plan ConnectRoutePlan, descriptor Descriptor) ev
 	if !descriptorBelongsToReceiver(plan, descriptor) {
 		return events.RouteIdentity{}
 	}
-	return descriptorRoute(nil, plan.Receiver.FlowID, descriptor)
+	return descriptorRoute(plan.Receiver.FlowID, descriptor)
 }
 
 func descriptorBelongsToReceiver(plan ConnectRoutePlan, descriptor Descriptor) bool {

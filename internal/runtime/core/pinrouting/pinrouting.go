@@ -50,6 +50,81 @@ type Resolution struct {
 	Failure  TargetFailure
 }
 
+type OutputConsumerClass uint8
+
+const (
+	OutputConsumerNone OutputConsumerClass = iota
+	OutputConsumerHarness
+	OutputConsumerSameFlow
+	OutputConsumerConnect
+	OutputConsumerStructuralParent
+	OutputConsumerExternal
+)
+
+type OutputConsumerClassification struct {
+	classes     map[OutputConsumerClass]struct{}
+	invalidSink bool
+	connects    []ConnectRoutePlan
+}
+
+func (c OutputConsumerClassification) Has(class OutputConsumerClass) bool {
+	_, ok := c.classes[class]
+	return ok
+}
+
+func (c OutputConsumerClassification) InvalidSink() bool {
+	return c.invalidSink
+}
+
+func (c OutputConsumerClassification) HasRuntimeConsumer() bool {
+	return c.Has(OutputConsumerSameFlow) || c.Has(OutputConsumerConnect) || c.Has(OutputConsumerStructuralParent) || c.Has(OutputConsumerExternal)
+}
+
+func ClassifyOutputConsumer(source semanticview.Source, flowID, eventType string) OutputConsumerClassification {
+	classification := OutputConsumerClassification{classes: map[OutputConsumerClass]struct{}{}}
+	if source == nil {
+		return classification
+	}
+	for _, pin := range outputPinsForEvent(source, flowID, eventType) {
+		if !pin.Sink.Valid() {
+			classification.invalidSink = true
+			continue
+		}
+		if pin.Sink == runtimecontracts.FlowOutputSinkHarness {
+			classification.classes[OutputConsumerHarness] = struct{}{}
+		}
+	}
+	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).MatchingConsumers(flowID, eventType) {
+		if endpoint.Kind != semanticview.EventEndpointExternal {
+			classification.classes[OutputConsumerSameFlow] = struct{}{}
+			break
+		}
+	}
+	classification.connects = compositionConnectRoutePlansFromOutputEvent(source, flowID, eventType)
+	if len(classification.connects) > 0 {
+		classification.classes[OutputConsumerConnect] = struct{}{}
+	}
+	if structuralParentRouteEligible(source, flowID) {
+		classification.classes[OutputConsumerStructuralParent] = struct{}{}
+	}
+	entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, eventType)
+	if ok && entry.AcceptedConsumerBoundary() == runtimecontracts.EventConsumerBoundaryExternal {
+		classification.classes[OutputConsumerExternal] = struct{}{}
+	}
+	return classification
+}
+
+func structuralParentRouteEligible(source semanticview.Source, flowID string) bool {
+	if source == nil {
+		return false
+	}
+	if schema, ok := source.FlowSchemaByID(flowID); ok && strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+		return true
+	}
+	path := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
+	return strings.Contains(path, "/")
+}
+
 func PinDeclaredOutput(source semanticview.Source, flowID, eventType string) bool {
 	flowID = strings.TrimSpace(flowID)
 	eventType = eventidentity.Normalize(eventType)
@@ -77,10 +152,6 @@ func PinDeclaredOutput(source semanticview.Source, flowID, eventType string) boo
 		}
 	}
 	return false
-}
-
-func compositionConnectsFromOutputEvent(source semanticview.Source, flowID, eventType string) bool {
-	return len(compositionConnectRoutePlansFromOutputEvent(source, flowID, eventType)) > 0
 }
 
 func compositionConnectRoutePlansFromOutputEvent(source semanticview.Source, flowID, eventType string) []ConnectRoutePlan {
@@ -219,10 +290,14 @@ func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resol
 	if !PinDeclaredOutput(input.Source, input.FlowID, input.EventType) {
 		return Resolution{Envelope: envelope.Normalized()}
 	}
-	if OutputHarnessSink(input.Source, input.FlowID, input.EventType) {
+	consumer := ClassifyOutputConsumer(input.Source, input.FlowID, input.EventType)
+	if consumer.InvalidSink() || (consumer.Has(OutputConsumerHarness) && consumer.HasRuntimeConsumer()) {
+		return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetRequiredMissing}
+	}
+	if consumer.Has(OutputConsumerHarness) || consumer.Has(OutputConsumerSameFlow) || consumer.Has(OutputConsumerExternal) {
 		return Resolution{Envelope: envelope.Normalized()}
 	}
-	connectPlans := compositionConnectRoutePlansFromOutputEvent(input.Source, input.FlowID, input.EventType)
+	connectPlans := consumer.connects
 	if len(connectPlans) > 0 {
 		if connectPlansContainRootReceiver(connectPlans) {
 			parentRoute := input.ParentRoute.Normalized()
@@ -262,20 +337,11 @@ func connectPlansContainRootReceiver(plans []ConnectRoutePlan) bool {
 }
 
 func OutputHarnessSink(source semanticview.Source, flowID, eventType string) bool {
-	for _, pin := range outputPinsForEvent(source, flowID, eventType) {
-		if pin.Sink == runtimecontracts.FlowOutputSinkHarness {
-			return true
-		}
-	}
-	return false
+	return ClassifyOutputConsumer(source, flowID, eventType).Has(OutputConsumerHarness)
 }
 
 func OutputHasExternalConsumer(source semanticview.Source, flowID, eventType string) bool {
-	if source == nil {
-		return false
-	}
-	entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, eventType)
-	return ok && len(entry.SwarmConsumer()) > 0
+	return ClassifyOutputConsumer(source, flowID, eventType).Has(OutputConsumerExternal)
 }
 
 func routeFromEvent(evt events.Event) events.RouteIdentity {
@@ -293,7 +359,7 @@ func routeFromEvent(evt events.Event) events.RouteIdentity {
 	}.Normalized()
 }
 
-func descriptorRoute(source semanticview.Source, flowID string, descriptor Descriptor) events.RouteIdentity {
+func descriptorRoute(flowID string, descriptor Descriptor) events.RouteIdentity {
 	flowInstance := strings.Trim(strings.TrimSpace(descriptor.FlowInstance), "/")
 	entityID := strings.TrimSpace(descriptor.EntityID)
 	if flowInstance == "" && entityID == "" {
@@ -303,34 +369,10 @@ func descriptorRoute(source semanticview.Source, flowID string, descriptor Descr
 		entityID = runtimeflowidentity.EntityID(flowInstance)
 	}
 	return events.RouteIdentity{
-		FlowID:       strings.TrimSpace(flowIDForInstance(source, flowID, flowInstance)),
+		FlowID:       strings.TrimSpace(flowID),
 		FlowInstance: flowInstance,
 		EntityID:     entityID,
 	}.Normalized()
-}
-
-func flowIDForInstance(source semanticview.Source, fallbackFlowID, flowInstance string) string {
-	fallbackFlowID = strings.TrimSpace(fallbackFlowID)
-	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
-	if source == nil || flowInstance == "" {
-		return fallbackFlowID
-	}
-	for _, scope := range source.FlowScopes() {
-		scopePath := strings.Trim(strings.TrimSpace(scope.Path), "/")
-		if scopePath != "" && (flowInstance == scopePath || strings.HasPrefix(flowInstance, scopePath+"/")) {
-			return strings.TrimSpace(scope.ID)
-		}
-	}
-	return fallbackFlowID
-}
-
-func routeMatchesFlow(source semanticview.Source, flowID, flowInstance string) bool {
-	if source == nil {
-		return true
-	}
-	scope := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
-	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
-	return scope == "" || flowInstance == scope || strings.HasPrefix(flowInstance, scope+"/")
 }
 
 func uniqueRoutes(in []events.RouteIdentity) []events.RouteIdentity {
