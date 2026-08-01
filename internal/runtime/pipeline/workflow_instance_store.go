@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -126,6 +127,7 @@ type workflowInstanceStore struct {
 	runtimeMutation  runtimeMutationRunner
 	entityQuery      entityquery.Reader
 	routeRecovery    runtimeworkflowroute.RecoveryReader
+	activityResults  runtimeactivityresult.Reader
 	timerObligations runtimetimerobligation.Reader
 	deliveryStore    runtimedelivery.Store
 	pipelineStore    runtimepipelineobligation.Store
@@ -207,13 +209,15 @@ type WorkflowPersistence struct {
 func NewPostgresWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) WorkflowPersistence {
 	reader, _ := runner.(entityquery.Reader)
 	routeRecovery, _ := runner.(runtimeworkflowroute.RecoveryReader)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery}}
+	activityResults, _ := runner.(runtimeactivityresult.Reader)
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults}}
 }
 
 func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) WorkflowPersistence {
 	reader, _ := runner.(entityquery.Reader)
 	routeRecovery, _ := runner.(runtimeworkflowroute.RecoveryReader)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery}}
+	activityResults, _ := runner.(runtimeactivityresult.Reader)
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults}}
 }
 
 func (p WorkflowPersistence) empty() bool {

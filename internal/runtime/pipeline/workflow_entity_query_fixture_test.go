@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	"github.com/division-sh/swarm/internal/runtime/entityquery"
@@ -14,12 +15,47 @@ import (
 	runtimeworkflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
 )
 
+func (r *recordingRuntimeMutationRunner) LoadRecordedActivityResult(ctx context.Context, request runtimeactivityresult.Query) (runtimeactivityresult.Record, bool, error) {
+	if r == nil || r.db == nil {
+		return runtimeactivityresult.Record{}, false, fmt.Errorf("test activity result reader is required")
+	}
+	query := `SELECT event_id::text, event_name, payload::text FROM events WHERE event_id IN ($1::uuid, $2::uuid) ORDER BY event_id`
+	if r.dialect != workflowStoreDialectPostgres {
+		query = `SELECT event_id, event_name, payload FROM events WHERE event_id IN (?, ?) ORDER BY event_id`
+	}
+	rows, err := r.db.QueryContext(ctx, query, request.SuccessEventID, request.FailureEventID)
+	if err != nil {
+		return runtimeactivityresult.Record{}, false, err
+	}
+	defer rows.Close()
+	found := make([]runtimeactivityresult.Record, 0, 2)
+	for rows.Next() {
+		var record runtimeactivityresult.Record
+		var payload string
+		if err := rows.Scan(&record.EventID, &record.EventType, &payload); err != nil {
+			return runtimeactivityresult.Record{}, false, err
+		}
+		record.Payload = append(record.Payload, payload...)
+		found = append(found, record)
+	}
+	if err := rows.Err(); err != nil {
+		return runtimeactivityresult.Record{}, false, err
+	}
+	if len(found) == 0 {
+		return runtimeactivityresult.Record{}, false, nil
+	}
+	if len(found) != 1 {
+		return runtimeactivityresult.Record{}, false, fmt.Errorf("activity request %s has both success and failure results recorded", request.RequestEventID)
+	}
+	return found[0], true, nil
+}
+
 func (r *recordingRuntimeMutationRunner) LoadActiveWorkflowRoute(ctx context.Context, instancePath string) (runtimeworkflowroute.RecoveryRecord, error) {
 	if r == nil || r.db == nil {
 		return runtimeworkflowroute.RecoveryRecord{}, fmt.Errorf("test workflow route recovery reader is required")
 	}
 	query := `SELECT flow_template, config FROM flow_instances WHERE instance_id = $1 AND status = 'active' AND terminated_at IS NULL`
-	if r.dialect == workflowStoreDialectSQLite {
+	if r.dialect != workflowStoreDialectPostgres {
 		query = `SELECT flow_template, config FROM flow_instances WHERE instance_id = ? AND status = 'active' AND terminated_at IS NULL`
 	}
 	var record runtimeworkflowroute.RecoveryRecord
@@ -54,7 +90,7 @@ func (r *recordingRuntimeMutationRunner) CountWorkflowEntities(ctx context.Conte
 		return 0, err
 	}
 	query := `SELECT fields, current_state, flow_instance FROM entity_state WHERE run_id = $1::uuid ORDER BY entity_id`
-	if r.dialect == workflowStoreDialectSQLite {
+	if r.dialect != workflowStoreDialectPostgres {
 		query = `SELECT fields, current_state, flow_instance FROM entity_state WHERE run_id = ? ORDER BY entity_id`
 	}
 	rows, err := r.db.QueryContext(ctx, query, runID)
