@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	runtimeworkflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
 	"github.com/lib/pq"
 )
 
@@ -124,6 +125,7 @@ type workflowInstanceStore struct {
 	dialect          workflowStoreDialect
 	runtimeMutation  runtimeMutationRunner
 	entityQuery      entityquery.Reader
+	routeRecovery    runtimeworkflowroute.RecoveryReader
 	timerObligations runtimetimerobligation.Reader
 	deliveryStore    runtimedelivery.Store
 	pipelineStore    runtimepipelineobligation.Store
@@ -204,12 +206,14 @@ type WorkflowPersistence struct {
 
 func NewPostgresWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) WorkflowPersistence {
 	reader, _ := runner.(entityquery.Reader)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader}}
+	routeRecovery, _ := runner.(runtimeworkflowroute.RecoveryReader)
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery}}
 }
 
 func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) WorkflowPersistence {
 	reader, _ := runner.(entityquery.Reader)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader}}
+	routeRecovery, _ := runner.(runtimeworkflowroute.RecoveryReader)
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery}}
 }
 
 func (p WorkflowPersistence) empty() bool {

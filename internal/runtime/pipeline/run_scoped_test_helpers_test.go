@@ -33,6 +33,7 @@ func newTestSQLiteWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 		db:               db,
 		dialect:          workflowStoreDialectSQLite,
 		entityQuery:      reader,
+		routeRecovery:    reader,
 		runLifecycle:     &unavailablePipelineTestRunLifecycle{},
 		timerObligations: pipelineTestTimerObligationReader{db: db, dialect: timerobligationadapter.DialectSQLite},
 	}
