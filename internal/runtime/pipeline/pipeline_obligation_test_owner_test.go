@@ -228,7 +228,7 @@ func completeDurablePipelineTestOptions(bus Bus, opts PipelineCoordinatorOptions
 }
 
 func newDurablePipelineCoordinatorForTest(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
-	return NewPipelineCoordinatorWithOptions(bus, db, completeDurablePipelineTestOptions(bus, opts))
+	return NewPipelineCoordinatorWithOptions(bus, completeDurablePipelineTestOptions(bus, opts))
 }
 
 func TestPipelineCoordinatorRequiresCanonicalObligationOwner(t *testing.T) {
@@ -237,7 +237,7 @@ func TestPipelineCoordinatorRequiresCanonicalObligationOwner(t *testing.T) {
 		t.Fatal("explicit preview coordinator was not constructed")
 	}
 
-	if durable := NewPipelineCoordinatorWithOptions(previewBus{}, nil, PipelineCoordinatorOptions{
+	if durable := NewPipelineCoordinatorWithOptions(previewBus{}, PipelineCoordinatorOptions{
 		Module:      module,
 		Persistence: WorkflowPersistence{store: &workflowInstanceStore{db: new(sql.DB)}},
 	}); durable != nil {

@@ -1365,7 +1365,6 @@ opco.ceo_ready:
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
-		db:             db,
 		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
@@ -1447,7 +1446,6 @@ states: [initializing, ready]
 	workflowStore := newPostgresWorkflowInstanceStoreForTest(db)
 	pc := &PipelineCoordinator{
 		bus:            &recordingPipelineBus{},
-		db:             db,
 		workflowStore:  workflowStore,
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},

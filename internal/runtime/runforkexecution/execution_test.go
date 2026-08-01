@@ -789,7 +789,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		guards:  runtimepipeline.NewContractGuardRegistry(loaded.Source),
 		actions: runtimepipeline.NewContractActionRegistry(loaded.Source),
 	}
-	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(sourceBus, db, runtimepipeline.PipelineCoordinatorOptions{
+	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(sourceBus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  workflowOwner,
 		Persistence:             runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
 		RunLifecycle:            pg,

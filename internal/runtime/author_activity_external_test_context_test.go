@@ -90,7 +90,7 @@ func newExternalRuntimeTestPipelineCoordinator(
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()
 	}
-	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, opts)
+	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, opts)
 	if coordinator == nil {
 		t.Fatal("construct durable pipeline coordinator with complete workflow owners")
 	}

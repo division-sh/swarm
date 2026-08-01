@@ -258,7 +258,7 @@ func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	registerTestAuthorActivityCatalog(t, pg, "score.requested")
 	bus := catalogPersistenceBus{}
-	workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  &fixtureWorkflowModule{},
 		Persistence:             runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
 		RunLifecycle:            pg,

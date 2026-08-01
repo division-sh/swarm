@@ -229,7 +229,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			runtime, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
 				Config: &config.Config{Runtime: config.RuntimeConfig{RecoveryOnStartup: true}, LLM: config.LLMConfig{Backend: "anthropic"}},
 
-				SQLDB: runtimeSQLDB, EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
+				EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
 				EventPayloadValidationBinder: selected, AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
 				RunLifecycleCandidates: selected, WorkflowPersistence: workflowPersistence,
 				ManagerStore: selected, ManagerLifecycleStore: selected,
@@ -324,14 +324,12 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 			for _, test := range cases {
 				t.Run(backend+"/"+mode.name+"/"+test.name, func(t *testing.T) {
 					var (
-						runtimeSQLDB *sql.DB
-						db           *sql.DB
-						selected     startupRecoveryOrderStore
+						db       *sql.DB
+						selected startupRecoveryOrderStore
 					)
 					if backend == "postgres" {
 						_, postgresDB, cleanup := testutil.StartPostgres(t)
 						t.Cleanup(cleanup)
-						runtimeSQLDB = postgresDB
 						db = postgresDB
 						selected = storetest.AdmitPostgresRuntimeStore(t, postgresDB)
 					} else {
@@ -421,7 +419,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 							LLM:     config.LLMConfig{Backend: "anthropic"},
 						},
 
-						SQLDB: runtimeSQLDB, EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
+						EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
 						EventPayloadValidationBinder: selected, AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
 						RunLifecycleCandidates: selected, WorkflowPersistence: workflowPersistence,
 						ManagerStore: selected, ManagerLifecycleStore: selected,

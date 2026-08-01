@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,7 +43,6 @@ type RunBundleAvailabilityReader interface {
 
 type PipelineCoordinator struct {
 	bus Bus
-	db  *sql.DB
 
 	mu sync.Mutex
 
@@ -68,6 +66,7 @@ type PipelineCoordinator struct {
 	gatePublisher           WorkflowGateMutationPublisher
 	directDecisionPublisher DecisionCardDirectMutationPublisher
 	deliveryStore           runtimedelivery.Store
+	deadLetters             runtimedeadletters.Persistence
 	deliveryRuntime         WorkflowDeliveryRuntime
 	flowRoutes              FlowInstanceRouteOwner
 	credentials             runtimecredentials.Store
@@ -96,6 +95,7 @@ type PipelineCoordinatorOptions struct {
 	Module                           WorkflowModule
 	Persistence                      WorkflowPersistence
 	DeliveryStore                    runtimedelivery.Store
+	DeadLetters                      runtimedeadletters.Persistence
 	PipelineObligations              runtimepipelineobligation.Store
 	InstanceActivator                FlowInstanceActivator
 	InstanceDeactivator              FlowInstanceDeactivator
@@ -184,15 +184,15 @@ func copyActivityToolEntries(in map[string]ChannelActivityTarget) map[string]Cha
 	return out
 }
 
-func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
-	return newPipelineCoordinatorWithOptions(bus, db, opts, true)
+func NewPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions) *PipelineCoordinator {
+	return newPipelineCoordinatorWithOptions(bus, opts, true)
 }
 
 func newPreviewPipelineCoordinator(bus Bus, opts PipelineCoordinatorOptions) *PipelineCoordinator {
-	return newPipelineCoordinatorWithOptions(bus, nil, opts, false)
+	return newPipelineCoordinatorWithOptions(bus, opts, false)
 }
 
-func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions, requireObligationOwner bool) *PipelineCoordinator {
+func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions, requireObligationOwner bool) *PipelineCoordinator {
 	if bus == nil {
 		return nil
 	}
@@ -223,7 +223,6 @@ func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 	}
 	coordinator := &PipelineCoordinator{
 		bus:                              bus,
-		db:                               db,
 		module:                           module,
 		expressionEval:                   newWorkflowExpressionEvaluator(),
 		instanceActivator:                opts.InstanceActivator,
@@ -239,6 +238,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		gatePublisher:                    opts.GatePublisher,
 		directDecisionPublisher:          opts.DirectDecisionPublisher,
 		deliveryStore:                    opts.DeliveryStore,
+		deadLetters:                      opts.DeadLetters,
 		deliveryRuntime:                  opts.DeliveryRuntime,
 		flowRoutes:                       opts.FlowRoutes,
 		credentials:                      credentials,
@@ -303,7 +303,7 @@ func (pc *PipelineCoordinator) FinalizeSelectedReceiverAdmission(admission manag
 	return nil
 }
 
-func NewPipelineCoordinator(bus Bus, db *sql.DB) *PipelineCoordinator {
+func NewPipelineCoordinator(bus Bus) *PipelineCoordinator {
 	panic("pipeline: workflow module is required")
 }
 
@@ -805,8 +805,8 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			ChainDepth:      intercepted.ChainDepth,
 			HandlerNode:     firstNonEmptyString(nodeID+":"+eventType, nodeID),
 		}
-		if pc.db != nil {
-			if err := recordPipelineDeadLetter(ctx, pc.db, rec); err != nil {
+		if pc.deadLetters != nil {
+			if err := pc.deadLetters.RecordDeadLetter(ctx, rec); err != nil {
 				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_persist_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
 					"intercepted_event_type": eventType,
 					"handler_node":           nodeID,

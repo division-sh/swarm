@@ -3221,7 +3221,7 @@ func TestActivateFlowInstanceCanonicalStoreFinalizesIdenticalReplayWithoutDuplic
 	agentStore := &flowActivationTestStore{}
 	workflowOwner := flowActivationTestRunLifecycleOwner{db: db}
 	bundle := testFlowBundle("task.started")
-	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, completeFlowActivationWorkflowOptions(runtimepipeline.PipelineCoordinatorOptions{
+	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, completeFlowActivationWorkflowOptions(runtimepipeline.PipelineCoordinatorOptions{
 		Module:              newFlowActivationWorkflowModule(t, bundle),
 		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, workflowOwner),
 		RunLifecycle:        workflowOwner,
@@ -3760,7 +3760,7 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	bus := &flowActivationTestBus{routeStore: routeStore}
 	workflowOwner := flowActivationTestRunLifecycleOwner{db: db}
 	bundle := testFlowBundle("")
-	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, completeFlowActivationWorkflowOptions(runtimepipeline.PipelineCoordinatorOptions{
+	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, completeFlowActivationWorkflowOptions(runtimepipeline.PipelineCoordinatorOptions{
 		Module:              newFlowActivationWorkflowModule(t, bundle),
 		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, workflowOwner),
 		RunLifecycle:        workflowOwner,
@@ -3862,7 +3862,7 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 	managerStore := &flowActivationTestStore{}
 	workflowOwner := flowActivationTestRunLifecycleOwner{db: db}
 	bundle := testFlowBundle("")
-	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, completeFlowActivationWorkflowOptions(runtimepipeline.PipelineCoordinatorOptions{
+	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, completeFlowActivationWorkflowOptions(runtimepipeline.PipelineCoordinatorOptions{
 		Module:              newFlowActivationWorkflowModule(t, bundle),
 		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, workflowOwner),
 		RunLifecycle:        workflowOwner,

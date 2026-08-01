@@ -1057,7 +1057,6 @@ func newEmitPersistenceTestCoordinator(db *sql.DB) (*PipelineCoordinator, *recor
 	}
 	pc := &PipelineCoordinator{
 		bus:            bus,
-		db:             db,
 		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
@@ -1458,7 +1457,6 @@ node-a:
 	}
 	pc := &PipelineCoordinator{
 		bus:            bus,
-		db:             db,
 		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
@@ -1589,7 +1587,6 @@ node-a:
 	}
 	pc := &PipelineCoordinator{
 		bus:            bus,
-		db:             db,
 		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
@@ -1711,7 +1708,6 @@ node-a:
 	}
 	pc := &PipelineCoordinator{
 		bus:            bus,
-		db:             db,
 		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
@@ -1845,7 +1841,6 @@ node-a:
 	}
 	pc := &PipelineCoordinator{
 		bus:            bus,
-		db:             db,
 		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
@@ -2239,7 +2234,6 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
-		db:             db,
 		module:         module,
 		workflowStore:  store,
 		expressionEval: newWorkflowExpressionEvaluator(),

@@ -1045,7 +1045,6 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 			Backend: "anthropic",
 		},
 	},
-		SQLDB:                       db,
 		WorkflowPersistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
 		EventStore:                  pg,
 		EventBusDurable:             conformanceDurableEventBusDependencies(pg),
@@ -1138,7 +1137,6 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 			Backend: "anthropic",
 		},
 	},
-		SQLDB:                       db,
 		WorkflowPersistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
 		EventStore:                  eventStore,
 		EventBusDurable:             conformanceDurableEventBusDependencies(pg),
@@ -1260,7 +1258,6 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 			Backend: "anthropic",
 		},
 	},
-		SQLDB:                       db,
 		WorkflowPersistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
 		EventStore:                  pg,
 		EventBusDurable:             conformanceDurableEventBusDependencies(pg),
@@ -1558,7 +1555,6 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 			Backend: "anthropic",
 		},
 	},
-		SQLDB:                       db,
 		WorkflowPersistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
 		EventStore:                  pg,
 		EventBusDurable:             conformanceDurableEventBusDependencies(pg),
@@ -1888,7 +1884,7 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 	if err != nil {
 		t.Fatalf("construct workflow mutation event bus: %v", err)
 	}
-	pipeline := runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, db, runtimepipeline.PipelineCoordinatorOptions{
+	pipeline := runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  module,
 		Persistence:             runtimepipeline.NewPostgresWorkflowPersistence(db, selected),
 		RunLifecycle:            selected,

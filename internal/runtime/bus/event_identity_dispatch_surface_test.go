@@ -268,7 +268,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 		if backend == "sqlite" {
 			workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected.(*store.SQLiteRuntimeStore))
 		}
-		workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
 			Module:                  standingDispatchWorkflowModule{},
 			Persistence:             workflowPersistence,
 			RunLifecycle:            selected,

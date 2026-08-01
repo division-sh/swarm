@@ -129,7 +129,7 @@ func newGateRecoveryCoordinator(bus gateRecoveryRuntimeBus, selected gateRecover
 	if opts.PipelineObligations == nil {
 		opts.PipelineObligations = selected.events.PipelineObligations()
 	}
-	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, opts)
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, opts)
 }
 
 type proposedEffectRouteProofBus struct {

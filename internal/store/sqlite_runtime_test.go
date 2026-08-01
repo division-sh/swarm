@@ -590,7 +590,7 @@ func configureSQLiteFlowActivationLifecycle(
 		guards:  runtimepipeline.NewContractGuardRegistry(source),
 		actions: runtimepipeline.NewContractActionRegistry(source),
 	}
-	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.DB, runtimepipeline.PipelineCoordinatorOptions{
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  module,
 		Persistence:             runtimepipeline.NewSQLiteWorkflowPersistence(selected.DB, selected),
 		RunLifecycle:            selected,

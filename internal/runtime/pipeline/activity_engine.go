@@ -3,7 +3,6 @@ package pipeline
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -611,54 +610,10 @@ type activityRecordedResult struct {
 }
 
 func (d pipelineActivityDispatcher) recordedActivityResult(ctx context.Context, intent runtimeengine.ActivityIntent) (activityRecordedResult, bool, error) {
-	if d.coordinator == nil || d.coordinator.db == nil {
+	if d.coordinator == nil || d.coordinator.workflowStore == nil {
 		return activityRecordedResult{}, false, nil
 	}
-	db := d.coordinator.db
-	successID := activityResultEventID(intent, intent.SuccessEvent)
-	failureID := activityResultEventID(intent, intent.FailureEvent)
-	var (
-		rows *sql.Rows
-		err  error
-	)
-	if d.coordinator.workflowStore != nil && d.coordinator.workflowStore.isSQLite() {
-		rows, err = db.QueryContext(ctx, `
-			SELECT event_id, event_name, payload
-			FROM events
-			WHERE event_id IN (?, ?)
-		`, successID, failureID)
-	} else {
-		rows, err = db.QueryContext(ctx, `
-			SELECT event_id::text, event_name, payload::text
-			FROM events
-			WHERE event_id IN ($1::uuid, $2::uuid)
-		`, successID, failureID)
-	}
-	if err != nil {
-		return activityRecordedResult{}, false, fmt.Errorf("lookup recorded activity result %s: %w", intent.ActivityID, err)
-	}
-	defer rows.Close()
-	var found []activityRecordedResult
-	for rows.Next() {
-		var result activityRecordedResult
-		var payload string
-		if err := rows.Scan(&result.EventID, &result.EventType, &payload); err != nil {
-			return activityRecordedResult{}, false, fmt.Errorf("scan recorded activity result %s: %w", intent.ActivityID, err)
-		}
-		result.Payload = json.RawMessage(payload)
-		found = append(found, result)
-	}
-	if err := rows.Err(); err != nil {
-		return activityRecordedResult{}, false, fmt.Errorf("iterate recorded activity result %s: %w", intent.ActivityID, err)
-	}
-	switch len(found) {
-	case 0:
-		return activityRecordedResult{}, false, nil
-	case 1:
-		return found[0], true, nil
-	default:
-		return activityRecordedResult{}, false, fmt.Errorf("activity request %s has both success and failure results recorded", activityRequestEventID(intent))
-	}
+	return d.coordinator.workflowStore.recordedActivityResult(ctx, intent)
 }
 
 func (d pipelineActivityDispatcher) logActivityRuntime(ctx context.Context, intent runtimeengine.ActivityIntent, action string, detail map[string]any) {

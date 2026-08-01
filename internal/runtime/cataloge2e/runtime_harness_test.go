@@ -194,7 +194,6 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID, BundleHash: authorActivityTestBundleSourceFact.BundleHash(), BundleSource: "ephemeral"})
 
 	rt, err := runtime.NewValidationHarnessRuntime(ctx, runtime.RuntimeDeps{Config: cfg,
-		SQLDB:               db,
 		WorkflowPersistence: workflowPersistence,
 		EventStore:          pg,
 		EventBusDurable: runtimebus.DurableDependencies{

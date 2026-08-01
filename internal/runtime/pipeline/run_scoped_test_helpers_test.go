@@ -129,9 +129,7 @@ func testPipelineCoordinatorRunContext(t *testing.T, pc *PipelineCoordinator) co
 		configurePipelineTestDeliveryOwner(t, pc)
 	}
 	var ctx context.Context
-	if pc.db != nil {
-		ctx = testPipelineRunContext(t, pc.db)
-	} else if pc.workflowStore != nil {
+	if pc.workflowStore != nil {
 		ctx = testWorkflowStoreRunContext(t, pc.workflowStore)
 	} else {
 		ctx = testPipelineRunContextNoSeed(t)

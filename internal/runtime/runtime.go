@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -100,7 +99,6 @@ type RuntimeOptions struct {
 type RuntimeDeps struct {
 	Config                         *config.Config
 	Options                        RuntimeOptions
-	SQLDB                          *sql.DB
 	EventStore                     runtimebus.EventStore
 	EventBusDurable                runtimebus.DurableDependencies
 	EventPayloadValidationBinder   EventPayloadValidationBinder
@@ -1027,7 +1025,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			return nil, fmt.Errorf("build run lifecycle completion executor: %w", err)
 		}
 		rt.runLifecycleExecutor = executor
-	} else if runtimeDeps.SQLDB != nil {
+	} else if runtimeDeps.WorkflowPersistence.Configured() {
 		return nil, fmt.Errorf("selected runtime store run lifecycle candidate owner is required")
 	}
 
@@ -1097,11 +1095,12 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		if err != nil {
 			return nil, fmt.Errorf("artifact repo root validation failed: %w", err)
 		}
-		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, runtimeDeps.SQLDB, runtimepipeline.PipelineCoordinatorOptions{
+		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, runtimepipeline.PipelineCoordinatorOptions{
 			ReceiverExecution:     eventreceiver.NormalExecution(),
 			Module:                opts.WorkflowModule,
 			Persistence:           runtimeDeps.WorkflowPersistence,
 			DeliveryStore:         runtimeDeps.DeliveryStore,
+			DeadLetters:           runtimeDeps.EventBusDurable.TargetFailureRecorder,
 			PipelineObligations:   runtimeDeps.PipelineObligations,
 			RunBundleAvailability: runtimeDeps.RunBundleAvailability,
 			InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -1151,7 +1150,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			return nil, fmt.Errorf("runtime workflow persistence construction is required")
 		}
 		if rt.Pipeline != nil {
-			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodes(rt.Bus, runtimeDeps.SQLDB)...)
+			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodes()...)
 		}
 	}
 
@@ -1282,7 +1281,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		PromptResolver: rt.PromptResolver,
 	})
 	lifecycleStore := runtimeDeps.ManagerLifecycleStore
-	if runtimeDeps.SQLDB != nil && lifecycleStore == nil {
+	if runtimeDeps.WorkflowPersistence.Configured() && lifecycleStore == nil {
 		return nil, fmt.Errorf("selected runtime store does not implement agent lifecycle persistence")
 	}
 	managerOptions := runtimemanager.AgentManagerOptions{

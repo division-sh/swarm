@@ -367,7 +367,7 @@ func newSelectedContractPipeline(
 	agentRuntime SelectedContractAgentRuntimeOptions,
 	instanceActivator runtimepipeline.FlowInstanceActivator,
 ) *runtimepipeline.PipelineCoordinator {
-	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, ports.db, selectedContractPipelineCoordinatorOptions(bus, ports, loaded, agentRuntime, instanceActivator))
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selectedContractPipelineCoordinatorOptions(bus, ports, loaded, agentRuntime, instanceActivator))
 }
 
 func selectedContractPipelineCoordinatorOptions(

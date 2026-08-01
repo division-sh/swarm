@@ -1168,7 +1168,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 	artifactRoot := t.TempDir()
-	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: artifactRoot}
+	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: artifactRoot}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
@@ -1292,7 +1292,7 @@ func TestPipelineEngineActionRunner_MockArtifactRepoCommitStopsBeforeActionLaunc
 			defer cleanup()
 
 			artifactRoot := filepath.Join(t.TempDir(), "must-not-exist")
-			pc := &PipelineCoordinator{db: db, artifactRoot: artifactRoot}
+			pc := &PipelineCoordinator{artifactRoot: artifactRoot}
 			action, execCtx := testArtifactRepoActionAndContext(
 				"22222222-2222-2222-2222-222222222222",
 				testArtifactRepoEntityFields(),
@@ -1504,7 +1504,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifac
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 	bus := &recordingPipelineBus{}
-	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: "/data/swarm/artifacts", bus: bus}
+	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: "/data/swarm/artifacts", bus: bus}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
@@ -1577,7 +1577,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoo
 			store := newPostgresWorkflowInstanceStoreForTest(db)
 			bus := &recordingPipelineBus{}
 			artifactRoot, _ := tc.root(t)
-			pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: artifactRoot, bus: bus}
+			pc := &PipelineCoordinator{workflowStore: store, artifactRoot: artifactRoot, bus: bus}
 			ctx := testWorkflowStoreRunContext(t, store)
 			entityID := "22222222-2222-2222-2222-222222222222"
 			initial := testArtifactRepoEntityFields()
@@ -1625,7 +1625,6 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t
 		t.Fatal("expected workflow fixture bundle")
 	}
 	pc := &PipelineCoordinator{
-		db:            db,
 		workflowStore: store,
 		artifactRoot:  t.TempDir(),
 		bus:           bus,
@@ -1726,7 +1725,6 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughO
 		t.Fatal("expected workflow fixture bundle")
 	}
 	pc := &PipelineCoordinator{
-		db:            db,
 		workflowStore: workflowStore,
 		artifactRoot:  t.TempDir(),
 		bus:           bus,
@@ -1795,7 +1793,6 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 		t.Fatal("expected workflow fixture bundle")
 	}
 	pc := &PipelineCoordinator{
-		db:            db,
 		workflowStore: workflowStore,
 		artifactRoot:  t.TempDir(),
 		bus:           bus,
@@ -1868,7 +1865,6 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureR
 		t.Fatal("expected workflow fixture bundle")
 	}
 	pc := &PipelineCoordinator{
-		db:            db,
 		workflowStore: workflowStore,
 		artifactRoot:  t.TempDir(),
 		bus:           bus,
@@ -1931,7 +1927,6 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedWithoutResultEv
 		t.Fatal("expected workflow fixture bundle")
 	}
 	pc := &PipelineCoordinator{
-		db:            db,
 		workflowStore: store,
 		artifactRoot:  t.TempDir(),
 		bus:           bus,
@@ -1989,7 +1984,6 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSucces
 		t.Fatal("expected workflow fixture bundle")
 	}
 	pc := &PipelineCoordinator{
-		db:            db,
 		workflowStore: store,
 		artifactRoot:  t.TempDir(),
 		bus:           bus,
@@ -2038,7 +2032,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 	bus := &recordingPipelineBus{}
-	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir(), bus: bus}
+	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), bus: bus}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
@@ -2100,7 +2094,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMis
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 	bus := &recordingPipelineBus{}
-	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir(), bus: bus}
+	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), bus: bus}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
@@ -2139,7 +2133,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentCon
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
-	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir()}
+	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir()}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
@@ -2187,7 +2181,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 	bus := &recordingPipelineBus{}
-	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir(), bus: bus}
+	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), bus: bus}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
@@ -2260,7 +2254,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHisto
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
-	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir()}
+	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir()}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()
@@ -2315,7 +2309,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitEnforcesProjectedRepoSize(
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
-	pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: t.TempDir()}
+	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir()}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
 	initial := testArtifactRepoEntityFields()

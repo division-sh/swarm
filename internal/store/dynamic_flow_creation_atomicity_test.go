@@ -233,7 +233,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	if sqlite {
 		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
 	}
-	workflow = runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, db, runtimepipeline.PipelineCoordinatorOptions{
+	workflow = runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  dynamicFlowCreationWorkflowModule{source: semanticview.Wrap(dynamicFlowCreationAtomicityBundle())},
 		Persistence:             workflowPersistence,
 		RunLifecycle:            selected,

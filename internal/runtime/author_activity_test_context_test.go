@@ -340,7 +340,7 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 			deps.HumanTaskExpiry = &runtimeTestUnavailableHumanTaskExpiry{}
 		}
 	}
-	if deps.SQLDB != nil && deps.RunLifecycleCandidates == nil {
+	if deps.WorkflowPersistence.Configured() && deps.RunLifecycleCandidates == nil {
 		if candidates, ok := deps.EventStore.(runtimerunlifecycle.CandidateOwner); ok {
 			deps.RunLifecycleCandidates = candidates
 		} else {

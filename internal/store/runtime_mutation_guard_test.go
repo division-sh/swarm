@@ -271,8 +271,9 @@ func TestSelectedRuntimeConstructionUsesOpaqueWorkflowPersistence(t *testing.T) 
 	if !strings.Contains(facadeText, "WorkflowPersistence:            s.WorkflowPersistence,") {
 		t.Fatal("selected runtime facade must project opaque workflow persistence into exact runtime dependencies")
 	}
-	if !strings.Contains(facadeText, "SQLDB:                          s.RuntimeSQLDB,") {
-		t.Fatal("selected runtime facade must project only the named PostgreSQL RuntimeSQLDB exception")
+	runtimeDepsBlock := runtimeWriterSnippetAfter(facadeText, "func (f selectedRuntimeStoreFacade) runtimeDeps() runtime.RuntimeDeps {", "func (f selectedRuntimeStoreFacade) close()")
+	if strings.Contains(runtimeDepsBlock, "SQLDB:") || strings.Contains(runtimeDepsBlock, "RuntimeSQLDB") {
+		t.Fatal("selected runtime facade must not project a raw SQL handle into runtime dependencies")
 	}
 
 	publishData, err := os.ReadFile(filepath.Join(root, "internal", "runtime", "bus", "eventbus_publish.go"))

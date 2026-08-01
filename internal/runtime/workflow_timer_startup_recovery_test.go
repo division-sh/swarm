@@ -100,10 +100,6 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 			}
 
 			process := worklifetime.NewProcess()
-			runtimeDB := db
-			if !postgres {
-				runtimeDB = nil
-			}
 			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle())
 			rt, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
 				Config: &config.Config{
@@ -111,7 +107,6 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 					LLM:     config.LLMConfig{Backend: "anthropic"},
 				},
 
-				SQLDB:                        runtimeDB,
 				EventStore:                   selected,
 				EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
 				EventPayloadValidationBinder: selected,
@@ -251,10 +246,6 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 
 			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle())
 			module := newRuntimeTestWorkflowModule(t, source)
-			runtimeDB := db
-			if !postgres {
-				runtimeDB = nil
-			}
 			newRuntime := func(managerStore runtimemanager.ManagerPersistence) (*swarmruntime.Runtime, *worklifetime.Process) {
 				process := worklifetime.NewProcess()
 				rt, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
@@ -263,7 +254,6 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 						LLM:     config.LLMConfig{Backend: "anthropic"},
 					},
 
-					SQLDB:                        runtimeDB,
 					EventStore:                   selected,
 					EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
 					EventPayloadValidationBinder: selected,
@@ -384,10 +374,6 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle())
 			module := newRuntimeTestWorkflowModule(t, source)
 			bootProgress := make([]swarmruntime.BootProgressEvent, 0, swarmruntime.BootProgressTotalSteps)
-			runtimeDB := db
-			if !postgres {
-				runtimeDB = nil
-			}
 			newRuntime := func() (*swarmruntime.Runtime, *worklifetime.Process) {
 				process := worklifetime.NewProcess()
 				rt, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
@@ -396,7 +382,6 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 						LLM:     config.LLMConfig{Backend: "anthropic"},
 					},
 
-					SQLDB:                        runtimeDB,
 					EventStore:                   selected,
 					EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
 					EventPayloadValidationBinder: selected,

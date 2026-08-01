@@ -175,7 +175,6 @@ func (s storeBundle) facade() selectedRuntimeStoreFacade {
 func (f selectedRuntimeStoreFacade) runtimeDeps() runtime.RuntimeDeps {
 	s := f.stores
 	return runtime.RuntimeDeps{
-		SQLDB:                          s.RuntimeSQLDB,
 		EventStore:                     s.EventStore,
 		EventBusDurable:                s.EventBusDurable,
 		EventPayloadValidationBinder:   s.EventPayloadValidationBinder,

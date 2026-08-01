@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -618,7 +617,7 @@ func deriveWorkflowEventPolicy(source semanticview.Source, eventType string, dri
 	}
 }
 
-func (pc *PipelineCoordinator) BackgroundNodes(_ any, _ *sql.DB) []BackgroundNode {
+func (pc *PipelineCoordinator) BackgroundNodes() []BackgroundNode {
 	return nil
 }
 

@@ -743,7 +743,7 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 		source: source, workflow: workflow, nodes: nodes,
 		guards: runtimepipeline.NewContractGuardRegistry(source), actions: runtimepipeline.NewContractActionRegistry(source),
 	}
-	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
+	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(eb, runtimepipeline.PipelineCoordinatorOptions{
 		Module: module, Persistence: workflowPersistence, RunLifecycle: backend,
 		DeliveryStore: backend, DeliveryRuntime: eb, DecisionCards: cards, HumanTasks: cards,
 		ProposedEffects: backend, DecisionCardDraftExpiry: backend, HumanTaskExpiry: backend,

@@ -89,7 +89,7 @@ func newWorkflowTestCoordinator(
 	selected workflowTestSelectedStore,
 ) *runtimepipeline.PipelineCoordinator {
 	t.Helper()
-	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, db, completeWorkflowTestCoordinatorOptions(persistence, selected))
+	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, completeWorkflowTestCoordinatorOptions(persistence, selected))
 	if coordinator == nil {
 		t.Fatal("construct workflow persistence test coordinator")
 	}
@@ -185,14 +185,14 @@ func TestWorkflowStoreRolesAreImmutableConstructorInputs(t *testing.T) {
 				invalid = runtimepipeline.NewPostgresWorkflowPersistence(db, nil)
 			}
 
-			if coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, db, completeWorkflowTestCoordinatorOptions(persistence, selected)); coordinator == nil {
+			if coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, completeWorkflowTestCoordinatorOptions(persistence, selected)); coordinator == nil {
 				t.Fatal("complete durable workflow roles were rejected")
 			}
 			for _, role := range roles {
 				t.Run(role.name, func(t *testing.T) {
 					opts := completeWorkflowTestCoordinatorOptions(persistence, selected)
 					role.omit(&opts, invalid)
-					if coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, db, opts); coordinator != nil {
+					if coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, opts); coordinator != nil {
 						t.Fatalf("durable workflow construction accepted missing %s", role.name)
 					}
 				})

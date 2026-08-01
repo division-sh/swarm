@@ -330,7 +330,7 @@ func startConfiguredChannelActivityNode(t *testing.T, ctx context.Context, coord
 	if coordinator == nil || bus == nil || db == nil {
 		t.Fatal("configured channel claimed-dispatch fixture requires coordinator, bus, and store")
 	}
-	if nodes := coordinator.BackgroundNodes(bus, db); len(nodes) != 0 {
+	if nodes := coordinator.BackgroundNodes(); len(nodes) != 0 {
 		t.Fatalf("configured channel background nodes = %d, want claimed event dispatch only", len(nodes))
 	}
 	return func() {}

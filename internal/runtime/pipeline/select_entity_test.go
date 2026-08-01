@@ -582,7 +582,6 @@ opco_budget:
 	}
 	pc := &PipelineCoordinator{
 		bus:            &recordingPipelineBus{},
-		db:             db,
 		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},

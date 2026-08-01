@@ -193,7 +193,6 @@ func TestNewRuntimeRejectsInvalidArtifactRootEnv(t *testing.T) {
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
-		SQLDB:               db,
 		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
 		EventStore:          &minimalRuntimeEventStore{},
 		EventBusDurable:     runtimeTestSyntheticDurableDependencies(deliveryStore),
