@@ -13,7 +13,9 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	timerobligationadapter "github.com/division-sh/swarm/internal/store/timerobligationadapter"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
@@ -21,25 +23,40 @@ import (
 func newTestWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 	store := NewPostgresWorkflowPersistence(db, &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectPostgres}).store
 	store.runLifecycle = &unavailablePipelineTestRunLifecycle{}
+	store.timerObligations = pipelineTestTimerObligationReader{db: db, dialect: timerobligationadapter.DialectPostgres}
 	return store
 }
 
 func newTestSQLiteWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 	return &workflowInstanceStore{
-		db:           db,
-		dialect:      workflowStoreDialectSQLite,
-		runLifecycle: &unavailablePipelineTestRunLifecycle{},
+		db:               db,
+		dialect:          workflowStoreDialectSQLite,
+		runLifecycle:     &unavailablePipelineTestRunLifecycle{},
+		timerObligations: pipelineTestTimerObligationReader{db: db, dialect: timerobligationadapter.DialectSQLite},
 	}
 }
 
 func newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, runner runtimeMutationRunner) *workflowInstanceStore {
 	store := NewSQLiteWorkflowPersistence(db, runner).store
+	store.timerObligations = pipelineTestTimerObligationReader{db: db, dialect: timerobligationadapter.DialectSQLite}
 	if owner, ok := runner.(runtimerunlifecycle.OperationOwner); ok {
 		store.runLifecycle = owner
 	} else {
 		store.runLifecycle = &unavailablePipelineTestRunLifecycle{}
 	}
 	return store
+}
+
+type pipelineTestTimerObligationReader struct {
+	db      *sql.DB
+	dialect timerobligationadapter.Dialect
+}
+
+func (r pipelineTestTimerObligationReader) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
+	if tx, ok := PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		return timerobligationadapter.Read(ctx, tx, r.dialect, scope, observedAt)
+	}
+	return timerobligationadapter.Read(ctx, r.db, r.dialect, scope, observedAt)
 }
 
 func workflowPersistenceForTest(store *workflowInstanceStore) WorkflowPersistence {

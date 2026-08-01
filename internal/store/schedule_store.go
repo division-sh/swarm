@@ -15,6 +15,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
+	timerobligationadapter "github.com/division-sh/swarm/internal/store/timerobligationadapter"
 )
 
 func (s *PostgresStore) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
@@ -25,9 +26,9 @@ func (s *PostgresStore) ReadTimerObligations(ctx context.Context, scope runtimet
 		return runtimetimerobligation.Snapshot{}, err
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return runtimetimerobligation.Read(ctx, tx, runtimetimerobligation.DialectPostgres, scope, observedAt)
+		return timerobligationadapter.Read(ctx, tx, timerobligationadapter.DialectPostgres, scope, observedAt)
 	}
-	return runtimetimerobligation.Read(ctx, s.backend.db, runtimetimerobligation.DialectPostgres, scope, observedAt)
+	return timerobligationadapter.Read(ctx, s.backend.db, timerobligationadapter.DialectPostgres, scope, observedAt)
 }
 
 func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.Schedule) error {

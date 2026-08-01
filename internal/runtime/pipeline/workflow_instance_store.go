@@ -42,18 +42,10 @@ type SchedulePersistence interface {
 }
 
 func (s *workflowInstanceStore) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
-	if s == nil || s.db == nil {
+	if s == nil || s.timerObligations == nil {
 		return runtimetimerobligation.Snapshot{}, fmt.Errorf("timer obligation reader requires workflow store")
 	}
-	queryer := runtimetimerobligation.Queryer(s.db)
-	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
-		queryer = tx
-	}
-	dialect := runtimetimerobligation.DialectPostgres
-	if s.isSQLite() {
-		dialect = runtimetimerobligation.DialectSQLite
-	}
-	return runtimetimerobligation.Read(ctx, queryer, dialect, scope, observedAt)
+	return s.timerObligations.ReadTimerObligations(ctx, scope, observedAt)
 }
 
 type WorkflowInstance struct {
@@ -130,6 +122,7 @@ type workflowInstanceStore struct {
 	db               *sql.DB
 	dialect          workflowStoreDialect
 	runtimeMutation  runtimeMutationRunner
+	timerObligations runtimetimerobligation.Reader
 	deliveryStore    runtimedelivery.Store
 	pipelineStore    runtimepipelineobligation.Store
 	decisionCards    decisioncard.Store

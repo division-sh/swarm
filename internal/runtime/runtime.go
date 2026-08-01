@@ -1117,6 +1117,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			},
 			TimerScheduler:          rt.Scheduler,
 			TimerScheduleStore:      runtimeDeps.ScheduleStore,
+			TimerObligationReader:   runtimeDeps.TimerObligationReader,
 			MailboxMaterializer:     runtimeDeps.MailboxMaterializer,
 			DecisionCards:           runtimeDeps.DecisionCards,
 			ProposedEffects:         runtimeDeps.ProposedEffects,

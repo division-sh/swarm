@@ -31,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/google/uuid"
 )
 
@@ -101,6 +102,7 @@ type PipelineCoordinatorOptions struct {
 	InstanceDeactivator              FlowInstanceDeactivator
 	TimerScheduler                   *Scheduler
 	TimerScheduleStore               SchedulePersistence
+	TimerObligationReader            runtimetimerobligation.Reader
 	MailboxMaterializer              MailboxWriteMaterializationStore
 	DecisionCards                    decisioncard.Store
 	ProposedEffects                  decisioncard.ProposedEffectStore
@@ -261,16 +263,17 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 	var workflowStore *workflowInstanceStore
 	if storeTemplate != nil {
 		workflowStore = &workflowInstanceStore{
-			db:              storeTemplate.db,
-			dialect:         storeTemplate.dialect,
-			runtimeMutation: storeTemplate.runtimeMutation,
-			deliveryStore:   opts.DeliveryStore,
-			pipelineStore:   opts.PipelineObligations,
-			decisionCards:   opts.DecisionCards,
-			gateEvents:      opts.GatePublisher,
-			lifecycleOwner:  pipelineWorkflowLifecycleOwner{coordinator: coordinator},
-			runLifecycle:    opts.RunLifecycle,
-			deliverySignals: make(map[runtimedelivery.ExecutionAuthority]func()),
+			db:               storeTemplate.db,
+			dialect:          storeTemplate.dialect,
+			runtimeMutation:  storeTemplate.runtimeMutation,
+			timerObligations: opts.TimerObligationReader,
+			deliveryStore:    opts.DeliveryStore,
+			pipelineStore:    opts.PipelineObligations,
+			decisionCards:    opts.DecisionCards,
+			gateEvents:       opts.GatePublisher,
+			lifecycleOwner:   pipelineWorkflowLifecycleOwner{coordinator: coordinator},
+			runLifecycle:     opts.RunLifecycle,
+			deliverySignals:  make(map[runtimedelivery.ExecutionAuthority]func()),
 		}
 	}
 	coordinator.workflowStore = workflowStore

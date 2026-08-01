@@ -19,6 +19,7 @@ import (
 	effectstore "github.com/division-sh/swarm/internal/store/internal/effects"
 	entitystore "github.com/division-sh/swarm/internal/store/internal/entityruntime"
 	sessionstore "github.com/division-sh/swarm/internal/store/internal/sessions"
+	timerstore "github.com/division-sh/swarm/internal/store/timerobligationadapter"
 )
 
 type runCompletionOwnerSummaries struct {
@@ -168,11 +169,11 @@ func summarizeTimerRun(ctx context.Context, tx *sql.Tx, runID string, selectedNo
 	if err != nil {
 		return runtimetimers.RunSummary{}, err
 	}
-	dialect := runtimetimers.DialectSQLite
+	dialect := timerstore.DialectSQLite
 	if postgres {
-		dialect = runtimetimers.DialectPostgres
+		dialect = timerstore.DialectPostgres
 	}
-	snapshot, err := runtimetimers.Read(ctx, tx, dialect, scope, selectedNow.UTC())
+	snapshot, err := timerstore.Read(ctx, tx, dialect, scope, selectedNow.UTC())
 	if err != nil {
 		return runtimetimers.RunSummary{}, err
 	}

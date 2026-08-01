@@ -17,6 +17,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	timerobligationadapter "github.com/division-sh/swarm/internal/store/timerobligationadapter"
 	"github.com/google/uuid"
 )
 
@@ -31,9 +32,9 @@ func (s *SQLiteRuntimeStore) ReadTimerObligations(ctx context.Context, scope run
 		return runtimetimerobligation.Snapshot{}, fmt.Errorf("timer obligation reader requires SQLite store")
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return runtimetimerobligation.Read(ctx, tx, runtimetimerobligation.DialectSQLite, scope, observedAt)
+		return timerobligationadapter.Read(ctx, tx, timerobligationadapter.DialectSQLite, scope, observedAt)
 	}
-	return runtimetimerobligation.Read(ctx, s.backend.db, runtimetimerobligation.DialectSQLite, scope, observedAt)
+	return timerobligationadapter.Read(ctx, s.backend.db, timerobligationadapter.DialectSQLite, scope, observedAt)
 }
 
 func (s *SQLiteRuntimeStore) InsertMailboxItem(ctx context.Context, item runtimetools.MailboxItem) (string, error) {
