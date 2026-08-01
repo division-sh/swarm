@@ -96,7 +96,6 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"owner_action|internal/runtime/pipeline/activity_engine.go|pipelineActivityIntentWriter.WriteActivityIntents|110":    {asyncSiteCanonicalOwner, "activity intent logging is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/pipeline/generic_schedule_lifecycle.go|PipelineCoordinator.cancelGenericSchedule|64":  {asyncSiteCanonicalOwner, "schedule cancellation is wrapped by an owner-bound action lease"},
 	"owner_action|internal/runtime/pipeline/generic_schedule_lifecycle.go|PipelineCoordinator.persistGenericSchedule|37": {asyncSiteCanonicalOwner, "schedule registration is wrapped by an owner-bound action lease"},
-	"owner_action|internal/runtime/pipeline/runtime_support.go|QueuePipelineAfterPublishAction|639":                      {asyncSiteCanonicalOwner, "the exported after-publish facade delegates to the canonical owner-bound queue"},
 	"owner_action|internal/runtime/pipeline/runtime_support.go|QueuePipelinePostCommitAction|438":                        {asyncSiteCanonicalOwner, "the exported post-commit facade delegates to the canonical owner-bound queue"},
 	"owner_action|internal/runtime/pipeline/runtime_support.go|QueuePipelineRollbackAction|592":                          {asyncSiteCanonicalOwner, "the exported rollback facade delegates to the canonical owner-bound queue"},
 	"owner_action|internal/runtime/pipeline/workflow_timer_owner.go|WorkflowTimerLifecycle.queueWakeupReconcile|808":     {asyncSiteCanonicalOwner, "timer registration and cancellation converge through one owner-bound post-commit action"},
@@ -278,8 +277,7 @@ func containsAlias(aliases map[string]struct{}, alias string) bool {
 func isOwnerActionRegistration(name string) bool {
 	switch name {
 	case "QueuePipelinePostCommitAction", "queuePipelinePostCommitAction",
-		"QueuePipelineRollbackAction", "queuePipelineRollbackAction",
-		"QueuePipelineAfterPublishAction", "queuePipelineAfterPublishAction":
+		"QueuePipelineRollbackAction", "queuePipelineRollbackAction":
 		return true
 	default:
 		return false

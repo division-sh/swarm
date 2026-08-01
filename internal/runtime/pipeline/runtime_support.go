@@ -330,7 +330,6 @@ type sqlTxContextKey struct{}
 type sqlConnContextKey struct{}
 type pipelinePostCommitActionsKey struct{}
 type pipelineRollbackActionsKey struct{}
-type pipelineAfterPublishActionsKey struct{}
 
 func withSQLTxContext(ctx context.Context, tx *sql.Tx) context.Context {
 	if tx == nil {
@@ -602,53 +601,6 @@ func flushPipelineRollbackActions(actions []OwnerAction) {
 
 func FlushPipelineRollbackActions(actions []OwnerAction) {
 	flushPipelineRollbackActions(actions)
-}
-
-func withPipelineAfterPublishActions(ctx context.Context, actions *[]OwnerAction) context.Context {
-	if actions == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, pipelineAfterPublishActionsKey{}, actions)
-}
-
-func WithPipelineAfterPublishActions(ctx context.Context, actions *[]OwnerAction) context.Context {
-	return withPipelineAfterPublishActions(ctx, actions)
-}
-
-func queuePipelineAfterPublishAction(ctx context.Context, fn OwnerAction) bool {
-	if ctx == nil || fn == nil {
-		return false
-	}
-	actions, ok := ctx.Value(pipelineAfterPublishActionsKey{}).(*[]OwnerAction)
-	owner, ownerOK := worklifetime.OccurrenceFromContext(ctx)
-	if !ok || actions == nil || !ownerOK {
-		return false
-	}
-	lease, err := owner.Begin(ownerActionAdmissionContext(ctx))
-	if err != nil {
-		return false
-	}
-	*actions = append(*actions, func(context.Context) {
-		defer func() { _ = lease.Done() }()
-		fn(lease.Context())
-	})
-	return true
-}
-
-func QueuePipelineAfterPublishAction(ctx context.Context, fn OwnerAction) bool {
-	return queuePipelineAfterPublishAction(ctx, fn)
-}
-
-func flushPipelineAfterPublishActions(actions []OwnerAction) {
-	for _, fn := range actions {
-		if fn != nil {
-			fn(context.Background())
-		}
-	}
-}
-
-func FlushPipelineAfterPublishActions(actions []OwnerAction) {
-	flushPipelineAfterPublishActions(actions)
 }
 
 func CollectPipelineEmitIntents(ctx context.Context, intents []runtimeengine.EmitIntent) bool {

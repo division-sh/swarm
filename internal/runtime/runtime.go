@@ -1566,10 +1566,6 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 
 	if rt.Pipeline != nil {
-		if _, err := rt.Pipeline.RepairContractEntityTypes(ctx); err != nil {
-			rt.emitBootProgress(8, "pipeline_maintenance", "FAILED", err.Error())
-			return fmt.Errorf("repair contract entity types: %w", err)
-		}
 		lease, beginErr := rt.workOccurrence.Begin(startCtx)
 		if beginErr != nil {
 			return fmt.Errorf("admit pipeline maintenance: %w", beginErr)

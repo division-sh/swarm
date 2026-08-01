@@ -9,7 +9,6 @@ type runtimeEpochContextKey struct{}
 
 var globalRuntimeEpoch atomic.Int64
 var globalRuntimeIngressPaused atomic.Bool
-var runtimeResetHook atomic.Value
 
 func init() {
 	globalRuntimeEpoch.Store(1)
@@ -86,16 +85,9 @@ func RuntimeIngressPaused() bool {
 
 func EnterRuntimeResetMode() int64 {
 	PauseRuntimeIngress()
-	if hook, _ := runtimeResetHook.Load().(func()); hook != nil {
-		hook()
-	}
 	return BumpRuntimeEpoch()
 }
 
 func ExitRuntimeResetMode() {
 	ResumeRuntimeIngress()
-}
-
-func SetRuntimeResetHook(hook func()) {
-	runtimeResetHook.Store(hook)
 }

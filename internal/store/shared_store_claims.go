@@ -17,10 +17,6 @@ const (
 	scheduleClaimNamespace       = "swarm:schedule:"
 )
 
-type advisoryLockLease interface {
-	Release(context.Context) error
-}
-
 type sqlAdvisoryLockLease struct {
 	mu                       sync.Mutex
 	session                  *postgresSessionAuthority

@@ -29,6 +29,7 @@ import (
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -36,6 +37,11 @@ import (
 
 type pipelineEmitCollectorKey struct{}
 type pipelineEmitIntentCollectorKey struct{}
+
+type RunBundleAvailabilityReader interface {
+	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
+}
+
 type PipelineCoordinator struct {
 	bus Bus
 	db  *sql.DB

@@ -53,7 +53,6 @@ func TestQueuedOwnerActionFamiliesFollowStandingRetirementExactlyOnce(t *testing
 	}{
 		{name: "post-commit", queue: queuePipelinePostCommitAction, flush: flushPipelinePostCommitActions, pick: func(postCommit, _, _ []OwnerAction) []OwnerAction { return postCommit }},
 		{name: "rollback", queue: queuePipelineRollbackAction, flush: flushPipelineRollbackActions, pick: func(_, rollback, _ []OwnerAction) []OwnerAction { return rollback }},
-		{name: "after-publish", queue: queuePipelineAfterPublishAction, flush: flushPipelineAfterPublishActions, pick: func(_, _, afterPublish []OwnerAction) []OwnerAction { return afterPublish }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -73,11 +72,9 @@ func TestQueuedOwnerActionFamiliesFollowStandingRetirementExactlyOnce(t *testing
 			}
 			postCommit := make([]OwnerAction, 0, 1)
 			rollback := make([]OwnerAction, 0, 1)
-			afterPublish := make([]OwnerAction, 0, 1)
 			callerCtx, cancelCaller := context.WithCancel(worklifetime.WithOccurrence(context.Background(), standing))
 			callerCtx = withPipelinePostCommitActions(callerCtx, &postCommit)
 			callerCtx = withPipelineRollbackActions(callerCtx, &rollback)
-			callerCtx = withPipelineAfterPublishActions(callerCtx, &afterPublish)
 
 			started := make(chan error, 1)
 			result := make(chan error, 1)
@@ -93,7 +90,7 @@ func TestQueuedOwnerActionFamiliesFollowStandingRetirementExactlyOnce(t *testing
 			cancelCaller()
 			flushed := make(chan struct{})
 			go func() {
-				tc.flush(tc.pick(postCommit, rollback, afterPublish))
+				tc.flush(tc.pick(postCommit, rollback, nil))
 				close(flushed)
 			}()
 			if err := <-started; err != nil {

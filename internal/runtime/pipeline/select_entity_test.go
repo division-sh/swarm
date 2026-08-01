@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"strings"
 	"sync"
 	"testing"
@@ -14,11 +13,9 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
-	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	storerunbundle "github.com/division-sh/swarm/internal/store/runbundle"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/google/uuid"
 )
 
 func TestExecuteNodeContractHandlerSelectEntityUpdatesTargetOwnedEntity(t *testing.T) {
@@ -197,135 +194,6 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityCreatesTargetOwnedEntity(
 		t.Fatalf("entity_type metadata = %q, want opco_budget", got)
 	}
 	assertEntityStateEntityType(t, db, FlowInstanceEntityID(instance.StorageRef), "opco_budget")
-}
-
-func TestRepairContractEntityTypesUsesBundleAvailabilityAndDoesNotPromoteUnavailableRun(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	pc, _ := newSelectEntityTestCoordinator(t, db)
-	ctx := testPipelineCoordinatorRunContext(t, pc)
-	persistedHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
-	resolvableID := uuid.NewString()
-	unresolvedID := uuid.NewString()
-	oldVersionID := uuid.NewString()
-	legacyRunID := "88888888-8888-8888-8888-888888888888"
-	legacyBundleID := uuid.NewString()
-	ephemeralRunID := "99999999-9999-9999-9999-999999999999"
-	ephemeralBundleID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
-		VALUES ($1, 'name: runtime-test', '{}'::jsonb)
-	`, persistedHash); err != nil {
-		t.Fatalf("seed current bundle row: %v", err)
-	}
-	persistedSource, err := testRunLifecycleSource(persistedHash, storerunlifecycle.BundleSourcePersisted)
-	if err != nil {
-		t.Fatalf("construct persisted current run source: %v", err)
-	}
-	if err := runlifecyclefixture.RevisePostgresSource(ctx, db, testPipelineRunID, persistedSource); err != nil {
-		t.Fatalf("revise current run bundle source: %v", err)
-	}
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: legacyRunID})
-	runlifecyclefixture.CorruptPostgresSource(
-		t,
-		ctx,
-		db,
-		legacyRunID,
-		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-		storerunlifecycle.BundleSourceDeleted,
-	)
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: ephemeralRunID, BundleHash: "bundle-v1:sha256:9999999999999999999999999999999999999999999999999999999999999999"})
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES
-			('treasury/legacy', 'treasury', 'template', '{"workflow_version":"1.0.0"}'::jsonb, 'active', now()),
-			('treasury/legacy-old-version', 'treasury', 'template', '{"workflow_version":"0.9.0"}'::jsonb, 'active', now()),
-			('treasury/legacy-bundle', 'treasury', 'template', '{"workflow_version":"1.0.0"}'::jsonb, 'active', now()),
-			('treasury/ephemeral-bundle', 'treasury', 'template', '{"workflow_version":"1.0.0"}'::jsonb, 'active', now())
-	`); err != nil {
-		t.Fatalf("seed flow_instances: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES
-			($1::uuid, $2::uuid, 'treasury/legacy', 'default', 'active',
-			 '{}'::jsonb, '{"entity_type":"not-authority","vertical_id":"vertical-1"}'::jsonb, '{}'::jsonb, 1, now(), now(), now()),
-			($1::uuid, $3::uuid, 'unknown/legacy', 'default', 'active',
-			 '{}'::jsonb, '{"entity_type":"opco_budget"}'::jsonb, '{}'::jsonb, 1, now(), now(), now()),
-			($1::uuid, $4::uuid, 'treasury/legacy-old-version', 'default', 'active',
-			 '{}'::jsonb, '{"entity_type":"opco_budget"}'::jsonb, '{}'::jsonb, 1, now(), now(), now()),
-			($6::uuid, $5::uuid, 'treasury/legacy-bundle', 'default', 'active',
-			 '{}'::jsonb, '{"entity_type":"opco_budget"}'::jsonb, '{}'::jsonb, 1, now(), now(), now()),
-			($7::uuid, $8::uuid, 'treasury/ephemeral-bundle', 'default', 'active',
-			 '{}'::jsonb, '{"entity_type":"opco_budget"}'::jsonb, '{}'::jsonb, 1, now(), now(), now())
-	`, testPipelineRunID, resolvableID, unresolvedID, oldVersionID, legacyBundleID, legacyRunID, ephemeralRunID, ephemeralBundleID); err != nil {
-		t.Fatalf("seed default entity_state rows: %v", err)
-	}
-
-	repaired, err := pc.RepairContractEntityTypes(ctx)
-	if err != nil {
-		t.Fatalf("RepairContractEntityTypes: %v", err)
-	}
-	if repaired != 0 {
-		t.Fatalf("repaired rows = %d, want 0 without canonical current bundle hash owner", repaired)
-	}
-	assertEntityStateEntityType(t, db, resolvableID, "default")
-	assertEntityStateEntityType(t, db, unresolvedID, "default")
-	assertEntityStateEntityType(t, db, oldVersionID, "default")
-	assertEntityStateEntityTypeForRun(t, db, legacyRunID, legacyBundleID, "default")
-	assertEntityStateEntityTypeForRun(t, db, ephemeralRunID, ephemeralBundleID, "default")
-}
-
-func TestRepairContractEntityTypesBlocksPersistedMissingBundleRow(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	pc, _ := newSelectEntityTestCoordinator(t, db)
-	ctx := testPipelineCoordinatorRunContext(t, pc)
-	entityID := uuid.NewString()
-	runlifecyclefixture.CorruptPostgresSource(
-		t,
-		ctx,
-		db,
-		testPipelineRunID,
-		"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		storerunlifecycle.BundleSourcePersisted,
-	)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES ('treasury/missing-bundle', 'treasury', 'template', '{"workflow_version":"1.0.0"}'::jsonb, 'active', now())
-	`); err != nil {
-		t.Fatalf("seed flow instance: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'treasury/missing-bundle', 'default', 'active',
-			'{}'::jsonb, '{"entity_type":"opco_budget"}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
-		)
-	`, testPipelineRunID, entityID); err != nil {
-		t.Fatalf("seed default entity_state row: %v", err)
-	}
-
-	repaired, err := pc.RepairContractEntityTypes(ctx)
-	if err == nil {
-		t.Fatal("RepairContractEntityTypes error = nil, want persisted-missing bundle block")
-	}
-	if repaired != 0 {
-		t.Fatalf("repaired rows = %d, want 0", repaired)
-	}
-	got := err.Error()
-	for _, want := range []string{"contract entity type repair blocked by run bundle availability", "BUNDLE_DATA_INTEGRITY_ERROR", "persisted_missing_bundle_row"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("RepairContractEntityTypes error = %q, want %q", got, want)
-		}
-	}
-	assertEntityStateEntityType(t, db, entityID, "default")
 }
 
 func TestExecuteNodeContractHandlerSelectOrCreateEntityReplayUsesSameDeclaredKey(t *testing.T) {

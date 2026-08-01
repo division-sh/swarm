@@ -15,13 +15,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type DeferredPipelineTransition struct {
-	db    *sql.DB
-	input PipelineTransitionInput
-}
-
-type pipelineTransitionCollectorKey struct{}
-
 type PipelineTransitionInput struct {
 	EventID       string
 	EventType     string
@@ -77,33 +70,6 @@ func RecordPipelineTransition(ctx context.Context, db *sql.DB, in PipelineTransi
 		return nil
 	}
 	return recordPipelineTransitionReceipt(ctx, db, eventID, handler, pipelineType, pipelineID, action, before, after, eventsEmitted, durationUS, in.DropReason, in.Failure)
-}
-
-func WithPipelineTransitionCollector(ctx context.Context, collector *[]DeferredPipelineTransition) context.Context {
-	if collector == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, pipelineTransitionCollectorKey{}, collector)
-}
-
-func AppendDeferredPipelineTransition(ctx context.Context, item DeferredPipelineTransition) bool {
-	if item.db == nil {
-		return false
-	}
-	collector, ok := ctx.Value(pipelineTransitionCollectorKey{}).(*[]DeferredPipelineTransition)
-	if !ok || collector == nil {
-		return false
-	}
-	*collector = append(*collector, item)
-	return true
-}
-
-func FlushDeferredPipelineTransitions(ctx context.Context, deferred []DeferredPipelineTransition) {
-	for _, item := range deferred {
-		if err := RecordPipelineTransition(ctx, item.db, item.input); err != nil {
-			processWarn("diagnostics", "failed to persist deferred pipeline transition event_id=%s event_type=%s pipeline_id=%s: %v", strings.TrimSpace(item.input.EventID), strings.TrimSpace(item.input.EventType), strings.TrimSpace(item.input.PipelineID), err)
-		}
-	}
 }
 
 func marshalJSONOrNil(v any) []byte {
