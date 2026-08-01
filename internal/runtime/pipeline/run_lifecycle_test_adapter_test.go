@@ -444,12 +444,13 @@ func testRunLifecycleSource(bundleHash, source string) (runtimecorrelation.Bundl
 	}
 }
 
-func newPostgresWorkflowInstanceStoreForTest(db *sql.DB) *WorkflowInstanceStore {
-	store := NewWorkflowInstanceStore(db)
-	store.ConfigureRuntimeMutationRunner(&recordingRuntimeMutationRunner{
+func newPostgresWorkflowInstanceStoreForTest(db *sql.DB) *workflowInstanceStore {
+	store := newTestWorkflowInstanceStore(db)
+	runner := &recordingRuntimeMutationRunner{
 		db:      db,
 		dialect: workflowStoreDialectPostgres,
-	})
+	}
+	store.runtimeMutation = runner
 	return store
 }
 
@@ -458,8 +459,11 @@ func newPostgresPipelineCoordinatorForTest(
 	db *sql.DB,
 	opts PipelineCoordinatorOptions,
 ) *PipelineCoordinator {
-	if db != nil && opts.WorkflowStore == nil {
-		opts.WorkflowStore = newPostgresWorkflowInstanceStoreForTest(db)
+	if db != nil && !opts.Persistence.Valid() {
+		opts.Persistence = workflowPersistenceForTest(newPostgresWorkflowInstanceStoreForTest(db))
+	}
+	if opts.PipelineObligations == nil {
+		opts.PipelineObligations = unavailablePipelineTestObligationOwner{}
 	}
 	return NewPipelineCoordinatorWithOptions(bus, db, opts)
 }

@@ -5,25 +5,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 func TestBuildSelectedContractReadinessClassifierEmitsCompleteOwnerMatrix(t *testing.T) {
-	frontier := store.RunForkContractFrontierAdmission{
-		Owner:                        store.RunForkContractFrontierAdmissionOwner,
+	frontier := runfork.RunForkContractFrontierAdmission{
+		Owner:                        runfork.RunForkContractFrontierAdmissionOwner,
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
-		ContractSelection: store.RunForkContractSelection{
+		ContractSelection: runfork.RunForkContractSelection{
 			Mode:            "selected_contracts",
 			ContractsRoot:   "/tmp/contracts",
 			WorkflowName:    "workflow",
 			WorkflowVersion: "v1",
 		},
 		FrontierEventCount: 1,
-		FrontierEvents: []store.RunForkContractFrontierEvent{{
+		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
 			SourceEventID: "source-event",
 			EventName:     "work.begin",
-			DerivedRecipients: []store.RunForkContractFrontierRecipient{{
+			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{{
 				SubscriberType: "agent",
 				SubscriberID:   "worker",
 				Path:           "flow-a/worker",
@@ -32,26 +32,26 @@ func TestBuildSelectedContractReadinessClassifierEmitsCompleteOwnerMatrix(t *tes
 		}},
 	}
 	model := testSelectedContractExecutionModel(t, frontier)
-	plan := store.RunForkPlan{
+	plan := runfork.RunForkPlan{
 		SourceRunID: "source-run",
-		ForkPoint: store.RunForkPoint{
+		ForkPoint: runfork.RunForkPoint{
 			Input:     "source-event",
 			EventID:   "source-event",
 			EventName: "work.begin",
 			Timestamp: time.Unix(1700000707, 0).UTC(),
 		},
-		ReplayResumeAdmission: store.RunForkReplayResumeAdmission{
-			Owner:                    store.RunForkReplayResumeAdmissionOwner,
+		ReplayResumeAdmission: runfork.RunForkReplayResumeAdmission{
+			Owner:                    runfork.RunForkReplayResumeAdmissionOwner,
 			DeliveryEventReplayReady: true,
-			Dispositions: []store.RunForkReplayResumeDisposition{{
-				Fact:           store.RunForkReplayResumeFactDeliveryPendingHistory,
-				Disposition:    store.RunForkReplayResumeDispositionForkReplay,
-				Classification: store.RunForkPendingClassificationPending,
+			Dispositions: []runfork.RunForkReplayResumeDisposition{{
+				Fact:           runfork.RunForkReplayResumeFactDeliveryPendingHistory,
+				Disposition:    runfork.RunForkReplayResumeDispositionForkReplay,
+				Classification: runfork.RunForkPendingClassificationPending,
 				Message:        "pending delivery can be replayed",
 			}, {
-				Fact:        store.RunForkReplayResumeFactSourceAdvanced,
-				Disposition: store.RunForkReplayResumeDispositionLineageOnly,
-				Owner:       store.RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner,
+				Fact:        runfork.RunForkReplayResumeFactSourceAdvanced,
+				Disposition: runfork.RunForkReplayResumeDispositionLineageOnly,
+				Owner:       runfork.RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner,
 				Message:     "post-T source conversation history is branch divergence evidence",
 			}},
 		},
@@ -65,48 +65,48 @@ func TestBuildSelectedContractReadinessClassifierEmitsCompleteOwnerMatrix(t *tes
 	if err != nil {
 		t.Fatalf("BuildSelectedContractReadinessClassifier: %v", err)
 	}
-	if readiness.Owner != store.RunForkSelectedContractReadinessClassifierOwner ||
+	if readiness.Owner != runfork.RunForkSelectedContractReadinessClassifierOwner ||
 		!readiness.NonMutating ||
-		readiness.ReplayResumeAdmissionOwner != store.RunForkReplayResumeAdmissionOwner ||
-		readiness.ContractFrontierAdmissionOwner != store.RunForkContractFrontierAdmissionOwner ||
-		readiness.RouteTopologyOwner != store.RunForkSelectedContractRouteTopologyOwner ||
-		readiness.RecipientPlanningOwner != store.RunForkSelectedContractRecipientPlanningOwner ||
-		readiness.SelectedExecutionModelOwner != store.RunForkSelectedContractExecutionModelOwner {
+		readiness.ReplayResumeAdmissionOwner != runfork.RunForkReplayResumeAdmissionOwner ||
+		readiness.ContractFrontierAdmissionOwner != runfork.RunForkContractFrontierAdmissionOwner ||
+		readiness.RouteTopologyOwner != runfork.RunForkSelectedContractRouteTopologyOwner ||
+		readiness.RecipientPlanningOwner != runfork.RunForkSelectedContractRecipientPlanningOwner ||
+		readiness.SelectedExecutionModelOwner != runfork.RunForkSelectedContractExecutionModelOwner {
 		t.Fatalf("readiness ownership = %#v", readiness)
 	}
 	assertReadinessFactSet(t, readiness.FactMatrix)
-	assertReadinessFact(t, readiness.FactMatrix, store.RunForkSelectedContractReadinessFactSourceDeliveries, store.RunForkSelectedContractReadinessDispositionExecutableForkWork, store.RunForkHistoricalReplayExecutionOwner)
-	assertReadinessFact(t, readiness.FactMatrix, store.RunForkSelectedContractReadinessFactForkEvents, store.RunForkSelectedContractReadinessDispositionExecutableForkWork, store.RunForkSelectedContractExecutionOwner)
-	assertReadinessFact(t, readiness.FactMatrix, store.RunForkSelectedContractReadinessFactSelectedRecipientsRoutes, store.RunForkSelectedContractReadinessDispositionReconstructedForkState, store.RunForkSelectedContractRecipientPlanningOwner)
-	assertReadinessFact(t, readiness.FactMatrix, store.RunForkSelectedContractReadinessFactSourcePostTFacts, store.RunForkSelectedContractReadinessDispositionBranchDivergenceEvidence, store.RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner)
-	assertReadinessFact(t, readiness.FactMatrix, store.RunForkSelectedContractReadinessFactOperatorConsumers, store.RunForkSelectedContractReadinessDispositionUnsupportedSplitSibling, store.RunForkHistoricalReplayExecutionAdmissionOwner)
-	if !executionBoundaryHas(readiness.InvalidPaths, "explain_output_authorizes_mutation", store.RunForkSelectedContractDispositionInvalid) {
+	assertReadinessFact(t, readiness.FactMatrix, runfork.RunForkSelectedContractReadinessFactSourceDeliveries, runfork.RunForkSelectedContractReadinessDispositionExecutableForkWork, runfork.RunForkHistoricalReplayExecutionOwner)
+	assertReadinessFact(t, readiness.FactMatrix, runfork.RunForkSelectedContractReadinessFactForkEvents, runfork.RunForkSelectedContractReadinessDispositionExecutableForkWork, runfork.RunForkSelectedContractExecutionOwner)
+	assertReadinessFact(t, readiness.FactMatrix, runfork.RunForkSelectedContractReadinessFactSelectedRecipientsRoutes, runfork.RunForkSelectedContractReadinessDispositionReconstructedForkState, runfork.RunForkSelectedContractRecipientPlanningOwner)
+	assertReadinessFact(t, readiness.FactMatrix, runfork.RunForkSelectedContractReadinessFactSourcePostTFacts, runfork.RunForkSelectedContractReadinessDispositionBranchDivergenceEvidence, runfork.RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner)
+	assertReadinessFact(t, readiness.FactMatrix, runfork.RunForkSelectedContractReadinessFactOperatorConsumers, runfork.RunForkSelectedContractReadinessDispositionUnsupportedSplitSibling, runfork.RunForkHistoricalReplayExecutionAdmissionOwner)
+	if !executionBoundaryHas(readiness.InvalidPaths, "explain_output_authorizes_mutation", runfork.RunForkSelectedContractDispositionInvalid) {
 		t.Fatalf("invalid paths = %#v, want explain output non-authoritative", readiness.InvalidPaths)
 	}
-	if !executionBoundaryHas(readiness.RequiredConsumers, "fork_local_runtime_container", store.RunForkSelectedContractDispositionPrerequisite) {
+	if !executionBoundaryHas(readiness.RequiredConsumers, "fork_local_runtime_container", runfork.RunForkSelectedContractDispositionPrerequisite) {
 		t.Fatalf("required consumers = %#v, want fork-local runtime container prerequisite", readiness.RequiredConsumers)
 	}
-	if executionBoundaryHas(readiness.BlockedSiblings, "fork_local_runtime_container", store.RunForkSelectedContractDispositionBlockedSibling) {
+	if executionBoundaryHas(readiness.BlockedSiblings, "fork_local_runtime_container", runfork.RunForkSelectedContractDispositionBlockedSibling) {
 		t.Fatalf("blocked siblings = %#v, fork-local runtime container should be an implemented required consumer", readiness.BlockedSiblings)
 	}
 }
 
 func TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteAuthority(t *testing.T) {
-	frontier := store.RunForkContractFrontierAdmission{
-		Owner:                        store.RunForkContractFrontierAdmissionOwner,
+	frontier := runfork.RunForkContractFrontierAdmission{
+		Owner:                        runfork.RunForkContractFrontierAdmissionOwner,
 		NonMutating:                  true,
 		HistoricalExecutionSupported: false,
-		ContractSelection: store.RunForkContractSelection{
+		ContractSelection: runfork.RunForkContractSelection{
 			Mode:            "selected_contracts",
 			ContractsRoot:   "/tmp/contracts",
 			WorkflowName:    "workflow",
 			WorkflowVersion: "v1",
 		},
 		FrontierEventCount: 1,
-		FrontierEvents: []store.RunForkContractFrontierEvent{{
+		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
 			SourceEventID: "source-event",
 			EventName:     "work.begin",
-			DerivedRecipients: []store.RunForkContractFrontierRecipient{{
+			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{{
 				SubscriberType: "node",
 				SubscriberID:   "worker",
 				Path:           "flow-a/worker",
@@ -133,8 +133,8 @@ func TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteA
 		t.Fatalf("BuildSelectedContractExecutionModel: %v", err)
 	}
 	readiness, err := BuildSelectedContractReadinessClassifier(SelectedContractReadinessClassifierRequest{
-		Plan: store.RunForkPlan{
-			ReplayResumeAdmission: store.RunForkReplayResumeAdmission{Owner: store.RunForkReplayResumeAdmissionOwner},
+		Plan: runfork.RunForkPlan{
+			ReplayResumeAdmission: runfork.RunForkReplayResumeAdmission{Owner: runfork.RunForkReplayResumeAdmissionOwner},
 		},
 		ContractFrontierAdmission: frontier,
 		SelectedContractExecution: model,
@@ -143,24 +143,24 @@ func TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteA
 		t.Fatalf("BuildSelectedContractReadinessClassifier: %v", err)
 	}
 	selectedAdmission := testContractSwapSelectedExecutionAdmission(frontier.ContractSelection)
-	selectedAdmission.RecipientPlanning.RecipientPlanEvents = []store.RunForkSelectedContractRecipientPlanEvent{{
+	selectedAdmission.RecipientPlanning.RecipientPlanEvents = []runfork.RunForkSelectedContractRecipientPlanEvent{{
 		SourceEventID: "source-event",
 		EventName:     "work.begin",
-		Recipients: []store.RunForkContractFrontierRecipient{{
+		Recipients: []runfork.RunForkContractFrontierRecipient{{
 			SubscriberType: "node",
 			SubscriberID:   "worker",
 			Path:           "flow-a/worker",
 			RouteSource:    "selected_contracts",
 		}},
-		Disposition: store.RunForkSelectedContractDispositionForkLocalTruth,
+		Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 	}}
 	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
-	replayAdmission := store.RunForkReplayResumeAdmission{
-		Owner:                    store.RunForkReplayResumeAdmissionOwner,
+	replayAdmission := runfork.RunForkReplayResumeAdmission{
+		Owner:                    runfork.RunForkReplayResumeAdmissionOwner,
 		DeliveryEventReplayReady: true,
-		Dispositions: []store.RunForkReplayResumeDisposition{{
-			Fact:        store.RunForkReplayResumeFactDeliveryPendingHistory,
-			Disposition: store.RunForkReplayResumeDispositionForkReplay,
+		Dispositions: []runfork.RunForkReplayResumeDisposition{{
+			Fact:        runfork.RunForkReplayResumeFactDeliveryPendingHistory,
+			Disposition: runfork.RunForkReplayResumeDispositionForkReplay,
 			Message:     "pending selected-contract source delivery can be replayed",
 		}},
 	}
@@ -184,14 +184,14 @@ func TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteA
 	historicalExecution, err := BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
 		Admission:             historicalAdmission,
 		ReplayResumeAdmission: replayAdmission,
-		PendingWork: []store.RunForkPendingWork{{
+		PendingWork: []runfork.RunForkPendingWork{{
 			EventID:        "source-event",
 			EventName:      "work.begin",
 			DeliveryID:     "source-delivery-1",
 			SubscriberType: "agent",
 			SubscriberID:   "source-agent",
 			Status:         "pending",
-			Classification: store.RunForkPendingClassificationPending,
+			Classification: runfork.RunForkPendingClassificationPending,
 		}},
 	})
 	if err != nil {
@@ -279,17 +279,17 @@ func TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteA
 		},
 		{
 			consumer:       "internal/runtime/runforkexecution.ActivateSelectedContractRunFork",
-			owner:          store.RunForkSelectedContractExecutionActivationGateOwner,
+			owner:          runfork.RunForkSelectedContractExecutionActivationGateOwner,
 			classification: carrierReadinessConsumerClass,
 		},
 		{
 			consumer:       "internal/runtime/runforkexecution.selectedContractForkLocalRuntimeContainer",
-			owner:          store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			owner:          runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 			classification: carrierReadinessConsumerClass,
 		},
 		{
 			consumer:       "internal/runtime/runforkexecution.RequireSelectedContractAgentDeliveryMaterialization",
-			owner:          store.RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner,
+			owner:          runfork.RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner,
 			classification: carrierReadinessConsumerClass,
 		},
 		{
@@ -373,76 +373,76 @@ func TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteA
 	if !recipientPlanning.NonMutating || recipientPlanning.DeliveryWritesSupported {
 		t.Fatalf("recipient planning mutation flags = non_mutating:%v delivery_writes:%v", recipientPlanning.NonMutating, recipientPlanning.DeliveryWritesSupported)
 	}
-	if readiness.RouteTopologyOwner != store.RunForkSelectedContractRouteTopologyOwner ||
-		readiness.RecipientPlanningOwner != store.RunForkSelectedContractRecipientPlanningOwner ||
-		readiness.SelectedExecutionModelOwner != store.RunForkSelectedContractExecutionModelOwner {
+	if readiness.RouteTopologyOwner != runfork.RunForkSelectedContractRouteTopologyOwner ||
+		readiness.RecipientPlanningOwner != runfork.RunForkSelectedContractRecipientPlanningOwner ||
+		readiness.SelectedExecutionModelOwner != runfork.RunForkSelectedContractExecutionModelOwner {
 		t.Fatalf("readiness owner consumption = %#v", readiness)
 	}
-	if contractSwapAdmission.RouteTopologyOwner != store.RunForkSelectedContractRouteTopologyOwner ||
-		contractSwapAdmission.RouteRecoveryOwner != store.RunForkSelectedContractRoutePersistenceOwner ||
-		contractSwapAdmission.RuntimeRouteRecoveryOwner != store.RunForkSelectedContractRouteRecoveryOwner ||
-		contractSwapAdmission.RecipientPlanningOwner != store.RunForkSelectedContractRecipientPlanningOwner {
+	if contractSwapAdmission.RouteTopologyOwner != runfork.RunForkSelectedContractRouteTopologyOwner ||
+		contractSwapAdmission.RouteRecoveryOwner != runfork.RunForkSelectedContractRoutePersistenceOwner ||
+		contractSwapAdmission.RuntimeRouteRecoveryOwner != runfork.RunForkSelectedContractRouteRecoveryOwner ||
+		contractSwapAdmission.RecipientPlanningOwner != runfork.RunForkSelectedContractRecipientPlanningOwner {
 		t.Fatalf("contract-swap admission route owner consumption = %#v", contractSwapAdmission)
 	}
-	if historicalAdmission.RouteTopologyOwner != store.RunForkSelectedContractRouteTopologyOwner ||
-		historicalAdmission.RouteRecoveryOwner != store.RunForkSelectedContractRoutePersistenceOwner ||
-		historicalAdmission.RuntimeRouteRecoveryOwner != store.RunForkSelectedContractRouteRecoveryOwner ||
-		historicalAdmission.RecipientPlanningOwner != store.RunForkSelectedContractRecipientPlanningOwner {
+	if historicalAdmission.RouteTopologyOwner != runfork.RunForkSelectedContractRouteTopologyOwner ||
+		historicalAdmission.RouteRecoveryOwner != runfork.RunForkSelectedContractRoutePersistenceOwner ||
+		historicalAdmission.RuntimeRouteRecoveryOwner != runfork.RunForkSelectedContractRouteRecoveryOwner ||
+		historicalAdmission.RecipientPlanningOwner != runfork.RunForkSelectedContractRecipientPlanningOwner {
 		t.Fatalf("historical replay admission route owner consumption = %#v", historicalAdmission)
 	}
-	if contractSwapExecution.RouteTopologyOwner != store.RunForkSelectedContractRouteTopologyOwner ||
-		contractSwapExecution.RouteRecoveryOwner != store.RunForkSelectedContractRoutePersistenceOwner ||
-		contractSwapExecution.RuntimeRouteRecoveryOwner != store.RunForkSelectedContractRouteRecoveryOwner ||
-		contractSwapExecution.RecipientPlanningOwner != store.RunForkSelectedContractRecipientPlanningOwner {
+	if contractSwapExecution.RouteTopologyOwner != runfork.RunForkSelectedContractRouteTopologyOwner ||
+		contractSwapExecution.RouteRecoveryOwner != runfork.RunForkSelectedContractRoutePersistenceOwner ||
+		contractSwapExecution.RuntimeRouteRecoveryOwner != runfork.RunForkSelectedContractRouteRecoveryOwner ||
+		contractSwapExecution.RecipientPlanningOwner != runfork.RunForkSelectedContractRecipientPlanningOwner {
 		t.Fatalf("contract-swap execution route owner consumption = %#v", contractSwapExecution)
 	}
-	if !executionBoundaryHas(recipientPlanning.InvalidPaths, "delivery_planner_as_canonical_owner", store.RunForkSelectedContractDispositionInvalid) {
+	if !executionBoundaryHas(recipientPlanning.InvalidPaths, "delivery_planner_as_canonical_owner", runfork.RunForkSelectedContractDispositionInvalid) {
 		t.Fatalf("recipient planning invalid paths = %#v, want generic delivery planner invalid as canonical owner", recipientPlanning.InvalidPaths)
 	}
 }
 
 func TestBuildSelectedContractReadinessClassifierRejectsLocalExecutionModel(t *testing.T) {
 	_, err := BuildSelectedContractReadinessClassifier(SelectedContractReadinessClassifierRequest{
-		Plan: store.RunForkPlan{
-			ReplayResumeAdmission: store.RunForkReplayResumeAdmission{Owner: store.RunForkReplayResumeAdmissionOwner},
+		Plan: runfork.RunForkPlan{
+			ReplayResumeAdmission: runfork.RunForkReplayResumeAdmission{Owner: runfork.RunForkReplayResumeAdmissionOwner},
 		},
-		ContractFrontierAdmission: store.RunForkContractFrontierAdmission{
-			Owner:       store.RunForkContractFrontierAdmissionOwner,
+		ContractFrontierAdmission: runfork.RunForkContractFrontierAdmission{
+			Owner:       runfork.RunForkContractFrontierAdmissionOwner,
 			NonMutating: true,
 		},
-		SelectedContractExecution: store.RunForkSelectedContractExecution{
+		SelectedContractExecution: runfork.RunForkSelectedContractExecution{
 			Owner:       "cmd.swarm.local_readiness",
 			NonMutating: true,
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), store.RunForkSelectedContractExecutionModelOwner) {
+	if err == nil || !strings.Contains(err.Error(), runfork.RunForkSelectedContractExecutionModelOwner) {
 		t.Fatalf("error = %v, want canonical execution model owner failure", err)
 	}
 }
 
-func assertReadinessFactSet(t *testing.T, facts []store.RunForkSelectedContractReadinessFact) {
+func assertReadinessFactSet(t *testing.T, facts []runfork.RunForkSelectedContractReadinessFact) {
 	t.Helper()
 	required := []string{
-		store.RunForkSelectedContractReadinessFactSourceEvents,
-		store.RunForkSelectedContractReadinessFactForkEvents,
-		store.RunForkSelectedContractReadinessFactSourceDeliveries,
-		store.RunForkSelectedContractReadinessFactForkDeliveries,
-		store.RunForkSelectedContractReadinessFactSelectedRecipientsRoutes,
-		store.RunForkSelectedContractReadinessFactTimers,
-		store.RunForkSelectedContractReadinessFactSessions,
-		store.RunForkSelectedContractReadinessFactTurns,
-		store.RunForkSelectedContractReadinessFactAudits,
-		store.RunForkSelectedContractReadinessFactCommittedReplayScopeMarkers,
-		store.RunForkSelectedContractReadinessFactPlatformRuntimeDiagnostics,
-		store.RunForkSelectedContractReadinessFactReceipts,
-		store.RunForkSelectedContractReadinessFactDeadLetters,
-		store.RunForkSelectedContractReadinessFactRetryIdempotency,
-		store.RunForkSelectedContractReadinessFactEmittedFollowUps,
-		store.RunForkSelectedContractReadinessFactSourcePostTFacts,
-		store.RunForkSelectedContractReadinessFactCurrentStateSnapshots,
-		store.RunForkSelectedContractReadinessFactNonAgentNodeSystemWork,
-		store.RunForkSelectedContractReadinessFactRestartRecovery,
-		store.RunForkSelectedContractReadinessFactOperatorConsumers,
+		runfork.RunForkSelectedContractReadinessFactSourceEvents,
+		runfork.RunForkSelectedContractReadinessFactForkEvents,
+		runfork.RunForkSelectedContractReadinessFactSourceDeliveries,
+		runfork.RunForkSelectedContractReadinessFactForkDeliveries,
+		runfork.RunForkSelectedContractReadinessFactSelectedRecipientsRoutes,
+		runfork.RunForkSelectedContractReadinessFactTimers,
+		runfork.RunForkSelectedContractReadinessFactSessions,
+		runfork.RunForkSelectedContractReadinessFactTurns,
+		runfork.RunForkSelectedContractReadinessFactAudits,
+		runfork.RunForkSelectedContractReadinessFactCommittedReplayScopeMarkers,
+		runfork.RunForkSelectedContractReadinessFactPlatformRuntimeDiagnostics,
+		runfork.RunForkSelectedContractReadinessFactReceipts,
+		runfork.RunForkSelectedContractReadinessFactDeadLetters,
+		runfork.RunForkSelectedContractReadinessFactRetryIdempotency,
+		runfork.RunForkSelectedContractReadinessFactEmittedFollowUps,
+		runfork.RunForkSelectedContractReadinessFactSourcePostTFacts,
+		runfork.RunForkSelectedContractReadinessFactCurrentStateSnapshots,
+		runfork.RunForkSelectedContractReadinessFactNonAgentNodeSystemWork,
+		runfork.RunForkSelectedContractReadinessFactRestartRecovery,
+		runfork.RunForkSelectedContractReadinessFactOperatorConsumers,
 	}
 	seen := map[string]struct{}{}
 	for _, fact := range facts {
@@ -458,7 +458,7 @@ func assertReadinessFactSet(t *testing.T, facts []store.RunForkSelectedContractR
 	}
 }
 
-func assertReadinessFact(t *testing.T, facts []store.RunForkSelectedContractReadinessFact, fact, disposition, owner string) {
+func assertReadinessFact(t *testing.T, facts []runfork.RunForkSelectedContractReadinessFact, fact, disposition, owner string) {
 	t.Helper()
 	for _, item := range facts {
 		if item.Fact == fact {
@@ -471,7 +471,7 @@ func assertReadinessFact(t *testing.T, facts []store.RunForkSelectedContractRead
 	t.Fatalf("readiness fact %s missing from %#v", fact, facts)
 }
 
-func runForkBoundaryOwner(t *testing.T, items []store.RunForkSelectedContractExecutionBoundary, concept string) string {
+func runForkBoundaryOwner(t *testing.T, items []runfork.RunForkSelectedContractExecutionBoundary, concept string) string {
 	t.Helper()
 	for _, item := range items {
 		if item.Concept == concept {

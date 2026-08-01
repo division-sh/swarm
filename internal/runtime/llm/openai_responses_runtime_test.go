@@ -77,13 +77,15 @@ func TestOpenAIResponsesRuntimeConversationToolBudgetAndPersistence(t *testing.T
 	harness := effecttest.New()
 	setEffectHarnessAgent(t, harness, "agent-1", "support/inst-1")
 	cfg := openAIResponsesTestConfig(server.URL)
+	registry := atomicLiveSessionTestRegistry{Registry: sessions.NewInMemoryRegistry(time.Second)}
 	runtime, err := RuntimeFactory{
 		Cfg:                  cfg,
-		Sessions:             atomicLiveSessionTestRegistry{Registry: sessions.NewInMemoryRegistry(time.Second)},
+		Sessions:             registry,
+		LiveSessions:         registry,
 		Conversations:        conversations,
 		LockOwner:            "worker-1",
 		Credentials:          testProviderCredentialResolver(t, "OPENAI_API_KEY", "test-key").Store,
-		CompletionController: runtimeeffects.NewCompletionController(harness, harness),
+		CompletionController: runtimeeffects.NewCompletionController(harness, harness, harness, harness),
 	}.Build()
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -156,7 +158,7 @@ func TestOpenAIResponsesRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 	harness := effecttest.New()
 	setEffectHarnessAgent(t, harness, "agent-1", "test/stateless")
 	runtime := NewOpenAIResponsesRuntime(openAIResponsesTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil)
-	runtime.completionController = runtimeeffects.NewCompletionController(harness, harness)
+	runtime.completionController = runtimeeffects.NewCompletionController(harness, harness, harness, harness)
 	runtime.credentials = testProviderCredentialResolver(t, "OPENAI_API_KEY", "test-key")
 	ctx := runtimeactors.WithActor(harness.CompletionContext("openai-responses-missing-usage"), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: "regular", FlowPath: "test/stateless"})
 	ctx = withTestStatelessMemory(t, ctx, "agent-1", "test/stateless")

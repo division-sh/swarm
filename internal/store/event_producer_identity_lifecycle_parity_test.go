@@ -14,6 +14,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
@@ -387,7 +388,7 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 			$1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
 			$6::uuid, $7::uuid, 'agent', 'replay-agent', $8, $9
 		)
-	`, uuid.NewString(), forkRunID, sourceRunID, sourceEventID, sourceDeliveryID, replayedEventID, forkDeliveryID, RunForkDeliveryEventReplayOwner, createdAt.Add(2*time.Minute)); err != nil {
+	`, uuid.NewString(), forkRunID, sourceRunID, sourceEventID, sourceDeliveryID, replayedEventID, forkDeliveryID, runfork.RunForkDeliveryEventReplayOwner, createdAt.Add(2*time.Minute)); err != nil {
 		t.Fatalf("insert replay lineage fixture: %v", err)
 	}
 	if err := tx.Commit(); err != nil {

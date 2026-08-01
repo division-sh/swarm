@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -28,18 +29,18 @@ func seedSelectedRouteRecoveryEvent(t testing.TB, ctx context.Context, db *sql.D
 }
 
 func TestNormalizeRunForkSelectedContractRouteRecoveryRejectsCurrentRouteOwner(t *testing.T) {
-	selection := RunForkContractSelection{
+	selection := runfork.RunForkContractSelection{
 		Mode:            "selected_contracts",
 		ContractsRoot:   "/tmp/contracts",
 		WorkflowName:    "workflow",
 		WorkflowVersion: "v1",
 	}
-	_, err := normalizeRunForkSelectedContractRouteRecovery(RunForkSelectedContractRouteRecoveryRequest{
+	_, err := normalizeRunForkSelectedContractRouteRecovery(runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         uuid.NewString(),
 		SourceRunID:       uuid.NewString(),
 		ForkEventID:       uuid.NewString(),
 		ContractSelection: selection,
-		RouteTopology: RunForkSelectedContractRouteTopology{
+		RouteTopology: runfork.RunForkSelectedContractRouteTopology{
 			Owner:                         "internal/runtime/bus.RouteTable.AddFlowInstanceRoute",
 			NonMutating:                   true,
 			ContractSelection:             selection,
@@ -47,9 +48,9 @@ func TestNormalizeRunForkSelectedContractRouteRecoveryRejectsCurrentRouteOwner(t
 			RoutePersistenceSupported:     false,
 			ExecutableRecipientsSupported: false,
 		},
-		RecipientPlanning: RunForkSelectedContractRecipientPlanning{
-			Owner:                       RunForkSelectedContractRecipientPlanningOwner,
-			RouteTopologyOwner:          RunForkSelectedContractRouteTopologyOwner,
+		RecipientPlanning: runfork.RunForkSelectedContractRecipientPlanning{
+			Owner:                       runfork.RunForkSelectedContractRecipientPlanningOwner,
+			RouteTopologyOwner:          runfork.RunForkSelectedContractRouteTopologyOwner,
 			NonMutating:                 true,
 			RecipientPlanningSupported:  true,
 			DeliveryWritesSupported:     false,
@@ -57,7 +58,7 @@ func TestNormalizeRunForkSelectedContractRouteRecoveryRejectsCurrentRouteOwner(t
 			FrontierEvidenceFingerprint: "frontier",
 		},
 	}, time.Now().UTC())
-	if err == nil || !strings.Contains(err.Error(), RunForkSelectedContractRouteTopologyOwner) {
+	if err == nil || !strings.Contains(err.Error(), runfork.RunForkSelectedContractRouteTopologyOwner) {
 		t.Fatalf("normalize error = %v, want canonical route topology owner rejection", err)
 	}
 }
@@ -75,7 +76,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence(t
 
 	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
 
-	record, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, RunForkSelectedContractRouteRecoveryRequest{
+	record, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         forkRunID,
 		SourceRunID:       sourceRunID,
 		ForkEventID:       eventID,
@@ -86,8 +87,8 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence(t
 	if err != nil {
 		t.Fatalf("RecordRunForkSelectedContractRouteRecovery: %v", err)
 	}
-	if record.Owner != RunForkSelectedContractRoutePersistenceOwner ||
-		record.RuntimeRecoveryOwner != RunForkSelectedContractRouteRecoveryOwner ||
+	if record.Owner != runfork.RunForkSelectedContractRoutePersistenceOwner ||
+		record.RuntimeRecoveryOwner != runfork.RunForkSelectedContractRouteRecoveryOwner ||
 		record.StaticRouteEventCount != 1 ||
 		record.RecipientPlanEventCount != 1 ||
 		record.RouteTopologyFingerprint == "" ||
@@ -122,8 +123,8 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection
 
 	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
 	targetHash := "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-	selection = RunForkContractSelection{
-		Mode:            RunForkContractSelectionModeBundleHash,
+	selection = runfork.RunForkContractSelection{
+		Mode:            runfork.RunForkContractSelectionModeBundleHash,
 		BundleHash:      targetHash,
 		WorkflowName:    selection.WorkflowName,
 		WorkflowVersion: selection.WorkflowVersion,
@@ -131,7 +132,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection
 	topology.ContractSelection = selection
 	planning.ContractSelection = selection
 
-	record, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, RunForkSelectedContractRouteRecoveryRequest{
+	record, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         forkRunID,
 		SourceRunID:       sourceRunID,
 		ForkEventID:       eventID,
@@ -142,7 +143,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection
 	if err != nil {
 		t.Fatalf("RecordRunForkSelectedContractRouteRecovery: %v", err)
 	}
-	if record.ContractSelection.Mode != RunForkContractSelectionModeBundleHash ||
+	if record.ContractSelection.Mode != runfork.RunForkContractSelectionModeBundleHash ||
 		record.ContractSelection.BundleHash != targetHash ||
 		record.ContractSelection.ContractsRoot != "" {
 		t.Fatalf("record selection = %#v", record.ContractSelection)
@@ -154,7 +155,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRoundTripsBundleHashSelection
 	if !ok {
 		t.Fatal("route recovery row not found")
 	}
-	if loaded.ContractSelection.Mode != RunForkContractSelectionModeBundleHash ||
+	if loaded.ContractSelection.Mode != runfork.RunForkContractSelectionModeBundleHash ||
 		loaded.ContractSelection.BundleHash != targetHash ||
 		loaded.ContractSelection.ContractsRoot != "" ||
 		!strings.Contains(string(loaded.RouteTopology), targetHash) ||
@@ -174,7 +175,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughJS
 	requireRunningRunForTest(t, ctx, pg, forkRunID, time.Now().UTC())
 	seedSelectedRouteRecoveryEvent(t, ctx, db, sourceRunID, eventID)
 	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
-	if _, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, RunForkSelectedContractRouteRecoveryRequest{
+	if _, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         forkRunID,
 		SourceRunID:       sourceRunID,
 		ForkEventID:       eventID,
@@ -230,15 +231,15 @@ func TestRecordRunForkSelectedContractRouteRecoveryFeedsManagerRecoveryThroughBu
 	seedSelectedRouteRecoveryEvent(t, ctx, db, sourceRunID, eventID)
 	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
 	targetHash := "bundle-v1:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-	selection = RunForkContractSelection{
-		Mode:            RunForkContractSelectionModeBundleHash,
+	selection = runfork.RunForkContractSelection{
+		Mode:            runfork.RunForkContractSelectionModeBundleHash,
 		BundleHash:      targetHash,
 		WorkflowName:    selection.WorkflowName,
 		WorkflowVersion: selection.WorkflowVersion,
 	}
 	topology.ContractSelection = selection
 	planning.ContractSelection = selection
-	if _, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, RunForkSelectedContractRouteRecoveryRequest{
+	if _, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         forkRunID,
 		SourceRunID:       sourceRunID,
 		ForkEventID:       eventID,
@@ -298,7 +299,7 @@ func selectedRouteRecoveryGuardEvent(t *testing.T, eventID, forkRunID, sourceRun
 	return eventtest.SelectedForkReplay(
 		eventID,
 		events.EventType("item.received"),
-		eventtest.Producer(events.EventProducerPlatform, RunForkSelectedContractExecutionOwner),
+		eventtest.Producer(events.EventProducerPlatform, runfork.RunForkSelectedContractExecutionOwner),
 		"",
 		nil,
 		0,
@@ -319,7 +320,7 @@ func TestRecordRunForkSelectedContractRouteRecoveryRejectsJSONBTamperDuringManag
 	requireRunningRunForTest(t, ctx, pg, forkRunID, time.Now().UTC())
 	seedSelectedRouteRecoveryEvent(t, ctx, db, sourceRunID, eventID)
 	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
-	if _, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, RunForkSelectedContractRouteRecoveryRequest{
+	if _, err := pg.RecordRunForkSelectedContractRouteRecovery(ctx, runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         forkRunID,
 		SourceRunID:       sourceRunID,
 		ForkEventID:       eventID,
@@ -346,43 +347,43 @@ func TestRecordRunForkSelectedContractRouteRecoveryRejectsJSONBTamperDuringManag
 	}
 }
 
-func testSelectedRouteRecoveryEvidence(eventID string) (RunForkContractSelection, RunForkSelectedContractRouteTopology, RunForkSelectedContractRecipientPlanning) {
-	selection := RunForkContractSelection{
+func testSelectedRouteRecoveryEvidence(eventID string) (runfork.RunForkContractSelection, runfork.RunForkSelectedContractRouteTopology, runfork.RunForkSelectedContractRecipientPlanning) {
+	selection := runfork.RunForkContractSelection{
 		Mode:            "selected_contracts",
 		ContractsRoot:   "/tmp/contracts",
 		WorkflowName:    "workflow",
 		WorkflowVersion: "v1",
 	}
-	topology := RunForkSelectedContractRouteTopology{
-		Owner:                         RunForkSelectedContractRouteTopologyOwner,
-		RouteAdmissionOwner:           RunForkSelectedContractRouteAdmissionOwner,
+	topology := runfork.RunForkSelectedContractRouteTopology{
+		Owner:                         runfork.RunForkSelectedContractRouteTopologyOwner,
+		RouteAdmissionOwner:           runfork.RunForkSelectedContractRouteAdmissionOwner,
 		NonMutating:                   true,
 		RoutePersistenceSupported:     false,
 		ExecutableRecipientsSupported: false,
 		ContractSelection:             selection,
 		StaticTopologySupported:       true,
 		DynamicTopologySupported:      true,
-		FrontierAdmissionOwner:        RunForkContractFrontierAdmissionOwner,
+		FrontierAdmissionOwner:        runfork.RunForkContractFrontierAdmissionOwner,
 		FrontierEventCount:            1,
 		FrontierSourceEventIDs:        []string{eventID},
 		FrontierEvidenceFingerprint:   "frontier-fingerprint",
-		StaticRouteEvents: []RunForkSelectedContractRouteEvent{{
+		StaticRouteEvents: []runfork.RunForkSelectedContractRouteEvent{{
 			SourceEventID: eventID,
 			EventName:     "item.received",
-			DerivedRecipients: []RunForkContractFrontierRecipient{{
+			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{{
 				SubscriberType: "node",
 				SubscriberID:   "node-a",
 				Path:           "flow-a/node-a",
 				RouteSource:    "selected_contracts",
 			}},
-			Disposition: RunForkSelectedContractDispositionForkLocalTruth,
+			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},
 	}
-	planning := RunForkSelectedContractRecipientPlanning{
-		Owner:                       RunForkSelectedContractRecipientPlanningOwner,
-		RouteTopologyOwner:          RunForkSelectedContractRouteTopologyOwner,
-		RouteAdmissionOwner:         RunForkSelectedContractRouteAdmissionOwner,
-		FutureExecutionOwner:        RunForkSelectedContractExecutionOwner,
+	planning := runfork.RunForkSelectedContractRecipientPlanning{
+		Owner:                       runfork.RunForkSelectedContractRecipientPlanningOwner,
+		RouteTopologyOwner:          runfork.RunForkSelectedContractRouteTopologyOwner,
+		RouteAdmissionOwner:         runfork.RunForkSelectedContractRouteAdmissionOwner,
+		FutureExecutionOwner:        runfork.RunForkSelectedContractExecutionOwner,
 		NonMutating:                 true,
 		RecipientPlanningSupported:  true,
 		DeliveryWritesSupported:     false,
@@ -390,16 +391,16 @@ func testSelectedRouteRecoveryEvidence(eventID string) (RunForkContractSelection
 		FrontierEventCount:          1,
 		FrontierSourceEventIDs:      []string{eventID},
 		FrontierEvidenceFingerprint: "frontier-fingerprint",
-		RecipientPlanEvents: []RunForkSelectedContractRecipientPlanEvent{{
+		RecipientPlanEvents: []runfork.RunForkSelectedContractRecipientPlanEvent{{
 			SourceEventID: eventID,
 			EventName:     "item.received",
-			Recipients: []RunForkContractFrontierRecipient{{
+			Recipients: []runfork.RunForkContractFrontierRecipient{{
 				SubscriberType: "node",
 				SubscriberID:   "node-a",
 				Path:           "flow-a/node-a",
 				RouteSource:    "selected_contracts",
 			}},
-			Disposition: RunForkSelectedContractDispositionForkLocalTruth,
+			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},
 	}
 	return selection, topology, planning

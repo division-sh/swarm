@@ -31,8 +31,4 @@ func TestEventBusDurabilityBoundaryRequiresOneDeclaredOwner(t *testing.T) {
 		t.Fatalf("ephemeral work presence: %v", err)
 	}
 
-	if _, err := runtimebus.NewEphemeralEventBus(ownerDeclaringEventStore{}); err == nil ||
-		!strings.Contains(err.Error(), "selected event store") {
-		t.Fatalf("ephemeral selected-store error = %v, want durable-boundary rejection", err)
-	}
 }

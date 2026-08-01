@@ -3245,7 +3245,7 @@ func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventN
 		}}, nil)),
 		generation: generation, authorizations: []runtimeprovideroutput.Authorization{authorization},
 	}
-	resolver := newConnectRoutePlanResolver(source, nil, nil, nil)
+	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil)
 	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(), events.EventType(eventName), "operator-api", "", json.RawMessage(`{"chat_id":"42"}`),
 		0, "run-1", "", events.EventEnvelope{}, time.Now().UTC(),

@@ -10,14 +10,19 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -72,6 +77,71 @@ type managedNativeRecoveryDeliveryStore struct {
 	onClaim    func(context.Context) error
 }
 
+type managedNativeDurableRoles struct{}
+
+func (managedNativeDurableRoles) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+func (managedNativeDurableRoles) RequestCompletionCandidate(context.Context, runtimerunlifecycle.CandidateRequest) (runtimerunlifecycle.CandidateRequestDisposition, error) {
+	return "", fmt.Errorf("unexpected managed-native completion candidate")
+}
+func (managedNativeDurableRoles) TransitionActiveRun(context.Context, runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	return "", fmt.Errorf("unexpected managed-native active run transition")
+}
+func (managedNativeDurableRoles) MarkTerminalRun(context.Context, runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf("unexpected managed-native terminal run transition")
+}
+func (managedNativeDurableRoles) UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error {
+	return nil
+}
+func (managedNativeDurableRoles) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.Route) error {
+	return nil
+}
+func (managedNativeDurableRoles) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.Route, error) {
+	return nil, nil
+}
+func (managedNativeDurableRoles) ReplaceFlowInstanceRouteRecords(context.Context, runtimeflowidentity.Route, []runtimebus.FlowInstanceRouteRecord) error {
+	return nil
+}
+func (managedNativeDurableRoles) ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) error {
+	return nil
+}
+func (managedNativeDurableRoles) ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.Route) ([]runtimebus.FlowInstanceRouteRecord, error) {
+	return nil, nil
+}
+func (managedNativeDurableRoles) RollbackFlowInstanceRoute(context.Context, runtimeflowidentity.Route) error {
+	return nil
+}
+func (managedNativeDurableRoles) ListActiveAgentDescriptors(context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
+	return nil, nil
+}
+func (managedNativeDurableRoles) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	return nil, nil
+}
+func (managedNativeDurableRoles) ListEventDeliveryTargets(context.Context, string) (map[string]events.RouteIdentity, error) {
+	return map[string]events.RouteIdentity{}, nil
+}
+func (managedNativeDurableRoles) ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error) {
+	return nil, nil
+}
+func (managedNativeDurableRoles) RecordDeadLetter(context.Context, runtimedeadletters.Record) error {
+	return nil
+}
+func (managedNativeDurableRoles) LoadRunOrigin(context.Context, string) (runtimerunlifecycle.RunOrigin, error) {
+	return runtimerunlifecycle.ScenarioSetupRunOrigin(), nil
+}
+
+func runtimeTestSyntheticDurableDependencies(delivery runtimedelivery.Store) runtimebus.DurableDependencies {
+	roles := managedNativeDurableRoles{}
+	return runtimebus.DurableDependencies{
+		RunLifecycle: roles, DeliveryLifecycle: delivery,
+		FlowRoutes: roles, FlowRouteRecords: roles, FlowRouteSets: roles,
+		FlowRouteTopology: roles, FlowRouteRollback: roles, ActiveAgents: roles, ActiveFlows: roles,
+		DeliveryTargets: roles, DeliveryRouteSets: roles,
+		TargetFailureRecorder: roles, RunOrigins: roles,
+	}
+}
+
 func (*managedNativeRecoveryDeliveryStore) ActivateDeliveryAuthority(
 	context.Context,
 	runtimedelivery.ExecutionAuthority,
@@ -122,15 +192,14 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 	}
 	probeRuntime := &managedNativeStartupProbeRuntime{}
 	cfg := managedNativeLifecycleConfig(true)
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{
-		Config: cfg,
-		Stores: managedNativeLifecycleStores(
-			managerStore,
-			delivery,
-			ownership,
-		),
-		Options: managedNativeLifecycleOptions(t, "recovered-native-agent", probeRuntime),
-	})
+	deps := managedNativeLifecycleDeps(
+		managerStore,
+		delivery,
+		ownership,
+	)
+	deps.Config = cfg
+	deps.Options = managedNativeLifecycleOptions(t, "recovered-native-agent", probeRuntime)
+	rt, err := newScopedTestRuntime(t, ctx, deps)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -194,20 +263,19 @@ func TestRuntimeStart_PreparedReplacementSettlesManagedNativePreflightBeforeComm
 		},
 	}
 
-	predecessor, err := newScopedTestRuntime(t, ctx, RuntimeDeps{
-		Config: &config.Config{},
-		Stores: managedNativeLifecycleStores(
-			managerStore,
-			delivery,
-			ownership,
-		),
-		Options: RuntimeOptions{
-			SelfCheck:                        false,
-			WorkflowModule:                   loadAgentFreeRuntimeWorkflowModule(t),
-			LLMRuntime:                       llm.NoopRuntime{},
-			DisablePersistentStartupRecovery: true,
-		},
-	})
+	predecessorDeps := managedNativeLifecycleDeps(
+		managerStore,
+		delivery,
+		ownership,
+	)
+	predecessorDeps.Config = &config.Config{}
+	predecessorDeps.Options = RuntimeOptions{
+		SelfCheck:                        false,
+		WorkflowModule:                   loadAgentFreeRuntimeWorkflowModule(t),
+		LLMRuntime:                       llm.NoopRuntime{},
+		DisablePersistentStartupRecovery: true,
+	}
+	predecessor, err := newScopedTestRuntime(t, ctx, predecessorDeps)
 	if err != nil {
 		t.Fatalf("NewRuntime(predecessor): %v", err)
 	}
@@ -222,15 +290,14 @@ func TestRuntimeStart_PreparedReplacementSettlesManagedNativePreflightBeforeComm
 	}
 
 	probeRuntime := &managedNativeStartupProbeRuntime{}
-	candidate, err := newScopedTestRuntime(t, ctx, RuntimeDeps{
-		Config: managedNativeLifecycleConfig(true),
-		Stores: managedNativeLifecycleStores(
-			managerStore,
-			delivery,
-			ownership,
-		),
-		Options: managedNativeLifecycleOptions(t, "replacement-native-agent", probeRuntime),
-	})
+	candidateDeps := managedNativeLifecycleDeps(
+		managerStore,
+		delivery,
+		ownership,
+	)
+	candidateDeps.Config = managedNativeLifecycleConfig(true)
+	candidateDeps.Options = managedNativeLifecycleOptions(t, "replacement-native-agent", probeRuntime)
+	candidate, err := newScopedTestRuntime(t, ctx, candidateDeps)
 	if err != nil {
 		t.Fatalf("NewRuntime(candidate): %v", err)
 	}
@@ -306,18 +373,21 @@ func managedNativeLifecycleOptions(t *testing.T, agentID string, modelRuntime ll
 	}
 }
 
-func managedNativeLifecycleStores(
+func managedNativeLifecycleDeps(
 	managerStore *managedNativeLifecycleStore,
 	delivery runtimedelivery.Store,
 	ownership runtimestartupownership.Store,
-) Stores {
+) RuntimeDeps {
 	eventStore := startupRecoveryMinimalEventStore{}
-	return Stores{
-		PipelineObligations: eventStore.PipelineObligations(),
-		EventStore:          eventStore,
-		DeliveryStore:       delivery,
-		ManagerStore:        managerStore,
-		StartupOwnership:    ownership,
+	return RuntimeDeps{
+		EventStore:               eventStore,
+		EventBusDurable:          runtimeTestSyntheticDurableDependencies(delivery),
+		PipelineObligations:      eventStore.PipelineObligations(),
+		DeliveryStore:            delivery,
+		ManagerStore:             managerStore,
+		EffectsStore:             managerStore,
+		ManagedCapabilitiesStore: managerStore,
+		StartupOwnership:         ownership,
 	}
 }
 

@@ -242,7 +242,7 @@ func (p DynamicFlowRuntimeReadinessPlan) Normalized() (DynamicFlowRuntimeReadine
 	return p, nil
 }
 
-func (s *WorkflowInstanceStore) insertDynamicFlowRuntimeReadinessPlan(
+func (s *workflowInstanceStore) insertDynamicFlowRuntimeReadinessPlan(
 	ctx context.Context,
 	instancePath string,
 	plan DynamicFlowRuntimeReadinessPlan,
@@ -282,7 +282,7 @@ func (s *WorkflowInstanceStore) insertDynamicFlowRuntimeReadinessPlan(
 	return nil
 }
 
-func (s *WorkflowInstanceStore) dynamicFlowRuntimeReadinessPlanEqual(
+func (s *workflowInstanceStore) dynamicFlowRuntimeReadinessPlanEqual(
 	ctx context.Context,
 	instancePath string,
 	expected *DynamicFlowRuntimeReadinessPlan,
@@ -326,7 +326,7 @@ func (s *WorkflowInstanceStore) dynamicFlowRuntimeReadinessPlanEqual(
 
 // ReconcileDynamicFlowRuntimeReadinessPlan advances the durable topology owner
 // when an existing flow instance is ensured against a revised semantic source.
-func (s *WorkflowInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(
+func (s *workflowInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(
 	ctx context.Context,
 	expected DynamicFlowRuntimeReadinessPlan,
 	observedAt time.Time,
@@ -443,7 +443,7 @@ func (s *WorkflowInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(
 	return changed, nil
 }
 
-func (s *WorkflowInstanceStore) LoadDynamicFlowRuntimeReadiness(
+func (s *workflowInstanceStore) LoadDynamicFlowRuntimeReadiness(
 	ctx context.Context,
 	runID string,
 	instancePath string,
@@ -505,7 +505,7 @@ func (s *WorkflowInstanceStore) LoadDynamicFlowRuntimeReadiness(
 	return item, err == nil, err
 }
 
-func (s *WorkflowInstanceStore) ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error) {
+func (s *workflowInstanceStore) ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("workflow instance store is required")
 	}
@@ -563,7 +563,7 @@ func (s *WorkflowInstanceStore) ListDynamicFlowRuntimeReadiness(ctx context.Cont
 	return out, rows.Err()
 }
 
-func (s *WorkflowInstanceStore) ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error) {
+func (s *workflowInstanceStore) ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("workflow instance store is required")
 	}
@@ -646,7 +646,7 @@ func decodeDynamicFlowRuntimeReadiness(
 	return item, nil
 }
 
-func (s *WorkflowInstanceStore) MarkDynamicFlowRuntimeTopologyReady(
+func (s *workflowInstanceStore) MarkDynamicFlowRuntimeTopologyReady(
 	ctx context.Context,
 	expected DynamicFlowRuntimeReadinessPlan,
 	readyAt time.Time,
@@ -669,7 +669,7 @@ func (s *WorkflowInstanceStore) MarkDynamicFlowRuntimeTopologyReady(
 	)
 }
 
-func (s *WorkflowInstanceStore) CommitDynamicFlowRuntimeCreationOccurrence(
+func (s *workflowInstanceStore) CommitDynamicFlowRuntimeCreationOccurrence(
 	ctx context.Context,
 	req DynamicFlowRuntimeCreationOccurrenceRequest,
 	publisher DynamicFlowRuntimeCreationOccurrencePublisher,
@@ -743,7 +743,7 @@ func (s *WorkflowInstanceStore) CommitDynamicFlowRuntimeCreationOccurrence(
 	})
 }
 
-func (s *WorkflowInstanceStore) lockDynamicFlowRuntimeCreationEligibility(
+func (s *workflowInstanceStore) lockDynamicFlowRuntimeCreationEligibility(
 	ctx context.Context,
 	tx *sql.Tx,
 	runID string,
@@ -792,7 +792,7 @@ func (s *WorkflowInstanceStore) lockDynamicFlowRuntimeCreationEligibility(
 	return nil
 }
 
-func (s *WorkflowInstanceStore) markDynamicFlowRuntimeReadiness(
+func (s *workflowInstanceStore) markDynamicFlowRuntimeReadiness(
 	ctx context.Context,
 	runID string,
 	instancePath string,

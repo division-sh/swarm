@@ -45,6 +45,8 @@ func TestForkChatSandboxBuildsCanonicalMockAdapter(t *testing.T) {
 		nil,
 		harness,
 		harness,
+		harness,
+		harness,
 	)
 	if err != nil {
 		t.Fatalf("build fork-chat mock runtime: %v", err)

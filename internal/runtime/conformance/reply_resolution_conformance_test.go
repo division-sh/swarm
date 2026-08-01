@@ -22,7 +22,6 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -77,7 +76,10 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 		t.Fatalf("default-correlation hard invalidities = %#v", got)
 	}
 	store := newReplyConformanceStore()
-	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
+		ContractBundle: source,
+		Durable:        bus.DurableDependencies{ReplyContext: store},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -136,7 +138,10 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 	ctx := testAuthorActivityContext(context.Background())
 	source := templatereply.LoadSource(t, templatereply.Options{ExplicitCorrelation: true})
 	store := newReplyConformanceStore()
-	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
+		ContractBundle: source,
+		Durable:        bus.DurableDependencies{ReplyContext: store},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -702,9 +707,9 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 	}
 	eb := newDurableReplyConformanceBus(t, ctx, backend, source)
 	db := replyConformanceDB(t, backend)
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, backend)
 	if sqliteStore, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, sqliteStore)
+		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, sqliteStore)
 	}
 	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
 	if err != nil {
@@ -719,8 +724,10 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 		guards: runtimepipeline.NewContractGuardRegistry(source), actions: runtimepipeline.NewContractActionRegistry(source),
 	}
 	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: module, WorkflowStore: workflowStore, DeliveryStore: backend, DecisionCards: cards,
-		PipelineObligations: backend.PipelineObligations(),
+		Module: module, Persistence: workflowPersistence, RunLifecycle: backend,
+		DeliveryStore: backend, DeliveryRuntime: eb, DecisionCards: cards, HumanTasks: cards,
+		DirectDecisionPublisher: eb,
+		PipelineObligations:     backend.PipelineObligations(),
 	})
 	eb.SetInterceptors(coordinator)
 	eb.RegisterRuntimeActiveAgentDescriptor(bus.ActiveAgentDescriptor{
@@ -769,11 +776,7 @@ func receiveReplyConformanceHumanTaskOutcome(t *testing.T, outcomes <-chan *bus.
 }
 
 type durableReplyConformanceStore interface {
-	bus.EventStore
-	runtimedelivery.Store
-	bus.FlowInstanceRoutePersistence
-	runtimereplycontext.Store
-	PipelineObligations() runtimepipelineobligation.Store
+	conformanceDurableEventBusStore
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 }
 
@@ -782,7 +785,7 @@ func newDurableReplyConformanceBus(t *testing.T, ctx context.Context, backend du
 	if source == nil {
 		t.Fatal("reply conformance semantic source is required")
 	}
-	eb, err := newScopedTestEventBus(t, backend, bus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(t, backend, durableConformanceEventBusOptions(backend, bus.EventBusOptions{ContractBundle: source}))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}

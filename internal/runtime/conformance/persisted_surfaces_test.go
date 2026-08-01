@@ -291,7 +291,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	defer func() {
 		http.DefaultTransport = previousTransport
 	}()
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, "review.requested")
+	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{}), "review.requested")
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -300,11 +300,12 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	runtime, err := (runtimellm.RuntimeFactory{
 		Cfg:                  &config.Config{},
 		Sessions:             pg,
+		LiveSessions:         pg,
 		Conversations:        pg,
 		LockOwner:            "worker-1",
 		Events:               bus,
 		Credentials:          credentials.Store,
-		CompletionController: runtimeeffects.NewCompletionController(pg, discardCompletionSpendProjection{}),
+		CompletionController: runtimeeffects.NewCompletionController(pg, pg, pg, discardCompletionSpendProjection{}),
 	}).Build()
 	if err != nil {
 		t.Fatalf("Build LLM runtime: %v", err)
@@ -479,7 +480,7 @@ printf '{"result":"ok"}'
 
 	pg.SetSessionLockTTL(30 * time.Second)
 	registry := runtimesessions.Registry(pg)
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, "review.requested")
+	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{}), "review.requested")
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -497,8 +498,9 @@ printf '{"result":"ok"}'
 				},
 			},
 		},
-		Sessions:  registry,
-		LockOwner: "worker-1",
+		Sessions:     registry,
+		LiveSessions: pg,
+		LockOwner:    "worker-1",
 		Workspaces: staticWorkspaceResolver{
 			target: &runtimeworkspace.Target{
 				Container: "swarm-agent-1",
@@ -508,7 +510,7 @@ printf '{"result":"ok"}'
 		Conversations:        pg,
 		Events:               bus,
 		Credentials:          credentials.Store,
-		CompletionController: runtimeeffects.NewCompletionController(pg, discardCompletionSpendProjection{}),
+		CompletionController: runtimeeffects.NewCompletionController(pg, pg, pg, discardCompletionSpendProjection{}),
 	}).Build()
 	if err != nil {
 		t.Fatalf("Build LLM runtime: %v", err)
@@ -1048,22 +1050,28 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 		LLM: config.LLMConfig{
 			Backend: "anthropic",
 		},
-	}, Stores: runtimepkg.Stores{
-		SQLDB:                  db,
-		PipelineStore:          runtimepipeline.NewWorkflowInstanceStore(db),
-		EventStore:             pg,
-		RunLifecycleCandidates: pg,
-		RuntimeLogStore:        pg,
-		ManagerStore:           pg,
-		ScheduleStore:          pg,
-		PipelineObligations:    pg.PipelineObligations(),
-	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
-		SelfCheck:         false,
-		WorkflowModule:    loadConformanceRuntimeWorkflowModule(t),
-		LLMRuntime:        conformanceNoopLLMRuntime{},
-		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
-	})})
+	},
+		SQLDB:                       db,
+		WorkflowPersistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		EventStore:                  pg,
+		EventBusDurable:             conformanceDurableEventBusDependencies(pg),
+		RunLifecycleCandidates:      pg,
+		RuntimeLogStore:             pg,
+		ManagerStore:                pg,
+		ManagerLifecycleStore:       pg,
+		ManagerLifecycleDiagnostics: pg,
+		ManagerPersistenceRoles:     conformanceManagerPersistenceRoles(pg, nil, nil),
+		SessionResetter:             pg,
+		ScheduleStore:               pg,
+		TimerObligationReader:       pg,
+		PipelineObligations:         pg.PipelineObligations(),
+		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
+			SelfCheck:         false,
+			WorkflowModule:    loadConformanceRuntimeWorkflowModule(t),
+			LLMRuntime:        conformanceNoopLLMRuntime{},
+			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+			BundleSourceFact:  authorActivityTestBundleSourceFact,
+		})})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1135,22 +1143,27 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 		LLM: config.LLMConfig{
 			Backend: "anthropic",
 		},
-	}, Stores: runtimepkg.Stores{
-		SQLDB:                  db,
-		PipelineStore:          runtimepipeline.NewWorkflowInstanceStore(db),
-		EventStore:             eventStore,
-		RunLifecycleCandidates: pg,
-		RuntimeLogStore:        pg,
-		ManagerStore:           &conformanceManagerReplayStore{},
-		DeliveryStore:          pg,
-		PipelineObligations:    eventStore.PipelineObligations(),
-	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
-		SelfCheck:         false,
-		WorkflowModule:    module,
-		LLMRuntime:        conformanceNoopLLMRuntime{},
-		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
-	})})
+	},
+		SQLDB:                       db,
+		WorkflowPersistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		EventStore:                  eventStore,
+		EventBusDurable:             conformanceDurableEventBusDependencies(pg),
+		RunLifecycleCandidates:      pg,
+		RuntimeLogStore:             pg,
+		ManagerStore:                &conformanceManagerReplayStore{},
+		ManagerLifecycleStore:       pg,
+		ManagerLifecycleDiagnostics: pg,
+		ManagerPersistenceRoles:     conformanceManagerPersistenceRoles(pg, nil, nil),
+		SessionResetter:             pg,
+		DeliveryStore:               pg,
+		PipelineObligations:         eventStore.PipelineObligations(),
+		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
+			SelfCheck:         false,
+			WorkflowModule:    module,
+			LLMRuntime:        conformanceNoopLLMRuntime{},
+			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+			BundleSourceFact:  authorActivityTestBundleSourceFact,
+		})})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1249,23 +1262,28 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 		LLM: config.LLMConfig{
 			Backend: "anthropic",
 		},
-	}, Stores: runtimepkg.Stores{
-		SQLDB:                  db,
-		PipelineStore:          runtimepipeline.NewWorkflowInstanceStore(db),
-		EventStore:             pg,
-		RunLifecycleCandidates: pg,
-		RuntimeLogStore:        pg,
-		ManagerStore:           pg,
-		DeliveryStore:          pg,
-		ScheduleStore:          scheduleStore,
-		PipelineObligations:    pg.PipelineObligations(),
-	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
-		SelfCheck:         false,
-		WorkflowModule:    loadConformanceRuntimeWorkflowModule(t),
-		LLMRuntime:        conformanceNoopLLMRuntime{},
-		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
-	})})
+	},
+		SQLDB:                       db,
+		WorkflowPersistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		EventStore:                  pg,
+		EventBusDurable:             conformanceDurableEventBusDependencies(pg),
+		RunLifecycleCandidates:      pg,
+		RuntimeLogStore:             pg,
+		ManagerStore:                pg,
+		ManagerLifecycleStore:       pg,
+		ManagerLifecycleDiagnostics: pg,
+		ManagerPersistenceRoles:     conformanceManagerPersistenceRoles(pg, nil, nil),
+		SessionResetter:             pg,
+		DeliveryStore:               pg,
+		ScheduleStore:               scheduleStore,
+		PipelineObligations:         pg.PipelineObligations(),
+		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
+			SelfCheck:         false,
+			WorkflowModule:    loadConformanceRuntimeWorkflowModule(t),
+			LLMRuntime:        conformanceNoopLLMRuntime{},
+			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+			BundleSourceFact:  authorActivityTestBundleSourceFact,
+		})})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1374,10 +1392,10 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 
 	logger := runtimepkg.NewRuntimeLogger(pg)
 	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
+	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{
 		Logger:    conformanceRuntimeLoggerHook{logger: logger},
 		WorkOwner: workOwner,
-	})
+	}))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1392,9 +1410,10 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 	}
 
 	am := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
-		BaseContext: testAuthorActivityRuntimeContext(context.Background()),
-		Sessions:    registry,
-		WorkOwner:   workOwner,
+		BaseContext:     testAuthorActivityRuntimeContext(context.Background()),
+		Sessions:        registry,
+		SessionResetter: pg,
+		WorkOwner:       workOwner,
 	})
 	if err := am.ResetRuntimeStateWithSource("admin_cli"); err != nil {
 		t.Fatalf("ResetRuntimeStateWithSource: %v", err)
@@ -1541,22 +1560,27 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		LLM: config.LLMConfig{
 			Backend: "anthropic",
 		},
-	}, Stores: runtimepkg.Stores{
-		SQLDB:                  db,
-		PipelineStore:          runtimepipeline.NewWorkflowInstanceStore(db),
-		EventStore:             pg,
-		RunLifecycleCandidates: pg,
-		RuntimeLogStore:        pg,
-		ManagerStore:           managerStore,
-		DeliveryStore:          pg,
-		PipelineObligations:    pg.PipelineObligations(),
-	}, Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
-		SelfCheck:         false,
-		WorkflowModule:    module,
-		LLMRuntime:        conformanceNoopLLMRuntime{},
-		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
-	})})
+	},
+		SQLDB:                       db,
+		WorkflowPersistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		EventStore:                  pg,
+		EventBusDurable:             conformanceDurableEventBusDependencies(pg),
+		RunLifecycleCandidates:      pg,
+		RuntimeLogStore:             pg,
+		ManagerStore:                managerStore,
+		ManagerLifecycleStore:       pg,
+		ManagerLifecycleDiagnostics: pg,
+		ManagerPersistenceRoles:     conformanceManagerPersistenceRoles(pg, nil, nil),
+		SessionResetter:             pg,
+		DeliveryStore:               pg,
+		PipelineObligations:         pg.PipelineObligations(),
+		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
+			SelfCheck:         false,
+			WorkflowModule:    module,
+			LLMRuntime:        conformanceNoopLLMRuntime{},
+			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+			BundleSourceFact:  authorActivityTestBundleSourceFact,
+		})})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1566,7 +1590,12 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 	}
 	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return conformanceManagerReplayAgent{id: cfg.ID}, nil
-	}, runtimemanager.AgentManagerOptions{WorkOwner: rt.WorkOccurrence(), DeliveryStore: pg}, managerStore)
+	}, runtimemanager.AgentManagerOptions{
+		WorkOwner:        rt.WorkOccurrence(),
+		DeliveryStore:    pg,
+		SessionResetter:  pg,
+		PersistenceRoles: conformanceManagerPersistenceRoles(pg, rt.Bus, rt.Pipeline),
+	}, managerStore)
 
 	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -1604,10 +1633,10 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 
 	logger := runtimepkg.NewRuntimeLogger(pg)
 	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
-	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
+	bus, err := newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg, runtimebus.EventBusOptions{
 		Logger:    conformanceRuntimeLoggerHook{logger: logger},
 		WorkOwner: workOwner,
-	}, "system.parent", "system.recover.replay", "system.recover.skip")
+	}), "system.parent", "system.recover.replay", "system.recover.skip")
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -1861,32 +1890,20 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 	requireMutationSurface(t, db)
 
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
-	instanceStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	instanceStore.ConfigureRuntimeMutationRunner(selected)
-	instanceStore.ConfigureRunLifecycle(selected)
+	module := loadConformanceRuntimeWorkflowModule(t)
+	eventBus, err := newScopedTestEventBus(t, selected, durableConformanceEventBusOptions(selected, runtimebus.EventBusOptions{ContractBundle: module.source}))
+	if err != nil {
+		t.Fatalf("construct workflow mutation event bus: %v", err)
+	}
+	pipeline := runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:              module,
+		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, selected),
+		RunLifecycle:        selected,
+		PipelineObligations: selected.PipelineObligations(),
+	})
 	entityID := uuid.NewString()
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
-	if err := instanceStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID:      entityID,
-		StorageRef:      entityID,
-		WorkflowName:    "mutation-flow",
-		WorkflowVersion: "1.0.0",
-		CurrentState:    "queued",
-		EnteredStageAt:  enteredAt,
-		CreatedAt:       enteredAt,
-		Metadata: map[string]any{
-			"status": "open",
-			"gates": map[string]any{
-				"g_ready": true,
-			},
-		},
-		StateBuckets: map[string]any{
-			"evidence": map[string]any{"score": 1},
-		},
-	}); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
-	}
-	if err := instanceStore.Upsert(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := pipeline.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "mutation-flow",
@@ -1904,8 +1921,8 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 			"evidence": map[string]any{"score": 2},
 			"notes":    map[string]any{"count": 1},
 		},
-	}); err != nil {
-		t.Fatalf("update workflow instance: %v", err)
+	}, enteredAt); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
 	}
 
 	if err := trackedMutationStateMatchesEntityState(db, runID, entityID); err != nil {

@@ -156,7 +156,7 @@ func (p *lifecyclePersistenceProbe) requestsFor(kind string) []AgentLifecycleTra
 
 func TestLifecycleCoordinatorReplayDoesNotReplaceSuccessfulGeneration(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
-	coordinator := newAgentLifecycleCoordinator(probe, nil)
+	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
 	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
@@ -187,7 +187,7 @@ func TestLifecycleCoordinatorReplayDoesNotReplaceSuccessfulGeneration(t *testing
 
 func TestLifecycleCoordinatorReconfigureOperationIdentityTracksTransitionOccurrence(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
-	coordinator := newAgentLifecycleCoordinator(probe, nil)
+	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	base := lifecycleTestPersistedAgent(t)
 	if err := coordinator.register(testAuthorActivityContext(context.Background()), base, true); err != nil {
 		t.Fatalf("register: %v", err)
@@ -235,7 +235,7 @@ func TestLifecycleCoordinatorReconfigureOperationIdentityTracksTransitionOccurre
 
 func TestLifecycleCoordinatorReconfigureOperationIdentityIsStableBeforeCommit(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
-	coordinator := newAgentLifecycleCoordinator(probe, nil)
+	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	base := lifecycleTestPersistedAgent(t)
 	if err := coordinator.register(testAuthorActivityContext(context.Background()), base, true); err != nil {
 		t.Fatalf("register: %v", err)
@@ -262,7 +262,7 @@ func TestLifecycleCoordinatorReconfigureOperationIdentityIsStableBeforeCommit(t 
 
 func TestLifecycleCoordinatorReconfigureRetryAdoptsCommittedOccurrence(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
-	coordinator := newAgentLifecycleCoordinator(probe, nil)
+	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	base := lifecycleTestPersistedAgent(t)
 	if err := coordinator.register(testAuthorActivityContext(context.Background()), base, true); err != nil {
 		t.Fatalf("register: %v", err)
@@ -304,7 +304,7 @@ func TestLifecycleCoordinatorReconfigureRetryAdoptsCommittedOccurrence(t *testin
 
 func TestLifecycleCoordinatorPersistenceFailureLeavesPriorGenerationOwned(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
-	coordinator := newAgentLifecycleCoordinator(probe, nil)
+	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
 	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
@@ -338,7 +338,7 @@ func TestLifecycleCoordinatorPersistenceFailureLeavesPriorGenerationOwned(t *tes
 func TestLifecycleCoordinatorSpawnPersistenceFailurePublishesNoCell(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
 	probe.failNext = fmt.Errorf("injected spawn persistence failure")
-	coordinator := newAgentLifecycleCoordinator(probe, nil)
+	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
 	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err == nil {
 		t.Fatal("register succeeded despite persistence failure")
@@ -354,7 +354,7 @@ func TestLifecycleCoordinatorRecoveredGenerationZeroAdvancesFromDurableValue(t *
 	epoch := runtimebus.CurrentRuntimeEpoch()
 	probe.cell = lifecycleProbeCell{Epoch: epoch, Generation: 0, Phase: AgentLifecycleRegistered}
 	probe.exists = true
-	coordinator := newAgentLifecycleCoordinator(probe, nil)
+	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
 	rec.LifecycleEpoch = epoch
 	rec.LifecycleGeneration = 0
@@ -380,7 +380,7 @@ func TestLifecycleCoordinatorRecoveredGenerationZeroAdvancesFromDurableValue(t *
 
 func TestLifecycleCoordinatorInMemoryEffectContextCarriesCurrentToken(t *testing.T) {
 	registry := runtimesessions.NewInMemoryRegistry(0)
-	coordinator := newAgentLifecycleCoordinator(nil, registry)
+	coordinator := newAgentLifecycleCoordinator(nil, registry, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
 	if err := coordinator.registerExecution(testAuthorActivityContext(context.Background()), rec, false, reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
 		t.Fatalf("register: %v", err)
@@ -411,7 +411,7 @@ func TestLifecycleCoordinatorInMemoryEffectContextCarriesCurrentToken(t *testing
 
 func TestLifecycleCoordinatorTeardownPersistenceFailureLeavesLoopOwned(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
-	coordinator := newAgentLifecycleCoordinator(probe, nil)
+	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
 	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
@@ -467,7 +467,7 @@ func TestLifecycleCoordinatorTeardownPersistenceFailureLeavesLoopOwned(t *testin
 
 func TestLifecycleCoordinatorRestartVersusTeardownNeverResurrectsLoop(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
-	coordinator := newAgentLifecycleCoordinator(probe, nil)
+	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
 	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
@@ -526,7 +526,7 @@ func TestLifecycleCoordinatorRestartVersusTeardownNeverResurrectsLoop(t *testing
 
 func TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
-	coordinator := newAgentLifecycleCoordinator(probe, nil)
+	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
 	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
@@ -552,7 +552,7 @@ func TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed(t *testing
 
 func TestLifecycleCoordinatorConcurrentReplacementsCommitAdjacentGenerations(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
-	coordinator := newAgentLifecycleCoordinator(probe, nil)
+	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
 	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
@@ -615,7 +615,7 @@ func TestLifecycleCoordinatorConcurrentReplacementsCommitAdjacentGenerations(t *
 func TestLifecycleCoordinatorStartupAbortCompletesIssuedTransitions(t *testing.T) {
 	for _, request := range []string{"shutdown", "reset"} {
 		t.Run(request, func(t *testing.T) {
-			coordinator := newAgentLifecycleCoordinator(nil, nil)
+			coordinator := newAgentLifecycleCoordinator(nil, nil, nil, nil, nil)
 			beginCoordinatorRun(t, coordinator, context.Background(), AgentRunModeStandard)
 			var transitions []*runtimeLifecycleTransition
 			switch request {

@@ -29,12 +29,12 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 const selectedContractAgentRuntimeDefaultQuiescenceTimeout = 2 * time.Minute
@@ -99,21 +99,45 @@ type selectedContractAgentRuntimePreflight struct {
 	tools        *runtimetools.Executor
 }
 
-func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loaded LoadedSelectedContractSource, planning store.RunForkSelectedContractRecipientPlanning, options SelectedContractAgentRuntimeOptions) (selectedContractAgentRuntimePlan, error) {
+func selectedContractManagerOptions(options runtimemanager.AgentManagerOptions, bus *runtimebus.EventBus, store SelectedContractExecutionStore, pipeline *runtimepipeline.PipelineCoordinator) runtimemanager.AgentManagerOptions {
+	options.PersistenceRoles = runtimemanager.PersistenceRoles{
+		AgentRoutes:          bus,
+		RouteInstaller:       bus,
+		RouteVerifier:        bus,
+		RouteRestorer:        bus,
+		RouteRetirer:         bus,
+		RouteRemover:         bus,
+		FlowTermination:      pipeline,
+		CreationPublisher:    bus,
+		LifecycleState:       store,
+		LifecycleEffects:     store,
+		LifecycleDiagnostics: store,
+		EffectsRecovery:      store,
+		DeliveryQuiescence:   store,
+		DeliveryRuntime:      bus,
+		EventExistence:       store,
+		DirectiveOperations:  store,
+		DirectiveTargets:     store,
+		FlowRoutes:           store,
+	}
+	return options
+}
+
+func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loaded LoadedSelectedContractSource, planning runfork.RunForkSelectedContractRecipientPlanning, options SelectedContractAgentRuntimeOptions) (selectedContractAgentRuntimePlan, error) {
 	if err := ctx.Err(); err != nil {
 		return selectedContractAgentRuntimePlan{}, err
 	}
-	if strings.TrimSpace(planning.Owner) != store.RunForkSelectedContractRecipientPlanningOwner {
-		return selectedContractAgentRuntimePlan{}, fmt.Errorf("selected-contract agent runtime materialization requires %s; got %q", store.RunForkSelectedContractRecipientPlanningOwner, planning.Owner)
+	if strings.TrimSpace(planning.Owner) != runfork.RunForkSelectedContractRecipientPlanningOwner {
+		return selectedContractAgentRuntimePlan{}, fmt.Errorf("selected-contract agent runtime materialization requires %s; got %q", runfork.RunForkSelectedContractRecipientPlanningOwner, planning.Owner)
 	}
 	agents, err := selectedContractPlannedAgentRecipients(planning)
 	if err != nil {
 		return selectedContractAgentRuntimePlan{}, err
 	}
 	proof := SelectedContractAgentRuntimeMaterialization{
-		Owner:                    store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner,
+		Owner:                    runfork.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner,
 		RecipientPlanningOwner:   planning.Owner,
-		ExecutionOwner:           store.RunForkSelectedContractExecutionOwner,
+		ExecutionOwner:           runfork.RunForkSelectedContractExecutionOwner,
 		AgentRecipients:          agents,
 		MaterializationRequired:  len(agents) > 0,
 		MaterializationSupported: len(agents) == 0,
@@ -182,8 +206,8 @@ func selectedContractAgentRuntimeUnsupportedError(agents []agentidentity.Identit
 	agents = append([]agentidentity.Identity(nil), agents...)
 	sortAgentIdentities(agents)
 	return fmt.Errorf("%s: %s requires selected-fork handler materialization for authoritative agent recipients before fork mutation; %s for %s",
-		store.RunForkBlockerSelectedContractAgentHandlerMaterializationUnsupported,
-		store.RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner,
+		runfork.RunForkBlockerSelectedContractAgentHandlerMaterializationUnsupported,
+		runfork.RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner,
 		strings.TrimSpace(reason),
 		strings.Join(agentIdentityDescriptions(agents), ","),
 	)
@@ -203,26 +227,27 @@ func agentIdentityDescriptions(identities []agentidentity.Identity) []string {
 	return out
 }
 
-func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus, workflowStore *runtimepipeline.WorkflowInstanceStore) (*selectedContractAgentRuntime, managedexecution.Admission, error) {
+func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator) (*selectedContractAgentRuntime, managedexecution.Admission, error) {
 	admission, authority, err := selectedContractManagedExecutionAuthority(ctx)
 	if err != nil {
 		return nil, managedexecution.Admission{}, err
 	}
-	if workflowStore == nil {
+	if pipeline == nil {
 		return nil, managedexecution.Admission{}, fmt.Errorf("selected-contract workflow lifecycle store is required")
 	}
 	if len(req.AgentRuntime.Records) == 0 {
-		manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		options := selectedContractManagerOptions(runtimemanager.AgentManagerOptions{
 			BaseContext:       context.WithoutCancel(ctx),
 			BundleSourceFact:  req.LoadedSource.BundleSourceFact,
 			SemanticSource:    req.LoadedSource.Source,
-			WorkflowInstances: workflowStore,
+			WorkflowInstances: pipeline,
 			DeliveryStore:     req.Store,
 			WorkOwner:         req.AgentRuntime.Options.AgentManagerOptions.WorkOwner,
-		}, req.Store)
+		}, bus, req.Store, pipeline)
+		manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, options, req.Store)
 		return &selectedContractAgentRuntime{manager: manager}, admission, nil
 	}
-	builder, err := buildSelectedContractAgentRuntimeFactory(req, bus, workflowStore)
+	builder, err := buildSelectedContractAgentRuntimeFactory(req, bus, pipeline)
 	if err != nil {
 		return nil, managedexecution.Admission{}, err
 	}
@@ -247,11 +272,11 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	}()
 	for _, rec := range req.AgentRuntime.Records {
 		if err := manager.RegisterEphemeralAgentForExecution(ctx, rec); err != nil && !errors.Is(err, runtimemanager.ErrAgentAlreadyExists) {
-			return nil, managedexecution.Admission{}, fmt.Errorf("%s materialize agent %s: %w", store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, strings.TrimSpace(rec.Config.ID), err)
+			return nil, managedexecution.Admission{}, fmt.Errorf("%s materialize agent %s: %w", runfork.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, strings.TrimSpace(rec.Config.ID), err)
 		}
 		identity, err := rec.Config.ConcreteIdentity()
 		if err != nil {
-			return nil, managedexecution.Admission{}, fmt.Errorf("%s concrete agent identity: %w", store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, err)
+			return nil, managedexecution.Admission{}, fmt.Errorf("%s concrete agent identity: %w", runfork.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, err)
 		}
 		bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
 			Identity: identity,
@@ -317,8 +342,8 @@ func selectedContractManagedExecutionAuthority(ctx context.Context) (managedexec
 	return admission, authority, nil
 }
 
-func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus, workflowStore *runtimepipeline.WorkflowInstanceStore) (selectedContractAgentRuntimeFactory, error) {
-	if workflowStore == nil {
+func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEventsRequest, bus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator) (selectedContractAgentRuntimeFactory, error) {
+	if pipeline == nil {
 		return selectedContractAgentRuntimeFactory{}, fmt.Errorf("selected-contract workflow lifecycle store is required")
 	}
 	options := req.AgentRuntime.Options
@@ -332,7 +357,8 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		managerOptions.SemanticSource = source
 	}
 	managerOptions.BundleSourceFact = req.LoadedSource.BundleSourceFact
-	managerOptions.WorkflowInstances = workflowStore
+	managerOptions.WorkflowInstances = pipeline
+	managerOptions = selectedContractManagerOptions(managerOptions, bus, req.Store, pipeline)
 	if managerOptions.PromptResolver == nil {
 		managerOptions.PromptResolver = promptResolver
 	}
@@ -375,6 +401,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		MCPClient:          options.MCPClient,
 		EntityStore:        options.EntityStore,
 		HumanTaskStore:     options.HumanTaskStore,
+		WorkflowInstances:  pipeline,
 		WorkflowSource:     source,
 		WorkspaceResolver:  options.Workspace,
 		ModelRuntime:       modelRuntime,
@@ -398,13 +425,14 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		modelRuntime, err = runtimellm.RuntimeFactory{
 			Cfg:                  options.Config,
 			Sessions:             options.SessionRegistry,
+			LiveSessions:         req.Store,
 			Conversations:        options.ConversationStore,
 			Workspaces:           options.Workspace,
 			Events:               bus,
 			MCPTurns:             mcpTurns,
 			ToolGateway:          binding,
 			Credentials:          options.ProviderCredentials,
-			CompletionController: runtimeeffects.NewCompletionController(req.Store, budget),
+			CompletionController: runtimeeffects.NewCompletionController(req.Store, req.Store, req.Store, budget),
 		}.Build()
 		if err != nil {
 			if cleanup != nil {

@@ -14,10 +14,18 @@ import (
 )
 
 type completionSettlementTestStore interface {
+	completionControllerTestStore
+	runtimeeffects.RecoveryStore
+}
+
+type completionControllerTestStore interface {
 	runtimeeffects.Store
 	runtimeeffects.CompletionStore
 	runtimeeffects.CompletionHeartbeatStore
-	runtimeeffects.RecoveryStore
+}
+
+func newCompletionControllerForTest(store completionControllerTestStore) *runtimeeffects.Controller {
+	return runtimeeffects.NewCompletionController(store, store, store, nil)
 }
 
 type completionSettlementFixture struct {
@@ -338,7 +346,7 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 		RunID: runID, SessionID: sessionID, Memory: agentmemory.Authored(true), FlowInstance: flowInstance,
 	}
 	authority.BudgetScopes = []runtimeeffects.BudgetAdmissionScope{{Kind: "system", CapUSD: 1}}
-	completionCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), runtimeeffects.NewController(store))
+	completionCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), newCompletionControllerForTest(store))
 	return completionSettlementFixture{
 		store: store, db: db, sqlite: sqlite, authority: authority, context: completionCtx,
 		sessionID: sessionID, agentID: agentID, leaseHolder: leaseHolder,

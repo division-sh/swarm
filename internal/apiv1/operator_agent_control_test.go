@@ -265,7 +265,14 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	agent := &directiveIntegrationAgent{id: "agent-1"}
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
-	}, runtimemanager.AgentManagerOptions{BaseContext: testAuthorActivityContext(context.Background()), WorkOwner: workOwner}, pg)
+	}, runtimemanager.AgentManagerOptions{
+		BaseContext: testAuthorActivityContext(context.Background()),
+		WorkOwner:   workOwner,
+		PersistenceRoles: runtimemanager.PersistenceRoles{
+			DirectiveOperations: pg,
+			DirectiveTargets:    pg,
+		},
+	}, pg)
 	t.Cleanup(func() {
 		if err := manager.Shutdown(); err != nil {
 			t.Errorf("shutdown directive integration manager: %v", err)
@@ -327,7 +334,14 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T
 	agent := &directiveIntegrationAgent{id: "agent-1"}
 	manager := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
-	}, runtimemanager.AgentManagerOptions{BaseContext: testAuthorActivityContextForSource(context.Background(), bootFact), WorkOwner: workOwner}, pg)
+	}, runtimemanager.AgentManagerOptions{
+		BaseContext: testAuthorActivityContextForSource(context.Background(), bootFact),
+		WorkOwner:   workOwner,
+		PersistenceRoles: runtimemanager.PersistenceRoles{
+			DirectiveOperations: pg,
+			DirectiveTargets:    pg,
+		},
+	}, pg)
 	t.Cleanup(func() {
 		if err := manager.Shutdown(); err != nil {
 			t.Errorf("shutdown canonical source manager: %v", err)

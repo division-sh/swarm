@@ -87,7 +87,7 @@ rows:
       - raw SQLite runtime SQLDB exposure to producers
     owners:
       - internal/serveapp buildStores
-      - runtime.Stores.SQLDB
+      - explicit selected-store composition roles
       - raw_sql_runtime_consumer_boundary_for_sqlite
     proof_refs:
       - kind: go_test
@@ -95,15 +95,15 @@ rows:
       - kind: go_test
         name: TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwner
       - kind: go_test
-        name: TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary
+        name: TestSelectedRuntimeConstructionUsesOpaqueWorkflowPersistence
     guard_proof_refs:
       - kind: go_test
         name: TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore
       - kind: go_test
         name: TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwner
     notes: >
-      SQLite construction must keep runtime.Stores.SQLDB nil; promoted stores
-      consume typed selected owners instead.
+      SQLite construction must expose only the exact typed selected owners;
+      runtime consumers never receive a raw SQL database handle.
 
   - id: postgres_story_order_serialization_guard
     classification: guard
@@ -117,12 +117,12 @@ rows:
       - kind: go_test
         name: TestPostgresStore_RunEventTransactionSerializesStoryCommitOrder
       - kind: go_test
-        name: TestWorkflowInstanceStore_RunPipelineMutationDoesNotRetryPostgresDialect
+        name: TestWorkflowInstanceStore_runPipelineMutationDoesNotRetryPostgresDialect
     guard_proof_refs:
       - kind: go_test
         name: TestPostgresStore_RunEventTransactionSerializesStoryCommitOrder
       - kind: go_test
-        name: TestWorkflowInstanceStore_RunPipelineMutationDoesNotRetryPostgresDialect
+        name: TestWorkflowInstanceStore_runPipelineMutationDoesNotRetryPostgresDialect
     notes: >
       SQLite-local busy handling remains a store-internal backend policy.
       PostgreSQL does not inherit that retry policy, but story-bearing writes
@@ -226,7 +226,7 @@ rows:
       - backend_neutral_runtime_mutation_write_boundary
       - runtimebus.EventCommitter/EventPublicationOperation
       - EventBus.PublishInMutation admitted-event commit scope
-      - runtimepipeline.Store.RunPipelineMutation
+      - runtimepipeline named workflow operations over private persistence adapters
       - SQLiteRuntimeStore.RunRuntimeMutation
       - PostgresStore normal transaction methods
     proof_refs:
@@ -237,7 +237,7 @@ rows:
       - kind: go_test
         name: TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter
       - kind: go_test
-        name: TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunner
+        name: TestSQLiteWorkflowInstanceStore_runPipelineMutationUsesRuntimeMutationRunner
       - kind: go_test
         name: TestPostgresStore_RunEventTransactionSerializesStoryCommitOrder
       - kind: go_test
@@ -246,7 +246,7 @@ rows:
       - kind: go_test
         name: TestSelectedSQLiteRuntimeWriterBoundaryAudit
       - kind: go_test
-        name: TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary
+        name: TestSelectedRuntimeConstructionUsesOpaqueWorkflowPersistence
       - kind: go_test
         name: TestEventBusPublishTransactional_RunsInterceptorsAfterCommit
     notes: >
@@ -276,16 +276,16 @@ rows:
       - kind: go_test
         name: TestSQLiteRuntimeStore_RunRuntimeMutationDoesNotRetryActiveTransaction
       - kind: go_test
-        name: TestSQLiteWorkflowInstanceStore_RunPipelineMutationRequiresRuntimeMutationRunner
+        name: TestSQLiteWorkflowInstanceStore_runPipelineMutationRequiresRuntimeMutationRunner
       - kind: go_test
-        name: TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunner
+        name: TestSQLiteWorkflowInstanceStore_runPipelineMutationUsesRuntimeMutationRunner
       - kind: go_test
         name: TestPostgresStore_RunEventTransactionSerializesStoryCommitOrder
     guard_proof_refs:
       - kind: go_test
-        name: TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary
+        name: TestSelectedRuntimeConstructionUsesOpaqueWorkflowPersistence
       - kind: go_test
-        name: TestSQLiteWorkflowInstanceStore_RunPipelineMutationRequiresRuntimeMutationRunner
+        name: TestSQLiteWorkflowInstanceStore_runPipelineMutationRequiresRuntimeMutationRunner
     notes: >
       SQLite busy/retry policy belongs below the store boundary. Pipeline writes
       require an injected RuntimeMutationRunner and must not own a fallback

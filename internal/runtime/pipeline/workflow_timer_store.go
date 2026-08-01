@@ -149,7 +149,7 @@ func canonicalWorkflowTimerTime(value time.Time) time.Time {
 	return value.UTC().Truncate(time.Microsecond)
 }
 
-func (s *WorkflowInstanceStore) insertWorkflowTimerActivation(ctx context.Context, activation WorkflowTimerActivation) (WorkflowTimerActivation, bool, error) {
+func (s *workflowInstanceStore) insertWorkflowTimerActivation(ctx context.Context, activation WorkflowTimerActivation) (WorkflowTimerActivation, bool, error) {
 	activation = activation.normalized()
 	if err := activation.validate(); err != nil {
 		return WorkflowTimerActivation{}, false, err
@@ -278,7 +278,7 @@ func workflowTimerJSONEqual(left, right []byte) bool {
 	return bytes.Equal(leftJSON, rightJSON)
 }
 
-func (s *WorkflowInstanceStore) loadWorkflowTimerActivation(ctx context.Context, activationID string, lock bool) (WorkflowTimerActivation, bool, error) {
+func (s *workflowInstanceStore) loadWorkflowTimerActivation(ctx context.Context, activationID string, lock bool) (WorkflowTimerActivation, bool, error) {
 	activationID = strings.TrimSpace(activationID)
 	if activationID == "" {
 		return WorkflowTimerActivation{}, false, fmt.Errorf("workflow timer activation id is required")
@@ -304,7 +304,7 @@ func (s *WorkflowInstanceStore) loadWorkflowTimerActivation(ctx context.Context,
 	return activation, true, nil
 }
 
-func (s *WorkflowInstanceStore) listWorkflowTimerActivations(ctx context.Context, runID, entityID string, activeOnly bool) ([]WorkflowTimerActivation, error) {
+func (s *workflowInstanceStore) listWorkflowTimerActivations(ctx context.Context, runID, entityID string, activeOnly bool) ([]WorkflowTimerActivation, error) {
 	exec := workflowTimerQueryer(s.db)
 	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
 		exec = tx
@@ -444,7 +444,7 @@ func scanWorkflowTimerActivation(scanner workflowTimerScanner) (WorkflowTimerAct
 	return activation, nil
 }
 
-func (s *WorkflowInstanceStore) cancelWorkflowTimerActivation(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) (WorkflowTimerActivation, bool, error) {
+func (s *workflowInstanceStore) cancelWorkflowTimerActivation(ctx context.Context, ref timeridentity.WorkflowTimerActivationRef) (WorkflowTimerActivation, bool, error) {
 	ref = ref.Normalize()
 	activation, found, err := s.loadWorkflowTimerActivation(ctx, ref.ActivationID, true)
 	if err != nil || !found {
@@ -483,7 +483,7 @@ func (s *WorkflowInstanceStore) cancelWorkflowTimerActivation(ctx context.Contex
 	return activation, true, nil
 }
 
-func (s *WorkflowInstanceStore) completeWorkflowTimerOccurrence(ctx context.Context, activation WorkflowTimerActivation, occurrence timeridentity.WorkflowTimerOccurrenceRef, firedAt time.Time) (WorkflowTimerActivation, error) {
+func (s *workflowInstanceStore) completeWorkflowTimerOccurrence(ctx context.Context, activation WorkflowTimerActivation, occurrence timeridentity.WorkflowTimerOccurrenceRef, firedAt time.Time) (WorkflowTimerActivation, error) {
 	activation = activation.normalized()
 	occurrence = occurrence.Normalize()
 	if activation.Status != workflowTimerStatusActive || occurrence.Activation != activation.Ref || !occurrence.DueAt.Equal(activation.FireAt) {

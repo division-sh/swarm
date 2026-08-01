@@ -32,7 +32,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 	storageRef := "root/acme"
 	entityID := FlowInstanceEntityID(storageRef)
 
-	if err := store.Create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := store.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      "acme",
 		StorageRef:      storageRef,
 		WorkflowName:    "root",
@@ -120,7 +120,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 	ensurePipelineTestRun(t, store, runID)
 	storageRef := "review/inst-1"
 
-	if err := store.Create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := store.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      "inst-1",
 		StorageRef:      storageRef,
 		WorkflowName:    "review",
@@ -165,7 +165,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	runner := &recordingRuntimeMutationRunner{db: db}
-	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+	store := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 	ensurePipelineTestRun(t, store, runID)
@@ -199,34 +199,34 @@ func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *
 	}
 }
 
-func TestSQLiteWorkflowInstanceStore_RunPipelineMutationRequiresRuntimeMutationRunner(t *testing.T) {
+func TestSQLiteWorkflowInstanceStore_runPipelineMutationRequiresRuntimeMutationRunner(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	store := NewSQLiteWorkflowInstanceStore(db)
+	store := newTestSQLiteWorkflowInstanceStore(db)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), uuid.NewString())
 	called := false
 
-	err := store.RunPipelineMutation(ctx, func(context.Context) error {
+	err := store.runPipelineMutation(ctx, func(context.Context) error {
 		called = true
 		return nil
 	})
-	if !errors.Is(err, errSQLiteWorkflowInstanceStoreRuntimeMutationRunnerRequired) {
-		t.Fatalf("RunPipelineMutation error = %v, want runtime mutation runner required", err)
+	if !errors.Is(err, errSQLiteWorkflowMutationOwnerRequired) {
+		t.Fatalf("runPipelineMutation error = %v, want runtime mutation runner required", err)
 	}
 	if called {
-		t.Fatal("RunPipelineMutation callback ran without runtime mutation runner")
+		t.Fatal("runPipelineMutation callback ran without runtime mutation runner")
 	}
 }
 
-func TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunner(t *testing.T) {
+func TestSQLiteWorkflowInstanceStore_runPipelineMutationUsesRuntimeMutationRunner(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	runner := &recordingRuntimeMutationRunner{db: db}
-	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+	store := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	ensurePipelineTestRun(t, store, runID)
 	var postCommitActions int32
 
-	err := store.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
 		tx, ok := PipelineSQLTxFromContext(txctx)
 		if !ok || tx == nil {
 			return errors.New("pipeline transaction is required")
@@ -249,7 +249,7 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunne
 		return err
 	})
 	if err != nil {
-		t.Fatalf("RunPipelineMutation with runtime mutation runner: %v", err)
+		t.Fatalf("runPipelineMutation with runtime mutation runner: %v", err)
 	}
 	if got := atomic.LoadInt32(&runner.calls); got != 1 {
 		t.Fatalf("runtime mutation calls = %d, want 1", got)
@@ -262,16 +262,16 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationUsesRuntimeMutationRunne
 func TestSQLiteWorkflowInstanceStore_MutateERollsBackCallbackFailure(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	runner := &recordingRuntimeMutationRunner{db: db}
-	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+	store := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	ensurePipelineTestRun(t, store, runID)
 	instance := materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: "root/item", StorageRef: "root/item", WorkflowName: "root", WorkflowVersion: "1.0.0", CurrentState: "queued", Metadata: map[string]any{}})
-	if err := store.Upsert(ctx, instance); err != nil {
+	if err := store.upsert(ctx, instance); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	sentinel := errors.New("supersession failed")
-	if err := store.MutateE(ctx, instance.InstanceID, func(item *WorkflowInstance) error {
+	if err := store.mutateE(ctx, instance.InstanceID, func(item *WorkflowInstance) error {
 		item.CurrentState = "must_not_commit"
 		return sentinel
 	}); !errors.Is(err, sentinel) {
@@ -286,9 +286,9 @@ func TestSQLiteWorkflowInstanceStore_MutateERollsBackCallbackFailure(t *testing.
 	}
 }
 
-func TestSQLiteWorkflowInstanceStore_RunPipelineMutationDoesNotRetryActiveTransaction(t *testing.T) {
+func TestSQLiteWorkflowInstanceStore_runPipelineMutationDoesNotRetryActiveTransaction(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	store := NewSQLiteWorkflowInstanceStore(db)
+	store := newTestSQLiteWorkflowInstanceStore(db)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), uuid.NewString())
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -302,7 +302,7 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationDoesNotRetryActiveTransa
 	if err != nil {
 		t.Fatalf("begin author activity story: %v", err)
 	}
-	err = store.RunPipelineMutation(txctx, func(txctx context.Context) error {
+	err = store.runPipelineMutation(txctx, func(txctx context.Context) error {
 		atomic.AddInt32(&attempts, 1)
 		gotTx, ok := PipelineSQLTxFromContext(txctx)
 		if !ok {
@@ -314,16 +314,16 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationDoesNotRetryActiveTransa
 		return busyErr
 	})
 	if !errors.Is(err, busyErr) {
-		t.Fatalf("RunPipelineMutation error = %v, want sentinel busy error", err)
+		t.Fatalf("runPipelineMutation error = %v, want sentinel busy error", err)
 	}
 	if got := atomic.LoadInt32(&attempts); got != 1 {
 		t.Fatalf("attempts = %d, want no retry inside active transaction", got)
 	}
 }
 
-func TestSQLiteWorkflowInstanceStore_RunPipelineMutationRejectsUnownedRawTransaction(t *testing.T) {
+func TestSQLiteWorkflowInstanceStore_runPipelineMutationRejectsUnownedRawTransaction(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	store := NewSQLiteWorkflowInstanceStore(db)
+	store := newTestSQLiteWorkflowInstanceStore(db)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), uuid.NewString())
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -331,29 +331,29 @@ func TestSQLiteWorkflowInstanceStore_RunPipelineMutationRejectsUnownedRawTransac
 	}
 	t.Cleanup(func() { _ = tx.Rollback() })
 
-	err = store.RunPipelineMutation(WithPipelineSQLTxContext(ctx, tx), func(context.Context) error {
+	err = store.runPipelineMutation(WithPipelineSQLTxContext(ctx, tx), func(context.Context) error {
 		t.Fatal("raw transaction callback must not run")
 		return nil
 	})
 	if err == nil || !strings.Contains(err.Error(), "raw transaction without author activity ownership") {
-		t.Fatalf("RunPipelineMutation error = %v, want unowned raw transaction rejection", err)
+		t.Fatalf("runPipelineMutation error = %v, want unowned raw transaction rejection", err)
 	}
 }
 
-func TestWorkflowInstanceStore_RunPipelineMutationDoesNotRetryPostgresDialect(t *testing.T) {
+func TestWorkflowInstanceStore_runPipelineMutationDoesNotRetryPostgresDialect(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	store := NewWorkflowInstanceStore(db)
+	store := newTestWorkflowInstanceStore(db)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), uuid.NewString())
 	busyErr := errors.New("SQLITE_BUSY: database is locked")
 	var attempts int32
 
-	err := store.RunPipelineMutation(ctx, func(context.Context) error {
+	err := store.runPipelineMutation(ctx, func(context.Context) error {
 		atomic.AddInt32(&attempts, 1)
 		return busyErr
 	})
 	if !errors.Is(err, busyErr) {
-		t.Fatalf("RunPipelineMutation error = %v, want sentinel busy error", err)
+		t.Fatalf("runPipelineMutation error = %v, want sentinel busy error", err)
 	}
 	if got := atomic.LoadInt32(&attempts); got != 1 {
 		t.Fatalf("attempts = %d, want no retry for postgres dialect", got)
@@ -415,10 +415,10 @@ func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.C
 	return nil
 }
 
-func newSQLiteWorkflowInstanceStoreForTest(t *testing.T, db *sql.DB) *WorkflowInstanceStore {
+func newSQLiteWorkflowInstanceStoreForTest(t *testing.T, db *sql.DB) *workflowInstanceStore {
 	t.Helper()
-	store := NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db})
-	store.ConfigureDeliveryLifecycleStore(newPipelineTestDeliveryOwner(t, db, true))
+	store := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db})
+	store.deliveryStore = newPipelineTestDeliveryOwner(t, db, true)
 	return store
 }
 

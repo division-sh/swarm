@@ -8,104 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/google/uuid"
 )
-
-const (
-	RunForkPendingClassificationDeliveredCompleted = "delivered_completed"
-	RunForkPendingClassificationPending            = "pending"
-	RunForkPendingClassificationInProgress         = "in_progress"
-	RunForkPendingClassificationFailedRetryable    = "failed_retryable"
-	RunForkPendingClassificationFailedTerminal     = "failed_terminal"
-	RunForkPendingClassificationDeadLetter         = "dead_letter"
-	RunForkPendingClassificationCommittedReplay    = "committed_replay_scope"
-)
-
-type RunForkPlanRequest struct {
-	SourceRunID string
-	At          string
-}
-
-type RunForkPlan struct {
-	SourceRunID               string                            `json:"source_run_id"`
-	SourceRunStatus           string                            `json:"source_run_status,omitempty"`
-	SourceRunStartedAt        *time.Time                        `json:"source_run_started_at,omitempty"`
-	SourceRunEndedAt          *time.Time                        `json:"source_run_ended_at,omitempty"`
-	ForkPoint                 RunForkPoint                      `json:"fork_point"`
-	EventCountAtFork          int                               `json:"event_count_at_fork"`
-	ReconstructedEntityCount  int                               `json:"reconstructed_entity_count"`
-	PendingWorkCount          int                               `json:"pending_work_count"`
-	UnsupportedBlockerCount   int                               `json:"unsupported_blocker_count"`
-	ExecutionReady            bool                              `json:"execution_ready"`
-	ReplayResumeAdmission     RunForkReplayResumeAdmission      `json:"replay_resume_admission"`
-	ContractFrontierAdmission *RunForkContractFrontierAdmission `json:"contract_frontier_admission,omitempty"`
-	SelectedContractExecution *RunForkSelectedContractExecution `json:"selected_contract_execution,omitempty"`
-	SelectedContractReadiness *RunForkSelectedContractReadiness `json:"selected_contract_readiness,omitempty"`
-	Entities                  []RunForkEntityState              `json:"entities,omitempty"`
-	PendingWork               []RunForkPendingWork              `json:"pending_work,omitempty"`
-	UnsupportedBlockers       []RunForkUnsupportedBlocker       `json:"unsupported_blockers,omitempty"`
-	RouteHistory              RunForkRouteHistoryProjection     `json:"route_history"`
-	historicalSnapshot        *runForkRevisionSnapshot
-}
-
-type RunForkPoint struct {
-	Input          string               `json:"input"`
-	EventID        string               `json:"event_id"`
-	EventName      string               `json:"event_name,omitempty"`
-	SourceEventID  string               `json:"source_event_id,omitempty"`
-	ProducedBy     string               `json:"produced_by,omitempty"`
-	ProducedByType string               `json:"produced_by_type,omitempty"`
-	SourceRoute    events.RouteIdentity `json:"source_route,omitempty"`
-	Timestamp      time.Time            `json:"timestamp"`
-	Revision       int64                `json:"revision"`
-}
-
-const (
-	RunForkRouteHistoryNotApplicable      = "not_applicable"
-	RunForkRouteHistoryUnknownUnversioned = "unknown_unversioned"
-)
-
-type RunForkRouteHistoryProjection struct {
-	State string `json:"state"`
-}
-
-type RunForkEntityState struct {
-	EntityID                string                                     `json:"entity_id"`
-	CurrentState            string                                     `json:"current_state,omitempty"`
-	EnteredStateAt          *time.Time                                 `json:"entered_state_at,omitempty"`
-	Fields                  map[string]any                             `json:"fields,omitempty"`
-	Gates                   map[string]any                             `json:"gates,omitempty"`
-	Accumulator             map[string]any                             `json:"accumulator,omitempty"`
-	MaterializationMetadata *RunForkMaterializedEntitySnapshotMetadata `json:"materialization_metadata,omitempty"`
-}
-
-type RunForkPendingWork struct {
-	EventID         string               `json:"event_id"`
-	EventName       string               `json:"event_name"`
-	FlowInstance    string               `json:"flow_instance,omitempty"`
-	SourceRoute     events.RouteIdentity `json:"source_route,omitempty"`
-	DeliveryID      string               `json:"delivery_id,omitempty"`
-	SubscriberType  string               `json:"subscriber_type,omitempty"`
-	SubscriberID    string               `json:"subscriber_id,omitempty"`
-	Classification  string               `json:"classification"`
-	Status          string               `json:"status,omitempty"`
-	RetryCount      int                  `json:"retry_count,omitempty"`
-	ReasonCode      string               `json:"reason_code,omitempty"`
-	ActiveSessionID string               `json:"active_session_id,omitempty"`
-	CreatedAt       time.Time            `json:"created_at"`
-	StartedAt       *time.Time           `json:"started_at,omitempty"`
-	DeliveredAt     *time.Time           `json:"delivered_at,omitempty"`
-	ReceiptOutcome  string               `json:"receipt_outcome,omitempty"`
-	ReceiptAt       *time.Time           `json:"receipt_at,omitempty"`
-}
-
-type RunForkUnsupportedBlocker struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
 
 type runForkEventCursor struct {
 	EventID        string
@@ -118,10 +25,10 @@ type runForkEventCursor struct {
 }
 
 type runForkAdmissionEvidence struct {
-	Pending                 []RunForkPendingWork
+	Pending                 []runfork.RunForkPendingWork
 	RelevantTimer           bool
 	RelevantRoute           bool
-	RouteHistory            RunForkRouteHistoryProjection
+	RouteHistory            runfork.RunForkRouteHistoryProjection
 	ActiveSession           bool
 	ActiveConversationAudit bool
 	ActiveTurn              bool
@@ -134,54 +41,58 @@ type runForkSourceFacts struct {
 	SourceFlows   []string
 }
 
-func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest) (RunForkPlan, error) {
+func (s *PostgresStore) PlanRunFork(ctx context.Context, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
 	if s == nil || s.DB == nil {
-		return RunForkPlan{}, fmt.Errorf("postgres store is required")
+		return runfork.RunForkPlan{}, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
-		return RunForkPlan{}, err
+		return runfork.RunForkPlan{}, err
 	}
 	runID := strings.TrimSpace(req.SourceRunID)
 	if runID == "" {
-		return RunForkPlan{}, fmt.Errorf("source run_id is required")
+		return runfork.RunForkPlan{}, fmt.Errorf("source run_id is required")
 	}
 	if _, err := uuid.Parse(runID); err != nil {
-		return RunForkPlan{}, fmt.Errorf("source run_id must be a UUID: %w", err)
+		return runfork.RunForkPlan{}, fmt.Errorf("source run_id must be a UUID: %w", err)
 	}
 	at := strings.TrimSpace(req.At)
 
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
-		return RunForkPlan{}, fmt.Errorf("begin run fork revision snapshot: %w", err)
+		return runfork.RunForkPlan{}, fmt.Errorf("begin run fork revision snapshot: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	plan := RunForkPlan{SourceRunID: runID}
+	plan := runfork.RunForkPlan{SourceRunID: runID}
 	if err := loadRunForkSourceSummary(ctx, tx, &plan); err != nil {
-		return RunForkPlan{}, err
+		return runfork.RunForkPlan{}, err
 	}
 	if err := runforkrevision.ValidateComplete(ctx, tx, runID); err != nil {
-		return RunForkPlan{}, err
+		return runfork.RunForkPlan{}, err
 	}
 	if at != "" {
 		if _, err := uuid.Parse(at); err != nil {
-			return RunForkPlan{}, fmt.Errorf("fork point --at must be an event UUID: %w", err)
+			return runfork.RunForkPlan{}, fmt.Errorf("fork point --at must be an event UUID: %w", err)
 		}
 	}
 	cursor, err := resolveRunForkRevisionPoint(ctx, tx, runID, at)
 	if err != nil {
-		return RunForkPlan{}, err
+		return runfork.RunForkPlan{}, err
 	}
 	snapshot, err := loadRunForkRevisionSnapshot(ctx, tx, runID, cursor.Revision)
 	if err != nil {
-		return RunForkPlan{}, err
+		return runfork.RunForkPlan{}, err
 	}
 	forkEvent, err := runForkPointRevisionEvent(snapshot, cursor)
 	if err != nil {
-		return RunForkPlan{}, err
+		return runfork.RunForkPlan{}, err
 	}
-	plan.historicalSnapshot = snapshot
-	plan.ForkPoint = RunForkPoint{
+	historicalEventIDs := make([]string, 0, len(snapshot.Events))
+	for _, historicalEvent := range snapshot.Events {
+		historicalEventIDs = append(historicalEventIDs, strings.TrimSpace(historicalEvent.EventID))
+	}
+	plan = plan.WithHistoricalEvents(snapshot.Revision, historicalEventIDs)
+	plan.ForkPoint = runfork.RunForkPoint{
 		Input:          at,
 		EventID:        cursor.EventID,
 		EventName:      cursor.EventName,
@@ -196,24 +107,24 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req RunForkPlanRequest)
 
 	entities, err := loadRunForkEntityStates(snapshot)
 	if err != nil {
-		return RunForkPlan{}, err
+		return runfork.RunForkPlan{}, err
 	}
 	entities, entitySnapshotMetadataAdmission, err := attachRunForkMaterializedEntitySnapshotMetadata(snapshot, entities)
 	if err != nil {
-		return RunForkPlan{}, err
+		return runfork.RunForkPlan{}, err
 	}
 	plan.Entities = entities
 	plan.ReconstructedEntityCount = len(entities)
 
 	pending, err := loadRunForkPendingWorkFromRevision(snapshot)
 	if err != nil {
-		return RunForkPlan{}, err
+		return runfork.RunForkPlan{}, err
 	}
 	plan.PendingWork = pending
 	plan.PendingWorkCount = len(pending)
 	evidence, err := loadRunForkAdmissionEvidenceFromRevision(snapshot, entities, pending)
 	if err != nil {
-		return RunForkPlan{}, err
+		return runfork.RunForkPlan{}, err
 	}
 	plan.ReplayResumeAdmission = runForkReplayResumeAdmission(evidence)
 	plan.RouteHistory = evidence.RouteHistory
@@ -241,7 +152,7 @@ func runForkPointRevisionEvent(snapshot *runForkRevisionSnapshot, cursor runFork
 	return runForkRevisionEvent{}, fmt.Errorf("fork point event %s is absent from fixed revision %d", eventID, cursor.Revision)
 }
 
-func loadRunForkSourceSummary(ctx context.Context, q rowQueryer, plan *RunForkPlan) error {
+func loadRunForkSourceSummary(ctx context.Context, q rowQueryer, plan *runfork.RunForkPlan) error {
 	var started, ended sql.NullTime
 	if err := q.QueryRowContext(ctx, `
 		SELECT COALESCE(status, ''), started_at, ended_at
@@ -264,7 +175,7 @@ func loadRunForkSourceSummary(ctx context.Context, q rowQueryer, plan *RunForkPl
 	return nil
 }
 
-func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]RunForkEntityState, error) {
+func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]runfork.RunForkEntityState, error) {
 	type timedProjectionMutation struct {
 		mutationlog.ProjectionMutation
 		CreatedAt time.Time
@@ -292,7 +203,7 @@ func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]RunForkEntity
 		})
 	}
 
-	out := make([]RunForkEntityState, 0, len(entityOrder))
+	out := make([]runfork.RunForkEntityState, 0, len(entityOrder))
 	for _, entityID := range entityOrder {
 		mutations := grouped[entityID]
 		projectionMutations := make([]mutationlog.ProjectionMutation, 0, len(mutations))
@@ -308,7 +219,7 @@ func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]RunForkEntity
 		if err != nil {
 			return nil, fmt.Errorf("reconstruct entity %s at fork point: %w", entityID, err)
 		}
-		out = append(out, RunForkEntityState{
+		out = append(out, runfork.RunForkEntityState{
 			EntityID:       entityID,
 			CurrentState:   projection.CurrentState,
 			EnteredStateAt: enteredStateAt,
@@ -320,7 +231,7 @@ func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]RunForkEntity
 	return out, nil
 }
 
-func runForkPendingReferencesActiveSession(pending []RunForkPendingWork) bool {
+func runForkPendingReferencesActiveSession(pending []runfork.RunForkPendingWork) bool {
 	for _, item := range pending {
 		if strings.TrimSpace(item.ActiveSessionID) != "" {
 			return true

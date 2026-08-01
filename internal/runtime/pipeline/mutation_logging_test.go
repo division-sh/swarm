@@ -29,7 +29,7 @@ func TestUpdateEntityState_LogsMutationRowForStateTransition(t *testing.T) {
 			},
 		},
 	}
-	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "mutation-flow",
@@ -88,7 +88,7 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 	entityID := uuid.NewString()
 
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "mutation-flow",
@@ -108,7 +108,7 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "mutation-flow",
@@ -154,7 +154,7 @@ func TestWorkflowInstanceStore_ReplaysContainedStateMapListProjection(t *testing
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 	entityID := uuid.NewString()
 
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "contained-state-flow",
@@ -181,7 +181,7 @@ func TestWorkflowInstanceStore_ReplaysContainedStateMapListProjection(t *testing
 			},
 		},
 	}
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "contained-state-flow",
@@ -344,9 +344,9 @@ func testMutationLoggingCoordinator(db *sql.DB) *PipelineCoordinator {
 	}
 }
 
-func seedMutationLoggingInstance(t *testing.T, store *WorkflowInstanceStore, entityID string) {
+func seedMutationLoggingInstance(t *testing.T, store *workflowInstanceStore, entityID string) {
 	t.Helper()
-	if err := store.Upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "mutation-flow",

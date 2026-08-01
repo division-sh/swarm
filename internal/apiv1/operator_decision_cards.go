@@ -10,30 +10,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
 
 const decisionCardEventName = "mailbox.card_decided"
-
-func newMailboxRuntimeControlEvent(eventID, eventName, runID string, payload []byte, entityID, flowInstance string, createdAt time.Time, mode executionmode.Mode) (events.Event, error) {
-	return events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
-		Facts: events.EventFacts{
-			ID: eventID, Type: events.EventType(eventName),
-			Producer:  events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},
-			Payload:   payload,
-			Envelope:  events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), flowInstance),
-			CreatedAt: createdAt, ExecutionMode: mode,
-		},
-		RunID: runID,
-	})
-}
 
 type mailboxProjectionListResult struct {
 	Items      []any  `json:"items"`
@@ -50,26 +35,6 @@ type mailboxProjectionEntry struct {
 	Kind      string
 	ID        string
 	CreatedAt time.Time
-}
-
-type decisionCardMutationResult struct {
-	OK                  bool   `json:"ok"`
-	CardID              string `json:"card_id"`
-	Status              string `json:"status"`
-	Verdict             string `json:"verdict,omitempty"`
-	DecisionEventID     string `json:"decision_event_id,omitempty"`
-	ChangeID            int64  `json:"change_id"`
-	IdempotencyReplayed bool   `json:"idempotency_replayed"`
-}
-
-type decisionCardInputResult struct {
-	OK                  bool   `json:"ok"`
-	CardID              string `json:"card_id"`
-	InputDraftID        string `json:"input_draft_id"`
-	Verdict             string `json:"verdict"`
-	Status              string `json:"status"`
-	ExpiresAt           string `json:"expires_at"`
-	IdempotencyReplayed bool   `json:"idempotency_replayed"`
 }
 
 func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
@@ -113,86 +78,13 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 			if cardID == "" || verdict == "" || observedHash == "" {
 				return nil, NewInvalidParamsError(map[string]any{"reason": "card_id, verdict, and observed_content_hash are required"})
 			}
-			return executeIdempotentDecisionCardMutation(ctx, req, opts, cardID, func(txctx context.Context) (any, error) {
-				card, err := opts.DecisionCards.GetDecisionCard(txctx, cardID)
-				if err != nil {
-					return nil, err
-				}
-				txctx = correlation.WithRunID(txctx, card.RunID)
-				eventID := uuid.NewString()
-				if opts.DecisionAuthority == nil {
-					return nil, fmt.Errorf("decision-card anchor authority is required")
-				}
-				if err := opts.DecisionAuthority.CommitDecision(txctx, card, eventID, now().UTC()); err != nil {
-					return nil, err
-				}
-				outcome, err := opts.DecisionCards.DecideDecisionCard(txctx, decisioncard.DecideRequest{
-					CardID: cardID, Verdict: verdict, Fields: fields, ActorTokenID: req.ActorTokenID,
-					ObservedContentHash: observedHash, DeliveryReceiptID: stringParam(req.Params, "delivery_receipt_id"),
-					DeliveryRenderHash: stringParam(req.Params, "delivery_render_hash"), InputDraftID: stringParam(req.Params, "input_draft_id"),
-					DecisionEventID: eventID, Now: now().UTC(),
-				})
-				if err != nil {
-					return nil, err
-				}
-				publisher, ok := opts.Events.(EventMutationPublisher)
-				if !ok || publisher == nil {
-					return nil, fmt.Errorf("event mutation publisher is required for mailbox.decide")
-				}
-				if outcome.ForcedDeferred {
-					payload, err := canonicaljson.Bytes(map[string]any{
-						"card_id": card.CardID, "anchor_kind": card.Anchor.Kind(),
-						"until": outcome.Card.DeferredUntil.UTC().Format(time.RFC3339Nano),
-						"cause": "weekly_budget_exhausted",
-					})
-					if err != nil {
-						return nil, err
-					}
-					scope, err := card.Anchor.Scope()
-					if err != nil {
-						return nil, err
-					}
-					evt, err := newMailboxRuntimeControlEvent(uuid.NewString(), "mailbox.card_deferred", card.RunID, payload, scope.EntityID, scope.FlowInstance, now().UTC(), card.ExecutionMode)
-					if err != nil {
-						return nil, err
-					}
-					if err := publisher.PublishInMutation(txctx, evt); err != nil {
-						return nil, fmt.Errorf("publish budget-deferred decision card event: %w", err)
-					}
-					return decisionCardMutationResult{OK: true, CardID: card.CardID, Status: outcome.Card.Status, ChangeID: outcome.ChangeID}, nil
-				}
-				payloadFields := map[string]semanticvalue.Value{"fields": fields, "anchor": card.Anchor.SemanticValue()}
-				for name, text := range map[string]string{
-					"card_id": card.CardID, "anchor_kind": string(card.Anchor.Kind()), "decision_id": card.Snapshot.Decision,
-					"verdict": verdict, "card_content_hash": card.CardContentHash,
-					"decision_schema_hash": card.DecisionSchemaHash, "bundle_hash": card.BundleHash,
-				} {
-					payloadFields[name], err = semanticvalue.String(text)
-					if err != nil {
-						return nil, fmt.Errorf("admit decision lifecycle %s: %w", name, err)
-					}
-				}
-				payloadValue, err := semanticvalue.ObjectFromMap(payloadFields)
-				if err != nil {
-					return nil, err
-				}
-				payload, err := canonicaljson.Encode(payloadValue)
-				if err != nil {
-					return nil, err
-				}
-				scope, err := card.Anchor.Scope()
-				if err != nil {
-					return nil, err
-				}
-				evt, err := newMailboxRuntimeControlEvent(eventID, decisionCardEventName, card.RunID, payload, scope.EntityID, scope.FlowInstance, now().UTC(), card.ExecutionMode)
-				if err != nil {
-					return nil, err
-				}
-				if err := publisher.PublishInMutation(txctx, evt); err != nil {
-					return nil, fmt.Errorf("publish decision card event: %w", err)
-				}
-				return decisionCardMutationResult{OK: true, CardID: card.CardID, Status: outcome.Card.Status, Verdict: verdict, DecisionEventID: eventID, ChangeID: outcome.ChangeID}, nil
-			})
+			eventID := uuid.NewString()
+			return executeIdempotentDecisionCardMutation(ctx, req, opts, cardID, runtimepipeline.NewDecisionCardDecision(decisioncard.DecideRequest{
+				CardID: cardID, Verdict: verdict, Fields: fields, ActorTokenID: req.ActorTokenID,
+				ObservedContentHash: observedHash, DeliveryReceiptID: stringParam(req.Params, "delivery_receipt_id"),
+				DeliveryRenderHash: stringParam(req.Params, "delivery_render_hash"), InputDraftID: stringParam(req.Params, "input_draft_id"),
+				DecisionEventID: eventID, Now: now().UTC(),
+			}))
 		},
 		"mailbox.defer": func(ctx context.Context, req Request) (any, error) {
 			cardID := strings.TrimSpace(stringParam(req.Params, "card_id"))
@@ -200,67 +92,24 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 			if err != nil {
 				return nil, err
 			}
-			return executeIdempotentDecisionCardMutation(ctx, req, opts, cardID, func(txctx context.Context) (any, error) {
-				outcome, err := opts.DecisionCards.DeferDecisionCard(txctx, decisioncard.DeferRequest{CardID: cardID, ActorTokenID: req.ActorTokenID, Until: until, Now: now().UTC()})
-				if err != nil {
-					return nil, err
-				}
-				publisher, ok := opts.Events.(EventMutationPublisher)
-				if !ok || publisher == nil {
-					return nil, fmt.Errorf("event mutation publisher is required for mailbox.defer")
-				}
-				payload, err := canonicaljson.Bytes(map[string]any{"card_id": cardID, "until": until.UTC().Format(time.RFC3339Nano)})
-				if err != nil {
-					return nil, err
-				}
-				scope, err := outcome.Card.Anchor.Scope()
-				if err != nil {
-					return nil, err
-				}
-				evt, err := newMailboxRuntimeControlEvent(uuid.NewString(), "mailbox.card_deferred", outcome.Card.RunID, payload, scope.EntityID, scope.FlowInstance, now().UTC(), outcome.Card.ExecutionMode)
-				if err != nil {
-					return nil, err
-				}
-				if err := publisher.PublishInMutation(txctx, evt); err != nil {
-					return nil, fmt.Errorf("publish decision card deferred event: %w", err)
-				}
-				return decisionCardMutationResult{OK: true, CardID: cardID, Status: outcome.Card.Status, ChangeID: outcome.ChangeID}, nil
-			})
+			return executeIdempotentDecisionCardMutation(ctx, req, opts, cardID, runtimepipeline.NewDecisionCardDeferral(decisioncard.DeferRequest{
+				CardID: cardID, ActorTokenID: req.ActorTokenID, Until: until, Now: now().UTC(),
+			}))
 		},
 		"mailbox.begin_input": func(ctx context.Context, req Request) (any, error) {
 			cardID := strings.TrimSpace(stringParam(req.Params, "card_id"))
 			verdict := strings.TrimSpace(stringParam(req.Params, "verdict"))
 			observedHash := strings.TrimSpace(stringParam(req.Params, "observed_content_hash"))
-			return executeIdempotentDecisionCardMutation(ctx, req, opts, cardID, func(txctx context.Context) (any, error) {
-				card, err := opts.DecisionCards.GetDecisionCard(txctx, cardID)
-				if err != nil {
-					return nil, err
-				}
-				if observedHash == "" || observedHash != card.CardContentHash {
-					return nil, decisioncard.ErrStaleContent
-				}
-				ttl, err := time.ParseDuration(strings.TrimSpace(card.EffectiveCadence.InputDraftTTL))
-				if err != nil || ttl <= 0 {
-					return nil, fmt.Errorf("decision card input draft TTL is invalid")
-				}
-				draft, err := opts.DecisionCards.BeginDecisionCardInput(txctx, decisioncard.BeginInputRequest{CardID: cardID, Verdict: verdict, ActorTokenID: req.ActorTokenID, DeliveryReceiptID: stringParam(req.Params, "delivery_receipt_id"), Now: now().UTC(), TTL: ttl})
-				if err != nil {
-					return nil, err
-				}
-				return decisionCardInputResult{OK: true, CardID: cardID, InputDraftID: draft.InputDraftID, Verdict: draft.Verdict, Status: draft.Status, ExpiresAt: draft.ExpiresAt.UTC().Format(time.RFC3339Nano)}, nil
-			})
+			return executeIdempotentDecisionCardMutation(ctx, req, opts, cardID, runtimepipeline.NewDecisionCardInputBegin(decisioncard.BeginInputRequest{
+				CardID: cardID, Verdict: verdict, ActorTokenID: req.ActorTokenID,
+				DeliveryReceiptID: stringParam(req.Params, "delivery_receipt_id"), Now: now().UTC(),
+			}, observedHash))
 		},
 		"mailbox.cancel_input": func(ctx context.Context, req Request) (any, error) {
 			cardID := strings.TrimSpace(stringParam(req.Params, "card_id"))
-			return executeIdempotentDecisionCardMutation(ctx, req, opts, cardID, func(txctx context.Context) (any, error) {
-				draft, err := opts.DecisionCards.CancelDecisionCardInput(txctx, decisioncard.CancelInputRequest{
-					CardID: cardID, InputDraftID: stringParam(req.Params, "input_draft_id"), ActorTokenID: req.ActorTokenID, Now: now().UTC(),
-				})
-				if err != nil {
-					return nil, err
-				}
-				return decisionCardInputResult{OK: true, CardID: cardID, InputDraftID: draft.InputDraftID, Verdict: draft.Verdict, Status: draft.Status, ExpiresAt: draft.ExpiresAt.UTC().Format(time.RFC3339Nano)}, nil
-			})
+			return executeIdempotentDecisionCardMutation(ctx, req, opts, cardID, runtimepipeline.NewDecisionCardInputCancellation(decisioncard.CancelInputRequest{
+				CardID: cardID, InputDraftID: stringParam(req.Params, "input_draft_id"), ActorTokenID: req.ActorTokenID, Now: now().UTC(),
+			}))
 		},
 		"mailbox.acknowledge": func(ctx context.Context, req Request) (any, error) {
 			writer, ok := opts.Mailbox.(interface {
@@ -270,20 +119,7 @@ func decisionCardHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 				return nil, fmt.Errorf("notice acknowledgment store is required")
 			}
 			id := strings.TrimSpace(stringParam(req.Params, "mailbox_id"))
-			return executeIdempotentDecisionCardMutation(ctx, req, opts, id, func(txctx context.Context) (any, error) {
-				if _, err := opts.DecisionCards.GetDecisionCard(txctx, id); err == nil {
-					return nil, NewInvalidParamsError(map[string]any{"mailbox_id": id, "reason": "decision cards use decide or defer; acknowledge is notice-only"})
-				} else if !errors.Is(err, decisioncard.ErrNotFound) {
-					return nil, err
-				}
-				if err := writer.MarkMailboxItemNotified(txctx, id); err != nil {
-					if errors.Is(err, store.ErrMailboxV1NotFound) {
-						return nil, decisioncard.ErrNotFound
-					}
-					return nil, err
-				}
-				return map[string]any{"ok": true, "mailbox_id": id, "kind": decisioncard.KindNotice}, nil
-			})
+			return executeIdempotentMailboxNoticeAcknowledgment(ctx, req, opts, id, writer)
 		},
 	}
 }
@@ -420,7 +256,7 @@ func encodeMailboxProjectionCursor(cursor mailboxProjectionCursor) string {
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
-func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opts OperatorReadOptions, cardID string, execute func(context.Context) (any, error)) (any, error) {
+func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opts OperatorReadOptions, cardID string, mutation runtimepipeline.DecisionCardMutation) (any, error) {
 	if opts.DecisionAuthority == nil || opts.Idempotency == nil {
 		return nil, fmt.Errorf("decision card workflow mutation and idempotency owners are required")
 	}
@@ -447,38 +283,97 @@ func executeIdempotentDecisionCardMutation(ctx context.Context, req Request, opt
 	if opts.Now != nil {
 		now = opts.Now().UTC()
 	}
-	err = opts.DecisionAuthority.RunPipelineMutation(ctx, func(txctx context.Context) error {
-		completion, wasReplay, err := opts.Idempotency.WithAPIIdempotency(txctx, store.APIIdempotencyRequest{
-			Method: req.Method, ActorTokenID: req.ActorTokenID, IdempotencyKey: idempotencyKey,
-			RequestHash: req.RequestHash, ResourceID: cardID, TTL: 24 * time.Hour, Now: now,
-		}, func(callbackCtx context.Context) (store.APIIdempotencyCompletion, error) {
-			value, err := execute(callbackCtx)
-			if err != nil {
-				return store.APIIdempotencyCompletion{}, err
-			}
-			admitted, err := canonicaljson.FromGo(value)
-			if err != nil {
-				return store.APIIdempotencyCompletion{}, err
-			}
-			raw, err := canonicaljson.Encode(admitted)
-			if err != nil {
-				return store.APIIdempotencyCompletion{}, err
-			}
-			return store.APIIdempotencyCompletion{ResourceID: cardID, Response: raw}, nil
-		})
-		if err != nil {
-			return err
-		}
-		replayed = wasReplay
-		result, err = canonicaljson.Decode(completion.Response)
-		return err
-	})
+	response, replayed, err := opts.DecisionAuthority.CommitDecisionCardMutation(ctx, decisionCardMutationIdempotencyAdapter{owner: opts.Idempotency}, runtimepipeline.DecisionCardMutationIdempotencyRequest{
+		Method: req.Method, ActorTokenID: req.ActorTokenID, IdempotencyKey: idempotencyKey,
+		RequestHash: req.RequestHash, ResourceID: cardID, TTL: 24 * time.Hour, Now: now,
+	}, mutation)
+	if err != nil {
+		return nil, decisionCardAPIError(cardID, err)
+	}
+	result, err = canonicaljson.Decode(response)
 	if err != nil {
 		return nil, decisionCardAPIError(cardID, err)
 	}
 	result, err = result.With("idempotency_replayed", semanticvalue.Bool(replayed))
 	if err != nil {
 		return nil, decisionCardAPIError(cardID, fmt.Errorf("decision card mutation result is not an object: %w", err))
+	}
+	return result, nil
+}
+
+type decisionCardMutationIdempotencyAdapter struct {
+	owner APIIdempotencyStore
+}
+
+func (a decisionCardMutationIdempotencyAdapter) WithDecisionCardMutationIdempotency(
+	ctx context.Context,
+	req runtimepipeline.DecisionCardMutationIdempotencyRequest,
+	execute func(context.Context) (runtimepipeline.DecisionCardMutationIdempotencyCompletion, error),
+) (runtimepipeline.DecisionCardMutationIdempotencyCompletion, bool, error) {
+	completion, replayed, err := a.owner.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
+		Method: req.Method, ActorTokenID: req.ActorTokenID, IdempotencyKey: req.IdempotencyKey,
+		RequestHash: req.RequestHash, ResourceID: req.ResourceID, TTL: req.TTL, Now: req.Now,
+	}, func(callbackCtx context.Context) (store.APIIdempotencyCompletion, error) {
+		result, err := execute(callbackCtx)
+		return store.APIIdempotencyCompletion{ResourceID: result.ResourceID, Response: result.Response}, err
+	})
+	return runtimepipeline.DecisionCardMutationIdempotencyCompletion{
+		ResourceID: completion.ResourceID, Response: completion.Response,
+	}, replayed, err
+}
+
+func executeIdempotentMailboxNoticeAcknowledgment(
+	ctx context.Context,
+	req Request,
+	opts OperatorReadOptions,
+	mailboxID string,
+	writer interface {
+		MarkMailboxItemNotified(context.Context, string) error
+	},
+) (any, error) {
+	if opts.Idempotency == nil {
+		return nil, fmt.Errorf("mailbox notice idempotency owner is required")
+	}
+	if provider, ok := opts.Events.(runtimeBundleSourceFactProvider); ok {
+		var err error
+		ctx, err = provider.AdmitBundleSourceFact(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	now := time.Now().UTC()
+	if opts.Now != nil {
+		now = opts.Now().UTC()
+	}
+	completion, replayed, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
+		Method: req.Method, ActorTokenID: req.ActorTokenID,
+		IdempotencyKey: strings.TrimSpace(stringParam(req.Params, "idempotency_key")),
+		RequestHash:    req.RequestHash, ResourceID: mailboxID, TTL: 24 * time.Hour, Now: now,
+	}, func(callbackCtx context.Context) (store.APIIdempotencyCompletion, error) {
+		if _, err := opts.DecisionCards.GetDecisionCard(callbackCtx, mailboxID); err == nil {
+			return store.APIIdempotencyCompletion{}, NewInvalidParamsError(map[string]any{"mailbox_id": mailboxID, "reason": "decision cards use decide or defer; acknowledge is notice-only"})
+		} else if !errors.Is(err, decisioncard.ErrNotFound) {
+			return store.APIIdempotencyCompletion{}, err
+		}
+		if err := writer.MarkMailboxItemNotified(callbackCtx, mailboxID); err != nil {
+			if errors.Is(err, store.ErrMailboxV1NotFound) {
+				return store.APIIdempotencyCompletion{}, decisioncard.ErrNotFound
+			}
+			return store.APIIdempotencyCompletion{}, err
+		}
+		raw, err := canonicaljson.Bytes(map[string]any{"ok": true, "mailbox_id": mailboxID, "kind": decisioncard.KindNotice})
+		return store.APIIdempotencyCompletion{ResourceID: mailboxID, Response: raw}, err
+	})
+	if err != nil {
+		return nil, decisionCardAPIError(mailboxID, err)
+	}
+	result, err := canonicaljson.Decode(completion.Response)
+	if err != nil {
+		return nil, decisionCardAPIError(mailboxID, err)
+	}
+	result, err = result.With("idempotency_replayed", semanticvalue.Bool(replayed))
+	if err != nil {
+		return nil, decisionCardAPIError(mailboxID, err)
 	}
 	return result, nil
 }

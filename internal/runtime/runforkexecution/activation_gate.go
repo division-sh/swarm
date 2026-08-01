@@ -11,37 +11,41 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
-	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
 type SelectedContractActivationStore interface {
-	LoadRunForkSelectedContractBinding(context.Context, string) (store.RunForkSelectedContractBinding, bool, error)
-	RequireRunForkSelectedContractBinding(context.Context, string) (store.RunForkSelectedContractBinding, error)
+	LoadRunForkSelectedContractBinding(context.Context, string) (runfork.RunForkSelectedContractBinding, bool, error)
+	RequireRunForkSelectedContractBinding(context.Context, string) (runfork.RunForkSelectedContractBinding, error)
 	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
-	LoadRunForkSelectedContractRouteRecovery(context.Context, string) (store.RunForkSelectedContractRouteRecovery, bool, error)
-	PlanRunFork(context.Context, store.RunForkPlanRequest) (store.RunForkPlan, error)
-	ActivateRunFork(context.Context, store.RunForkActivateRequest) (store.RunForkActivation, error)
+	LoadRunForkSelectedContractRouteRecovery(context.Context, string) (runfork.RunForkSelectedContractRouteRecovery, bool, error)
+	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+	ActivateRunFork(context.Context, runfork.RunForkActivateRequest) (runfork.RunForkActivation, error)
+	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
 
 type SelectedContractActivationGateRequest struct {
 	ForkRunID           string
 	ConfirmSourceFreeze bool
 	Store               SelectedContractActivationStore
+	ExecutionStore      SelectedContractExecutionStore
+	WorkflowPersistence runtimepipeline.WorkflowPersistence
 	SourceLoader        SelectedContractSourceLoader
 }
 
 type SelectedContractActivationGateResult struct {
-	store.RunForkActivation
-	Owner                              string                                               `json:"selected_contract_activation_gate_owner,omitempty"`
-	SelectedContractExecutionAdmission *store.RunForkSelectedContractExecutionAdmission     `json:"selected_contract_execution_admission,omitempty"`
-	ContractSwapBootResumeAdmission    *store.RunForkContractSwapBootResumeAdmission        `json:"contract_swap_boot_resume_admission,omitempty"`
-	HistoricalReplayExecutionAdmission *store.RunForkHistoricalReplayExecutionAdmission     `json:"historical_replay_execution_admission,omitempty"`
-	ContractSwapBootResumeExecution    *store.RunForkHistoricalReplayContractSwapBootResume `json:"contract_swap_boot_resume_execution,omitempty"`
-	ForkLocalRuntimeContainer          *SelectedContractForkLocalRuntimeContainer           `json:"fork_local_runtime_container,omitempty"`
-	ExecutedEventCount                 int                                                  `json:"executed_event_count,omitempty"`
-	ForkEvents                         []SelectedContractExecutionForkEvent                 `json:"fork_events,omitempty"`
+	runfork.RunForkActivation
+	Owner                              string                                                 `json:"selected_contract_activation_gate_owner,omitempty"`
+	SelectedContractExecutionAdmission *runfork.RunForkSelectedContractExecutionAdmission     `json:"selected_contract_execution_admission,omitempty"`
+	ContractSwapBootResumeAdmission    *runfork.RunForkContractSwapBootResumeAdmission        `json:"contract_swap_boot_resume_admission,omitempty"`
+	HistoricalReplayExecutionAdmission *runfork.RunForkHistoricalReplayExecutionAdmission     `json:"historical_replay_execution_admission,omitempty"`
+	ContractSwapBootResumeExecution    *runfork.RunForkHistoricalReplayContractSwapBootResume `json:"contract_swap_boot_resume_execution,omitempty"`
+	ForkLocalRuntimeContainer          *SelectedContractForkLocalRuntimeContainer             `json:"fork_local_runtime_container,omitempty"`
+	ExecutedEventCount                 int                                                    `json:"executed_event_count,omitempty"`
+	ForkEvents                         []SelectedContractExecutionForkEvent                   `json:"fork_events,omitempty"`
 }
 
 func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractActivationGateRequest) (SelectedContractActivationGateResult, error) {
@@ -61,7 +65,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		return SelectedContractActivationGateResult{}, fmt.Errorf("load selected-contract binding for activation gate: %w", err)
 	}
 	if !ok {
-		activation, err := req.Store.ActivateRunFork(ctx, store.RunForkActivateRequest{
+		activation, err := req.Store.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
 			ForkRunID:                         forkRunID,
 			ConfirmSourceFreeze:               req.ConfirmSourceFreeze,
 			HistoricalReplayExecutionAdmitter: HistoricalReplayExecutionAdmitter{},
@@ -107,35 +111,32 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		return SelectedContractActivationGateResult{}, fmt.Errorf("load selected semantic source for activation gate: %w", err)
 	}
 	defer cleanupLoadedSelectedContractSource(loadedSource)
-	pgStore, _ := req.Store.(*store.PostgresStore)
-	if pgStore != nil {
-		if err := loadedSource.BundleSourceFact.Validate(); err != nil {
-			return SelectedContractActivationGateResult{}, fmt.Errorf("selected-contract activation source loader returned incomplete bundle identity")
-		}
-		scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loadedSource.BundleSourceFact.BundleHash())
-		if err != nil {
-			return SelectedContractActivationGateResult{}, fmt.Errorf("resolve selected-contract activation author activity scope: %w", err)
-		}
-		ctx = runtimeauthoractivity.WithScope(ctx, scope)
-		descriptors, err := runtimepkg.AuthorActivityEventDescriptors(loadedSource.Source)
-		if err != nil {
-			return SelectedContractActivationGateResult{}, fmt.Errorf("project selected-contract activation descriptors: %w", err)
-		}
-		lease, err := pgStore.RegisterAuthorActivityEventCatalog(scope, descriptors)
-		if err != nil {
-			return SelectedContractActivationGateResult{}, fmt.Errorf("register selected-contract activation descriptors: %w", err)
-		}
-		defer lease.Release()
+	if err := loadedSource.BundleSourceFact.Validate(); err != nil {
+		return SelectedContractActivationGateResult{}, fmt.Errorf("selected-contract activation source loader returned incomplete bundle identity")
 	}
-	plan, err := req.Store.PlanRunFork(ctx, store.RunForkPlanRequest{SourceRunID: binding.SourceRunID, At: binding.ForkEventID})
+	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, loadedSource.BundleSourceFact.BundleHash())
+	if err != nil {
+		return SelectedContractActivationGateResult{}, fmt.Errorf("resolve selected-contract activation author activity scope: %w", err)
+	}
+	ctx = runtimeauthoractivity.WithScope(ctx, scope)
+	descriptors, err := runtimepkg.AuthorActivityEventDescriptors(loadedSource.Source)
+	if err != nil {
+		return SelectedContractActivationGateResult{}, fmt.Errorf("project selected-contract activation descriptors: %w", err)
+	}
+	lease, err := req.Store.RegisterAuthorActivityEventCatalog(scope, descriptors)
+	if err != nil {
+		return SelectedContractActivationGateResult{}, fmt.Errorf("register selected-contract activation descriptors: %w", err)
+	}
+	defer lease.Release()
+	plan, err := req.Store.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: binding.SourceRunID, At: binding.ForkEventID})
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("plan selected-contract activation gate: %w", err)
 	}
 	deferredWorkAdmission, err := admitSelectedContractDeferredWork(plan, loadedSource.Source)
 	if err != nil {
-		return SelectedContractActivationGateResult{Owner: store.RunForkSelectedContractExecutionActivationGateOwner}, err
+		return SelectedContractActivationGateResult{Owner: runfork.RunForkSelectedContractExecutionActivationGateOwner}, err
 	}
-	replayAdmission := store.RunForkSelectedContractReplayResumeAdmission(plan)
+	replayAdmission := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
 	if len(plan.ReplayResumeAdmission.Dispositions) > 0 || len(plan.ReplayResumeAdmission.UnsupportedBlockers) > 0 {
 		plan.UnsupportedBlockers = replayAdmission.UnsupportedBlockers
 		plan.UnsupportedBlockerCount = len(replayAdmission.UnsupportedBlockers)
@@ -189,7 +190,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if err != nil {
 		return SelectedContractActivationGateResult{}, err
 	}
-	var routeRecovery *store.RunForkSelectedContractRouteRecovery
+	var routeRecovery *runfork.RunForkSelectedContractRouteRecovery
 	recoveredRoute, ok, err := req.Store.LoadRunForkSelectedContractRouteRecovery(ctx, forkRunID)
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("load selected-contract route recovery for contract-swap admission: %w", err)
@@ -199,7 +200,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		if err := validateContractSwapRouteRecovery(admission, recoveredRoute); err != nil {
 			return SelectedContractActivationGateResult{}, err
 		}
-		replayAdmission = store.RunForkReplayResumeAdmissionWithSelectedRouteResolution(replayAdmission)
+		replayAdmission = runfork.RunForkReplayResumeAdmissionWithSelectedRouteResolution(replayAdmission)
 		plan.ReplayResumeAdmission = replayAdmission
 		plan.UnsupportedBlockers = replayAdmission.UnsupportedBlockers
 		plan.UnsupportedBlockerCount = len(replayAdmission.UnsupportedBlockers)
@@ -223,7 +224,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		return SelectedContractActivationGateResult{}, err
 	}
 	result := SelectedContractActivationGateResult{
-		Owner:                              store.RunForkSelectedContractExecutionActivationGateOwner,
+		Owner:                              runfork.RunForkSelectedContractExecutionActivationGateOwner,
 		SelectedContractExecutionAdmission: &admission,
 		ContractSwapBootResumeAdmission:    &contractSwapAdmission,
 		HistoricalReplayExecutionAdmission: &historicalReplayAdmission,
@@ -235,8 +236,8 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		return result, fmt.Errorf("selected-contract activation gate requires execution-ready plan before mutation; blockers: %s", selectedContractBlockerCodes(plan.UnsupportedBlockers))
 	}
 	if plan.ReplayResumeAdmission.DeliveryEventReplayReady {
-		if pgStore == nil {
-			return result, fmt.Errorf("%s requires postgres store", store.RunForkHistoricalReplayContractSwapBootResumeOwner)
+		if req.ExecutionStore == nil {
+			return result, fmt.Errorf("%s requires selected-contract execution store", runfork.RunForkHistoricalReplayContractSwapBootResumeOwner)
 		}
 		historicalReplayExecution, err := BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
 			Admission:             historicalReplayAdmission,
@@ -259,7 +260,8 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		result.ContractSwapBootResumeExecution = &contractSwapExecution
 		sourceEventIDs := contractSwapBootResumeSourceEvents(contractSwapExecution)
 		container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
-			Store:                 pgStore,
+			Store:                 req.ExecutionStore,
+			WorkflowPersistence:   req.WorkflowPersistence,
 			Admission:             admission,
 			LoadedSource:          loadedSource,
 			RecipientPlanning:     *model.RecipientPlanning,
@@ -267,11 +269,11 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			ForkRunID:             forkRunID,
 			ForkEventID:           plan.ForkPoint.EventID,
 			SourceEvents:          sourceEventIDs,
-			ExecutionOwner:        store.RunForkHistoricalReplayContractSwapBootResumeOwner,
+			ExecutionOwner:        runfork.RunForkHistoricalReplayContractSwapBootResumeOwner,
 			DeferredWorkAdmission: deferredWorkAdmission,
 		})
 		if err != nil {
-			return result, cleanupSelectedContractExecutionFailure(ctx, pgStore, forkRunID, err)
+			return result, cleanupSelectedContractExecutionFailure(ctx, req.ExecutionStore, forkRunID, err)
 		}
 		containerProof := container.Proof()
 		result.ForkLocalRuntimeContainer = &containerProof
@@ -282,7 +284,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			if authorityErr := container.Fail(ctx, err); authorityErr != nil {
 				err = errors.Join(err, authorityErr)
 			} else {
-				err = cleanupSelectedContractExecutionFailure(ctx, pgStore, forkRunID, err)
+				err = cleanupSelectedContractExecutionFailure(ctx, req.ExecutionStore, forkRunID, err)
 			}
 			return result, err
 		}
@@ -290,9 +292,9 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			if authorityErr := container.Fail(ctx, err); authorityErr != nil {
 				return result, errors.Join(err, authorityErr)
 			}
-			return result, cleanupSelectedContractExecutionFailure(ctx, pgStore, forkRunID, err)
+			return result, cleanupSelectedContractExecutionFailure(ctx, req.ExecutionStore, forkRunID, err)
 		}
-		activation, err := pgStore.ActivateRunForkForSelectedContractExecution(ctx, store.RunForkSelectedContractExecutionActivateRequest{
+		activation, err := req.ExecutionStore.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
 			ForkRunID:             forkRunID,
 			ConfirmSourceFreeze:   req.ConfirmSourceFreeze,
 			AllowedSourceEventIDs: sourceEventIDs,
@@ -305,7 +307,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			if closeErr := container.Close(ctx); closeErr != nil {
 				err = errors.Join(err, closeErr)
 			}
-			return result, cleanupSelectedContractExecutionFailure(ctx, pgStore, forkRunID, err)
+			return result, cleanupSelectedContractExecutionFailure(ctx, req.ExecutionStore, forkRunID, err)
 		}
 		if err := container.Close(ctx); err != nil {
 			return result, err
@@ -316,10 +318,10 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		return result, fmt.Errorf("selected-contract activation gate blocks historical replay before mutation; blockers: %s", selectedContractBlockerCodes(plan.UnsupportedBlockers))
 	}
 	if frontier.FrontierEventCount > 0 {
-		return result, fmt.Errorf("%s: selected-contract frontier execution remains non-mutating", store.RunForkBlockerContractFrontierExecutionUnsupported)
+		return result, fmt.Errorf("%s: selected-contract frontier execution remains non-mutating", runfork.RunForkBlockerContractFrontierExecutionUnsupported)
 	}
 
-	activation, err := req.Store.ActivateRunFork(ctx, store.RunForkActivateRequest{
+	activation, err := req.Store.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
 		ForkRunID:                         forkRunID,
 		ConfirmSourceFreeze:               req.ConfirmSourceFreeze,
 		HistoricalReplayExecutionAdmitter: HistoricalReplayExecutionAdmitter{},
@@ -328,7 +330,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	return result, err
 }
 
-func selectedContractBlockerCodes(blockers []store.RunForkUnsupportedBlocker) string {
+func selectedContractBlockerCodes(blockers []runfork.RunForkUnsupportedBlocker) string {
 	if len(blockers) == 0 {
 		return "none"
 	}

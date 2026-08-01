@@ -12,9 +12,9 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -64,7 +64,7 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 		t.Fatalf("commit revision: %v", err)
 	}
 
-	plan, err := pg.PlanRunFork(ctx, store.RunForkPlanRequest{
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{
 		SourceRunID: runID,
 		At:          completedEventID,
 	})
@@ -120,8 +120,8 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 		wantHistoryCodes  []string
 		wantRouteFacts    bool
 	}
-	nonMutating := store.RunForkBlockerSelectedContractRouteAdmissionNonMutating
-	flowHistory := store.RunForkBlockerFlowRouteHistoryUnproven
+	nonMutating := runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating
+	flowHistory := runfork.RunForkBlockerFlowRouteHistoryUnproven
 	cases := []testCase{
 		{
 			name:             "explicit template fork point without delivery",
@@ -156,7 +156,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			explicitSelector: true, deliveryStatus: "pending",
 			source:       testContractFrontierTemplateConnectSource,
 			wantFrontier: []string{"consumer-node"}, wantDynamic: []string{"producer/inst-1"},
-			wantFrontierCodes: []string{store.RunForkBlockerContractFrontierExecutionUnsupported},
+			wantFrontierCodes: []string{runfork.RunForkBlockerContractFrontierExecutionUnsupported},
 			wantHistoryCodes:  []string{nonMutating, flowHistory}, wantRouteFacts: true,
 		},
 		{
@@ -229,7 +229,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			if tc.explicitSelector {
 				selector = eventID
 			}
-			plan, err := pg.PlanRunFork(ctx, store.RunForkPlanRequest{SourceRunID: runID, At: selector})
+			plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: selector})
 			if err != nil {
 				t.Fatalf("PlanRunFork: %v", err)
 			}
@@ -264,7 +264,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 				t.Fatalf("history recipients = %v, want %v", got, tc.wantHistory)
 			}
 			for _, event := range history.SelectedRouteEvents {
-				if event.SourceEventID != eventID || event.Disposition != store.RunForkSelectedContractDispositionEvidenceOnly {
+				if event.SourceEventID != eventID || event.Disposition != runfork.RunForkSelectedContractDispositionEvidenceOnly {
 					t.Fatalf("selected route event = %#v, want fork point evidence-only disposition", event)
 				}
 			}
@@ -298,7 +298,7 @@ func captureRunForkRevision(t *testing.T, ctx context.Context, db interface {
 	}
 }
 
-func frontierRecipientIDs(frontier store.RunForkContractFrontierAdmission) []string {
+func frontierRecipientIDs(frontier runfork.RunForkContractFrontierAdmission) []string {
 	var out []string
 	for _, event := range frontier.FrontierEvents {
 		for _, recipient := range event.DerivedRecipients {
@@ -308,7 +308,7 @@ func frontierRecipientIDs(frontier store.RunForkContractFrontierAdmission) []str
 	return out
 }
 
-func historyRecipientIDs(history store.RunForkSelectedContractRouteAdmission) []string {
+func historyRecipientIDs(history runfork.RunForkSelectedContractRouteAdmission) []string {
 	var out []string
 	for _, event := range history.SelectedRouteEvents {
 		for _, recipient := range event.DerivedRecipients {
@@ -318,7 +318,7 @@ func historyRecipientIDs(history store.RunForkSelectedContractRouteAdmission) []
 	return out
 }
 
-func blockerCodes(blockers []store.RunForkUnsupportedBlocker) []string {
+func blockerCodes(blockers []runfork.RunForkUnsupportedBlocker) []string {
 	out := make([]string, 0, len(blockers))
 	for _, blocker := range blockers {
 		out = append(out, blocker.Code)

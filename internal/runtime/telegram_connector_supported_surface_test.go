@@ -25,6 +25,8 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -46,7 +48,6 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 		)
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 		seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, db, flowInstance, false)
 
@@ -57,7 +58,9 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
-			workflowStore: workflowStore,
+			persistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+			runLifecycle:  pg,
+			obligations:   pg.PipelineObligations(),
 			runID:         runID,
 			entityID:      entityID,
 			flowInstance:  flowInstance,
@@ -73,7 +76,6 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 		)
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-		workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 		seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, sqliteStore.DB, flowInstance, true)
 
@@ -84,7 +86,9 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
-			workflowStore: workflowStore,
+			persistence:   runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore),
+			runLifecycle:  sqliteStore,
+			obligations:   sqliteStore.PipelineObligations(),
 			runID:         runID,
 			entityID:      entityID,
 			flowInstance:  flowInstance,
@@ -94,17 +98,20 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 }
 
 type telegramConnectorSupportedSurfaceBackend struct {
-	name          string
-	ctx           context.Context
-	db            *sql.DB
-	eventStore    runtimebus.EventStore
-	deliveryStore runtimedelivery.Store
-	inboundStore  runtimepkg.InboundPersistence
-	workflowStore *runtimepipeline.WorkflowInstanceStore
-	runID         string
-	entityID      string
-	flowInstance  string
-	sqlite        bool
+	name             string
+	ctx              context.Context
+	db               *sql.DB
+	eventStore       runtimebus.EventStore
+	deliveryStore    runtimedelivery.Store
+	inboundStore     runtimepkg.InboundPersistence
+	activityAttempts runtimeTestActivityAttemptReader
+	persistence      runtimepipeline.WorkflowPersistence
+	runLifecycle     runtimerunlifecycle.OperationOwner
+	obligations      runtimepipelineobligation.Store
+	runID            string
+	entityID         string
+	flowInstance     string
+	sqlite           bool
 }
 
 type telegramConnectorSupportedSurfaceCall struct {
@@ -158,7 +165,8 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 	if err != nil {
 		t.Fatalf("%s NewEventBusWithOptions: %v", backend.name, err)
 	}
-	pc = startTelegramConnectorSupportedSurfaceCoordinator(t, backend.ctx, bus, backend.db, backend.workflowStore, backend.deliveryStore, source, credentialStore)
+	pc = startTelegramConnectorSupportedSurfaceCoordinator(t, backend, bus, source, credentialStore)
+	backend.activityAttempts = pc
 
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
@@ -246,7 +254,8 @@ func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend t
 	if err != nil {
 		t.Fatalf("%s missing-token NewEventBusWithOptions: %v", backend.name, err)
 	}
-	pc = startTelegramConnectorSupportedSurfaceCoordinator(t, backend.ctx, bus, backend.db, backend.workflowStore, backend.deliveryStore, source, credentialStore)
+	pc = startTelegramConnectorSupportedSurfaceCoordinator(t, backend, bus, source, credentialStore)
+	backend.activityAttempts = pc
 
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
@@ -415,11 +424,8 @@ func (m telegramConnectorSupportedSurfaceModule) ActionRegistry() runtimepipelin
 
 func startTelegramConnectorSupportedSurfaceCoordinator(
 	t *testing.T,
-	ctx context.Context,
+	backend telegramConnectorSupportedSurfaceBackend,
 	bus *runtimebus.EventBus,
-	db *sql.DB,
-	workflowStore *runtimepipeline.WorkflowInstanceStore,
-	deliveryStore runtimedelivery.Store,
 	source semanticview.Source,
 	credentialStore runtimecredentials.Store,
 ) *runtimepipeline.PipelineCoordinator {
@@ -434,14 +440,18 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 		guards:  runtimepipeline.NewContractGuardRegistry(source),
 		actions: runtimepipeline.NewContractActionRegistry(source),
 	}
-	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
-		Module:        module,
-		WorkflowStore: workflowStore,
-		DeliveryStore: deliveryStore,
-		Credentials:   credentialStore,
+	pc := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, backend.db, runtimepipeline.PipelineCoordinatorOptions{
+		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
+		Module:              module,
+		Persistence:         backend.persistence,
+		RunLifecycle:        backend.runLifecycle,
+		PipelineObligations: backend.obligations,
+		DeliveryStore:       backend.deliveryStore,
+		Credentials:         credentialStore,
+		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
+		PinRoutingDescriptors: bus, FlowRoutes: bus,
 	})
-	startConfiguredChannelActivityNode(t, ctx, pc, bus, db)
+	startConfiguredChannelActivityNode(t, backend.ctx, pc, bus, backend.db)
 	return pc
 }
 
@@ -632,7 +642,7 @@ func tryLoadTelegramConnectorSupportedSurfaceActivityAttempt(backend telegramCon
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
-	rec, ok, err := backend.workflowStore.LoadActivityAttempt(backend.ctx, requestEventID)
+	rec, ok, err := backend.activityAttempts.LoadActivityAttempt(backend.ctx, requestEventID)
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}

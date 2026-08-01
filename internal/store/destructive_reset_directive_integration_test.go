@@ -62,7 +62,14 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 	}
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, func(runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
-	}, runtimemanager.AgentManagerOptions{WorkOwner: storeTestWorkOwner(t)}, pg))
+	}, runtimemanager.AgentManagerOptions{
+		WorkOwner: storeTestWorkOwner(t),
+		PersistenceRoles: runtimemanager.PersistenceRoles{
+			EventExistence:      pg,
+			DirectiveOperations: pg,
+			DirectiveTargets:    pg,
+		},
+	}, pg))
 	identity := agentidentitytest.RootRuntime(t, agent.id, "destructive-reset-integration")
 	rec := runtimemanager.PersistedAgent{
 		Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Identity: identity, Role: "test", Model: "regular"},

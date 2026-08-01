@@ -90,17 +90,17 @@ func (f *fakeRuntimeStartupOwnershipLease) Release(ctx context.Context) error {
 func TestRuntimeStart_FailsWhenSharedStoreOwnershipAlreadyHeld(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 
-	rt1, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{}, Stores: Stores{
+	rt1, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{},
 		StartupOwnership: fakeRuntimeStartupOwnershipStore{
 			acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
 				return &fakeRuntimeStartupOwnershipLease{}, nil
 			},
 		},
-	}, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
+		Options: RuntimeOptions{
+			SelfCheck:      false,
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
 
 	if err != nil {
 		t.Fatalf("newScopedTestRuntime(rt1): %v", err)
@@ -110,17 +110,17 @@ func TestRuntimeStart_FailsWhenSharedStoreOwnershipAlreadyHeld(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = rt1.Shutdown() })
 
-	rt2, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{}, Stores: Stores{
+	rt2, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{},
 		StartupOwnership: fakeRuntimeStartupOwnershipStore{
 			acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
 				return nil, fmt.Errorf("shared runtime store already owned by another runtime instance")
 			},
 		},
-	}, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
+		Options: RuntimeOptions{
+			SelfCheck:      false,
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
 
 	if err != nil {
 		t.Fatalf("newScopedTestRuntime(rt2): %v", err)
@@ -138,17 +138,17 @@ func TestRuntimeShutdown_ReleasesSharedStoreOwnership(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	lease := &fakeRuntimeStartupOwnershipLease{}
 
-	rt1, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{}, Stores: Stores{
+	rt1, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{},
 		StartupOwnership: fakeRuntimeStartupOwnershipStore{
 			acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
 				return lease, nil
 			},
 		},
-	}, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
+		Options: RuntimeOptions{
+			SelfCheck:      false,
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
 
 	if err != nil {
 		t.Fatalf("newScopedTestRuntime(rt1): %v", err)
@@ -163,17 +163,17 @@ func TestRuntimeShutdown_ReleasesSharedStoreOwnership(t *testing.T) {
 		t.Fatalf("startup ownership lease release count = %d, want 1", got)
 	}
 
-	rt2, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{}, Stores: Stores{
+	rt2, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{},
 		StartupOwnership: fakeRuntimeStartupOwnershipStore{
 			acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
 				return &fakeRuntimeStartupOwnershipLease{}, nil
 			},
 		},
-	}, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
+		Options: RuntimeOptions{
+			SelfCheck:      false,
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
 
 	if err != nil {
 		t.Fatalf("newScopedTestRuntime(rt2): %v", err)
@@ -190,18 +190,18 @@ func TestRuntimePreparedStartupOwnershipIsConsumedWithoutReacquire(t *testing.T)
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	lease := &fakeRuntimeStartupOwnershipLease{}
 	var acquires atomic.Int32
-	rt, err := newScopedTestRuntime(t, context.Background(), RuntimeDeps{Config: &config.Config{}, Stores: Stores{
+	rt, err := newScopedTestRuntime(t, context.Background(), RuntimeDeps{Config: &config.Config{},
 		StartupOwnership: fakeRuntimeStartupOwnershipStore{
 			acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
 				acquires.Add(1)
 				return lease, nil
 			},
 		},
-	}, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
+		Options: RuntimeOptions{
+			SelfCheck:      false,
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -232,11 +232,11 @@ func TestRuntimePreparedStartupOwnershipIsConsumedWithoutReacquire(t *testing.T)
 func TestRuntimePreparedStartupOwnershipCanBeReleasedBeforeStart(t *testing.T) {
 	lease := &fakeRuntimeStartupOwnershipLease{}
 	rt := &Runtime{
-		Stores: Stores{StartupOwnership: fakeRuntimeStartupOwnershipStore{
+		startupOwnership: fakeRuntimeStartupOwnershipStore{
 			acquire: func(context.Context, string) (runtimestartupownership.Lease, error) {
 				return lease, nil
 			},
-		}},
+		},
 		Options: RuntimeOptions{BundleSourceFact: testBundleSourceFact(t, runtimeTestBundleHash)},
 		ownerID: "runtime-owner",
 	}
@@ -291,7 +291,7 @@ func TestRuntimeReplacementBorrowsAndCommitsStartupOwnershipWithoutReacquire(t *
 		return lease, nil
 	}}
 	newRuntime := func() *Runtime {
-		rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{}, Stores: Stores{StartupOwnership: ownership}, Options: RuntimeOptions{
+		rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{}, StartupOwnership: ownership, Options: RuntimeOptions{
 			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{}, DisablePersistentStartupRecovery: true,
 		}})
 
@@ -349,7 +349,7 @@ func TestRuntimeReplacementStartupRollbackPreservesPredecessorOwnership(t *testi
 	lease := &fakeRuntimeStartupOwnershipLease{}
 	ownership := fakeRuntimeStartupOwnershipStore{acquire: func(context.Context, string) (runtimestartupownership.Lease, error) { return lease, nil }}
 	newRuntime := func() *Runtime {
-		rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{}, Stores: Stores{StartupOwnership: ownership}, Options: RuntimeOptions{
+		rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{}, StartupOwnership: ownership, Options: RuntimeOptions{
 			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{}, DisablePersistentStartupRecovery: true,
 		}})
 
@@ -395,7 +395,7 @@ func TestRuntimeReplacementPostCommitRollbackRestoresPredecessorOwnership(t *tes
 	lease := &fakeRuntimeStartupOwnershipLease{}
 	ownership := fakeRuntimeStartupOwnershipStore{acquire: func(context.Context, string) (runtimestartupownership.Lease, error) { return lease, nil }}
 	newRuntime := func() *Runtime {
-		rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{}, Stores: Stores{StartupOwnership: ownership}, Options: RuntimeOptions{
+		rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{}, StartupOwnership: ownership, Options: RuntimeOptions{
 			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{}, DisablePersistentStartupRecovery: true,
 		}})
 

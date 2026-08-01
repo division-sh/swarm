@@ -21,7 +21,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func (s *WorkflowInstanceStore) loadSQLite(ctx context.Context, instanceID string) (WorkflowInstance, bool, error) {
+func (s *workflowInstanceStore) loadSQLite(ctx context.Context, instanceID string) (WorkflowInstance, bool, error) {
 	keys := workflowInstanceLookupKeys(instanceID)
 	if len(keys) == 0 {
 		return WorkflowInstance{}, false, nil
@@ -76,7 +76,7 @@ func (s *WorkflowInstanceStore) loadSQLite(ctx context.Context, instanceID strin
 	return items[0], true, nil
 }
 
-func (s *WorkflowInstanceStore) listSQLite(ctx context.Context) ([]WorkflowInstance, error) {
+func (s *workflowInstanceStore) listSQLite(ctx context.Context) ([]WorkflowInstance, error) {
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
 		return nil, err
@@ -112,7 +112,7 @@ func (s *WorkflowInstanceStore) listSQLite(ctx context.Context) ([]WorkflowInsta
 	return s.scanSQLiteWorkflowInstances(ctx, rows, runID)
 }
 
-func (s *WorkflowInstanceStore) selectActiveByFieldsSQLite(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
+func (s *workflowInstanceStore) selectActiveByFieldsSQLite(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
 		return nil, err
@@ -175,7 +175,7 @@ func (s *WorkflowInstanceStore) selectActiveByFieldsSQLite(ctx context.Context, 
 	return out, nil
 }
 
-func (s *WorkflowInstanceStore) upsertSQLite(ctx context.Context, instance WorkflowInstance) error {
+func (s *workflowInstanceStore) upsertSQLite(ctx context.Context, instance WorkflowInstance) error {
 	instance, identity, ok, err := normalizeWorkflowInstanceForPersistence(instance)
 	if err != nil {
 		return err
@@ -186,7 +186,7 @@ func (s *WorkflowInstanceStore) upsertSQLite(ctx context.Context, instance Workf
 	return s.writeSQLite(ctx, identity.RowID(), identity.StorageRef, instance, false)
 }
 
-func (s *WorkflowInstanceStore) createSQLite(ctx context.Context, instance WorkflowInstance) error {
+func (s *workflowInstanceStore) createSQLite(ctx context.Context, instance WorkflowInstance) error {
 	instance, identity, ok, err := normalizeWorkflowInstanceForPersistence(instance)
 	if err != nil {
 		return err
@@ -197,17 +197,17 @@ func (s *WorkflowInstanceStore) createSQLite(ctx context.Context, instance Workf
 	return s.writeSQLite(ctx, identity.RowID(), identity.StorageRef, instance, true)
 }
 
-func (s *WorkflowInstanceStore) mutateSQLite(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error {
+func (s *workflowInstanceStore) mutateSQLite(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error {
 	if fn == nil {
 		return nil
 	}
-	return s.mutateSQLiteE(ctx, instanceID, func(instance *WorkflowInstance) error {
+	return s.mutateSQLiteE(ctx, instanceID, instanceID, func(instance *WorkflowInstance) error {
 		fn(instance)
 		return nil
 	})
 }
 
-func (s *WorkflowInstanceStore) mutateSQLiteE(ctx context.Context, instanceID string, fn func(*WorkflowInstance) error) error {
+func (s *workflowInstanceStore) mutateSQLiteE(ctx context.Context, instanceID, requestedKey string, fn func(*WorkflowInstance) error) error {
 	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		if _, err := s.requireActiveWorkflowRun(txctx, tx); err != nil {
 			return err
@@ -217,16 +217,16 @@ func (s *WorkflowInstanceStore) mutateSQLiteE(ctx context.Context, instanceID st
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("workflow instance %s does not exist", strings.TrimSpace(instanceID))
+			return &WorkflowInstanceLookupMiss{RequestedKey: requestedKey}
 		}
 		if err := fn(&instance); err != nil {
 			return err
 		}
-		return s.Upsert(txctx, instance)
+		return s.upsert(txctx, instance)
 	})
 }
 
-func (s *WorkflowInstanceStore) markTerminatedSQLiteTx(ctx context.Context, tx *sql.Tx, storageRef string, terminatedAt time.Time) error {
+func (s *workflowInstanceStore) markTerminatedSQLiteTx(ctx context.Context, tx *sql.Tx, storageRef string, terminatedAt time.Time) error {
 	storageRef = strings.TrimSpace(storageRef)
 	if storageRef == "" {
 		return fmt.Errorf("workflow instance storage_ref is required")
@@ -252,7 +252,7 @@ func (s *WorkflowInstanceStore) markTerminatedSQLiteTx(ctx context.Context, tx *
 	return nil
 }
 
-func (s *WorkflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageRef string, instance WorkflowInstance, createOnly bool) error {
+func (s *workflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageRef string, instance WorkflowInstance, createOnly bool) error {
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
 		return err
@@ -427,7 +427,7 @@ func admitStandingGenerationRebindSQLite(ctx context.Context, tx *sql.Tx, runID,
 	return nil
 }
 
-func (s *WorkflowInstanceStore) scanSQLiteWorkflowInstances(ctx context.Context, rows *sql.Rows, runID string) ([]WorkflowInstance, error) {
+func (s *workflowInstanceStore) scanSQLiteWorkflowInstances(ctx context.Context, rows *sql.Rows, runID string) ([]WorkflowInstance, error) {
 	out := make([]WorkflowInstance, 0, 32)
 	for rows.Next() {
 		var (
@@ -542,7 +542,7 @@ func workflowInstanceSQLiteCreateTargetExists(ctx context.Context, tx *sql.Tx, r
 	return exists, nil
 }
 
-func (s *WorkflowInstanceStore) loadTrackedEntityStateProjectionSQLite(ctx context.Context, tx *sql.Tx, runID, entityID string) (runtimemutationlog.EntityStateProjection, error) {
+func (s *workflowInstanceStore) loadTrackedEntityStateProjectionSQLite(ctx context.Context, tx *sql.Tx, runID, entityID string) (runtimemutationlog.EntityStateProjection, error) {
 	if tx == nil || strings.TrimSpace(entityID) == "" {
 		return runtimemutationlog.EntityStateProjection{}, nil
 	}
@@ -712,7 +712,7 @@ func insertSQLiteEntityMutationRecord(ctx context.Context, tx *sql.Tx, runID str
 	return runtimeauthoractivity.Record(ctx, draft)
 }
 
-func (s *WorkflowInstanceStore) queryEntityStateCountSQLite(ctx context.Context, runID string, source semanticview.Source, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {
+func (s *workflowInstanceStore) queryEntityStateCountSQLite(ctx context.Context, runID string, source semanticview.Source, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {
 	runID, err := runtimecurrentstate.ValidateRunID(runID)
 	if err != nil {
 		return 0, err

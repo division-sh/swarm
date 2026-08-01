@@ -483,6 +483,7 @@ func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T
 type forkChatCompletionTestStore interface {
 	runtimeeffects.Store
 	runtimeeffects.CompletionStore
+	runtimeeffects.CompletionHeartbeatStore
 }
 
 func settleForkChatCompletionForTest(t *testing.T, ctx context.Context, s forkChatCompletionTestStore, prepared ConversationForkChatPrepared, ordinal int, now time.Time) {
@@ -497,7 +498,7 @@ func settleForkChatCompletionForTest(t *testing.T, ctx context.Context, s forkCh
 		},
 		Target: runtimeeffects.UsageTarget{Kind: runtimeeffects.UsageTargetConversationForkCompletion, ID: prepared.ForkTurnID, Ordinal: ordinal},
 	}
-	completionCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), runtimeeffects.NewController(s))
+	completionCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), newCompletionControllerForTest(s))
 	completionCtx = runtimeeffects.WithLogicalOperationIdentity(completionCtx, fmt.Sprintf("forkchat-test:%s:%d", prepared.RequestOccurrenceID, ordinal))
 	handle, err := runtimeeffects.BeginCompletion(completionCtx, "anthropic_api", []byte(prepared.RequestHash), nil)
 	if err != nil {

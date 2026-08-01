@@ -571,15 +571,18 @@ func rejectSQLiteStandingRunStopTx(ctx context.Context, tx *sql.Tx, runID string
 }
 
 func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req APIIdempotencyRequest, execute func(context.Context) (APIIdempotencyCompletion, error)) (APIIdempotencyCompletion, bool, error) {
+	if execute == nil {
+		return APIIdempotencyCompletion{}, false, fmt.Errorf("api idempotency executor is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if strings.TrimSpace(req.IdempotencyKey) == "" {
 		completion, err := execute(ctx)
 		return completion, false, err
 	}
 	if s == nil || s.DB == nil {
 		return APIIdempotencyCompletion{}, false, fmt.Errorf("sqlite runtime store is required")
-	}
-	if execute == nil {
-		return APIIdempotencyCompletion{}, false, fmt.Errorf("api idempotency executor is required")
 	}
 	req.Method = strings.TrimSpace(req.Method)
 	req.ActorTokenID = strings.TrimSpace(req.ActorTokenID)
@@ -596,33 +599,7 @@ func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req APIIdem
 		req.TTL = 24 * time.Hour
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		if err := purgeExpiredSQLiteAPIIdempotency(ctx, tx, req.Now); err != nil {
-			return APIIdempotencyCompletion{}, false, err
-		}
-		existing, found, err := sqliteLoadAPIIdempotency(ctx, tx, req)
-		if err != nil {
-			return APIIdempotencyCompletion{}, false, err
-		}
-		if found {
-			if existing.RequestHash != req.RequestHash {
-				return APIIdempotencyCompletion{}, false, &APIIdempotencyConflictError{OriginalRequestHash: existing.RequestHash, ConflictingRequestHash: req.RequestHash, Method: req.Method, ResourceID: existing.ResourceID}
-			}
-			return APIIdempotencyCompletion{ResourceID: existing.ResourceID, Response: append(json.RawMessage(nil), existing.Response...)}, true, nil
-		}
-		completion, err := execute(ctx)
-		if err != nil {
-			return APIIdempotencyCompletion{}, false, err
-		}
-		if len(completion.Response) == 0 {
-			return APIIdempotencyCompletion{}, false, fmt.Errorf("api idempotency response is required")
-		}
-		if strings.TrimSpace(completion.ResourceID) == "" {
-			completion.ResourceID = req.ResourceID
-		}
-		if err := sqliteStoreAPIIdempotency(ctx, tx, req, completion); err != nil {
-			return APIIdempotencyCompletion{}, false, err
-		}
-		return completion, false, nil
+		return withSQLiteAPIIdempotencyTx(ctx, tx, req, execute)
 	}
 
 	// SQLite is local-dev only here: serialize idempotent callbacks in-process
@@ -671,6 +648,36 @@ func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req APIIdem
 	if err := s.runRuntimeMutation(ctx, "sqlite api idempotency completion", func(txctx context.Context, tx *sql.Tx) error {
 		return sqliteStoreAPIIdempotency(txctx, tx, req, completion)
 	}); err != nil {
+		return APIIdempotencyCompletion{}, false, err
+	}
+	return completion, false, nil
+}
+
+func withSQLiteAPIIdempotencyTx(ctx context.Context, tx *sql.Tx, req APIIdempotencyRequest, execute func(context.Context) (APIIdempotencyCompletion, error)) (APIIdempotencyCompletion, bool, error) {
+	if err := purgeExpiredSQLiteAPIIdempotency(ctx, tx, req.Now); err != nil {
+		return APIIdempotencyCompletion{}, false, err
+	}
+	existing, found, err := sqliteLoadAPIIdempotency(ctx, tx, req)
+	if err != nil {
+		return APIIdempotencyCompletion{}, false, err
+	}
+	if found {
+		if existing.RequestHash != req.RequestHash {
+			return APIIdempotencyCompletion{}, false, &APIIdempotencyConflictError{OriginalRequestHash: existing.RequestHash, ConflictingRequestHash: req.RequestHash, Method: req.Method, ResourceID: existing.ResourceID}
+		}
+		return APIIdempotencyCompletion{ResourceID: existing.ResourceID, Response: append(json.RawMessage(nil), existing.Response...)}, true, nil
+	}
+	completion, err := execute(ctx)
+	if err != nil {
+		return APIIdempotencyCompletion{}, false, err
+	}
+	if len(completion.Response) == 0 {
+		return APIIdempotencyCompletion{}, false, fmt.Errorf("api idempotency response is required")
+	}
+	if strings.TrimSpace(completion.ResourceID) == "" {
+		completion.ResourceID = req.ResourceID
+	}
+	if err := sqliteStoreAPIIdempotency(ctx, tx, req, completion); err != nil {
 		return APIIdempotencyCompletion{}, false, err
 	}
 	return completion, false, nil

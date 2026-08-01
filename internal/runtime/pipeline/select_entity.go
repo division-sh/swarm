@@ -37,7 +37,7 @@ func (pc *PipelineCoordinator) selectHandlerEntityForFlow(ctx context.Context, f
 	if handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty() {
 		return selectedHandlerEntity{}, fmt.Errorf("select_entity_invalid: node %s flow %s declares both select_entity and select_or_create_entity", nodeID, flowID)
 	}
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return selectedHandlerEntity{}, fmt.Errorf("select_entity_unavailable: workflow instance store is required for node %s flow %s", nodeID, flowID)
 	}
 	expected, err := selectEntityExpectedValues(handler.SelectEntity, evt)
@@ -70,7 +70,7 @@ func (pc *PipelineCoordinator) selectOrCreateHandlerEntityForFlow(ctx context.Co
 	if handler.SelectEntity != nil && !handler.SelectEntity.Empty() {
 		return selectedHandlerEntity{}, fmt.Errorf("select_or_create_entity_invalid: node %s flow %s declares both select_entity and select_or_create_entity", nodeID, flowID)
 	}
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return selectedHandlerEntity{}, fmt.Errorf("select_or_create_entity_unavailable: workflow instance store is required for node %s flow %s", nodeID, flowID)
 	}
 	expected, err := selectOrCreateEntityExpectedValues(handler.SelectOrCreateEntity, evt)

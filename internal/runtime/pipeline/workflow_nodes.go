@@ -939,13 +939,14 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryTargetFlowInstanceMatches(sou
 	return true
 }
 
-type flowInstanceRouteOwner interface {
+type FlowInstanceRouteOwner interface {
 	HasFlowInstanceRoute(runtimeflowidentity.Route) bool
+	RemoveFlowInstanceRouteContext(context.Context, runtimeflowidentity.Route) error
 }
 
 func (pc *PipelineCoordinator) hasMaterializedFlowInstanceRoute(source semanticview.Source, flowID, instancePath string) bool {
-	owner, ok := pc.bus.(flowInstanceRouteOwner)
-	if !ok || owner == nil {
+	owner := pc.flowRoutes
+	if owner == nil {
 		return false
 	}
 	identity := runtimeflowidentity.StoredRoute(

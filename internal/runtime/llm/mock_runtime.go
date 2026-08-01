@@ -27,6 +27,7 @@ import (
 type MockRuntime struct {
 	cfg                  *config.Config
 	sessions             sessions.Registry
+	liveSessions         LiveSessionAcquirer
 	conversations        ConversationPersistence
 	lockOwner            string
 	events               EventPublisher
@@ -34,7 +35,7 @@ type MockRuntime struct {
 }
 
 func NewMockRuntime(cfg *config.Config, sessionRegistry sessions.Registry, lockOwner string, conversations ConversationPersistence, publisher EventPublisher, controller *runtimeeffects.Controller) *MockRuntime {
-	return &MockRuntime{cfg: cfg, sessions: sessionRegistry, conversations: conversations, lockOwner: lockOwner, events: publisher, completionController: controller}
+	return &MockRuntime{cfg: cfg, sessions: sessionRegistry, liveSessions: newTransientLiveSessionAcquirer(sessionRegistry), conversations: conversations, lockOwner: lockOwner, events: publisher, completionController: controller}
 }
 
 func (r *MockRuntime) ProviderContract() ProviderContract { return MockProviderContract() }
@@ -83,7 +84,7 @@ func (r *MockRuntime) StartSession(ctx context.Context, agentID, systemPrompt st
 	if err := ValidateProviderToolDefinitions(tools); err != nil {
 		return nil, err
 	}
-	lease, hydrated, resolved, err := startMemory(ctx, r.sessions, r.conversations, agentID, r.lockOwner)
+	lease, hydrated, resolved, err := startMemory(ctx, r.liveSessions, agentID, r.lockOwner)
 	if err != nil {
 		return nil, err
 	}

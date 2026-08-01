@@ -266,9 +266,6 @@ func (semanticOnlyWorkflowRuntime) WorkflowDefinition() *runtimepipeline.Workflo
 	return nil
 }
 func (semanticOnlyWorkflowRuntime) WorkflowNodes() []runtimepipeline.WorkflowNode { return nil }
-func (semanticOnlyWorkflowRuntime) WorkflowInstanceStore() runtimepipeline.WorkflowInstancePersistence {
-	return nil
-}
 func (semanticOnlyWorkflowRuntime) TransitionEvaluator() runtimepipeline.TransitionEvaluator {
 	return nil
 }
@@ -557,7 +554,7 @@ func TestNewRuntime_SchedulerMarksSchedulesFiredThroughCanonicalTerminalHelper(t
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 		LLM:     config.LLMConfig{Backend: "anthropic"},
-	}, Stores: Stores{ScheduleStore: store}, Options: RuntimeOptions{
+	}, ScheduleStore: store, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)},
 		LLMRuntime:     noopLLMRuntime{},
@@ -635,7 +632,7 @@ func TestRuntime_StartRestoresExactSchedulesDistinctByFlowInstance(t *testing.T)
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: &config.Config{
 		Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 		LLM:     config.LLMConfig{Backend: "anthropic"},
-	}, Stores: Stores{ScheduleStore: store}, Options: RuntimeOptions{
+	}, ScheduleStore: store, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)},
 		LLMRuntime:     noopLLMRuntime{},

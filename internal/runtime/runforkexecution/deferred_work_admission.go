@@ -9,8 +9,8 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 const selectedContractDeferredWorkOwnerUnavailable = "selected_contract_deferred_work_owner_unavailable"
@@ -30,7 +30,7 @@ type selectedContractDeferredWorkAdmission struct {
 	workflowVersion string
 }
 
-func admitSelectedContractDeferredWork(plan store.RunForkPlan, source semanticview.Source) (selectedContractDeferredWorkAdmission, error) {
+func admitSelectedContractDeferredWork(plan runfork.RunForkPlan, source semanticview.Source) (selectedContractDeferredWorkAdmission, error) {
 	sourceRunID := strings.TrimSpace(plan.SourceRunID)
 	forkEventID := strings.TrimSpace(plan.ForkPoint.EventID)
 	if !validSelectedContractDeferredWorkCoordinates(sourceRunID, forkEventID) {
@@ -49,7 +49,7 @@ func admitSelectedContractDeferredWork(plan store.RunForkPlan, source semanticvi
 	if len(capabilities) > 0 {
 		detailCode := selectedContractDeferredWorkOwnerUnavailable
 		if revisionTimerHistory {
-			detailCode = store.RunForkBlockerTimerHistoryUnproven
+			detailCode = runfork.RunForkBlockerTimerHistoryUnproven
 		}
 		return selectedContractDeferredWorkAdmission{}, runtimefailures.New(
 			runtimefailures.ClassDependencyUnavailable,
@@ -60,7 +60,7 @@ func admitSelectedContractDeferredWork(plan store.RunForkPlan, source semanticvi
 		)
 	}
 	return selectedContractDeferredWorkAdmission{
-		owner:           store.RunForkSelectedContractDeferredWorkAdmissionOwner,
+		owner:           runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
 		sourceRunID:     sourceRunID,
 		forkEventID:     forkEventID,
 		workflowName:    workflowName,
@@ -69,8 +69,8 @@ func admitSelectedContractDeferredWork(plan store.RunForkPlan, source semanticvi
 }
 
 func (a selectedContractDeferredWorkAdmission) validate(sourceRunID, forkEventID string, source semanticview.Source) error {
-	if a.owner != store.RunForkSelectedContractDeferredWorkAdmissionOwner {
-		return fmt.Errorf("selected-contract execution requires %s", store.RunForkSelectedContractDeferredWorkAdmissionOwner)
+	if a.owner != runfork.RunForkSelectedContractDeferredWorkAdmissionOwner {
+		return fmt.Errorf("selected-contract execution requires %s", runfork.RunForkSelectedContractDeferredWorkAdmissionOwner)
 	}
 	sourceRunID = strings.TrimSpace(sourceRunID)
 	forkEventID = strings.TrimSpace(forkEventID)
@@ -83,17 +83,17 @@ func (a selectedContractDeferredWorkAdmission) validate(sourceRunID, forkEventID
 	if a.workflowName != strings.TrimSpace(source.WorkflowName()) || a.workflowVersion != strings.TrimSpace(source.WorkflowVersion()) {
 		return fmt.Errorf("selected-contract deferred-work admission workflow identity does not match selected source")
 	}
-	if capabilities, _ := selectedContractDeferredWorkCapabilities(store.RunForkPlan{}, source); len(capabilities) > 0 {
+	if capabilities, _ := selectedContractDeferredWorkCapabilities(runfork.RunForkPlan{}, source); len(capabilities) > 0 {
 		return fmt.Errorf("selected-contract deferred-work admission source now declares unsupported capabilities: %s", strings.Join(capabilities, ","))
 	}
 	return nil
 }
 
-func selectedContractDeferredWorkCapabilities(plan store.RunForkPlan, source semanticview.Source) ([]string, bool) {
+func selectedContractDeferredWorkCapabilities(plan runfork.RunForkPlan, source semanticview.Source) ([]string, bool) {
 	capabilities := make([]string, 0, 4)
 	revisionTimerHistory := false
 	for _, blocker := range plan.UnsupportedBlockers {
-		if strings.TrimSpace(blocker.Code) == store.RunForkBlockerTimerHistoryUnproven {
+		if strings.TrimSpace(blocker.Code) == runfork.RunForkBlockerTimerHistoryUnproven {
 			revisionTimerHistory = true
 			capabilities = append(capabilities, selectedContractDeferredWorkRevisionTimerHistory)
 			break

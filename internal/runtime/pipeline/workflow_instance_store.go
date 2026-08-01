@@ -41,7 +41,7 @@ type SchedulePersistence interface {
 	ReleaseScheduleClaims(ctx context.Context) error
 }
 
-func (s *WorkflowInstanceStore) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
+func (s *workflowInstanceStore) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
 	if s == nil || s.db == nil {
 		return runtimetimerobligation.Snapshot{}, fmt.Errorf("timer obligation reader requires workflow store")
 	}
@@ -72,6 +72,16 @@ type WorkflowInstance struct {
 	Metadata          map[string]any
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+}
+
+// WorkflowInstanceLookupMiss reports the exact key that failed to resolve.
+// It is shared by every backend and is returned before any mutation callback runs.
+type WorkflowInstanceLookupMiss struct {
+	RequestedKey string
+}
+
+func (e *WorkflowInstanceLookupMiss) Error() string {
+	return fmt.Sprintf("workflow instance lookup missed requested key %q", e.RequestedKey)
 }
 
 type WorkflowInitialMaterializationResult uint8
@@ -116,14 +126,14 @@ type workflowInstancePersistedControl struct {
 	TransitionHistory  []WorkflowTransitionRecord `json:"transition_history"`
 }
 
-type WorkflowInstanceStore struct {
+type workflowInstanceStore struct {
 	db               *sql.DB
 	dialect          workflowStoreDialect
-	runtimeMutation  RuntimeMutationRunner
+	runtimeMutation  runtimeMutationRunner
 	deliveryStore    runtimedelivery.Store
 	pipelineStore    runtimepipelineobligation.Store
 	decisionCards    decisioncard.Store
-	gateEvents       workflowGateMutationPublisher
+	gateEvents       WorkflowGateMutationPublisher
 	lifecycleOwner   workflowInstanceLifecycleOwner
 	runLifecycle     runtimerunlifecycle.OperationOwner
 	deliverySignalMu sync.RWMutex
@@ -131,7 +141,7 @@ type WorkflowInstanceStore struct {
 }
 
 type DeliveryContinuationSignalRegistration struct {
-	owner     *WorkflowInstanceStore
+	owner     *workflowInstanceStore
 	authority runtimedelivery.ExecutionAuthority
 	released  bool
 }
@@ -165,7 +175,7 @@ func standingGenerationRebindAllowed(ctx context.Context) bool {
 	return allowed
 }
 
-type RuntimeMutationRunner interface {
+type runtimeMutationRunner interface {
 	RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error
 }
 
@@ -190,7 +200,32 @@ const (
 	workflowStoreDialectSQLite   workflowStoreDialect = "sqlite"
 )
 
-var errSQLiteWorkflowInstanceStoreRuntimeMutationRunnerRequired = errors.New("sqlite workflow instance store requires runtime mutation runner")
+// WorkflowPersistence is an opaque selected-backend construction value. It
+// carries storage mechanics into pipeline construction without exposing the
+// concrete workflow store to runtime consumers.
+type WorkflowPersistence struct {
+	store *workflowInstanceStore
+}
+
+func NewPostgresWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) WorkflowPersistence {
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner}}
+}
+
+func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) WorkflowPersistence {
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner}}
+}
+
+func (p WorkflowPersistence) empty() bool {
+	return p.store == nil || p.store.db == nil
+}
+
+// Valid reports whether the selected backend supplied workflow persistence.
+// It does not expose the concrete persistence implementation.
+func (p WorkflowPersistence) Valid() bool {
+	return !p.empty()
+}
+
+var errSQLiteWorkflowMutationOwnerRequired = errors.New("sqlite workflow persistence requires its selected mutation owner")
 
 type workflowCreateEntityInitialValuesContextKey struct{}
 
@@ -198,40 +233,9 @@ type workflowCreateEntityInitialValues struct {
 	Fields map[string]any
 }
 
-func NewWorkflowInstanceStore(db *sql.DB) *WorkflowInstanceStore {
-	return &WorkflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres}
-}
-
-func NewSQLiteWorkflowInstanceStore(db *sql.DB) *WorkflowInstanceStore {
-	return &WorkflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite}
-}
-
-func NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, runner RuntimeMutationRunner) *WorkflowInstanceStore {
-	store := &WorkflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner}
-	if owner, ok := runner.(runtimerunlifecycle.OperationOwner); ok {
-		store.runLifecycle = owner
-	}
-	return store
-}
-
-func (s *WorkflowInstanceStore) ConfigureRuntimeMutationRunner(runner RuntimeMutationRunner) {
-	if s != nil {
-		s.runtimeMutation = runner
-		if owner, ok := runner.(runtimerunlifecycle.OperationOwner); ok {
-			s.runLifecycle = owner
-		}
-	}
-}
-
-func (s *WorkflowInstanceStore) ConfigureDeliveryLifecycleStore(store runtimedelivery.Store) {
-	if s != nil {
-		s.deliveryStore = store
-	}
-}
-
 // RegisterDeliveryContinuationSignal installs the exact runtime-generation
 // notification used after standing-run terminalization commits.
-func (s *WorkflowInstanceStore) RegisterDeliveryContinuationSignal(authority runtimedelivery.ExecutionAuthority, signal func()) (*DeliveryContinuationSignalRegistration, error) {
+func (s *workflowInstanceStore) RegisterDeliveryContinuationSignal(authority runtimedelivery.ExecutionAuthority, signal func()) (*DeliveryContinuationSignalRegistration, error) {
 	if s == nil || signal == nil {
 		return nil, errors.New("delivery continuation signal owner is required")
 	}
@@ -250,7 +254,7 @@ func (s *WorkflowInstanceStore) RegisterDeliveryContinuationSignal(authority run
 	return &DeliveryContinuationSignalRegistration{owner: s, authority: authority}, nil
 }
 
-func (s *WorkflowInstanceStore) deliveryContinuationSignalOwners() []runtimedelivery.ExecutionAuthority {
+func (s *workflowInstanceStore) deliveryContinuationSignalOwners() []runtimedelivery.ExecutionAuthority {
 	if s == nil {
 		return nil
 	}
@@ -263,7 +267,7 @@ func (s *WorkflowInstanceStore) deliveryContinuationSignalOwners() []runtimedeli
 	return owners
 }
 
-func (s *WorkflowInstanceStore) signalDeliveryContinuations() {
+func (s *workflowInstanceStore) signalDeliveryContinuations() {
 	if s == nil {
 		return
 	}
@@ -278,7 +282,7 @@ func (s *WorkflowInstanceStore) signalDeliveryContinuations() {
 	}
 }
 
-func (s *WorkflowInstanceStore) queueDeliveryContinuationSignal(ctx context.Context) error {
+func (s *workflowInstanceStore) queueDeliveryContinuationSignal(ctx context.Context) error {
 	if !queuePipelineTransactionPostCommitAction(ctx, func(context.Context) {
 		s.signalDeliveryContinuations()
 	}) {
@@ -287,41 +291,7 @@ func (s *WorkflowInstanceStore) queueDeliveryContinuationSignal(ctx context.Cont
 	return nil
 }
 
-func (s *WorkflowInstanceStore) ConfigurePipelineObligationStore(store runtimepipelineobligation.Store) {
-	if s != nil {
-		s.pipelineStore = store
-	}
-}
-
-func (s *WorkflowInstanceStore) DeliveryLifecycleStore() runtimedelivery.Store {
-	if s == nil {
-		return nil
-	}
-	return s.deliveryStore
-}
-
-func (s *WorkflowInstanceStore) ConfigureDecisionCardLifecycle(cards decisioncard.Store, publishers ...workflowGateMutationPublisher) {
-	if s != nil {
-		s.decisionCards = cards
-		if len(publishers) > 0 {
-			s.gateEvents = publishers[0]
-		}
-	}
-}
-
-func (s *WorkflowInstanceStore) ConfigureWorkflowInstanceLifecycle(owner workflowInstanceLifecycleOwner) {
-	if s != nil {
-		s.lifecycleOwner = owner
-	}
-}
-
-func (s *WorkflowInstanceStore) ConfigureRunLifecycle(owner runtimerunlifecycle.OperationOwner) {
-	if s != nil {
-		s.runLifecycle = owner
-	}
-}
-
-func (s *WorkflowInstanceStore) requestRunCompletionCandidate(ctx context.Context, runID string) error {
+func (s *workflowInstanceStore) requestRunCompletionCandidate(ctx context.Context, runID string) error {
 	if s == nil || s.runLifecycle == nil {
 		return nil
 	}
@@ -350,11 +320,11 @@ func workflowCreateEntityInitialValuesFromContext(ctx context.Context) (workflow
 	return workflowCreateEntityInitialValues{Fields: cloneStringAnyMap(info.Fields)}, true
 }
 
-func (s *WorkflowInstanceStore) Enabled() bool {
+func (s *workflowInstanceStore) enabled() bool {
 	return s != nil && s.db != nil
 }
 
-func (s *WorkflowInstanceStore) Load(ctx context.Context, instanceID string) (WorkflowInstance, bool, error) {
+func (s *workflowInstanceStore) Load(ctx context.Context, instanceID string) (WorkflowInstance, bool, error) {
 	instanceID = strings.TrimSpace(instanceID)
 	if instanceID == "" || s == nil || s.db == nil {
 		return WorkflowInstance{}, false, nil
@@ -369,7 +339,7 @@ func (s *WorkflowInstanceStore) Load(ctx context.Context, instanceID string) (Wo
 	return s.loadSpec(ctx, keys, false)
 }
 
-func (s *WorkflowInstanceStore) List(ctx context.Context) ([]WorkflowInstance, error) {
+func (s *workflowInstanceStore) list(ctx context.Context) ([]WorkflowInstance, error) {
 	if s == nil || s.db == nil {
 		return nil, nil
 	}
@@ -379,11 +349,11 @@ func (s *WorkflowInstanceStore) List(ctx context.Context) ([]WorkflowInstance, e
 	return s.listSpec(ctx)
 }
 
-func (s *WorkflowInstanceStore) selectActiveByFields(ctx context.Context, scopeKey string, selectors []workflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
-	return s.SelectActiveByFields(ctx, scopeKey, selectors, excludedStates)
+func (s *workflowInstanceStore) selectActiveByFields(ctx context.Context, scopeKey string, selectors []workflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
+	return s.selectActiveByFieldsExported(ctx, scopeKey, selectors, excludedStates)
 }
 
-func (s *WorkflowInstanceStore) SelectActiveByFields(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
+func (s *workflowInstanceStore) selectActiveByFieldsExported(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
 	if s == nil || s.db == nil {
 		return nil, nil
 	}
@@ -393,7 +363,7 @@ func (s *WorkflowInstanceStore) SelectActiveByFields(ctx context.Context, scopeK
 	return s.selectActiveByFieldsSpec(ctx, scopeKey, selectors, excludedStates)
 }
 
-func (s *WorkflowInstanceStore) requireActiveWorkflowRun(ctx context.Context, tx *sql.Tx) (string, error) {
+func (s *workflowInstanceStore) requireActiveWorkflowRun(ctx context.Context, tx *sql.Tx) (string, error) {
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
 		return "", err
@@ -404,7 +374,7 @@ func (s *WorkflowInstanceStore) requireActiveWorkflowRun(ctx context.Context, tx
 	return runID, nil
 }
 
-func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowInstance) error {
+func (s *workflowInstanceStore) upsert(ctx context.Context, instance WorkflowInstance) error {
 	if s == nil || s.db == nil {
 		return nil
 	}
@@ -423,7 +393,7 @@ func (s *WorkflowInstanceStore) Upsert(ctx context.Context, instance WorkflowIns
 	})
 }
 
-func (s *WorkflowInstanceStore) Create(ctx context.Context, instance WorkflowInstance) error {
+func (s *workflowInstanceStore) create(ctx context.Context, instance WorkflowInstance) error {
 	if s == nil || s.db == nil {
 		return nil
 	}
@@ -442,7 +412,7 @@ func (s *WorkflowInstanceStore) Create(ctx context.Context, instance WorkflowIns
 	})
 }
 
-func (s *WorkflowInstanceStore) MaterializeInitialEntry(ctx context.Context, instance WorkflowInstance, occurredAt time.Time) (WorkflowInitialMaterializationResult, error) {
+func (s *workflowInstanceStore) MaterializeInitialEntry(ctx context.Context, instance WorkflowInstance, occurredAt time.Time) (WorkflowInitialMaterializationResult, error) {
 	if s == nil || s.db == nil {
 		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow instance lifecycle store is required")
 	}
@@ -487,7 +457,7 @@ func (s *WorkflowInstanceStore) MaterializeInitialEntry(ctx context.Context, ins
 			}
 			return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-lifecycle", "materialize_initial_entry", map[string]any{"flow_instance": identity.StorageRef})
 		}
-		if err := s.Create(txctx, normalized); err != nil {
+		if err := s.create(txctx, normalized); err != nil {
 			if !workflowInstanceAlreadyExists(err) {
 				return err
 			}
@@ -524,7 +494,7 @@ func (s *WorkflowInstanceStore) MaterializeInitialEntry(ctx context.Context, ins
 	return result, nil
 }
 
-func (s *WorkflowInstanceStore) workflowInitialMaterializationEqual(
+func (s *workflowInstanceStore) workflowInitialMaterializationEqual(
 	ctx context.Context,
 	instancePath string,
 	initialProjection workflowInitialMaterializationProjection,
@@ -550,7 +520,7 @@ func workflowInstanceAlreadyExists(err error) bool {
 
 // ArmInitialEntryTimers projects the durable initial-entry timer facts only
 // after the caller has installed the runtime route that can receive them.
-func (s *WorkflowInstanceStore) ArmInitialEntryTimers(ctx context.Context, instanceID string) error {
+func (s *workflowInstanceStore) ArmInitialEntryTimers(ctx context.Context, instanceID string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("workflow instance lifecycle store is required")
 	}
@@ -566,7 +536,7 @@ func (s *WorkflowInstanceStore) ArmInitialEntryTimers(ctx context.Context, insta
 
 // ReconcileInitialEntryTimers mutates the durable initial-entry declaration
 // set and projects exactly the committed successor set.
-func (s *WorkflowInstanceStore) ReconcileInitialEntryTimers(ctx context.Context, instanceID string) error {
+func (s *workflowInstanceStore) ReconcileInitialEntryTimers(ctx context.Context, instanceID string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("workflow instance lifecycle store is required")
 	}
@@ -577,14 +547,14 @@ func (s *WorkflowInstanceStore) ReconcileInitialEntryTimers(ctx context.Context,
 	if instanceID == "" {
 		return fmt.Errorf("workflow initial timer reconciliation requires instance identity")
 	}
-	return s.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	return s.runPipelineMutation(ctx, func(txctx context.Context) error {
 		return s.lifecycleOwner.ReconcileInitialEntryTimers(txctx, instanceID)
 	})
 }
 
 // RetireInitialEntryTimerWakeups withdraws and joins the exact process-local
 // projections for the durable active set. It does not mutate timer status.
-func (s *WorkflowInstanceStore) RetireInitialEntryTimerWakeups(ctx context.Context, instanceID string) error {
+func (s *workflowInstanceStore) RetireInitialEntryTimerWakeups(ctx context.Context, instanceID string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("workflow instance lifecycle store is required")
 	}
@@ -657,23 +627,27 @@ func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (Workflo
 	return instance, identity, true, nil
 }
 
-func (s *WorkflowInstanceStore) Mutate(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error {
+func (s *workflowInstanceStore) mutate(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error {
 	if fn == nil {
 		return nil
 	}
-	return s.MutateE(ctx, instanceID, func(instance *WorkflowInstance) error {
+	return s.mutateE(ctx, instanceID, func(instance *WorkflowInstance) error {
 		fn(instance)
 		return nil
 	})
 }
 
-func (s *WorkflowInstanceStore) MutateE(ctx context.Context, instanceID string, fn func(*WorkflowInstance) error) error {
+func (s *workflowInstanceStore) mutateE(ctx context.Context, instanceID string, fn func(*WorkflowInstance) error) error {
+	requestedKey := instanceID
 	instanceID = strings.TrimSpace(instanceID)
-	if instanceID == "" || s == nil || s.db == nil || fn == nil {
+	if instanceID == "" {
+		return &WorkflowInstanceLookupMiss{RequestedKey: requestedKey}
+	}
+	if s == nil || s.db == nil || fn == nil {
 		return nil
 	}
 	if s.isSQLite() {
-		return s.mutateSQLiteE(ctx, instanceID, fn)
+		return s.mutateSQLiteE(ctx, instanceID, requestedKey, fn)
 	}
 	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		if _, err := s.requireActiveWorkflowRun(txctx, tx); err != nil {
@@ -687,16 +661,16 @@ func (s *WorkflowInstanceStore) MutateE(ctx context.Context, instanceID string, 
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("workflow instance %s does not exist", instanceID)
+			return &WorkflowInstanceLookupMiss{RequestedKey: requestedKey}
 		}
 		if err := fn(&instance); err != nil {
 			return err
 		}
-		return s.Upsert(txctx, instance)
+		return s.upsert(txctx, instance)
 	})
 }
 
-func (s *WorkflowInstanceStore) MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error {
+func (s *workflowInstanceStore) MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error {
 	if s == nil || s.db == nil {
 		return nil
 	}
@@ -705,7 +679,7 @@ func (s *WorkflowInstanceStore) MarkTerminated(ctx context.Context, storageRef s
 			if _, err := s.requireActiveWorkflowRun(txctx, tx); err != nil {
 				return err
 			}
-			if err := s.MutateE(txctx, storageRef, func(instance *WorkflowInstance) error {
+			if err := s.mutateE(txctx, storageRef, func(instance *WorkflowInstance) error {
 				return s.supersedeWorkflowInstanceGates(txctx, instance, "flow_terminated", terminatedAt)
 			}); err != nil {
 				return err
@@ -781,15 +755,15 @@ func markWorkflowInstanceTerminatedSpecTx(ctx context.Context, tx *sql.Tx, stora
 	return nil
 }
 
-func (s *WorkflowInstanceStore) Delete(context.Context, string) error {
+func (s *workflowInstanceStore) delete(context.Context, string) error {
 	return fmt.Errorf("workflow instance deletion is unsupported: entity_state writes must stay on the mutation-logged upsert path")
 }
 
-func (s *WorkflowInstanceStore) isSQLite() bool {
+func (s *workflowInstanceStore) isSQLite() bool {
 	return s != nil && s.dialect == workflowStoreDialectSQLite
 }
 
-func (s *WorkflowInstanceStore) RunPipelineMutation(ctx context.Context, fn func(context.Context) error) error {
+func (s *workflowInstanceStore) runPipelineMutation(ctx context.Context, fn func(context.Context) error) error {
 	if fn == nil {
 		return nil
 	}
@@ -798,7 +772,7 @@ func (s *WorkflowInstanceStore) RunPipelineMutation(ctx context.Context, fn func
 	})
 }
 
-func (s *WorkflowInstanceStore) runInPipelineTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+func (s *workflowInstanceStore) runInPipelineTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
 	if fn == nil {
 		return nil
 	}
@@ -821,12 +795,12 @@ func (s *WorkflowInstanceStore) runInPipelineTransaction(ctx context.Context, fn
 		})
 	}
 	if s.isSQLite() {
-		return errSQLiteWorkflowInstanceStoreRuntimeMutationRunnerRequired
+		return errSQLiteWorkflowMutationOwnerRequired
 	}
 	return s.runInPipelineTransactionOnce(ctx, fn)
 }
 
-func (s *WorkflowInstanceStore) runInPipelineTransactionOnce(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+func (s *workflowInstanceStore) runInPipelineTransactionOnce(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
 	if s == nil || s.db == nil {
 		return fn(ctx, nil)
 	}
@@ -877,7 +851,7 @@ func (s *WorkflowInstanceStore) runInPipelineTransactionOnce(ctx context.Context
 	return nil
 }
 
-func (s *WorkflowInstanceStore) QueryEntityCount(ctx context.Context, runID string, source semanticview.Source, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {
+func (s *workflowInstanceStore) QueryEntityCount(ctx context.Context, runID string, source semanticview.Source, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, nil
 	}
@@ -887,7 +861,7 @@ func (s *WorkflowInstanceStore) QueryEntityCount(ctx context.Context, runID stri
 	return queryEntityStateCount(runID, s.db, source, contract, predicate)
 }
 
-func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, forUpdate bool) (WorkflowInstance, bool, error) {
+func (s *workflowInstanceStore) loadSpec(ctx context.Context, keys []string, forUpdate bool) (WorkflowInstance, bool, error) {
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
 		return WorkflowInstance{}, false, err
@@ -996,7 +970,7 @@ func (s *WorkflowInstanceStore) loadSpec(ctx context.Context, keys []string, for
 	return item, true, nil
 }
 
-func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstance, error) {
+func (s *workflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstance, error) {
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
 		return nil, err
@@ -1007,7 +981,7 @@ func (s *WorkflowInstanceStore) listSpec(ctx context.Context) ([]WorkflowInstanc
 	`, runID)
 }
 
-func (s *WorkflowInstanceStore) selectActiveByFieldsSpec(ctx context.Context, scopeKey string, selectors []workflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
+func (s *workflowInstanceStore) selectActiveByFieldsSpec(ctx context.Context, scopeKey string, selectors []workflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
 		return nil, err
@@ -1068,7 +1042,7 @@ func (s *WorkflowInstanceStore) selectActiveByFieldsSpec(ctx context.Context, sc
 	return s.querySpec(ctx, runID, where.String(), args...)
 }
 
-func (s *WorkflowInstanceStore) querySpec(ctx context.Context, runID, where string, args ...any) ([]WorkflowInstance, error) {
+func (s *workflowInstanceStore) querySpec(ctx context.Context, runID, where string, args ...any) ([]WorkflowInstance, error) {
 	rows, err := dbQueryContext(ctx, s.db, `
 		SELECT
 			es.entity_id::text,
@@ -1219,7 +1193,7 @@ func workflowInstanceFieldSelectorPath(field string) []string {
 	return out
 }
 
-func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRef string, instance WorkflowInstance) error {
+func (s *workflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRef string, instance WorkflowInstance) error {
 	tx, ok := sqlTxFromContext(ctx)
 	if !ok || tx == nil || !runtimeauthoractivity.InMutation(ctx, tx) {
 		return fmt.Errorf("workflow instance upsert requires the pipeline story transaction owner")
@@ -1324,7 +1298,7 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 	return s.requestRunCompletionCandidate(ctx, runID)
 }
 
-func (s *WorkflowInstanceStore) createSpec(ctx context.Context, rowID, storageRef string, instance WorkflowInstance) error {
+func (s *workflowInstanceStore) createSpec(ctx context.Context, rowID, storageRef string, instance WorkflowInstance) error {
 	tx, ok := sqlTxFromContext(ctx)
 	if !ok || tx == nil || !runtimeauthoractivity.InMutation(ctx, tx) {
 		return fmt.Errorf("workflow instance create requires the pipeline story transaction owner")

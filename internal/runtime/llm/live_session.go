@@ -8,17 +8,30 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
-func acquireLiveSessionAndConversation(ctx context.Context, registry sessions.Registry, conversations ConversationPersistence, identity agentmemory.Identity, lockOwner string) (*sessions.Lease, ConversationRecord, error) {
-	if registry == nil {
-		return nil, ConversationRecord{}, fmt.Errorf("live session registry is required")
+func acquireLiveSessionAndConversation(ctx context.Context, acquirer LiveSessionAcquirer, identity agentmemory.Identity, lockOwner string) (*sessions.Lease, ConversationRecord, error) {
+	if acquirer == nil {
+		return nil, ConversationRecord{}, fmt.Errorf("live session acquirer is required")
 	}
-	if acquirer, ok := registry.(LiveSessionAcquirer); ok {
-		return acquirer.AcquireLiveSession(ctx, identity, lockOwner)
+	return acquirer.AcquireLiveSession(ctx, identity, lockOwner)
+}
+
+type transientLiveSessionAcquirer struct {
+	registry sessions.Registry
+}
+
+func newTransientLiveSessionAcquirer(registry sessions.Registry) LiveSessionAcquirer {
+	return transientLiveSessionAcquirer{registry: registry}
+}
+
+func NewTransientLiveSessionAcquirer(registry sessions.Registry) LiveSessionAcquirer {
+	return newTransientLiveSessionAcquirer(registry)
+}
+
+func (a transientLiveSessionAcquirer) AcquireLiveSession(ctx context.Context, identity agentmemory.Identity, lockOwner string) (*sessions.Lease, ConversationRecord, error) {
+	if a.registry == nil {
+		return nil, ConversationRecord{}, fmt.Errorf("transient live session registry is required")
 	}
-	if conversations != nil {
-		return nil, ConversationRecord{}, fmt.Errorf("selected live session store must own atomic acquire and hydration")
-	}
-	lease, err := registry.Acquire(ctx, identity, lockOwner)
+	lease, err := a.registry.Acquire(ctx, identity, lockOwner)
 	if err != nil {
 		return nil, ConversationRecord{}, err
 	}

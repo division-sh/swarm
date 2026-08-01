@@ -20,6 +20,7 @@ import (
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -88,6 +89,53 @@ type EventBus struct {
 	workOwner                   worklifetime.Occurrence
 	deliveryAuthority           runtimedelivery.ExecutionAuthority
 	deliveryContinuations       DeliveryContinuationOwner
+	durable                     DurableDependencies
+}
+
+// DurableDependencies is the exact selected-store contract consumed by a
+// durable EventBus. EventStore is never inspected to discover these roles.
+type DurableDependencies struct {
+	ReplyContext          runtimereplycontext.Store
+	RunLifecycle          runtimerunlifecycle.OperationOwner
+	DeliveryLifecycle     runtimedelivery.Store
+	FlowRoutes            FlowInstanceRoutePersistence
+	FlowRouteRecords      FlowInstanceRouteRecordReader
+	FlowRouteSets         FlowInstanceRouteSetPersistence
+	FlowRouteTopology     FlowInstanceRouteTopologyPersistence
+	FlowRouteRollback     FlowInstanceRouteRollbackPersistence
+	ActiveAgents          ActiveAgentDescriptorLister
+	ActiveFlows           ActiveFlowInstanceDescriptorLister
+	DeliveryTargets       EventDeliveryTargetReader
+	DeliveryRouteSets     EventDeliveryRouteSetReader
+	TargetFailureRecorder TargetFailureDeadLetterRecorder
+	RunOrigins            RunOriginReader
+}
+
+func (d DurableDependencies) validate() error {
+	required := []struct {
+		name  string
+		value any
+	}{
+		{"run lifecycle owner", d.RunLifecycle},
+		{"delivery lifecycle owner", d.DeliveryLifecycle},
+		{"flow route owner", d.FlowRoutes},
+		{"flow route record reader", d.FlowRouteRecords},
+		{"flow route set owner", d.FlowRouteSets},
+		{"flow route topology owner", d.FlowRouteTopology},
+		{"flow route rollback owner", d.FlowRouteRollback},
+		{"active agent descriptor reader", d.ActiveAgents},
+		{"active flow descriptor reader", d.ActiveFlows},
+		{"delivery target reader", d.DeliveryTargets},
+		{"delivery route reader", d.DeliveryRouteSets},
+		{"target failure recorder", d.TargetFailureRecorder},
+		{"run origin reader", d.RunOrigins},
+	}
+	for _, role := range required {
+		if role.value == nil {
+			return fmt.Errorf("durable event bus requires explicit %s", role.name)
+		}
+	}
+	return nil
 }
 
 // DeliveryContinuationOwner is the exact transfer boundary between committed
@@ -160,14 +208,6 @@ type LocalDelivery = worklifetime.EventDelivery
 
 type transactionRouteOverlayKey struct{}
 
-func (eb *EventBus) RuntimeMutationRunner() runtimepipeline.RuntimeMutationRunner {
-	if eb == nil {
-		return nil
-	}
-	runner, _ := eb.store.(runtimepipeline.RuntimeMutationRunner)
-	return runner
-}
-
 func (eb *EventBus) PipelineObligationOwner() runtimepipelineobligation.Store {
 	if eb == nil {
 		return nil
@@ -179,8 +219,7 @@ func (eb *EventBus) RunLifecycleCandidateOwner() runtimerunlifecycle.OperationOw
 	if eb == nil {
 		return nil
 	}
-	owner, _ := eb.store.(runtimerunlifecycle.OperationOwner)
-	return owner
+	return eb.durable.RunLifecycle
 }
 
 type transactionRouteOverlay struct {
@@ -272,6 +311,7 @@ type EventBusOptions struct {
 	WorkOwner                   worklifetime.Occurrence
 	PipelineObligations         runtimepipelineobligation.Store
 	DeliveryAuthority           runtimedelivery.ExecutionAuthority
+	Durable                     DurableDependencies
 }
 
 const deliverySendTimeout = 250 * time.Millisecond
@@ -320,16 +360,15 @@ func closedSignal() chan struct{} {
 	return done
 }
 
-type pipelineObligationStoreProvider interface {
-	PipelineObligations() runtimepipelineobligation.Store
-}
-
 func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, error) {
 	if opts.PipelineObligations == nil {
 		return nil, errors.New("durable event bus requires the pipeline obligation owner")
 	}
 	if err := opts.BundleSourceFact.Validate(); err != nil {
 		return nil, fmt.Errorf("durable event bus requires an immutable bundle source fact: %w", err)
+	}
+	if err := opts.Durable.validate(); err != nil {
+		return nil, err
 	}
 	if opts.DeliveryAuthority.Kind() != "" {
 		if err := opts.DeliveryAuthority.Validate(); err != nil {
@@ -427,9 +466,6 @@ func NewEphemeralEventBusWithOptions(store EventStore, opts EventBusOptions) (*E
 	if opts.PipelineObligations != nil {
 		return nil, errors.New("ephemeral event bus cannot accept a durable pipeline obligation owner")
 	}
-	if _, selected := store.(pipelineObligationStoreProvider); selected {
-		return nil, errors.New("selected event store requires the durable event bus constructor")
-	}
 	eb, err := newEventBusWithOptions(store, opts)
 	if err != nil {
 		return nil, err
@@ -498,6 +534,7 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		providerOutputVerifier:      opts.ProviderOutputVerifier,
 		workOwner:                   opts.WorkOwner,
 		deliveryAuthority:           opts.DeliveryAuthority,
+		durable:                     opts.Durable,
 	}
 	if opts.DeliveryAuthority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork {
 		transfers, err := newSelectedDeliveryTransfers(opts.DeliveryAuthority)
@@ -532,7 +569,7 @@ func (eb *EventBus) rebuildRoutePlanners() {
 	if eb == nil {
 		return
 	}
-	eb.connectRoutePlanner = newConnectRoutePlanResolver(eb.semanticSource, eb.routeTable, eb.PinRoutingDescriptors, eb.templateInstanceActivator, eb.store)
+	eb.connectRoutePlanner = newConnectRoutePlanResolver(eb.semanticSource, eb.routeTable, eb.PinRoutingDescriptors, eb.templateInstanceActivator, eb.durable.ReplyContext)
 	eb.connectRoutePlanner.loadAgents = eb.activeAgentDescriptors
 	eb.deliveryPlanner = eb.newEventBusDeliveryPlanner()
 }
@@ -594,8 +631,8 @@ func (eb *EventBus) MarkDeliveryInProgress(ctx context.Context, agentID, session
 	if !ok || claim.SubscriberClass() != runtimedelivery.SubscriberAgent || claim.SubscriberID() != strings.TrimSpace(agentID) {
 		return false, fmt.Errorf("agent session binding requires the exact current delivery claim")
 	}
-	owner, ok := eb.store.(runtimedelivery.Store)
-	if !ok || owner == nil {
+	owner := eb.durable.DeliveryLifecycle
+	if owner == nil {
 		return false, fmt.Errorf("selected event store does not expose delivery lifecycle ownership")
 	}
 	if _, err := owner.BindAgentSession(ctx, claim, sessionID); err != nil {
@@ -622,8 +659,8 @@ func (eb *EventBus) ListFlowInstanceRoutes(ctx context.Context) ([]runtimeflowid
 	if eb == nil || eb.store == nil {
 		return nil, errors.New("event bus store is required")
 	}
-	store, ok := eb.store.(FlowInstanceRoutePersistence)
-	if !ok || store == nil {
+	store := eb.durable.FlowRoutes
+	if store == nil {
 		return nil, errors.New("event bus store does not support flow-instance route persistence")
 	}
 	return store.ListFlowInstanceRoutes(ctx)
@@ -638,8 +675,8 @@ func (eb *EventBus) VerifyFlowInstanceRoute(ctx context.Context, identity runtim
 		return fmt.Errorf("flow-instance route %s is not process-ready", identity.InstancePath)
 	}
 	expected := table.MaterializedRoutes(identity)
-	reader, ok := eb.store.(FlowInstanceRouteRecordReader)
-	if !ok || reader == nil {
+	reader := eb.durable.FlowRouteRecords
+	if reader == nil {
 		return errors.New("event bus store does not expose exact flow-instance route records")
 	}
 	actual, err := reader.ListFlowInstanceRouteRecords(ctx, identity)
@@ -776,6 +813,17 @@ func (eb *EventBus) deriveFlowInstanceRouteTopology(
 	return staged, out, nil
 }
 
+func flowInstanceRouteTopologyRecordSets(table *RouteTable, identities []runtimeflowidentity.Route) []FlowInstanceRouteRecordSet {
+	sets := make([]FlowInstanceRouteRecordSet, 0, len(identities))
+	for _, identity := range identities {
+		sets = append(sets, FlowInstanceRouteRecordSet{
+			Identity: identity,
+			Routes:   table.MaterializedRoutes(identity),
+		})
+	}
+	return sets
+}
+
 func (eb *EventBus) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
 	return eb.AddFlowInstanceRouteContext(context.Background(), req)
 }
@@ -830,42 +878,26 @@ func (eb *EventBus) StageFlowInstanceRouteContext(ctx context.Context, req FlowI
 	if table == nil {
 		return errors.New("route table is not initialized")
 	}
-	persister, ok := eb.store.(FlowInstanceRouteSetPersistence)
-	if !ok || persister == nil {
-		return errors.New("exact flow-instance route-set persistence is required")
+	persister := eb.durable.FlowRouteTopology
+	if persister == nil {
+		return errors.New("exact flow-instance route-topology persistence is required")
 	}
-	descriptorLister, ok := eb.store.(ActiveFlowInstanceDescriptorLister)
-	if !ok || descriptorLister == nil {
+	descriptorLister := eb.durable.ActiveFlows
+	if descriptorLister == nil {
 		return errors.New("flow-instance route staging requires active flow-instance descriptors")
 	}
 	req = req.Normalized()
-	stage := func(txctx context.Context) error {
-		staged, identities, err := eb.deriveFlowInstanceRouteTopology(
-			txctx,
-			table,
-			descriptorLister,
-			&req,
-			runtimeflowidentity.Route{},
-		)
-		if err != nil {
-			return err
-		}
-		for _, identity := range identities {
-			routes := staged.MaterializedRoutes(identity)
-			if err := persister.ReplaceFlowInstanceRouteRecords(txctx, identity, routes); err != nil {
-				return err
-			}
-		}
-		return nil
+	staged, identities, err := eb.deriveFlowInstanceRouteTopology(
+		ctx,
+		table,
+		descriptorLister,
+		&req,
+		runtimeflowidentity.Route{},
+	)
+	if err != nil {
+		return err
 	}
-	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); active {
-		return stage(ctx)
-	}
-	runner := eb.RuntimeMutationRunner()
-	if runner == nil {
-		return errors.New("flow-instance route staging requires selected runtime mutation")
-	}
-	return runner.RunRuntimeMutationContext(ctx, stage)
+	return persister.ReplaceFlowInstanceRouteTopology(ctx, flowInstanceRouteTopologyRecordSets(staged, identities))
 }
 
 func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowInstanceRouteMaterializationRequest) error {
@@ -899,8 +931,8 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 			return err
 		}
 		routes := staged.MaterializedRoutes(req.Identity)
-		persister, ok := eb.store.(FlowInstanceRoutePersistence)
-		if !ok {
+		persister := eb.durable.FlowRoutes
+		if persister == nil {
 			return errors.New("transactional flow-instance route persistence is required")
 		}
 		for _, route := range routes {
@@ -940,8 +972,8 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 			}
 		}
 	}
-	persister, ok := eb.store.(FlowInstanceRoutePersistence)
-	if !ok {
+	persister := eb.durable.FlowRoutes
+	if persister == nil {
 		return nil
 	}
 	routes := table.MaterializedRoutes(req.Identity)
@@ -951,9 +983,7 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 	for _, route := range routes {
 		if err := persister.UpsertFlowInstanceRoute(ctx, route); err != nil {
 			if addedRoute {
-				if rollback, ok := eb.store.(FlowInstanceRouteRollbackPersistence); ok && rollback != nil {
-					_ = rollback.RollbackFlowInstanceRoute(ctx, route.Identity)
-				}
+				_ = eb.durable.FlowRouteRollback.RollbackFlowInstanceRoute(ctx, route.Identity)
 				_ = table.RemoveFlowInstanceRoute(route.Identity)
 			}
 			return err
@@ -991,33 +1021,26 @@ func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity
 			return fmt.Errorf("flow-instance route removal requires exact identity")
 		}
 	}
-	persister, ok := eb.store.(FlowInstanceRouteSetPersistence)
-	if !ok || persister == nil {
-		if _, selected := eb.store.(pipelineObligationStoreProvider); selected {
-			return errors.New("selected store requires exact flow-instance route-set persistence")
+	persister := eb.durable.FlowRouteTopology
+	if persister == nil {
+		if eb.ephemeral {
+			return table.RemoveFlowInstanceRoute(owner)
 		}
-		return table.RemoveFlowInstanceRoute(owner)
+		return errors.New("selected store requires exact flow-instance route-set persistence")
 	}
-	descriptorLister, ok := eb.store.(ActiveFlowInstanceDescriptorLister)
-	if !ok || descriptorLister == nil {
+	descriptorLister := eb.durable.ActiveFlows
+	if descriptorLister == nil {
 		return errors.New("flow-instance route removal requires active flow-instance descriptors")
 	}
-	stage := func(txctx context.Context) error {
-		staged, identities, err := eb.deriveFlowInstanceRouteTopology(txctx, table, descriptorLister, nil, owner)
-		if err != nil {
-			return err
-		}
-		identities = append(identities, owner)
-		sort.Slice(identities, func(i, j int) bool { return identities[i].InstancePath < identities[j].InstancePath })
-		for _, affected := range identities {
-			if err := persister.ReplaceFlowInstanceRouteRecords(txctx, affected, staged.MaterializedRoutes(affected)); err != nil {
-				return err
-			}
-		}
-		return nil
+	staged, identities, err := eb.deriveFlowInstanceRouteTopology(ctx, table, descriptorLister, nil, owner)
+	if err != nil {
+		return err
 	}
+	identities = append(identities, owner)
+	sort.Slice(identities, func(i, j int) bool { return identities[i].InstancePath < identities[j].InstancePath })
+	sets := flowInstanceRouteTopologyRecordSets(staged, identities)
 	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); active {
-		if err := stage(ctx); err != nil {
+		if err := persister.ReplaceFlowInstanceRouteTopology(ctx, sets); err != nil {
 			return err
 		}
 		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(context.Context) {
@@ -1027,11 +1050,7 @@ func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity
 		}
 		return nil
 	}
-	runner := eb.RuntimeMutationRunner()
-	if runner == nil {
-		return errors.New("flow-instance route removal requires selected runtime mutation")
-	}
-	if err := runner.RunRuntimeMutationContext(ctx, stage); err != nil {
+	if err := persister.ReplaceFlowInstanceRouteTopology(ctx, sets); err != nil {
 		return err
 	}
 	return table.RemoveFlowInstanceRoute(owner)

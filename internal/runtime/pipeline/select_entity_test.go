@@ -13,8 +13,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	storerunbundle "github.com/division-sh/swarm/internal/store/runbundle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -382,7 +384,7 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFailsClosedOnDeterministi
 		t.Fatalf("selectOrCreateEntityInstanceID: %v", err)
 	}
 	identity := DeriveFlowInstanceIdentity(source, "treasury", instanceID)
-	if err := pc.workflowStore.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      identity.EntityID,
 		StorageRef:      identity.InstancePath,
 		WorkflowName:    "treasury",
@@ -722,9 +724,18 @@ opco_budget:
 				{Name: "active"},
 			}, nil),
 		},
+		runBundleAvailability: selectEntityTestRunBundleAvailability{db: db},
 	}
-	pc.workflowStore.ConfigureDeliveryLifecycleStore(newPipelineTestDeliveryOwnerForDB(t, db))
+	pc.workflowStore.deliveryStore = newPipelineTestDeliveryOwnerForDB(t, db)
 	return pc, source
+}
+
+type selectEntityTestRunBundleAvailability struct {
+	db *sql.DB
+}
+
+func (a selectEntityTestRunBundleAvailability) LoadRunBundleAvailability(ctx context.Context, runID string) (runtimerunbundle.Availability, error) {
+	return storerunbundle.LoadAvailability(ctx, a.db, runID)
 }
 
 func selectEntitySpendHandler() runtimecontracts.SystemNodeEventHandler {
@@ -818,7 +829,7 @@ func selectOrCreateArtifactRepoCommitHandler() runtimecontracts.SystemNodeEventH
 	}
 }
 
-func loadSelectOrCreateBudgetByKey(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, verticalID string) WorkflowInstance {
+func loadSelectOrCreateBudgetByKey(t *testing.T, store *workflowInstanceStore, ctx context.Context, source semanticview.Source, verticalID string) WorkflowInstance {
 	t.Helper()
 	instanceID, err := selectOrCreateEntityInstanceID(source, "treasury", map[string]any{"vertical_id": verticalID})
 	if err != nil {
@@ -835,17 +846,17 @@ func loadSelectOrCreateBudgetByKey(t *testing.T, store *WorkflowInstanceStore, c
 	return instance
 }
 
-func seedSelectEntityBudget(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, verticalID string, spent any) string {
+func seedSelectEntityBudget(t *testing.T, store *workflowInstanceStore, ctx context.Context, source semanticview.Source, verticalID string, spent any) string {
 	t.Helper()
 	return seedSelectEntityBudgetWithInstance(t, store, ctx, source, "budget-1", verticalID, spent)
 }
 
-func seedSelectEntityBudgetWithInstance(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID, verticalID string, spent any) string {
+func seedSelectEntityBudgetWithInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID, verticalID string, spent any) string {
 	t.Helper()
 	return seedSelectEntityBudgetWithState(t, store, ctx, source, instanceID, verticalID, spent, "active")
 }
 
-func seedSelectEntityBudgetWithState(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID, verticalID string, spent any, currentState string) string {
+func seedSelectEntityBudgetWithState(t *testing.T, store *workflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID, verticalID string, spent any, currentState string) string {
 	t.Helper()
 	return seedSelectEntityBudgetWithMetadataAndState(t, store, ctx, source, instanceID, map[string]any{
 		"vertical_id": verticalID,
@@ -853,12 +864,12 @@ func seedSelectEntityBudgetWithState(t *testing.T, store *WorkflowInstanceStore,
 	}, nil, currentState)
 }
 
-func seedSelectEntityBudgetWithMetadata(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID string, metadata map[string]any, config map[string]any) string {
+func seedSelectEntityBudgetWithMetadata(t *testing.T, store *workflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID string, metadata map[string]any, config map[string]any) string {
 	t.Helper()
 	return seedSelectEntityBudgetWithMetadataAndState(t, store, ctx, source, instanceID, metadata, config, "active")
 }
 
-func seedSelectEntityBudgetWithMetadataAndState(t *testing.T, store *WorkflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID string, metadata map[string]any, config map[string]any, currentState string) string {
+func seedSelectEntityBudgetWithMetadataAndState(t *testing.T, store *workflowInstanceStore, ctx context.Context, source semanticview.Source, instanceID string, metadata map[string]any, config map[string]any, currentState string) string {
 	t.Helper()
 	identity := DeriveFlowInstanceIdentity(source, "treasury", instanceID)
 	metadata = cloneStringAnyMap(metadata)
@@ -879,7 +890,7 @@ func seedSelectEntityBudgetWithMetadataAndState(t *testing.T, store *WorkflowIns
 		Config:          config,
 		Metadata:        metadata,
 	})
-	if err := store.Upsert(ctx, instance); err != nil {
+	if err := store.upsert(ctx, instance); err != nil {
 		t.Fatalf("seed budget entity: %v", err)
 	}
 	return identity.EntityID

@@ -52,9 +52,9 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			fireErrors := make(chan error, 4)
 			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(context.Context, runtimepipeline.Schedule) {})
 			t.Cleanup(scheduler.Stop)
-			coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
+			coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 				Module:             gateRecoveryModule{source: source},
-				WorkflowStore:      selected.workflowStore,
+				Persistence:        selected.persistence,
 				TimerScheduler:     scheduler,
 				TimerScheduleStore: scheduleStore,
 				WorkOwner:          pipelineExternalTestWorkOwner(t),
@@ -62,14 +62,14 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
-			if _, err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Metadata: map[string]any{"run_id": runID},
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
-			if err := selected.workflowStore.ArmInitialEntryTimers(ctx, entityID); err != nil {
+			if err := coordinator.ArmInitialEntryTimers(ctx, entityID); err != nil {
 				t.Fatalf("arm initial workflow timers: %v", err)
 			}
 
@@ -80,7 +80,7 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 					t.Fatalf("workflow timer callback: %v", err)
 				default:
 				}
-				instance, found, err := selected.workflowStore.Load(ctx, entityID)
+				instance, found, err := coordinator.Load(ctx, entityID)
 				if err != nil {
 					t.Fatalf("load workflow instance: %v", err)
 				}
@@ -128,27 +128,27 @@ func TestRecurringWorkflowTimerDoesNotReregisterAfterSynchronousTransitionCancel
 				func(context.Context, runtimepipeline.Schedule) {},
 			)
 			t.Cleanup(scheduler.Stop)
-			coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-				Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
+			coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
+				Module: gateRecoveryModule{source: source}, Persistence: selected.persistence,
 				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore, WorkOwner: pipelineExternalTestWorkOwner(t),
 			})
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC().Add(-4900 * time.Millisecond)
-			if _, err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Metadata: map[string]any{"run_id": runID},
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
-			if err := selected.workflowStore.ArmInitialEntryTimers(ctx, entityID); err != nil {
+			if err := coordinator.ArmInitialEntryTimers(ctx, entityID); err != nil {
 				t.Fatalf("arm initial workflow timers: %v", err)
 			}
 
 			stateDeadline := time.Now().Add(5 * time.Second)
 			for {
-				instance, found, err := selected.workflowStore.Load(ctx, entityID)
+				instance, found, err := coordinator.Load(ctx, entityID)
 				if err != nil {
 					t.Fatalf("load workflow instance: %v", err)
 				}
@@ -210,13 +210,13 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 				t.Fatalf("selected %s store does not implement SchedulePersistence", selected.name)
 			}
 			module := gateRecoveryModule{source: source}
-			coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-				Module: module, WorkflowStore: selected.workflowStore, TimerScheduleStore: scheduleStore,
+			coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
+				Module: module, Persistence: selected.persistence, TimerScheduleStore: scheduleStore,
 			})
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
-			if _, err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Metadata: map[string]any{"run_id": runID},
@@ -227,8 +227,8 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 
 			fireErrors := make(chan error, 4)
 			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(context.Context, runtimepipeline.Schedule) {})
-			restored := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-				Module: module, WorkflowStore: selected.workflowStore,
+			restored := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
+				Module: module, Persistence: selected.persistence,
 				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore, WorkOwner: pipelineExternalTestWorkOwner(t),
 			})
 			bus.SetInterceptors(restored)
@@ -245,7 +245,7 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 					t.Fatalf("restored workflow timer callback: %v", err)
 				default:
 				}
-				instance, found, err := selected.workflowStore.Load(ctx, entityID)
+				instance, found, err := restored.Load(ctx, entityID)
 				if err != nil {
 					scheduler.Stop()
 					t.Fatalf("load workflow instance after restored fire: %v", err)
@@ -278,8 +278,8 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 				fireErrors <- fmt.Errorf("terminal timer was restored: %s", schedule.TaskID)
 			})
 			t.Cleanup(terminalScheduler.Stop)
-			terminal := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-				Module: module, WorkflowStore: selected.workflowStore,
+			terminal := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
+				Module: module, Persistence: selected.persistence,
 				TimerScheduler: terminalScheduler, TimerScheduleStore: scheduleStore,
 			})
 			if err := terminal.RestoreWorkflowTimers(ctx); err != nil {
@@ -376,21 +376,21 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 				return runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(context.Context, runtimepipeline.Schedule) {})
 			}
 			scheduler := newScheduler()
-			coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-				Module: module, WorkflowStore: selected.workflowStore,
+			coordinator = newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
+				Module: module, Persistence: selected.persistence,
 				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore, WorkOwner: pipelineExternalTestWorkOwner(t),
 			})
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
-			if _, err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Metadata: map[string]any{"run_id": runID},
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
-			if err := selected.workflowStore.ArmInitialEntryTimers(ctx, entityID); err != nil {
+			if err := coordinator.ArmInitialEntryTimers(ctx, entityID); err != nil {
 				t.Fatalf("arm initial workflow timers: %v", err)
 			}
 			waitWorkflowTimerEventCount(t, selected, fireErrors, runID, runtimecontracts.WorkflowStageTimerInternalEvent, 2)
@@ -404,8 +404,8 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			beforeRestart := workflowTimerEventCount(t, selected, runID, runtimecontracts.WorkflowStageTimerInternalEvent)
 			scheduler = newScheduler()
 			t.Cleanup(scheduler.Stop)
-			coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-				Module: module, WorkflowStore: selected.workflowStore,
+			coordinator = newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
+				Module: module, Persistence: selected.persistence,
 				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore, WorkOwner: pipelineExternalTestWorkOwner(t),
 			})
 			bus.SetInterceptors(coordinator)
@@ -424,7 +424,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			cancelled := false
 			deadline := time.Now().Add(5 * time.Second)
 			for time.Now().Before(deadline) {
-				instance, found, err := selected.workflowStore.Load(ctx, entityID)
+				instance, found, err := coordinator.Load(ctx, entityID)
 				if err != nil {
 					t.Fatalf("load workflow instance after cancellation: %v", err)
 				}
@@ -485,8 +485,8 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 
 			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(context.Context, runtimepipeline.Schedule) {})
 			t.Cleanup(scheduler.Stop)
-			coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-				Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
+			coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
+				Module: gateRecoveryModule{source: source}, Persistence: selected.persistence,
 				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore, WorkOwner: pipelineExternalTestWorkOwner(t),
 			})
 			bus.SetInterceptors(coordinator)
@@ -497,14 +497,14 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			})
 
 			createdAt := time.Now().UTC()
-			if _, err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Metadata: map[string]any{"run_id": runID},
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
-			if err := selected.workflowStore.ArmInitialEntryTimers(ctx, entityID); err != nil {
+			if err := coordinator.ArmInitialEntryTimers(ctx, entityID); err != nil {
 				t.Fatalf("arm initial workflow timers: %v", err)
 			}
 
@@ -577,21 +577,21 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			fireErrors := make(chan error, 4)
 			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(context.Context, runtimepipeline.Schedule) {})
 			t.Cleanup(scheduler.Stop)
-			coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.db, runtimepipeline.PipelineCoordinatorOptions{
-				Module: gateRecoveryModule{source: source}, WorkflowStore: selected.workflowStore,
+			coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
+				Module: gateRecoveryModule{source: source}, Persistence: selected.persistence,
 				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore, WorkOwner: pipelineExternalTestWorkOwner(t),
 			})
 			bus.SetInterceptors(coordinator)
 
 			createdAt := time.Now().UTC()
-			if _, err := selected.workflowStore.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
 				Metadata: map[string]any{"run_id": runID},
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
-			if err := selected.workflowStore.ArmInitialEntryTimers(ctx, entityID); err != nil {
+			if err := coordinator.ArmInitialEntryTimers(ctx, entityID); err != nil {
 				t.Fatalf("arm initial workflow timers: %v", err)
 			}
 
@@ -602,7 +602,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 					t.Fatalf("workflow timer callback: %v", err)
 				default:
 				}
-				instance, found, err := selected.workflowStore.Load(ctx, entityID)
+				instance, found, err := coordinator.Load(ctx, entityID)
 				if err != nil {
 					t.Fatalf("load workflow instance: %v", err)
 				}
@@ -633,7 +633,7 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			if recovered != 1 {
 				t.Fatalf("SweepPipelineObligations recovered=%d, want 1", recovered)
 			}
-			instance, found, err := selected.workflowStore.Load(ctx, entityID)
+			instance, found, err := coordinator.Load(ctx, entityID)
 			if err != nil || !found {
 				t.Fatalf("load recovered workflow instance found=%v err=%v", found, err)
 			}

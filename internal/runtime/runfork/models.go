@@ -1,13 +1,450 @@
-package store
+package runfork
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+
+	"fmt"
+
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
+
 	"sort"
 	"strings"
+	"time"
+
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
+
+func sortedTrimmedStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for value := range seen {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+const (
+	RunForkActivatedStatus    = "running"
+	RunForkSourceFrozenStatus = "forked"
+)
+
+type RunForkActivateRequest struct {
+	ForkRunID                         string
+	ConfirmSourceFreeze               bool
+	HistoricalReplayExecutionAdmitter RunForkHistoricalReplayExecutionAdmitter
+}
+
+type RunForkActivation struct {
+	SourceRunID               string                                   `json:"source_run_id"`
+	ForkRunID                 string                                   `json:"fork_run_id"`
+	ForkRunStatus             string                                   `json:"fork_run_status"`
+	SourceRunStatus           string                                   `json:"source_run_status"`
+	ForkPoint                 RunForkPoint                             `json:"fork_point"`
+	Activated                 bool                                     `json:"activated"`
+	SourceFrozen              bool                                     `json:"source_frozen"`
+	ReplayResumeBlocked       bool                                     `json:"replay_resume_blocked"`
+	ReplayResumeAdmission     RunForkReplayResumeAdmission             `json:"replay_resume_admission"`
+	UnsupportedBlockers       []RunForkUnsupportedBlocker              `json:"unsupported_blockers,omitempty"`
+	MaterializedEntityCount   int                                      `json:"materialized_entity_count"`
+	HistoricalReplayExecution *RunForkHistoricalReplayExecution        `json:"historical_replay_execution,omitempty"`
+	DeliveryEventReplay       *RunForkDeliveryEventReplayResult        `json:"delivery_event_replay,omitempty"`
+	SelectedContractBinding   *RunForkSelectedContractBinding          `json:"selected_contract_binding,omitempty"`
+	BranchDivergence          *RunForkSelectedContractBranchDivergence `json:"selected_contract_branch_divergence,omitempty"`
+	SourceAdvancedAfterFork   bool                                     `json:"source_advanced_after_fork_point,omitempty"`
+	RepeatedActivationFailed  bool                                     `json:"repeated_activation_failed,omitempty"`
+}
+
+const (
+	RunForkContractFrontierAdmissionOwner = "runtime.run_fork.contract_frontier_admission"
+
+	RunForkSelectedContractDiagnosticPlatformOutcomePolicyOwner = "runtime.run_fork.contract_frontier_admission.selected_contract_diagnostic_platform_outcome_policy"
+
+	RunForkContractSelectionModeSelectedContracts = "selected_contracts"
+	RunForkContractSelectionModeBundleHash        = "bundle_hash"
+
+	RunForkContractFrontierDispositionLineageNoAction = "lineage_no_action"
+
+	RunForkBlockerContractFrontierExecutionUnsupported = "contract_frontier_execution_unsupported"
+	RunForkBlockerContractFrontierRouteUnresolved      = "contract_frontier_route_unresolved"
+)
+
+type RunForkContractSelection struct {
+	Mode            string `json:"mode"`
+	ContractsRoot   string `json:"contracts_root,omitempty"`
+	BundleHash      string `json:"bundle_hash,omitempty"`
+	WorkflowName    string `json:"workflow_name,omitempty"`
+	WorkflowVersion string `json:"workflow_version,omitempty"`
+}
+
+type RunForkContractFrontierAdmission struct {
+	Owner                        string                                `json:"owner"`
+	ContractSelection            RunForkContractSelection              `json:"contract_selection"`
+	NonMutating                  bool                                  `json:"non_mutating"`
+	HistoricalExecutionSupported bool                                  `json:"historical_execution_supported"`
+	FrontierEventCount           int                                   `json:"frontier_event_count"`
+	FrontierEvents               []RunForkContractFrontierEvent        `json:"frontier_events,omitempty"`
+	LineageOnlyEvents            []RunForkContractFrontierLineageEvent `json:"lineage_only_events,omitempty"`
+	UnsupportedBlockers          []RunForkUnsupportedBlocker           `json:"unsupported_blockers,omitempty"`
+}
+
+type RunForkContractFrontierLineageEvent struct {
+	SourceEventID         string   `json:"source_event_id"`
+	EventName             string   `json:"event_name"`
+	SourceClassifications []string `json:"source_classifications,omitempty"`
+	SourceFlowInstances   []string `json:"source_flow_instances,omitempty"`
+	SourceSubscriberTypes []string `json:"source_subscriber_types,omitempty"`
+	SourceSubscriberIDs   []string `json:"source_subscriber_ids,omitempty"`
+	Owner                 string   `json:"owner"`
+	Disposition           string   `json:"disposition"`
+	Reason                string   `json:"reason"`
+}
+
+type RunForkContractFrontierEvent struct {
+	SourceEventID           string                             `json:"source_event_id"`
+	EventName               string                             `json:"event_name"`
+	SourceClassifications   []string                           `json:"source_classifications,omitempty"`
+	SourceFlowInstances     []string                           `json:"source_flow_instances,omitempty"`
+	SourceSubscriberTypes   []string                           `json:"source_subscriber_types,omitempty"`
+	SourceSubscriberIDs     []string                           `json:"source_subscriber_ids,omitempty"`
+	RuntimeEventOwners      []string                           `json:"runtime_event_owners,omitempty"`
+	WorkflowNodeSubscribers []string                           `json:"workflow_node_subscribers,omitempty"`
+	DerivedRecipients       []RunForkContractFrontierRecipient `json:"derived_recipients,omitempty"`
+}
+
+type RunForkContractFrontierRecipient struct {
+	SubscriberType string                 `json:"subscriber_type"`
+	SubscriberID   string                 `json:"subscriber_id"`
+	Path           string                 `json:"path,omitempty"`
+	RouteSource    string                 `json:"route_source,omitempty"`
+	AgentIdentity  agentidentity.Identity `json:"agent_identity,omitempty"`
+}
+
+func RunForkSelectedContractDiagnosticPlatformOutcomePolicyApplies(item RunForkPendingWork) bool {
+	if strings.TrimSpace(item.Classification) != RunForkPendingClassificationDeadLetter {
+		return false
+	}
+	if strings.TrimSpace(item.SubscriberType) != "platform" {
+		return false
+	}
+	return RunForkSpecDiagnosticPlatformEvent(item.EventName)
+}
+
+func RunForkSpecDiagnosticPlatformEvent(eventName string) bool {
+	switch strings.TrimSpace(eventName) {
+	case "platform.runtime_log", "platform.inbound_recorded":
+		return true
+	default:
+		return false
+	}
+}
+
+const (
+	RunForkDeliveryEventReplayOwner = "store.run_fork.delivery_event_replay"
+)
+
+type RunForkDeliveryEventReplayResult struct {
+	Owner                 string `json:"owner"`
+	SourceRunID           string `json:"source_run_id"`
+	ForkRunID             string `json:"fork_run_id"`
+	ReplayedEventCount    int    `json:"replayed_event_count"`
+	ReplayedDeliveryCount int    `json:"replayed_delivery_count"`
+}
+
+const (
+	RunForkMaterializedEntitySnapshotMetadataOwner = "runtime.run_fork.materialized_entity_snapshot_metadata"
+
+	RunForkMaterializedEntitySnapshotMetadataSourceEvent       = "source_event"
+	RunForkMaterializedEntitySnapshotMetadataSourceEntityState = "source_entity_state"
+)
+
+type RunForkMaterializedEntitySnapshotMetadata struct {
+	Owner        string `json:"owner"`
+	FlowInstance string `json:"flow_instance"`
+	EntityType   string `json:"entity_type"`
+	Source       string `json:"source"`
+}
+
+const (
+	RunForkMaterializedStatus = "paused"
+)
+
+type RunForkMaterializeRequest struct {
+	SourceRunID       string
+	At                string
+	ContractSelection *RunForkContractSelection
+	BundleSourceFact  runtimecorrelation.BundleSourceFact
+}
+
+type RunForkMaterialization struct {
+	SourceRunID              string                          `json:"source_run_id"`
+	ForkRunID                string                          `json:"fork_run_id"`
+	ForkRunStatus            string                          `json:"fork_run_status"`
+	ForkPoint                RunForkPoint                    `json:"fork_point"`
+	MaterializedEntityCount  int                             `json:"materialized_entity_count"`
+	ExecutionReady           bool                            `json:"execution_ready"`
+	ReplayResumeAdmission    RunForkReplayResumeAdmission    `json:"replay_resume_admission"`
+	SelectedContractBinding  *RunForkSelectedContractBinding `json:"selected_contract_binding,omitempty"`
+	UnsupportedBlockers      []RunForkUnsupportedBlocker     `json:"unsupported_blockers,omitempty"`
+	DeliveryResumeBlocked    bool                            `json:"delivery_resume_blocked"`
+	SourceRunStatusUnchanged bool                            `json:"source_run_status_unchanged"`
+}
+
+const (
+	RunForkPendingClassificationDeliveredCompleted = "delivered_completed"
+	RunForkPendingClassificationPending            = "pending"
+	RunForkPendingClassificationInProgress         = "in_progress"
+	RunForkPendingClassificationFailedRetryable    = "failed_retryable"
+	RunForkPendingClassificationFailedTerminal     = "failed_terminal"
+	RunForkPendingClassificationDeadLetter         = "dead_letter"
+	RunForkPendingClassificationCommittedReplay    = "committed_replay_scope"
+)
+
+type RunForkPlanRequest struct {
+	SourceRunID string
+	At          string
+}
+
+type RunForkPlan struct {
+	SourceRunID               string                            `json:"source_run_id"`
+	SourceRunStatus           string                            `json:"source_run_status,omitempty"`
+	SourceRunStartedAt        *time.Time                        `json:"source_run_started_at,omitempty"`
+	SourceRunEndedAt          *time.Time                        `json:"source_run_ended_at,omitempty"`
+	ForkPoint                 RunForkPoint                      `json:"fork_point"`
+	EventCountAtFork          int                               `json:"event_count_at_fork"`
+	ReconstructedEntityCount  int                               `json:"reconstructed_entity_count"`
+	PendingWorkCount          int                               `json:"pending_work_count"`
+	UnsupportedBlockerCount   int                               `json:"unsupported_blocker_count"`
+	ExecutionReady            bool                              `json:"execution_ready"`
+	ReplayResumeAdmission     RunForkReplayResumeAdmission      `json:"replay_resume_admission"`
+	ContractFrontierAdmission *RunForkContractFrontierAdmission `json:"contract_frontier_admission,omitempty"`
+	SelectedContractExecution *RunForkSelectedContractExecution `json:"selected_contract_execution,omitempty"`
+	SelectedContractReadiness *RunForkSelectedContractReadiness `json:"selected_contract_readiness,omitempty"`
+	Entities                  []RunForkEntityState              `json:"entities,omitempty"`
+	PendingWork               []RunForkPendingWork              `json:"pending_work,omitempty"`
+	UnsupportedBlockers       []RunForkUnsupportedBlocker       `json:"unsupported_blockers,omitempty"`
+	RouteHistory              RunForkRouteHistoryProjection     `json:"route_history"`
+	historicalRevision        int64
+	historicalEventIDs        []string
+}
+
+func (p RunForkPlan) WithHistoricalEvents(revision int64, eventIDs []string) RunForkPlan {
+	p.historicalRevision = revision
+	p.historicalEventIDs = append([]string(nil), eventIDs...)
+	return p
+}
+
+func (p RunForkPlan) HistoricalEventIDs(revision int64) ([]string, bool) {
+	if revision <= 0 || p.historicalRevision != revision {
+		return nil, false
+	}
+	return append([]string(nil), p.historicalEventIDs...), true
+}
+
+type RunForkPoint struct {
+	Input          string               `json:"input"`
+	EventID        string               `json:"event_id"`
+	EventName      string               `json:"event_name,omitempty"`
+	SourceEventID  string               `json:"source_event_id,omitempty"`
+	ProducedBy     string               `json:"produced_by,omitempty"`
+	ProducedByType string               `json:"produced_by_type,omitempty"`
+	SourceRoute    events.RouteIdentity `json:"source_route,omitempty"`
+	Timestamp      time.Time            `json:"timestamp"`
+	Revision       int64                `json:"revision"`
+}
+
+const (
+	RunForkRouteHistoryNotApplicable      = "not_applicable"
+	RunForkRouteHistoryUnknownUnversioned = "unknown_unversioned"
+)
+
+type RunForkRouteHistoryProjection struct {
+	State string `json:"state"`
+}
+
+type RunForkEntityState struct {
+	EntityID                string                                     `json:"entity_id"`
+	CurrentState            string                                     `json:"current_state,omitempty"`
+	EnteredStateAt          *time.Time                                 `json:"entered_state_at,omitempty"`
+	Fields                  map[string]any                             `json:"fields,omitempty"`
+	Gates                   map[string]any                             `json:"gates,omitempty"`
+	Accumulator             map[string]any                             `json:"accumulator,omitempty"`
+	MaterializationMetadata *RunForkMaterializedEntitySnapshotMetadata `json:"materialization_metadata,omitempty"`
+}
+
+type RunForkPendingWork struct {
+	EventID         string               `json:"event_id"`
+	EventName       string               `json:"event_name"`
+	FlowInstance    string               `json:"flow_instance,omitempty"`
+	SourceRoute     events.RouteIdentity `json:"source_route,omitempty"`
+	DeliveryID      string               `json:"delivery_id,omitempty"`
+	SubscriberType  string               `json:"subscriber_type,omitempty"`
+	SubscriberID    string               `json:"subscriber_id,omitempty"`
+	Classification  string               `json:"classification"`
+	Status          string               `json:"status,omitempty"`
+	RetryCount      int                  `json:"retry_count,omitempty"`
+	ReasonCode      string               `json:"reason_code,omitempty"`
+	ActiveSessionID string               `json:"active_session_id,omitempty"`
+	CreatedAt       time.Time            `json:"created_at"`
+	StartedAt       *time.Time           `json:"started_at,omitempty"`
+	DeliveredAt     *time.Time           `json:"delivered_at,omitempty"`
+	ReceiptOutcome  string               `json:"receipt_outcome,omitempty"`
+	ReceiptAt       *time.Time           `json:"receipt_at,omitempty"`
+}
+
+type RunForkUnsupportedBlocker struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+const (
+	RunForkReplayResumeAdmissionOwner = "store.run_fork.replay_resume_admission"
+
+	RunForkReplayResumeDispositionReconstruct        = "reconstruct"
+	RunForkReplayResumeDispositionForkReplay         = "fork_replay"
+	RunForkReplayResumeDispositionLineageOnly        = "lineage_only"
+	RunForkReplayResumeDispositionFailClosedBlocker  = "fail_closed_blocker"
+	RunForkReplayResumeDispositionSplitSibling       = "split_sibling"
+	RunForkReplayResumeDispositionNoHistoricalAction = "no_historical_action"
+)
+
+const (
+	RunForkReplayResumeFactEntityStateSnapshot       = "entity_state_snapshot"
+	RunForkReplayResumeFactDeliveryCompletedHistory  = "delivery_completed_history"
+	RunForkReplayResumeFactDeliveryPendingHistory    = "delivery_pending_history"
+	RunForkReplayResumeFactDeliveryInProgressHistory = "delivery_in_progress_history"
+	RunForkReplayResumeFactDeliveryFailedHistory     = "delivery_failed_history"
+	RunForkReplayResumeFactDeliveryDeadLetterHistory = "delivery_dead_letter_history"
+	RunForkReplayResumeFactCommittedReplayScope      = "committed_replay_scope"
+	RunForkReplayResumeFactTimerHistory              = "timer_history"
+	RunForkReplayResumeFactRouteHistory              = "flow_route_history"
+	RunForkReplayResumeFactSessionHistory            = "session_history"
+	RunForkReplayResumeFactConversationAuditHistory  = "conversation_audit_history"
+	RunForkReplayResumeFactActiveTurnHistory         = "active_turn_history"
+	RunForkReplayResumeFactSourceAdvanced            = "source_advanced_after_fork_point"
+	RunForkReplayResumeFactForkReplayState           = "fork_replay_state"
+	RunForkReplayResumeFactContractSwap              = "contract_swap"
+	RunForkReplayResumeFactHistoricalReplayExecution = "historical_replay_execution"
+	RunForkReplayResumeFactOpenReplyContext          = "open_reply_context"
+)
+
+const (
+	RunForkBlockerDeliveryHistoryUnproven               = "delivery_history_unproven"
+	RunForkBlockerNonAgentDeliveryReplayUnsupported     = "non_agent_delivery_replay_unsupported"
+	RunForkBlockerCommittedReplayScopeReplayUnsupported = "committed_replay_scope_replay_unsupported"
+	RunForkBlockerTimerHistoryUnproven                  = "timer_history_unproven"
+	RunForkBlockerFlowRouteHistoryUnproven              = "flow_route_history_unproven"
+	RunForkBlockerSessionHistoryUnproven                = "session_history_unproven"
+	RunForkBlockerConversationAuditUnproven             = "conversation_audit_history_unproven"
+	RunForkBlockerActiveTurnHistoryUnproven             = "active_turn_history_unproven"
+	RunForkBlockerEntitySnapshotMetadataUnproven        = "entity_snapshot_metadata_unproven"
+	RunForkBlockerOpenReplyContextUnsupported           = "open_reply_context_unsupported"
+)
+
+type RunForkReplayResumeAdmission struct {
+	Owner                    string                           `json:"owner"`
+	StateOnlyExecutionReady  bool                             `json:"state_only_execution_ready"`
+	DeliveryEventReplayReady bool                             `json:"delivery_event_replay_ready"`
+	BoundedReplaySupported   bool                             `json:"bounded_replay_supported"`
+	ReplayResumeFactsPresent bool                             `json:"replay_resume_facts_present"`
+	Dispositions             []RunForkReplayResumeDisposition `json:"dispositions,omitempty"`
+	UnsupportedBlockers      []RunForkUnsupportedBlocker      `json:"unsupported_blockers,omitempty"`
+}
+
+type RunForkReplayResumeDisposition struct {
+	Fact           string `json:"fact"`
+	Disposition    string `json:"disposition"`
+	Owner          string `json:"owner,omitempty"`
+	BlockerCode    string `json:"blocker_code,omitempty"`
+	Classification string `json:"classification,omitempty"`
+	EntityID       string `json:"entity_id,omitempty"`
+	EventID        string `json:"event_id,omitempty"`
+	DeliveryID     string `json:"delivery_id,omitempty"`
+	SubscriberType string `json:"subscriber_type,omitempty"`
+	SubscriberID   string `json:"subscriber_id,omitempty"`
+	Message        string `json:"message"`
+}
+
+// RunForkReplayResumeAdmissionWithSelectedRouteResolution discharges only the
+// unversioned route-history blocker after the selected route topology and its
+// persisted fork-local recovery have been validated by the caller.
+func RunForkReplayResumeAdmissionWithSelectedRouteResolution(admission RunForkReplayResumeAdmission) RunForkReplayResumeAdmission {
+	filtered := make([]RunForkUnsupportedBlocker, 0, len(admission.UnsupportedBlockers))
+	for _, blocker := range admission.UnsupportedBlockers {
+		if strings.TrimSpace(blocker.Code) == RunForkBlockerFlowRouteHistoryUnproven {
+			continue
+		}
+		filtered = append(filtered, blocker)
+	}
+	admission.UnsupportedBlockers = filtered
+	for i := range admission.Dispositions {
+		if strings.TrimSpace(admission.Dispositions[i].Fact) != RunForkReplayResumeFactRouteHistory {
+			continue
+		}
+		admission.Dispositions[i].Disposition = RunForkReplayResumeDispositionReconstruct
+		admission.Dispositions[i].BlockerCode = ""
+		admission.Dispositions[i].Owner = RunForkSelectedContractRoutePersistenceOwner
+		admission.Dispositions[i].Classification = RunForkRouteHistoryUnknownUnversioned
+		admission.Dispositions[i].Message = "selected frontier, binding, and static/dynamic topology proof resolve unversioned source routes into persisted fork-local route recovery"
+	}
+	return runForkReplayResumeAdmissionRecalculateReadiness(admission)
+}
+
+// RunForkPendingWorkReplayableForHistoricalReplay is the shared taxonomy predicate
+// consumed by the runtime historical replay owner before any fork-local mutation.
+func RunForkPendingWorkReplayableForHistoricalReplay(item RunForkPendingWork) bool {
+	if item.Classification != RunForkPendingClassificationPending {
+		return false
+	}
+	if strings.TrimSpace(item.DeliveryID) == "" || strings.TrimSpace(item.SubscriberID) == "" {
+		return false
+	}
+	if strings.TrimSpace(item.SubscriberType) != "agent" {
+		return false
+	}
+	return strings.TrimSpace(item.Status) == "pending" &&
+		item.RetryCount == 0 &&
+		strings.TrimSpace(item.ActiveSessionID) == "" &&
+		item.StartedAt == nil &&
+		item.DeliveredAt == nil &&
+		item.ReceiptAt == nil
+}
+
+const (
+	RunForkSelectedContractBindingOwner = "store.run_fork.selected_contract_binding"
+)
+
+type RunForkSelectedContractBindingRequest struct {
+	ForkRunID         string
+	SourceRunID       string
+	ForkEventID       string
+	ContractSelection RunForkContractSelection
+}
+
+type RunForkSelectedContractBinding struct {
+	Owner             string                   `json:"owner"`
+	ForkRunID         string                   `json:"fork_run_id"`
+	SourceRunID       string                   `json:"source_run_id"`
+	ForkEventID       string                   `json:"fork_event_id"`
+	ContractSelection RunForkContractSelection `json:"contract_selection"`
+	CreatedAt         time.Time                `json:"created_at"`
+}
 
 const (
 	RunForkSelectedContractExecutionModelOwner                                 = "runtime.run_fork.selected_contract_execution_model"
@@ -439,21 +876,233 @@ func RunForkContractFrontierEvidenceBinding(frontier RunForkContractFrontierAdmi
 	return len(frontier.FrontierEvents), sourceEventIDs, hex.EncodeToString(sum[:])
 }
 
-func sortedTrimmedStrings(values []string) []string {
-	if len(values) == 0 {
-		return nil
+const (
+	RunForkSelectedContractExecutionLineageOwner = "store.run_fork.selected_contract_execution_lineage"
+)
+
+type RunForkSelectedContractExecutionMaterializeRequest struct {
+	SourceRunID       string
+	At                string
+	ContractSelection RunForkContractSelection
+	BundleSourceFact  runtimecorrelation.BundleSourceFact
+	FrontierAdmission RunForkContractFrontierAdmission
+	RouteTopology     RunForkSelectedContractRouteTopology
+	RecipientPlanning RunForkSelectedContractRecipientPlanning
+}
+
+type RunForkSelectedContractExecutionActivateRequest struct {
+	ForkRunID             string
+	ConfirmSourceFreeze   bool
+	AllowedSourceEventIDs []string
+	FrontierAdmission     RunForkContractFrontierAdmission
+	RouteTopology         RunForkSelectedContractRouteTopology
+	RecipientPlanning     RunForkSelectedContractRecipientPlanning
+}
+
+type RunForkSelectedContractSourceEvent struct {
+	SourceEventID      string             `json:"source_event_id"`
+	EventName          string             `json:"event_name"`
+	ExecutionMode      executionmode.Mode `json:"execution_mode"`
+	EntityID           string             `json:"entity_id,omitempty"`
+	FlowInstance       string             `json:"flow_instance,omitempty"`
+	Scope              string             `json:"scope,omitempty"`
+	SourceFlowID       string             `json:"source_flow_id,omitempty"`
+	SourceFlowInstance string             `json:"source_flow_instance,omitempty"`
+	SourceEntityID     string             `json:"source_entity_id,omitempty"`
+	Payload            json.RawMessage    `json:"payload,omitempty"`
+}
+
+type RunForkSelectedContractExecutionLineage struct {
+	ForkRunID          string    `json:"fork_run_id"`
+	SourceRunID        string    `json:"source_run_id"`
+	SourceEventID      string    `json:"source_event_id"`
+	ForkEventID        string    `json:"fork_event_id"`
+	EventName          string    `json:"event_name"`
+	SelectionAuthority string    `json:"selection_authority"`
+	CreatedAt          time.Time `json:"created_at"`
+}
+
+type RunForkSelectedContractBranchDivergence struct {
+	Owner                          string    `json:"owner"`
+	ForkRunID                      string    `json:"fork_run_id"`
+	SourceRunID                    string    `json:"source_run_id"`
+	ForkEventID                    string    `json:"fork_event_id"`
+	Policy                         string    `json:"policy"`
+	SourceRunStatusAtActivation    string    `json:"source_run_status_at_activation"`
+	SourceRunStatusAfterActivation string    `json:"source_run_status_after_activation"`
+	SourceFrozen                   bool      `json:"source_frozen"`
+	SourceAdvancedFacts            []string  `json:"source_advanced_facts,omitempty"`
+	CreatedAt                      time.Time `json:"created_at"`
+}
+
+const (
+	RunForkPlanningOwner                            = "store.run_fork.planning_owner"
+	RunForkSelectedContractReadinessClassifierOwner = "runtime.run_fork.selected_contract_readiness_classifier"
+)
+
+const (
+	RunForkSelectedContractReadinessDispositionExecutableForkWork       = "executable_fork_work"
+	RunForkSelectedContractReadinessDispositionLineageNoAction          = "lineage_no_action"
+	RunForkSelectedContractReadinessDispositionReconstructedForkState   = "reconstructed_fork_local_state"
+	RunForkSelectedContractReadinessDispositionBranchDivergenceEvidence = "branch_divergence_evidence"
+	RunForkSelectedContractReadinessDispositionFailClosedBlocker        = "fail_closed_blocker"
+	RunForkSelectedContractReadinessDispositionUnsupportedSplitSibling  = "unsupported_split_sibling"
+)
+
+const (
+	RunForkSelectedContractReadinessFactSourceEvents                = "source_events"
+	RunForkSelectedContractReadinessFactForkEvents                  = "fork_events"
+	RunForkSelectedContractReadinessFactSourceDeliveries            = "source_deliveries"
+	RunForkSelectedContractReadinessFactForkDeliveries              = "fork_deliveries"
+	RunForkSelectedContractReadinessFactSelectedRecipientsRoutes    = "selected_recipients_and_route_topology"
+	RunForkSelectedContractReadinessFactTimers                      = "timers"
+	RunForkSelectedContractReadinessFactSessions                    = "sessions"
+	RunForkSelectedContractReadinessFactTurns                       = "turns"
+	RunForkSelectedContractReadinessFactAudits                      = "audits"
+	RunForkSelectedContractReadinessFactCommittedReplayScopeMarkers = "committed_replay_scope_markers"
+	RunForkSelectedContractReadinessFactPlatformRuntimeDiagnostics  = "platform_runtime_diagnostic_control_rows"
+	RunForkSelectedContractReadinessFactReceipts                    = "receipts"
+	RunForkSelectedContractReadinessFactDeadLetters                 = "dead_letters"
+	RunForkSelectedContractReadinessFactRetryIdempotency            = "retry_idempotency"
+	RunForkSelectedContractReadinessFactEmittedFollowUps            = "emitted_follow_ups"
+	RunForkSelectedContractReadinessFactSourcePostTFacts            = "source_post_t_facts"
+	RunForkSelectedContractReadinessFactCurrentStateSnapshots       = "current_state_materialization_snapshots"
+	RunForkSelectedContractReadinessFactNonAgentNodeSystemWork      = "non_agent_node_system_work"
+	RunForkSelectedContractReadinessFactRestartRecovery             = "restart_recovery"
+	RunForkSelectedContractReadinessFactOperatorConsumers           = "cli_api_dashboard_builder_consumers"
+)
+
+type RunForkSelectedContractReadiness struct {
+	Owner                          string                                     `json:"owner"`
+	NonMutating                    bool                                       `json:"non_mutating"`
+	ContractSelection              RunForkContractSelection                   `json:"contract_selection"`
+	PlannerOwner                   string                                     `json:"planner_owner"`
+	ReplayResumeAdmissionOwner     string                                     `json:"replay_resume_admission_owner"`
+	ContractFrontierAdmissionOwner string                                     `json:"contract_frontier_admission_owner"`
+	RouteAdmissionOwner            string                                     `json:"route_admission_owner,omitempty"`
+	RouteTopologyOwner             string                                     `json:"route_topology_owner,omitempty"`
+	DynamicRouteTopologyOwner      string                                     `json:"dynamic_route_topology_owner,omitempty"`
+	RecipientPlanningOwner         string                                     `json:"recipient_planning_owner,omitempty"`
+	SelectedExecutionModelOwner    string                                     `json:"selected_execution_model_owner"`
+	FutureExecutionOwner           string                                     `json:"future_execution_owner"`
+	FactMatrix                     []RunForkSelectedContractReadinessFact     `json:"fact_matrix"`
+	RequiredConsumers              []RunForkSelectedContractExecutionBoundary `json:"required_consumers,omitempty"`
+	BlockedSiblings                []RunForkSelectedContractExecutionBoundary `json:"blocked_siblings,omitempty"`
+	InvalidPaths                   []RunForkSelectedContractExecutionBoundary `json:"invalid_paths,omitempty"`
+	UnsupportedBlockers            []RunForkUnsupportedBlocker                `json:"unsupported_blockers,omitempty"`
+}
+
+type RunForkSelectedContractReadinessFact struct {
+	Fact        string   `json:"fact"`
+	Disposition string   `json:"disposition"`
+	Owner       string   `json:"owner,omitempty"`
+	SourceOwner string   `json:"source_owner,omitempty"`
+	BlockerCode string   `json:"blocker_code,omitempty"`
+	Tracker     string   `json:"tracker,omitempty"`
+	Evidence    []string `json:"evidence,omitempty"`
+	Message     string   `json:"message"`
+}
+
+const (
+	RunForkSelectedContractRoutePersistenceOwner = "store.run_fork.selected_contract_route_persistence"
+	RunForkSelectedContractRouteRecoveryOwner    = "runtime.run_fork.selected_contract_route_recovery"
+)
+
+type RunForkSelectedContractRouteRecoveryRequest struct {
+	ForkRunID         string
+	SourceRunID       string
+	ForkEventID       string
+	ContractSelection RunForkContractSelection
+	RouteTopology     RunForkSelectedContractRouteTopology
+	RecipientPlanning RunForkSelectedContractRecipientPlanning
+}
+
+type RunForkSelectedContractRouteRecovery struct {
+	Owner                        string                   `json:"owner"`
+	RuntimeRecoveryOwner         string                   `json:"runtime_recovery_owner"`
+	ForkRunID                    string                   `json:"fork_run_id"`
+	SourceRunID                  string                   `json:"source_run_id"`
+	ForkEventID                  string                   `json:"fork_event_id"`
+	ContractSelection            RunForkContractSelection `json:"contract_selection"`
+	RouteTopologyOwner           string                   `json:"route_topology_owner"`
+	DynamicTopologyOwner         string                   `json:"dynamic_topology_owner,omitempty"`
+	RecipientPlanningOwner       string                   `json:"recipient_planning_owner"`
+	FrontierEvidenceFingerprint  string                   `json:"frontier_evidence_fingerprint"`
+	RouteTopologyFingerprint     string                   `json:"route_topology_fingerprint"`
+	RecipientPlanningFingerprint string                   `json:"recipient_planning_fingerprint"`
+	StaticRouteEventCount        int                      `json:"static_route_event_count"`
+	DynamicTopologyProofCount    int                      `json:"dynamic_topology_proof_count"`
+	RecipientPlanEventCount      int                      `json:"recipient_plan_event_count"`
+	RouteTopology                json.RawMessage          `json:"route_topology"`
+	RecipientPlanning            json.RawMessage          `json:"recipient_planning"`
+	CreatedAt                    time.Time                `json:"created_at"`
+}
+
+var ErrRunForkSourceFreezeConfirmationRequired = errors.New("run fork source freeze confirmation required")
+var ErrRunForkSourceFreezeBusy = errors.New("run fork source has in-flight execution authority")
+
+type RunForkSourceFreezeConfirmationError struct {
+	SourceRunID string
+	ForkRunID   string
+}
+
+func (e *RunForkSourceFreezeConfirmationError) Error() string {
+	if e == nil {
+		return ErrRunForkSourceFreezeConfirmationRequired.Error()
 	}
-	seen := map[string]struct{}{}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			seen[value] = struct{}{}
-		}
+	return fmt.Sprintf("%s: source_run_id=%s fork_run_id=%s", ErrRunForkSourceFreezeConfirmationRequired, strings.TrimSpace(e.SourceRunID), strings.TrimSpace(e.ForkRunID))
+}
+
+func (e *RunForkSourceFreezeConfirmationError) Unwrap() error {
+	return ErrRunForkSourceFreezeConfirmationRequired
+}
+
+type RunForkSourceFreezeBusyError struct {
+	SourceRunID string
+	Blockers    []string
+}
+
+func (e *RunForkSourceFreezeBusyError) Error() string {
+	if e == nil {
+		return ErrRunForkSourceFreezeBusy.Error()
 	}
-	out := make([]string, 0, len(seen))
-	for value := range seen {
-		out = append(out, value)
+	return fmt.Sprintf("%s: source_run_id=%s blockers=%s", ErrRunForkSourceFreezeBusy, strings.TrimSpace(e.SourceRunID), strings.Join(e.Blockers, ","))
+}
+
+func (e *RunForkSourceFreezeBusyError) Unwrap() error {
+	return ErrRunForkSourceFreezeBusy
+}
+
+type SelectedContractRuntimeExecutionIssueRequest struct {
+	Admission                  RunForkSelectedContractExecutionAdmission
+	ContainerPlanFingerprint   string
+	ActorCensusFingerprint     string
+	EffectiveConfigFingerprint string
+	Now                        time.Time
+}
+
+type SelectedContractRuntimeExecution struct {
+	ExecutionID                     string
+	ForkRunID                       string
+	SourceRunID                     string
+	ForkEventID                     string
+	Generation                      uint64
+	ExecutableCoordinateFingerprint string
+	AdmissionFingerprint            string
+	ContainerPlanFingerprint        string
+	ActorCensusFingerprint          string
+	EffectiveConfigFingerprint      string
+	State                           string
+	ExecutionOwner                  string
+	LeaseExpiresAt                  time.Time
+	FenceGeneration                 uint64
+}
+
+func RunForkSelectedContractRuntimeFingerprint(value any) (string, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return "", fmt.Errorf("marshal selected-contract runtime fingerprint: %w", err)
 	}
-	sort.Strings(out)
-	return out
+	sum := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }

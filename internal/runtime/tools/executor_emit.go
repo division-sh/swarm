@@ -280,7 +280,7 @@ func (e *Executor) emitParentRouteForActor(ctx context.Context, actor models.Age
 	if e == nil {
 		return events.RouteIdentity{}, false, nil
 	}
-	if e.workflowInstances != nil && e.workflowInstances.Enabled() {
+	if e.workflowInstances != nil {
 		for _, ref := range emitWorkflowInstanceRefs(actor, flowInstance) {
 			instance, ok, err := e.workflowInstances.Load(ctx, ref)
 			if err != nil {

@@ -16,7 +16,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func (s *WorkflowInstanceStore) supersedeWorkflowInstanceGates(ctx context.Context, instance *WorkflowInstance, reason string, now time.Time) error {
+func (s *workflowInstanceStore) supersedeWorkflowInstanceGates(ctx context.Context, instance *WorkflowInstance, reason string, now time.Time) error {
 	if s == nil || s.decisionCards == nil || instance == nil {
 		return nil
 	}

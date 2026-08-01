@@ -21,6 +21,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -411,10 +412,9 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContext()), runID)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: sqliteStore.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 	bus := &sqliteFlowActivationBus{}
 	bundle := sqliteFlowActivationBundle()
-	configureSQLiteFlowActivationLifecycle(t, sqliteStore, workflowStore, bus, bundle)
+	workflowStore := configureSQLiteFlowActivationLifecycle(t, sqliteStore, bus, bundle)
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		BaseContext:       ctx,
 		BundleSourceFact:  mustStoreTestEphemeralBundleSourceFact(authorActivityTestBundleHash),
@@ -424,9 +424,16 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 		LifecycleStore:    sqliteStore,
 		DeliveryStore:     sqliteStore,
 		WorkOwner:         storeTestWorkOwner(t),
+		PersistenceRoles: runtimemanager.PersistenceRoles{
+			AgentRoutes:    bus,
+			RouteInstaller: bus,
+			RouteVerifier:  bus,
+			RouteRestorer:  bus,
+			RouteRetirer:   bus,
+		},
 	}, sqliteStore))
 	req := sqliteFlowActivationRequest(bundle, "review", "inst-1", "parent-ent", "review/inst-1")
-	if err := workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	if err := sqliteStore.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 		return manager.ActivateFlowInstance(txctx, req)
 	}); err != nil {
 		t.Fatalf("ActivateFlowInstance inside sqlite pipeline transaction: %v", err)
@@ -458,10 +465,9 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContext()), runID)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: sqliteStore.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 	bus := &sqliteFlowActivationBus{}
 	bundle := sqliteFlowActivationBundle()
-	configureSQLiteFlowActivationLifecycle(t, sqliteStore, workflowStore, bus, bundle)
+	workflowStore := configureSQLiteFlowActivationLifecycle(t, sqliteStore, bus, bundle)
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		BaseContext:       ctx,
 		BundleSourceFact:  mustStoreTestEphemeralBundleSourceFact(authorActivityTestBundleHash),
@@ -471,6 +477,13 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 		LifecycleStore:    sqliteStore,
 		DeliveryStore:     sqliteStore,
 		WorkOwner:         storeTestWorkOwner(t),
+		PersistenceRoles: runtimemanager.PersistenceRoles{
+			AgentRoutes:    bus,
+			RouteInstaller: bus,
+			RouteVerifier:  bus,
+			RouteRestorer:  bus,
+			RouteRetirer:   bus,
+		},
 	}, sqliteStore))
 	start := make(chan struct{})
 	errs := make(chan error, 2)
@@ -482,7 +495,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 			defer wg.Done()
 			<-start
 			req := sqliteFlowActivationRequest(bundle, "review", instanceID, "parent-ent", "review/"+instanceID)
-			errs <- workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+			errs <- sqliteStore.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 				return manager.ActivateFlowInstance(txctx, req)
 			})
 		}()
@@ -543,6 +556,17 @@ type sqliteFlowActivationBus struct {
 	published      []events.Event
 }
 
+type sqliteFlowActivationRoutePreparation struct {
+	deliveries chan *worklifetime.EventDelivery
+}
+
+func (p *sqliteFlowActivationRoutePreparation) Deliveries() <-chan *worklifetime.EventDelivery {
+	return p.deliveries
+}
+
+func (*sqliteFlowActivationRoutePreparation) Publish() error { return nil }
+func (*sqliteFlowActivationRoutePreparation) Discard() error { return nil }
+
 func (*sqliteFlowActivationBus) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
 	return ctx, nil
 }
@@ -556,10 +580,9 @@ type sqliteFlowActivationWorkflowModule struct {
 func configureSQLiteFlowActivationLifecycle(
 	t *testing.T,
 	selected *SQLiteRuntimeStore,
-	workflowStore *runtimepipeline.WorkflowInstanceStore,
 	bus *sqliteFlowActivationBus,
 	bundle *runtimecontracts.WorkflowContractBundle,
-) {
+) *runtimepipeline.PipelineCoordinator {
 	t.Helper()
 	source := semanticview.Wrap(bundle)
 	module := sqliteFlowActivationWorkflowModule{
@@ -567,9 +590,10 @@ func configureSQLiteFlowActivationLifecycle(
 		guards:  runtimepipeline.NewContractGuardRegistry(source),
 		actions: runtimepipeline.NewContractActionRegistry(source),
 	}
-	runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.DB, runtimepipeline.PipelineCoordinatorOptions{
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, selected.DB, runtimepipeline.PipelineCoordinatorOptions{
 		Module:              module,
-		WorkflowStore:       workflowStore,
+		Persistence:         runtimepipeline.NewSQLiteWorkflowPersistence(selected.DB, selected),
+		RunLifecycle:        selected,
 		PipelineObligations: selected.PipelineObligations(),
 		WorkOwner:           storeTestWorkOwner(t),
 	})
@@ -625,6 +649,18 @@ func (*sqliteFlowActivationBus) Unsubscribe(string) {}
 func (*sqliteFlowActivationBus) Store() runtimebus.EventStore { return nil }
 
 func (*sqliteFlowActivationBus) ResetInMemoryState() error { return nil }
+
+func (*sqliteFlowActivationBus) PrepareAgentRoute(
+	runtimeeffects.LifecycleToken,
+	semanticview.FlowOwnedAgentSubscriptionAdmission,
+) runtimebus.AgentRoutePreparation {
+	return &sqliteFlowActivationRoutePreparation{
+		deliveries: make(chan *worklifetime.EventDelivery),
+	}
+}
+
+func (*sqliteFlowActivationBus) FenceAgentRoute(runtimeeffects.LifecycleToken)  {}
+func (*sqliteFlowActivationBus) RemoveAgentRoute(runtimeeffects.LifecycleToken) {}
 
 func (b *sqliteFlowActivationBus) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
 	b.mu.Lock()
@@ -1115,30 +1151,26 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{DB: store.DB}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	owner := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
+	owner := newSQLiteWorkflowTestCoordinator(t, store.DB, store)
 	entityID := runtimepipeline.FlowInstanceEntityID("root/acme")
-	if err := owner.Create(ctx, runtimepipeline.WorkflowInstance{
+	createdAt := time.Now().UTC()
+	if _, err := owner.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      "acme",
+		StorageRef:      "root/acme",
 		WorkflowName:    "root",
 		WorkflowVersion: "v1",
-		CurrentState:    "collecting",
-		EnteredStageAt:  time.Now().UTC(),
+		CurrentState:    "qualified",
+		EnteredStageAt:  createdAt,
 		Metadata: map[string]any{
 			"flow_path":   "root/acme",
 			"slug":        "acme",
 			"name":        "Acme",
 			"entity_type": "company",
-			"score":       float64(7),
+			"score":       float64(9),
 		},
-		StateBuckets: map[string]any{"evidence": []any{"seed"}},
-	}); err != nil {
-		t.Fatalf("Create workflow instance: %v", err)
-	}
-	if err := owner.Mutate(ctx, "root/acme", func(instance *runtimepipeline.WorkflowInstance) {
-		instance.CurrentState = "qualified"
-		instance.Metadata["score"] = float64(9)
-	}); err != nil {
-		t.Fatalf("Mutate workflow instance: %v", err)
+		StateBuckets: map[string]any{"evidence": map[string]any{"seed": true}},
+	}, createdAt); err != nil {
+		t.Fatalf("materialize workflow instance: %v", err)
 	}
 	loaded, ok, err := owner.Load(ctx, "root/acme")
 	if err != nil {
@@ -1146,13 +1178,6 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	}
 	if !ok || loaded.CurrentState != "qualified" || loaded.Metadata["slug"] != "acme" {
 		t.Fatalf("loaded workflow instance = %#v, want qualified acme", loaded)
-	}
-	selected, err := owner.SelectActiveByFields(ctx, "root", []runtimepipeline.WorkflowInstanceFieldSelector{{Field: "score", Value: float64(9)}}, []string{"terminal"})
-	if err != nil {
-		t.Fatalf("SelectActiveByFields: %v", err)
-	}
-	if len(selected) != 1 || selected[0].StorageRef != "root/acme" {
-		t.Fatalf("selected workflow instances = %#v, want root/acme", selected)
 	}
 	var mutationCount int
 	if err := store.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id = ? AND entity_id = ?`, runID, entityID).Scan(&mutationCount); err != nil {

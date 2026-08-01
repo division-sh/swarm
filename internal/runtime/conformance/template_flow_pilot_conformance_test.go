@@ -315,6 +315,10 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	}
 	eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 		ContractBundle: source,
+		Durable: runtimebus.DurableDependencies{
+			ActiveAgents: store,
+			ActiveFlows:  store,
+		},
 		TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 			t.Fatal("existing account route descriptors should satisfy fan-out delivery")
 			return nil
@@ -438,6 +442,10 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 			store := &fanOutPinRouteMemoryStore{flowInstances: tc.flowInstances}
 			eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 				ContractBundle: source,
+				Durable: runtimebus.DurableDependencies{
+					ActiveAgents: store,
+					ActiveFlows:  store,
+				},
 				TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 					t.Fatal("fail-closed fan-out route should not activate an account instance")
 					return nil

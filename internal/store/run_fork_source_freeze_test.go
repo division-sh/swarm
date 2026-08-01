@@ -17,6 +17,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -49,7 +50,7 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 				}
 			}
 
-			err := mark(ctx, runID, RunForkSourceFrozenStatus, now.Add(time.Minute))
+			err := mark(ctx, runID, runfork.RunForkSourceFrozenStatus, now.Add(time.Minute))
 			if !errors.Is(err, storerunlifecycle.ErrForkSourceUnsupported) {
 				t.Fatalf("generic forked transition error = %v", err)
 			}
@@ -90,7 +91,7 @@ func TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome(t 
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityBundleSourceContext()
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	lineage := seedRunForkSourceFreezePair(t, db, "running", RunForkMaterializedStatus, now)
+	lineage := seedRunForkSourceFreezePair(t, db, "running", runfork.RunForkMaterializedStatus, now)
 
 	stageCard := newDecisionCardTestCard(t, lineage.SourceRunID, now)
 	if err := pg.CreateDecisionCard(ctx, stageCard); err != nil {
@@ -132,7 +133,7 @@ func TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome(t 
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, lineage.ForkRunID).Scan(&childStatus); err != nil {
 		t.Fatal(err)
 	}
-	if sourceStatus != RunForkSourceFrozenStatus || childStatus != RunForkActivatedStatus || continuedAs != lineage.ForkRunID || endedAt.IsZero() {
+	if sourceStatus != runfork.RunForkSourceFrozenStatus || childStatus != runfork.RunForkActivatedStatus || continuedAs != lineage.ForkRunID || endedAt.IsZero() {
 		t.Fatalf("lifecycle outcome source=%s child=%s continued_as=%s ended_at=%v", sourceStatus, childStatus, continuedAs, endedAt)
 	}
 
@@ -221,13 +222,13 @@ func TestRunForkSourceFreezeRequiresConfirmationBeforeMutation(t *testing.T) {
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityBundleSourceContext()
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	lineage := seedRunForkSourceFreezePair(t, db, "running", RunForkMaterializedStatus, now)
+	lineage := seedRunForkSourceFreezePair(t, db, "running", runfork.RunForkMaterializedStatus, now)
 
 	err := commitRunForkSourceFreezeForTest(ctx, pg, lineage, now.Add(time.Second), false)
-	if !errors.Is(err, ErrRunForkSourceFreezeConfirmationRequired) {
+	if !errors.Is(err, runfork.ErrRunForkSourceFreezeConfirmationRequired) {
 		t.Fatalf("missing confirmation error = %v", err)
 	}
-	assertRunForkSourceFreezeLifecycleUnchanged(t, db, lineage, "running", RunForkMaterializedStatus)
+	assertRunForkSourceFreezeLifecycleUnchanged(t, db, lineage, "running", runfork.RunForkMaterializedStatus)
 }
 
 func TestRunForkSourceFreezeRejectsCompletedSourceWithoutConfirmationCeremony(t *testing.T) {
@@ -235,13 +236,13 @@ func TestRunForkSourceFreezeRejectsCompletedSourceWithoutConfirmationCeremony(t 
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityBundleSourceContext()
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	lineage := seedRunForkSourceFreezePair(t, db, "completed", RunForkMaterializedStatus, now)
+	lineage := seedRunForkSourceFreezePair(t, db, "completed", runfork.RunForkMaterializedStatus, now)
 
 	err := commitRunForkSourceFreezeForTest(ctx, pg, lineage, now.Add(time.Second), false)
-	if !errors.Is(err, storerunlifecycle.ErrRunNotActive) || errors.Is(err, ErrRunForkSourceFreezeConfirmationRequired) {
+	if !errors.Is(err, storerunlifecycle.ErrRunNotActive) || errors.Is(err, runfork.ErrRunForkSourceFreezeConfirmationRequired) {
 		t.Fatalf("completed source error = %v", err)
 	}
-	assertRunForkSourceFreezeLifecycleUnchanged(t, db, lineage, "completed", RunForkMaterializedStatus)
+	assertRunForkSourceFreezeLifecycleUnchanged(t, db, lineage, "completed", runfork.RunForkMaterializedStatus)
 }
 
 func TestRunForkSourceFreezeBlocksOnlyLiveExecutionAuthority(t *testing.T) {
@@ -269,15 +270,15 @@ func TestRunForkSourceFreezeBlocksOnlyLiveExecutionAuthority(t *testing.T) {
 				pg := admitTestPostgresStore(t, db)
 				ctx := testAuthorActivityBundleSourceContext()
 				now := time.Now().UTC().Truncate(time.Microsecond)
-				lineage := seedRunForkSourceFreezePair(t, db, "running", RunForkMaterializedStatus, now)
+				lineage := seedRunForkSourceFreezePair(t, db, "running", runfork.RunForkMaterializedStatus, now)
 				test.seed(t, ctx, db, lineage, now, live)
 
 				err := commitRunForkSourceFreezeForTest(ctx, pg, lineage, now.Add(time.Second), true)
 				if live {
-					if !errors.Is(err, ErrRunForkSourceFreezeBusy) || !strings.Contains(err.Error(), test.blockerName) {
+					if !errors.Is(err, runfork.ErrRunForkSourceFreezeBusy) || !strings.Contains(err.Error(), test.blockerName) {
 						t.Fatalf("live authority error = %v, want %s", err, test.blockerName)
 					}
-					assertRunForkSourceFreezeLifecycleUnchanged(t, db, lineage, "running", RunForkMaterializedStatus)
+					assertRunForkSourceFreezeLifecycleUnchanged(t, db, lineage, "running", runfork.RunForkMaterializedStatus)
 					return
 				}
 				if err != nil {
@@ -287,7 +288,7 @@ func TestRunForkSourceFreezeBlocksOnlyLiveExecutionAuthority(t *testing.T) {
 				if err := db.QueryRowContext(ctx, `SELECT status, continued_as_run_id::text FROM runs WHERE run_id = $1::uuid`, lineage.SourceRunID).Scan(&sourceStatus, &continuedAs); err != nil {
 					t.Fatal(err)
 				}
-				if sourceStatus != RunForkSourceFrozenStatus || continuedAs != lineage.ForkRunID {
+				if sourceStatus != runfork.RunForkSourceFrozenStatus || continuedAs != lineage.ForkRunID {
 					t.Fatalf("historical freeze outcome = %s/%s", sourceStatus, continuedAs)
 				}
 			})

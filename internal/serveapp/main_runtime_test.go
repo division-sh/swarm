@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"io"
 	"net"
 	"net/http"
@@ -22,6 +21,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/apiv1"
@@ -54,6 +55,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
@@ -631,7 +633,7 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 	}
 
 	stores := selectedPostgresStoreBundle(pg, &config.Config{})
-	if stores.InboundStore == nil || stores.runtimeStores().InboundStore == nil {
+	if stores.InboundStore == nil || stores.runtimeDeps().InboundStore == nil {
 		t.Fatal("selected Postgres store bundle missing InboundStore for served webhook ingress")
 	}
 	loaded, err := loadServeRuntimeBundleFromCatalog(ctx, cliapp.RepoRoot(), stores, projection.BundleHash, runningPlatformSpecPath)
@@ -843,7 +845,7 @@ func TestRunServeRuntimeDiskLoadedRunForkSupportedSurfaceExecutesAndStampsEpheme
 	if result.SourceRunID != sourceRunID || result.BundleHash != projection.BundleHash || result.ExecutedEventCount != 1 {
 		t.Fatalf("run.fork result = %#v, want source=%s bundle_hash=%s executed=1", result, sourceRunID, projection.BundleHash)
 	}
-	if !result.SourceFrozen || result.SourceRunStatus != store.RunForkSourceFrozenStatus || result.ForkRunID == "" {
+	if !result.SourceFrozen || result.SourceRunStatus != runfork.RunForkSourceFrozenStatus || result.ForkRunID == "" {
 		t.Fatalf("run.fork source/fork outcome = %#v, want frozen source and materialized fork", result)
 	}
 
@@ -940,7 +942,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	if rpc.Result.SourceRunID != sourceRunID || rpc.Result.BundleHash != projection.BundleHash || rpc.Result.ExecutedEventCount != 1 {
 		t.Fatalf("run.fork result = %#v, want source=%s bundle_hash=%s executed=1", rpc.Result, sourceRunID, projection.BundleHash)
 	}
-	if !rpc.Result.SourceFrozen || rpc.Result.SourceRunStatus != store.RunForkSourceFrozenStatus {
+	if !rpc.Result.SourceFrozen || rpc.Result.SourceRunStatus != runfork.RunForkSourceFrozenStatus {
 		t.Fatalf("run.fork source outcome = %#v, want frozen/forked", rpc.Result)
 	}
 	if rpc.Result.ForkRunID == "" || rpc.Result.ForkEventID != sourceEventID {
@@ -1001,7 +1003,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	if err := json.Unmarshal([]byte(stdout), &advancedResult); err != nil {
 		t.Fatalf("decode advanced swarm run fork json: %v\n%s", err, stdout)
 	}
-	if advancedResult.SourceRunID != advancedSourceRunID || advancedResult.SourceFrozen || advancedResult.SourceRunStatus != "running" || advancedResult.ForkRunStatus != store.RunForkActivatedStatus {
+	if advancedResult.SourceRunID != advancedSourceRunID || advancedResult.SourceFrozen || advancedResult.SourceRunStatus != "running" || advancedResult.ForkRunStatus != runfork.RunForkActivatedStatus {
 		t.Fatalf("advanced run.fork result = %#v, want preserved running source and activated fork", advancedResult)
 	}
 	var advancedSourceStatus, advancedContinuedAs string
@@ -1107,7 +1109,7 @@ func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t 
 	waitServedJoinSourceTimer(t, db, initial.RunID)
 	waitServedRunDeliveryQuiescence(t, db, "postgres", initial.RunID)
 	forkEventID := seedServedJoinForkFrontier(t, db, initial.RunID, entityID, arrival.EventID)
-	if _, err := pg.PlanRunFork(context.Background(), store.RunForkPlanRequest{
+	if _, err := pg.PlanRunFork(context.Background(), runfork.RunForkPlanRequest{
 		SourceRunID: initial.RunID,
 		At:          forkEventID,
 	}); err != nil {
@@ -1125,8 +1127,8 @@ func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t 
 		t.Fatalf("join run.fork error details = %#v", rpcErr.Data["details"])
 	}
 	failure := decodeServedFailureEnvelope(t, details["failure"])
-	if failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != store.RunForkBlockerTimerHistoryUnproven {
-		t.Fatalf("join run.fork failure = %#v, want dependency-unavailable/%s", failure, store.RunForkBlockerTimerHistoryUnproven)
+	if failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != runfork.RunForkBlockerTimerHistoryUnproven {
+		t.Fatalf("join run.fork failure = %#v, want dependency-unavailable/%s", failure, runfork.RunForkBlockerTimerHistoryUnproven)
 	}
 	var forkRuns, forkTimers int
 	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`, initial.RunID).Scan(&forkRuns); err != nil {
@@ -1310,7 +1312,7 @@ func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetI
 	`, rpcResult.ForkRunID).Scan(&mode, &selectedHash, &contractsRoot); err != nil {
 		t.Fatalf("load selected-contract binding: %v", err)
 	}
-	if mode != store.RunForkContractSelectionModeBundleHash || selectedHash != targetProjection.BundleHash || contractsRoot != "" {
+	if mode != runfork.RunForkContractSelectionModeBundleHash || selectedHash != targetProjection.BundleHash || contractsRoot != "" {
 		t.Fatalf("selected-contract binding = mode:%q hash:%q root:%q, want target bundle_hash selection", mode, selectedHash, contractsRoot)
 	}
 	var routeMode, routeHash string
@@ -1321,7 +1323,7 @@ func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetI
 	`, rpcResult.ForkRunID).Scan(&routeMode, &routeHash); err != nil {
 		t.Fatalf("load selected-contract route recovery: %v", err)
 	}
-	if routeMode != store.RunForkContractSelectionModeBundleHash || routeHash != targetProjection.BundleHash {
+	if routeMode != runfork.RunForkContractSelectionModeBundleHash || routeHash != targetProjection.BundleHash {
 		t.Fatalf("route recovery = mode:%q hash:%q, want target bundle_hash selection", routeMode, routeHash)
 	}
 	var forkEventID string
@@ -1983,9 +1985,13 @@ func wrapServedDirectiveFaultStore(t *testing.T, stores storeBundle, faults *ser
 	}
 	switch eventStore := stores.EventStore.(type) {
 	case *store.PostgresStore:
-		stores.EventStore = &servedPostgresDirectiveFaultStore{PostgresStore: eventStore, faults: faults}
+		wrapped := &servedPostgresDirectiveFaultStore{PostgresStore: eventStore, faults: faults}
+		stores.EventStore = wrapped
+		stores.ManagerPersistenceRoles.DirectiveOperations = wrapped
 	case *store.SQLiteRuntimeStore:
-		stores.EventStore = &servedSQLiteDirectiveFaultStore{SQLiteRuntimeStore: eventStore, faults: faults}
+		wrapped := &servedSQLiteDirectiveFaultStore{SQLiteRuntimeStore: eventStore, faults: faults}
+		stores.EventStore = wrapped
+		stores.ManagerPersistenceRoles.DirectiveOperations = wrapped
 	default:
 		t.Fatalf("unsupported served directive event store %T", stores.EventStore)
 	}
@@ -2894,7 +2900,7 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 
 type servedDecisionCardFixture struct {
 	RunID, EntityID, CardID, ContentHash, NoticeID string
-	Workflow                                       *runtimepipeline.WorkflowInstanceStore
+	Workflow                                       *runtimepipeline.PipelineCoordinator
 }
 
 func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
@@ -3311,7 +3317,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	bundleFact := rt.Runtime.Options.BundleSourceFact
 	bundleHash := bundleFact.BundleHash()
 	var cards decisioncard.Store
-	var workflow *runtimepipeline.WorkflowInstanceStore
+	workflow := rt.Runtime.Pipeline
 	var seedEvent func(context.Context, events.Event) error
 	var insertNotice func(context.Context, runtimetools.MailboxItem) (string, error)
 	switch rt.Backend {
@@ -3320,8 +3326,6 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		if pg == nil {
 			t.Fatal("accepted Postgres store owner is required")
 		}
-		workflow = runtimepipeline.NewWorkflowInstanceStore(rt.DB)
-		workflow.ConfigureRuntimeMutationRunner(pg)
 		cards, insertNotice = pg, pg.InsertMailboxItem
 		seedEvent = func(ctx context.Context, evt events.Event) error {
 			storetest.CommitSemanticEventWithInitialFacts(t, ctx, pg, evt, nil,
@@ -3335,7 +3339,6 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 			t.Fatal("accepted SQLite store owner is required")
 		}
 		cards = sqlite
-		workflow = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(rt.DB, sqlite)
 		insertNotice = sqlite.InsertMailboxItem
 		seedEvent = func(ctx context.Context, evt events.Event) error {
 			storetest.CommitSemanticEventWithInitialFacts(t, ctx, sqlite, evt, nil,
@@ -3374,10 +3377,10 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 		t.Fatalf("store gate activation: %v", err)
 	}
-	if err := workflow.Upsert(runtimecorrelation.WithRunID(ctx, runID), runtimepipeline.WorkflowInstance{
+	if _, err := workflow.MaterializeInitialEntry(runtimecorrelation.WithRunID(ctx, runID), runtimepipeline.WorkflowInstance{
 		InstanceID: entityID, StorageRef: entityID, WorkflowName: "root", WorkflowVersion: "1.0.0",
 		CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: carrier.PersistedMetadata(), StateBuckets: carrier.PersistedStateBuckets(),
-	}); err != nil {
+	}, now); err != nil {
 		t.Fatalf("seed gated workflow instance: %v", err)
 	}
 	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Launch review", map[string]any{"environment": "staging"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
@@ -4583,29 +4586,26 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	}
 
 	var cards decisioncard.Store
-	var workflow *runtimepipeline.WorkflowInstanceStore
+	workflow := rt.Runtime.Pipeline
 	switch rt.Backend {
 	case "postgres":
 		if rt.Postgres == nil {
 			t.Fatal("accepted Postgres store owner is required")
 		}
 		cards = rt.Postgres
-		workflow = runtimepipeline.NewWorkflowInstanceStore(rt.DB)
-		workflow.ConfigureRuntimeMutationRunner(rt.Postgres)
 	case "sqlite":
 		sqlite := rt.SQLite
 		if sqlite == nil {
 			t.Fatal("accepted SQLite store owner is required")
 		}
 		cards = sqlite
-		workflow = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(rt.DB, sqlite)
 	default:
 		t.Fatalf("unknown run.stop decision-card proof backend %q", rt.Backend)
 	}
-	if err := workflow.Upsert(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := workflow.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: entityID, StorageRef: entityID, WorkflowName: "root", WorkflowVersion: "1.0.0",
 		CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: carrier.PersistedMetadata(), StateBuckets: carrier.PersistedStateBuckets(),
-	}); err != nil {
+	}, now); err != nil {
 		t.Fatalf("seed %s run.stop gated workflow instance: %v", rt.Backend, err)
 	}
 	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Run stop review", map[string]any{"operation": "run.stop"}, outcomes)
@@ -4668,21 +4668,19 @@ func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedCon
 	}
 
 	var cards decisioncard.Store
-	var workflow *runtimepipeline.WorkflowInstanceStore
+	workflow := rt.Runtime.Pipeline
 	switch rt.Backend {
 	case "postgres":
 		if rt.Postgres == nil {
 			t.Fatal("accepted Postgres store owner is required")
 		}
 		cards = rt.Postgres
-		workflow = runtimepipeline.NewWorkflowInstanceStore(rt.DB)
 	case "sqlite":
 		sqlite := rt.SQLite
 		if sqlite == nil {
 			t.Fatal("accepted SQLite store owner is required")
 		}
 		cards = sqlite
-		workflow = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(rt.DB, sqlite)
 	default:
 		t.Fatalf("unknown terminal decision-card proof backend %q", rt.Backend)
 	}

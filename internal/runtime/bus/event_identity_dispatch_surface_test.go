@@ -38,8 +38,22 @@ type completeEventDispatchStore interface {
 	runtimebus.EventStore
 	runtimedelivery.Store
 	runtimemanager.ManagerPersistence
+	interface {
+		RunRuntimeMutationContext(context.Context, func(context.Context) error) error
+	}
+	runtimerunlifecycle.OperationOwner
 	PipelineObligations() runtimepipelineobligation.Store
 }
+
+type standingDispatchWorkflowModule struct{}
+
+func (standingDispatchWorkflowModule) SemanticSource() semanticview.Source { return nil }
+func (standingDispatchWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
+	return nil
+}
+func (standingDispatchWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode  { return nil }
+func (standingDispatchWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry   { return nil }
+func (standingDispatchWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry { return nil }
 
 type completeEventDispatchFixture struct {
 	store    completeEventDispatchStore
@@ -247,19 +261,17 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	runID, eventID := uuid.NewString(), uuid.NewString()
 	if origin.Kind() == runtimerunlifecycle.OriginStandingGeneration {
 		runID = runtimeflowidentity.StandingGenerationRunID(origin.ServiceID(), origin.Generation())
-		runner, ok := selected.(runtimepipeline.RuntimeMutationRunner)
-		if !ok {
-			t.Fatalf("%s selected store does not expose the runtime mutation owner", backend)
-		}
-		var workflow *runtimepipeline.WorkflowInstanceStore
+		workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
 		if backend == "sqlite" {
-			workflow = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
-		} else {
-			workflow = runtimepipeline.NewWorkflowInstanceStore(db)
-			workflow.ConfigureRuntimeMutationRunner(runner)
+			workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected.(*store.SQLiteRuntimeStore))
 		}
-		workflow.ConfigureDeliveryLifecycleStore(selected)
-		workflow.ConfigurePipelineObligationStore(selected.PipelineObligations())
+		workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+			Module:              standingDispatchWorkflowModule{},
+			Persistence:         workflowPersistence,
+			RunLifecycle:        selected,
+			DeliveryStore:       selected,
+			PipelineObligations: selected.PipelineObligations(),
+		})
 		reconciled, err := workflow.ReconcileStandingService(ctx, runtimepipeline.StandingServiceCandidate{
 			ServiceID:  origin.ServiceID(),
 			PackageKey: "standing-recovery-proof",
@@ -540,7 +552,15 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	})
 	manager := runtimemanager.NewAgentManagerWithOptions(f.bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return &completeEventRecordingAgent{id: cfg.ID, subscriptions: []events.EventType{f.event.Type()}, seen: seen}, nil
-	}, runtimemanager.AgentManagerOptions{DeliveryStore: f.store, WorkOwner: owner}, f.store)
+	}, runtimemanager.AgentManagerOptions{
+		DeliveryStore: f.store,
+		PersistenceRoles: runtimemanager.PersistenceRoles{
+			AgentRoutes: f.bus, RouteInstaller: f.bus, RouteVerifier: f.bus,
+			RouteRestorer: f.bus, RouteRetirer: f.bus, RouteRemover: f.bus,
+			CreationPublisher: f.bus, DeliveryRuntime: f.bus,
+		},
+		WorkOwner: owner,
+	}, f.store)
 	return manager, owner
 }
 

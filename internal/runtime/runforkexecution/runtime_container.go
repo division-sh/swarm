@@ -24,41 +24,41 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 // SelectedContractForkLocalRuntimeContainer is the canonical live runtime
 // container proof for selected-contract fork execution. It coordinates existing
 // child owners; it does not authorize source-row replay or restart recovery.
 type SelectedContractForkLocalRuntimeContainer struct {
-	Owner                                          string                                           `json:"owner"`
-	ExecutionOwner                                 string                                           `json:"execution_owner"`
-	SourceRunID                                    string                                           `json:"source_run_id"`
-	ForkRunID                                      string                                           `json:"fork_run_id"`
-	ForkEventID                                    string                                           `json:"fork_event_id"`
-	SourceEventIDs                                 []string                                         `json:"source_event_ids,omitempty"`
-	RecipientPlanningOwner                         string                                           `json:"recipient_planning_owner"`
-	DeferredWorkAdmissionOwner                     string                                           `json:"deferred_work_admission_owner"`
-	AuthoritativeAgentDeliveryMaterializationOwner string                                           `json:"authoritative_agent_delivery_materialization_owner"`
-	AgentRuntimeMaterializationOwner               string                                           `json:"agent_runtime_materialization_owner,omitempty"`
-	RuntimePlatformEventLineagePolicyOwner         string                                           `json:"runtime_platform_event_lineage_policy_owner"`
-	TypedRuntimeLineageOwner                       string                                           `json:"typed_runtime_lineage_owner"`
-	RouteRecoveryOwner                             string                                           `json:"route_recovery_owner"`
-	ActivationGateOwner                            string                                           `json:"activation_gate_owner"`
-	EventBusRecipientPlanGuard                     bool                                             `json:"eventbus_recipient_plan_guard"`
-	RuntimeActiveAgentDescriptorsEphemeral         bool                                             `json:"runtime_active_agent_descriptors_ephemeral"`
-	EphemeralAgentRuntime                          bool                                             `json:"ephemeral_agent_runtime"`
-	QuiescenceRequired                             bool                                             `json:"quiescence_required"`
-	CleanupRequired                                bool                                             `json:"cleanup_required"`
-	RuntimeExecutionID                             string                                           `json:"runtime_execution_id"`
-	RuntimeGeneration                              uint64                                           `json:"runtime_generation"`
-	AuthorityExecutionOwner                        string                                           `json:"authority_execution_owner"`
-	AdmissionFingerprint                           string                                           `json:"admission_fingerprint"`
-	ContainerPlanFingerprint                       string                                           `json:"container_plan_fingerprint"`
-	ActorCensusFingerprint                         string                                           `json:"actor_census_fingerprint"`
-	EffectiveConfigFingerprint                     string                                           `json:"effective_config_fingerprint"`
-	InvalidPaths                                   []store.RunForkSelectedContractExecutionBoundary `json:"invalid_paths,omitempty"`
-	SplitSiblings                                  []store.RunForkSelectedContractExecutionBoundary `json:"split_siblings,omitempty"`
+	Owner                                          string                                             `json:"owner"`
+	ExecutionOwner                                 string                                             `json:"execution_owner"`
+	SourceRunID                                    string                                             `json:"source_run_id"`
+	ForkRunID                                      string                                             `json:"fork_run_id"`
+	ForkEventID                                    string                                             `json:"fork_event_id"`
+	SourceEventIDs                                 []string                                           `json:"source_event_ids,omitempty"`
+	RecipientPlanningOwner                         string                                             `json:"recipient_planning_owner"`
+	DeferredWorkAdmissionOwner                     string                                             `json:"deferred_work_admission_owner"`
+	AuthoritativeAgentDeliveryMaterializationOwner string                                             `json:"authoritative_agent_delivery_materialization_owner"`
+	AgentRuntimeMaterializationOwner               string                                             `json:"agent_runtime_materialization_owner,omitempty"`
+	RuntimePlatformEventLineagePolicyOwner         string                                             `json:"runtime_platform_event_lineage_policy_owner"`
+	TypedRuntimeLineageOwner                       string                                             `json:"typed_runtime_lineage_owner"`
+	RouteRecoveryOwner                             string                                             `json:"route_recovery_owner"`
+	ActivationGateOwner                            string                                             `json:"activation_gate_owner"`
+	EventBusRecipientPlanGuard                     bool                                               `json:"eventbus_recipient_plan_guard"`
+	RuntimeActiveAgentDescriptorsEphemeral         bool                                               `json:"runtime_active_agent_descriptors_ephemeral"`
+	EphemeralAgentRuntime                          bool                                               `json:"ephemeral_agent_runtime"`
+	QuiescenceRequired                             bool                                               `json:"quiescence_required"`
+	CleanupRequired                                bool                                               `json:"cleanup_required"`
+	RuntimeExecutionID                             string                                             `json:"runtime_execution_id"`
+	RuntimeGeneration                              uint64                                             `json:"runtime_generation"`
+	AuthorityExecutionOwner                        string                                             `json:"authority_execution_owner"`
+	AdmissionFingerprint                           string                                             `json:"admission_fingerprint"`
+	ContainerPlanFingerprint                       string                                             `json:"container_plan_fingerprint"`
+	ActorCensusFingerprint                         string                                             `json:"actor_census_fingerprint"`
+	EffectiveConfigFingerprint                     string                                             `json:"effective_config_fingerprint"`
+	InvalidPaths                                   []runfork.RunForkSelectedContractExecutionBoundary `json:"invalid_paths,omitempty"`
+	SplitSiblings                                  []runfork.RunForkSelectedContractExecutionBoundary `json:"split_siblings,omitempty"`
 }
 
 type selectedContractForkLocalRuntimeContainer struct {
@@ -73,7 +73,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
 	if req.Store == nil {
-		return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("%s requires postgres store", store.RunForkSelectedContractForkLocalRuntimeContainerOwner)
+		return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("%s requires postgres store", runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner)
 	}
 	sourceRunID, err := requireSelectedContractRuntimeContainerUUID("source run_id", req.SourceRunID)
 	if err != nil {
@@ -90,16 +90,16 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	if err := req.DeferredWorkAdmission.validate(sourceRunID, forkEventID, req.LoadedSource.Source); err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
-	if req.Admission.DeferredWorkAdmissionOwner != store.RunForkSelectedContractDeferredWorkAdmissionOwner {
+	if req.Admission.DeferredWorkAdmissionOwner != runfork.RunForkSelectedContractDeferredWorkAdmissionOwner {
 		return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("%s requires %s execution admission evidence",
-			store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
-			store.RunForkSelectedContractDeferredWorkAdmissionOwner,
+			runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
 		)
 	}
-	if strings.TrimSpace(req.RecipientPlanning.Owner) != store.RunForkSelectedContractRecipientPlanningOwner {
+	if strings.TrimSpace(req.RecipientPlanning.Owner) != runfork.RunForkSelectedContractRecipientPlanningOwner {
 		return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("%s requires %s; got %q",
-			store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
-			store.RunForkSelectedContractRecipientPlanningOwner,
+			runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			runfork.RunForkSelectedContractRecipientPlanningOwner,
 			req.RecipientPlanning.Owner,
 		)
 	}
@@ -109,8 +109,8 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	})
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("%s consumes %s: %w",
-			store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
-			store.RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner,
+			runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			runfork.RunForkSelectedContractAuthoritativeAgentDeliveryMaterializationOwner,
 			err,
 		)
 	}
@@ -120,16 +120,16 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	}
 	sourceEventIDs := normalizeSelectedContractRuntimeContainerSourceEvents(req.SourceEvents)
 	agentRuntimeOwner := strings.TrimSpace(req.AgentRuntime.Proof.Owner)
-	if deliveryMaterialization.MaterializationRequired && agentRuntimeOwner != store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner {
+	if deliveryMaterialization.MaterializationRequired && agentRuntimeOwner != runfork.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner {
 		return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("%s requires %s for planned agent recipients; got %q",
-			store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
-			store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner,
+			runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			runfork.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner,
 			agentRuntimeOwner,
 		)
 	}
 	req.ExecutionOwner = executionOwner
 	proof := SelectedContractForkLocalRuntimeContainer{
-		Owner:                      store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+		Owner:                      runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 		ExecutionOwner:             executionOwner,
 		SourceRunID:                sourceRunID,
 		ForkRunID:                  forkRunID,
@@ -139,10 +139,10 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 		DeferredWorkAdmissionOwner: req.DeferredWorkAdmission.owner,
 		AuthoritativeAgentDeliveryMaterializationOwner: deliveryMaterialization.Owner,
 		AgentRuntimeMaterializationOwner:               agentRuntimeOwner,
-		RuntimePlatformEventLineagePolicyOwner:         store.RunForkSelectedContractForkLocalRuntimePlatformEventLineagePolicyOwner,
-		TypedRuntimeLineageOwner:                       store.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner,
-		RouteRecoveryOwner:                             store.RunForkSelectedContractRouteRecoveryOwner,
-		ActivationGateOwner:                            store.RunForkSelectedContractExecutionActivationGateOwner,
+		RuntimePlatformEventLineagePolicyOwner:         runfork.RunForkSelectedContractForkLocalRuntimePlatformEventLineagePolicyOwner,
+		TypedRuntimeLineageOwner:                       runfork.RunForkSelectedContractForkLocalRuntimeTypedLineageOwner,
+		RouteRecoveryOwner:                             runfork.RunForkSelectedContractRouteRecoveryOwner,
+		ActivationGateOwner:                            runfork.RunForkSelectedContractExecutionActivationGateOwner,
 		EventBusRecipientPlanGuard:                     true,
 		RuntimeActiveAgentDescriptorsEphemeral:         true,
 		EphemeralAgentRuntime:                          true,
@@ -151,19 +151,19 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 		InvalidPaths:                                   selectedContractRuntimeContainerInvalidPaths(),
 		SplitSiblings:                                  selectedContractRuntimeContainerSplitSiblings(),
 	}
-	containerFingerprint, err := store.RunForkSelectedContractRuntimeFingerprint(struct {
+	containerFingerprint, err := runfork.RunForkSelectedContractRuntimeFingerprint(struct {
 		Proof             SelectedContractForkLocalRuntimeContainer
-		RecipientPlanning store.RunForkSelectedContractRecipientPlanning
+		RecipientPlanning runfork.RunForkSelectedContractRecipientPlanning
 		SourceEvents      []string
 	}{proof, req.RecipientPlanning, sourceEventIDs})
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
-	actorFingerprint, err := store.RunForkSelectedContractRuntimeFingerprint(req.AgentRuntime.Records)
+	actorFingerprint, err := runfork.RunForkSelectedContractRuntimeFingerprint(req.AgentRuntime.Records)
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
-	configFingerprint, err := store.RunForkSelectedContractRuntimeFingerprint(req.AgentRuntime.Options.Config)
+	configFingerprint, err := runfork.RunForkSelectedContractRuntimeFingerprint(req.AgentRuntime.Options.Config)
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
@@ -183,7 +183,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 			return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("selected-contract agent %s execution mode %s conflicts with selected backend mode %s", record.Config.ID, record.Config.ExecutionMode, mode)
 		}
 	}
-	issued, err := req.Store.IssueRunForkSelectedContractRuntimeExecution(ctx, store.SelectedContractRuntimeExecutionIssueRequest{
+	issued, err := req.Store.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
 		Admission: req.Admission, ContainerPlanFingerprint: containerFingerprint,
 		ActorCensusFingerprint: actorFingerprint, EffectiveConfigFingerprint: configFingerprint,
 	})
@@ -245,7 +245,6 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if err != nil {
 		return nil, err
 	}
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(req.Store.DB)
 	var lifecycleManager *runtimemanager.AgentManager
 	deliveryAuthority, err := runtimedelivery.NewSelectedExecutionAuthority(
 		req.LoadedSource.BundleSourceFact,
@@ -257,7 +256,13 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		return nil, fmt.Errorf("create selected-contract delivery authority: %w", err)
 	}
 	bus, err := runtimebus.NewEventBusWithOptions(req.Store, runtimebus.EventBusOptions{
-		WorkOwner:                   forkOwner,
+		WorkOwner: forkOwner,
+		Durable: runtimebus.DurableDependencies{
+			ReplyContext: req.Store, RunLifecycle: req.Store, DeliveryLifecycle: req.Store,
+			FlowRoutes: req.Store, FlowRouteRecords: req.Store, FlowRouteSets: req.Store, FlowRouteTopology: req.Store, FlowRouteRollback: req.Store,
+			ActiveAgents: req.Store, ActiveFlows: req.Store, DeliveryTargets: req.Store, DeliveryRouteSets: req.Store,
+			TargetFailureRecorder: req.Store, RunOrigins: req.Store,
+		},
 		PipelineObligations:         req.Store.PipelineObligations(),
 		BundleSourceFact:            req.LoadedSource.BundleSourceFact,
 		DeliveryAuthority:           deliveryAuthority,
@@ -276,7 +281,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if err != nil {
 		return nil, fmt.Errorf("create selected-contract fork-local runtime container bus: %w", err)
 	}
-	pipeline := newSelectedContractPipeline(bus, req.Store, req.LoadedSource, req.AgentRuntime.Options, workflowStore, func(ctx context.Context, activation runtimepipeline.FlowInstanceActivationRequest) error {
+	pipeline := newSelectedContractPipeline(bus, req.Store, req.WorkflowPersistence, req.LoadedSource, req.AgentRuntime.Options, func(ctx context.Context, activation runtimepipeline.FlowInstanceActivationRequest) error {
 		if lifecycleManager == nil {
 			return fmt.Errorf("selected-contract fork-local lifecycle manager is not initialized")
 		}
@@ -318,7 +323,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 			}
 		}
 	}()
-	agentRuntime, admission, err := startSelectedContractAgentRuntime(runCtx, req, bus, workflowStore)
+	agentRuntime, admission, err := startSelectedContractAgentRuntime(runCtx, req, bus, pipeline)
 	if err != nil {
 		return nil, err
 	}
@@ -347,13 +352,13 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		prepared, err := bus.PrepareSelectedForkPublish(eventCtx, evt)
 		if err != nil {
 			return out, fmt.Errorf("%s execute selected-contract fork event %s as %s: %w",
-				store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+				runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 				sourceEvent.SourceEventID,
 				forkEventID,
 				err,
 			)
 		}
-		lineage := store.RunForkSelectedContractExecutionLineage{
+		lineage := runfork.RunForkSelectedContractExecutionLineage{
 			ForkRunID:          req.ForkRunID,
 			SourceRunID:        req.SourceRunID,
 			SourceEventID:      sourceEvent.SourceEventID,
@@ -362,7 +367,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 			SelectionAuthority: c.proof.ExecutionOwner,
 			CreatedAt:          prepared.Event.CreatedAt(),
 		}
-		outcome, err := req.Store.CommitSelectedForkEvent(eventCtx, store.CommitSelectedForkEventRequest{
+		outcome, err := req.Store.CommitSelectedForkEvent(eventCtx, runtimebus.CommitSelectedForkEventRequest{
 			Commit: prepared.CommitRequest(), Lineage: lineage,
 		})
 		if err != nil {
@@ -375,7 +380,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		prepared = committedPrepared
 		if err := bus.DispatchPreparedPublishAndWait(eventCtx, prepared); err != nil {
 			return out, fmt.Errorf("%s dispatch committed selected-contract fork event %s as %s: %w",
-				store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+				runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 				sourceEvent.SourceEventID,
 				forkEventID,
 				err,
@@ -390,7 +395,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if agentRuntime != nil {
 		stopHeartbeatWork()
 		if err := agentRuntime.Shutdown(); err != nil {
-			return out, fmt.Errorf("%s stop selected-fork runtime before quiescence: %w", store.RunForkSelectedContractForkLocalRuntimeContainerOwner, err)
+			return out, fmt.Errorf("%s stop selected-fork runtime before quiescence: %w", runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, err)
 		}
 		agentRuntimeStopped = true
 		timeout := req.AgentRuntime.Options.QuiescenceTimeout
@@ -400,12 +405,12 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		waitCtx, cancel := context.WithTimeout(runCtx, timeout)
 		defer cancel()
 		if err := agentRuntime.WaitForQuiescence(waitCtx, bus); err != nil {
-			return out, fmt.Errorf("%s wait for selected-fork runtime quiescence: %w", store.RunForkSelectedContractForkLocalRuntimeContainerOwner, err)
+			return out, fmt.Errorf("%s wait for selected-fork runtime quiescence: %w", runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, err)
 		}
 	}
 	select {
 	case err := <-heartbeatErr:
-		return out, fmt.Errorf("%s heartbeat selected-fork completion authority: %w", store.RunForkSelectedContractForkLocalRuntimeContainerOwner, err)
+		return out, fmt.Errorf("%s heartbeat selected-fork completion authority: %w", runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, err)
 	default:
 	}
 	return out, nil
@@ -420,7 +425,7 @@ func (c selectedContractForkLocalRuntimeContainer) Close(ctx context.Context) er
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Fail(ctx context.Context, cause error) error {
-	failure := runtimefailures.FromError(cause, store.RunForkSelectedContractForkLocalRuntimeContainerOwner, "execute")
+	failure := runtimefailures.FromError(cause, runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, "execute")
 	raw, err := json.Marshal(failure.Failure)
 	if err != nil {
 		return err
@@ -435,11 +440,11 @@ type selectedContractRuntimeContainerLoggerHook struct {
 	logger *runtimepkg.RuntimeLogger
 }
 
-func selectedContractRuntimeContainerLogger(pg *store.PostgresStore) runtimebus.LoggerHook {
-	if pg == nil || pg.DB == nil {
+func selectedContractRuntimeContainerLogger(persistence runtimepkg.RuntimeLogPersistence) runtimebus.LoggerHook {
+	if persistence == nil {
 		return nil
 	}
-	return selectedContractRuntimeContainerLoggerHook{logger: runtimepkg.NewRuntimeLogger(pg)}
+	return selectedContractRuntimeContainerLoggerHook{logger: runtimepkg.NewRuntimeLogger(persistence)}
 }
 
 func (h selectedContractRuntimeContainerLoggerHook) Log(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, failure *runtimefailures.Envelope, durationUS int) error {
@@ -478,27 +483,27 @@ func selectedContractRuntimeContainerLineageContext(ctx context.Context, proof S
 func selectedContractRuntimeContainerExecutionOwner(owner string) string {
 	owner = strings.TrimSpace(owner)
 	if owner == "" {
-		return store.RunForkSelectedContractExecutionOwner
+		return runfork.RunForkSelectedContractExecutionOwner
 	}
 	return owner
 }
 
 func validateSelectedContractRuntimeContainerExecutionOwner(owner string) error {
 	switch strings.TrimSpace(owner) {
-	case store.RunForkSelectedContractExecutionOwner, store.RunForkHistoricalReplayContractSwapBootResumeOwner:
+	case runfork.RunForkSelectedContractExecutionOwner, runfork.RunForkHistoricalReplayContractSwapBootResumeOwner:
 		return nil
 	default:
-		return fmt.Errorf("%s cannot execute for owner %q", store.RunForkSelectedContractForkLocalRuntimeContainerOwner, owner)
+		return fmt.Errorf("%s cannot execute for owner %q", runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, owner)
 	}
 }
 
 func requireSelectedContractRuntimeContainerUUID(name, value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "", fmt.Errorf("%s requires %s", store.RunForkSelectedContractForkLocalRuntimeContainerOwner, name)
+		return "", fmt.Errorf("%s requires %s", runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, name)
 	}
 	if _, err := uuid.Parse(value); err != nil {
-		return "", fmt.Errorf("%s requires %s to be a UUID: %w", store.RunForkSelectedContractForkLocalRuntimeContainerOwner, name, err)
+		return "", fmt.Errorf("%s requires %s to be a UUID: %w", runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, name, err)
 	}
 	return value, nil
 }
@@ -520,48 +525,48 @@ func normalizeSelectedContractRuntimeContainerSourceEvents(values []string) []st
 	return out
 }
 
-func selectedContractRuntimeContainerInvalidPaths() []store.RunForkSelectedContractExecutionBoundary {
-	return []store.RunForkSelectedContractExecutionBoundary{
+func selectedContractRuntimeContainerInvalidPaths() []runfork.RunForkSelectedContractExecutionBoundary {
+	return []runfork.RunForkSelectedContractExecutionBoundary{
 		{
 			Concept:     "source_row_copy_as_execution_truth",
-			Disposition: store.RunForkSelectedContractDispositionInvalid,
+			Disposition: runfork.RunForkSelectedContractDispositionInvalid,
 			Reason:      "source events, deliveries, outcomes, routes, sessions, turns, audits, and runtime diagnostics remain lineage/blocker evidence; the container mints fresh fork-local runtime rows",
 		},
 		{
 			Concept:     "eventbus_descriptor_as_semantic_owner",
-			Disposition: store.RunForkSelectedContractDispositionInvalid,
+			Disposition: runfork.RunForkSelectedContractDispositionInvalid,
 			Reason:      "EventBus runtime descriptors are in-memory container evidence only and must not become selected-fork authority outside the container",
 		},
 		{
 			Concept:     "normal_agent_manager_state_as_selected_fork_truth",
-			Disposition: store.RunForkSelectedContractDispositionInvalid,
+			Disposition: runfork.RunForkSelectedContractDispositionInvalid,
 			Reason:      "selected-fork agents are ephemeral fork-local handlers and must not persist ordinary current-runtime agent rows as selected-fork truth",
 		},
 		{
 			Concept:     "readiness_or_operator_output_authorizes_runtime",
-			Disposition: store.RunForkSelectedContractDispositionInvalid,
+			Disposition: runfork.RunForkSelectedContractDispositionInvalid,
 			Reason:      "readiness JSON, CLI, API, dashboard, and Builder are consumers only and cannot own runtime-container semantics",
 		},
 	}
 }
 
-func selectedContractRuntimeContainerSplitSiblings() []store.RunForkSelectedContractExecutionBoundary {
-	return []store.RunForkSelectedContractExecutionBoundary{
+func selectedContractRuntimeContainerSplitSiblings() []runfork.RunForkSelectedContractExecutionBoundary {
+	return []runfork.RunForkSelectedContractExecutionBoundary{
 		{
 			Concept:     "restart_recovery",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
-			Owner:       store.RunForkHistoricalReplayExecutionAdmissionOwner,
+			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
+			Owner:       runfork.RunForkHistoricalReplayExecutionAdmissionOwner,
 			Reason:      "the live selected-fork runtime container is not restart/recovery ownership",
 		},
 		{
 			Concept:     "sessions_turns_audits",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
+			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
 			Reason:      "historical conversation reconstruction remains split; fresh fork-local rows may only come from normal selected-fork execution",
 		},
 		{
 			Concept:     "non_agent_delivery_replay",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
-			Owner:       store.RunForkHistoricalReplayExecutionAdmissionOwner,
+			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
+			Owner:       runfork.RunForkHistoricalReplayExecutionAdmissionOwner,
 			Reason:      "node/system/platform delivery replay needs separate handler/idempotency/recovery ownership",
 		},
 	}

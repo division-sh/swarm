@@ -4,74 +4,74 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 func TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners(t *testing.T) {
 	selection := testContractSwapSelection()
 	selectedAdmission := testContractSwapSelectedExecutionAdmission(selection)
 	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
-	replayAdmission := store.RunForkReplayResumeAdmission{
-		Owner:                    store.RunForkReplayResumeAdmissionOwner,
+	replayAdmission := runfork.RunForkReplayResumeAdmission{
+		Owner:                    runfork.RunForkReplayResumeAdmissionOwner,
 		ReplayResumeFactsPresent: true,
-		Dispositions: []store.RunForkReplayResumeDisposition{
+		Dispositions: []runfork.RunForkReplayResumeDisposition{
 			{
-				Fact:        store.RunForkReplayResumeFactDeliveryDeadLetterHistory,
-				Disposition: store.RunForkReplayResumeDispositionFailClosedBlocker,
-				BlockerCode: store.RunForkBlockerDeliveryHistoryUnproven,
+				Fact:        runfork.RunForkReplayResumeFactDeliveryDeadLetterHistory,
+				Disposition: runfork.RunForkReplayResumeDispositionFailClosedBlocker,
+				BlockerCode: runfork.RunForkBlockerDeliveryHistoryUnproven,
 				Message:     "dead-letter delivery history is not replayable",
 			},
 			{
-				Fact:        store.RunForkReplayResumeFactDeliveryPendingHistory,
-				Disposition: store.RunForkReplayResumeDispositionFailClosedBlocker,
-				BlockerCode: store.RunForkBlockerNonAgentDeliveryReplayUnsupported,
+				Fact:        runfork.RunForkReplayResumeFactDeliveryPendingHistory,
+				Disposition: runfork.RunForkReplayResumeDispositionFailClosedBlocker,
+				BlockerCode: runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported,
 				Message:     "non-agent work is not replayable",
 			},
 			{
-				Fact:        store.RunForkReplayResumeFactTimerHistory,
-				Disposition: store.RunForkReplayResumeDispositionFailClosedBlocker,
-				BlockerCode: store.RunForkBlockerTimerHistoryUnproven,
+				Fact:        runfork.RunForkReplayResumeFactTimerHistory,
+				Disposition: runfork.RunForkReplayResumeDispositionFailClosedBlocker,
+				BlockerCode: runfork.RunForkBlockerTimerHistoryUnproven,
 				Message:     "timer history is unproven",
 			},
 			{
-				Fact:        store.RunForkReplayResumeFactRouteHistory,
-				Disposition: store.RunForkReplayResumeDispositionFailClosedBlocker,
-				BlockerCode: store.RunForkBlockerFlowRouteHistoryUnproven,
+				Fact:        runfork.RunForkReplayResumeFactRouteHistory,
+				Disposition: runfork.RunForkReplayResumeDispositionFailClosedBlocker,
+				BlockerCode: runfork.RunForkBlockerFlowRouteHistoryUnproven,
 				Message:     "route history is unproven",
 			},
 			{
-				Fact:        store.RunForkReplayResumeFactSessionHistory,
-				Disposition: store.RunForkReplayResumeDispositionFailClosedBlocker,
-				BlockerCode: store.RunForkBlockerSessionHistoryUnproven,
+				Fact:        runfork.RunForkReplayResumeFactSessionHistory,
+				Disposition: runfork.RunForkReplayResumeDispositionFailClosedBlocker,
+				BlockerCode: runfork.RunForkBlockerSessionHistoryUnproven,
 				Message:     "session history is unproven",
 			},
 			{
-				Fact:        store.RunForkReplayResumeFactActiveTurnHistory,
-				Disposition: store.RunForkReplayResumeDispositionFailClosedBlocker,
-				BlockerCode: store.RunForkBlockerActiveTurnHistoryUnproven,
+				Fact:        runfork.RunForkReplayResumeFactActiveTurnHistory,
+				Disposition: runfork.RunForkReplayResumeDispositionFailClosedBlocker,
+				BlockerCode: runfork.RunForkBlockerActiveTurnHistoryUnproven,
 				Message:     "turn history is unproven",
 			},
 			{
-				Fact:        store.RunForkReplayResumeFactConversationAuditHistory,
-				Disposition: store.RunForkReplayResumeDispositionFailClosedBlocker,
-				BlockerCode: store.RunForkBlockerConversationAuditUnproven,
+				Fact:        runfork.RunForkReplayResumeFactConversationAuditHistory,
+				Disposition: runfork.RunForkReplayResumeDispositionFailClosedBlocker,
+				BlockerCode: runfork.RunForkBlockerConversationAuditUnproven,
 				Message:     "audit history is unproven",
 			},
 			{
-				Fact:        store.RunForkReplayResumeFactSourceAdvanced,
-				Disposition: store.RunForkReplayResumeDispositionFailClosedBlocker,
+				Fact:        runfork.RunForkReplayResumeFactSourceAdvanced,
+				Disposition: runfork.RunForkReplayResumeDispositionFailClosedBlocker,
 				BlockerCode: "source_events_advanced_after_fork_point",
 				Message:     "source advanced after fork point",
 			},
 		},
-		UnsupportedBlockers: []store.RunForkUnsupportedBlocker{
-			{Code: store.RunForkBlockerDeliveryHistoryUnproven, Message: "delivery history is not replayable"},
-			{Code: store.RunForkBlockerNonAgentDeliveryReplayUnsupported, Message: "non-agent work is not replayable"},
-			{Code: store.RunForkBlockerTimerHistoryUnproven, Message: "timer history is unproven"},
-			{Code: store.RunForkBlockerFlowRouteHistoryUnproven, Message: "route history is unproven"},
-			{Code: store.RunForkBlockerSessionHistoryUnproven, Message: "session history is unproven"},
-			{Code: store.RunForkBlockerActiveTurnHistoryUnproven, Message: "turn history is unproven"},
-			{Code: store.RunForkBlockerConversationAuditUnproven, Message: "audit history is unproven"},
+		UnsupportedBlockers: []runfork.RunForkUnsupportedBlocker{
+			{Code: runfork.RunForkBlockerDeliveryHistoryUnproven, Message: "delivery history is not replayable"},
+			{Code: runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported, Message: "non-agent work is not replayable"},
+			{Code: runfork.RunForkBlockerTimerHistoryUnproven, Message: "timer history is unproven"},
+			{Code: runfork.RunForkBlockerFlowRouteHistoryUnproven, Message: "route history is unproven"},
+			{Code: runfork.RunForkBlockerSessionHistoryUnproven, Message: "session history is unproven"},
+			{Code: runfork.RunForkBlockerActiveTurnHistoryUnproven, Message: "turn history is unproven"},
+			{Code: runfork.RunForkBlockerConversationAuditUnproven, Message: "audit history is unproven"},
 			{Code: "source_events_advanced_after_fork_point", Message: "source advanced after fork point"},
 		},
 	}
@@ -93,46 +93,46 @@ func TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners
 	if err != nil {
 		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
 	}
-	if admission.Owner != store.RunForkHistoricalReplayExecutionAdmissionOwner ||
+	if admission.Owner != runfork.RunForkHistoricalReplayExecutionAdmissionOwner ||
 		!admission.NonMutating ||
 		admission.ExecutionSupported ||
-		admission.FutureExecutionOwner != store.RunForkHistoricalReplayExecutionOwner {
+		admission.FutureExecutionOwner != runfork.RunForkHistoricalReplayExecutionOwner {
 		t.Fatalf("admission owner/support = %#v", admission)
 	}
-	if admission.ReplayResumeAdmissionOwner != store.RunForkReplayResumeAdmissionOwner ||
-		admission.SelectedExecutionAdmissionOwner != store.RunForkSelectedContractExecutionAdmissionOwner ||
-		admission.SelectedBindingOwner != store.RunForkSelectedContractBindingOwner ||
-		admission.RouteTopologyOwner != store.RunForkSelectedContractRouteTopologyOwner ||
-		admission.RecipientPlanningOwner != store.RunForkSelectedContractRecipientPlanningOwner ||
-		admission.RouteRecoveryOwner != store.RunForkSelectedContractRoutePersistenceOwner ||
-		admission.RuntimeRouteRecoveryOwner != store.RunForkSelectedContractRouteRecoveryOwner ||
-		admission.ContractSwapAdmissionOwner != store.RunForkContractSwapBootResumeAdmissionOwner {
+	if admission.ReplayResumeAdmissionOwner != runfork.RunForkReplayResumeAdmissionOwner ||
+		admission.SelectedExecutionAdmissionOwner != runfork.RunForkSelectedContractExecutionAdmissionOwner ||
+		admission.SelectedBindingOwner != runfork.RunForkSelectedContractBindingOwner ||
+		admission.RouteTopologyOwner != runfork.RunForkSelectedContractRouteTopologyOwner ||
+		admission.RecipientPlanningOwner != runfork.RunForkSelectedContractRecipientPlanningOwner ||
+		admission.RouteRecoveryOwner != runfork.RunForkSelectedContractRoutePersistenceOwner ||
+		admission.RuntimeRouteRecoveryOwner != runfork.RunForkSelectedContractRouteRecoveryOwner ||
+		admission.ContractSwapAdmissionOwner != runfork.RunForkContractSwapBootResumeAdmissionOwner {
 		t.Fatalf("owner consumption = %#v", admission)
 	}
 	assertHistoricalReplayFactSet(t, admission.FactAdmissions)
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, store.RunForkHistoricalReplayFactSourceEvents, store.RunForkHistoricalReplayAdmissionLineageOnlyEvidence, "")
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, store.RunForkHistoricalReplayFactReceipts, store.RunForkHistoricalReplayAdmissionLineageOnlyEvidence, "")
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, store.RunForkHistoricalReplayFactEventDeliveries, store.RunForkHistoricalReplayAdmissionFailClosedBlocker, store.RunForkBlockerDeliveryHistoryUnproven)
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, store.RunForkHistoricalReplayFactDeadLetters, store.RunForkHistoricalReplayAdmissionFailClosedBlocker, store.RunForkBlockerDeliveryHistoryUnproven)
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, store.RunForkHistoricalReplayFactTimers, store.RunForkHistoricalReplayAdmissionFailClosedBlocker, store.RunForkBlockerTimerHistoryUnproven)
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, store.RunForkHistoricalReplayFactRoutes, store.RunForkHistoricalReplayAdmissionFailClosedBlocker, store.RunForkBlockerFlowRouteHistoryUnproven)
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, store.RunForkHistoricalReplayFactSessions, store.RunForkHistoricalReplayAdmissionFailClosedBlocker, store.RunForkBlockerSessionHistoryUnproven)
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, store.RunForkHistoricalReplayFactTurns, store.RunForkHistoricalReplayAdmissionFailClosedBlocker, store.RunForkBlockerActiveTurnHistoryUnproven)
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, store.RunForkHistoricalReplayFactAudits, store.RunForkHistoricalReplayAdmissionFailClosedBlocker, store.RunForkBlockerConversationAuditUnproven)
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, store.RunForkHistoricalReplayFactNonAgentNodeSystemWork, store.RunForkHistoricalReplayAdmissionFailClosedBlocker, store.RunForkBlockerNonAgentDeliveryReplayUnsupported)
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, store.RunForkHistoricalReplayFactSourceAdvancedPostTFacts, store.RunForkHistoricalReplayAdmissionFailClosedBlocker, "source_events_advanced_after_fork_point")
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, store.RunForkHistoricalReplayFactRetryIdempotency, store.RunForkHistoricalReplayAdmissionSplitSibling, "")
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, store.RunForkHistoricalReplayFactEmittedFollowUps, store.RunForkHistoricalReplayAdmissionSplitSibling, "")
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, store.RunForkHistoricalReplayFactRuntimeRestartRecovery, store.RunForkHistoricalReplayAdmissionSplitSibling, "")
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, store.RunForkHistoricalReplayFactCLIApiDashboardOperator, store.RunForkHistoricalReplayAdmissionSplitSibling, "")
-	if !unsupportedBlockerHas(admission.UnsupportedBlockers, store.RunForkBlockerHistoricalReplayExecutionAdmissionNonMutating) ||
-		!unsupportedBlockerHas(admission.UnsupportedBlockers, store.RunForkBlockerContractSwapBootResumeAdmissionNonMutating) ||
-		!unsupportedBlockerHas(admission.UnsupportedBlockers, store.RunForkBlockerTimerHistoryUnproven) {
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactSourceEvents, runfork.RunForkHistoricalReplayAdmissionLineageOnlyEvidence, "")
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactReceipts, runfork.RunForkHistoricalReplayAdmissionLineageOnlyEvidence, "")
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactEventDeliveries, runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker, runfork.RunForkBlockerDeliveryHistoryUnproven)
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactDeadLetters, runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker, runfork.RunForkBlockerDeliveryHistoryUnproven)
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactTimers, runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker, runfork.RunForkBlockerTimerHistoryUnproven)
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactRoutes, runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker, runfork.RunForkBlockerFlowRouteHistoryUnproven)
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactSessions, runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker, runfork.RunForkBlockerSessionHistoryUnproven)
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactTurns, runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker, runfork.RunForkBlockerActiveTurnHistoryUnproven)
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactAudits, runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker, runfork.RunForkBlockerConversationAuditUnproven)
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactNonAgentNodeSystemWork, runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker, runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported)
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactSourceAdvancedPostTFacts, runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker, "source_events_advanced_after_fork_point")
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactRetryIdempotency, runfork.RunForkHistoricalReplayAdmissionSplitSibling, "")
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactEmittedFollowUps, runfork.RunForkHistoricalReplayAdmissionSplitSibling, "")
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactRuntimeRestartRecovery, runfork.RunForkHistoricalReplayAdmissionSplitSibling, "")
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactCLIApiDashboardOperator, runfork.RunForkHistoricalReplayAdmissionSplitSibling, "")
+	if !unsupportedBlockerHas(admission.UnsupportedBlockers, runfork.RunForkBlockerHistoricalReplayExecutionAdmissionNonMutating) ||
+		!unsupportedBlockerHas(admission.UnsupportedBlockers, runfork.RunForkBlockerContractSwapBootResumeAdmissionNonMutating) ||
+		!unsupportedBlockerHas(admission.UnsupportedBlockers, runfork.RunForkBlockerTimerHistoryUnproven) {
 		t.Fatalf("unsupported blockers = %#v", admission.UnsupportedBlockers)
 	}
-	if !executionBoundaryHas(admission.InvalidPaths, "source_event_copy", store.RunForkSelectedContractDispositionInvalid) ||
-		!executionBoundaryHas(admission.InvalidPaths, "selected_frontier_execution_as_full_replay", store.RunForkSelectedContractDispositionInvalid) ||
-		!executionBoundaryHas(admission.BlockedSiblings, "mutating_historical_replay_execution", store.RunForkSelectedContractDispositionBlockedSibling) {
+	if !executionBoundaryHas(admission.InvalidPaths, "source_event_copy", runfork.RunForkSelectedContractDispositionInvalid) ||
+		!executionBoundaryHas(admission.InvalidPaths, "selected_frontier_execution_as_full_replay", runfork.RunForkSelectedContractDispositionInvalid) ||
+		!executionBoundaryHas(admission.BlockedSiblings, "mutating_historical_replay_execution", runfork.RunForkSelectedContractDispositionBlockedSibling) {
 		t.Fatalf("boundaries invalid=%#v blocked=%#v", admission.InvalidPaths, admission.BlockedSiblings)
 	}
 }
@@ -140,12 +140,12 @@ func TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners
 func TestBuildHistoricalReplayExecutionAdmissionReportsReplayablePrimitiveWithoutMutation(t *testing.T) {
 	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
 	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
-	replayAdmission := store.RunForkReplayResumeAdmission{
-		Owner:                    store.RunForkReplayResumeAdmissionOwner,
+	replayAdmission := runfork.RunForkReplayResumeAdmission{
+		Owner:                    runfork.RunForkReplayResumeAdmissionOwner,
 		DeliveryEventReplayReady: true,
-		Dispositions: []store.RunForkReplayResumeDisposition{{
-			Fact:        store.RunForkReplayResumeFactDeliveryPendingHistory,
-			Disposition: store.RunForkReplayResumeDispositionForkReplay,
+		Dispositions: []runfork.RunForkReplayResumeDisposition{{
+			Fact:        runfork.RunForkReplayResumeFactDeliveryPendingHistory,
+			Disposition: runfork.RunForkReplayResumeDispositionForkReplay,
 			Message:     "pending unstarted source delivery can be replayed",
 		}},
 	}
@@ -168,11 +168,11 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsReplayablePrimitiveWithou
 		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
 	}
 	assertHistoricalReplayFactSet(t, admission.FactAdmissions)
-	assertHistoricalReplayAdmission(t, admission.FactAdmissions, store.RunForkHistoricalReplayFactEventDeliveries, store.RunForkHistoricalReplayAdmissionExecutableForkWork, "")
+	assertHistoricalReplayAdmission(t, admission.FactAdmissions, runfork.RunForkHistoricalReplayFactEventDeliveries, runfork.RunForkHistoricalReplayAdmissionExecutableForkWork, "")
 	if !admission.NonMutating || admission.ExecutionSupported {
 		t.Fatalf("admission mutation flags = %#v", admission)
 	}
-	if !unsupportedBlockerHas(admission.UnsupportedBlockers, store.RunForkBlockerHistoricalReplayExecutionAdmissionNonMutating) {
+	if !unsupportedBlockerHas(admission.UnsupportedBlockers, runfork.RunForkBlockerHistoricalReplayExecutionAdmissionNonMutating) {
 		t.Fatalf("unsupported blockers = %#v, want non-mutating blocker", admission.UnsupportedBlockers)
 	}
 }
@@ -180,13 +180,13 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsReplayablePrimitiveWithou
 func TestBuildHistoricalReplayExecutionAdmissionRejectsStaleTimerReconstructionDisposition(t *testing.T) {
 	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
 	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
-	replayAdmission := store.RunForkReplayResumeAdmission{
-		Owner:                    store.RunForkReplayResumeAdmissionOwner,
+	replayAdmission := runfork.RunForkReplayResumeAdmission{
+		Owner:                    runfork.RunForkReplayResumeAdmissionOwner,
 		ReplayResumeFactsPresent: true,
-		Dispositions: []store.RunForkReplayResumeDisposition{{
-			Fact:           store.RunForkReplayResumeFactTimerHistory,
-			Disposition:    store.RunForkReplayResumeDispositionReconstruct,
-			Classification: store.RunForkHistoricalReplayAdmissionReconstructedForkState,
+		Dispositions: []runfork.RunForkReplayResumeDisposition{{
+			Fact:           runfork.RunForkReplayResumeFactTimerHistory,
+			Disposition:    runfork.RunForkReplayResumeDispositionReconstruct,
+			Classification: runfork.RunForkHistoricalReplayAdmissionReconstructedForkState,
 			Message:        "stale timer reconstruction disposition",
 		}},
 	}
@@ -208,11 +208,11 @@ func TestBuildHistoricalReplayExecutionAdmissionRejectsStaleTimerReconstructionD
 	if err != nil {
 		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
 	}
-	timerAdmission, ok := historicalReplayFactAdmission(admission.FactAdmissions, store.RunForkHistoricalReplayFactTimers)
+	timerAdmission, ok := historicalReplayFactAdmission(admission.FactAdmissions, runfork.RunForkHistoricalReplayFactTimers)
 	if !ok {
 		t.Fatalf("timer fact admission missing: %#v", admission.FactAdmissions)
 	}
-	if timerAdmission.Admission != store.RunForkHistoricalReplayAdmissionSplitSibling ||
+	if timerAdmission.Admission != runfork.RunForkHistoricalReplayAdmissionSplitSibling ||
 		timerAdmission.Tracker != "#642" {
 		t.Fatalf("timer admission = %#v", timerAdmission)
 	}
@@ -221,26 +221,26 @@ func TestBuildHistoricalReplayExecutionAdmissionRejectsStaleTimerReconstructionD
 func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractConversationLineageOwner(t *testing.T) {
 	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
 	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
-	replayAdmission := store.RunForkReplayResumeAdmission{
-		Owner:                   store.RunForkReplayResumeAdmissionOwner,
+	replayAdmission := runfork.RunForkReplayResumeAdmission{
+		Owner:                   runfork.RunForkReplayResumeAdmissionOwner,
 		StateOnlyExecutionReady: true,
-		Dispositions: []store.RunForkReplayResumeDisposition{
+		Dispositions: []runfork.RunForkReplayResumeDisposition{
 			{
-				Fact:        store.RunForkReplayResumeFactSessionHistory,
-				Disposition: store.RunForkReplayResumeDispositionLineageOnly,
-				Owner:       store.RunForkSelectedContractSessionTurnAuditLineagePolicyOwner,
+				Fact:        runfork.RunForkReplayResumeFactSessionHistory,
+				Disposition: runfork.RunForkReplayResumeDispositionLineageOnly,
+				Owner:       runfork.RunForkSelectedContractSessionTurnAuditLineagePolicyOwner,
 				Message:     "selected-contract session lineage/no-action evidence",
 			},
 			{
-				Fact:        store.RunForkReplayResumeFactActiveTurnHistory,
-				Disposition: store.RunForkReplayResumeDispositionLineageOnly,
-				Owner:       store.RunForkSelectedContractSessionTurnAuditLineagePolicyOwner,
+				Fact:        runfork.RunForkReplayResumeFactActiveTurnHistory,
+				Disposition: runfork.RunForkReplayResumeDispositionLineageOnly,
+				Owner:       runfork.RunForkSelectedContractSessionTurnAuditLineagePolicyOwner,
 				Message:     "selected-contract turn lineage/no-action evidence",
 			},
 			{
-				Fact:        store.RunForkReplayResumeFactConversationAuditHistory,
-				Disposition: store.RunForkReplayResumeDispositionLineageOnly,
-				Owner:       store.RunForkSelectedContractSessionTurnAuditLineagePolicyOwner,
+				Fact:        runfork.RunForkReplayResumeFactConversationAuditHistory,
+				Disposition: runfork.RunForkReplayResumeDispositionLineageOnly,
+				Owner:       runfork.RunForkSelectedContractSessionTurnAuditLineagePolicyOwner,
 				Message:     "selected-contract audit lineage/no-action evidence",
 			},
 		},
@@ -264,16 +264,16 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractConversat
 		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
 	}
 	for _, fact := range []string{
-		store.RunForkHistoricalReplayFactSessions,
-		store.RunForkHistoricalReplayFactTurns,
-		store.RunForkHistoricalReplayFactAudits,
+		runfork.RunForkHistoricalReplayFactSessions,
+		runfork.RunForkHistoricalReplayFactTurns,
+		runfork.RunForkHistoricalReplayFactAudits,
 	} {
 		item, ok := historicalReplayFactAdmission(admission.FactAdmissions, fact)
 		if !ok {
 			t.Fatalf("missing fact admission for %s", fact)
 		}
-		if item.Admission != store.RunForkHistoricalReplayAdmissionLineageOnlyEvidence ||
-			item.SourceOwner != store.RunForkSelectedContractSessionTurnAuditLineagePolicyOwner ||
+		if item.Admission != runfork.RunForkHistoricalReplayAdmissionLineageOnlyEvidence ||
+			item.SourceOwner != runfork.RunForkSelectedContractSessionTurnAuditLineagePolicyOwner ||
 			item.Tracker != "#661" {
 			t.Fatalf("%s admission = %#v, want #661 lineage owner", fact, item)
 		}
@@ -283,13 +283,13 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractConversat
 func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractSourceAdvancedConversationHistoryOwner(t *testing.T) {
 	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
 	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
-	replayAdmission := store.RunForkReplayResumeAdmission{
-		Owner:                   store.RunForkReplayResumeAdmissionOwner,
+	replayAdmission := runfork.RunForkReplayResumeAdmission{
+		Owner:                   runfork.RunForkReplayResumeAdmissionOwner,
 		StateOnlyExecutionReady: true,
-		Dispositions: []store.RunForkReplayResumeDisposition{{
-			Fact:           store.RunForkReplayResumeFactSourceAdvanced,
-			Disposition:    store.RunForkReplayResumeDispositionLineageOnly,
-			Owner:          store.RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner,
+		Dispositions: []runfork.RunForkReplayResumeDisposition{{
+			Fact:           runfork.RunForkReplayResumeFactSourceAdvanced,
+			Disposition:    runfork.RunForkReplayResumeDispositionLineageOnly,
+			Owner:          runfork.RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner,
 			Classification: "source_turns_advanced_after_fork_point",
 			Message:        "selected-contract source-advanced conversation-history lineage/no-action evidence",
 		}},
@@ -312,12 +312,12 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractSourceAdv
 	if err != nil {
 		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
 	}
-	item, ok := historicalReplayFactAdmission(admission.FactAdmissions, store.RunForkHistoricalReplayFactSourceAdvancedPostTFacts)
+	item, ok := historicalReplayFactAdmission(admission.FactAdmissions, runfork.RunForkHistoricalReplayFactSourceAdvancedPostTFacts)
 	if !ok {
 		t.Fatalf("missing source-advanced admission: %#v", admission.FactAdmissions)
 	}
-	if item.Admission != store.RunForkHistoricalReplayAdmissionLineageOnlyEvidence ||
-		item.SourceOwner != store.RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner ||
+	if item.Admission != runfork.RunForkHistoricalReplayAdmissionLineageOnlyEvidence ||
+		item.SourceOwner != runfork.RunForkSelectedContractSourceAdvancedConversationHistoryPolicyOwner ||
 		item.Tracker != "#671" {
 		t.Fatalf("source-advanced admission = %#v, want #671 conversation-history lineage owner", item)
 	}
@@ -326,13 +326,13 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractSourceAdv
 func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractReplayScopeMarkerOwner(t *testing.T) {
 	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
 	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
-	replayAdmission := store.RunForkReplayResumeAdmission{
-		Owner:                   store.RunForkReplayResumeAdmissionOwner,
+	replayAdmission := runfork.RunForkReplayResumeAdmission{
+		Owner:                   runfork.RunForkReplayResumeAdmissionOwner,
 		StateOnlyExecutionReady: true,
-		Dispositions: []store.RunForkReplayResumeDisposition{{
-			Fact:        store.RunForkReplayResumeFactCommittedReplayScope,
-			Disposition: store.RunForkReplayResumeDispositionLineageOnly,
-			Owner:       store.RunForkSelectedContractCommittedReplayScopeMarkerPolicyOwner,
+		Dispositions: []runfork.RunForkReplayResumeDisposition{{
+			Fact:        runfork.RunForkReplayResumeFactCommittedReplayScope,
+			Disposition: runfork.RunForkReplayResumeDispositionLineageOnly,
+			Owner:       runfork.RunForkSelectedContractCommittedReplayScopeMarkerPolicyOwner,
 			Message:     "selected-contract replay-scope marker lineage/no-action evidence",
 		}},
 	}
@@ -354,12 +354,12 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractReplaySco
 	if err != nil {
 		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
 	}
-	item, ok := historicalReplayFactAdmission(admission.FactAdmissions, store.RunForkHistoricalReplayFactEventDeliveries)
+	item, ok := historicalReplayFactAdmission(admission.FactAdmissions, runfork.RunForkHistoricalReplayFactEventDeliveries)
 	if !ok {
 		t.Fatalf("missing event_deliveries admission: %#v", admission.FactAdmissions)
 	}
-	if item.Admission != store.RunForkHistoricalReplayAdmissionLineageOnlyEvidence ||
-		item.SourceOwner != store.RunForkSelectedContractCommittedReplayScopeMarkerPolicyOwner ||
+	if item.Admission != runfork.RunForkHistoricalReplayAdmissionLineageOnlyEvidence ||
+		item.SourceOwner != runfork.RunForkSelectedContractCommittedReplayScopeMarkerPolicyOwner ||
 		item.Tracker != "#663" {
 		t.Fatalf("event_deliveries admission = %#v, want #663 marker lineage owner", item)
 	}
@@ -368,14 +368,14 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractReplaySco
 func TestBuildHistoricalReplayExecutionAdmissionReportsActiveSourceDeliveryCouplingOwner(t *testing.T) {
 	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
 	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
-	replayAdmission := store.RunForkReplayResumeAdmission{
-		Owner:                   store.RunForkReplayResumeAdmissionOwner,
+	replayAdmission := runfork.RunForkReplayResumeAdmission{
+		Owner:                   runfork.RunForkReplayResumeAdmissionOwner,
 		StateOnlyExecutionReady: true,
-		Dispositions: []store.RunForkReplayResumeDisposition{{
-			Fact:           store.RunForkReplayResumeFactDeliveryInProgressHistory,
-			Disposition:    store.RunForkReplayResumeDispositionLineageOnly,
-			Owner:          store.RunForkSelectedContractActiveSourceDeliveryConversationCouplingPolicyOwner,
-			Classification: store.RunForkSelectedContractActiveSourceDeliveryConversationCouplingClassification,
+		Dispositions: []runfork.RunForkReplayResumeDisposition{{
+			Fact:           runfork.RunForkReplayResumeFactDeliveryInProgressHistory,
+			Disposition:    runfork.RunForkReplayResumeDispositionLineageOnly,
+			Owner:          runfork.RunForkSelectedContractActiveSourceDeliveryConversationCouplingPolicyOwner,
+			Classification: runfork.RunForkSelectedContractActiveSourceDeliveryConversationCouplingClassification,
 			Message:        "selected-contract same-source active delivery lineage/no-action evidence",
 		}},
 	}
@@ -397,24 +397,24 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsActiveSourceDeliveryCoupl
 	if err != nil {
 		t.Fatalf("BuildHistoricalReplayExecutionAdmission: %v", err)
 	}
-	item, ok := historicalReplayFactAdmission(admission.FactAdmissions, store.RunForkHistoricalReplayFactEventDeliveries)
+	item, ok := historicalReplayFactAdmission(admission.FactAdmissions, runfork.RunForkHistoricalReplayFactEventDeliveries)
 	if !ok {
 		t.Fatalf("missing event_deliveries admission: %#v", admission.FactAdmissions)
 	}
-	if item.Admission != store.RunForkHistoricalReplayAdmissionLineageOnlyEvidence ||
-		item.SourceOwner != store.RunForkSelectedContractActiveSourceDeliveryConversationCouplingPolicyOwner ||
+	if item.Admission != runfork.RunForkHistoricalReplayAdmissionLineageOnlyEvidence ||
+		item.SourceOwner != runfork.RunForkSelectedContractActiveSourceDeliveryConversationCouplingPolicyOwner ||
 		item.Tracker != "#678" {
 		t.Fatalf("event_deliveries admission = %#v, want #678 active source delivery owner", item)
 	}
 }
 
 func TestBuildHistoricalReplayExecutionConsumesAdmissionForDeliveryEventReplayMutation(t *testing.T) {
-	replayAdmission := store.RunForkReplayResumeAdmission{
-		Owner:                    store.RunForkReplayResumeAdmissionOwner,
+	replayAdmission := runfork.RunForkReplayResumeAdmission{
+		Owner:                    runfork.RunForkReplayResumeAdmissionOwner,
 		DeliveryEventReplayReady: true,
-		Dispositions: []store.RunForkReplayResumeDisposition{{
-			Fact:        store.RunForkReplayResumeFactDeliveryPendingHistory,
-			Disposition: store.RunForkReplayResumeDispositionForkReplay,
+		Dispositions: []runfork.RunForkReplayResumeDisposition{{
+			Fact:        runfork.RunForkReplayResumeFactDeliveryPendingHistory,
+			Disposition: runfork.RunForkReplayResumeDispositionForkReplay,
 			Message:     "pending unstarted source delivery can be replayed",
 		}},
 	}
@@ -431,26 +431,26 @@ func TestBuildHistoricalReplayExecutionConsumesAdmissionForDeliveryEventReplayMu
 	execution, err := BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
 		Admission:             admission,
 		ReplayResumeAdmission: replayAdmission,
-		PendingWork: []store.RunForkPendingWork{{
+		PendingWork: []runfork.RunForkPendingWork{{
 			EventID:        "source-event",
 			DeliveryID:     "source-delivery",
 			SubscriberType: "agent",
 			SubscriberID:   "agent-a",
-			Classification: store.RunForkPendingClassificationPending,
+			Classification: runfork.RunForkPendingClassificationPending,
 			Status:         "pending",
 		}},
 	})
 	if err != nil {
 		t.Fatalf("BuildHistoricalReplayExecution: %v", err)
 	}
-	if execution.Owner != store.RunForkHistoricalReplayExecutionOwner ||
-		execution.AdmissionOwner != store.RunForkHistoricalReplayExecutionAdmissionOwner ||
-		execution.ReplayResumeAdmissionOwner != store.RunForkReplayResumeAdmissionOwner ||
+	if execution.Owner != runfork.RunForkHistoricalReplayExecutionOwner ||
+		execution.AdmissionOwner != runfork.RunForkHistoricalReplayExecutionAdmissionOwner ||
+		execution.ReplayResumeAdmissionOwner != runfork.RunForkReplayResumeAdmissionOwner ||
 		!execution.DeliveryEventReplayReady {
 		t.Fatalf("execution = %#v", execution)
 	}
-	if execution.EventDeliveriesAdmission.Fact != store.RunForkHistoricalReplayFactEventDeliveries ||
-		execution.EventDeliveriesAdmission.Admission != store.RunForkHistoricalReplayAdmissionExecutableForkWork {
+	if execution.EventDeliveriesAdmission.Fact != runfork.RunForkHistoricalReplayFactEventDeliveries ||
+		execution.EventDeliveriesAdmission.Admission != runfork.RunForkHistoricalReplayAdmissionExecutableForkWork {
 		t.Fatalf("event deliveries admission = %#v", execution.EventDeliveriesAdmission)
 	}
 	if execution.ClosureLevel != "canonical_owner_promotion_with_delivery_event_replay_ready_only" ||
@@ -464,20 +464,20 @@ func TestBuildHistoricalReplayExecutionConsumesAdmissionForDeliveryEventReplayMu
 		execution.DeliveryEventReplayWork[0].SourceDeliveryID != "source-delivery" {
 		t.Fatalf("owner-authorized delivery replay work = %#v", execution.DeliveryEventReplayWork)
 	}
-	if !executionBoundaryHas(execution.InvalidPaths, "source_delivery_copy", store.RunForkSelectedContractDispositionInvalid) ||
-		!executionBoundaryHas(execution.InvalidPaths, "source_outcome_suppression", store.RunForkSelectedContractDispositionInvalid) ||
-		!executionBoundaryHas(execution.BlockedSiblings, "timer_reconstruction", store.RunForkSelectedContractDispositionBlockedSibling) {
+	if !executionBoundaryHas(execution.InvalidPaths, "source_delivery_copy", runfork.RunForkSelectedContractDispositionInvalid) ||
+		!executionBoundaryHas(execution.InvalidPaths, "source_outcome_suppression", runfork.RunForkSelectedContractDispositionInvalid) ||
+		!executionBoundaryHas(execution.BlockedSiblings, "timer_reconstruction", runfork.RunForkSelectedContractDispositionBlockedSibling) {
 		t.Fatalf("execution boundaries invalid=%#v blocked=%#v", execution.InvalidPaths, execution.BlockedSiblings)
 	}
 }
 
 func TestBuildHistoricalReplayExecutionRejectsTaxonomyReadyWithoutOwnerWork(t *testing.T) {
-	replayAdmission := store.RunForkReplayResumeAdmission{
-		Owner:                    store.RunForkReplayResumeAdmissionOwner,
+	replayAdmission := runfork.RunForkReplayResumeAdmission{
+		Owner:                    runfork.RunForkReplayResumeAdmissionOwner,
 		DeliveryEventReplayReady: true,
-		Dispositions: []store.RunForkReplayResumeDisposition{{
-			Fact:        store.RunForkReplayResumeFactDeliveryPendingHistory,
-			Disposition: store.RunForkReplayResumeDispositionForkReplay,
+		Dispositions: []runfork.RunForkReplayResumeDisposition{{
+			Fact:        runfork.RunForkReplayResumeFactDeliveryPendingHistory,
+			Disposition: runfork.RunForkReplayResumeDispositionForkReplay,
 			Message:     "pending unstarted source delivery can be replayed",
 		}},
 	}
@@ -494,12 +494,12 @@ func TestBuildHistoricalReplayExecutionRejectsTaxonomyReadyWithoutOwnerWork(t *t
 	_, err = BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
 		Admission:             admission,
 		ReplayResumeAdmission: replayAdmission,
-		PendingWork: []store.RunForkPendingWork{{
+		PendingWork: []runfork.RunForkPendingWork{{
 			EventID:        "source-event",
 			DeliveryID:     "source-delivery",
 			SubscriberType: "agent",
 			SubscriberID:   "agent-a",
-			Classification: store.RunForkPendingClassificationPending,
+			Classification: runfork.RunForkPendingClassificationPending,
 			Status:         "pending",
 			RetryCount:     1,
 		}},
@@ -510,19 +510,19 @@ func TestBuildHistoricalReplayExecutionRejectsTaxonomyReadyWithoutOwnerWork(t *t
 }
 
 func TestBuildHistoricalReplayExecutionRejectsNonExecutableAdmission(t *testing.T) {
-	replayAdmission := store.RunForkReplayResumeAdmission{
-		Owner:                    store.RunForkReplayResumeAdmissionOwner,
+	replayAdmission := runfork.RunForkReplayResumeAdmission{
+		Owner:                    runfork.RunForkReplayResumeAdmissionOwner,
 		DeliveryEventReplayReady: true,
 	}
 	_, err := BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
-		Admission: store.RunForkHistoricalReplayExecutionAdmission{
-			Owner:                      store.RunForkHistoricalReplayExecutionAdmissionOwner,
+		Admission: runfork.RunForkHistoricalReplayExecutionAdmission{
+			Owner:                      runfork.RunForkHistoricalReplayExecutionAdmissionOwner,
 			NonMutating:                true,
-			FutureExecutionOwner:       store.RunForkHistoricalReplayExecutionOwner,
-			ReplayResumeAdmissionOwner: store.RunForkReplayResumeAdmissionOwner,
-			FactAdmissions: []store.RunForkHistoricalReplayFactAdmission{{
-				Fact:      store.RunForkHistoricalReplayFactEventDeliveries,
-				Admission: store.RunForkHistoricalReplayAdmissionLineageOnlyEvidence,
+			FutureExecutionOwner:       runfork.RunForkHistoricalReplayExecutionOwner,
+			ReplayResumeAdmissionOwner: runfork.RunForkReplayResumeAdmissionOwner,
+			FactAdmissions: []runfork.RunForkHistoricalReplayFactAdmission{{
+				Fact:      runfork.RunForkHistoricalReplayFactEventDeliveries,
+				Admission: runfork.RunForkHistoricalReplayAdmissionLineageOnlyEvidence,
 				Message:   "not executable",
 			}},
 		},
@@ -535,8 +535,8 @@ func TestBuildHistoricalReplayExecutionRejectsNonExecutableAdmission(t *testing.
 
 func TestBuildHistoricalReplayExecutionAdmissionRejectsNonCanonicalReplayTaxonomy(t *testing.T) {
 	selectedAdmission := testContractSwapSelectedExecutionAdmission(testContractSwapSelection())
-	contractSwapAdmission := store.RunForkContractSwapBootResumeAdmission{
-		Owner:                           store.RunForkContractSwapBootResumeAdmissionOwner,
+	contractSwapAdmission := runfork.RunForkContractSwapBootResumeAdmission{
+		Owner:                           runfork.RunForkContractSwapBootResumeAdmissionOwner,
 		NonMutating:                     true,
 		SelectedExecutionAdmissionOwner: selectedAdmission.Owner,
 		ReplayResumeAdmissionOwner:      "cmd.swarm.local_replay_helper",
@@ -546,33 +546,33 @@ func TestBuildHistoricalReplayExecutionAdmissionRejectsNonCanonicalReplayTaxonom
 	}
 
 	_, err := BuildHistoricalReplayExecutionAdmission(HistoricalReplayExecutionAdmissionRequest{
-		ReplayResumeAdmission:      store.RunForkReplayResumeAdmission{Owner: "cmd.swarm.local_replay_helper"},
+		ReplayResumeAdmission:      runfork.RunForkReplayResumeAdmission{Owner: "cmd.swarm.local_replay_helper"},
 		SelectedExecutionAdmission: selectedAdmission,
 		ContractSwapAdmission:      contractSwapAdmission,
 	})
-	if err == nil || !strings.Contains(err.Error(), store.RunForkReplayResumeAdmissionOwner) {
+	if err == nil || !strings.Contains(err.Error(), runfork.RunForkReplayResumeAdmissionOwner) {
 		t.Fatalf("error = %v, want canonical replay admission owner failure", err)
 	}
 }
 
-func assertHistoricalReplayFactSet(t *testing.T, admissions []store.RunForkHistoricalReplayFactAdmission) {
+func assertHistoricalReplayFactSet(t *testing.T, admissions []runfork.RunForkHistoricalReplayFactAdmission) {
 	t.Helper()
 	required := []string{
-		store.RunForkHistoricalReplayFactSourceEvents,
-		store.RunForkHistoricalReplayFactEventDeliveries,
-		store.RunForkHistoricalReplayFactReceipts,
-		store.RunForkHistoricalReplayFactDeadLetters,
-		store.RunForkHistoricalReplayFactRetryIdempotency,
-		store.RunForkHistoricalReplayFactEmittedFollowUps,
-		store.RunForkHistoricalReplayFactTimers,
-		store.RunForkHistoricalReplayFactRoutes,
-		store.RunForkHistoricalReplayFactSessions,
-		store.RunForkHistoricalReplayFactTurns,
-		store.RunForkHistoricalReplayFactAudits,
-		store.RunForkHistoricalReplayFactNonAgentNodeSystemWork,
-		store.RunForkHistoricalReplayFactSourceAdvancedPostTFacts,
-		store.RunForkHistoricalReplayFactRuntimeRestartRecovery,
-		store.RunForkHistoricalReplayFactCLIApiDashboardOperator,
+		runfork.RunForkHistoricalReplayFactSourceEvents,
+		runfork.RunForkHistoricalReplayFactEventDeliveries,
+		runfork.RunForkHistoricalReplayFactReceipts,
+		runfork.RunForkHistoricalReplayFactDeadLetters,
+		runfork.RunForkHistoricalReplayFactRetryIdempotency,
+		runfork.RunForkHistoricalReplayFactEmittedFollowUps,
+		runfork.RunForkHistoricalReplayFactTimers,
+		runfork.RunForkHistoricalReplayFactRoutes,
+		runfork.RunForkHistoricalReplayFactSessions,
+		runfork.RunForkHistoricalReplayFactTurns,
+		runfork.RunForkHistoricalReplayFactAudits,
+		runfork.RunForkHistoricalReplayFactNonAgentNodeSystemWork,
+		runfork.RunForkHistoricalReplayFactSourceAdvancedPostTFacts,
+		runfork.RunForkHistoricalReplayFactRuntimeRestartRecovery,
+		runfork.RunForkHistoricalReplayFactCLIApiDashboardOperator,
 	}
 	if len(admissions) != len(required) {
 		t.Fatalf("fact admission count = %d, want %d: %#v", len(admissions), len(required), admissions)
@@ -588,7 +588,7 @@ func assertHistoricalReplayFactSet(t *testing.T, admissions []store.RunForkHisto
 	}
 }
 
-func assertHistoricalReplayAdmission(t *testing.T, admissions []store.RunForkHistoricalReplayFactAdmission, fact, admission, blockerCode string) {
+func assertHistoricalReplayAdmission(t *testing.T, admissions []runfork.RunForkHistoricalReplayFactAdmission, fact, admission, blockerCode string) {
 	t.Helper()
 	for _, item := range admissions {
 		if item.Fact != fact {

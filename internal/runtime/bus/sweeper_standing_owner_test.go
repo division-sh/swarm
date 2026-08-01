@@ -31,7 +31,7 @@ func TestStandingPipelineRecoveryBlocksUntilExactOwnerIsInstalled(t *testing.T) 
 		t.Fatal(err)
 	}
 	store := &recoveryOriginStore{origin: standing}
-	bus := &EventBus{store: store}
+	bus := &EventBus{store: store, durable: DurableDependencies{RunOrigins: store}}
 	event := eventtest.ExistingRunRootIngress(
 		uuid.NewString(),
 		events.EventType("test.standing.recovery"),
@@ -58,7 +58,7 @@ func TestStandingPipelineRecoveryBlocksUntilExactOwnerIsInstalled(t *testing.T) 
 
 func TestNonStandingPipelineRecoveryDoesNotRequireStandingOwner(t *testing.T) {
 	store := &recoveryOriginStore{origin: runtimerunlifecycle.ScenarioSetupRunOrigin()}
-	bus := &EventBus{store: store}
+	bus := &EventBus{store: store, durable: DurableDependencies{RunOrigins: store}}
 	event := eventtest.ExistingRunRootIngress(
 		uuid.NewString(),
 		events.EventType("test.ordinary.recovery"),

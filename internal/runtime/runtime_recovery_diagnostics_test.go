@@ -776,19 +776,27 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 			TaskID:    "recover-me",
 		}},
 	}
+	eventStore := startupRecoveryMinimalEventStore{}
+	managerStore := &recoveryGuardManagerStore{}
+	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false), Stores: Stores{
-		SQLDB:           db,
-		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
-		EventStore:      startupRecoveryMinimalEventStore{},
-		ManagerStore:    &recoveryGuardManagerStore{},
-		ScheduleStore:   scheduleStore,
-	}, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),
+		SQLDB:                 db,
+		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
+		EventStore:            eventStore,
+		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
+		PipelineObligations:   eventStore.PipelineObligations(),
+		DeliveryStore:         deliveryStore,
+		ManagerStore:          managerStore,
+		ManagerLifecycleStore: managerStore,
+		ScheduleStore:         scheduleStore,
+		TimerObligationReader: scheduleStore,
+		Options: RuntimeOptions{
+			SelfCheck:      false,
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -834,18 +842,23 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 			Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "persisted-agent"},
 		}},
 	}
+	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false), Stores: Stores{
-		SQLDB:           db,
-		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
-		EventStore:      eventStore,
-		ManagerStore:    managerStore,
-	}, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),
+		SQLDB:                 db,
+		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
+		EventStore:            eventStore,
+		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
+		PipelineObligations:   eventStore.PipelineObligations(),
+		DeliveryStore:         deliveryStore,
+		ManagerStore:          managerStore,
+		ManagerLifecycleStore: managerStore,
+		Options: RuntimeOptions{
+			SelfCheck:      false,
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -912,20 +925,27 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 			TaskID:    "recover-me",
 		}},
 	}
+	eventStore := startupRecoveryMinimalEventStore{}
+	managerStore := &recoveryGuardManagerStore{}
+	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
-		SQLDB:           db,
-		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		DeliveryStore:   newRuntimeShutdownDeliveryStore(t),
-		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
-		EventStore:      startupRecoveryMinimalEventStore{},
-		ManagerStore:    &recoveryGuardManagerStore{},
-		ScheduleStore:   scheduleStore,
-	}, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
+		SQLDB:                 db,
+		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		DeliveryStore:         deliveryStore,
+		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
+		EventStore:            eventStore,
+		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
+		PipelineObligations:   eventStore.PipelineObligations(),
+		ManagerStore:          managerStore,
+		ManagerLifecycleStore: managerStore,
+		ScheduleStore:         scheduleStore,
+		TimerObligationReader: scheduleStore,
+		Options: RuntimeOptions{
+			SelfCheck:      false,
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -985,20 +1005,27 @@ func TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetai
 			}},
 		},
 	}
+	eventStore := startupRecoveryMinimalEventStore{}
+	managerStore := &recoveryGuardManagerStore{}
+	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
-		SQLDB:           db,
-		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		DeliveryStore:   newRuntimeShutdownDeliveryStore(t),
-		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
-		EventStore:      startupRecoveryMinimalEventStore{},
-		ManagerStore:    &recoveryGuardManagerStore{},
-		ScheduleStore:   scheduleStore,
-	}, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
+		SQLDB:                 db,
+		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		DeliveryStore:         deliveryStore,
+		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
+		EventStore:            eventStore,
+		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
+		PipelineObligations:   eventStore.PipelineObligations(),
+		ManagerStore:          managerStore,
+		ManagerLifecycleStore: managerStore,
+		ScheduleStore:         scheduleStore,
+		TimerObligationReader: scheduleStore,
+		Options: RuntimeOptions{
+			SelfCheck:      false,
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -1082,20 +1109,27 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 			{Err: errors.New("claim failed")},
 		},
 	}
+	eventStore := startupRecoveryMinimalEventStore{}
+	managerStore := &recoveryGuardManagerStore{}
+	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
-		SQLDB:           db,
-		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		DeliveryStore:   newRuntimeShutdownDeliveryStore(t),
-		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
-		EventStore:      startupRecoveryMinimalEventStore{},
-		ManagerStore:    &recoveryGuardManagerStore{},
-		ScheduleStore:   scheduleStore,
-	}, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
+		SQLDB:                 db,
+		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		DeliveryStore:         deliveryStore,
+		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
+		EventStore:            eventStore,
+		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
+		PipelineObligations:   eventStore.PipelineObligations(),
+		ManagerStore:          managerStore,
+		ManagerLifecycleStore: managerStore,
+		ScheduleStore:         scheduleStore,
+		TimerObligationReader: scheduleStore,
+		Options: RuntimeOptions{
+			SelfCheck:      false,
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1191,19 +1225,24 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 		}},
 		claimErr: errors.New("claim failed"),
 	}
+	managerStore := &recoveryGuardManagerStore{}
+	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
-		SQLDB:           db,
-		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		DeliveryStore:   newRuntimeShutdownDeliveryStore(t),
-		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
-		EventStore:      eventStore,
-		ManagerStore:    &recoveryGuardManagerStore{},
-	}, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
+		SQLDB:                 db,
+		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		DeliveryStore:         deliveryStore,
+		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
+		EventStore:            eventStore,
+		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
+		PipelineObligations:   eventStore.PipelineObligations(),
+		ManagerStore:          managerStore,
+		ManagerLifecycleStore: managerStore,
+		Options: RuntimeOptions{
+			SelfCheck:      false,
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1248,19 +1287,23 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 	}
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 	managerStore := &startupRecoveryManagerStore{}
+	eventStore := startupRecoveryMinimalEventStore{}
 
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
-		SQLDB:           db,
-		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		DeliveryStore:   deliveryStore,
-		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
-		EventStore:      startupRecoveryMinimalEventStore{},
-		ManagerStore:    managerStore,
-	}, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
+		SQLDB:                 db,
+		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		DeliveryStore:         deliveryStore,
+		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
+		EventStore:            eventStore,
+		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
+		PipelineObligations:   eventStore.PipelineObligations(),
+		ManagerStore:          managerStore,
+		ManagerLifecycleStore: managerStore,
+		Options: RuntimeOptions{
+			SelfCheck:      false,
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -1300,6 +1343,7 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 		WorkflowInstances:              readinessStore,
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
 		WorkOwner:                      rt.WorkOccurrence(),
+		PersistenceRoles:               runtimeTestManagerBusRoles(rt.Bus),
 	}, managerStore)
 
 	err = rt.Start(ctx)
@@ -1319,19 +1363,25 @@ func TestRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatal(t 
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
+	eventStore := startupRecoveryMinimalEventStore{}
+	managerStore := startupRecoveryManagerStore{loadErr: errors.New("load agents failed")}
+	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
-		SQLDB:           db,
-		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		DeliveryStore:   newRuntimeShutdownDeliveryStore(t),
-		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
-		EventStore:      startupRecoveryMinimalEventStore{},
-		ManagerStore:    startupRecoveryManagerStore{loadErr: errors.New("load agents failed")},
-	}, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
+		SQLDB:                 db,
+		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		DeliveryStore:         deliveryStore,
+		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
+		EventStore:            eventStore,
+		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
+		PipelineObligations:   eventStore.PipelineObligations(),
+		ManagerStore:          managerStore,
+		ManagerLifecycleStore: managerStore,
+		Options: RuntimeOptions{
+			SelfCheck:      false,
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -1378,20 +1428,26 @@ func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndD
 		remainingFailures: 1,
 		loadErr:           errors.New("load agents failed"),
 	}
+	eventStore := startupRecoveryMinimalEventStore{}
+	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true), Stores: Stores{
-		SQLDB:           db,
-		PipelineStore:   runtimepipeline.NewWorkflowInstanceStore(db),
-		DeliveryStore:   newRuntimeShutdownDeliveryStore(t),
-		RuntimeLogStore: runtimeLogPersistenceStub{db: db},
-		EventStore:      startupRecoveryMinimalEventStore{},
-		ManagerStore:    managerStore,
-		ScheduleStore:   scheduleStore,
-	}, Options: RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
+	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
+		SQLDB:                 db,
+		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		DeliveryStore:         deliveryStore,
+		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
+		EventStore:            eventStore,
+		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
+		PipelineObligations:   eventStore.PipelineObligations(),
+		ManagerStore:          managerStore,
+		ManagerLifecycleStore: managerStore,
+		ScheduleStore:         scheduleStore,
+		TimerObligationReader: scheduleStore,
+		Options: RuntimeOptions{
+			SelfCheck:      false,
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)

@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -28,7 +29,7 @@ func TestRunForkPlanner_ResolvesCommitOrderedEventRevisionsAndRejectsTimestampSe
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, secondEventID, runID, "fork.second", events.EventProducerPlatform, "test", "", "", at)
 	secondRevision := captureRunForkTestRevision(t, db, runID)
 
-	byEvent, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: firstEventID})
+	byEvent, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: firstEventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork(event): %v", err)
 	}
@@ -42,7 +43,7 @@ func TestRunForkPlanner_ResolvesCommitOrderedEventRevisionsAndRejectsTimestampSe
 		t.Fatalf("first event revision = %d, want %d", byEvent.ForkPoint.Revision, firstRevision)
 	}
 
-	bySecondEvent, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: secondEventID})
+	bySecondEvent, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: secondEventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork(second event): %v", err)
 	}
@@ -53,7 +54,7 @@ func TestRunForkPlanner_ResolvesCommitOrderedEventRevisionsAndRejectsTimestampSe
 		t.Fatalf("event count at second event = %d, want 2", bySecondEvent.EventCountAtFork)
 	}
 
-	if _, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: at.Format(time.RFC3339Nano)}); err == nil || !strings.Contains(err.Error(), "UUID") {
+	if _, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: at.Format(time.RFC3339Nano)}); err == nil || !strings.Contains(err.Error(), "UUID") {
 		t.Fatalf("timestamp selector error = %v, want UUID-only rejection", err)
 	}
 }
@@ -83,14 +84,14 @@ func TestRunForkPlanner_FailsClosedForOpenReplyContextAtForkPoint(t *testing.T) 
 	}
 
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: requestEventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: requestEventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
 	if plan.ExecutionReady {
 		t.Fatalf("open reply context plan unexpectedly execution-ready: %#v", plan)
 	}
-	if !runForkTestHasPlanBlocker(plan, RunForkBlockerOpenReplyContextUnsupported) {
+	if !runForkTestHasPlanBlocker(plan, runfork.RunForkBlockerOpenReplyContextUnsupported) {
 		t.Fatalf("open reply context blocker missing: %#v", plan.UnsupportedBlockers)
 	}
 }
@@ -132,7 +133,7 @@ func TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations(t *testi
 		t.Fatalf("seed second revision mutations: %v", err)
 	}
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: firstEventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: firstEventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
@@ -184,7 +185,7 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	}
 
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
@@ -196,11 +197,11 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 		}
 	}
 	want := map[string]string{
-		"done-agent":     RunForkPendingClassificationDeliveredCompleted,
-		"pending-agent":  RunForkPendingClassificationPending,
-		"progress-agent": RunForkPendingClassificationInProgress,
-		"retry-agent":    RunForkPendingClassificationFailedRetryable,
-		"dead-agent":     RunForkPendingClassificationDeadLetter,
+		"done-agent":     runfork.RunForkPendingClassificationDeliveredCompleted,
+		"pending-agent":  runfork.RunForkPendingClassificationPending,
+		"progress-agent": runfork.RunForkPendingClassificationInProgress,
+		"retry-agent":    runfork.RunForkPendingClassificationFailedRetryable,
+		"dead-agent":     runfork.RunForkPendingClassificationDeadLetter,
 	}
 	for subscriber, classification := range want {
 		if got[subscriber] != classification {
@@ -210,8 +211,8 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	if plan.ExecutionReady {
 		t.Fatal("ExecutionReady = true, want false while recorder blockers remain")
 	}
-	if plan.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner {
-		t.Fatalf("taxonomy owner = %q, want %q", plan.ReplayResumeAdmission.Owner, RunForkReplayResumeAdmissionOwner)
+	if plan.ReplayResumeAdmission.Owner != runfork.RunForkReplayResumeAdmissionOwner {
+		t.Fatalf("taxonomy owner = %q, want %q", plan.ReplayResumeAdmission.Owner, runfork.RunForkReplayResumeAdmissionOwner)
 	}
 	if plan.ReplayResumeAdmission.StateOnlyExecutionReady {
 		t.Fatal("taxonomy StateOnlyExecutionReady = true, want false")
@@ -225,7 +226,7 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	}
 	for _, code := range []string{
 		"delivery_history_unproven",
-		RunForkBlockerFlowRouteHistoryUnproven,
+		runfork.RunForkBlockerFlowRouteHistoryUnproven,
 	} {
 		if !blockers[code] {
 			t.Fatalf("missing blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
@@ -237,11 +238,11 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 		}
 	}
 	for _, fact := range []string{
-		RunForkReplayResumeFactDeliveryCompletedHistory,
-		RunForkReplayResumeFactDeliveryPendingHistory,
-		RunForkReplayResumeFactDeliveryInProgressHistory,
-		RunForkReplayResumeFactDeliveryFailedHistory,
-		RunForkReplayResumeFactDeliveryDeadLetterHistory,
+		runfork.RunForkReplayResumeFactDeliveryCompletedHistory,
+		runfork.RunForkReplayResumeFactDeliveryPendingHistory,
+		runfork.RunForkReplayResumeFactDeliveryInProgressHistory,
+		runfork.RunForkReplayResumeFactDeliveryFailedHistory,
+		runfork.RunForkReplayResumeFactDeliveryDeadLetterHistory,
 	} {
 		if !runForkTestHasDisposition(plan.ReplayResumeAdmission, fact) {
 			t.Fatalf("missing taxonomy disposition for %s; admission=%#v", fact, plan.ReplayResumeAdmission)
@@ -262,7 +263,7 @@ func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *te
 	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "safe-agent"}, runtimedelivery.StateQueued, nil)
 
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
@@ -275,11 +276,11 @@ func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *te
 	if !plan.ReplayResumeAdmission.DeliveryEventReplayReady || !plan.ReplayResumeAdmission.ReplayResumeFactsPresent || !plan.ReplayResumeAdmission.BoundedReplaySupported {
 		t.Fatalf("replay flags = %#v, want delivery-event replay ready and supported", plan.ReplayResumeAdmission)
 	}
-	if plan.RouteHistory.State != RunForkRouteHistoryNotApplicable {
-		t.Fatalf("route history = %#v, want %s", plan.RouteHistory, RunForkRouteHistoryNotApplicable)
+	if plan.RouteHistory.State != runfork.RunForkRouteHistoryNotApplicable {
+		t.Fatalf("route history = %#v, want %s", plan.RouteHistory, runfork.RunForkRouteHistoryNotApplicable)
 	}
 	for _, disposition := range plan.ReplayResumeAdmission.Dispositions {
-		if disposition.Fact == RunForkReplayResumeFactDeliveryPendingHistory && disposition.Disposition == RunForkReplayResumeDispositionForkReplay {
+		if disposition.Fact == runfork.RunForkReplayResumeFactDeliveryPendingHistory && disposition.Disposition == runfork.RunForkReplayResumeDispositionForkReplay {
 			return
 		}
 	}
@@ -299,17 +300,17 @@ func TestRunForkPlanner_NodePendingDeliveryRemainsBlocked(t *testing.T) {
 	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-handler"}, runtimedelivery.StateQueued, nil)
 
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
 	if plan.ExecutionReady || plan.ReplayResumeAdmission.DeliveryEventReplayReady {
 		t.Fatalf("node pending plan became replay-ready: %#v", plan.ReplayResumeAdmission)
 	}
-	if !runForkTestHasBlocker(plan, RunForkBlockerNonAgentDeliveryReplayUnsupported) {
+	if !runForkTestHasBlocker(plan, runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) {
 		t.Fatalf("node pending blockers = %#v, want non-agent delivery replay blocker", plan.UnsupportedBlockers)
 	}
-	if !runForkTestHasDispositionBlocker(plan.ReplayResumeAdmission, RunForkReplayResumeFactDeliveryPendingHistory, RunForkBlockerNonAgentDeliveryReplayUnsupported) {
+	if !runForkTestHasDispositionBlocker(plan.ReplayResumeAdmission, runfork.RunForkReplayResumeFactDeliveryPendingHistory, runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) {
 		t.Fatalf("node pending admission = %#v, want non-agent delivery replay disposition", plan.ReplayResumeAdmission)
 	}
 }
@@ -325,14 +326,14 @@ func TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers(t *testing.T) 
 		{
 			name:      "pending node",
 			state:     runtimedelivery.StateQueued,
-			wantFact:  RunForkReplayResumeFactDeliveryPendingHistory,
-			wantClass: RunForkPendingClassificationPending,
+			wantFact:  runfork.RunForkReplayResumeFactDeliveryPendingHistory,
+			wantClass: runfork.RunForkPendingClassificationPending,
 		},
 		{
 			name:      "in progress node",
 			state:     runtimedelivery.StateLaunching,
-			wantFact:  RunForkReplayResumeFactDeliveryInProgressHistory,
-			wantClass: RunForkPendingClassificationInProgress,
+			wantFact:  runfork.RunForkReplayResumeFactDeliveryInProgressHistory,
+			wantClass: runfork.RunForkPendingClassificationInProgress,
 		},
 		{
 			name: "failed node", state: runtimedelivery.StateRetrying,
@@ -340,7 +341,7 @@ func TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers(t *testing.T) 
 				failure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "retryable_node_error", nil)
 				return &failure
 			}(),
-			wantFact: RunForkReplayResumeFactDeliveryFailedHistory, wantClass: RunForkPendingClassificationFailedRetryable,
+			wantFact: runfork.RunForkReplayResumeFactDeliveryFailedHistory, wantClass: runfork.RunForkPendingClassificationFailedRetryable,
 		},
 		{
 			name: "dead letter node", state: runtimedelivery.StateExhausted,
@@ -348,7 +349,7 @@ func TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers(t *testing.T) 
 				failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "dead_letter", nil)
 				return &failure
 			}(),
-			wantFact: RunForkReplayResumeFactDeliveryDeadLetterHistory, wantClass: RunForkPendingClassificationDeadLetter,
+			wantFact: runfork.RunForkReplayResumeFactDeliveryDeadLetterHistory, wantClass: runfork.RunForkPendingClassificationDeadLetter,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -364,18 +365,18 @@ func TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers(t *testing.T) 
 			seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-handler"}, tc.state, tc.failure)
 
 			captureRunForkTestRevision(t, db, runID)
-			plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+			plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 			if err != nil {
 				t.Fatalf("PlanRunFork: %v", err)
 			}
 			if plan.ExecutionReady || plan.ReplayResumeAdmission.DeliveryEventReplayReady {
 				t.Fatalf("non-agent delivery became replay-ready: %#v", plan.ReplayResumeAdmission)
 			}
-			if !runForkTestHasBlocker(plan, RunForkBlockerNonAgentDeliveryReplayUnsupported) {
+			if !runForkTestHasBlocker(plan, runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) {
 				t.Fatalf("blockers = %#v, want non-agent delivery replay blocker", plan.UnsupportedBlockers)
 			}
-			if !runForkTestHasDispositionBlocker(plan.ReplayResumeAdmission, tc.wantFact, RunForkBlockerNonAgentDeliveryReplayUnsupported) {
-				t.Fatalf("admission = %#v, want %s/%s disposition", plan.ReplayResumeAdmission, tc.wantFact, RunForkBlockerNonAgentDeliveryReplayUnsupported)
+			if !runForkTestHasDispositionBlocker(plan.ReplayResumeAdmission, tc.wantFact, runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) {
+				t.Fatalf("admission = %#v, want %s/%s disposition", plan.ReplayResumeAdmission, tc.wantFact, runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported)
 			}
 			if len(plan.PendingWork) != 1 {
 				t.Fatalf("pending work = %#v, want one non-agent item", plan.PendingWork)
@@ -405,7 +406,7 @@ func TestRunForkPlanner_CommittedReplayScopeDoesNotMasqueradeAsExecutableDeliver
 	}
 
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
@@ -487,18 +488,18 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 	}
 
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
 	if plan.ExecutionReady {
 		t.Fatalf("ExecutionReady = true, want route-history blocker; blockers=%#v", plan.UnsupportedBlockers)
 	}
-	if !runForkTestHasBlocker(plan, RunForkBlockerFlowRouteHistoryUnproven) {
-		t.Fatalf("blockers=%#v, want %s", plan.UnsupportedBlockers, RunForkBlockerFlowRouteHistoryUnproven)
+	if !runForkTestHasBlocker(plan, runfork.RunForkBlockerFlowRouteHistoryUnproven) {
+		t.Fatalf("blockers=%#v, want %s", plan.UnsupportedBlockers, runfork.RunForkBlockerFlowRouteHistoryUnproven)
 	}
-	if plan.RouteHistory.State != RunForkRouteHistoryUnknownUnversioned {
-		t.Fatalf("route history = %#v, want %s", plan.RouteHistory, RunForkRouteHistoryUnknownUnversioned)
+	if plan.RouteHistory.State != runfork.RunForkRouteHistoryUnknownUnversioned {
+		t.Fatalf("route history = %#v, want %s", plan.RouteHistory, runfork.RunForkRouteHistoryUnknownUnversioned)
 	}
 	baseline, err := json.Marshal(plan)
 	if err != nil {
@@ -515,7 +516,7 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 		if _, err := db.ExecContext(ctx, mutation.query); err != nil {
 			t.Fatalf("%s current routing rules: %v", mutation.label, err)
 		}
-		replanned, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+		replanned, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 		if err != nil {
 			t.Fatalf("PlanRunFork after current route %s: %v", mutation.label, err)
 		}
@@ -527,16 +528,16 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 			t.Fatalf("fixed-revision plan changed after current route %s\nbefore: %s\nafter:  %s", mutation.label, baseline, got)
 		}
 	}
-	if plan.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner {
-		t.Fatalf("taxonomy owner = %q, want %q", plan.ReplayResumeAdmission.Owner, RunForkReplayResumeAdmissionOwner)
+	if plan.ReplayResumeAdmission.Owner != runfork.RunForkReplayResumeAdmissionOwner {
+		t.Fatalf("taxonomy owner = %q, want %q", plan.ReplayResumeAdmission.Owner, runfork.RunForkReplayResumeAdmissionOwner)
 	}
 	if plan.ReplayResumeAdmission.StateOnlyExecutionReady || !plan.ReplayResumeAdmission.ReplayResumeFactsPresent || plan.ReplayResumeAdmission.BoundedReplaySupported {
 		t.Fatalf("taxonomy flags = state_only:%v historical_required:%v bounded_supported:%v, want false/true/false", plan.ReplayResumeAdmission.StateOnlyExecutionReady, plan.ReplayResumeAdmission.ReplayResumeFactsPresent, plan.ReplayResumeAdmission.BoundedReplaySupported)
 	}
-	if !runForkTestHasDisposition(plan.ReplayResumeAdmission, RunForkReplayResumeFactEntityStateSnapshot) {
+	if !runForkTestHasDisposition(plan.ReplayResumeAdmission, runfork.RunForkReplayResumeFactEntityStateSnapshot) {
 		t.Fatalf("missing entity-state taxonomy disposition; admission=%#v", plan.ReplayResumeAdmission)
 	}
-	if !runForkTestHasDisposition(plan.ReplayResumeAdmission, RunForkReplayResumeFactHistoricalReplayExecution) {
+	if !runForkTestHasDisposition(plan.ReplayResumeAdmission, runfork.RunForkReplayResumeFactHistoricalReplayExecution) {
 		t.Fatalf("missing split historical replay taxonomy disposition; admission=%#v", plan.ReplayResumeAdmission)
 	}
 	if plan.ReconstructedEntityCount != 1 {
@@ -581,7 +582,7 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 	}
 
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
@@ -593,7 +594,7 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 			t.Fatalf("missing blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
 		}
 	}
-	for _, fact := range []string{RunForkReplayResumeFactTimerHistory, RunForkReplayResumeFactRouteHistory} {
+	for _, fact := range []string{runfork.RunForkReplayResumeFactTimerHistory, runfork.RunForkReplayResumeFactRouteHistory} {
 		if !runForkTestHasDisposition(plan.ReplayResumeAdmission, fact) {
 			t.Fatalf("missing taxonomy disposition for %s; admission=%#v", fact, plan.ReplayResumeAdmission)
 		}
@@ -630,7 +631,7 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 	}
 
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
@@ -642,9 +643,9 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 		got[item.SubscriberID] = item.Classification
 	}
 	want := map[string]string{
-		"node-dead": RunForkPendingClassificationDeadLetter,
-		"node-ok":   RunForkPendingClassificationDeliveredCompleted,
-		"agent-ok":  RunForkPendingClassificationDeliveredCompleted,
+		"node-dead": runfork.RunForkPendingClassificationDeadLetter,
+		"node-ok":   runfork.RunForkPendingClassificationDeliveredCompleted,
+		"agent-ok":  runfork.RunForkPendingClassificationDeliveredCompleted,
 	}
 	for subscriber, classification := range want {
 		if got[subscriber] != classification {
@@ -679,7 +680,7 @@ func TestRunForkPlanner_DeadLetterClassificationUsesExactSiblingDeliveryID(t *te
 	delivered := seedDeliveryStateFixture(t, ctx, pg, event, deliveredRoute, runtimedelivery.StateDelivered, nil)
 
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
@@ -689,11 +690,11 @@ func TestRunForkPlanner_DeadLetterClassificationUsesExactSiblingDeliveryID(t *te
 			classifications[item.DeliveryID] = item.Classification
 		}
 	}
-	if got := classifications[dead.DeliveryID]; got != RunForkPendingClassificationDeadLetter {
-		t.Fatalf("dead sibling classification = %q, want %q; all=%#v", got, RunForkPendingClassificationDeadLetter, classifications)
+	if got := classifications[dead.DeliveryID]; got != runfork.RunForkPendingClassificationDeadLetter {
+		t.Fatalf("dead sibling classification = %q, want %q; all=%#v", got, runfork.RunForkPendingClassificationDeadLetter, classifications)
 	}
-	if got := classifications[delivered.DeliveryID]; got != RunForkPendingClassificationDeliveredCompleted {
-		t.Fatalf("delivered sibling classification = %q, want %q; all=%#v", got, RunForkPendingClassificationDeliveredCompleted, classifications)
+	if got := classifications[delivered.DeliveryID]; got != runfork.RunForkPendingClassificationDeliveredCompleted {
+		t.Fatalf("delivered sibling classification = %q, want %q; all=%#v", got, runfork.RunForkPendingClassificationDeliveredCompleted, classifications)
 	}
 }
 
@@ -731,17 +732,17 @@ func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *test
 		t.Fatalf("complete pending delivery after selected revision: %v", err)
 	}
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
-	got := map[string]RunForkPendingWork{}
+	got := map[string]runfork.RunForkPendingWork{}
 	for _, item := range plan.PendingWork {
 		got[item.SubscriberID] = item
 	}
 	inProgress := got["completed-after-fork"]
-	if inProgress.Classification != RunForkPendingClassificationInProgress {
-		t.Fatalf("completed-after-fork classification = %q, want %q; item=%#v", inProgress.Classification, RunForkPendingClassificationInProgress, inProgress)
+	if inProgress.Classification != runfork.RunForkPendingClassificationInProgress {
+		t.Fatalf("completed-after-fork classification = %q, want %q; item=%#v", inProgress.Classification, runfork.RunForkPendingClassificationInProgress, inProgress)
 	}
 	if inProgress.Status != "in_progress" {
 		t.Fatalf("completed-after-fork status = %q, want in_progress", inProgress.Status)
@@ -750,8 +751,8 @@ func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *test
 		t.Fatalf("completed-after-fork delivered_at = %v, want nil because completion happened after fork", inProgress.DeliveredAt)
 	}
 	pending := got["started-after-fork"]
-	if pending.Classification != RunForkPendingClassificationPending {
-		t.Fatalf("started-after-fork classification = %q, want %q; item=%#v", pending.Classification, RunForkPendingClassificationPending, pending)
+	if pending.Classification != runfork.RunForkPendingClassificationPending {
+		t.Fatalf("started-after-fork classification = %q, want %q; item=%#v", pending.Classification, runfork.RunForkPendingClassificationPending, pending)
 	}
 	if pending.Status != "pending" {
 		t.Fatalf("started-after-fork status = %q, want pending", pending.Status)
@@ -797,24 +798,24 @@ func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 		t.Fatalf("fail pending delivery after selected revision: %v", err)
 	}
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
-	got := map[string]RunForkPendingWork{}
+	got := map[string]runfork.RunForkPendingWork{}
 	for _, item := range plan.PendingWork {
 		got[item.SubscriberID] = item
 	}
 	inProgress := got["failed-after-fork"]
-	if inProgress.Classification != RunForkPendingClassificationInProgress {
-		t.Fatalf("failed-after-fork classification = %q, want %q; item=%#v", inProgress.Classification, RunForkPendingClassificationInProgress, inProgress)
+	if inProgress.Classification != runfork.RunForkPendingClassificationInProgress {
+		t.Fatalf("failed-after-fork classification = %q, want %q; item=%#v", inProgress.Classification, runfork.RunForkPendingClassificationInProgress, inProgress)
 	}
 	if inProgress.RetryCount != 0 || inProgress.ReasonCode != "" {
 		t.Fatalf("failed-after-fork terminal metadata leaked: retry_count=%d reason_code=%q", inProgress.RetryCount, inProgress.ReasonCode)
 	}
 	pending := got["pending-then-failed-after-fork"]
-	if pending.Classification != RunForkPendingClassificationPending {
-		t.Fatalf("pending-then-failed-after-fork classification = %q, want %q; item=%#v", pending.Classification, RunForkPendingClassificationPending, pending)
+	if pending.Classification != runfork.RunForkPendingClassificationPending {
+		t.Fatalf("pending-then-failed-after-fork classification = %q, want %q; item=%#v", pending.Classification, runfork.RunForkPendingClassificationPending, pending)
 	}
 	if pending.RetryCount != 0 || pending.ReasonCode != "" {
 		t.Fatalf("pending-then-failed-after-fork terminal metadata leaked: retry_count=%d reason_code=%q", pending.RetryCount, pending.ReasonCode)
@@ -843,14 +844,14 @@ func TestRunForkPlanner_AccountsForPlatformReceiptAndExactDeliveryOutcomes(t *te
 	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-done"}, runtimedelivery.StateDelivered, nil)
 
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
 	if plan.PendingWorkCount != 3 || len(plan.PendingWork) != 3 {
 		t.Fatalf("pending work count = %d/%d, want 3 completed processing facts; items=%#v", plan.PendingWorkCount, len(plan.PendingWork), plan.PendingWork)
 	}
-	got := map[string]RunForkPendingWork{}
+	got := map[string]runfork.RunForkPendingWork{}
 	for _, item := range plan.PendingWork {
 		got[item.SubscriberType+"/"+item.SubscriberID] = item
 	}
@@ -869,8 +870,8 @@ func TestRunForkPlanner_AccountsForPlatformReceiptAndExactDeliveryOutcomes(t *te
 		if key != "platform/pipeline" && item.DeliveryID == "" {
 			t.Fatalf("%s delivery_id is empty, want exact executable obligation", key)
 		}
-		if item.Classification != RunForkPendingClassificationDeliveredCompleted {
-			t.Fatalf("%s classification = %q, want %q; item=%#v", key, item.Classification, RunForkPendingClassificationDeliveredCompleted, item)
+		if item.Classification != runfork.RunForkPendingClassificationDeliveredCompleted {
+			t.Fatalf("%s classification = %q, want %q; item=%#v", key, item.Classification, runfork.RunForkPendingClassificationDeliveredCompleted, item)
 		}
 		if item.ReceiptOutcome != wantOutcome || (key == "platform/pipeline") != (item.ReceiptAt != nil) {
 			t.Fatalf("%s event-level receipt = outcome %q at %v, want outcome %q", key, item.ReceiptOutcome, item.ReceiptAt, wantOutcome)
@@ -931,7 +932,7 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 	}
 
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
@@ -943,7 +944,7 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 			t.Fatalf("missing blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
 		}
 	}
-	for _, fact := range []string{RunForkReplayResumeFactSessionHistory, RunForkReplayResumeFactActiveTurnHistory} {
+	for _, fact := range []string{runfork.RunForkReplayResumeFactSessionHistory, runfork.RunForkReplayResumeFactActiveTurnHistory} {
 		if !runForkTestHasDisposition(plan.ReplayResumeAdmission, fact) {
 			t.Fatalf("missing disposition %q; admission=%#v", fact, plan.ReplayResumeAdmission)
 		}
@@ -976,17 +977,17 @@ func TestRunForkPlanner_ActiveConversationAuditRemainsPolicyBlocker(t *testing.T
 	}
 
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
 	if plan.ExecutionReady {
 		t.Fatal("ExecutionReady = true, want false for active task conversation audit facts")
 	}
-	if !runForkTestHasBlocker(plan, RunForkBlockerConversationAuditUnproven) {
+	if !runForkTestHasBlocker(plan, runfork.RunForkBlockerConversationAuditUnproven) {
 		t.Fatalf("missing conversation audit blocker; blockers=%#v", plan.UnsupportedBlockers)
 	}
-	if !runForkTestHasDisposition(plan.ReplayResumeAdmission, RunForkReplayResumeFactConversationAuditHistory) {
+	if !runForkTestHasDisposition(plan.ReplayResumeAdmission, runfork.RunForkReplayResumeFactConversationAuditHistory) {
 		t.Fatalf("missing conversation audit disposition; admission=%#v", plan.ReplayResumeAdmission)
 	}
 }
@@ -1019,11 +1020,11 @@ func TestRunForkPlanner_TerminatedSessionBeforeForkIsLineageOnly(t *testing.T) {
 		t.Fatalf("seed terminated session: %v", err)
 	}
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
-	for _, code := range []string{RunForkBlockerSessionHistoryUnproven, RunForkBlockerActiveTurnHistoryUnproven} {
+	for _, code := range []string{runfork.RunForkBlockerSessionHistoryUnproven, runfork.RunForkBlockerActiveTurnHistoryUnproven} {
 		if runForkTestHasBlocker(plan, code) {
 			t.Fatalf("completed lineage emitted blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
 		}
@@ -1059,22 +1060,22 @@ func TestRunForkPlanner_TerminatedAuditStillBlocksWithoutAtForkTerminationProof(
 	}
 
 	captureRunForkTestRevision(t, db, runID)
-	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID})
+	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
 	if plan.ExecutionReady {
 		t.Fatal("ExecutionReady = true, want false because audit termination is not append-only proven at fork T")
 	}
-	if !runForkTestHasBlocker(plan, RunForkBlockerConversationAuditUnproven) {
+	if !runForkTestHasBlocker(plan, runfork.RunForkBlockerConversationAuditUnproven) {
 		t.Fatalf("missing conversation audit blocker; blockers=%#v", plan.UnsupportedBlockers)
 	}
-	if !runForkTestHasDisposition(plan.ReplayResumeAdmission, RunForkReplayResumeFactConversationAuditHistory) {
+	if !runForkTestHasDisposition(plan.ReplayResumeAdmission, runfork.RunForkReplayResumeFactConversationAuditHistory) {
 		t.Fatalf("missing conversation audit disposition; admission=%#v", plan.ReplayResumeAdmission)
 	}
 }
 
-func runForkTestHasBlocker(plan RunForkPlan, code string) bool {
+func runForkTestHasBlocker(plan runfork.RunForkPlan, code string) bool {
 	for _, blocker := range plan.UnsupportedBlockers {
 		if blocker.Code == code {
 			return true
@@ -1083,7 +1084,7 @@ func runForkTestHasBlocker(plan RunForkPlan, code string) bool {
 	return false
 }
 
-func runForkTestHasDisposition(admission RunForkReplayResumeAdmission, fact string) bool {
+func runForkTestHasDisposition(admission runfork.RunForkReplayResumeAdmission, fact string) bool {
 	for _, disposition := range admission.Dispositions {
 		if disposition.Fact == fact {
 			return true
@@ -1092,7 +1093,7 @@ func runForkTestHasDisposition(admission RunForkReplayResumeAdmission, fact stri
 	return false
 }
 
-func runForkTestHasDispositionBlocker(admission RunForkReplayResumeAdmission, fact, blockerCode string) bool {
+func runForkTestHasDispositionBlocker(admission runfork.RunForkReplayResumeAdmission, fact, blockerCode string) bool {
 	for _, disposition := range admission.Dispositions {
 		if disposition.Fact == fact && disposition.BlockerCode == blockerCode {
 			return true

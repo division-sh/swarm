@@ -8,7 +8,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -53,7 +52,7 @@ func supersedePriorLoopGenerationArtifacts(instance *WorkflowInstance, previousB
 }
 
 func (pc *PipelineCoordinator) reconcileSupersededLoopSchedules(ctx context.Context, entityID string) error {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return nil
 	}
 	instance, ok, err := pc.workflowStore.Load(ctx, strings.TrimSpace(entityID))
@@ -75,8 +74,8 @@ func (pc *PipelineCoordinator) reconcileSupersededLoopSchedules(ctx context.Cont
 		}
 	}
 	if pc.decisionCards != nil {
-		store, ok := pc.decisionCards.(decisioncard.ProposedEffectStore)
-		if !ok || store == nil {
+		store := pc.proposedEffects
+		if store == nil {
 			return fmt.Errorf("proposed-effect continuation store is required for loop supersession")
 		}
 		runID := firstNonEmptyString(runtimecorrelation.RunIDFromContext(ctx), asString(instance.Metadata["run_id"]))

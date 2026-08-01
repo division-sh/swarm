@@ -46,9 +46,13 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 
 	module := newRunCompletionSystemNodeModule(t, source)
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module:           module,
-		DeliveryStore:    pg,
-		BundleSourceFact: runStartTestBundleSourceFact(),
+		Module:              module,
+		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		DeliveryStore:       pg,
+		DeliveryRuntime:     bus,
+		PipelineObligations: pg.PipelineObligations(),
+		RunLifecycle:        pg,
+		BundleSourceFact:    runStartTestBundleSourceFact(),
 	})
 
 	runID := "11111111-1111-4111-8111-111111111111"

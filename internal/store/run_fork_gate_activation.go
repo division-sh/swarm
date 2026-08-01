@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
 
@@ -99,7 +100,7 @@ func materializeRunForkDecisionCards(ctx context.Context, tx *sql.Tx, forkRunID,
 	return nil
 }
 
-func materializeRunForkProposedEffectCards(ctx context.Context, tx *sql.Tx, sourceRunID, forkRunID, entityID string, forkPoint RunForkPoint, now time.Time) error {
+func materializeRunForkProposedEffectCards(ctx context.Context, tx *sql.Tx, sourceRunID, forkRunID, entityID string, forkPoint runfork.RunForkPoint, now time.Time) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT p.card_id
 		FROM proposed_effect_continuations p

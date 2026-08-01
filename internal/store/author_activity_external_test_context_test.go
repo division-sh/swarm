@@ -16,6 +16,8 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -78,7 +80,30 @@ func ownStoreTestAgentManager(t *testing.T, manager *runtimemanager.AgentManager
 	return manager
 }
 
-func newStoreTestEventBus(t *testing.T, selected runtimebus.EventStore, options ...runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
+type externalStoreTestDurableEventBusStore interface {
+	runtimebus.EventStore
+	runtimereplycontext.Store
+	runtimerunlifecycle.OperationOwner
+	runtimedelivery.Store
+	runtimebus.FlowInstanceRoutePersistence
+	runtimebus.FlowInstanceRouteRecordReader
+	runtimebus.FlowInstanceRouteSetPersistence
+	runtimebus.FlowInstanceRouteTopologyPersistence
+	runtimebus.FlowInstanceRouteRollbackPersistence
+	runtimebus.ActiveAgentDescriptorLister
+	runtimebus.ActiveFlowInstanceDescriptorLister
+	runtimebus.EventDeliveryTargetReader
+	runtimebus.EventDeliveryRouteSetReader
+	runtimebus.TargetFailureDeadLetterRecorder
+	runtimebus.RunOriginReader
+	PipelineObligations() runtimepipelineobligation.Store
+}
+
+type externalStoreTestMutationOwner interface {
+	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
+}
+
+func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBusStore, options ...runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
 	t.Helper()
 	var opts runtimebus.EventBusOptions
 	if len(options) > 0 {
@@ -105,11 +130,13 @@ func newStoreTestEventBus(t *testing.T, selected runtimebus.EventStore, options 
 		opts.DeliveryAuthority = authority
 	}
 	if opts.PipelineObligations == nil {
-		if provider, ok := selected.(interface {
-			PipelineObligations() runtimepipelineobligation.Store
-		}); ok {
-			opts.PipelineObligations = provider.PipelineObligations()
-		}
+		opts.PipelineObligations = selected.PipelineObligations()
+	}
+	opts.Durable = runtimebus.DurableDependencies{
+		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
+		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected, FlowRouteTopology: selected, FlowRouteRollback: selected,
+		ActiveAgents: selected, ActiveFlows: selected, DeliveryTargets: selected, DeliveryRouteSets: selected,
+		TargetFailureRecorder: selected, RunOrigins: selected,
 	}
 	bus, err := runtimebus.NewEventBusWithOptions(selected, opts)
 	if err != nil {

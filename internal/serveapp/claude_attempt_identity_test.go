@@ -35,6 +35,8 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
@@ -82,12 +84,26 @@ func defaultClaudeAttemptProofSurface() claudeAttemptProofSurface {
 
 type claudeAttemptProofStore interface {
 	runtimebus.EventStore
+	runtimereplycontext.Store
+	runtimerunlifecycle.OperationOwner
+	runtimebus.FlowInstanceRoutePersistence
+	runtimebus.FlowInstanceRouteRecordReader
+	runtimebus.FlowInstanceRouteSetPersistence
+	runtimebus.FlowInstanceRouteTopologyPersistence
+	runtimebus.FlowInstanceRouteRollbackPersistence
+	runtimebus.ActiveAgentDescriptorLister
+	runtimebus.ActiveFlowInstanceDescriptorLister
+	runtimebus.EventDeliveryTargetReader
+	runtimebus.EventDeliveryRouteSetReader
+	runtimebus.TargetFailureDeadLetterRecorder
+	runtimebus.RunOriginReader
 	runtimemanager.ManagerPersistence
 	runtimemanager.AgentLifecyclePersistence
 	runtimeeffects.Store
 	runtimeeffects.CompletionStore
 	runtimeeffects.CompletionHeartbeatStore
 	runtimeeffects.RecoveryStore
+	runtimesessions.Resetter
 	runtimellm.ConversationPersistence
 	runtimedelivery.Store
 	PipelineObligations() runtimepipelineobligation.Store
@@ -431,7 +447,15 @@ func TestAgentManagerDirectDeadLetterPersistsCanonicalEnvelopeSelectedStores(t *
 			eventBus, workOwner, _ := newClaudeAttemptProofEventBus(t, backend, 1)
 			manager := runtimemanager.NewAgentManagerWithOptions(eventBus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 				return claudeAttemptProofChainDepthAgent{id: cfg.ID}, nil
-			}, runtimemanager.AgentManagerOptions{BaseContext: claudeAttemptProofContext(), LifecycleStore: backend.store, DeliveryStore: backend.store, Sessions: backend.sessions, WorkOwner: workOwner}, backend.store)
+			}, runtimemanager.AgentManagerOptions{
+				BaseContext:      claudeAttemptProofContext(),
+				LifecycleStore:   backend.store,
+				DeliveryStore:    backend.store,
+				Sessions:         backend.sessions,
+				SessionResetter:  backend.store,
+				PersistenceRoles: selectedStoreManagerPersistenceRoles(backend.store, eventBus),
+				WorkOwner:        workOwner,
+			}, backend.store)
 			if err := manager.SpawnAgent(claudeAttemptProofAgentConfig()); err != nil {
 				t.Fatalf("spawn chain-depth proof agent: %v", err)
 			}
@@ -517,12 +541,20 @@ func newClaudeAttemptProofManagerForGeneration(
 		eventBus,
 		runtimellm.ClaudeCLIRuntimeOptions{
 			ProviderCredentials:  runtimellm.NewProviderCredentialResolver(runtimecredentials.NewEnvStore()),
-			CompletionController: runtimeeffects.NewCompletionController(backend.store, claudeAttemptProofSpendProjection{}),
+			CompletionController: runtimeeffects.NewCompletionController(backend.store, backend.store, backend.store, claudeAttemptProofSpendProjection{}),
 		},
 	)
 	manager := runtimemanager.NewAgentManagerWithOptions(eventBus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return &claudeAttemptProofAgent{runtime: runtime, config: cfg, calls: calls}, nil
-	}, runtimemanager.AgentManagerOptions{BaseContext: claudeAttemptProofContext(), LifecycleStore: backend.store, DeliveryStore: backend.store, Sessions: backend.sessions, WorkOwner: workOwner}, backend.store)
+	}, runtimemanager.AgentManagerOptions{
+		BaseContext:      claudeAttemptProofContext(),
+		LifecycleStore:   backend.store,
+		DeliveryStore:    backend.store,
+		Sessions:         backend.sessions,
+		SessionResetter:  backend.store,
+		PersistenceRoles: selectedStoreManagerPersistenceRoles(backend.store, eventBus),
+		WorkOwner:        workOwner,
+	}, backend.store)
 	return manager, eventBus, coordinator
 }
 
@@ -587,6 +619,13 @@ func newClaudeAttemptProofEventBus(
 		WorkOwner:           workOwner,
 		PipelineObligations: backend.store.PipelineObligations(),
 		DeliveryAuthority:   authority,
+		Durable: runtimebus.DurableDependencies{
+			ReplyContext: backend.store, RunLifecycle: backend.store,
+			DeliveryLifecycle: backend.store, FlowRoutes: backend.store, FlowRouteRecords: backend.store,
+			FlowRouteSets: backend.store, FlowRouteTopology: backend.store, FlowRouteRollback: backend.store, ActiveAgents: backend.store,
+			ActiveFlows: backend.store, DeliveryTargets: backend.store, DeliveryRouteSets: backend.store,
+			TargetFailureRecorder: backend.store, RunOrigins: backend.store,
+		},
 	})
 	if err != nil {
 		t.Fatalf("new Claude proof event bus: %v", err)

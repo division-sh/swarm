@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 )
@@ -129,8 +130,8 @@ func TestBundleCatalogReadSurfaceMissingCursorAndMalformedProjection(t *testing.
 	if _, err := pg.LoadBundleCatalog(ctx, missingHash); !errors.Is(err, ErrBundleNotFound) {
 		t.Fatalf("LoadBundleCatalog missing error = %v, want ErrBundleNotFound", err)
 	}
-	if _, err := pg.LoadBundleCatalogRuntimeRecord(ctx, missingHash); !errors.Is(err, ErrBundleNotFound) {
-		t.Fatalf("LoadBundleCatalogRuntimeRecord missing error = %v, want ErrBundleNotFound", err)
+	if _, err := pg.LoadBundleCatalogRuntimeRecord(ctx, missingHash); !errors.Is(err, runtimerunbundle.ErrBundleNotFound) {
+		t.Fatalf("LoadBundleCatalogRuntimeRecord missing error = %v, want runbundle.ErrBundleNotFound", err)
 	}
 	if _, err := pg.ListBundleCatalog(ctx, BundleCatalogListOptions{Cursor: "not-a-cursor"}); !errors.Is(err, ErrInvalidBundleCatalogCursor) {
 		t.Fatalf("ListBundleCatalog invalid cursor error = %v, want ErrInvalidBundleCatalogCursor", err)

@@ -331,8 +331,8 @@ func drainBufferedLocalDeliveryChannel(ctx context.Context, store EventStore, ch
 
 func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 	ephemeral := eb.runtimeActiveAgentDescriptors()
-	lister, ok := eb.store.(ActiveAgentDescriptorLister)
-	if !ok {
+	lister := eb.durable.ActiveAgents
+	if lister == nil {
 		if len(ephemeral) > 0 {
 			return ephemeral, true, nil
 		}
@@ -383,8 +383,8 @@ func (eb *EventBus) activeTargetDescriptors(ctx context.Context) ([]ActiveTarget
 		return nil, true, err
 	}
 	out := activeTargetDescriptorsFromAgents(agentDescriptors)
-	lister, flowOK := eb.store.(ActiveFlowInstanceDescriptorLister)
-	if !flowOK {
+	lister := eb.durable.ActiveFlows
+	if lister == nil {
 		return out, agentsOK || len(out) > 0, nil
 	}
 	flowDescriptors, err := eb.activeFlowInstanceDescriptorsForSemanticSource(ctx, lister)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
@@ -93,7 +94,7 @@ func TestForkedSourceCannotWriteSelectedContractRouteRecoveryEvidence(t *testing
 	insertForkedConsumerEvent(t, fixture, eventID, "selected.route.source", fixture.forkedAt.Add(-time.Minute))
 	fixture.freeze(t)
 	selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
-	_, err := fixture.postgres.RecordRunForkSelectedContractRouteRecovery(testAuthorActivityBundleSourceContext(), RunForkSelectedContractRouteRecoveryRequest{
+	_, err := fixture.postgres.RecordRunForkSelectedContractRouteRecovery(testAuthorActivityBundleSourceContext(), runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID: fixture.continued, SourceRunID: fixture.sourceRun, ForkEventID: eventID,
 		ContractSelection: selection, RouteTopology: topology, RecipientPlanning: planning,
 	})

@@ -18,7 +18,6 @@ import (
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
@@ -27,7 +26,7 @@ import (
 )
 
 type standingSignalMutationRunner struct {
-	delegate       runtimepipeline.RuntimeMutationRunner
+	delegate       storeTestRuntimeMutationOwner
 	afterCommitErr error
 	rollbackErr    error
 	beforeCommit   func() error
@@ -80,36 +79,32 @@ func TestStandingServiceTerminalizationSignalUsesCallbackTimeRegistrationParity(
 
 				var (
 					db            *sql.DB
-					base          runtimepipeline.RuntimeMutationRunner
+					base          storeTestRuntimeMutationOwner
+					selected      workflowTestSelectedStore
 					deliveryStore runtimedelivery.Store
-					workflowStore *runtimepipeline.WorkflowInstanceStore
+					workflowStore *runtimepipeline.PipelineCoordinator
 					dialect       runtimeauthoractivity.Dialect
 					adapter       *runtimedelivery.Adapter
 				)
 				if backend == "sqlite" {
-					selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
-					db, base, deliveryStore = selected.DB, selected, selected
+					sqliteSelected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+					db, base, deliveryStore = sqliteSelected.DB, sqliteSelected, sqliteSelected
+					selected = sqliteSelected
 					dialect, adapter = runtimeauthoractivity.DialectSQLite, sqliteDeliveryAdapter
 				} else {
 					_, opened, cleanup := testutil.StartPostgres(t)
 					t.Cleanup(cleanup)
-					selected := admitTestPostgresStore(t, opened)
-					db, base, deliveryStore = opened, selected, selected
+					postgresSelected := admitTestPostgresStore(t, opened)
+					db, base, deliveryStore = opened, postgresSelected, postgresSelected
+					selected = postgresSelected
 					dialect, adapter = runtimeauthoractivity.DialectPostgres, postgresDeliveryAdapter
 				}
 				runner := &standingSignalMutationRunner{delegate: base}
 				if backend == "sqlite" {
-					workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+					workflowStore = newSQLiteWorkflowTestCoordinator(t, db, selected)
 				} else {
-					workflowStore = runtimepipeline.NewWorkflowInstanceStore(db)
-					workflowStore.ConfigureRuntimeMutationRunner(runner)
+					workflowStore = newPostgresWorkflowTestCoordinator(t, db, selected)
 				}
-				selectedDelivery := deliveryStore.(interface {
-					PipelineObligations() runtimepipelineobligation.Store
-				})
-				workflowStore.ConfigureDeliveryLifecycleStore(deliveryStore)
-				workflowStore.ConfigurePipelineObligationStore(selectedDelivery.PipelineObligations())
-				workflowStore.ConfigureRunLifecycle(deliveryStore.(runtimerunlifecycle.OperationOwner))
 
 				candidate := runtimepipeline.StandingServiceCandidate{
 					ServiceID:  runtimeflowidentity.StandingServiceID("project", "signal-registration-order"),
@@ -210,7 +205,10 @@ func TestStandingServiceTerminalizationSignalUsesCallbackTimeRegistrationParity(
 				if outcome == "rollback" {
 					runner.rollbackErr = errors.New("injected registration-order rollback")
 				}
-				_, operationErr := workflowStore.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: candidate.ServiceID, Actor: "test"})
+				operationErr := runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
+					_, err := workflowStore.SuspendStandingService(txctx, runtimepipeline.StandingServiceOperation{ServiceID: candidate.ServiceID, Actor: "test"})
+					return err
+				})
 				if outcome == "rollback" && !errors.Is(operationErr, runner.rollbackErr) {
 					t.Fatalf("registration-order rollback = %v", operationErr)
 				}
@@ -275,36 +273,30 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 
 			var (
 				db            *sql.DB
-				base          runtimepipeline.RuntimeMutationRunner
+				selected      workflowTestSelectedStore
 				deliveryStore runtimedelivery.Store
-				workflowStore *runtimepipeline.WorkflowInstanceStore
+				workflowStore *runtimepipeline.PipelineCoordinator
 				dialect       runtimeauthoractivity.Dialect
 				adapter       *runtimedelivery.Adapter
 			)
 			if backend == "sqlite" {
-				selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
-				db, base, deliveryStore = selected.DB, selected, selected
+				sqliteSelected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				db, deliveryStore = sqliteSelected.DB, sqliteSelected
+				selected = sqliteSelected
 				dialect, adapter = runtimeauthoractivity.DialectSQLite, sqliteDeliveryAdapter
 			} else {
 				_, opened, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				selected := admitTestPostgresStore(t, opened)
-				db, base, deliveryStore = opened, selected, selected
+				postgresSelected := admitTestPostgresStore(t, opened)
+				db, deliveryStore = opened, postgresSelected
+				selected = postgresSelected
 				dialect, adapter = runtimeauthoractivity.DialectPostgres, postgresDeliveryAdapter
 			}
-			runner := &standingSignalMutationRunner{delegate: base}
 			if backend == "sqlite" {
-				workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+				workflowStore = newSQLiteWorkflowTestCoordinator(t, db, selected)
 			} else {
-				workflowStore = runtimepipeline.NewWorkflowInstanceStore(db)
-				workflowStore.ConfigureRuntimeMutationRunner(runner)
+				workflowStore = newPostgresWorkflowTestCoordinator(t, db, selected)
 			}
-			selectedDelivery := deliveryStore.(interface {
-				PipelineObligations() runtimepipelineobligation.Store
-			})
-			workflowStore.ConfigureDeliveryLifecycleStore(deliveryStore)
-			workflowStore.ConfigurePipelineObligationStore(selectedDelivery.PipelineObligations())
-			workflowStore.ConfigureRunLifecycle(deliveryStore.(runtimerunlifecycle.OperationOwner))
 
 			candidate := runtimepipeline.StandingServiceCandidate{
 				ServiceID:  runtimeflowidentity.StandingServiceID("project", "signal-startup-order"),
@@ -399,24 +391,26 @@ func TestStandingServiceTerminalizationSignalFollowsTransactionOutcomeParity(t *
 					})
 					var (
 						db             *sql.DB
-						base           runtimepipeline.RuntimeMutationRunner
+						base           storeTestRuntimeMutationOwner
+						selected       workflowTestSelectedStore
 						deliveryStore  runtimedelivery.Store
-						workflowStore  *runtimepipeline.WorkflowInstanceStore
+						workflowStore  *runtimepipeline.PipelineCoordinator
 						dialect        runtimeauthoractivity.Dialect
 						commitDelivery func(events.Event, events.DeliveryRoute, runtimedelivery.ExecutionAuthority) []runtimedelivery.DurableHandoffProof
 					)
 					if backend == "sqlite" {
-						selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
-						db = selected.DB
-						base = selected
-						deliveryStore = selected
+						sqliteSelected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+						db = sqliteSelected.DB
+						base = sqliteSelected
+						selected = sqliteSelected
+						deliveryStore = sqliteSelected
 						dialect = runtimeauthoractivity.DialectSQLite
 						commitDelivery = func(evt events.Event, route events.DeliveryRoute, authority runtimedelivery.ExecutionAuthority) []runtimedelivery.DurableHandoffProof {
 							if err := eventfixture.Insert(ctx, db, dialect, evt); err != nil {
 								t.Fatalf("insert standing delivery event: %v", err)
 							}
 							var proofs []runtimedelivery.DurableHandoffProof
-							if err := selected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+							if err := sqliteSelected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 								var err error
 								proofs, err = sqliteDeliveryAdapter.CommitInitial(txctx, tx, evt.ID(), evt.RunID(), []events.DeliveryRoute{route}, authority)
 								return err
@@ -428,17 +422,18 @@ func TestStandingServiceTerminalizationSignalFollowsTransactionOutcomeParity(t *
 					} else {
 						_, opened, cleanup := testutil.StartPostgres(t)
 						t.Cleanup(cleanup)
-						selected := admitTestPostgresStore(t, opened)
+						postgresSelected := admitTestPostgresStore(t, opened)
 						db = opened
-						base = selected
-						deliveryStore = selected
+						base = postgresSelected
+						selected = postgresSelected
+						deliveryStore = postgresSelected
 						dialect = runtimeauthoractivity.DialectPostgres
 						commitDelivery = func(evt events.Event, route events.DeliveryRoute, authority runtimedelivery.ExecutionAuthority) []runtimedelivery.DurableHandoffProof {
 							if err := eventfixture.Insert(ctx, db, dialect, evt); err != nil {
 								t.Fatalf("insert standing delivery event: %v", err)
 							}
 							var proofs []runtimedelivery.DurableHandoffProof
-							if err := selected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+							if err := postgresSelected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 								var err error
 								proofs, err = postgresDeliveryAdapter.CommitInitial(txctx, tx, evt.ID(), evt.RunID(), []events.DeliveryRoute{route}, authority)
 								return err
@@ -450,20 +445,10 @@ func TestStandingServiceTerminalizationSignalFollowsTransactionOutcomeParity(t *
 					}
 					runner := &standingSignalMutationRunner{delegate: base}
 					if backend == "sqlite" {
-						workflowStore = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
+						workflowStore = newSQLiteWorkflowTestCoordinator(t, db, selected)
 					} else {
-						workflowStore = runtimepipeline.NewWorkflowInstanceStore(db)
-						workflowStore.ConfigureRuntimeMutationRunner(runner)
+						workflowStore = newPostgresWorkflowTestCoordinator(t, db, selected)
 					}
-					selectedDelivery, ok := deliveryStore.(interface {
-						PipelineObligations() runtimepipelineobligation.Store
-					})
-					if !ok {
-						t.Fatalf("%T does not expose pipeline obligations", deliveryStore)
-					}
-					workflowStore.ConfigureDeliveryLifecycleStore(deliveryStore)
-					workflowStore.ConfigurePipelineObligationStore(selectedDelivery.PipelineObligations())
-					workflowStore.ConfigureRunLifecycle(deliveryStore.(runtimerunlifecycle.OperationOwner))
 					candidate := runtimepipeline.StandingServiceCandidate{
 						ServiceID:  runtimeflowidentity.StandingServiceID("project", "signal-"+operation),
 						PackageKey: "project", FlowID: "signal-" + operation,
@@ -537,16 +522,19 @@ func TestStandingServiceTerminalizationSignalFollowsTransactionOutcomeParity(t *
 					} else {
 						runner.afterCommitErr = injectedErr
 					}
-					switch operation {
-					case "orphan":
-						_, err = workflowStore.ReconcileStandingServiceSet(ctx, nil)
-					case "replacement":
-						_, err = workflowStore.ReconcileStandingServiceReplacement(ctx, []runtimepipeline.StandingServiceCandidate{candidate}, nil)
-					case "suspend":
-						_, err = workflowStore.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: candidate.ServiceID, Actor: "test"})
-					case "reset":
-						_, err = workflowStore.ResetStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: candidate.ServiceID, Actor: "test"})
-					}
+					err = runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
+						switch operation {
+						case "orphan":
+							_, err = workflowStore.ReconcileStandingServiceSet(txctx, nil)
+						case "replacement":
+							_, err = workflowStore.ReconcileStandingServiceReplacement(txctx, []runtimepipeline.StandingServiceCandidate{candidate}, nil)
+						case "suspend":
+							_, err = workflowStore.SuspendStandingService(txctx, runtimepipeline.StandingServiceOperation{ServiceID: candidate.ServiceID, Actor: "test"})
+						case "reset":
+							_, err = workflowStore.ResetStandingService(txctx, runtimepipeline.StandingServiceOperation{ServiceID: candidate.ServiceID, Actor: "test"})
+						}
+						return err
+					})
 					if !errors.Is(err, injectedErr) {
 						t.Fatalf("terminalization error = %v, want injected outcome failure", err)
 					}
@@ -640,9 +628,7 @@ func awaitStandingTerminalResolution(
 func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
-	workflowStore.ConfigureDeliveryLifecycleStore(store)
-	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
+	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.DB, store)
 	packageKey := "project"
 	flowID := "ingress"
 	serviceID := runtimeflowidentity.StandingServiceID(packageKey, flowID)
@@ -714,9 +700,7 @@ func TestSQLiteStandingServiceReconcileCreatesPublishesAndRepairsRestartAbandon(
 func TestSQLiteStandingServiceReconcileRejectsUnknownTerminalityWithCommand(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
-	workflowStore.ConfigureDeliveryLifecycleStore(store)
-	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
+	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.DB, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
@@ -742,9 +726,7 @@ func TestSQLiteStandingServiceReconcileRejectsUnknownTerminalityWithCommand(t *t
 func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
-	workflowStore.ConfigureDeliveryLifecycleStore(store)
-	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
+	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.DB, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
@@ -871,9 +853,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 func TestSQLiteStandingServiceSetOrphansRemovedDeclaration(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
-	workflowStore.ConfigureDeliveryLifecycleStore(store)
-	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
+	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.DB, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
@@ -907,9 +887,7 @@ func TestSQLiteStandingServiceSetOrphansRemovedDeclaration(t *testing.T) {
 
 func TestSQLiteStandingServiceReplacementIsScopedAndAtomic(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
-	workflowStore.ConfigureDeliveryLifecycleStore(store)
-	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
+	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.DB, store)
 	testStandingServiceReplacementIsScopedAndAtomic(t, store.DB, workflowStore)
 }
 
@@ -917,14 +895,11 @@ func TestPostgresStandingServiceReplacementIsScopedAndAtomic(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	selected := admitTestPostgresStore(t, db)
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	workflowStore.ConfigureRuntimeMutationRunner(selected)
-	workflowStore.ConfigureDeliveryLifecycleStore(selected)
-	workflowStore.ConfigurePipelineObligationStore(selected.PipelineObligations())
+	workflowStore := newPostgresWorkflowTestCoordinator(t, db, selected)
 	testStandingServiceReplacementIsScopedAndAtomic(t, db, workflowStore)
 }
 
-func testStandingServiceReplacementIsScopedAndAtomic(t *testing.T, db *sql.DB, workflowStore *runtimepipeline.WorkflowInstanceStore) {
+func testStandingServiceReplacementIsScopedAndAtomic(t *testing.T, db *sql.DB, workflowStore *runtimepipeline.PipelineCoordinator) {
 	t.Helper()
 	ctx := testAuthorActivityRuntimeContext()
 	makeCandidate := func(flowID, hashDigit string) runtimepipeline.StandingServiceCandidate {
@@ -1001,11 +976,8 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	ctx := testAuthorActivityRuntimeContext()
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	selected := admitTestPostgresStore(t, db)
-	workflowStore.ConfigureRuntimeMutationRunner(selected)
-	workflowStore.ConfigureDeliveryLifecycleStore(selected)
-	workflowStore.ConfigurePipelineObligationStore(selected.PipelineObligations())
+	workflowStore := newPostgresWorkflowTestCoordinator(t, db, selected)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
@@ -1110,9 +1082,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 func TestSQLiteRunStopRefusesCurrentStandingGenerationWithTeachingCommand(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
-	workflowStore.ConfigureDeliveryLifecycleStore(store)
-	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
+	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.DB, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress", InstanceID: uuid.NewString(), EntityID: uuid.NewString(),

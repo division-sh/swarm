@@ -7,14 +7,14 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
 
 func TestAdmitContractFrontier_DerivesSelectedContractRecipientsWithoutMutating(t *testing.T) {
-	plan := testRunForkPlan("producer/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node")
+	plan := testRunForkPlan("producer/scan.requested", runfork.RunForkPendingClassificationPending, "node", "source-node")
 	source := testContractFrontierSource("consumer-node")
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -25,8 +25,8 @@ func TestAdmitContractFrontier_DerivesSelectedContractRecipientsWithoutMutating(
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
 	}
-	if admission.Owner != store.RunForkContractFrontierAdmissionOwner {
-		t.Fatalf("owner = %q, want %q", admission.Owner, store.RunForkContractFrontierAdmissionOwner)
+	if admission.Owner != runfork.RunForkContractFrontierAdmissionOwner {
+		t.Fatalf("owner = %q, want %q", admission.Owner, runfork.RunForkContractFrontierAdmissionOwner)
 	}
 	if !admission.NonMutating || admission.HistoricalExecutionSupported {
 		t.Fatalf("admission mutation flags = non_mutating:%v historical_supported:%v", admission.NonMutating, admission.HistoricalExecutionSupported)
@@ -50,13 +50,13 @@ func TestAdmitContractFrontier_DerivesSelectedContractRecipientsWithoutMutating(
 	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].SubscriberID != "consumer-node" || event.DerivedRecipients[0].SubscriberType != "node" {
 		t.Fatalf("derived recipients = %#v, want selected contract consumer-node", event.DerivedRecipients)
 	}
-	if !hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierExecutionUnsupported) {
+	if !hasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierExecutionUnsupported) {
 		t.Fatalf("blockers = %#v, want execution unsupported", admission.UnsupportedBlockers)
 	}
 }
 
 func TestAdmitContractFrontier_SelectedContractChangesRecipients(t *testing.T) {
-	plan := testRunForkPlan("producer/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node")
+	plan := testRunForkPlan("producer/scan.requested", runfork.RunForkPendingClassificationPending, "node", "source-node")
 	sourceA := testContractFrontierSource("consumer-a")
 	sourceB := testContractFrontierSource("consumer-b")
 
@@ -84,7 +84,7 @@ func TestAdmitContractFrontier_SelectedContractChangesRecipients(t *testing.T) {
 }
 
 func TestAdmitContractFrontier_ConnectMatchesConcreteTemplateSourceEndpoint(t *testing.T) {
-	plan := testRunForkPlan("producer/inst-1/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node")
+	plan := testRunForkPlan("producer/inst-1/scan.requested", runfork.RunForkPendingClassificationPending, "node", "source-node")
 	plan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}
 	source := testContractFrontierTemplateConnectSource()
 
@@ -100,13 +100,13 @@ func TestAdmitContractFrontier_ConnectMatchesConcreteTemplateSourceEndpoint(t *t
 	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].SubscriberID != "consumer-node" {
 		t.Fatalf("derived recipients = %#v, want consumer-node through producer connect", event.DerivedRecipients)
 	}
-	if hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
+	if hasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierRouteUnresolved) {
 		t.Fatalf("blockers = %#v, want concrete template source connect to resolve", admission.UnsupportedBlockers)
 	}
 }
 
 func TestAdmitContractFrontier_ConnectRejectsConcreteTemplateIdentityWhenSourceRouteIsAbsent(t *testing.T) {
-	plan := testRunForkPlan("producer/inst-1/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node")
+	plan := testRunForkPlan("producer/inst-1/scan.requested", runfork.RunForkPendingClassificationPending, "node", "source-node")
 	source := testContractFrontierTemplateConnectSource()
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -121,13 +121,13 @@ func TestAdmitContractFrontier_ConnectRejectsConcreteTemplateIdentityWhenSourceR
 	if len(event.DerivedRecipients) != 0 {
 		t.Fatalf("derived recipients = %#v, want concrete template source without route rejected", event.DerivedRecipients)
 	}
-	if !hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
+	if !hasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierRouteUnresolved) {
 		t.Fatalf("blockers = %#v, want concrete template source without route unresolved", admission.UnsupportedBlockers)
 	}
 }
 
 func TestAdmitContractFrontier_ConnectRejectsUnrelatedTemplateSameLeaf(t *testing.T) {
-	plan := testRunForkPlan("unrelated/inst-1/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node")
+	plan := testRunForkPlan("unrelated/inst-1/scan.requested", runfork.RunForkPendingClassificationPending, "node", "source-node")
 	plan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "unrelated", FlowInstance: "unrelated/inst-1"}
 	source := testContractFrontierTemplateConnectSource()
 
@@ -143,7 +143,7 @@ func TestAdmitContractFrontier_ConnectRejectsUnrelatedTemplateSameLeaf(t *testin
 	if len(event.DerivedRecipients) != 0 {
 		t.Fatalf("derived recipients = %#v, want unrelated same-leaf template excluded", event.DerivedRecipients)
 	}
-	if !hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
+	if !hasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierRouteUnresolved) {
 		t.Fatalf("blockers = %#v, want unrelated same-leaf template to remain unresolved", admission.UnsupportedBlockers)
 	}
 }
@@ -161,7 +161,7 @@ func TestSelectedContractAdmissionsEnforceProducerMode(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := testContractFrontierConnectSource(tc.mode)
-			frontierPlan := testRunForkPlan(tc.eventName, store.RunForkPendingClassificationPending, "node", "source-node")
+			frontierPlan := testRunForkPlan(tc.eventName, runfork.RunForkPendingClassificationPending, "node", "source-node")
 			frontierPlan.PendingWork[0].SourceRoute = tc.source
 			frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 				Plan:              frontierPlan,
@@ -174,11 +174,11 @@ func TestSelectedContractAdmissionsEnforceProducerMode(t *testing.T) {
 			if len(frontier.FrontierEvents) != 1 || len(frontier.FrontierEvents[0].DerivedRecipients) != 0 {
 				t.Fatalf("frontier events = %#v, want producer mode mismatch rejected", frontier.FrontierEvents)
 			}
-			if !hasBlocker(frontier.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
+			if !hasBlocker(frontier.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierRouteUnresolved) {
 				t.Fatalf("frontier blockers = %#v, want unresolved route", frontier.UnsupportedBlockers)
 			}
 
-			historyPlan := testRunForkPlan(tc.eventName, store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
+			historyPlan := testRunForkPlan(tc.eventName, runfork.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
 			historyPlan.PendingWork[0].SourceRoute = tc.source
 			historyFrontier, err := AdmitContractFrontier(ContractFrontierRequest{
 				Plan:              historyPlan,
@@ -212,7 +212,7 @@ func TestSelectedContractAdmissionsPreserveRootAndCarrierPoliciesAndRuntimeIncom
 		}
 		t.Run(name, func(t *testing.T) {
 			source := testContractFrontierMixedReceiverSource(t, includeRuntimeReceiver)
-			frontierPlan := testRunForkPlan("producer/work.ready", store.RunForkPendingClassificationPending, "node", "source-node")
+			frontierPlan := testRunForkPlan("producer/work.ready", runfork.RunForkPendingClassificationPending, "node", "source-node")
 			frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 				Plan:              frontierPlan,
 				Source:            source,
@@ -225,11 +225,11 @@ func TestSelectedContractAdmissionsPreserveRootAndCarrierPoliciesAndRuntimeIncom
 				t.Fatalf("frontier events = %#v, want one", frontier.FrontierEvents)
 			}
 			assertContractFrontierMixedRecipients(t, frontier.FrontierEvents[0].DerivedRecipients)
-			if got := hasBlocker(frontier.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved); got != includeRuntimeReceiver {
+			if got := hasBlocker(frontier.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierRouteUnresolved); got != includeRuntimeReceiver {
 				t.Fatalf("frontier unresolved blocker = %v, want %v: %#v", got, includeRuntimeReceiver, frontier.UnsupportedBlockers)
 			}
 
-			historyPlan := testRunForkPlan("producer/work.ready", store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
+			historyPlan := testRunForkPlan("producer/work.ready", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
 			historyFrontier, err := AdmitContractFrontier(ContractFrontierRequest{
 				Plan:              historyPlan,
 				Source:            source,
@@ -251,21 +251,21 @@ func TestSelectedContractAdmissionsPreserveRootAndCarrierPoliciesAndRuntimeIncom
 				t.Fatalf("selected route events = %#v, want one", history.SelectedRouteEvents)
 			}
 			assertContractFrontierMixedRecipients(t, history.SelectedRouteEvents[0].DerivedRecipients)
-			wantDisposition := store.RunForkSelectedContractDispositionEvidenceOnly
+			wantDisposition := runfork.RunForkSelectedContractDispositionEvidenceOnly
 			if includeRuntimeReceiver {
-				wantDisposition = store.RunForkSelectedContractDispositionFailClosed
+				wantDisposition = runfork.RunForkSelectedContractDispositionFailClosed
 			}
 			if history.SelectedRouteEvents[0].Disposition != wantDisposition {
 				t.Fatalf("history disposition = %q, want %q", history.SelectedRouteEvents[0].Disposition, wantDisposition)
 			}
-			if got := hasBlocker(history.UnsupportedBlockers, store.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven); got != includeRuntimeReceiver {
+			if got := hasBlocker(history.UnsupportedBlockers, runfork.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven); got != includeRuntimeReceiver {
 				t.Fatalf("history dynamic blocker = %v, want %v: %#v", got, includeRuntimeReceiver, history.UnsupportedBlockers)
 			}
 		})
 	}
 }
 
-func assertContractFrontierMixedRecipients(t *testing.T, recipients []store.RunForkContractFrontierRecipient) {
+func assertContractFrontierMixedRecipients(t *testing.T, recipients []runfork.RunForkContractFrontierRecipient) {
 	t.Helper()
 	want := map[string]bool{
 		"node/root-node":     false,
@@ -285,7 +285,7 @@ func assertContractFrontierMixedRecipients(t *testing.T, recipients []store.RunF
 }
 
 func TestAdmitContractFrontier_DeliveredCompletedHistoryIsNotFrontierWork(t *testing.T) {
-	plan := testRunForkPlan("producer/scan.requested", store.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
+	plan := testRunForkPlan("producer/scan.requested", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
 	source := testContractFrontierSource("consumer-node")
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -305,7 +305,7 @@ func TestAdmitContractFrontier_DeliveredCompletedHistoryIsNotFrontierWork(t *tes
 }
 
 func TestAdmitContractFrontier_CommittedReplayScopeMarkersAreNotFrontierWork(t *testing.T) {
-	plan := testRunForkPlan("producer/scan.requested", store.RunForkPendingClassificationCommittedReplay, "platform", "replay-scope")
+	plan := testRunForkPlan("producer/scan.requested", runfork.RunForkPendingClassificationCommittedReplay, "platform", "replay-scope")
 	source := testContractFrontierSource("consumer-node")
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -327,7 +327,7 @@ func TestAdmitContractFrontier_CommittedReplayScopeMarkersAreNotFrontierWork(t *
 func TestAdmitContractFrontier_DiagnosticPlatformOutcomesAreLineageOnly(t *testing.T) {
 	for _, eventName := range []string{"platform.runtime_log", "platform.inbound_recorded"} {
 		t.Run(eventName, func(t *testing.T) {
-			plan := testRunForkPlan(eventName, store.RunForkPendingClassificationDeadLetter, "platform", "pipeline")
+			plan := testRunForkPlan(eventName, runfork.RunForkPendingClassificationDeadLetter, "platform", "pipeline")
 			source := testContractFrontierSource("consumer-node")
 
 			admission, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -351,13 +351,13 @@ func TestAdmitContractFrontier_DiagnosticPlatformOutcomesAreLineageOnly(t *testi
 			if lineage.EventName != eventName {
 				t.Fatalf("lineage event name = %q, want %q", lineage.EventName, eventName)
 			}
-			if lineage.Owner != store.RunForkSelectedContractDiagnosticPlatformOutcomePolicyOwner {
-				t.Fatalf("lineage owner = %q, want %q", lineage.Owner, store.RunForkSelectedContractDiagnosticPlatformOutcomePolicyOwner)
+			if lineage.Owner != runfork.RunForkSelectedContractDiagnosticPlatformOutcomePolicyOwner {
+				t.Fatalf("lineage owner = %q, want %q", lineage.Owner, runfork.RunForkSelectedContractDiagnosticPlatformOutcomePolicyOwner)
 			}
-			if lineage.Disposition != store.RunForkContractFrontierDispositionLineageNoAction {
-				t.Fatalf("lineage disposition = %q, want %q", lineage.Disposition, store.RunForkContractFrontierDispositionLineageNoAction)
+			if lineage.Disposition != runfork.RunForkContractFrontierDispositionLineageNoAction {
+				t.Fatalf("lineage disposition = %q, want %q", lineage.Disposition, runfork.RunForkContractFrontierDispositionLineageNoAction)
 			}
-			if !hasString(lineage.SourceClassifications, store.RunForkPendingClassificationDeadLetter) || !hasString(lineage.SourceSubscriberTypes, "platform") {
+			if !hasString(lineage.SourceClassifications, runfork.RunForkPendingClassificationDeadLetter) || !hasString(lineage.SourceSubscriberTypes, "platform") {
 				t.Fatalf("lineage evidence = classifications:%v subscriber_types:%v", lineage.SourceClassifications, lineage.SourceSubscriberTypes)
 			}
 		})
@@ -365,7 +365,7 @@ func TestAdmitContractFrontier_DiagnosticPlatformOutcomesAreLineageOnly(t *testi
 }
 
 func TestAdmitContractFrontier_NonDiagnosticPlatformDeadLetterRemainsFailClosed(t *testing.T) {
-	plan := testRunForkPlan("platform.dead_letter", store.RunForkPendingClassificationDeadLetter, "platform", "pipeline")
+	plan := testRunForkPlan("platform.dead_letter", runfork.RunForkPendingClassificationDeadLetter, "platform", "pipeline")
 	source := testContractFrontierSource("consumer-node")
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -382,13 +382,13 @@ func TestAdmitContractFrontier_NonDiagnosticPlatformDeadLetterRemainsFailClosed(
 	if len(admission.LineageOnlyEvents) != 0 {
 		t.Fatalf("lineage-only events = %#v, want none for non-diagnostic platform outcome", admission.LineageOnlyEvents)
 	}
-	if !hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
+	if !hasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierRouteUnresolved) {
 		t.Fatalf("blockers = %#v, want unresolved-route blocker", admission.UnsupportedBlockers)
 	}
 }
 
 func TestAdmitContractFrontier_SelectedDeadLetterRemainsExecutableFrontier(t *testing.T) {
-	plan := testRunForkPlan("producer/scan.requested", store.RunForkPendingClassificationDeadLetter, "node", "source-node")
+	plan := testRunForkPlan("producer/scan.requested", runfork.RunForkPendingClassificationDeadLetter, "node", "source-node")
 	source := testContractFrontierSource("consumer-node")
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -405,16 +405,16 @@ func TestAdmitContractFrontier_SelectedDeadLetterRemainsExecutableFrontier(t *te
 	if len(admission.LineageOnlyEvents) != 0 {
 		t.Fatalf("lineage-only events = %#v, want none for selected dead-letter source fact", admission.LineageOnlyEvents)
 	}
-	if hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
+	if hasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierRouteUnresolved) {
 		t.Fatalf("blockers = %#v, want no unresolved-route blocker for selected source fact", admission.UnsupportedBlockers)
 	}
-	if !hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierExecutionUnsupported) {
+	if !hasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierExecutionUnsupported) {
 		t.Fatalf("blockers = %#v, want execution unsupported", admission.UnsupportedBlockers)
 	}
 }
 
 func TestAdmitContractFrontier_MaterializesSourceFlowInstanceRoutes(t *testing.T) {
-	plan := testRunForkPlan("review/inst-1/task.started", store.RunForkPendingClassificationPending, "node", "source-node")
+	plan := testRunForkPlan("review/inst-1/task.started", runfork.RunForkPendingClassificationPending, "node", "source-node")
 	plan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "review", FlowInstance: "review/inst-1"}
 	source := testContractFrontierTemplateSource()
 
@@ -439,14 +439,14 @@ func TestAdmitContractFrontier_MaterializesSourceFlowInstanceRoutes(t *testing.T
 	if event.DerivedRecipients[0].Path != "review/inst-1" {
 		t.Fatalf("recipient path = %q, want review/inst-1", event.DerivedRecipients[0].Path)
 	}
-	if hasBlocker(admission.UnsupportedBlockers, store.RunForkBlockerContractFrontierRouteUnresolved) {
+	if hasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierRouteUnresolved) {
 		t.Fatalf("blockers = %#v, want no unresolved-route blocker for materialized instance route", admission.UnsupportedBlockers)
 	}
 }
 
 func TestAdmitContractFrontier_FailsClosedWithoutSelectedSource(t *testing.T) {
 	_, err := AdmitContractFrontier(ContractFrontierRequest{
-		Plan: testRunForkPlan("producer/scan.requested", store.RunForkPendingClassificationPending, "node", "source-node"),
+		Plan: testRunForkPlan("producer/scan.requested", runfork.RunForkPendingClassificationPending, "node", "source-node"),
 	})
 	if err == nil {
 		t.Fatal("AdmitContractFrontier error = nil, want selected source failure")
@@ -454,7 +454,7 @@ func TestAdmitContractFrontier_FailsClosedWithoutSelectedSource(t *testing.T) {
 }
 
 func TestAdmitContractFrontier_DoesNotInferFlowInstanceRouteFromEventName(t *testing.T) {
-	plan := testRunForkPlan("review/inst-1/task.started", store.RunForkPendingClassificationPending, "node", "source-node")
+	plan := testRunForkPlan("review/inst-1/task.started", runfork.RunForkPendingClassificationPending, "node", "source-node")
 	source := testContractFrontierTemplateSource()
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -471,18 +471,18 @@ func TestAdmitContractFrontier_DoesNotInferFlowInstanceRouteFromEventName(t *tes
 	}
 }
 
-func testRunForkPlan(eventName, classification, subscriberType, subscriberID string) store.RunForkPlan {
+func testRunForkPlan(eventName, classification, subscriberType, subscriberID string) runfork.RunForkPlan {
 	now := time.Unix(1700001000, 0).UTC()
 	eventID := uuid.NewString()
-	return store.RunForkPlan{
+	return runfork.RunForkPlan{
 		SourceRunID: uuid.NewString(),
-		ForkPoint: store.RunForkPoint{
+		ForkPoint: runfork.RunForkPoint{
 			Input:     eventID,
 			EventID:   eventID,
 			EventName: eventName,
 			Timestamp: now,
 		},
-		PendingWork: []store.RunForkPendingWork{{
+		PendingWork: []runfork.RunForkPendingWork{{
 			EventID:        eventID,
 			EventName:      eventName,
 			DeliveryID:     uuid.NewString(),
@@ -731,7 +731,7 @@ func hasString(values []string, want string) bool {
 	return false
 }
 
-func hasBlocker(blockers []store.RunForkUnsupportedBlocker, code string) bool {
+func hasBlocker(blockers []runfork.RunForkUnsupportedBlocker, code string) bool {
 	for _, blocker := range blockers {
 		if blocker.Code == code {
 			return true

@@ -819,7 +819,20 @@ seam_families:
       - internal/runtime/bus/eventbus_routing.go
       - internal/runtime/engine/executor.go
       - internal/runtime/engine/interfaces.go
+      - internal/runtime/artifact_action_result_delivery_test.go
+      - internal/runtime/channel_runtime_supported_surface_test.go
+      - internal/runtime/final_flow_instance_authoring_runtime_test.go
+      - internal/runtime/node_delivery_startup_recovery_test.go
       - internal/runtime/pipeline/engine_adapter.go
+      - internal/runtime/pipeline/coordinator.go
+      - internal/runtime/runforkexecution/execution.go
+      - internal/runtime/runtime.go
+      - internal/runtime/slack_connector_managed_credential_supported_surface_test.go
+      - internal/runtime/telegram_connector_supported_surface_test.go
+      - internal/runtime/template_flow_pilot_runtime_test.go
+      - internal/runtime/template_instance_delivery_test.go
+      - internal/runtime/conformance/fan_in_barrier_runtime_conformance_test.go
+      - internal/runtime/conformance/notify_all_children_runtime_conformance_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
       - internal/store/flow_instance_descriptor_authority_test.go
       - internal/store/flow_instance_descriptors_sqlite_test.go
@@ -887,7 +900,9 @@ seam_families:
       - internal/runtime/pipeline/workflow_conformance_test.go
       - internal/runtime/pipeline/workflow_gate_recovery_external_test.go
       - internal/runtime/pipeline/workflow_handler_preview.go
+      - internal/runtime/cataloge2e/assertions_test.go
       - internal/store/run_fork_selected_contract_route_recovery_test.go
+      - internal/store/workflow_persistence_test.go
       - internal/store/sqlite_runtime_test.go
       - internal/runtime/tools/deps.go
       - internal/runtime/tools/executor_agents.go
@@ -1012,7 +1027,7 @@ seam_families:
       - internal/runtime/runforkexecution/recipient_planning.go
       - internal/store/run_fork_delivery_event_replay.go
       - internal/store/run_fork_revision_projection.go
-      - internal/store/run_fork_selected_contract_execution.go
+      - internal/runtime/runforkexecution/runtime_container.go
       - internal/store/run_fork_replay_resume_admission.go
     search_dimensions: [event_deliveries, replay_scope, connect_route_plan]
     invalid_authority:

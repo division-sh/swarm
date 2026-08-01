@@ -73,7 +73,7 @@ func TestMockCompletionSpendDoesNotConsumeLiveAdmissionCap(t *testing.T) {
 			mockAuthority := fixture.normal.authority
 			mockAuthority.ExecutionMode = runtimeeffects.ExecutionModeMock
 			mockAuthority.Target.ID = uuid.NewString()
-			mockCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), mockAuthority), runtimeeffects.NewController(fixture.primary))
+			mockCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), mockAuthority), newCompletionControllerForTest(fixture.primary))
 			mockCtx = runtimeeffects.WithExecutionMode(mockCtx, runtimeeffects.ExecutionModeMock)
 			mockCtx = withManagedCompletionTestSurface(t, mockCtx, mockAuthority, "mock_python")
 			mockCtx = runtimeeffects.WithLogicalOperationIdentity(mockCtx, "mock-spend-before-live-cap")
@@ -96,7 +96,7 @@ func TestMockCompletionSpendDoesNotConsumeLiveAdmissionCap(t *testing.T) {
 			liveAuthority := fixture.normal.authority
 			liveAuthority.Target.ID = uuid.NewString()
 			liveAuthority.BudgetScopes = []runtimeeffects.BudgetAdmissionScope{{Kind: "system", CapUSD: 1}}
-			liveCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), liveAuthority), runtimeeffects.NewController(fixture.primary))
+			liveCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), liveAuthority), newCompletionControllerForTest(fixture.primary))
 			liveCtx = runtimeeffects.WithExecutionMode(liveCtx, runtimeeffects.ExecutionModeLive)
 			liveCtx = withManagedCompletionTestSurface(t, liveCtx, liveAuthority, "openai_compatible")
 			liveCtx = runtimeeffects.WithLogicalOperationIdentity(liveCtx, "live-cap-after-mock-spend")
@@ -143,7 +143,7 @@ func proveCompletionBudgetAdmissionRace(t *testing.T, fixture completionBudgetRa
 		go func() {
 			defer wg.Done()
 			<-start
-			ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), candidate.authority), runtimeeffects.NewController(candidate.store))
+			ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), candidate.authority), newCompletionControllerForTest(candidate.store))
 			if candidate.authority.Target.Kind == runtimeeffects.UsageTargetAgentTurn {
 				ctx = withManagedCompletionTestSurface(t, ctx, candidate.authority, "openai_responses")
 			}
@@ -290,7 +290,7 @@ func proveCompletionBudgetSettlementAccounting(t *testing.T, sqlite bool, exactn
 	}
 	authority := fixture.authority
 	authority.BudgetScopes = append([]runtimeeffects.BudgetAdmissionScope(nil), scopes...)
-	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), runtimeeffects.NewController(fixture.store))
+	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), newCompletionControllerForTest(fixture.store))
 	ctx = withManagedCompletionTestSurface(t, ctx, authority, "openai_compatible")
 	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "budget-accounting:"+string(exactness)+":"+string(state))
 	handle, err := runtimeeffects.BeginCompletion(ctx, "openai_compatible", []byte("budget accounting"), nil)

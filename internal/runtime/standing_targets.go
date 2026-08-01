@@ -13,8 +13,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -429,25 +427,14 @@ func (rt *Runtime) EnsureStandingReplacementTargets(ctx context.Context, predece
 		return nil, nil, fmt.Errorf("replacement runtime work occurrence is required")
 	}
 	ctx = worklifetime.WithRuntimeOccurrence(ctx, rt.workOccurrence)
-	owner := rt.Stores.PipelineStore
+	owner := rt.Pipeline
 	if owner == nil {
 		return nil, nil, fmt.Errorf("standing replacement requires pipeline store")
 	}
-	if len(previous) > 0 && predecessor.Stores.PipelineStore == nil {
+	if len(previous) > 0 && predecessor.Pipeline == nil {
 		return nil, nil, fmt.Errorf("standing predecessor requires pipeline store")
 	}
-	if predecessor != nil && predecessor.Stores.PipelineStore != nil && predecessor.Stores.PipelineStore != owner {
-		return nil, nil, fmt.Errorf("standing replacement requires one selected-store owner")
-	}
-	var targets []StandingTarget
-	var activations []StandingActivation
-	err = owner.RunPipelineMutation(ctx, func(txctx context.Context) error {
-		if _, err := owner.ReconcileStandingServiceReplacement(txctx, previous, candidates); err != nil {
-			return err
-		}
-		targets, activations, err = rt.ensureStandingTargets(txctx, "")
-		return err
-	})
+	targets, activations, err := rt.ensureStandingTargetsMutation(ctx, "", previous, true)
 	if err == nil {
 		err = rt.restoreAdoptedStandingWorkflowTimers(ctx, activations)
 	}
@@ -455,6 +442,10 @@ func (rt *Runtime) EnsureStandingReplacementTargets(ctx context.Context, predece
 }
 
 func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) ([]StandingTarget, []StandingActivation, error) {
+	return rt.ensureStandingTargetsMutation(ctx, serviceID, nil, false)
+}
+
+func (rt *Runtime) ensureStandingTargetsMutation(ctx context.Context, serviceID string, previous []runtimepipeline.StandingServiceCandidate, replace bool) ([]StandingTarget, []StandingActivation, error) {
 	if rt == nil {
 		return nil, nil, fmt.Errorf("standing activation requires a runtime")
 	}
@@ -472,52 +463,27 @@ func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) 
 	if _, hasPreparedOwner := worklifetime.OccurrenceFromContext(ctx); !hasPreparedOwner {
 		ctx = worklifetime.WithRuntimeOccurrence(ctx, rt.workOccurrence)
 	}
-	if rt.Stores.PipelineStore == nil || rt.Manager == nil || rt.Pipeline == nil {
+	if rt.Pipeline == nil || rt.Manager == nil {
 		return nil, nil, fmt.Errorf("standing activation requires pipeline store, pipeline, and agent manager")
 	}
 	fact := rt.Options.BundleSourceFact
 	source := rt.Options.WorkflowModule.SemanticSource()
-	targets := make([]StandingTarget, 0)
-	activations := make([]StandingActivation, 0, len(plans))
+	selectedPlans := make([]standingTargetPlan, 0, len(plans))
+	mutations := make([]runtimepipeline.StandingTargetMutation, 0, len(plans))
+	observedAt := time.Now().UTC()
 	for _, plan := range plans {
 		if serviceID != "" && plan.serviceID != serviceID {
 			continue
 		}
 		declaration := plan.declaration
 		instance := plan.instance
-		created := false
-		var reconciliation runtimepipeline.StandingServiceReconciliation
-		var publicationSequence int64
-		err := rt.Stores.PipelineStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
-			candidate := runtimepipeline.StandingServiceCandidate{
+		selectedPlans = append(selectedPlans, plan)
+		mutations = append(mutations, runtimepipeline.StandingTargetMutation{
+			Candidate: runtimepipeline.StandingServiceCandidate{
 				ServiceID: plan.serviceID, PackageKey: declaration.PackageKey, FlowID: declaration.FlowID,
 				InstanceID: instance.InstanceID, EntityID: instance.EntityID, Source: fact,
-			}
-			var err error
-			var found bool
-			reconciliation, found, err = rt.Stores.PipelineStore.LoadReconciledStandingService(txctx, candidate)
-			if err != nil {
-				return err
-			}
-			if !found {
-				reconciliation, err = rt.Stores.PipelineStore.ReconcileStandingService(txctx, candidate)
-				if err != nil {
-					return err
-				}
-			}
-			if reconciliation.EffectiveState != "active" {
-				return nil
-			}
-			txctx = runtimecorrelation.WithRunID(txctx, reconciliation.RunID)
-			txctx = runtimecorrelation.WithBundleSourceFact(txctx, fact)
-			txctx = runtimeeffects.WithExecutionMode(txctx, executionmode.Live)
-			if reconciliation.Generation > 1 {
-				txctx = runtimepipeline.WithStandingGenerationRebind(txctx)
-			}
-			if err := rt.Manager.ReconcileDynamicFlowRuntimeReadinessPlansForRun(txctx, time.Now().UTC()); err != nil {
-				return err
-			}
-			wasCreated, err := rt.Manager.EnsureFlowInstance(txctx, runtimepipeline.FlowInstanceActivationRequest{
+			},
+			Activation: runtimepipeline.FlowInstanceActivationRequest{
 				ContractBundle: source,
 				Instance:       instance,
 				InitialState:   source.FlowInitialStage(declaration.FlowID),
@@ -527,18 +493,26 @@ func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) 
 					"bundle_hash": fact.BundleHash(),
 					"package_key": declaration.PackageKey,
 				},
-				OccurredAt: time.Now().UTC(),
-			})
-			if err != nil {
-				return err
-			}
-			created = wasCreated
-			publicationSequence, err = rt.Stores.PipelineStore.PublishStandingService(txctx, reconciliation.ServiceID, reconciliation.RunID, reconciliation.Generation)
-			return err
+				OccurredAt: observedAt,
+			},
 		})
-		if err != nil {
-			return nil, nil, fmt.Errorf("activate standing flow %s: %w", declaration.FlowID, err)
-		}
+	}
+	results, err := rt.Pipeline.CommitStandingTargets(ctx, runtimepipeline.StandingTargetMutationRequest{
+		Previous: previous, Targets: mutations, Replace: replace, ObservedAt: observedAt,
+	}, rt.Manager)
+	if err != nil {
+		return nil, nil, fmt.Errorf("activate standing targets: %w", err)
+	}
+	if len(results) != len(selectedPlans) {
+		return nil, nil, fmt.Errorf("standing target mutation returned %d results for %d plans", len(results), len(selectedPlans))
+	}
+	targets := make([]StandingTarget, 0)
+	activations := make([]StandingActivation, 0, len(selectedPlans))
+	for i, plan := range selectedPlans {
+		declaration := plan.declaration
+		instance := plan.instance
+		result := results[i]
+		reconciliation := result.Reconciliation
 		if reconciliation.EffectiveState != "active" {
 			activations = append(activations, StandingActivation{
 				BundleHash: fact.BundleHash(), ServiceID: reconciliation.ServiceID, PackageKey: declaration.PackageKey,
@@ -558,15 +532,15 @@ func (rt *Runtime) ensureStandingTargets(ctx context.Context, serviceID string) 
 		}
 		activations = append(activations, StandingActivation{
 			BundleHash: fact.BundleHash(), ServiceID: plan.serviceID, PackageKey: declaration.PackageKey, FlowID: declaration.FlowID,
-			RunID: reconciliation.RunID, Generation: reconciliation.Generation, PublicationSequence: publicationSequence, InstanceID: instance.InstanceID,
+			RunID: reconciliation.RunID, Generation: reconciliation.Generation, PublicationSequence: result.PublicationSequence, InstanceID: instance.InstanceID,
 			FlowInstance: instance.InstancePath, EntityID: instance.EntityID,
-			EffectiveState: reconciliation.EffectiveState, Created: created,
+			EffectiveState: reconciliation.EffectiveState, Created: result.Created,
 		})
 		for _, target := range plan.targets {
 			target.BundleHash = fact.BundleHash()
 			target.RunID = reconciliation.RunID
 			target.Generation = reconciliation.Generation
-			target.PublicationSequence = publicationSequence
+			target.PublicationSequence = result.PublicationSequence
 			targets = append(targets, target.normalized())
 		}
 	}

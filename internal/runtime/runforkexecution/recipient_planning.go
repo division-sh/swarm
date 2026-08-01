@@ -9,50 +9,50 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 type SelectedContractRecipientPlanningRequest struct {
-	Admission      store.RunForkContractFrontierAdmission
-	RouteAdmission store.RunForkSelectedContractRouteAdmission
-	RouteTopology  store.RunForkSelectedContractRouteTopology
+	Admission      runfork.RunForkContractFrontierAdmission
+	RouteAdmission runfork.RunForkSelectedContractRouteAdmission
+	RouteTopology  runfork.RunForkSelectedContractRouteTopology
 }
 
-func BuildSelectedContractRecipientPlanning(req SelectedContractRecipientPlanningRequest) (store.RunForkSelectedContractRecipientPlanning, error) {
+func BuildSelectedContractRecipientPlanning(req SelectedContractRecipientPlanningRequest) (runfork.RunForkSelectedContractRecipientPlanning, error) {
 	admission := req.Admission
-	if strings.TrimSpace(admission.Owner) != store.RunForkContractFrontierAdmissionOwner {
-		return store.RunForkSelectedContractRecipientPlanning{}, fmt.Errorf("selected-contract recipient planning requires %s admission; got %q", store.RunForkContractFrontierAdmissionOwner, admission.Owner)
+	if strings.TrimSpace(admission.Owner) != runfork.RunForkContractFrontierAdmissionOwner {
+		return runfork.RunForkSelectedContractRecipientPlanning{}, fmt.Errorf("selected-contract recipient planning requires %s admission; got %q", runfork.RunForkContractFrontierAdmissionOwner, admission.Owner)
 	}
 	if !admission.NonMutating {
-		return store.RunForkSelectedContractRecipientPlanning{}, fmt.Errorf("selected-contract recipient planning requires non-mutating frontier admission")
+		return runfork.RunForkSelectedContractRecipientPlanning{}, fmt.Errorf("selected-contract recipient planning requires non-mutating frontier admission")
 	}
 	if admission.HistoricalExecutionSupported {
-		return store.RunForkSelectedContractRecipientPlanning{}, fmt.Errorf("selected-contract recipient planning unexpectedly supports historical execution")
+		return runfork.RunForkSelectedContractRecipientPlanning{}, fmt.Errorf("selected-contract recipient planning unexpectedly supports historical execution")
 	}
 	routeAdmission := req.RouteAdmission
 	if err := validateSelectedContractRouteAdmission(admission, routeAdmission); err != nil {
-		return store.RunForkSelectedContractRecipientPlanning{}, err
+		return runfork.RunForkSelectedContractRecipientPlanning{}, err
 	}
 	routeTopology := req.RouteTopology
 	if err := validateSelectedContractRouteTopology(admission, routeAdmission, routeTopology); err != nil {
-		return store.RunForkSelectedContractRecipientPlanning{}, err
+		return runfork.RunForkSelectedContractRecipientPlanning{}, err
 	}
 	return canonicalSelectedContractRecipientPlanning(admission, routeTopology), nil
 }
 
-func canonicalSelectedContractRecipientPlanning(frontier store.RunForkContractFrontierAdmission, routeTopology store.RunForkSelectedContractRouteTopology) store.RunForkSelectedContractRecipientPlanning {
-	blockers := []store.RunForkUnsupportedBlocker{{
-		Code:    store.RunForkBlockerSelectedContractRecipientPlanningNonMutating,
+func canonicalSelectedContractRecipientPlanning(frontier runfork.RunForkContractFrontierAdmission, routeTopology runfork.RunForkSelectedContractRouteTopology) runfork.RunForkSelectedContractRecipientPlanning {
+	blockers := []runfork.RunForkUnsupportedBlocker{{
+		Code:    runfork.RunForkBlockerSelectedContractRecipientPlanningNonMutating,
 		Message: "selected-contract recipient planning is non-mutating; event append, delivery writes, and handler execution remain separately gated",
 	}}
 	for _, blocker := range routeTopology.UnsupportedBlockers {
 		blockers = appendRunForkUnsupportedBlocker(blockers, blocker)
 	}
-	return store.RunForkSelectedContractRecipientPlanning{
-		Owner:                       store.RunForkSelectedContractRecipientPlanningOwner,
+	return runfork.RunForkSelectedContractRecipientPlanning{
+		Owner:                       runfork.RunForkSelectedContractRecipientPlanningOwner,
 		RouteTopologyOwner:          routeTopology.Owner,
 		RouteAdmissionOwner:         routeTopology.RouteAdmissionOwner,
-		FutureExecutionOwner:        store.RunForkSelectedContractExecutionOwner,
+		FutureExecutionOwner:        runfork.RunForkSelectedContractExecutionOwner,
 		NonMutating:                 true,
 		RecipientPlanningSupported:  selectedContractRecipientPlanningSupported(blockers),
 		DeliveryWritesSupported:     false,
@@ -69,12 +69,12 @@ func canonicalSelectedContractRecipientPlanning(frontier store.RunForkContractFr
 	}
 }
 
-func selectedContractRecipientPlanningSupported(blockers []store.RunForkUnsupportedBlocker) bool {
+func selectedContractRecipientPlanningSupported(blockers []runfork.RunForkUnsupportedBlocker) bool {
 	for _, blocker := range blockers {
 		switch strings.TrimSpace(blocker.Code) {
-		case "", store.RunForkBlockerSelectedContractRecipientPlanningNonMutating,
-			store.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
-			store.RunForkBlockerSelectedContractRouteTopologyNonMutating:
+		case "", runfork.RunForkBlockerSelectedContractRecipientPlanningNonMutating,
+			runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
+			runfork.RunForkBlockerSelectedContractRouteTopologyNonMutating:
 			continue
 		default:
 			return false
@@ -83,17 +83,17 @@ func selectedContractRecipientPlanningSupported(blockers []store.RunForkUnsuppor
 	return true
 }
 
-func selectedContractRecipientPlanEvents(events []store.RunForkContractFrontierEvent) []store.RunForkSelectedContractRecipientPlanEvent {
+func selectedContractRecipientPlanEvents(events []runfork.RunForkContractFrontierEvent) []runfork.RunForkSelectedContractRecipientPlanEvent {
 	if len(events) == 0 {
 		return nil
 	}
-	out := make([]store.RunForkSelectedContractRecipientPlanEvent, 0, len(events))
+	out := make([]runfork.RunForkSelectedContractRecipientPlanEvent, 0, len(events))
 	for _, event := range events {
-		out = append(out, store.RunForkSelectedContractRecipientPlanEvent{
+		out = append(out, runfork.RunForkSelectedContractRecipientPlanEvent{
 			SourceEventID: strings.TrimSpace(event.SourceEventID),
 			EventName:     strings.TrimSpace(event.EventName),
 			Recipients:    sortedFrontierRecipients(event.DerivedRecipients),
-			Disposition:   store.RunForkSelectedContractDispositionForkLocalTruth,
+			Disposition:   runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -104,14 +104,14 @@ func selectedContractRecipientPlanEvents(events []store.RunForkContractFrontierE
 	return out
 }
 
-func sortedFrontierRecipients(in []store.RunForkContractFrontierRecipient) []store.RunForkContractFrontierRecipient {
+func sortedFrontierRecipients(in []runfork.RunForkContractFrontierRecipient) []runfork.RunForkContractFrontierRecipient {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]store.RunForkContractFrontierRecipient, 0, len(in))
+	out := make([]runfork.RunForkContractFrontierRecipient, 0, len(in))
 	seen := map[string]struct{}{}
 	for _, recipient := range in {
-		recipient = store.RunForkContractFrontierRecipient{
+		recipient = runfork.RunForkContractFrontierRecipient{
 			SubscriberType: strings.TrimSpace(recipient.SubscriberType),
 			SubscriberID:   strings.TrimSpace(recipient.SubscriberID),
 			Path:           strings.TrimSpace(recipient.Path),
@@ -134,121 +134,121 @@ func sortedFrontierRecipients(in []store.RunForkContractFrontierRecipient) []sto
 	return out
 }
 
-func selectedContractRecipientPlanningRequiredEvidence(routeTopology store.RunForkSelectedContractRouteTopology) []store.RunForkSelectedContractExecutionBoundary {
-	evidence := []store.RunForkSelectedContractExecutionBoundary{
+func selectedContractRecipientPlanningRequiredEvidence(routeTopology runfork.RunForkSelectedContractRouteTopology) []runfork.RunForkSelectedContractExecutionBoundary {
+	evidence := []runfork.RunForkSelectedContractExecutionBoundary{
 		{
 			Concept:     "selected_contract_route_topology",
-			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
-			Owner:       store.RunForkSelectedContractRouteTopologyOwner,
+			Disposition: runfork.RunForkSelectedContractDispositionPrerequisite,
+			Owner:       runfork.RunForkSelectedContractRouteTopologyOwner,
 			Reason:      "recipient planning consumes canonical fork-local route topology before selected execution can publish fork work",
 		},
 		{
 			Concept:     "selected_contract_binding",
-			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
-			Owner:       store.RunForkSelectedContractBindingOwner,
+			Disposition: runfork.RunForkSelectedContractDispositionPrerequisite,
+			Owner:       runfork.RunForkSelectedContractBindingOwner,
 			Reason:      "recipient planning is selected-source specific and must remain bound to durable selected contract evidence",
 		},
 	}
 	for _, item := range routeTopology.RequiredEvidence {
-		if strings.TrimSpace(item.Disposition) == store.RunForkSelectedContractDispositionPrerequisite {
+		if strings.TrimSpace(item.Disposition) == runfork.RunForkSelectedContractDispositionPrerequisite {
 			evidence = append(evidence, item)
 		}
 	}
 	return evidence
 }
 
-func selectedContractRecipientPlanningRequiredConsumers() []store.RunForkSelectedContractExecutionBoundary {
-	return []store.RunForkSelectedContractExecutionBoundary{
+func selectedContractRecipientPlanningRequiredConsumers() []runfork.RunForkSelectedContractExecutionBoundary {
+	return []runfork.RunForkSelectedContractExecutionBoundary{
 		{
 			Concept:     "selected_execution_publish_path",
-			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
-			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			Disposition: runfork.RunForkSelectedContractDispositionPrerequisite,
+			Owner:       runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 			Reason:      "selected execution must consume recipient-plan evidence through the fork-local runtime container before EventBus.Publish can derive selected-fork recipients",
 		},
 		{
 			Concept:     "eventbus_publish_recipient_guard",
-			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
+			Disposition: runfork.RunForkSelectedContractDispositionPrerequisite,
 			Owner:       "internal/runtime/bus.EventBus.Publish",
 			Reason:      "the live publish path remains a downstream consumer and must validate routed recipients against this owner before delivery writes",
 		},
 	}
 }
 
-func selectedContractRecipientPlanningBlockedSiblings() []store.RunForkSelectedContractExecutionBoundary {
-	return []store.RunForkSelectedContractExecutionBoundary{
+func selectedContractRecipientPlanningBlockedSiblings() []runfork.RunForkSelectedContractExecutionBoundary {
+	return []runfork.RunForkSelectedContractExecutionBoundary{
 		{
 			Concept:     "fork_local_event_delivery_writes",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
-			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
+			Owner:       runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 			Reason:      "recipient planning does not append events or create event_deliveries",
 		},
 		{
 			Concept:     "handler_execution",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
-			Owner:       store.RunForkSelectedContractForkLocalRuntimeContainerOwner,
+			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
+			Owner:       runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner,
 			Reason:      "recipient planning evidence is computed before handler execution",
 		},
 		{
 			Concept:     "receipts_dead_letters_idempotency",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
+			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
 			Reason:      "outcome writes and suppressors remain separately gated",
 		},
 		{
 			Concept:     "dynamic_flow_instance_route_reconstruction",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
+			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
 			Owner:       "internal/runtime/bus.RouteTable.AddFlowInstanceRoute",
 			Reason:      "dynamic topology remains fail-closed without fork-local topology proof",
 		},
 		{
 			Concept:     "timer_reconstruction",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
+			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
 			Reason:      "timer reconstruction remains a separate scheduler lifecycle owner",
 		},
 		{
 			Concept:     "sessions_turns_audits",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
+			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
 			Reason:      "session, turn, and audit reconstruction remain separately gated",
 		},
 	}
 }
 
-func selectedContractRecipientPlanningInvalidPaths() []store.RunForkSelectedContractExecutionBoundary {
-	return []store.RunForkSelectedContractExecutionBoundary{
+func selectedContractRecipientPlanningInvalidPaths() []runfork.RunForkSelectedContractExecutionBoundary {
+	return []runfork.RunForkSelectedContractExecutionBoundary{
 		{
 			Concept:     "source_route_rows_as_recipient_truth",
-			Disposition: store.RunForkSelectedContractDispositionInvalid,
+			Disposition: runfork.RunForkSelectedContractDispositionInvalid,
 			Reason:      "source routing_rules and flow_instance_routes are not executable selected-fork recipient truth",
 		},
 		{
 			Concept:     "source_event_deliveries_as_recipient_truth",
-			Disposition: store.RunForkSelectedContractDispositionInvalid,
+			Disposition: runfork.RunForkSelectedContractDispositionInvalid,
 			Reason:      "source event_deliveries are source-run history and must not define selected-fork recipients",
 		},
 		{
 			Concept:     "delivery_planner_as_canonical_owner",
-			Disposition: store.RunForkSelectedContractDispositionInvalid,
+			Disposition: runfork.RunForkSelectedContractDispositionInvalid,
 			Reason:      "generic delivery planning may only be a downstream consumer guarded by recipient-plan evidence",
 		},
 		{
 			Concept:     "source_outcome_suppression",
-			Disposition: store.RunForkSelectedContractDispositionInvalid,
+			Disposition: runfork.RunForkSelectedContractDispositionInvalid,
 			Reason:      "source receipts, dead letters, retry state, and post-T outcomes cannot suppress selected-fork work",
 		},
 	}
 }
 
-func validateSelectedContractRecipientPlanning(frontier store.RunForkContractFrontierAdmission, routeAdmission store.RunForkSelectedContractRouteAdmission, routeTopology store.RunForkSelectedContractRouteTopology, planning store.RunForkSelectedContractRecipientPlanning) error {
-	if strings.TrimSpace(planning.Owner) != store.RunForkSelectedContractRecipientPlanningOwner {
-		return fmt.Errorf("selected-contract execution requires %s; got %q", store.RunForkSelectedContractRecipientPlanningOwner, planning.Owner)
+func validateSelectedContractRecipientPlanning(frontier runfork.RunForkContractFrontierAdmission, routeAdmission runfork.RunForkSelectedContractRouteAdmission, routeTopology runfork.RunForkSelectedContractRouteTopology, planning runfork.RunForkSelectedContractRecipientPlanning) error {
+	if strings.TrimSpace(planning.Owner) != runfork.RunForkSelectedContractRecipientPlanningOwner {
+		return fmt.Errorf("selected-contract execution requires %s; got %q", runfork.RunForkSelectedContractRecipientPlanningOwner, planning.Owner)
 	}
-	if strings.TrimSpace(planning.RouteTopologyOwner) != store.RunForkSelectedContractRouteTopologyOwner {
-		return fmt.Errorf("selected-contract recipient planning must consume %s; got %q", store.RunForkSelectedContractRouteTopologyOwner, planning.RouteTopologyOwner)
+	if strings.TrimSpace(planning.RouteTopologyOwner) != runfork.RunForkSelectedContractRouteTopologyOwner {
+		return fmt.Errorf("selected-contract recipient planning must consume %s; got %q", runfork.RunForkSelectedContractRouteTopologyOwner, planning.RouteTopologyOwner)
 	}
-	if strings.TrimSpace(planning.RouteAdmissionOwner) != store.RunForkSelectedContractRouteAdmissionOwner {
-		return fmt.Errorf("selected-contract recipient planning must consume %s; got %q", store.RunForkSelectedContractRouteAdmissionOwner, planning.RouteAdmissionOwner)
+	if strings.TrimSpace(planning.RouteAdmissionOwner) != runfork.RunForkSelectedContractRouteAdmissionOwner {
+		return fmt.Errorf("selected-contract recipient planning must consume %s; got %q", runfork.RunForkSelectedContractRouteAdmissionOwner, planning.RouteAdmissionOwner)
 	}
-	if strings.TrimSpace(planning.FutureExecutionOwner) != store.RunForkSelectedContractExecutionOwner {
-		return fmt.Errorf("selected-contract recipient planning must point to %s; got %q", store.RunForkSelectedContractExecutionOwner, planning.FutureExecutionOwner)
+	if strings.TrimSpace(planning.FutureExecutionOwner) != runfork.RunForkSelectedContractExecutionOwner {
+		return fmt.Errorf("selected-contract recipient planning must point to %s; got %q", runfork.RunForkSelectedContractExecutionOwner, planning.FutureExecutionOwner)
 	}
 	if !planning.NonMutating {
 		return fmt.Errorf("selected-contract recipient planning must be non-mutating")
@@ -259,7 +259,7 @@ func validateSelectedContractRecipientPlanning(frontier store.RunForkContractFro
 	if err := validateSelectionMatches("recipient planning", routeTopology.ContractSelection, planning.ContractSelection); err != nil {
 		return err
 	}
-	frontierEventCount, frontierSourceEventIDs, frontierFingerprint := store.RunForkContractFrontierEvidenceBinding(frontier)
+	frontierEventCount, frontierSourceEventIDs, frontierFingerprint := runfork.RunForkContractFrontierEvidenceBinding(frontier)
 	if planning.FrontierEventCount != frontierEventCount {
 		return fmt.Errorf("selected-contract recipient planning frontier count mismatch: got %d want %d", planning.FrontierEventCount, frontierEventCount)
 	}
@@ -276,9 +276,9 @@ func validateSelectedContractRecipientPlanning(frontier store.RunForkContractFro
 	return validateSelectedContractRouteTopology(frontier, routeAdmission, routeTopology)
 }
 
-func validateSelectedContractRecipientPlanningForPublish(planning store.RunForkSelectedContractRecipientPlanning) error {
-	if strings.TrimSpace(planning.Owner) != store.RunForkSelectedContractRecipientPlanningOwner {
-		return fmt.Errorf("selected-contract publish path requires %s; got %q", store.RunForkSelectedContractRecipientPlanningOwner, planning.Owner)
+func validateSelectedContractRecipientPlanningForPublish(planning runfork.RunForkSelectedContractRecipientPlanning) error {
+	if strings.TrimSpace(planning.Owner) != runfork.RunForkSelectedContractRecipientPlanningOwner {
+		return fmt.Errorf("selected-contract publish path requires %s; got %q", runfork.RunForkSelectedContractRecipientPlanningOwner, planning.Owner)
 	}
 	if !planning.NonMutating || planning.DeliveryWritesSupported {
 		return fmt.Errorf("selected-contract publish path requires non-mutating recipient planning without delivery writes")
@@ -288,9 +288,9 @@ func validateSelectedContractRecipientPlanningForPublish(planning store.RunForkS
 	}
 	for _, blocker := range planning.UnsupportedBlockers {
 		switch strings.TrimSpace(blocker.Code) {
-		case "", store.RunForkBlockerSelectedContractRecipientPlanningNonMutating,
-			store.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
-			store.RunForkBlockerSelectedContractRouteTopologyNonMutating:
+		case "", runfork.RunForkBlockerSelectedContractRecipientPlanningNonMutating,
+			runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
+			runfork.RunForkBlockerSelectedContractRouteTopologyNonMutating:
 			continue
 		default:
 			if msg := strings.TrimSpace(blocker.Message); msg != "" {
@@ -303,17 +303,17 @@ func validateSelectedContractRecipientPlanningForPublish(planning store.RunForkS
 }
 
 type selectedContractRecipientPlanPublishGuard struct {
-	plansBySourceEvent map[string]store.RunForkSelectedContractRecipientPlanEvent
+	plansBySourceEvent map[string]runfork.RunForkSelectedContractRecipientPlanEvent
 	sourceByForkEvent  map[string]string
 	sourceAgents       map[string]struct{}
 }
 
-func newSelectedContractRecipientPlanPublishGuard(planning store.RunForkSelectedContractRecipientPlanning, sourceAgents ...string) (*selectedContractRecipientPlanPublishGuard, error) {
+func newSelectedContractRecipientPlanPublishGuard(planning runfork.RunForkSelectedContractRecipientPlanning, sourceAgents ...string) (*selectedContractRecipientPlanPublishGuard, error) {
 	if err := validateSelectedContractRecipientPlanningForPublish(planning); err != nil {
 		return nil, err
 	}
 	if len(sourceAgents) == 0 {
-		sourceAgents = []string{store.RunForkSelectedContractExecutionOwner}
+		sourceAgents = []string{runfork.RunForkSelectedContractExecutionOwner}
 	}
 	allowedAgents := map[string]struct{}{}
 	for _, agent := range sourceAgents {
@@ -325,7 +325,7 @@ func newSelectedContractRecipientPlanPublishGuard(planning store.RunForkSelected
 	if len(allowedAgents) == 0 {
 		return nil, fmt.Errorf("selected-contract recipient planning publish guard requires source-agent owner")
 	}
-	plans := map[string]store.RunForkSelectedContractRecipientPlanEvent{}
+	plans := map[string]runfork.RunForkSelectedContractRecipientPlanEvent{}
 	for _, event := range planning.RecipientPlanEvents {
 		sourceEventID := strings.TrimSpace(event.SourceEventID)
 		if sourceEventID == "" {
@@ -390,7 +390,7 @@ func (g *selectedContractRecipientPlanPublishGuard) Authorize(ctx context.Contex
 		actualKeys = actualRecipientIdentityKeys(actual.RoutedRecipients)
 	}
 	if !recipientKeysEqual(expectedKeys, actualKeys) {
-		return fmt.Errorf("selected-contract publish routed recipients do not match %s for source event %s", store.RunForkSelectedContractRecipientPlanningOwner, sourceEventID)
+		return fmt.Errorf("selected-contract publish routed recipients do not match %s for source event %s", runfork.RunForkSelectedContractRecipientPlanningOwner, sourceEventID)
 	}
 	return nil
 }
@@ -474,23 +474,23 @@ func (g *selectedContractRecipientPlanPublishGuard) authorizesEvent(event events
 	return ok
 }
 
-func (g *selectedContractRecipientPlanPublishGuard) expectedRecipientPlanEvent(evt events.Event) (string, store.RunForkSelectedContractRecipientPlanEvent, error) {
+func (g *selectedContractRecipientPlanPublishGuard) expectedRecipientPlanEvent(evt events.Event) (string, runfork.RunForkSelectedContractRecipientPlanEvent, error) {
 	forkEventID := strings.TrimSpace(evt.ID())
 	sourceEventID := strings.TrimSpace(g.sourceByForkEvent[forkEventID])
 	if sourceEventID == "" {
-		return "", store.RunForkSelectedContractRecipientPlanEvent{}, fmt.Errorf("selected-contract publish path missing %s evidence for fork event %s", store.RunForkSelectedContractRecipientPlanningOwner, forkEventID)
+		return "", runfork.RunForkSelectedContractRecipientPlanEvent{}, fmt.Errorf("selected-contract publish path missing %s evidence for fork event %s", runfork.RunForkSelectedContractRecipientPlanningOwner, forkEventID)
 	}
 	expected, ok := g.plansBySourceEvent[sourceEventID]
 	if !ok {
-		return "", store.RunForkSelectedContractRecipientPlanEvent{}, fmt.Errorf("selected-contract publish path has no recipient plan for source event %s", sourceEventID)
+		return "", runfork.RunForkSelectedContractRecipientPlanEvent{}, fmt.Errorf("selected-contract publish path has no recipient plan for source event %s", sourceEventID)
 	}
 	if strings.TrimSpace(expected.EventName) != strings.TrimSpace(string(evt.Type())) {
-		return "", store.RunForkSelectedContractRecipientPlanEvent{}, fmt.Errorf("selected-contract publish event type mismatch for source event %s: got %q want %q", sourceEventID, evt.Type(), expected.EventName)
+		return "", runfork.RunForkSelectedContractRecipientPlanEvent{}, fmt.Errorf("selected-contract publish event type mismatch for source event %s: got %q want %q", sourceEventID, evt.Type(), expected.EventName)
 	}
 	return sourceEventID, expected, nil
 }
 
-func selectedContractNodeDeliveryRoutes(evt events.Event, in []store.RunForkContractFrontierRecipient) []events.DeliveryRoute {
+func selectedContractNodeDeliveryRoutes(evt events.Event, in []runfork.RunForkContractFrontierRecipient) []events.DeliveryRoute {
 	if len(in) == 0 {
 		return nil
 	}
@@ -516,10 +516,10 @@ func selectedContractNodeDeliveryRoutes(evt events.Event, in []store.RunForkCont
 	return events.NormalizeDeliveryRoutes(out)
 }
 
-func expectedRecipientKeys(in []store.RunForkContractFrontierRecipient) []string {
+func expectedRecipientKeys(in []runfork.RunForkContractFrontierRecipient) []string {
 	out := make([]string, 0, len(in))
 	for _, recipient := range in {
-		recipient = store.RunForkContractFrontierRecipient{
+		recipient = runfork.RunForkContractFrontierRecipient{
 			SubscriberType: strings.TrimSpace(recipient.SubscriberType),
 			SubscriberID:   strings.TrimSpace(recipient.SubscriberID),
 			Path:           strings.TrimSpace(recipient.Path),
@@ -541,7 +541,7 @@ func actualRecipientKeys(in []runtimebus.PublishDiagnosticRecipient) []string {
 		if strings.TrimSpace(recipient.Type) == "" || strings.TrimSpace(recipient.ID) == "" {
 			continue
 		}
-		out = append(out, recipientKey(store.RunForkContractFrontierRecipient{
+		out = append(out, recipientKey(runfork.RunForkContractFrontierRecipient{
 			SubscriberType: recipient.Type,
 			SubscriberID:   recipient.ID,
 			Path:           recipient.Path,
@@ -552,7 +552,7 @@ func actualRecipientKeys(in []runtimebus.PublishDiagnosticRecipient) []string {
 	return out
 }
 
-func expectedRecipientIdentityKeys(in []store.RunForkContractFrontierRecipient) []string {
+func expectedRecipientIdentityKeys(in []runfork.RunForkContractFrontierRecipient) []string {
 	out := make([]string, 0, len(in))
 	for _, recipient := range in {
 		if key := recipientIdentityKey(recipient.SubscriberType, recipient.SubscriberID); key != "" {
@@ -595,7 +595,7 @@ func recipientKeysEqual(left, right []string) bool {
 	return true
 }
 
-func recipientKey(recipient store.RunForkContractFrontierRecipient) string {
+func recipientKey(recipient runfork.RunForkContractFrontierRecipient) string {
 	return strings.Join([]string{
 		strings.TrimSpace(recipient.SubscriberType),
 		strings.TrimSpace(recipient.SubscriberID),

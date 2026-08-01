@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -15,6 +16,19 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+type catalogPersistenceBus struct{}
+
+func (catalogPersistenceBus) Publish(context.Context, events.Event) error { return nil }
+func (catalogPersistenceBus) PublishDirect(context.Context, events.Event, []string) error {
+	return nil
+}
+func (catalogPersistenceBus) ResolveSubscribedRecipients(string) []string { return nil }
+func (catalogPersistenceBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
+	return nil
+}
+func (catalogPersistenceBus) EngineOutbox() runtimeengine.OutboxWriter             { return nil }
+func (catalogPersistenceBus) EngineDispatcher() runtimeengine.PostCommitDispatcher { return nil }
 
 func TestCatalogCausalEntityIDs_FollowsSourceEventIDChain(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
@@ -224,12 +238,18 @@ func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID})
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	registerTestAuthorActivityCatalog(t, pg, "score.requested")
+	workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(catalogPersistenceBus{}, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:              &fixtureWorkflowModule{},
+		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		RunLifecycle:        pg,
+		PipelineObligations: pg.PipelineObligations(),
+	})
 	return &runtimeHarness{
 		t:              t,
 		ctx:            ctx,
 		db:             db,
 		pg:             pg,
-		workflow:       runtimepipeline.NewWorkflowInstanceStore(db),
+		workflow:       workflow,
 		startedAt:      time.Now().UTC(),
 		publishedIDs:   map[string]struct{}{},
 		publishedOrder: []string{},

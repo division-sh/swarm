@@ -11,18 +11,17 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -30,13 +29,15 @@ import (
 )
 
 type workflowTimerStartupStore interface {
-	runtimebus.EventStore
+	externalRuntimeTestDurableEventStore
+	externalRuntimeTestMutationOwner
+	swarmruntime.EventPayloadValidationBinder
+	swarmruntime.AuthorActivityCatalogRegistrar
 	runtimerunlifecycle.CandidateOwner
-	runtimepipeline.RuntimeMutationRunner
 	runtimepipeline.SchedulePersistence
-	runtimedelivery.Store
 	runtimemanager.AgentLifecyclePersistence
 	runtimemanager.ManagerPersistence
+	runtimetimerobligation.Reader
 	PipelineObligations() runtimepipelineobligation.Store
 }
 
@@ -62,27 +63,31 @@ func (s *workflowTimerStartupFlakyManagerStore) LoadAgents(ctx context.Context) 
 func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOnBothStores(t *testing.T) {
 	for _, backend := range []struct {
 		name string
-		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, *runtimepipeline.WorkflowInstanceStore, bool)
+		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, bool)
 	}{
 		{
 			name: "sqlite",
-			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, *runtimepipeline.WorkflowInstanceStore, bool) {
+			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected.DB, selected, runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(selected.DB, selected), false
+				return selected.DB, selected, false
 			},
 		},
 		{
 			name: "postgres",
-			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, *runtimepipeline.WorkflowInstanceStore, bool) {
+			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				selected := storetest.AdmitPostgresRuntimeStore(t, db)
-				return db, selected, runtimepipeline.NewWorkflowInstanceStore(db), true
+				return db, selected, true
 			},
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			db, selected, workflowStore, postgres := backend.open(t)
+			db, selected, postgres := backend.open(t)
+			workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+			if !postgres {
+				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
+			}
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
@@ -103,16 +108,22 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 					Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 					LLM:     config.LLMConfig{Backend: "anthropic"},
 				},
-				Stores: swarmruntime.Stores{
-					SQLDB:                  runtimeDB,
-					EventStore:             selected,
-					RunLifecycleCandidates: selected,
-					ScheduleStore:          selected,
-					PipelineStore:          workflowStore,
-					ManagerStore:           selected,
-					DeliveryStore:          selected,
-					PipelineObligations:    selected.PipelineObligations(),
-				},
+
+				SQLDB:                        runtimeDB,
+				EventStore:                   selected,
+				EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
+				EventPayloadValidationBinder: selected,
+				AuthorActivityRegistrars:     []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+				RunLifecycleCandidates:       selected,
+				ScheduleStore:                selected,
+				TimerObligationReader:        selected,
+				WorkflowPersistence:          workflowPersistence,
+				ManagerStore:                 selected,
+				ManagerLifecycleStore:        selected,
+				ManagerPersistenceRoles:      externalRuntimeTestSelectedManagerRoles(selected),
+				DeliveryStore:                selected,
+				PipelineObligations:          selected.PipelineObligations(),
+
 				Options: swarmruntime.RuntimeOptions{
 					SelfCheck:         false,
 					WorkflowModule:    newRuntimeTestWorkflowModule(t, source),
@@ -196,27 +207,31 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersOnBothStores(t *testing.T) {
 	for _, backend := range []struct {
 		name string
-		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, *runtimepipeline.WorkflowInstanceStore, bool)
+		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, bool)
 	}{
 		{
 			name: "sqlite",
-			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, *runtimepipeline.WorkflowInstanceStore, bool) {
+			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected.DB, selected, runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(selected.DB, selected), false
+				return selected.DB, selected, false
 			},
 		},
 		{
 			name: "postgres",
-			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, *runtimepipeline.WorkflowInstanceStore, bool) {
+			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				selected := storetest.AdmitPostgresRuntimeStore(t, db)
-				return db, selected, runtimepipeline.NewWorkflowInstanceStore(db), true
+				return db, selected, true
 			},
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			db, selected, workflowStore, postgres := backend.open(t)
+			db, selected, postgres := backend.open(t)
+			workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+			if !postgres {
+				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
+			}
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
@@ -239,15 +254,21 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 						Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 						LLM:     config.LLMConfig{Backend: "anthropic"},
 					},
-					Stores: swarmruntime.Stores{
-						SQLDB:                  runtimeDB,
-						EventStore:             selected,
-						RunLifecycleCandidates: selected,
-						PipelineStore:          workflowStore,
-						ManagerStore:           managerStore,
-						DeliveryStore:          selected,
-						PipelineObligations:    selected.PipelineObligations(),
-					},
+
+					SQLDB:                        runtimeDB,
+					EventStore:                   selected,
+					EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
+					EventPayloadValidationBinder: selected,
+					AuthorActivityRegistrars:     []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+					RunLifecycleCandidates:       selected,
+					WorkflowPersistence:          workflowPersistence,
+					ManagerStore:                 managerStore,
+					ManagerLifecycleStore:        selected,
+					ManagerPersistenceRoles:      externalRuntimeTestSelectedManagerRoles(selected),
+					TimerObligationReader:        selected,
+					DeliveryStore:                selected,
+					PipelineObligations:          selected.PipelineObligations(),
+
 					Options: swarmruntime.RuntimeOptions{
 						SelfCheck:         false,
 						WorkflowModule:    module,
@@ -276,7 +297,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 
 			seedRuntime, seedProcess := newRuntime(selected)
 			seedCtx := worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence())
-			result, err := workflowStore.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
+			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
 				InstanceID:      entityID,
 				StorageRef:      entityID,
 				WorkflowName:    "workflow-timer-startup",
@@ -304,7 +325,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			}
 			shutdown("failed restart", restarted, restartedProcess)
 
-			instance, found, err := workflowStore.Load(ctx, entityID)
+			instance, found, err := restarted.Pipeline.Load(ctx, entityID)
 			if err != nil {
 				t.Fatalf("load workflow instance after failed restart: %v", err)
 			}
@@ -318,27 +339,31 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStores(t *testing.T) {
 	for _, backend := range []struct {
 		name string
-		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, *runtimepipeline.WorkflowInstanceStore, bool)
+		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, bool)
 	}{
 		{
 			name: "sqlite",
-			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, *runtimepipeline.WorkflowInstanceStore, bool) {
+			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected.DB, selected, runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(selected.DB, selected), false
+				return selected.DB, selected, false
 			},
 		},
 		{
 			name: "postgres",
-			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, *runtimepipeline.WorkflowInstanceStore, bool) {
+			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				selected := storetest.AdmitPostgresRuntimeStore(t, db)
-				return db, selected, runtimepipeline.NewWorkflowInstanceStore(db), true
+				return db, selected, true
 			},
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			db, selected, workflowStore, postgres := backend.open(t)
+			db, selected, postgres := backend.open(t)
+			workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+			if !postgres {
+				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
+			}
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
@@ -362,15 +387,21 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 						Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
 						LLM:     config.LLMConfig{Backend: "anthropic"},
 					},
-					Stores: swarmruntime.Stores{
-						SQLDB:                  runtimeDB,
-						EventStore:             selected,
-						RunLifecycleCandidates: selected,
-						PipelineStore:          workflowStore,
-						ManagerStore:           selected,
-						DeliveryStore:          selected,
-						PipelineObligations:    selected.PipelineObligations(),
-					},
+
+					SQLDB:                        runtimeDB,
+					EventStore:                   selected,
+					EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
+					EventPayloadValidationBinder: selected,
+					AuthorActivityRegistrars:     []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+					RunLifecycleCandidates:       selected,
+					WorkflowPersistence:          workflowPersistence,
+					ManagerStore:                 selected,
+					ManagerLifecycleStore:        selected,
+					ManagerPersistenceRoles:      externalRuntimeTestSelectedManagerRoles(selected),
+					TimerObligationReader:        selected,
+					DeliveryStore:                selected,
+					PipelineObligations:          selected.PipelineObligations(),
+
 					Options: swarmruntime.RuntimeOptions{
 						SelfCheck:         false,
 						WorkflowModule:    module,
@@ -385,9 +416,6 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 				})
 				if err != nil {
 					t.Fatalf("NewRuntime: %v", err)
-				}
-				if rt.Stores.ScheduleStore != nil {
-					t.Fatal("workflow-only recovery fixture unexpectedly configured a generic schedule store")
 				}
 				return rt, process
 			}
@@ -406,7 +434,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			seedRuntime, seedProcess := newRuntime()
 			occurredAt := time.Now().UTC().Add(-time.Second)
 			seedCtx := worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence())
-			result, err := workflowStore.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
+			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
 				InstanceID:      entityID,
 				StorageRef:      entityID,
 				WorkflowName:    "workflow-timer-startup",
@@ -457,7 +485,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 
 			deadline := time.Now().Add(8 * time.Second)
 			for {
-				instance, found, err := workflowStore.Load(ctx, entityID)
+				instance, found, err := restarted.Pipeline.Load(ctx, entityID)
 				if err != nil {
 					t.Fatalf("load restored workflow instance: %v", err)
 				}

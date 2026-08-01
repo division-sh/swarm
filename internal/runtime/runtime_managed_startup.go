@@ -37,12 +37,12 @@ func (rt *Runtime) currentStartupProbeAuthority() (runtimestartupownership.Autho
 }
 
 func (rt *Runtime) managedProviderPreflightAuthority(authority runtimestartupownership.Authority) (ManagedProviderPreflightAuthority, error) {
-	effectStore, ok := rt.Stores.ManagerStore.(runtimeeffects.Store)
-	if !ok || effectStore == nil {
+	effectStore := rt.effectsStore
+	if effectStore == nil {
 		return ManagedProviderPreflightAuthority{}, fmt.Errorf("runtime store does not implement managed external-effect persistence")
 	}
-	capabilityStore, ok := rt.Stores.ManagerStore.(managedcapabilities.Persistence)
-	if !ok || capabilityStore == nil {
+	capabilityStore := rt.managedCapabilitiesStore
+	if capabilityStore == nil {
 		return ManagedProviderPreflightAuthority{}, fmt.Errorf("runtime store does not implement managed capability persistence")
 	}
 	return ManagedProviderPreflightAuthority{
@@ -114,12 +114,12 @@ func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimes
 		return managedExecutionActivation{}, err
 	}
 	var deliveryCoordinator *runtimedeliverycontinuation.Coordinator
-	if rt.Stores.DeliveryStore != nil {
-		if err := rt.Stores.DeliveryStore.ActivateDeliveryAuthority(ctx, deliveryAuthority); err != nil {
+	if rt.deliveryStore != nil {
+		if err := rt.deliveryStore.ActivateDeliveryAuthority(ctx, deliveryAuthority); err != nil {
 			return managedExecutionActivation{}, fmt.Errorf("activate delivery execution authority: %w", err)
 		}
 		coordinator, err := runtimedeliverycontinuation.New(
-			rt.Stores.DeliveryStore,
+			rt.deliveryStore,
 			deliveryAuthority,
 			rt.workOccurrence,
 			rt.Bus,
@@ -140,8 +140,8 @@ func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimes
 		if err := rt.Bus.SetDeliveryContinuationOwner(coordinator); err != nil {
 			return managedExecutionActivation{}, err
 		}
-		if rt.Stores.PipelineStore != nil && rt.Stores.PipelineStore.Enabled() {
-			registration, err := rt.Stores.PipelineStore.RegisterDeliveryContinuationSignal(deliveryAuthority, rt.Bus.SignalDeliveryContinuations)
+		if rt.Pipeline != nil {
+			registration, err := rt.Pipeline.RegisterDeliveryContinuationSignal(deliveryAuthority, rt.Bus.SignalDeliveryContinuations)
 			if err != nil {
 				return managedExecutionActivation{}, fmt.Errorf("register delivery continuation signal owner: %w", err)
 			}
@@ -159,7 +159,7 @@ func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimes
 	}
 	rt.lifecycleMu.Unlock()
 	if replay {
-		if rt.Stores.DeliveryStore != nil {
+		if rt.deliveryStore != nil {
 			result.ReplayErr = runtimepipeline.NewRecoveryManagerWith(rt.Bus).RecoverToExhaustion(ctx)
 			if result.ReplayErr != nil {
 				return result, fmt.Errorf("recover pipeline obligations before delivery enumeration: %w", result.ReplayErr)

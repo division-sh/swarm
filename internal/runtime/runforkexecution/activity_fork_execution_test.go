@@ -24,8 +24,8 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -123,14 +123,15 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			if !selectedContractActivityDescriptorExists(descriptors, tt.resultEventType) {
 				t.Fatalf("selected activity source has no descriptor for %s: %#v", tt.resultEventType, descriptors)
 			}
-			selection := store.RunForkContractSelection{
+			selection := runfork.RunForkContractSelection{
 				Mode: "selected_contracts", ContractsRoot: "/tmp/selected-contract-activity-proof",
 				WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
 			}
 			loader := &fakeSelectedContractSourceLoader{loaded: selectedContractActivityLoadedSource(source, selection)}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRunID, At: sourceRequestEventID, ConfirmSourceFreeze: true, Store: pg,
-				SourceLoader: loader, ContractSelection: selection,
+				WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+				SourceLoader:        loader, ContractSelection: selection,
 			})
 			if err != nil {
 				t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
@@ -272,7 +273,7 @@ func selectedContractActivitySource(serverURL string, effectClass runtimecontrac
 	return semanticview.Wrap(bundle)
 }
 
-func selectedContractActivityLoadedSource(source semanticview.Source, selection store.RunForkContractSelection) LoadedSelectedContractSource {
+func selectedContractActivityLoadedSource(source semanticview.Source, selection runfork.RunForkContractSelection) LoadedSelectedContractSource {
 	workflow := runtimepipeline.NewWorkflowDefinition("activity-fork-proof", []runtimepipeline.WorkflowStage{{Name: "pending"}}, nil)
 	nodes := []runtimepipeline.WorkflowNode{{
 		ID: "test-node", Subscriptions: []events.EventType{"platform.activity_requested"}, ExecutionType: runtimecontracts.SystemNodeExecutionType,

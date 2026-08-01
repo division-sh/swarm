@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 const runForkActivityRequestEvent = "platform.activity_requested"
@@ -53,7 +54,7 @@ type runForkActivityAttemptEvidence struct {
 	UpdatedAt       time.Time
 }
 
-func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, forkRunID string, event RunForkSelectedContractSourceEvent) (RunForkSelectedContractSourceEvent, error) {
+func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, forkRunID string, event runfork.RunForkSelectedContractSourceEvent) (runfork.RunForkSelectedContractSourceEvent, error) {
 	if tx == nil {
 		return event, fmt.Errorf("selected-contract fork source preparation requires transaction")
 	}

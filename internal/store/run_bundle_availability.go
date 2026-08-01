@@ -5,10 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/division-sh/swarm/internal/store/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	storerunbundle "github.com/division-sh/swarm/internal/store/runbundle"
 )
-
-type ActiveRunBundleAvailabilityConflict = runbundle.Availability
 
 func (s *PostgresStore) ActiveRunBundleAvailabilities(ctx context.Context) ([]runbundle.Availability, error) {
 	if s == nil || s.DB == nil {
@@ -17,10 +16,10 @@ func (s *PostgresStore) ActiveRunBundleAvailabilities(ctx context.Context) ([]ru
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	return runbundle.ListActiveAvailabilities(ctx, s.DB)
+	return storerunbundle.ListActiveAvailabilities(ctx, s.DB)
 }
 
-func (s *PostgresStore) ActiveRunBundleAvailabilityConflicts(ctx context.Context) ([]ActiveRunBundleAvailabilityConflict, error) {
+func (s *PostgresStore) ActiveRunBundleAvailabilityConflicts(ctx context.Context) ([]runbundle.Availability, error) {
 	availabilities, err := s.ActiveRunBundleAvailabilities(ctx)
 	if err != nil {
 		return nil, err
@@ -38,7 +37,7 @@ func (s *PostgresStore) LoadRunBundleAvailability(ctx context.Context, runID str
 	if err := s.requireCurrentSchema(); err != nil {
 		return runbundle.Availability{}, err
 	}
-	availability, err := runbundle.LoadAvailability(ctx, s.DB, runID)
+	availability, err := storerunbundle.LoadAvailability(ctx, s.DB, runID)
 	if errors.Is(err, runbundle.ErrRunNotFound) {
 		return runbundle.Availability{}, ErrRunNotFound
 	}

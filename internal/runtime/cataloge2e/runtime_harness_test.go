@@ -15,11 +15,13 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtime "github.com/division-sh/swarm/internal/runtime"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -130,7 +132,7 @@ type runtimeHarness struct {
 	db             *sql.DB
 	pg             *store.PostgresStore
 	rt             *runtime.Runtime
-	workflow       *runtimepipeline.WorkflowInstanceStore
+	workflow       catalogWorkflowPersistence
 	llm            *scriptedLLMRuntime
 	bundle         *runtimecontracts.WorkflowContractBundle
 	initialState   string
@@ -140,6 +142,11 @@ type runtimeHarness struct {
 	eventEntityIDs map[string]string
 	previews       map[string]runtimepipeline.HandlerPreview
 	mu             sync.Mutex
+}
+
+type catalogWorkflowPersistence interface {
+	Load(context.Context, string) (runtimepipeline.WorkflowInstance, bool, error)
+	MaterializeInitialEntry(context.Context, runtimepipeline.WorkflowInstance, time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error)
 }
 
 type agentFixtureDoc struct {
@@ -179,38 +186,70 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	loadAgentFixtures(t, fixtureRoot, llmRuntime)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	pg.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, pg)
 
 	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), catalogRuntimeRunID))
 	t.Cleanup(cancel)
 	processOwner := worklifetime.NewProcess()
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID, BundleHash: authorActivityTestBundleSourceFact.BundleHash(), BundleSource: "ephemeral"})
 
-	rt, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{Config: cfg, Stores: runtime.Stores{
-		SQLDB:                  db,
-		PipelineStore:          workflowStore,
-		PipelineObligations:    pg.PipelineObligations(),
-		RunLifecycleCandidates: pg,
-		EventStore:             pg,
-		DeliveryStore:          pg,
-		RuntimeLogStore:        pg,
-		SessionRegistry:        pg,
-		ManagerStore:           pg,
-		ScheduleStore:          pg,
-		StartupOwnership:       pg,
-		MailboxStore:           pg,
-		ToolEntityStore:        pg,
-		HumanTaskStore:         pg,
-		RuntimeIngressStore:    pg,
-		ConversationStore:      nil,
-	}, Options: runtime.RuntimeOptions{
-		SelfCheck:         false,
-		WorkflowModule:    module,
-		LLMRuntime:        llmRuntime,
-		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
-		ProcessWorkOwner:  processOwner,
-	}})
+	rt, err := runtime.NewRuntime(ctx, runtime.RuntimeDeps{Config: cfg,
+		SQLDB:               db,
+		WorkflowPersistence: workflowPersistence,
+		EventStore:          pg,
+		EventBusDurable: runtimebus.DurableDependencies{
+			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
+			FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteSets: pg, FlowRouteTopology: pg, FlowRouteRollback: pg,
+			ActiveAgents: pg, ActiveFlows: pg, DeliveryTargets: pg, DeliveryRouteSets: pg,
+			TargetFailureRecorder: pg, RunOrigins: pg,
+		},
+		EventPayloadValidationBinder:   pg,
+		InboundPayloadValidationBinder: pg,
+		AuthorActivityRegistrars:       []runtime.AuthorActivityCatalogRegistrar{pg},
+		RunControlStore:                pg,
+		RunLifecycleCandidates:         pg,
+		RuntimeLogStore:                pg,
+		SessionRegistry:                pg,
+		LiveSessionAcquirer:            pg,
+		SessionResetter:                pg,
+		ManagerStore:                   pg,
+		ManagerLifecycleStore:          pg,
+		ManagerLifecycleDiagnostics:    pg,
+		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
+			LifecycleState: pg, LifecycleEffects: pg,
+			LifecycleDiagnostics: pg, EffectsRecovery: pg, DeliveryQuiescence: pg,
+			EventExistence: pg, DirectiveOperations: pg, DirectiveTargets: pg, FlowRoutes: pg,
+		},
+		EffectsStore:             pg,
+		CompletionStore:          pg,
+		CompletionHeartbeatStore: pg,
+		EffectsRecoveryStore:     pg,
+		ManagedCapabilitiesStore: pg,
+		DeliveryStore:            pg,
+		PipelineObligations:      pg.PipelineObligations(),
+		ScheduleStore:            pg,
+		TimerObligationReader:    pg,
+		MailboxMaterializer:      pg,
+		DecisionCards:            pg,
+		ProposedEffects:          pg,
+		DecisionCardHumanTasks:   pg,
+		DecisionCardDraftExpiry:  pg,
+		HumanTaskExpiry:          pg,
+		StartupOwnership:         pg,
+		MailboxStore:             pg,
+		ToolEntityStore:          pg,
+		HumanTaskStore:           pg,
+		BudgetSpendStore:         pg,
+		RuntimeIngressStore:      pg,
+		ConversationStore:        nil,
+		Options: runtime.RuntimeOptions{
+			SelfCheck:         false,
+			WorkflowModule:    module,
+			LLMRuntime:        llmRuntime,
+			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+			BundleSourceFact:  authorActivityTestBundleSourceFact,
+			ProcessWorkOwner:  processOwner,
+		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -261,7 +300,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		db:             db,
 		pg:             pg,
 		rt:             rt,
-		workflow:       workflowStore,
+		workflow:       rt.Pipeline,
 		llm:            llmRuntime,
 		bundle:         bundle,
 		initialState:   strings.TrimSpace(rootSchema.InitialState),
@@ -759,14 +798,15 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 		return
 	}
 	ctx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
-	if err := h.workflow.Upsert(ctx, runtimepipeline.WorkflowInstance{
+	if _, err := h.workflow.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      entityID,
+		StorageRef:      entityID,
 		WorkflowName:    h.bundle.WorkflowName(),
 		WorkflowVersion: h.bundle.WorkflowVersion(),
 		CurrentState:    initialState,
 		EnteredStageAt:  h.startedAt,
 		CreatedAt:       h.startedAt,
-	}); err != nil {
+	}, h.startedAt); err != nil {
 		h.t.Fatalf("seed initial workflow state for %s: %v", entityID, err)
 	}
 }
@@ -789,7 +829,6 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 	if entityID == "" {
 		entityID = runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID)
 	}
-	h.seedInitialState(entityID)
 	instance, ok, err := h.workflow.Load(h.ctx, entityID)
 	if err != nil {
 		h.t.Fatalf("load workflow instance for entity field seeding %s: %v", entityID, err)
@@ -850,7 +889,10 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 		}
 		instance.Metadata["gates"] = gates
 	}
-	if err := h.workflow.Upsert(h.ctx, instance); err != nil {
+	if ok {
+		h.t.Fatalf("entity field fixture %s was already materialized before exact fixture projection", entityID)
+	}
+	if _, err := h.workflow.MaterializeInitialEntry(h.ctx, instance, h.startedAt); err != nil {
 		h.t.Fatalf("seed entity_fields_before for %s: %v", entityID, err)
 	}
 }

@@ -53,7 +53,7 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 	if pc == nil {
 		return fmt.Errorf("artifact_repo_commit requires pipeline coordinator")
 	}
-	if pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+	if pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return fmt.Errorf("artifact_repo_commit requires workflow instance store")
 	}
 	spec := action.ArtifactRepo

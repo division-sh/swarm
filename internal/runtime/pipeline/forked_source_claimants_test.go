@@ -17,7 +17,7 @@ import (
 
 type forkedPipelineBackend struct {
 	db             *sql.DB
-	store          *WorkflowInstanceStore
+	store          *workflowInstanceStore
 	runner         *recordingRuntimeMutationRunner
 	ctx            context.Context
 	runID          string
@@ -86,10 +86,10 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndSelectorsExclude(t *testi
 				CurrentState: "active", EnteredStageAt: fixture.frozenAt.Add(-time.Minute),
 				Metadata: map[string]any{"marker": "source"},
 			}
-			if err := fixture.store.Create(fixture.ctx, instance); err != nil {
+			if err := fixture.store.create(fixture.ctx, instance); err != nil {
 				t.Fatal(err)
 			}
-			before, err := fixture.store.SelectActiveByFields(fixture.ctx, "freeze", []WorkflowInstanceFieldSelector{{Field: "marker", Value: "source"}}, nil)
+			before, err := fixture.store.selectActiveByFieldsExported(fixture.ctx, "freeze", []WorkflowInstanceFieldSelector{{Field: "marker", Value: "source"}}, nil)
 			if err != nil || len(before) != 1 {
 				t.Fatalf("active selector before freeze = %d, %v", len(before), err)
 			}
@@ -97,18 +97,18 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndSelectorsExclude(t *testi
 
 			late := instance
 			late.CurrentState = "changed"
-			requireForkedPipelineRefusal(t, "upsert workflow", fixture.store.Upsert(fixture.ctx, late))
+			requireForkedPipelineRefusal(t, "upsert workflow", fixture.store.upsert(fixture.ctx, late))
 			late.InstanceID = uuid.NewString()
 			late.StorageRef = "freeze/" + uuid.NewString()
-			requireForkedPipelineRefusal(t, "create workflow", fixture.store.Create(fixture.ctx, late))
-			requireForkedPipelineRefusal(t, "mutate workflow", fixture.store.Mutate(fixture.ctx, storageRef, func(item *WorkflowInstance) { item.CurrentState = "changed" }))
-			requireForkedPipelineRefusal(t, "mutate workflow with error", fixture.store.MutateE(fixture.ctx, storageRef, func(item *WorkflowInstance) error {
+			requireForkedPipelineRefusal(t, "create workflow", fixture.store.create(fixture.ctx, late))
+			requireForkedPipelineRefusal(t, "mutate workflow", fixture.store.mutate(fixture.ctx, storageRef, func(item *WorkflowInstance) { item.CurrentState = "changed" }))
+			requireForkedPipelineRefusal(t, "mutate workflow with error", fixture.store.mutateE(fixture.ctx, storageRef, func(item *WorkflowInstance) error {
 				item.CurrentState = "changed"
 				return nil
 			}))
 			requireForkedPipelineRefusal(t, "terminate workflow", fixture.store.MarkTerminated(fixture.ctx, storageRef, fixture.frozenAt))
 
-			after, err := fixture.store.SelectActiveByFields(fixture.ctx, "freeze", []WorkflowInstanceFieldSelector{{Field: "marker", Value: "source"}}, nil)
+			after, err := fixture.store.selectActiveByFieldsExported(fixture.ctx, "freeze", []WorkflowInstanceFieldSelector{{Field: "marker", Value: "source"}}, nil)
 			if err != nil || len(after) != 0 {
 				t.Fatalf("active selector after freeze = %d, %v", len(after), err)
 			}

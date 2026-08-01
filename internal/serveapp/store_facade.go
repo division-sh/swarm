@@ -14,11 +14,12 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartuprecovery "github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
 type selectedRuntimeStoreFacade struct {
@@ -100,7 +101,7 @@ func (o *selectedStoreOwner) CloseActivated(receipt *worklifetime.ProcessJoinRec
 }
 
 type selectedBundleRuntimeCatalogStore interface {
-	LoadBundleCatalogRuntimeRecord(context.Context, string) (store.BundleCatalogRuntimeRecord, error)
+	LoadBundleCatalogRuntimeRecord(context.Context, string) (runbundle.BundleCatalogRuntimeRecord, error)
 }
 
 type selectedBundleSourceCatalogStore interface {
@@ -110,7 +111,7 @@ type selectedBundleSourceCatalogStore interface {
 type selectedRunBundleAvailabilityStore interface {
 	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
 	ActiveRunBundleAvailabilities(context.Context) ([]runbundle.Availability, error)
-	ActiveRunBundleAvailabilityConflicts(context.Context) ([]store.ActiveRunBundleAvailabilityConflict, error)
+	ActiveRunBundleAvailabilityConflicts(context.Context) ([]runbundle.Availability, error)
 }
 
 type selectedStartupRecoveryStore interface {
@@ -158,9 +159,9 @@ type selectedAPIOptionalCapabilityBuilder func(selectedAPICapabilityRequest) (se
 
 type selectedRunForkRuntimeOwner struct {
 	activateFunc    func(context.Context, runtimerunforkexecution.SelectedContractActivationGateRequest) (runtimerunforkexecution.SelectedContractActivationGateResult, error)
-	materializeFunc func(context.Context, store.RunForkMaterializeRequest) (store.RunForkMaterialization, error)
+	materializeFunc func(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 	executeFunc     func(context.Context, runtimerunforkexecution.SelectedContractExecutionRequest) (runtimerunforkexecution.SelectedContractExecutionResult, error)
-	planFunc        func(context.Context, store.RunForkPlanRequest) (store.RunForkPlan, error)
+	planFunc        func(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 }
 
 func (o selectedRunForkRuntimeOwner) configured() bool {
@@ -171,30 +172,50 @@ func (s storeBundle) facade() selectedRuntimeStoreFacade {
 	return selectedRuntimeStoreFacade{stores: s}
 }
 
-func (f selectedRuntimeStoreFacade) runtimeStores() runtime.Stores {
+func (f selectedRuntimeStoreFacade) runtimeDeps() runtime.RuntimeDeps {
 	s := f.stores
-	return runtime.Stores{
-		SQLDB:                  s.RuntimeSQLDB,
-		ConstructionBlocker:    s.RuntimeBlocker,
-		EventStore:             s.EventStore,
-		RunLifecycleCandidates: s.RunLifecycleCandidates,
-		RuntimeLogStore:        s.RuntimeLogStore,
-		PipelineStore:          s.PipelineStore,
-		SessionRegistry:        s.SessionRegistry,
-		ConversationStore:      s.ConversationStore,
-		ManagerStore:           s.ManagerStore,
-		DeliveryStore:          s.DeliveryStore,
-		PipelineObligations:    s.PipelineObligations,
-		ScheduleStore:          s.ScheduleStore,
-		MailboxMaterializer:    s.MailboxMaterializer,
-		DecisionCards:          s.DecisionCards,
-		StartupOwnership:       s.StartupOwnership,
-		MailboxStore:           s.MailboxStore,
-		ToolEntityStore:        s.ToolEntityStore,
-		HumanTaskStore:         s.HumanTaskStore,
-		BudgetSpendStore:       s.BudgetSpendStore,
-		InboundStore:           s.InboundStore,
-		RuntimeIngressStore:    s.RuntimeIngressStore,
+	return runtime.RuntimeDeps{
+		SQLDB:                          s.RuntimeSQLDB,
+		EventStore:                     s.EventStore,
+		EventBusDurable:                s.EventBusDurable,
+		EventPayloadValidationBinder:   s.EventPayloadValidationBinder,
+		InboundPayloadValidationBinder: s.InboundPayloadValidationBinder,
+		AuthorActivityRegistrars:       append([]runtime.AuthorActivityCatalogRegistrar(nil), s.AuthorActivityRegistrars...),
+		RunControlStore:                s.RunControlStore,
+		RunLifecycleCandidates:         s.RunLifecycleCandidates,
+		RuntimeLogStore:                s.RuntimeLogStore,
+		WorkflowPersistence:            s.WorkflowPersistence,
+		RunBundleAvailability:          s.RunBundleAvailabilityStore,
+		SessionRegistry:                s.SessionRegistry,
+		LiveSessionAcquirer:            s.LiveSessionAcquirer,
+		SessionResetter:                s.SessionResetter,
+		ConversationStore:              s.ConversationStore,
+		ManagerStore:                   s.ManagerStore,
+		ManagerLifecycleStore:          s.ManagerLifecycleStore,
+		ManagerLifecycleDiagnostics:    s.ManagerLifecycleDiagnostics,
+		ManagerPersistenceRoles:        s.ManagerPersistenceRoles,
+		EffectsStore:                   s.EffectsStore,
+		CompletionStore:                s.CompletionStore,
+		CompletionHeartbeatStore:       s.CompletionHeartbeatStore,
+		EffectsRecoveryStore:           s.EffectsRecoveryStore,
+		ManagedCapabilitiesStore:       s.ManagedCapabilitiesStore,
+		DeliveryStore:                  s.DeliveryStore,
+		PipelineObligations:            s.PipelineObligations,
+		ScheduleStore:                  s.ScheduleStore,
+		TimerObligationReader:          s.TimerObligationReader,
+		MailboxMaterializer:            s.MailboxMaterializer,
+		DecisionCards:                  s.DecisionCards,
+		ProposedEffects:                s.ProposedEffects,
+		DecisionCardHumanTasks:         s.DecisionCardHumanTasks,
+		DecisionCardDraftExpiry:        s.DecisionCardDraftExpiry,
+		HumanTaskExpiry:                s.HumanTaskExpiry,
+		StartupOwnership:               s.StartupOwnership,
+		MailboxStore:                   s.MailboxStore,
+		ToolEntityStore:                s.ToolEntityStore,
+		HumanTaskStore:                 s.HumanTaskStore,
+		BudgetSpendStore:               s.BudgetSpendStore,
+		InboundStore:                   s.InboundStore,
+		RuntimeIngressStore:            s.RuntimeIngressStore,
 	}
 }
 
@@ -294,9 +315,9 @@ func (o selectedRunForkRuntimeOwner) activate(ctx context.Context, req runtimeru
 	return o.activateFunc(ctx, req)
 }
 
-func (o selectedRunForkRuntimeOwner) materialize(ctx context.Context, req store.RunForkMaterializeRequest) (store.RunForkMaterialization, error) {
+func (o selectedRunForkRuntimeOwner) materialize(ctx context.Context, req runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error) {
 	if o.materializeFunc == nil {
-		return store.RunForkMaterialization{}, fmt.Errorf("selected run.fork runtime owner is required")
+		return runfork.RunForkMaterialization{}, fmt.Errorf("selected run.fork runtime owner is required")
 	}
 	return o.materializeFunc(ctx, req)
 }
@@ -308,9 +329,9 @@ func (o selectedRunForkRuntimeOwner) execute(ctx context.Context, req runtimerun
 	return o.executeFunc(ctx, req)
 }
 
-func (o selectedRunForkRuntimeOwner) plan(ctx context.Context, req store.RunForkPlanRequest) (store.RunForkPlan, error) {
+func (o selectedRunForkRuntimeOwner) plan(ctx context.Context, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
 	if o.planFunc == nil {
-		return store.RunForkPlan{}, fmt.Errorf("selected run.fork runtime owner is required")
+		return runfork.RunForkPlan{}, fmt.Errorf("selected run.fork runtime owner is required")
 	}
 	return o.planFunc(ctx, req)
 }

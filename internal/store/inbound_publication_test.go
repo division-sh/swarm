@@ -26,10 +26,11 @@ import (
 
 type inboundPublicationProofStore interface {
 	runtimeinbound.Runner
-	runtimebus.EventStore
+	storeTestDurableEventBusStore
+	workflowTestSelectedStore
 }
 
-func commitInboundPublicationTestEvent(t *testing.T, store runtimebus.EventStore, mutation runtimeinbound.Mutation, publication *runtimeinbound.EventFinalization) error {
+func commitInboundPublicationTestEvent(t *testing.T, store storeTestDurableEventBusStore, mutation runtimeinbound.Mutation, publication *runtimeinbound.EventFinalization) error {
 	t.Helper()
 	if publication == nil {
 		return errors.New("inbound publication test event is required")
@@ -62,9 +63,7 @@ func commitInboundPublicationTestEvent(t *testing.T, store runtimebus.EventStore
 func TestSQLiteInboundPublicationOperationCommitsRetriesAndRollsBackAtomically(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	store.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
-	workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(store.DB, store)
-	workflowStore.ConfigureDeliveryLifecycleStore(store)
-	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
+	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.DB, store)
 	runInboundPublicationOperationProof(t, store.DB, true, store, workflowStore)
 }
 
@@ -73,14 +72,11 @@ func TestPostgresInboundPublicationOperationCommitsRetriesAndRollsBackAtomically
 	t.Cleanup(cleanup)
 	store := admitTestPostgresStore(t, db)
 	store.SetEventPayloadValidator(currentPlatformPayloadValidatorForStoreTest(t))
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
-	workflowStore.ConfigureRuntimeMutationRunner(store)
-	workflowStore.ConfigureDeliveryLifecycleStore(store)
-	workflowStore.ConfigurePipelineObligationStore(store.PipelineObligations())
+	workflowStore := newPostgresWorkflowTestCoordinator(t, db, store)
 	runInboundPublicationOperationProof(t, db, false, store, workflowStore)
 }
 
-func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, store inboundPublicationProofStore, workflowStore *runtimepipeline.WorkflowInstanceStore) {
+func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, store inboundPublicationProofStore, workflowStore *runtimepipeline.PipelineCoordinator) {
 	t.Helper()
 	packageKey := "publication-proof"
 	flowID := "ingress"
@@ -193,7 +189,7 @@ func assertInboundEvidenceProducedByPlatform(t *testing.T, db *sql.DB, sqlite bo
 	}
 }
 
-func runInboundPublicationStandingGenerationRebindProof(t *testing.T, db *sql.DB, sqlite bool, store inboundPublicationProofStore, workflowStore *runtimepipeline.WorkflowInstanceStore) {
+func runInboundPublicationStandingGenerationRebindProof(t *testing.T, db *sql.DB, sqlite bool, store inboundPublicationProofStore, workflowStore *runtimepipeline.PipelineCoordinator) {
 	t.Helper()
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID:  runtimeflowidentity.StandingServiceID("publication-reset-proof", "ingress"),
@@ -231,14 +227,21 @@ func runInboundPublicationStandingGenerationRebindProof(t *testing.T, db *sql.DB
 		EnteredStageAt:  time.Now().UTC(),
 		Metadata:        map[string]any{"flow_path": childPath},
 	}
-	if err := workflowStore.Create(runtimecorrelation.WithRunID(ctx, first.RunID), child); err != nil {
+	if _, err := workflowStore.MaterializeInitialEntry(runtimecorrelation.WithRunID(ctx, first.RunID), child, child.EnteredStageAt); err != nil {
 		t.Fatalf("seed first-generation child: %v", err)
 	}
 
 	firstRequest := inboundPublicationProofRequest(t, candidate, first.RunID, firstSequence, "delivery-same-generation-rebind")
 	firstCtx := runtimecorrelation.WithRunID(ctx, first.RunID)
 	if _, err := store.RunInboundPublicationMutation(firstCtx, firstRequest, func(mutation runtimeinbound.Mutation) error {
-		return workflowStore.Create(mutation.Context(), child)
+		result, err := workflowStore.MaterializeInitialEntry(mutation.Context(), child, child.EnteredStageAt)
+		if err != nil {
+			return err
+		}
+		if result != runtimepipeline.WorkflowInitialMaterializationCreated {
+			return errors.New("flow_instance_already_exists")
+		}
+		return nil
 	}); err == nil || !strings.Contains(err.Error(), "flow_instance_already_exists") {
 		t.Fatalf("same-generation rebind error = %v", err)
 	}
@@ -256,8 +259,12 @@ func runInboundPublicationStandingGenerationRebindProof(t *testing.T, db *sql.DB
 	publications, evidence := inboundPublicationProofEvents(t, resetRequest)
 	resetCtx := runtimecorrelation.WithRunID(ctx, reset.RunID)
 	if _, err := store.RunInboundPublicationMutation(resetCtx, resetRequest, func(mutation runtimeinbound.Mutation) error {
-		if err := workflowStore.Create(mutation.Context(), child); err != nil {
+		result, err := workflowStore.MaterializeInitialEntry(mutation.Context(), child, child.EnteredStageAt)
+		if err != nil {
 			return err
+		}
+		if result != runtimepipeline.WorkflowInitialMaterializationCreated {
+			return errors.New("flow_instance_already_exists")
 		}
 		for index := range publications {
 			if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {

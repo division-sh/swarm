@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 func TestBuildHistoricalReplayContractSwapBootResumeConsumesOwnersAndSelectedRecipients(t *testing.T) {
@@ -20,13 +20,13 @@ func TestBuildHistoricalReplayContractSwapBootResumeConsumesOwnersAndSelectedRec
 	if err != nil {
 		t.Fatalf("BuildHistoricalReplayContractSwapBootResumeExecution: %v", err)
 	}
-	if execution.Owner != store.RunForkHistoricalReplayContractSwapBootResumeOwner ||
-		execution.ParentHistoricalReplayExecutionOwner != store.RunForkHistoricalReplayExecutionOwner ||
-		execution.HistoricalReplayExecutionAdmissionOwner != store.RunForkHistoricalReplayExecutionAdmissionOwner ||
-		execution.ContractSwapAdmissionOwner != store.RunForkContractSwapBootResumeAdmissionOwner ||
-		execution.SelectedExecutionAdmissionOwner != store.RunForkSelectedContractExecutionAdmissionOwner ||
-		execution.RecipientPlanningOwner != store.RunForkSelectedContractRecipientPlanningOwner ||
-		execution.RouteRecoveryOwner != store.RunForkSelectedContractRoutePersistenceOwner ||
+	if execution.Owner != runfork.RunForkHistoricalReplayContractSwapBootResumeOwner ||
+		execution.ParentHistoricalReplayExecutionOwner != runfork.RunForkHistoricalReplayExecutionOwner ||
+		execution.HistoricalReplayExecutionAdmissionOwner != runfork.RunForkHistoricalReplayExecutionAdmissionOwner ||
+		execution.ContractSwapAdmissionOwner != runfork.RunForkContractSwapBootResumeAdmissionOwner ||
+		execution.SelectedExecutionAdmissionOwner != runfork.RunForkSelectedContractExecutionAdmissionOwner ||
+		execution.RecipientPlanningOwner != runfork.RunForkSelectedContractRecipientPlanningOwner ||
+		execution.RouteRecoveryOwner != runfork.RunForkSelectedContractRoutePersistenceOwner ||
 		!execution.DeliveryEventReplayReady {
 		t.Fatalf("owner consumption = %#v", execution)
 	}
@@ -40,8 +40,8 @@ func TestBuildHistoricalReplayContractSwapBootResumeConsumesOwnersAndSelectedRec
 	if execution.ExecutableWork[0].SelectedRecipients[0].SubscriberID == "source-agent" {
 		t.Fatalf("source subscriber leaked into selected recipient truth: %#v", execution.ExecutableWork[0])
 	}
-	if !executionBoundaryHas(execution.InvalidPaths, "source_subscriber_as_selected_recipient", store.RunForkSelectedContractDispositionInvalid) ||
-		!executionBoundaryHas(execution.BlockedSiblings, "full_historical_replay_resume", store.RunForkSelectedContractDispositionBlockedSibling) {
+	if !executionBoundaryHas(execution.InvalidPaths, "source_subscriber_as_selected_recipient", runfork.RunForkSelectedContractDispositionInvalid) ||
+		!executionBoundaryHas(execution.BlockedSiblings, "full_historical_replay_resume", runfork.RunForkSelectedContractDispositionBlockedSibling) {
 		t.Fatalf("boundaries invalid=%#v blocked=%#v", execution.InvalidPaths, execution.BlockedSiblings)
 	}
 }
@@ -64,11 +64,11 @@ func TestBuildHistoricalReplayContractSwapBootResumeRejectsSourceSubscriberFallb
 
 func TestBuildHistoricalReplayContractSwapBootResumeRejectsFailClosedSiblingFact(t *testing.T) {
 	selectedAdmission, contractSwapAdmission, historicalAdmission, historicalExecution, routeRecovery := testContractSwapExecutionInputs(t)
-	historicalExecution.FactAdmissions = append([]store.RunForkHistoricalReplayFactAdmission(nil), historicalExecution.FactAdmissions...)
+	historicalExecution.FactAdmissions = append([]runfork.RunForkHistoricalReplayFactAdmission(nil), historicalExecution.FactAdmissions...)
 	for i := range historicalExecution.FactAdmissions {
-		if historicalExecution.FactAdmissions[i].Fact == store.RunForkHistoricalReplayFactTimers {
-			historicalExecution.FactAdmissions[i].Admission = store.RunForkHistoricalReplayAdmissionFailClosedBlocker
-			historicalExecution.FactAdmissions[i].BlockerCode = store.RunForkBlockerTimerHistoryUnproven
+		if historicalExecution.FactAdmissions[i].Fact == runfork.RunForkHistoricalReplayFactTimers {
+			historicalExecution.FactAdmissions[i].Admission = runfork.RunForkHistoricalReplayAdmissionFailClosedBlocker
+			historicalExecution.FactAdmissions[i].BlockerCode = runfork.RunForkBlockerTimerHistoryUnproven
 			break
 		}
 	}
@@ -80,39 +80,39 @@ func TestBuildHistoricalReplayContractSwapBootResumeRejectsFailClosedSiblingFact
 		HistoricalReplayExecution:  historicalExecution,
 		RouteRecovery:              &routeRecovery,
 	})
-	if err == nil || !strings.Contains(err.Error(), store.RunForkHistoricalReplayFactTimers) {
+	if err == nil || !strings.Contains(err.Error(), runfork.RunForkHistoricalReplayFactTimers) {
 		t.Fatalf("error = %v, want fail-closed timer sibling blocker", err)
 	}
 }
 
 func testContractSwapExecutionInputs(t *testing.T) (
-	store.RunForkSelectedContractExecutionAdmission,
-	store.RunForkContractSwapBootResumeAdmission,
-	store.RunForkHistoricalReplayExecutionAdmission,
-	store.RunForkHistoricalReplayExecution,
-	store.RunForkSelectedContractRouteRecovery,
+	runfork.RunForkSelectedContractExecutionAdmission,
+	runfork.RunForkContractSwapBootResumeAdmission,
+	runfork.RunForkHistoricalReplayExecutionAdmission,
+	runfork.RunForkHistoricalReplayExecution,
+	runfork.RunForkSelectedContractRouteRecovery,
 ) {
 	t.Helper()
 	selection := testContractSwapSelection()
 	selectedAdmission := testContractSwapSelectedExecutionAdmission(selection)
-	selectedAdmission.RecipientPlanning.RecipientPlanEvents = []store.RunForkSelectedContractRecipientPlanEvent{{
+	selectedAdmission.RecipientPlanning.RecipientPlanEvents = []runfork.RunForkSelectedContractRecipientPlanEvent{{
 		SourceEventID: "source-event",
 		EventName:     "work.begin",
-		Recipients: []store.RunForkContractFrontierRecipient{{
+		Recipients: []runfork.RunForkContractFrontierRecipient{{
 			SubscriberType: "node",
 			SubscriberID:   "selected-node",
 			Path:           "flow-a/selected-node",
 			RouteSource:    "selected_contracts",
 		}},
-		Disposition: store.RunForkSelectedContractDispositionForkLocalTruth,
+		Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 	}}
 	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
-	replayAdmission := store.RunForkReplayResumeAdmission{
-		Owner:                    store.RunForkReplayResumeAdmissionOwner,
+	replayAdmission := runfork.RunForkReplayResumeAdmission{
+		Owner:                    runfork.RunForkReplayResumeAdmissionOwner,
 		DeliveryEventReplayReady: true,
-		Dispositions: []store.RunForkReplayResumeDisposition{{
-			Fact:        store.RunForkReplayResumeFactDeliveryPendingHistory,
-			Disposition: store.RunForkReplayResumeDispositionForkReplay,
+		Dispositions: []runfork.RunForkReplayResumeDisposition{{
+			Fact:        runfork.RunForkReplayResumeFactDeliveryPendingHistory,
+			Disposition: runfork.RunForkReplayResumeDispositionForkReplay,
 			Message:     "pending unstarted source delivery can be replayed",
 		}},
 	}
@@ -136,7 +136,7 @@ func testContractSwapExecutionInputs(t *testing.T) (
 	historicalExecution, err := BuildHistoricalReplayExecution(HistoricalReplayExecutionRequest{
 		Admission:             historicalAdmission,
 		ReplayResumeAdmission: replayAdmission,
-		PendingWork: []store.RunForkPendingWork{
+		PendingWork: []runfork.RunForkPendingWork{
 			{
 				EventID:        "source-event",
 				EventName:      "work.begin",
@@ -144,7 +144,7 @@ func testContractSwapExecutionInputs(t *testing.T) (
 				SubscriberType: "agent",
 				SubscriberID:   "source-agent",
 				Status:         "pending",
-				Classification: store.RunForkPendingClassificationPending,
+				Classification: runfork.RunForkPendingClassificationPending,
 			},
 			{
 				EventID:        "source-event",
@@ -153,7 +153,7 @@ func testContractSwapExecutionInputs(t *testing.T) (
 				SubscriberType: "agent",
 				SubscriberID:   "other-source-agent",
 				Status:         "pending",
-				Classification: store.RunForkPendingClassificationPending,
+				Classification: runfork.RunForkPendingClassificationPending,
 			},
 		},
 	})

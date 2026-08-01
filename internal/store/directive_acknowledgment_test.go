@@ -42,9 +42,11 @@ const (
 var errInjectedDirectivePersistence = errors.New("injected directive persistence acknowledgment failure")
 
 type directiveIntegrationStore interface {
-	runtimebus.EventStore
+	storeTestDurableEventBusStore
 	runtimeagentcontrol.DirectiveOperationStore
 	runtimemanager.ManagerPersistence
+	runtimemanager.AgentDirectiveRunTargetResolver
+	runtimemanager.EventExistenceReader
 }
 
 type faultingDirectiveIntegrationStore struct {
@@ -65,13 +67,7 @@ func (s *faultingDirectiveIntegrationStore) setFault(fault directivePersistenceF
 }
 
 func (s *faultingDirectiveIntegrationStore) ResolveAgentDirectiveRunTarget(ctx context.Context, identity runtimeagentidentity.Identity, explicitRunID string) (runtimeagentcontrol.RunTargetResolution, error) {
-	resolver, ok := s.directiveIntegrationStore.(interface {
-		ResolveAgentDirectiveRunTarget(context.Context, runtimeagentidentity.Identity, string) (runtimeagentcontrol.RunTargetResolution, error)
-	})
-	if !ok {
-		return runtimeagentcontrol.RunTargetResolution{}, errors.New("directive run target resolver is required")
-	}
-	return resolver.ResolveAgentDirectiveRunTarget(ctx, identity, explicitRunID)
+	return s.directiveIntegrationStore.ResolveAgentDirectiveRunTarget(ctx, identity, explicitRunID)
 }
 
 func (s *faultingDirectiveIntegrationStore) takeFault(fault directivePersistenceFault) (directiveFaultMode, bool) {
@@ -473,7 +469,14 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 	}
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, func(runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
-	}, runtimemanager.AgentManagerOptions{WorkOwner: storeTestWorkOwner(t)}, faults))
+	}, runtimemanager.AgentManagerOptions{
+		WorkOwner: storeTestWorkOwner(t),
+		PersistenceRoles: runtimemanager.PersistenceRoles{
+			EventExistence:      faults,
+			DirectiveOperations: faults,
+			DirectiveTargets:    faults,
+		},
+	}, faults))
 	rec := runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ExecutionMode: "live",

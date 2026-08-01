@@ -66,22 +66,18 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			workflowStore := configureRuntimeTestWorkflowStore(
-				t,
-				runtimepipeline.NewWorkflowInstanceStore(db),
-				pg,
-			)
-			if err := workflowStore.Upsert(ctx, artifactActionResultWorkflowInstance()); err != nil {
-				t.Fatalf("seed workflow instance: %v", err)
-			}
 			module := newRuntimeTestWorkflowModule(t, source)
 			resultHandlerStarted := make(chan string, 4)
 			pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-				WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
-				Module:        module,
-				WorkflowStore: workflowStore,
-				DeliveryStore: pg,
-				ArtifactRoot:  t.TempDir(),
+				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
+				Module:              module,
+				Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+				RunLifecycle:        pg,
+				PipelineObligations: pg.PipelineObligations(),
+				DeliveryStore:       pg,
+				GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
+				PinRoutingDescriptors: bus, FlowRoutes: bus,
+				ArtifactRoot: t.TempDir(),
 				TestWorkflowNodeHandlerStartHook: func(_ context.Context, nodeID string, evt events.Event) error {
 					if strings.TrimSpace(nodeID) == "repo-scaffold-node" && strings.TrimSpace(string(evt.Type())) == resultEventType {
 						select {
@@ -92,6 +88,9 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 					return nil
 				},
 			})
+			if _, err := pc.MaterializeInitialEntry(ctx, artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
+				t.Fatalf("seed workflow instance: %v", err)
+			}
 			if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("repo-scaffold", "inst-1")}); err != nil {
 				t.Fatalf("AddFlowInstanceRoute: %v", err)
 			}
@@ -218,22 +217,18 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			workflowStore := configureRuntimeTestWorkflowStore(
-				t,
-				runtimepipeline.NewWorkflowInstanceStore(db),
-				pg,
-			)
-			if err := workflowStore.Upsert(ctx, artifactActionResultStaticWorkflowInstance()); err != nil {
-				t.Fatalf("seed workflow instance: %v", err)
-			}
 			module := newRuntimeTestWorkflowModule(t, source)
 			resultHandlerStarted := make(chan string, 4)
 			pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-				WorkOwner:     runtimeTestEventBusWorkOwner(t, bus),
-				Module:        module,
-				WorkflowStore: workflowStore,
-				DeliveryStore: pg,
-				ArtifactRoot:  t.TempDir(),
+				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
+				Module:              module,
+				Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+				RunLifecycle:        pg,
+				PipelineObligations: pg.PipelineObligations(),
+				DeliveryStore:       pg,
+				GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
+				PinRoutingDescriptors: bus, FlowRoutes: bus,
+				ArtifactRoot: t.TempDir(),
 				TestWorkflowNodeHandlerStartHook: func(_ context.Context, nodeID string, evt events.Event) error {
 					if strings.TrimSpace(nodeID) == "repo-scaffold-node" && strings.TrimSpace(string(evt.Type())) == resultEventType {
 						select {
@@ -244,6 +239,9 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 					return nil
 				},
 			})
+			if _, err := pc.MaterializeInitialEntry(ctx, artifactActionResultStaticWorkflowInstance(), time.Now().UTC()); err != nil {
+				t.Fatalf("seed workflow instance: %v", err)
+			}
 
 			requestPayload, err := json.Marshal(map[string]any{
 				"request_id": tc.requestID,

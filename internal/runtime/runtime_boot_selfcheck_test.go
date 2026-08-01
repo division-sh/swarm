@@ -28,26 +28,27 @@ func TestRuntimeStart_PipelineMaintenanceFailureUsesCanonicalBootStepIdentity(t 
 		t.Fatalf("sqlmock: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"task_type", "run_id", "status", "fire_at", "run_status"}))
 	mock.ExpectQuery("SELECT").WillReturnError(context.DeadlineExceeded)
 
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	store := &bootSelfCheckDescriptorStore{}
 	progress := []BootProgressEvent{}
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
 		EventStore: store,
-	}, Options: RuntimeOptions{
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-		BootProgress: func(evt BootProgressEvent) {
-			progress = append(progress, evt)
-		},
-	}})
+		Options: RuntimeOptions{
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+			BootProgress: func(evt BootProgressEvent) {
+				progress = append(progress, evt)
+			},
+		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
 	rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		Module: module, WorkOwner: rt.WorkOccurrence(),
+		Module: module, Persistence: runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}), WorkOwner: rt.WorkOccurrence(),
 		PipelineObligations: newStartupRecoveryPipelineOwner(nil, nil),
 	})
 	if err := rt.Start(testAuthorActivityContext(context.Background())); err == nil {
@@ -111,13 +112,13 @@ func TestRuntimeStart_SelfCheckUsesInternalSubscriberVisibility(t *testing.T) {
 			Identity: runtimebustest.Identity(t, "agent-a", ""),
 		}},
 	}
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
 		EventStore: store,
-	}, Options: RuntimeOptions{
-		SelfCheck:      true,
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
+		Options: RuntimeOptions{
+			SelfCheck:      true,
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -144,19 +145,19 @@ func TestRuntimeStart_PlatformBootPayloadCarriesBootDecisionSummary(t *testing.T
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	store := &bootSelfCheckDescriptorStore{}
 	progress := []BootProgressEvent{}
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
 		EventStore: store,
-	}, Options: RuntimeOptions{
-		SelfCheck:        true,
-		WorkflowModule:   module,
-		LLMRuntime:       noopLLMRuntime{},
-		BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),
-		BootStartedAt:    time.Now().UTC().Add(-1500 * time.Millisecond),
-		SystemContainers: []string{"swarm-system", "swarm-scaffold"},
-		BootProgress: func(evt BootProgressEvent) {
-			progress = append(progress, evt)
-		},
-	}})
+		Options: RuntimeOptions{
+			SelfCheck:        true,
+			WorkflowModule:   module,
+			LLMRuntime:       noopLLMRuntime{},
+			BundleSourceFact: testBundleSourceFact(t, runtimeContextTestHashA),
+			BootStartedAt:    time.Now().UTC().Add(-1500 * time.Millisecond),
+			SystemContainers: []string{"swarm-system", "swarm-scaffold"},
+			BootProgress: func(evt BootProgressEvent) {
+				progress = append(progress, evt)
+			},
+		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)

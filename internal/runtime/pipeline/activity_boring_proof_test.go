@@ -397,7 +397,7 @@ func TestActivityBoringProofRuntimeLogFailureDoesNotBlockReadOnlyActivity(t *tes
 	defer server.Close()
 
 	bus := &recordingPipelineBus{runtimeLogErr: errors.New("runtime log unavailable")}
-	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: activityBoringSource(server.URL)},
 	})
 	intent := newActivityBoringIntent("https://example.com/source", testPipelineRunID)
@@ -454,8 +454,9 @@ func newActivityBoringFixture(t *testing.T, kind activityBoringStoreKind, server
 			return appendActivityBoringEvent(ctx, db, kind, evt)
 		}}
 		pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-			Module:        staticSemanticWorkflowModule{source: activityBoringSource(serverURL)},
-			WorkflowStore: NewSQLiteWorkflowInstanceStore(db),
+			Module:              staticSemanticWorkflowModule{source: activityBoringSource(serverURL)},
+			Persistence:         workflowPersistenceForTest(newSQLiteWorkflowInstanceStoreForTest(t, db)),
+			PipelineObligations: unavailablePipelineTestObligationOwner{},
 		})
 		return activityBoringFixture{db: db, bus: bus, pc: pc}
 	case activityBoringStorePostgres:
@@ -479,9 +480,11 @@ func newActivityBoringCoordinator(t *testing.T, db *sql.DB, kind activityBoringS
 	}
 	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
-		Module:        staticSemanticWorkflowModule{source: activityBoringSource(serverURL)},
-		WorkflowStore: store,
-		DeliveryStore: deliveryStore,
+		Module:              staticSemanticWorkflowModule{source: activityBoringSource(serverURL)},
+		Persistence:         workflowPersistenceForTest(store),
+		DeliveryStore:       deliveryStore,
+		DeliveryRuntime:     bus,
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
 	})
 	return activityBoringFixture{db: db, bus: bus, pc: pc}
 }
@@ -530,8 +533,10 @@ func newActivityBoringFullFlowCoordinator(t *testing.T, db *sql.DB, kind activit
 				},
 			}},
 		},
-		WorkflowStore: store,
-		DeliveryStore: deliveryStore,
+		Persistence:         workflowPersistenceForTest(store),
+		DeliveryStore:       deliveryStore,
+		DeliveryRuntime:     bus,
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
 	})
 	bus.coordinator = pc
 	return activityBoringFixture{db: db, bus: bus, pc: pc}
@@ -883,7 +888,7 @@ func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, k
 	if entityID == "" {
 		t.Fatal("activity boring source event requires entity id")
 	}
-	if err := fixture.pc.workflowStore.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := fixture.pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "research",

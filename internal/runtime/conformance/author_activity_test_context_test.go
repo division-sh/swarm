@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -9,14 +10,19 @@ import (
 	"time"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -84,6 +90,24 @@ func ownConformanceTestAgentManager(t testing.TB, manager *runtimemanager.AgentM
 	return manager
 }
 
+func conformanceManagerPersistenceRoles(selected any, eventBus *runtimebus.EventBus, pipeline *runtimepipeline.PipelineCoordinator) runtimemanager.PersistenceRoles {
+	roles := runtimemanager.PersistenceRoles{
+		AgentRoutes: eventBus, RouteInstaller: eventBus, RouteVerifier: eventBus,
+		RouteRestorer: eventBus, RouteRetirer: eventBus, RouteRemover: eventBus,
+		FlowTermination: pipeline, CreationPublisher: eventBus, DeliveryRuntime: eventBus,
+	}
+	roles.LifecycleState, _ = selected.(runtimemanager.AgentLifecycleStateReader)
+	roles.LifecycleEffects, _ = selected.(runtimeeffects.Store)
+	roles.LifecycleDiagnostics, _ = selected.(runtimemanager.AgentLifecycleDiagnosticPersistence)
+	roles.EffectsRecovery, _ = selected.(runtimeeffects.RecoveryStore)
+	roles.DeliveryQuiescence, _ = selected.(runtimemanager.ActiveRunDeliveryQuiescenceReader)
+	roles.EventExistence, _ = selected.(runtimemanager.EventExistenceReader)
+	roles.DirectiveOperations, _ = selected.(runtimeagentcontrol.DirectiveOperationStore)
+	roles.DirectiveTargets, _ = selected.(runtimemanager.AgentDirectiveRunTargetResolver)
+	roles.FlowRoutes, _ = selected.(runtimebus.FlowInstanceRoutePersistence)
+	return roles
+}
+
 func testAuthorActivityContext(ctx context.Context) context.Context {
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, authorActivityTestBundleSourceFact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
@@ -112,6 +136,45 @@ func testAuthorActivityRuntimeOptions(t testing.TB, opts runtimepkg.RuntimeOptio
 
 type testAuthorActivityCatalogRegistrar interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
+}
+
+type conformanceRuntimeTestMutationOwner interface {
+	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
+}
+
+type conformanceDurableEventBusStore interface {
+	runtimebus.EventStore
+	conformanceRuntimeTestMutationOwner
+	runtimereplycontext.Store
+	runtimerunlifecycle.OperationOwner
+	runtimedelivery.Store
+	runtimebus.FlowInstanceRoutePersistence
+	runtimebus.FlowInstanceRouteRecordReader
+	runtimebus.FlowInstanceRouteSetPersistence
+	runtimebus.FlowInstanceRouteTopologyPersistence
+	runtimebus.FlowInstanceRouteRollbackPersistence
+	runtimebus.ActiveAgentDescriptorLister
+	runtimebus.ActiveFlowInstanceDescriptorLister
+	runtimebus.EventDeliveryTargetReader
+	runtimebus.EventDeliveryRouteSetReader
+	runtimebus.TargetFailureDeadLetterRecorder
+	runtimebus.RunOriginReader
+	PipelineObligations() runtimepipelineobligation.Store
+}
+
+func durableConformanceEventBusOptions(store conformanceDurableEventBusStore, opts runtimebus.EventBusOptions) runtimebus.EventBusOptions {
+	opts.PipelineObligations = store.PipelineObligations()
+	opts.Durable = conformanceDurableEventBusDependencies(store)
+	return opts
+}
+
+func conformanceDurableEventBusDependencies(store conformanceDurableEventBusStore) runtimebus.DurableDependencies {
+	return runtimebus.DurableDependencies{
+		ReplyContext: store, RunLifecycle: store, DeliveryLifecycle: store,
+		FlowRoutes: store, FlowRouteRecords: store, FlowRouteSets: store, FlowRouteTopology: store, FlowRouteRollback: store,
+		ActiveAgents: store, ActiveFlows: store, DeliveryTargets: store, DeliveryRouteSets: store,
+		TargetFailureRecorder: store, RunOrigins: store,
+	}
 }
 
 func registerTestAuthorActivityCatalog(t *testing.T, target testAuthorActivityCatalogRegistrar, descriptors []runtimeauthoractivity.EventDescriptor) {
@@ -160,13 +223,6 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 		}
 		opts.DeliveryAuthority = authority
 	}
-	if opts.PipelineObligations == nil {
-		if provider, ok := eventStore.(interface {
-			PipelineObligations() runtimepipelineobligation.Store
-		}); ok {
-			opts.PipelineObligations = provider.PipelineObligations()
-		}
-	}
 	if registrar, ok := eventStore.(testAuthorActivityCatalogRegistrar); ok {
 		descriptors := testAuthorActivityEventDescriptors(t, opts)
 		for _, eventType := range differentEvents {
@@ -175,6 +231,13 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 			})
 		}
 		registerTestAuthorActivityCatalog(t, registrar, descriptors)
+	}
+	if opts.PipelineObligations != nil {
+		durable, ok := eventStore.(conformanceDurableEventBusStore)
+		if !ok {
+			return nil, fmt.Errorf("conformance durable event-store fixture %T lacks exact durable roles", eventStore)
+		}
+		opts = durableConformanceEventBusOptions(durable, opts)
 	}
 	var bus *runtimebus.EventBus
 	var err error

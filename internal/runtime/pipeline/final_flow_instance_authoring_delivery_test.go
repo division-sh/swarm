@@ -26,7 +26,7 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 	instanceID := "ti-account-42"
 	flowInstance := finalflowinstanceauthoring.TemplateFlowID + "/" + instanceID
 	entityID := FlowInstanceEntityID(flowInstance)
-	if err := workflowStore.Create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      instanceID,
 		StorageRef:      flowInstance,
 		WorkflowName:    finalflowinstanceauthoring.TemplateFlowID,
@@ -86,7 +86,7 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 	assertFinalFlowInstanceAuthoringDeliveryStatus(t, db, evt.ID(), finalflowinstanceauthoring.TemplateNodeID, "delivered")
 }
 
-func newFinalFlowInstanceAuthoringPipelineCoordinator(t *testing.T, db *sql.DB, bundle *runtimecontracts.WorkflowContractBundle, source semanticview.Source) (*PipelineCoordinator, *WorkflowInstanceStore) {
+func newFinalFlowInstanceAuthoringPipelineCoordinator(t *testing.T, db *sql.DB, bundle *runtimecontracts.WorkflowContractBundle, source semanticview.Source) (*PipelineCoordinator, *workflowInstanceStore) {
 	t.Helper()
 	workflow, err := LoadWorkflowDefinition(source)
 	if err != nil {
@@ -98,7 +98,9 @@ func newFinalFlowInstanceAuthoringPipelineCoordinator(t *testing.T, db *sql.DB, 
 	}
 	workflowStore := newPostgresWorkflowInstanceStoreForTest(db)
 	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
-	pc := NewPipelineCoordinatorWithOptions(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+	bus := &recordingPipelineBus{}
+	bus.configurePipelineTestDeliveryOwner(deliveryStore)
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{
 			bundle:         bundle,
 			workflow:       workflow,
@@ -106,8 +108,10 @@ func newFinalFlowInstanceAuthoringPipelineCoordinator(t *testing.T, db *sql.DB, 
 			guardRegistry:  NewContractGuardRegistry(source),
 			actionRegistry: NewContractActionRegistry(source),
 		},
-		WorkflowStore: workflowStore,
-		DeliveryStore: deliveryStore,
+		Persistence:         workflowPersistenceForTest(workflowStore),
+		DeliveryStore:       deliveryStore,
+		DeliveryRuntime:     bus,
+		PipelineObligations: unavailablePipelineTestObligationOwner{},
 	})
 	return pc, workflowStore
 }
@@ -154,7 +158,7 @@ func assertNoFinalFlowInstanceAuthoringContainedRouteRows(t *testing.T, db *sql.
 	}
 }
 
-func assertNoFinalFlowInstanceAuthoringContainedWorkflowInstance(t *testing.T, db *sql.DB, store *WorkflowInstanceStore, ctx context.Context, flowInstance string) {
+func assertNoFinalFlowInstanceAuthoringContainedWorkflowInstance(t *testing.T, db *sql.DB, store *workflowInstanceStore, ctx context.Context, flowInstance string) {
 	t.Helper()
 	entityID := FlowInstanceEntityID(flowInstance)
 	if _, ok, err := store.Load(ctx, entityID); err != nil {

@@ -43,6 +43,7 @@ func TestEventBusSubscribedPublishDoesNotCrossAgentRouteGenerations(t *testing.T
 			const agentID = "route-generation-agent"
 			oldToken := testAgentLifecycleToken(t, agentID, "", 11, 1)
 			newToken := testAgentLifecycleToken(t, agentID, "", 11, 2)
+			eb.RegisterRuntimeActiveAgentDescriptor(ActiveAgentDescriptor{Identity: oldToken.Identity})
 			oldCh := eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.route_generation")))
 			evt := routeGenerationTestEvent(eventtest.UUID("route-generation-publish"), "test.route_generation")
 
@@ -89,6 +90,7 @@ func TestEventBusPublishInMutationDoesNotCrossAgentRouteGenerations(t *testing.T
 	const agentID = "route-generation-mutation-agent"
 	oldToken := testAgentLifecycleToken(t, agentID, "", 12, 1)
 	newToken := testAgentLifecycleToken(t, agentID, "", 12, 2)
+	eb.RegisterRuntimeActiveAgentDescriptor(ActiveAgentDescriptor{Identity: oldToken.Identity})
 	oldCh := eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.route_generation_mutation")))
 	evt := routeGenerationTestEvent(eventtest.UUID("route-generation-mutation"), "test.route_generation_mutation")
 
@@ -119,6 +121,7 @@ func TestEventBusPublishAcknowledgedDoesNotCrossAgentRouteGenerations(t *testing
 	const agentID = "route-generation-ack-agent"
 	oldToken := testAgentLifecycleToken(t, agentID, "", 13, 1)
 	newToken := testAgentLifecycleToken(t, agentID, "", 13, 2)
+	eb.RegisterRuntimeActiveAgentDescriptor(ActiveAgentDescriptor{Identity: oldToken.Identity})
 	oldCh := eb.ReplaceAgentRoute(oldToken, testAgentSubscriptionAdmission(t, oldToken.AgentID, events.EventType("test.route_generation_ack")))
 	evt := routeGenerationTestEvent(eventtest.UUID("route-generation-ack"), "test.route_generation_ack")
 

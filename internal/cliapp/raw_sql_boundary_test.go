@@ -254,25 +254,11 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			SpecRef:        "platform-spec.yaml#run_model.fork.fixed_event_revision_and_workset",
 			Reason:         "pipeline transactions collect changed fork-reader families and publish them only at the existing unit-of-work commit boundary",
 		},
-		"internal/runtime/pipeline/runtime_interfaces.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1783,
-			Reason:         "pipeline runtime interface names the selected pipeline mutation owner boundary",
-		},
-		"internal/runtime/runforkexecution/activation_gate.go": {
+		"internal/runtime/runforkexecution/store_ports.go": {
 			Classification: rawSQLOptionalProductBoundary,
+			Issue:          2148,
 			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork",
-			Reason:         "selected-contract run.fork activation is a spec-classified optional Postgres-backed product seam until promoted behind selected owners",
-		},
-		"internal/runtime/runforkexecution/execution.go": {
-			Classification: rawSQLOptionalProductBoundary,
-			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork",
-			Reason:         "selected-contract run.fork execution constructs a fork-local runtime pipeline from the Postgres store DB; this is an explicit optional product split, not backend-neutral selected capability authority",
-		},
-		"internal/runtime/runforkexecution/runtime_container.go": {
-			Classification: rawSQLOptionalProductBoundary,
-			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork",
-			Reason:         "selected-contract fork-local runtime container uses the Postgres store DB for optional run.fork logging/pipeline support and remains a spec-classified optional product split",
+			Reason:         "the exact selected-fork execution dependency temporarily carries the Postgres runtime SQL mechanic assigned to #2148; execution consumers no longer inspect concrete store shape",
 		},
 		"internal/runtime/runforkrevision/revision.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
@@ -328,11 +314,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			SpecRef:        "platform-spec.yaml#engine.timer_model",
 			Reason:         "the closed workflow lifecycle effect applier requires the selected mutation context so timer, join, and gate reactions commit with the accepted event",
 		},
-		"internal/runtime/pipeline/workflow_gate_decision.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1986,
-			Reason:         "gate decision routing consumes the selected workflow mutation owner atomically with activation state",
-		},
 		"internal/runtime/pipeline/workflow_gate_fence.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1986,
@@ -347,11 +328,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,
 			Reason:         "workflow node construction carries pipeline SQL dependency to explicit node/unit-of-work owners",
-		},
-		"internal/runtime/pipeline/workflow_timer_lifecycle.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1846,
-			Reason:         "stage timer fire handling uses the selected workflow instance RunPipelineMutation owner to keep fired state and timed transition application in one unit of work",
 		},
 		"internal/runtime/pipeline/workflow_timer_owner.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
@@ -380,21 +356,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,
 			Reason:         "runtime dependency struct carries the named Postgres-only RuntimeSQLDB exception and must not be used as SQLite capability authority",
-		},
-		"internal/runtime/standing_targets.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1951,
-			Reason:         "standing activation consumes the selected WorkflowInstanceStore RunPipelineMutation owner for atomic run, instance, entity, route, and timer creation",
-		},
-		"internal/apiv1/operator_decision_cards.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1986,
-			Reason:         "typed decision-card API mutations enter the selected workflow unit-of-work owner",
-		},
-		"internal/apiv1/operator_read.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1986,
-			Reason:         "operator dependency wiring names the selected workflow mutation capability",
 		},
 		"internal/runtime/workspace/host_manager.go": {
 			Classification: rawSQLWorkspaceProcessBoundary,

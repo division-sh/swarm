@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
-	"github.com/division-sh/swarm/internal/store/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/google/uuid"
 )
 

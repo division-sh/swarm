@@ -16,6 +16,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -175,7 +176,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		return 0
 	}
 	if *materializeOnly {
-		var contractSelection *store.RunForkContractSelection
+		var contractSelection *runfork.RunForkContractSelection
 		if contracts := strings.TrimSpace(*contractsPath); contracts != "" {
 			contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolveContractsPath(repo, contracts))
 			if err != nil {
@@ -200,7 +201,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 				writeForkContractLoadError(out, "fork failed: classify selected contracts", err)
 				return cliapp.CLIExitValidation
 			}
-			result, err := runForkOwner.materialize(ctx, store.RunForkMaterializeRequest{
+			result, err := runForkOwner.materialize(ctx, runfork.RunForkMaterializeRequest{
 				SourceRunID:       strings.TrimSpace(*runID),
 				At:                strings.TrimSpace(*at),
 				ContractSelection: contractSelection,
@@ -224,7 +225,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			printRunForkMaterialization(out, result)
 			return 0
 		}
-		result, err := runForkOwner.materialize(ctx, store.RunForkMaterializeRequest{
+		result, err := runForkOwner.materialize(ctx, runfork.RunForkMaterializeRequest{
 			SourceRunID:       strings.TrimSpace(*runID),
 			At:                strings.TrimSpace(*at),
 			ContractSelection: contractSelection,
@@ -375,7 +376,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		printSelectedContractExecution(out, result)
 		return 0
 	}
-	plan, err := runForkOwner.plan(ctx, store.RunForkPlanRequest{
+	plan, err := runForkOwner.plan(ctx, runfork.RunForkPlanRequest{
 		SourceRunID: strings.TrimSpace(*runID),
 		At:          strings.TrimSpace(*at),
 	})
@@ -386,7 +387,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		return 1
 	}
 	if contracts := strings.TrimSpace(*contractsPath); contracts != "" {
-		replayAdmission := store.RunForkSelectedContractReplayResumeAdmission(plan)
+		replayAdmission := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
 		if len(plan.ReplayResumeAdmission.Dispositions) > 0 || len(plan.ReplayResumeAdmission.UnsupportedBlockers) > 0 {
 			plan.UnsupportedBlockers = replayAdmission.UnsupportedBlockers
 			plan.UnsupportedBlockerCount = len(replayAdmission.UnsupportedBlockers)
@@ -516,7 +517,7 @@ func writeForkContractLoadError(out io.Writer, prefix string, err error) {
 	fmt.Fprintf(out, "%s: %v\n", strings.TrimSpace(prefix), err)
 }
 
-func printRunForkActivation(w io.Writer, result store.RunForkActivation) {
+func printRunForkActivation(w io.Writer, result runfork.RunForkActivation) {
 	if w == nil {
 		return
 	}
@@ -577,7 +578,7 @@ func printSelectedContractExecution(w io.Writer, result runtimerunforkexecution.
 	}
 }
 
-func printRunForkMaterialization(w io.Writer, result store.RunForkMaterialization) {
+func printRunForkMaterialization(w io.Writer, result runfork.RunForkMaterialization) {
 	if w == nil {
 		return
 	}
@@ -599,7 +600,7 @@ func printRunForkMaterialization(w io.Writer, result store.RunForkMaterializatio
 	}
 }
 
-func printRunForkPlan(w io.Writer, plan store.RunForkPlan) {
+func printRunForkPlan(w io.Writer, plan runfork.RunForkPlan) {
 	if w == nil {
 		return
 	}

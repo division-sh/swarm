@@ -392,6 +392,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
 		WorkOwner:                      workOwner,
 		DeliveryStore:                  deliveryStore,
+		PersistenceRoles:               runtimeTestManagerBusRoles(bus),
 	}, managerStore)
 	rt.Manager = am
 
@@ -499,6 +500,7 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
 		WorkOwner:                      workOwner,
 		DeliveryStore:                  deliveryStore,
+		PersistenceRoles:               runtimeTestManagerBusRoles(bus),
 	})
 	rt.Manager = am
 

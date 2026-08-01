@@ -38,7 +38,6 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 		)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 		seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, db, flowInstance, false)
 
@@ -49,7 +48,9 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
-			workflowStore: workflowStore,
+			persistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+			runLifecycle:  pg,
+			obligations:   pg.PipelineObligations(),
 			runID:         runID,
 			entityID:      entityID,
 			flowInstance:  flowInstance,
@@ -65,7 +66,6 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 		)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-		workflowStore := runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(sqliteStore.DB, sqliteStore)
 		seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, sqliteStore.DB, flowInstance, true)
 
@@ -76,7 +76,9 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
-			workflowStore: workflowStore,
+			persistence:   runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore),
+			runLifecycle:  sqliteStore,
+			obligations:   sqliteStore.PipelineObligations(),
 			runID:         runID,
 			entityID:      entityID,
 			flowInstance:  flowInstance,
@@ -118,6 +120,7 @@ func runNotionManagedCredentialConnectorSurface(t *testing.T, backend slackManag
 	})
 	source := notionManagedConnectorSource(t, fake.server.URL, backend.flowInstance)
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
+	backend.activityAttempts = pc
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 
@@ -447,7 +450,8 @@ func notionManagedConnectorPackRegistry(t *testing.T, baseURL string) *providerc
 func assertNotionManagedConnectorMissingCredential(t *testing.T, backend slackManagedConnectorBackend, baseURL string) {
 	t.Helper()
 	source := notionManagedConnectorSource(t, baseURL, backend.flowInstance)
-	bus, _ := startSlackManagedConnectorBusAndCoordinator(t, backend, source, runtimemanagedcredentials.NewMemoryStore())
+	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, runtimemanagedcredentials.NewMemoryStore())
+	backend.activityAttempts = pc
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "223456792", "missing credential")
@@ -518,7 +522,7 @@ func tryLoadNotionManagedConnectorActivityAttempt(backend slackManagedConnectorB
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
-	rec, ok, err := backend.workflowStore.LoadActivityAttempt(backend.ctx, requestEventID)
+	rec, ok, err := backend.activityAttempts.LoadActivityAttempt(backend.ctx, requestEventID)
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}

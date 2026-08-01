@@ -9,7 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
-	"github.com/division-sh/swarm/internal/store/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 )
 
 const (

@@ -4,10 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"strings"
 	"testing"
 	"time"
+
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	"github.com/google/uuid"
 
@@ -18,26 +19,29 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
 type dynamicFlowCreationAtomicityStore interface {
-	runtimebus.EventStore
-	runtimepipeline.RuntimeMutationRunner
+	externalStoreTestDurableEventBusStore
+	externalStoreTestMutationOwner
+	runtimerunlifecycle.OperationOwner
+	runtimedelivery.Store
 	PipelineObligations() runtimepipelineobligation.Store
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
 
 type dynamicFlowCreationAtomicityFixture struct {
 	db       *sql.DB
-	workflow *runtimepipeline.WorkflowInstanceStore
+	workflow *runtimepipeline.PipelineCoordinator
 	bus      *runtimebus.EventBus
 	ctx      context.Context
 	runID    string
@@ -46,23 +50,15 @@ type dynamicFlowCreationAtomicityFixture struct {
 	sqlite   bool
 }
 
-type dynamicFlowCreationAtomicityLifecycle struct{}
+type dynamicFlowCreationWorkflowModule struct{ source semanticview.Source }
 
-func (dynamicFlowCreationAtomicityLifecycle) ApplyWorkflowLifecycleEffects(context.Context, []runtimeworkflowlifecycle.Effect) error {
+func (m dynamicFlowCreationWorkflowModule) SemanticSource() semanticview.Source { return m.source }
+func (dynamicFlowCreationWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
 	return nil
 }
-
-func (dynamicFlowCreationAtomicityLifecycle) ArmInitialEntryTimers(context.Context, string) error {
-	return nil
-}
-
-func (dynamicFlowCreationAtomicityLifecycle) ReconcileInitialEntryTimers(context.Context, string) error {
-	return nil
-}
-
-func (dynamicFlowCreationAtomicityLifecycle) RetireInitialEntryTimerWakeups(context.Context, string) error {
-	return nil
-}
+func (dynamicFlowCreationWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode  { return nil }
+func (dynamicFlowCreationWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry   { return nil }
+func (dynamicFlowCreationWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry { return nil }
 
 type blockingDynamicFlowCreationPublisher struct {
 	delegate runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher
@@ -159,7 +155,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	var (
 		db       *sql.DB
 		selected dynamicFlowCreationAtomicityStore
-		workflow *runtimepipeline.WorkflowInstanceStore
+		workflow *runtimepipeline.PipelineCoordinator
 		sqlite   bool
 	)
 	switch backend {
@@ -167,7 +163,6 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 		db = sqliteStore.DB
 		selected = sqliteStore
-		workflow = runtimepipeline.NewSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, sqliteStore)
 		sqlite = true
 	case "postgres":
 		_, postgresDB, cleanup := testutil.StartPostgres(t)
@@ -175,8 +170,6 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		postgresStore := storetest.AdmitPostgresRuntimeStore(t, postgresDB)
 		db = postgresDB
 		selected = postgresStore
-		workflow = runtimepipeline.NewWorkflowInstanceStore(db)
-		workflow.ConfigureRuntimeMutationRunner(postgresStore)
 	default:
 		t.Fatalf("unknown backend %q", backend)
 	}
@@ -229,6 +222,17 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+	if sqlite {
+		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
+	}
+	workflow = runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:              dynamicFlowCreationWorkflowModule{source: semanticview.Wrap(dynamicFlowCreationAtomicityBundle())},
+		Persistence:         workflowPersistence,
+		RunLifecycle:        selected,
+		DeliveryStore:       selected,
+		PipelineObligations: selected.PipelineObligations(),
+	})
 	parent := eventtest.ExistingRunRootIngress(
 		plan.CreationEvent.ParentEventID,
 		events.EventType("test.dynamic_flow.triggered"),
@@ -243,7 +247,6 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	if err := eventBus.Publish(ctx, parent); err != nil {
 		t.Fatalf("publish causal parent: %v", err)
 	}
-	workflow.ConfigureWorkflowInstanceLifecycle(dynamicFlowCreationAtomicityLifecycle{})
 	result, err := workflow.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: "inst-1", StorageRef: identity.InstancePath, WorkflowName: identity.TemplateID,
 		WorkflowVersion: "1.0.0", RuntimeReadiness: &plan, CurrentState: "pending",

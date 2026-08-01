@@ -22,8 +22,10 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
 )
 
 const selectedContractAgentTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
@@ -210,6 +212,8 @@ func (selectedContractSelfReleaseAgent) OnEvent(context.Context, events.Event) (
 }
 
 func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	owner := testGatewayWorkOwner(t)
 	mockIdentity := selectedContractTestRootAgentIdentity(t, "mock-agent")
 	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
@@ -220,7 +224,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	builder, err := buildSelectedContractAgentRuntimeFactory(publishSelectedContractForkEventsRequest{
-		Store:        &store.PostgresStore{},
+		Store:        selected,
 		LoadedSource: LoadedSelectedContractSource{},
 		AgentRuntime: selectedContractAgentRuntimePlan{
 			Proof: SelectedContractAgentRuntimeMaterialization{AgentRecipients: []agentidentity.Identity{mockIdentity}},
@@ -229,7 +233,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 				AgentManagerOptions: runtimemanager.AgentManagerOptions{WorkOwner: owner},
 			},
 		},
-	}, eventBus, runtimepipeline.NewWorkflowInstanceStore(nil))
+	}, eventBus, &runtimepipeline.PipelineCoordinator{})
 	if err != nil {
 		t.Fatalf("build selected-contract mock runtime: %v", err)
 	}
@@ -244,10 +248,10 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 func TestSelectedContractAgentRecipientsPreserveConcreteTemplateInstanceIdentity(t *testing.T) {
 	first := selectedContractTestAgentIdentity(t, "shared-agent", "review/inst-1")
 	second := selectedContractTestAgentIdentity(t, "shared-agent", "review/inst-2")
-	planning := store.RunForkSelectedContractRecipientPlanning{
-		Owner: store.RunForkSelectedContractRecipientPlanningOwner,
-		RecipientPlanEvents: []store.RunForkSelectedContractRecipientPlanEvent{{
-			Recipients: []store.RunForkContractFrontierRecipient{
+	planning := runfork.RunForkSelectedContractRecipientPlanning{
+		Owner: runfork.RunForkSelectedContractRecipientPlanningOwner,
+		RecipientPlanEvents: []runfork.RunForkSelectedContractRecipientPlanEvent{{
+			Recipients: []runfork.RunForkContractFrontierRecipient{
 				{SubscriberType: "agent", SubscriberID: "shared-agent", Path: "review/inst-1", AgentIdentity: first},
 				{SubscriberType: "agent", SubscriberID: "shared-agent", Path: "review/inst-2", AgentIdentity: second},
 			},
@@ -261,7 +265,7 @@ func TestSelectedContractAgentRecipientsPreserveConcreteTemplateInstanceIdentity
 		t.Fatalf("selected-contract recipients = %#v, want both concrete identities", recipients)
 	}
 	runtimeProof := SelectedContractAgentRuntimeMaterialization{
-		Owner:                     store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner,
+		Owner:                     runfork.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner,
 		AgentRecipients:           recipients,
 		ConfiguredAgentIdentities: []agentidentity.Identity{first, second},
 		MaterializationSupported:  true,
@@ -277,6 +281,8 @@ func TestSelectedContractAgentRecipientsPreserveConcreteTemplateInstanceIdentity
 }
 
 func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkScopeForSelfRelease(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	owner := testGatewayWorkOwner(t)
 	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
 		BundleSourceFact: selectedContractAgentTestSourceFact(t),
@@ -304,7 +310,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 	probe := &selectedContractSelfReleaseScopeProbe{want: wantScope, seen: make(chan runtimeauthoractivity.Scope, 1)}
 
 	runtime, _, err := startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
-		Store: &store.PostgresStore{},
+		Store: selected,
 		AgentRuntime: selectedContractAgentRuntimePlan{
 			Records: []runtimemanager.PersistedAgent{{Config: runtimeactors.AgentConfig{
 				ID: "fork-agent", Identity: selectedContractTestRootAgentIdentity(t, "fork-agent"),
@@ -317,7 +323,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 				AgentManagerOptions: runtimemanager.AgentManagerOptions{LifecycleStore: probe, WorkOwner: owner},
 			},
 		},
-	}, eventBus, runtimepipeline.NewWorkflowInstanceStore(nil))
+	}, eventBus, &runtimepipeline.PipelineCoordinator{})
 	if err != nil {
 		t.Fatalf("startSelectedContractAgentRuntime: %v", err)
 	}

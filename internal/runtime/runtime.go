@@ -27,6 +27,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -53,34 +54,19 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/google/uuid"
 )
 
-type Stores struct {
-	SQLDB                  *sql.DB
-	ConstructionBlocker    string
-	EventStore             runtimebus.EventStore
-	RunLifecycleCandidates runtimerunlifecycle.CandidateOwner
-	RuntimeLogStore        RuntimeLogPersistence
-	PipelineStore          *runtimepipeline.WorkflowInstanceStore
-	SessionRegistry        sessions.Registry
-	ConversationStore      llm.ConversationPersistence
-	ManagerStore           runtimemanager.ManagerPersistence
-	DeliveryStore          runtimedelivery.Store
-	PipelineObligations    runtimepipelineobligation.Store
-	ScheduleStore          runtimepipeline.SchedulePersistence
-	MailboxMaterializer    runtimepipeline.MailboxWriteMaterializationStore
-	DecisionCards          decisioncard.Store
-	StartupOwnership       runtimestartupownership.Store
-	MailboxStore           runtimetools.MailboxPersistence
-	ToolEntityStore        runtimetools.EntityPersistence
-	HumanTaskStore         runtimetools.HumanTaskCardStore
-	BudgetSpendStore       budgetspend.Store
-	InboundStore           InboundPersistence
-	RuntimeIngressStore    runtimeingress.Store
+type EventPayloadValidationBinder interface {
+	SetEventPayloadValidator(func(context.Context, string, []byte) error)
+}
+
+type AuthorActivityCatalogRegistrar interface {
+	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
 
 type RuntimeOptions struct {
@@ -111,14 +97,54 @@ type RuntimeOptions struct {
 
 // RuntimeDeps is the canonical dependency graph for NewRuntime boot wiring.
 type RuntimeDeps struct {
-	Config  *config.Config
-	Stores  Stores
-	Options RuntimeOptions
+	Config                         *config.Config
+	Options                        RuntimeOptions
+	SQLDB                          *sql.DB
+	EventStore                     runtimebus.EventStore
+	EventBusDurable                runtimebus.DurableDependencies
+	EventPayloadValidationBinder   EventPayloadValidationBinder
+	InboundPayloadValidationBinder EventPayloadValidationBinder
+	AuthorActivityRegistrars       []AuthorActivityCatalogRegistrar
+	RunControlStore                runtimeruncontrol.Store
+	RunLifecycleCandidates         runtimerunlifecycle.CandidateOwner
+	RuntimeLogStore                RuntimeLogPersistence
+	WorkflowPersistence            runtimepipeline.WorkflowPersistence
+	RunBundleAvailability          runtimepipeline.RunBundleAvailabilityReader
+	SessionRegistry                sessions.Registry
+	LiveSessionAcquirer            llm.LiveSessionAcquirer
+	SessionResetter                sessions.Resetter
+	ConversationStore              llm.ConversationPersistence
+	ManagerStore                   runtimemanager.ManagerPersistence
+	ManagerLifecycleStore          runtimemanager.AgentLifecyclePersistence
+	ManagerLifecycleDiagnostics    runtimemanager.AgentLifecycleDiagnosticPersistence
+	ManagerPersistenceRoles        runtimemanager.PersistenceRoles
+	EffectsStore                   runtimeeffects.Store
+	CompletionStore                runtimeeffects.CompletionStore
+	CompletionHeartbeatStore       runtimeeffects.CompletionHeartbeatStore
+	EffectsRecoveryStore           runtimeeffects.RecoveryStore
+	ManagedCapabilitiesStore       managedcapabilities.Persistence
+	DeliveryStore                  runtimedelivery.Store
+	PipelineObligations            runtimepipelineobligation.Store
+	ScheduleStore                  runtimepipeline.SchedulePersistence
+	TimerObligationReader          runtimetimerobligation.Reader
+	MailboxMaterializer            runtimepipeline.MailboxWriteMaterializationStore
+	DecisionCards                  decisioncard.Store
+	ProposedEffects                decisioncard.ProposedEffectStore
+	DecisionCardHumanTasks         decisioncard.HumanTaskStore
+	DecisionCardDraftExpiry        runtimepipeline.DecisionCardDraftExpiry
+	HumanTaskExpiry                runtimepipeline.HumanTaskExpiry
+	StartupOwnership               runtimestartupownership.Store
+	MailboxStore                   runtimetools.MailboxPersistence
+	ToolEntityStore                runtimetools.EntityPersistence
+	HumanTaskStore                 runtimetools.HumanTaskCardStore
+	BudgetSpendStore               budgetspend.Store
+	InboundStore                   InboundPersistence
+	RuntimeIngressStore            runtimeingress.Store
 }
 
 type validatedRuntimeDeps struct {
+	Dependencies               RuntimeDeps
 	Config                     *config.Config
-	Stores                     Stores
 	Options                    RuntimeOptions
 	Source                     semanticview.Source
 	PromptResolver             runtimecontracts.PromptResolver
@@ -209,9 +235,19 @@ type Runtime struct {
 	authorActivityDescriptors  []runtimeauthoractivity.EventDescriptor
 	authorActivityScope        runtimeauthoractivity.Scope
 	authorActivityLeases       []*runtimeauthoractivity.EventCatalogLease
+	authorActivityRegistrars   []AuthorActivityCatalogRegistrar
+	eventPayloadBinder         EventPayloadValidationBinder
+	inboundPayloadBinder       EventPayloadValidationBinder
+	startupOwnership           runtimestartupownership.Store
+	runLifecycleCandidates     runtimerunlifecycle.CandidateOwner
+	deliveryStore              runtimedelivery.Store
+	scheduleStore              runtimepipeline.SchedulePersistence
+	timerObligationReader      runtimetimerobligation.Reader
+	mailboxStore               runtimetools.MailboxPersistence
+	effectsStore               runtimeeffects.Store
+	managedCapabilitiesStore   managedcapabilities.Persistence
 
 	Config             *config.Config
-	Stores             Stores
 	Options            RuntimeOptions
 	Bus                *runtimebus.EventBus
 	Logger             *RuntimeLogger
@@ -279,7 +315,7 @@ func (rt *Runtime) WorkOccurrence() *worklifetime.RuntimeOccurrence {
 // serve-level recovery and desired-state reconciliation mutate durable state.
 // Start consumes the prepared lease instead of acquiring a second owner.
 func (rt *Runtime) PrepareInitialStartupOwnership(ctx context.Context) error {
-	if rt == nil || rt.Stores.StartupOwnership == nil {
+	if rt == nil || rt.startupOwnership == nil {
 		return nil
 	}
 	if ctx == nil {
@@ -296,7 +332,7 @@ func (rt *Runtime) PrepareInitialStartupOwnership(ctx context.Context) error {
 	if _, err := uuid.Parse(strings.TrimSpace(rt.bootID)); err != nil {
 		rt.bootID = uuid.NewString()
 	}
-	lease, err := rt.Stores.StartupOwnership.AcquireRuntimeStartupOwnership(ctx, runtimestartupownership.AcquireRequest{
+	lease, err := rt.startupOwnership.AcquireRuntimeStartupOwnership(ctx, runtimestartupownership.AcquireRequest{
 		OwnerID:    rt.ownerID,
 		BootID:     rt.bootID,
 		BundleHash: rt.Options.BundleSourceFact.BundleHash(),
@@ -360,12 +396,12 @@ func (rt *Runtime) PrepareStartupOwnershipHandoff(predecessor *Runtime) (*Startu
 	}
 	lease := predecessor.ownershipLease
 	if lease == nil {
-		if rt.Stores.StartupOwnership != nil {
+		if rt.startupOwnership != nil {
 			return nil, fmt.Errorf("replacement runtime requires predecessor startup ownership lease")
 		}
 		return nil, nil
 	}
-	if rt.Stores.StartupOwnership == nil {
+	if rt.startupOwnership == nil {
 		return nil, fmt.Errorf("replacement runtime cannot consume predecessor startup ownership lease")
 	}
 	predecessor.ownershipHandoffPending = true
@@ -648,7 +684,6 @@ func (deps RuntimeDeps) Validate() error {
 
 func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	cfg := deps.Config
-	stores := deps.Stores
 	opts := deps.Options
 	if cfg == nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime config is required")
@@ -667,13 +702,10 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime execution mode validation failed: %w", err)
 	}
-	if blocker := strings.TrimSpace(stores.ConstructionBlocker); blocker != "" {
-		return validatedRuntimeDeps{}, fmt.Errorf("runtime store boundary is not construction-ready: %s", blocker)
-	}
-	if stores.SQLDB != nil && stores.PipelineObligations == nil {
+	if deps.SQLDB != nil && deps.PipelineObligations == nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("selected runtime store pipeline obligation owner is required")
 	}
-	if stores.InboundStore != nil && opts.ProviderTriggerCatalog == nil {
+	if deps.InboundStore != nil && opts.ProviderTriggerCatalog == nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("provider trigger catalog snapshot is required when inbound store is configured")
 	}
 	var source semanticview.Source
@@ -714,9 +746,11 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if credentials == nil {
 		credentials = runtimecredentials.NewEnvStore()
 	}
+	deps.Config = cfg
+	deps.Options = opts
 	return validatedRuntimeDeps{
+		Dependencies:               deps,
 		Config:                     cfg,
-		Stores:                     stores,
 		Options:                    opts,
 		Source:                     source,
 		PromptResolver:             promptResolver,
@@ -735,15 +769,12 @@ func (deps validatedRuntimeDeps) payloadValidator(logger *RuntimeLogger) runtime
 	return newRuntimePayloadValidator(logger, deps.EmitRegistry.EventSchemaSnapshot())
 }
 
-func bindRuntimeStorePayloadValidator(stores Stores, payloadValidator runtimebus.PayloadValidator) {
-	type eventPayloadValidationBinder interface {
-		SetEventPayloadValidator(func(context.Context, string, []byte) error)
+func bindRuntimeStorePayloadValidator(eventBinder, inboundBinder EventPayloadValidationBinder, payloadValidator runtimebus.PayloadValidator) {
+	if eventBinder != nil {
+		eventBinder.SetEventPayloadValidator(payloadValidator)
 	}
-	if binder, ok := stores.EventStore.(eventPayloadValidationBinder); ok && binder != nil {
-		binder.SetEventPayloadValidator(payloadValidator)
-	}
-	if binder, ok := stores.InboundStore.(eventPayloadValidationBinder); ok && binder != nil {
-		binder.SetEventPayloadValidator(payloadValidator)
+	if inboundBinder != nil {
+		inboundBinder.SetEventPayloadValidator(payloadValidator)
 	}
 }
 
@@ -822,10 +853,6 @@ func AuthorActivityEventDescriptors(source semanticview.Source) ([]runtimeauthor
 	return descriptors, nil
 }
 
-type authorActivityCatalogRegistrar interface {
-	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
-}
-
 func (rt *Runtime) PrepareAuthorActivityCatalog() error {
 	if rt == nil {
 		return fmt.Errorf("runtime is required")
@@ -835,20 +862,8 @@ func (rt *Runtime) PrepareAuthorActivityCatalog() error {
 	if len(rt.authorActivityLeases) > 0 {
 		return nil
 	}
-	if rt.Stores.EventStore == nil && rt.Stores.InboundStore == nil {
-		return nil
-	}
-	targets := []any{rt.Stores.EventStore, rt.Stores.InboundStore}
-	registrars := make([]authorActivityCatalogRegistrar, 0, len(targets))
-	for _, target := range targets {
-		if registrar, ok := target.(authorActivityCatalogRegistrar); ok && registrar != nil {
-			registrars = append(registrars, registrar)
-		}
-	}
+	registrars := rt.authorActivityRegistrars
 	if len(registrars) == 0 {
-		if rt.Stores.SQLDB != nil {
-			return fmt.Errorf("selected store does not implement the author activity event catalog registry")
-		}
 		return nil
 	}
 	if rt.authorActivityScope.Kind != runtimeauthoractivity.ScopeBundle || strings.TrimSpace(rt.authorActivityScope.RuntimeInstanceID) == "" || strings.TrimSpace(rt.authorActivityScope.BundleHash) == "" {
@@ -897,7 +912,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		return nil, err
 	}
 	cfg := boot.Config
-	stores := boot.Stores
+	runtimeDeps := boot.Dependencies
 	opts := boot.Options
 	source := boot.Source
 	if opts.ProcessWorkOwner == nil {
@@ -920,8 +935,8 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			_, _ = workOccurrence.RetireAndWait(context.Background())
 		}
 	}()
-	if stores.InboundStore != nil {
-		if err := stores.InboundStore.ValidateInboundPublicationIntegrity(ctx); err != nil {
+	if runtimeDeps.InboundStore != nil {
+		if err := runtimeDeps.InboundStore.ValidateInboundPublicationIntegrity(ctx); err != nil {
 			return nil, fmt.Errorf("validate inbound publication integrity at startup: %w", err)
 		}
 	}
@@ -934,7 +949,6 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		ownerID:                   newRuntimeOwnerID(),
 		bootID:                    uuid.NewString(),
 		Config:                    cfg,
-		Stores:                    stores,
 		Options:                   opts,
 		Workspace:                 opts.WorkspaceLifecycle,
 		MCPTurns:                  mcpTurns,
@@ -942,12 +956,23 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		EmitRegistry:              boot.EmitRegistry,
 		authorActivityDescriptors: descriptors,
 		authorActivityScope:       runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, boot.BundleSourceFact.BundleHash()),
+		authorActivityRegistrars:  append([]AuthorActivityCatalogRegistrar(nil), runtimeDeps.AuthorActivityRegistrars...),
+		eventPayloadBinder:        runtimeDeps.EventPayloadValidationBinder,
+		inboundPayloadBinder:      runtimeDeps.InboundPayloadValidationBinder,
+		startupOwnership:          runtimeDeps.StartupOwnership,
+		runLifecycleCandidates:    runtimeDeps.RunLifecycleCandidates,
+		deliveryStore:             runtimeDeps.DeliveryStore,
+		scheduleStore:             runtimeDeps.ScheduleStore,
+		timerObligationReader:     runtimeDeps.TimerObligationReader,
+		mailboxStore:              runtimeDeps.MailboxStore,
+		effectsStore:              runtimeDeps.EffectsStore,
+		managedCapabilitiesStore:  runtimeDeps.ManagedCapabilitiesStore,
 		PromptResolver:            boot.PromptResolver,
 		Credentials:               boot.Credentials,
 		ManagedCredentials:        boot.ManagedCredentials,
 		workOccurrence:            workOccurrence,
 	}
-	if candidateOwner := stores.RunLifecycleCandidates; candidateOwner != nil {
+	if candidateOwner := runtimeDeps.RunLifecycleCandidates; candidateOwner != nil {
 		scope := runtimerunlifecycle.CandidateScope{BundleHash: boot.BundleSourceFact.BundleHash()}
 		executor, err := runtimerunlifecycle.NewExecutor(
 			candidateOwner,
@@ -960,16 +985,16 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			return nil, fmt.Errorf("build run lifecycle completion executor: %w", err)
 		}
 		rt.runLifecycleExecutor = executor
-	} else if stores.SQLDB != nil {
+	} else if runtimeDeps.SQLDB != nil {
 		return nil, fmt.Errorf("selected runtime store run lifecycle candidate owner is required")
 	}
 
-	if stores.RuntimeLogStore != nil {
-		rt.Logger = NewRuntimeLogger(stores.RuntimeLogStore)
+	if runtimeDeps.RuntimeLogStore != nil {
+		rt.Logger = NewRuntimeLogger(runtimeDeps.RuntimeLogStore)
 	}
 	payloadValidator := boot.payloadValidator(rt.Logger)
 	rt.payloadValidator = payloadValidator
-	bus, err := newRuntimeEventBus(stores.EventStore, stores.PipelineObligations, rt.Logger, source, boot.BundleSourceFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
+	bus, err := newRuntimeEventBus(runtimeDeps.EventStore, runtimeDeps.EventBusDurable, runtimeDeps.PipelineObligations, rt.Logger, source, boot.BundleSourceFact, opts.RuntimeInstanceID, workOccurrence, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
@@ -984,10 +1009,10 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		return nil, fmt.Errorf("build event bus: %w", err)
 	}
 	rt.Bus = bus
-	rt.RuntimeIngress = runtimeingress.NewController(stores.RuntimeIngressStore, rt.Bus, runtimeingress.Options{})
+	rt.RuntimeIngress = runtimeingress.NewController(runtimeDeps.RuntimeIngressStore, rt.Bus, runtimeingress.Options{})
 	rt.Bus.SetRuntimeIngressDispatchGate(rt.RuntimeIngress)
-	if runControlStore, ok := stores.EventStore.(runtimeruncontrol.Store); ok && runControlStore != nil {
-		rt.RunControl = runtimeruncontrol.NewController(runControlStore, rt.Bus, runtimeruncontrol.Options{})
+	if runtimeDeps.RunControlStore != nil {
+		rt.RunControl = runtimeruncontrol.NewController(runtimeDeps.RunControlStore, rt.Bus, runtimeruncontrol.Options{})
 		rt.Bus.SetRunDispatchGate(rt.RunControl)
 	}
 	rt.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(workOccurrence, func(taskCtx context.Context, sc runtimepipeline.Schedule) {
@@ -1008,8 +1033,8 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 				}, constructErr))
 			}
 		}
-		if stores.ScheduleStore != nil {
-			if err := stores.ScheduleStore.CompleteScheduleFireExact(callbackCtx, sc); err != nil {
+		if runtimeDeps.ScheduleStore != nil {
+			if err := runtimeDeps.ScheduleStore.CompleteScheduleFireExact(callbackCtx, sc); err != nil {
 				if rt.Logger != nil {
 					handleRuntimeLogPersistenceError("scheduler", "mark_fired_failed", rt.Logger.Error(callbackCtx, "scheduler", "mark_fired_failed", map[string]any{
 						"agent_id":   sc.AgentID,
@@ -1021,11 +1046,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			}
 		}
 	})
-	pipelineStore := stores.PipelineStore
-	if pipelineStore == nil && stores.SQLDB != nil {
-		return nil, fmt.Errorf("runtime pipeline store must be provided by selected runtime store construction")
-	}
-	if pipelineStore != nil && pipelineStore.Enabled() {
+	if runtimeDeps.WorkflowPersistence.Valid() {
 		channelActivityTools, err := compiledChannelActivityTools(opts.ChannelOutboundBindings)
 		if err != nil {
 			return nil, fmt.Errorf("compile channel activity tools: %w", err)
@@ -1034,11 +1055,12 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		if err != nil {
 			return nil, fmt.Errorf("artifact repo root validation failed: %w", err)
 		}
-		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, stores.SQLDB, runtimepipeline.PipelineCoordinatorOptions{
-			Module:              opts.WorkflowModule,
-			WorkflowStore:       pipelineStore,
-			DeliveryStore:       stores.DeliveryStore,
-			PipelineObligations: stores.PipelineObligations,
+		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, runtimeDeps.SQLDB, runtimepipeline.PipelineCoordinatorOptions{
+			Module:                opts.WorkflowModule,
+			Persistence:           runtimeDeps.WorkflowPersistence,
+			DeliveryStore:         runtimeDeps.DeliveryStore,
+			PipelineObligations:   runtimeDeps.PipelineObligations,
+			RunBundleAvailability: runtimeDeps.RunBundleAvailability,
 			InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 				if managerRef == nil {
 					return fmt.Errorf("flow instance activator is required")
@@ -1051,16 +1073,26 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 				}
 				return managerRef.DeactivateFlowInstanceModel(ctx, req)
 			},
-			TimerScheduler:         rt.Scheduler,
-			TimerScheduleStore:     stores.ScheduleStore,
-			MailboxMaterializer:    stores.MailboxMaterializer,
-			DecisionCards:          stores.DecisionCards,
-			Credentials:            rt.Credentials,
-			ManagedCredentials:     rt.ManagedCredentials,
-			MockConnectorResponses: boot.MockConnectorResponses,
-			ChannelActivityTools:   channelActivityTools,
-			ArtifactRoot:           artifactRoot,
-			BundleSourceFact:       opts.BundleSourceFact,
+			TimerScheduler:          rt.Scheduler,
+			TimerScheduleStore:      runtimeDeps.ScheduleStore,
+			MailboxMaterializer:     runtimeDeps.MailboxMaterializer,
+			DecisionCards:           runtimeDeps.DecisionCards,
+			ProposedEffects:         runtimeDeps.ProposedEffects,
+			HumanTasks:              runtimeDeps.DecisionCardHumanTasks,
+			DecisionCardDraftExpiry: runtimeDeps.DecisionCardDraftExpiry,
+			HumanTaskExpiry:         runtimeDeps.HumanTaskExpiry,
+			GatePublisher:           rt.Bus,
+			DirectDecisionPublisher: rt.Bus,
+			DeliveryRuntime:         rt.Bus,
+			PinRoutingDescriptors:   rt.Bus,
+			FlowRoutes:              rt.Bus,
+			RunLifecycle:            runtimeDeps.EventBusDurable.RunLifecycle,
+			Credentials:             rt.Credentials,
+			ManagedCredentials:      rt.ManagedCredentials,
+			MockConnectorResponses:  boot.MockConnectorResponses,
+			ChannelActivityTools:    channelActivityTools,
+			ArtifactRoot:            artifactRoot,
+			BundleSourceFact:        opts.BundleSourceFact,
 			DecisionCardCadence: decisioncard.CadencePolicy{
 				FirstReminderDelay: rt.Config.Runtime.DecisionCardFirstReminder,
 				UrgencyDelay:       rt.Config.Runtime.DecisionCardUrgency,
@@ -1072,13 +1104,16 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			TestLifecycleProbe:               opts.TestLifecycleProbe,
 			WorkOwner:                        workOccurrence,
 		})
+		if rt.Pipeline == nil {
+			return nil, fmt.Errorf("runtime workflow persistence construction is required")
+		}
 		if rt.Pipeline != nil {
-			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodes(rt.Bus, stores.SQLDB)...)
+			rt.SystemNodes = append(rt.SystemNodes, rt.Pipeline.BackgroundNodes(rt.Bus, runtimeDeps.SQLDB)...)
 		}
 	}
 
-	if stores.BudgetSpendStore != nil {
-		rt.Budget = NewBudgetTracker(stores.BudgetSpendStore, rt.Bus, cfg, stores.MailboxStore, rt.Logger, source)
+	if runtimeDeps.BudgetSpendStore != nil {
+		rt.Budget = NewBudgetTracker(runtimeDeps.BudgetSpendStore, rt.Bus, cfg, runtimeDeps.MailboxStore, rt.Logger, source)
 	}
 
 	backendProfile, err := cfg.LLMBackendProfile()
@@ -1087,20 +1122,20 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	}
 	modelRuntime := opts.LLMRuntime
 	if modelRuntime == nil {
-		effectStore, ok := stores.ManagerStore.(runtimeeffects.Store)
-		if !ok || effectStore == nil {
+		if runtimeDeps.EffectsStore == nil || runtimeDeps.CompletionStore == nil || runtimeDeps.CompletionHeartbeatStore == nil {
 			return nil, fmt.Errorf("selected runtime store does not implement completion execution authority")
 		}
 		modelRuntime, err = llm.RuntimeFactory{
 			Cfg:                  cfg,
-			Sessions:             stores.SessionRegistry,
-			Conversations:        stores.ConversationStore,
+			Sessions:             runtimeDeps.SessionRegistry,
+			LiveSessions:         runtimeDeps.LiveSessionAcquirer,
+			Conversations:        runtimeDeps.ConversationStore,
 			Workspaces:           rt.Workspace,
 			Events:               rt.Bus,
 			MCPTurns:             rt.MCPTurns,
 			ToolGateway:          opts.ToolGatewayBinding,
 			Credentials:          boot.ProviderCredentialResolver.Store,
-			CompletionController: runtimeeffects.NewCompletionController(effectStore, rt.Budget),
+			CompletionController: runtimeeffects.NewCompletionController(runtimeDeps.EffectsStore, runtimeDeps.CompletionStore, runtimeDeps.CompletionHeartbeatStore, rt.Budget),
 		}.Build()
 		if err != nil {
 			return nil, fmt.Errorf("build runtime: %w", err)
@@ -1127,10 +1162,10 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		Config:             cfg,
 		Credentials:        rt.Credentials,
 		ManagedCredentials: rt.ManagedCredentials,
-		MailboxStore:       stores.MailboxStore,
-		EntityStore:        stores.ToolEntityStore,
-		HumanTaskStore:     stores.HumanTaskStore,
-		WorkflowInstances:  pipelineStore,
+		MailboxStore:       runtimeDeps.MailboxStore,
+		EntityStore:        runtimeDeps.ToolEntityStore,
+		HumanTaskStore:     runtimeDeps.HumanTaskStore,
+		WorkflowInstances:  rt.Pipeline,
 		WorkflowSource:     source,
 		ChannelBindings:    opts.ChannelOutboundBindings,
 		ActivityExecutor:   rt.Pipeline,
@@ -1141,7 +1176,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		ManagerProvider: func() runtimetools.Manager {
 			return managerRef
 		},
-	}, stores.ScheduleStore)
+	}, runtimeDeps.ScheduleStore)
 	credentialValidationOptions := runtimebootverify.Options{
 		Credentials:            rt.Credentials,
 		ManagedCredentials:     rt.ManagedCredentials,
@@ -1203,25 +1238,33 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	factory := runtimeagents.NewLLMAgentFactory(rt.LLM, rt.ToolExecutor, runtimeagents.LLMAgentOptions{
 		PromptResolver: rt.PromptResolver,
 	})
-	var workflowInstances runtimepipeline.WorkflowInstancePersistence
-	if rt.Pipeline != nil {
-		workflowInstances = rt.Pipeline.WorkflowInstanceStore()
-	}
-	lifecycleStore, lifecycleStoreOK := stores.ManagerStore.(runtimemanager.AgentLifecyclePersistence)
-	if stores.SQLDB != nil && (!lifecycleStoreOK || lifecycleStore == nil) {
+	lifecycleStore := runtimeDeps.ManagerLifecycleStore
+	if runtimeDeps.SQLDB != nil && lifecycleStore == nil {
 		return nil, fmt.Errorf("selected runtime store does not implement agent lifecycle persistence")
 	}
-	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, runtimemanager.AgentManagerOptions{
-		BaseContext:            rt.authorActivityContext(context.Background()),
-		BundleSourceFact:       rt.Options.BundleSourceFact,
-		LifecycleStore:         lifecycleStore,
-		DeliveryStore:          stores.DeliveryStore,
-		TestLifecycleProbe:     opts.TestLifecycleProbe,
-		Workspaces:             rt.Workspace,
-		Sessions:               stores.SessionRegistry,
+	managerOptions := runtimemanager.AgentManagerOptions{
+		BaseContext:        rt.authorActivityContext(context.Background()),
+		BundleSourceFact:   rt.Options.BundleSourceFact,
+		LifecycleStore:     lifecycleStore,
+		DeliveryStore:      runtimeDeps.DeliveryStore,
+		TestLifecycleProbe: opts.TestLifecycleProbe,
+		Workspaces:         rt.Workspace,
+		Sessions:           runtimeDeps.SessionRegistry,
+		SessionResetter:    runtimeDeps.SessionResetter,
+		PersistenceRoles: func() runtimemanager.PersistenceRoles {
+			roles := runtimeDeps.ManagerPersistenceRoles
+			roles.AgentRoutes = rt.Bus
+			roles.RouteInstaller = rt.Bus
+			roles.RouteVerifier = rt.Bus
+			roles.RouteRestorer = rt.Bus
+			roles.RouteRetirer = rt.Bus
+			roles.RouteRemover = rt.Bus
+			roles.CreationPublisher = rt.Bus
+			roles.DeliveryRuntime = rt.Bus
+			return roles
+		}(),
 		SemanticSource:         source,
 		PromptResolver:         rt.PromptResolver,
-		WorkflowInstances:      workflowInstances,
 		LLMBackend:             backendProfile.ID,
 		ModelAliases:           cfg.LLM.Models,
 		RequireModelResolution: true,
@@ -1246,11 +1289,16 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		},
 		ThrottleSuppressPrefixes: runtimeThrottleSuppressPrefixes(source),
 		DisableSpinupControl:     true,
-	}, stores.ManagerStore)
+	}
+	if rt.Pipeline != nil {
+		managerOptions.PersistenceRoles.FlowTermination = rt.Pipeline
+		managerOptions.WorkflowInstances = rt.Pipeline
+	}
+	rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, factory, managerOptions, runtimeDeps.ManagerStore)
 	managerRef = rt.Manager
 
-	if stores.InboundStore != nil {
-		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, stores.InboundStore)
+	if runtimeDeps.InboundStore != nil {
+		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, runtimeDeps.InboundStore)
 		rt.InboundGateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
 		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
 		rt.InboundGateway.SetCredentialStore(opts.ProviderCredentials)
@@ -1350,9 +1398,9 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	lease := rt.pendingOwnershipLease
 	preparedOwnedLease := lease != nil && rt.pendingOwnershipOwned
 	borrowedLease := lease != nil && !preparedOwnedLease
-	if rt.Stores.StartupOwnership != nil && lease == nil {
+	if rt.startupOwnership != nil && lease == nil {
 		var err error
-		lease, err = rt.Stores.StartupOwnership.AcquireRuntimeStartupOwnership(ctx, runtimestartupownership.AcquireRequest{
+		lease, err = rt.startupOwnership.AcquireRuntimeStartupOwnership(ctx, runtimestartupownership.AcquireRequest{
 			OwnerID: rt.ownerID, BootID: rt.bootID, BundleHash: rt.Options.BundleSourceFact.BundleHash(),
 		})
 		if err != nil {
@@ -1403,7 +1451,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}()
 	if rt.runLifecycleExecutor != nil {
 		scope := runtimerunlifecycle.CandidateScope{BundleHash: rt.Options.BundleSourceFact.BundleHash()}
-		registration, err := rt.Stores.RunLifecycleCandidates.RegisterCompletionCandidateSink(
+		registration, err := rt.runLifecycleCandidates.RegisterCompletionCandidateSink(
 			startCtx,
 			scope,
 			rt.runLifecycleExecutor,
@@ -1416,7 +1464,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			return fmt.Errorf("start run lifecycle completion executor: %w", err)
 		}
 	}
-	bindRuntimeStorePayloadValidator(rt.Stores, rt.payloadValidator)
+	bindRuntimeStorePayloadValidator(rt.eventPayloadBinder, rt.inboundPayloadBinder, rt.payloadValidator)
 	if rt.RuntimeIngress != nil {
 		if err := rt.RuntimeIngress.SyncState(ctx); err != nil {
 			return fmt.Errorf("sync runtime ingress state: %w", err)
@@ -1542,19 +1590,19 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	} else if rt.Scheduler != nil {
 		restoredFamilies := make([]string, 0, 2)
 		scheduleRestoreStatus := "ok"
-		if rt.Stores.ScheduleStore != nil {
+		if rt.scheduleStore != nil {
 			startupRecoveryDecision.ScheduleRestoreAttempted = true
-			schedules, err := rt.Stores.ScheduleStore.LoadActiveSchedules(ctx)
+			schedules, err := rt.scheduleStore.LoadActiveSchedules(ctx)
 			if err != nil {
 				rt.emitBootProgress(11, "schedule_restoration", "FAILED", err.Error())
 				return fmt.Errorf("load schedules failed: %w", err)
 			}
-			results := restoreStartupTimerSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Logger, schedules)
+			results := restoreStartupTimerSchedules(ctx, rt.scheduleStore, rt.Scheduler, rt.Logger, schedules)
 			timerReplayCount, timerSkipCount, timerDropCount, _ := summarizeStartupTimerRecovery(results)
 			startupRecoveryDecision.ScheduleReplayCount = timerReplayCount
 			startupRecoveryDecision.ScheduleSkipCount = timerSkipCount
 			startupRecoveryDecision.ScheduleDropCount = timerDropCount
-			if err := ensureBootWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline, schedules); err != nil {
+			if err := ensureBootWorkflowSchedules(ctx, rt.scheduleStore, rt.Scheduler, rt.Pipeline, schedules); err != nil {
 				if rt.Logger != nil {
 					handleRuntimeLogPersistenceError("scheduler", "ensure_boot_timers_failed", rt.Logger.Error(ctx, "scheduler", "ensure_boot_timers_failed", nil, err))
 				}
@@ -1712,8 +1760,6 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.emitBootProgress(17, "outbox_sweeper", "skipped", "event bus unavailable")
 	}
 	rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
-	if rt.Stores.SQLDB != nil && rt.Logger != nil {
-	}
 	var bootCheck <-chan *worklifetime.EventDelivery
 	var bootSubscription worklifetime.InternalSubscription
 	if rt.Options.SelfCheck && rt.Bus != nil {
@@ -1784,12 +1830,12 @@ func (rt *Runtime) recordStartupManagerRecoveryFailure(ctx context.Context, deci
 			}
 		}
 	}
-	if rt.Stores.MailboxStore != nil {
+	if rt.mailboxStore != nil {
 		ctxPayload := mustJSON(map[string]any{
 			"failure":     *decision.Failure,
 			"instruction": "Runtime recovery failed. Reinitialize or repair persisted runtime state before restart.",
 		})
-		if _, mailboxErr := rt.Stores.MailboxStore.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+		if _, mailboxErr := rt.mailboxStore.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 			FromAgent: "runtime", Type: "alert", Priority: "critical", Status: "pending", Context: ctxPayload,
 			Summary: runtimeTruncateString("Runtime recovery failed: "+recoveryErr.Error(), 200),
 		}); mailboxErr != nil && rt.Logger != nil {
@@ -1986,8 +2032,8 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 		rt.runLifecycleRegistration.Release()
 		rt.runLifecycleRegistration = nil
 	}
-	if rt.Stores.ScheduleStore != nil {
-		if err := rt.Stores.ScheduleStore.ReleaseScheduleClaims(context.Background()); err != nil {
+	if rt.scheduleStore != nil {
+		if err := rt.scheduleStore.ReleaseScheduleClaims(context.Background()); err != nil {
 			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("release schedule claims: %w", err))
 		}
 	}

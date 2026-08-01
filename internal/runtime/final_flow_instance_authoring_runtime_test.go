@@ -33,7 +33,6 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	t.Cleanup(cleanup)
 	ctx := seedRuntimeTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
 	var manager *runtimemanager.AgentManager
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
@@ -54,21 +53,31 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	module := newRuntimeTestWorkflowModule(t, source)
+	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		WorkOwner: runtimeTestEventBusWorkOwner(t, bus),
+		Module:    module,
+		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+			if manager == nil {
+				return errors.New("agent manager not initialized")
+			}
+			return manager.ActivateFlowInstance(ctx, req)
+		},
+		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		RunLifecycle:        pg,
+		PipelineObligations: pg.PipelineObligations(),
+		DeliveryStore:       pg,
+		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
+		PinRoutingDescriptors: bus, FlowRoutes: bus,
+	})
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
 		SemanticSource:    source,
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		WorkflowInstances: workflowStore,
+		WorkflowInstances: pc,
+		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
 		DeliveryStore:     pg,
 	}))
-	module := newRuntimeTestWorkflowModule(t, source)
-	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
-		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
-		Module:            module,
-		InstanceActivator: manager.ActivateFlowInstance,
-		WorkflowStore:     workflowStore,
-		DeliveryStore:     pg,
-	})
 
 	evt := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999955",
@@ -130,7 +139,7 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		EntityID:     entityID,
 	}))
 
-	loaded, ok, err := workflowStore.Load(ctx, entityID)
+	loaded, ok, err := pc.Load(ctx, entityID)
 	if err != nil {
 		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
 	}

@@ -21,6 +21,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -717,7 +718,7 @@ func TestRunForkRevisionDeletionPublishesTombstoneAndUnrevisionedDriftFailsClose
 	if _, err := db.ExecContext(ctx, `UPDATE events SET event_name='revision.drifted' WHERE event_id=$1::uuid`, eventID); err != nil {
 		t.Fatalf("write unrevisioned drift: %v", err)
 	}
-	if _, err := (admitTestPostgresStore(t, db)).PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: eventID}); err == nil || !strings.Contains(err.Error(), "unsupported unrevisioned events facts") {
+	if _, err := (admitTestPostgresStore(t, db)).PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID}); err == nil || !strings.Contains(err.Error(), "unsupported unrevisioned events facts") {
 		t.Fatalf("PlanRunFork drift error = %v, want fail-closed unrevisioned events", err)
 	}
 }

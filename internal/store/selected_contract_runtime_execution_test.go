@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -24,9 +25,10 @@ import (
 type selectedCompletionAuthorityStore interface {
 	runtimeeffects.Store
 	runtimeeffects.CompletionStore
+	runtimeeffects.CompletionHeartbeatStore
 	runtimeeffects.RecoveryStore
-	IssueRunForkSelectedContractRuntimeExecution(context.Context, SelectedContractRuntimeExecutionIssueRequest) (SelectedContractRuntimeExecution, error)
-	ClaimRunForkSelectedContractRuntimeExecution(context.Context, SelectedContractRuntimeExecution, string, time.Duration) (runtimeeffects.Authority, error)
+	IssueRunForkSelectedContractRuntimeExecution(context.Context, runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error)
+	ClaimRunForkSelectedContractRuntimeExecution(context.Context, runfork.SelectedContractRuntimeExecution, string, time.Duration) (runtimeeffects.Authority, error)
 	HeartbeatRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, time.Duration) error
 	QuiesceRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority) error
 	CloseRunForkSelectedContractRuntimeExecution(context.Context, string) error
@@ -39,8 +41,8 @@ type selectedCompletionFixture struct {
 	sourceRun string
 	forkRun   string
 	eventID   string
-	admission RunForkSelectedContractExecutionAdmission
-	request   SelectedContractRuntimeExecutionIssueRequest
+	admission runfork.RunForkSelectedContractExecutionAdmission
+	request   runfork.SelectedContractRuntimeExecutionIssueRequest
 }
 
 func TestSelectedForkCompletionAuthorityIssuanceConsumesExactAdmissionSQLite(t *testing.T) {
@@ -59,21 +61,21 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 
 	invalidAdmissions := []struct {
 		name   string
-		mutate func(*RunForkSelectedContractExecutionAdmission)
+		mutate func(*runfork.RunForkSelectedContractExecutionAdmission)
 	}{
-		{name: "owner", mutate: func(a *RunForkSelectedContractExecutionAdmission) { a.Owner = "caller.local" }},
-		{name: "future owner", mutate: func(a *RunForkSelectedContractExecutionAdmission) { a.FutureExecutionOwner = "caller.local" }},
-		{name: "mutating", mutate: func(a *RunForkSelectedContractExecutionAdmission) { a.NonMutating = false }},
-		{name: "already executable", mutate: func(a *RunForkSelectedContractExecutionAdmission) { a.ExecutionSupported = true }},
-		{name: "binding owner", mutate: func(a *RunForkSelectedContractExecutionAdmission) { a.ContractBindingOwner = "caller.local" }},
-		{name: "deferred-work admission owner", mutate: func(a *RunForkSelectedContractExecutionAdmission) {
+		{name: "owner", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) { a.Owner = "caller.local" }},
+		{name: "future owner", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) { a.FutureExecutionOwner = "caller.local" }},
+		{name: "mutating", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) { a.NonMutating = false }},
+		{name: "already executable", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) { a.ExecutionSupported = true }},
+		{name: "binding owner", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) { a.ContractBindingOwner = "caller.local" }},
+		{name: "deferred-work admission owner", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) {
 			a.DeferredWorkAdmissionOwner = "caller.local"
 		}},
-		{name: "admission use", mutate: func(a *RunForkSelectedContractExecutionAdmission) {
-			a.AdmissionUse = RunForkSelectedContractExecutionAdmissionUseEvidenceOnly
+		{name: "admission use", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) {
+			a.AdmissionUse = runfork.RunForkSelectedContractExecutionAdmissionUseEvidenceOnly
 		}},
-		{name: "durable source", mutate: func(a *RunForkSelectedContractExecutionAdmission) { a.SourceRunID = uuid.NewString() }},
-		{name: "durable event", mutate: func(a *RunForkSelectedContractExecutionAdmission) { a.ForkEventID = uuid.NewString() }},
+		{name: "durable source", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) { a.SourceRunID = uuid.NewString() }},
+		{name: "durable event", mutate: func(a *runfork.RunForkSelectedContractExecutionAdmission) { a.ForkEventID = uuid.NewString() }},
 	}
 	for _, tc := range invalidAdmissions {
 		t.Run("reject admission "+tc.name, func(t *testing.T) {
@@ -115,14 +117,14 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 
 	claimMutations := []struct {
 		name   string
-		mutate func(*SelectedContractRuntimeExecution)
+		mutate func(*runfork.SelectedContractRuntimeExecution)
 	}{
-		{name: "admission", mutate: func(e *SelectedContractRuntimeExecution) { e.AdmissionFingerprint += ":stale" }},
-		{name: "container", mutate: func(e *SelectedContractRuntimeExecution) { e.ContainerPlanFingerprint += ":stale" }},
-		{name: "actors", mutate: func(e *SelectedContractRuntimeExecution) { e.ActorCensusFingerprint += ":stale" }},
-		{name: "config", mutate: func(e *SelectedContractRuntimeExecution) { e.EffectiveConfigFingerprint += ":stale" }},
-		{name: "generation", mutate: func(e *SelectedContractRuntimeExecution) { e.Generation++ }},
-		{name: "issue owner", mutate: func(e *SelectedContractRuntimeExecution) { e.ExecutionOwner += ":stale" }},
+		{name: "admission", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.AdmissionFingerprint += ":stale" }},
+		{name: "container", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.ContainerPlanFingerprint += ":stale" }},
+		{name: "actors", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.ActorCensusFingerprint += ":stale" }},
+		{name: "config", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.EffectiveConfigFingerprint += ":stale" }},
+		{name: "generation", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.Generation++ }},
+		{name: "issue owner", mutate: func(e *runfork.SelectedContractRuntimeExecution) { e.ExecutionOwner += ":stale" }},
 	}
 	for _, tc := range claimMutations {
 		t.Run("reject claim "+tc.name, func(t *testing.T) {
@@ -159,7 +161,7 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 			stale := authority
 			tc.mutate(&stale)
 			stale.Target = selectedAgentTurnTarget(fixture.forkRun)
-			attemptCtx := runtimeeffects.WithLogicalOperationIdentity(runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, stale), runtimeeffects.NewController(fixture.store)), "stale:"+tc.name)
+			attemptCtx := runtimeeffects.WithLogicalOperationIdentity(runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, stale), newCompletionControllerForTest(fixture.store)), "stale:"+tc.name)
 			attemptCtx = withManagedCompletionTestSurface(t, attemptCtx, stale, "anthropic_api")
 			if _, err := runtimeeffects.BeginCompletion(attemptCtx, "anthropic_api", []byte("request"), nil); err == nil {
 				t.Fatalf("authorize accepted stale %s", tc.name)
@@ -172,7 +174,7 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 	if err := fixture.store.HeartbeatRunForkSelectedContractRuntimeExecution(ctx, authority, 3*time.Minute); err != nil {
 		t.Fatalf("renew selected completion authority before provider call: %v", err)
 	}
-	providerCtx := runtimeeffects.WithLogicalOperationIdentity(runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, providerAuthority), runtimeeffects.NewController(fixture.store)), "selected:successful-completion")
+	providerCtx := runtimeeffects.WithLogicalOperationIdentity(runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, providerAuthority), newCompletionControllerForTest(fixture.store)), "selected:successful-completion")
 	providerCtx = managedSelectedExecutionStoreTestContext(t, providerCtx, providerAuthority)
 	providerCtx = withManagedCompletionTestSurface(t, providerCtx, providerAuthority, "anthropic_api")
 	for _, registration := range runtimeeffects.Registrations() {
@@ -235,7 +237,7 @@ func proveSelectedForkCompletionAuthoritySingleCurrentGeneration(t *testing.T, f
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	const contenders = 2
-	results := make(chan SelectedContractRuntimeExecution, contenders)
+	results := make(chan runfork.SelectedContractRuntimeExecution, contenders)
 	errs := make(chan error, contenders)
 	var wg sync.WaitGroup
 	for range contenders {
@@ -291,7 +293,7 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 	if err != nil {
 		t.Fatal(err)
 	}
-	controller := runtimeeffects.NewController(fixture.store)
+	controller := newCompletionControllerForTest(fixture.store)
 	type recoveryCase struct {
 		name string
 		mark func(context.Context, *runtimeeffects.Handle) error
@@ -381,7 +383,7 @@ func TestSelectedForkCompletionAuthorityCleanupPreservesEvidencePostgres(t *test
 	}
 	authority.Target = selectedAgentTurnTarget(fixture.forkRun)
 	completionCtx := runtimeeffects.WithLogicalOperationIdentity(
-		runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), runtimeeffects.NewController(store)),
+		runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), newCompletionControllerForTest(store)),
 		"selected:cleanup-preservation",
 	)
 	completionCtx = managedSelectedExecutionStoreTestContext(t, completionCtx, authority)
@@ -530,8 +532,8 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`, fixture.forkRun).Scan(&committedRevisionRows); err != nil {
 		t.Fatalf("count blocked discard revisions: %v", err)
 	}
-	if status != RunForkMaterializedStatus || committedRevisionRows != int(firstRevision) {
-		t.Fatalf("blocked discard state = status:%q revisions:%d, want %q/%d", status, committedRevisionRows, RunForkMaterializedStatus, firstRevision)
+	if status != runfork.RunForkMaterializedStatus || committedRevisionRows != int(firstRevision) {
+		t.Fatalf("blocked discard state = status:%q revisions:%d, want %q/%d", status, committedRevisionRows, runfork.RunForkMaterializedStatus, firstRevision)
 	}
 
 	if err := allocationTx.Commit(); err != nil {
@@ -563,8 +565,8 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1::uuid`, fixture.forkRun).Scan(&eventRows); err != nil {
 		t.Fatalf("count serialized selected events: %v", err)
 	}
-	if status != RunForkMaterializedStatus || currentRevision != int(allocatedRevision) || revisionRows != int(allocatedRevision) || eventRows != 2 {
-		t.Fatalf("failed discard partial state = status:%q head:%d ledger:%d events:%d, want %q/%d/%d/2", status, currentRevision, revisionRows, eventRows, RunForkMaterializedStatus, allocatedRevision, allocatedRevision)
+	if status != runfork.RunForkMaterializedStatus || currentRevision != int(allocatedRevision) || revisionRows != int(allocatedRevision) || eventRows != 2 {
+		t.Fatalf("failed discard partial state = status:%q head:%d ledger:%d events:%d, want %q/%d/%d/2", status, currentRevision, revisionRows, eventRows, runfork.RunForkMaterializedStatus, allocatedRevision, allocatedRevision)
 	}
 	if err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun); err != nil {
 		t.Fatalf("retry selected fork discard after contention: %v", err)
@@ -611,7 +613,7 @@ func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {
 	requirePausedRunForTest(t, ctx, store, forkRunID, now)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkEventID, forkRunID, "fork.dependency", events.EventProducerPlatform, "selected-discard", "", "", now)
 	captureRunForkTestRevision(t, db, forkRunID, runforkrevision.FamilyEvents)
-	dependent, err := store.MaterializeRunFork(ctx, RunForkMaterializeRequest{
+	dependent, err := store.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
 		SourceRunID: forkRunID,
 		At:          forkEventID,
 	})
@@ -735,18 +737,18 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 			t.Fatalf("seed selected binding: %v", err)
 		}
 	}
-	selection := RunForkContractSelection{Mode: "selected_contracts", ContractsRoot: "/tmp/contracts", WorkflowName: "workflow", WorkflowVersion: "v1"}
-	admission := RunForkSelectedContractExecutionAdmission{
-		Owner: RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: RunForkSelectedContractExecutionOwner,
+	selection := runfork.RunForkContractSelection{Mode: "selected_contracts", ContractsRoot: "/tmp/contracts", WorkflowName: "workflow", WorkflowVersion: "v1"}
+	admission := runfork.RunForkSelectedContractExecutionAdmission{
+		Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
 		NonMutating: true, ExecutionSupported: false, ForkRunID: forkRun, SourceRunID: sourceRun, ForkEventID: eventID,
-		ContractSelection: selection, ContractBindingOwner: RunForkSelectedContractBindingOwner,
-		AdmissionOwner: "runtime.run_fork.frontier", AdmissionUse: RunForkSelectedContractExecutionAdmissionUseDurableBinding,
-		ExecutionModelOwner: RunForkSelectedContractExecutionModelOwner, SourceWorkflowName: "workflow", SourceWorkflowVersion: "v1",
-		DeferredWorkAdmissionOwner: RunForkSelectedContractDeferredWorkAdmissionOwner,
+		ContractSelection: selection, ContractBindingOwner: runfork.RunForkSelectedContractBindingOwner,
+		AdmissionOwner: "runtime.run_fork.frontier", AdmissionUse: runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
+		ExecutionModelOwner: runfork.RunForkSelectedContractExecutionModelOwner, SourceWorkflowName: "workflow", SourceWorkflowVersion: "v1",
+		DeferredWorkAdmissionOwner: runfork.RunForkSelectedContractDeferredWorkAdmissionOwner,
 	}
 	return selectedCompletionFixture{
 		store: store, db: db, sqlite: sqlite, sourceRun: sourceRun, forkRun: forkRun, eventID: eventID, admission: admission,
-		request: SelectedContractRuntimeExecutionIssueRequest{
+		request: runfork.SelectedContractRuntimeExecutionIssueRequest{
 			Admission: admission, ContainerPlanFingerprint: "sha256:container", ActorCensusFingerprint: "sha256:actors",
 			EffectiveConfigFingerprint: "sha256:config", Now: now,
 		},

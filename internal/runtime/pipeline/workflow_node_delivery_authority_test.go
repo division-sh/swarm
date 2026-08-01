@@ -279,7 +279,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 						Policies: map[string]WorkflowEventPolicy{"source.evt": {Consume: true}},
 					}},
 				},
-				WorkflowStore: workflowStore,
+				Persistence:   workflowPersistenceForTest(workflowStore),
 				DeliveryStore: owner,
 				WorkOwner:     pipelineTestWorkOwner(t),
 			})
@@ -296,7 +296,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 				dialect = runtimeauthoractivity.DialectSQLite
 			}
 			seedPipelineEventRecordForDialect(t, ctx, workflowStore.db, dialect, evt)
-			if err := workflowStore.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "delivery-retry", WorkflowVersion: "v-test", CurrentState: "queued",
 				EnteredStageAt: evt.CreatedAt(), CreatedAt: evt.CreatedAt(),
 			})); err != nil {
@@ -453,7 +453,7 @@ func seedDeliveryAuthorityEvent(t *testing.T, db *sql.DB, ctx context.Context) e
 
 func seedDeliveryAuthorityWorkflowInstance(t *testing.T, pc *PipelineCoordinator, ctx context.Context, entityID string) {
 	t.Helper()
-	if err := pc.workflowStore.Upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
 		StorageRef:      entityID,
 		WorkflowName:    "delivery-authority",

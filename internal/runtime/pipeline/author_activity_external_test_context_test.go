@@ -16,6 +16,8 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -91,6 +93,26 @@ type testAuthorActivityCatalogRegistrar interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
 
+type scopedTestDurableStore interface {
+	runtimebus.EventStore
+	testAuthorActivityCatalogRegistrar
+	runtimereplycontext.Store
+	runtimerunlifecycle.OperationOwner
+	runtimedelivery.Store
+	runtimebus.FlowInstanceRoutePersistence
+	runtimebus.FlowInstanceRouteRecordReader
+	runtimebus.FlowInstanceRouteSetPersistence
+	runtimebus.FlowInstanceRouteTopologyPersistence
+	runtimebus.FlowInstanceRouteRollbackPersistence
+	runtimebus.ActiveAgentDescriptorLister
+	runtimebus.ActiveFlowInstanceDescriptorLister
+	runtimebus.EventDeliveryTargetReader
+	runtimebus.EventDeliveryRouteSetReader
+	runtimebus.TargetFailureDeadLetterRecorder
+	runtimebus.RunOriginReader
+	PipelineObligations() runtimepipelineobligation.Store
+}
+
 func registerDifferentTestAuthorActivityEvents(t *testing.T, eventStore any, eventTypes ...string) {
 	t.Helper()
 	registrar, ok := eventStore.(testAuthorActivityCatalogRegistrar)
@@ -112,7 +134,7 @@ func registerDifferentTestAuthorActivityEvents(t *testing.T, eventStore any, eve
 	t.Cleanup(lease.Release)
 }
 
-func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts runtimebus.EventBusOptions, differentEvents ...string) (*runtimebus.EventBus, error) {
+func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts runtimebus.EventBusOptions, differentEvents ...string) (*runtimebus.EventBus, error) {
 	t.Helper()
 	if opts.BundleSourceFact.Validate() != nil {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
@@ -132,39 +154,43 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 		opts.DeliveryAuthority = authority
 	}
 	if opts.PipelineObligations == nil {
-		if provider, ok := eventStore.(interface {
-			PipelineObligations() runtimepipelineobligation.Store
-		}); ok {
-			opts.PipelineObligations = provider.PipelineObligations()
-		}
+		opts.PipelineObligations = eventStore.PipelineObligations()
 	}
-	if registrar, ok := eventStore.(testAuthorActivityCatalogRegistrar); ok {
-		descriptors := testAuthorActivityEventDescriptors(t, opts)
-		for _, eventType := range differentEvents {
-			descriptors = append(descriptors, runtimeauthoractivity.EventDescriptor{
-				EventType: strings.TrimSpace(eventType), Disposition: runtimeauthoractivity.StoryDifferent,
-			})
-		}
-		lease, err := registrar.RegisterAuthorActivityEventCatalog(
-			runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash()), descriptors,
-		)
-		if err != nil {
-			return nil, err
-		}
-		t.Cleanup(lease.Release)
+	opts.Durable = runtimebus.DurableDependencies{
+		ReplyContext:          eventStore,
+		RunLifecycle:          eventStore,
+		DeliveryLifecycle:     eventStore,
+		FlowRoutes:            eventStore,
+		FlowRouteRecords:      eventStore,
+		FlowRouteSets:         eventStore,
+		FlowRouteTopology:     eventStore,
+		FlowRouteRollback:     eventStore,
+		ActiveAgents:          eventStore,
+		ActiveFlows:           eventStore,
+		DeliveryTargets:       eventStore,
+		DeliveryRouteSets:     eventStore,
+		TargetFailureRecorder: eventStore,
+		RunOrigins:            eventStore,
 	}
-	var bus *runtimebus.EventBus
-	var err error
-	if opts.PipelineObligations == nil {
-		bus, err = runtimebus.NewEphemeralEventBusWithOptions(eventStore, opts)
-	} else {
-		bus, err = runtimebus.NewEventBusWithOptions(eventStore, opts)
+	descriptors := testAuthorActivityEventDescriptors(t, opts)
+	for _, eventType := range differentEvents {
+		descriptors = append(descriptors, runtimeauthoractivity.EventDescriptor{
+			EventType: strings.TrimSpace(eventType), Disposition: runtimeauthoractivity.StoryDifferent,
+		})
 	}
+	lease, err := eventStore.RegisterAuthorActivityEventCatalog(
+		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash()), descriptors,
+	)
+	if err != nil {
+		return nil, err
+	}
+	t.Cleanup(lease.Release)
+	bus, err := runtimebus.NewEventBusWithOptions(eventStore, opts)
 	if err != nil {
 		return nil, err
 	}
 	if err := bus.SetDeliveryContinuationOwner(
-		runtimebustest.NewDeliveryContinuationOwner(opts.PipelineObligations == nil),
+		runtimebustest.NewDeliveryContinuationOwner(false),
 	); err != nil {
 		return nil, err
 	}

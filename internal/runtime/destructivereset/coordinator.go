@@ -76,7 +76,7 @@ func (c *Coordinator) BuildPlanWithLock(ctx context.Context, req Request, apply 
 		return Result{}, false, ErrLockLeaseMissing
 	}
 	defer func() {
-		retErr = errors.Join(retErr, lease.Release(context.Background()))
+		retErr = errors.Join(retErr, lease.Release(context.WithoutCancel(ctx)))
 	}()
 
 	plan, err := c.Planner.BuildPlan(ctx, req)

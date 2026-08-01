@@ -7,20 +7,20 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 type SelectedContractRouteHistoryRequest struct {
-	Plan              store.RunForkPlan
+	Plan              runfork.RunForkPlan
 	Source            semanticview.Source
-	ContractSelection store.RunForkContractSelection
-	FrontierAdmission store.RunForkContractFrontierAdmission
+	ContractSelection runfork.RunForkContractSelection
+	FrontierAdmission runfork.RunForkContractFrontierAdmission
 }
 
-func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) (store.RunForkSelectedContractRouteAdmission, error) {
+func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) (runfork.RunForkSelectedContractRouteAdmission, error) {
 	if req.Source == nil {
-		return store.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("selected route admission requires selected contract semantic source")
+		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("selected route admission requires selected contract semantic source")
 	}
 	selection := req.ContractSelection
 	if strings.TrimSpace(selection.Mode) == "" {
@@ -32,47 +32,47 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if strings.TrimSpace(selection.WorkflowVersion) == "" {
 		selection.WorkflowVersion = strings.TrimSpace(req.Source.WorkflowVersion())
 	}
-	if strings.TrimSpace(req.FrontierAdmission.Owner) != store.RunForkContractFrontierAdmissionOwner {
-		return store.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("selected route admission requires %s frontier admission; got %q", store.RunForkContractFrontierAdmissionOwner, req.FrontierAdmission.Owner)
+	if strings.TrimSpace(req.FrontierAdmission.Owner) != runfork.RunForkContractFrontierAdmissionOwner {
+		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("selected route admission requires %s frontier admission; got %q", runfork.RunForkContractFrontierAdmissionOwner, req.FrontierAdmission.Owner)
 	}
 	if !req.FrontierAdmission.NonMutating {
-		return store.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("selected route admission requires non-mutating frontier admission")
+		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("selected route admission requires non-mutating frontier admission")
 	}
 
 	routeTable, err := runtimebus.DeriveRouteTable(req.Source)
 	if err != nil {
-		return store.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission routes: %w", err)
+		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission routes: %w", err)
 	}
 	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Source, req.Plan.PendingWork); err != nil {
-		return store.RunForkSelectedContractRouteAdmission{}, err
+		return runfork.RunForkSelectedContractRouteAdmission{}, err
 	}
 	connectPlans, connectIssues := runtimepinrouting.LowerCompositionConnectRoutePlans(req.Source)
 	if len(connectIssues) != 0 {
-		return store.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission connect routes: %#v", connectIssues)
+		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission connect routes: %#v", connectIssues)
 	}
 	routeEvents, incompleteRoutes := selectedRouteHistoryEvents(routeTable, connectPlans, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
 	dynamicFlowInstances := selectedRouteHistoryDynamicFlowInstances(req.Source, req.Plan, req.FrontierAdmission)
-	blockers := []store.RunForkUnsupportedBlocker{{
-		Code:    store.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
+	blockers := []runfork.RunForkUnsupportedBlocker{{
+		Code:    runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
 		Message: "selected-contract route admission is non-mutating; route persistence, recipient delivery writes, and handler execution remain separately gated",
 	}}
 	if selectedRouteHistoryHasSourceRouteFacts(req.Plan) {
-		blockers = appendRunForkBlocker(blockers, store.RunForkUnsupportedBlocker{
-			Code:    store.RunForkBlockerFlowRouteHistoryUnproven,
+		blockers = appendRunForkBlocker(blockers, runfork.RunForkUnsupportedBlocker{
+			Code:    runfork.RunForkBlockerFlowRouteHistoryUnproven,
 			Message: "source route rows are current operational state and remain evidence-only until selected route reconstruction is separately approved",
 		})
 	}
 	if incompleteRoutes {
-		blockers = appendRunForkBlocker(blockers, store.RunForkUnsupportedBlocker{
-			Code:    store.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven,
+		blockers = appendRunForkBlocker(blockers, runfork.RunForkUnsupportedBlocker{
+			Code:    runfork.RunForkBlockerSelectedContractDynamicRouteTopologyUnproven,
 			Message: "selected route history has a matched connect receiver that still requires runtime resolution",
 		})
 	}
-	frontierEventCount, frontierSourceEventIDs, frontierFingerprint := store.RunForkContractFrontierEvidenceBinding(req.FrontierAdmission)
+	frontierEventCount, frontierSourceEventIDs, frontierFingerprint := runfork.RunForkContractFrontierEvidenceBinding(req.FrontierAdmission)
 
-	return store.RunForkSelectedContractRouteAdmission{
-		Owner:                          store.RunForkSelectedContractRouteAdmissionOwner,
-		FutureRouteReconstructionOwner: store.RunForkSelectedContractExecutionOwner + ".route_reconstruction",
+	return runfork.RunForkSelectedContractRouteAdmission{
+		Owner:                          runfork.RunForkSelectedContractRouteAdmissionOwner,
+		FutureRouteReconstructionOwner: runfork.RunForkSelectedContractExecutionOwner + ".route_reconstruction",
 		NonMutating:                    true,
 		RouteReconstructionSupported:   false,
 		ContractSelection:              selection,
@@ -90,18 +90,18 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	}, nil
 }
 
-func selectedRouteHistoryHasSourceRouteFacts(plan store.RunForkPlan) bool {
-	if hasUnsupportedBlocker(plan.UnsupportedBlockers, store.RunForkBlockerFlowRouteHistoryUnproven) {
+func selectedRouteHistoryHasSourceRouteFacts(plan runfork.RunForkPlan) bool {
+	if hasUnsupportedBlocker(plan.UnsupportedBlockers, runfork.RunForkBlockerFlowRouteHistoryUnproven) {
 		return true
 	}
 	for _, blocker := range plan.ReplayResumeAdmission.UnsupportedBlockers {
-		if strings.TrimSpace(blocker.Code) == store.RunForkBlockerFlowRouteHistoryUnproven {
+		if strings.TrimSpace(blocker.Code) == runfork.RunForkBlockerFlowRouteHistoryUnproven {
 			return true
 		}
 	}
 	for _, disposition := range plan.ReplayResumeAdmission.Dispositions {
-		if strings.TrimSpace(disposition.Fact) == store.RunForkReplayResumeFactRouteHistory &&
-			strings.TrimSpace(disposition.Disposition) == store.RunForkReplayResumeDispositionFailClosedBlocker {
+		if strings.TrimSpace(disposition.Fact) == runfork.RunForkReplayResumeFactRouteHistory &&
+			strings.TrimSpace(disposition.Disposition) == runfork.RunForkReplayResumeDispositionFailClosedBlocker {
 			return true
 		}
 	}
@@ -114,7 +114,7 @@ type selectedRouteHistoryEvent struct {
 	sourceRoute   events.RouteIdentity
 }
 
-func selectedRouteHistoryEventEvidence(plan store.RunForkPlan, frontier store.RunForkContractFrontierAdmission) []selectedRouteHistoryEvent {
+func selectedRouteHistoryEventEvidence(plan runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission) []selectedRouteHistoryEvent {
 	frontierEventIDs := map[string]struct{}{}
 	for _, event := range frontier.FrontierEvents {
 		if sourceEventID := strings.TrimSpace(event.SourceEventID); sourceEventID != "" {
@@ -140,7 +140,7 @@ func selectedRouteHistoryEventEvidence(plan store.RunForkPlan, frontier store.Ru
 	}
 	add(plan.ForkPoint.EventID, plan.ForkPoint.EventName, plan.ForkPoint.SourceRoute)
 	for _, item := range plan.PendingWork {
-		if strings.TrimSpace(item.Classification) == store.RunForkPendingClassificationDeliveredCompleted {
+		if strings.TrimSpace(item.Classification) == runfork.RunForkPendingClassificationDeliveredCompleted {
 			add(item.EventID, item.EventName, item.SourceRoute)
 		}
 	}
@@ -156,18 +156,18 @@ func selectedRouteHistoryEventEvidence(plan store.RunForkPlan, frontier store.Ru
 	return out
 }
 
-func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectPlans []runtimepinrouting.ConnectRoutePlan, events []selectedRouteHistoryEvent) ([]store.RunForkSelectedContractRouteEvent, bool) {
-	out := make([]store.RunForkSelectedContractRouteEvent, 0, len(events))
+func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectPlans []runtimepinrouting.ConnectRoutePlan, events []selectedRouteHistoryEvent) ([]runfork.RunForkSelectedContractRouteEvent, bool) {
+	out := make([]runfork.RunForkSelectedContractRouteEvent, 0, len(events))
 	incomplete := false
 	for _, event := range events {
 		lookups := contractFrontierRouteLookups(event.eventName, event.sourceRoute, connectPlans)
 		eventIncomplete := contractFrontierLookupsRequireRuntimeResolution(lookups)
 		incomplete = incomplete || eventIncomplete
-		disposition := store.RunForkSelectedContractDispositionEvidenceOnly
+		disposition := runfork.RunForkSelectedContractDispositionEvidenceOnly
 		if eventIncomplete {
-			disposition = store.RunForkSelectedContractDispositionFailClosed
+			disposition = runfork.RunForkSelectedContractDispositionFailClosed
 		}
-		out = append(out, store.RunForkSelectedContractRouteEvent{
+		out = append(out, runfork.RunForkSelectedContractRouteEvent{
 			SourceEventID:     event.sourceEventID,
 			EventName:         event.eventName,
 			DerivedRecipients: contractFrontierRecipients(resolveContractFrontierRoutes(routeTable, lookups)),
@@ -177,7 +177,7 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectPlans 
 	return out, incomplete
 }
 
-func selectedRouteHistoryDynamicFlowInstances(source semanticview.Source, plan store.RunForkPlan, frontier store.RunForkContractFrontierAdmission) []string {
+func selectedRouteHistoryDynamicFlowInstances(source semanticview.Source, plan runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission) []string {
 	seen := map[string]struct{}{}
 	add := func(value string) {
 		value = strings.Trim(strings.TrimSpace(value), "/")
@@ -197,77 +197,77 @@ func selectedRouteHistoryDynamicFlowInstances(source semanticview.Source, plan s
 	return sortedSet(seen)
 }
 
-func selectedRouteHistoryRequiredConsumers() []store.RunForkSelectedContractExecutionBoundary {
-	return []store.RunForkSelectedContractExecutionBoundary{
+func selectedRouteHistoryRequiredConsumers() []runfork.RunForkSelectedContractExecutionBoundary {
+	return []runfork.RunForkSelectedContractExecutionBoundary{
 		{
 			Concept:     "selected_source_route_derivation",
-			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
+			Disposition: runfork.RunForkSelectedContractDispositionPrerequisite,
 			Owner:       "internal/runtime/bus.DeriveRouteTable",
 			Reason:      "route-history admission consumes selected-source route derivation instead of copying source route rows",
 		},
 		{
 			Concept:     "fork_local_recipient_planning",
-			Disposition: store.RunForkSelectedContractDispositionFutureOwnerRequired,
-			Owner:       store.RunForkSelectedContractRecipientPlanningOwner,
+			Disposition: runfork.RunForkSelectedContractDispositionFutureOwnerRequired,
+			Owner:       runfork.RunForkSelectedContractRecipientPlanningOwner,
 			Reason:      "executable route reconstruction must feed the canonical recipient-planning owner before delivery rows can be created",
 		},
 	}
 }
 
-func selectedRouteHistoryBlockedSiblings() []store.RunForkSelectedContractExecutionBoundary {
-	return []store.RunForkSelectedContractExecutionBoundary{
+func selectedRouteHistoryBlockedSiblings() []runfork.RunForkSelectedContractExecutionBoundary {
+	return []runfork.RunForkSelectedContractExecutionBoundary{
 		{
 			Concept:     "mutating_route_reconstruction",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
-			Owner:       store.RunForkSelectedContractExecutionOwner + ".route_reconstruction",
+			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
+			Owner:       runfork.RunForkSelectedContractExecutionOwner + ".route_reconstruction",
 			Reason:      "this route admission model is non-mutating and does not persist fork-local route rows",
 		},
 		{
 			Concept:     "dynamic_flow_instance_route_reconstruction",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
+			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
 			Owner:       "internal/runtime/bus.RouteTable.AddFlowInstanceRoute",
 			Reason:      "dynamic flow-instance route reconstruction needs fork-local flow-instance ownership before route persistence",
 		},
 		{
 			Concept:     "recipient_delivery_writes",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
+			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
 			Owner:       "delivery_and_replay_ownership",
 			Reason:      "recipient derivation becomes executable only after a delivery owner approves fork-local delivery writes",
 		},
 		{
 			Concept:     "timer_reconstruction",
-			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
+			Disposition: runfork.RunForkSelectedContractDispositionBlockedSibling,
 			Reason:      "timer reconstruction is scheduler lifecycle history, not route/subscription admission",
 		},
 	}
 }
 
-func selectedRouteHistoryInvalidPaths() []store.RunForkSelectedContractExecutionBoundary {
-	return []store.RunForkSelectedContractExecutionBoundary{
+func selectedRouteHistoryInvalidPaths() []runfork.RunForkSelectedContractExecutionBoundary {
+	return []runfork.RunForkSelectedContractExecutionBoundary{
 		{
 			Concept:     "copy_source_routing_rules",
-			Disposition: store.RunForkSelectedContractDispositionInvalid,
+			Disposition: runfork.RunForkSelectedContractDispositionInvalid,
 			Reason:      "source routing_rules are current operational evidence, not selected-fork route truth",
 		},
 		{
 			Concept:     "copy_source_flow_instance_routes",
-			Disposition: store.RunForkSelectedContractDispositionInvalid,
+			Disposition: runfork.RunForkSelectedContractDispositionInvalid,
 			Reason:      "source materialized route rows lack selected-fork provenance and must not be copied",
 		},
 		{
 			Concept:     "reuse_source_recipients",
-			Disposition: store.RunForkSelectedContractDispositionInvalid,
+			Disposition: runfork.RunForkSelectedContractDispositionInvalid,
 			Reason:      "source recipient decisions were made under the source run and source contracts",
 		},
 		{
 			Concept:     "cli_api_dashboard_owned_routes",
-			Disposition: store.RunForkSelectedContractDispositionInvalid,
+			Disposition: runfork.RunForkSelectedContractDispositionInvalid,
 			Reason:      "operator surfaces may consume route admission but must not own selected route reconstruction semantics",
 		},
 	}
 }
 
-func hasUnsupportedBlocker(blockers []store.RunForkUnsupportedBlocker, code string) bool {
+func hasUnsupportedBlocker(blockers []runfork.RunForkUnsupportedBlocker, code string) bool {
 	code = strings.TrimSpace(code)
 	for _, blocker := range blockers {
 		if strings.TrimSpace(blocker.Code) == code {

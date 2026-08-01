@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -82,5 +83,8 @@ func TestPipelineCoordinatorRequiresCanonicalObligationOwner(t *testing.T) {
 			t.Fatal("durable coordinator accepted an ownerless bus")
 		}
 	}()
-	_ = NewPipelineCoordinatorWithOptions(previewBus{}, nil, PipelineCoordinatorOptions{Module: module})
+	_ = NewPipelineCoordinatorWithOptions(previewBus{}, nil, PipelineCoordinatorOptions{
+		Module:      module,
+		Persistence: WorkflowPersistence{store: &workflowInstanceStore{db: new(sql.DB)}},
+	})
 }

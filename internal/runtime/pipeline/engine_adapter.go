@@ -88,14 +88,19 @@ type pipelineEngineTx struct {
 func (t pipelineEngineTx) Context() context.Context { return t.ctx }
 
 type pipelineEngineTxRunner struct {
-	store Store
+	store workflowMutationStore
+}
+
+type workflowMutationStore interface {
+	enabled() bool
+	runPipelineMutation(context.Context, func(context.Context) error) error
 }
 
 func (r pipelineEngineTxRunner) Run(ctx context.Context, fn func(runtimeengine.Tx) error) error {
-	if r.store == nil || !r.store.Enabled() {
+	if r.store == nil || !r.store.enabled() {
 		return fn(pipelineEngineTx{ctx: ctx})
 	}
-	return r.store.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	return r.store.runPipelineMutation(ctx, func(txctx context.Context) error {
 		return fn(pipelineEngineTx{ctx: txctx})
 	})
 }
@@ -126,7 +131,7 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
 	flowID := strings.TrimSpace(pipelineFlowScope(ctx))
-	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.Enabled() {
+	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.enabled() {
 		instance, ok, err := r.coordinator.workflowStore.Load(ctx, entityID.String())
 		if err != nil {
 			return runtimeengine.StateSnapshot{}, false, err
@@ -178,7 +183,7 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 	}
 	currentState := ""
 	nextState := strings.TrimSpace(mutation.NextState)
-	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.Enabled() {
+	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.enabled() {
 		if err := r.ensureFlowOwnsEntity(ctx, entityID.String()); err != nil {
 			return err
 		}
@@ -218,7 +223,7 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 			}
 		}
 		allowedFields := workflowEntitySchemaFields(r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
-		if err := r.coordinator.workflowStore.MutateE(ctx, entityID.String(), func(instance *WorkflowInstance) error {
+		if err := r.coordinator.workflowStore.mutateE(ctx, entityID.String(), func(instance *WorkflowInstance) error {
 			currentState = strings.TrimSpace(instance.CurrentState)
 			if err := applyEngineStateMutation(instance, mutation, allowedFields, r.coordinator.SemanticSource(), pipelineFlowScope(ctx)); err != nil {
 				return err
@@ -258,7 +263,7 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 }
 
 func (r pipelineEngineStateRepo) VerifyEmitPersistence(ctx context.Context, entityID identity.EntityID, prerequisites runtimeengine.EmitPersistencePrerequisites) error {
-	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.Enabled() {
+	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.enabled() {
 		return nil
 	}
 	entityID = identity.NormalizeEntityID(entityID.String())
@@ -310,7 +315,7 @@ func (r pipelineEngineStateRepo) VerifyEmitPersistence(ctx context.Context, enti
 }
 
 func (r pipelineEngineStateRepo) ensureFlowOwnsEntity(ctx context.Context, entityID string) error {
-	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.Enabled() {
+	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.enabled() {
 		return nil
 	}
 	flowID := strings.TrimSpace(pipelineFlowScope(ctx))
@@ -340,7 +345,7 @@ func newCoordinatorEngineEvaluator(pc *PipelineCoordinator) runtimeengine.Evalua
 }
 
 func (e pipelineEngineEvaluator) queryEntityCount(ctx workflowExpressionContext, predicate string) (int, error) {
-	if e.coordinator == nil || e.coordinator.workflowStore == nil || !e.coordinator.workflowStore.Enabled() {
+	if e.coordinator == nil || e.coordinator.workflowStore == nil || !e.coordinator.workflowStore.enabled() {
 		return 0, nil
 	}
 	parsed, err := parseWorkflowEntityQueryPredicate(predicate, ctx)
@@ -520,7 +525,7 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 		dispatcher = pc.bus.EngineDispatcher()
 	}
 	var lifecycleOwner runtimeengine.WorkflowLifecycleEffectOwner
-	if pc.workflowStore != nil && pc.workflowStore.Enabled() {
+	if pc.workflowStore != nil && pc.workflowStore.enabled() {
 		lifecycleOwner = pipelineWorkflowLifecycleOwner{coordinator: pc}
 	}
 	return runtimeengine.RuntimeDependencies{
@@ -546,7 +551,7 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 	}
 }
 
-type pinRoutingDescriptorSource interface {
+type PinRoutingDescriptorSource interface {
 	PinRoutingDescriptors(context.Context) ([]runtimepinrouting.Descriptor, error)
 }
 
@@ -554,8 +559,8 @@ func pipelineEngineTargetDescriptorLoader(pc *PipelineCoordinator) runtimeengine
 	if pc == nil || pc.bus == nil {
 		return nil
 	}
-	source, ok := pc.bus.(pinRoutingDescriptorSource)
-	if !ok || source == nil {
+	source := pc.pinRoutingDescriptors
+	if source == nil {
 		return nil
 	}
 	return source.PinRoutingDescriptors
@@ -1062,7 +1067,7 @@ func restoreWorkflowRuntimeControlMetadata(metadata map[string]any, control map[
 }
 
 func (pc *PipelineCoordinator) maybeDeactivateTerminalFlowInstance(ctx context.Context, entityID, nextState string) error {
-	if pc == nil || pc.instanceDeactivator == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+	if pc == nil || pc.instanceDeactivator == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return nil
 	}
 	nextState = strings.TrimSpace(nextState)

@@ -9,23 +9,24 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/runbundle"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 func TestActivateSelectedContractRunForkDelegatesNonSelectedActivation(t *testing.T) {
 	forkRunID := uuid.NewString()
-	activation := store.RunForkActivation{
+	activation := runfork.RunForkActivation{
 		SourceRunID:     uuid.NewString(),
 		ForkRunID:       forkRunID,
-		ForkRunStatus:   store.RunForkActivatedStatus,
-		SourceRunStatus: store.RunForkSourceFrozenStatus,
+		ForkRunStatus:   runfork.RunForkActivatedStatus,
+		SourceRunStatus: runfork.RunForkSourceFrozenStatus,
 		Activated:       true,
 		SourceFrozen:    true,
 	}
 	fakeStore := &fakeSelectedContractActivationStore{activation: activation}
 
-	result, err := ActivateSelectedContractRunFork(context.Background(), SelectedContractActivationGateRequest{
+	result, err := ActivateSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID: forkRunID,
 		Store:     fakeStore,
 	})
@@ -52,11 +53,11 @@ func TestActivateSelectedContractRunForkConsumesAdmissionBeforeStateOnlyActivati
 		bindingOK:          true,
 		bundleAvailability: testSelectedContractBundleAvailability(forkRunID),
 		plan:               plan,
-		activation:         store.RunForkActivation{SourceRunID: binding.SourceRunID, ForkRunID: forkRunID, Activated: true, SourceFrozen: true},
+		activation:         runfork.RunForkActivation{SourceRunID: binding.SourceRunID, ForkRunID: forkRunID, Activated: true, SourceFrozen: true},
 	}
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
 
-	result, err := ActivateSelectedContractRunFork(context.Background(), SelectedContractActivationGateRequest{
+	result, err := ActivateSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,
@@ -70,25 +71,25 @@ func TestActivateSelectedContractRunForkConsumesAdmissionBeforeStateOnlyActivati
 	if fakeStore.activateRequest.HistoricalReplayExecutionAdmitter == nil {
 		t.Fatal("selected state-only activation did not receive historical replay execution admitter")
 	}
-	if result.Owner != store.RunForkSelectedContractExecutionActivationGateOwner {
-		t.Fatalf("owner = %q, want %q", result.Owner, store.RunForkSelectedContractExecutionActivationGateOwner)
+	if result.Owner != runfork.RunForkSelectedContractExecutionActivationGateOwner {
+		t.Fatalf("owner = %q, want %q", result.Owner, runfork.RunForkSelectedContractExecutionActivationGateOwner)
 	}
 	if result.SelectedContractExecutionAdmission == nil ||
-		result.SelectedContractExecutionAdmission.Owner != store.RunForkSelectedContractExecutionAdmissionOwner ||
+		result.SelectedContractExecutionAdmission.Owner != runfork.RunForkSelectedContractExecutionAdmissionOwner ||
 		result.SelectedContractExecutionAdmission.FrontierEventCount != 0 {
 		t.Fatalf("selected admission = %#v", result.SelectedContractExecutionAdmission)
 	}
 	if result.ContractSwapBootResumeAdmission == nil ||
-		result.ContractSwapBootResumeAdmission.Owner != store.RunForkContractSwapBootResumeAdmissionOwner ||
+		result.ContractSwapBootResumeAdmission.Owner != runfork.RunForkContractSwapBootResumeAdmissionOwner ||
 		result.ContractSwapBootResumeAdmission.BootResumeSupported ||
-		!unsupportedBlockerHas(result.ContractSwapBootResumeAdmission.UnsupportedBlockers, store.RunForkBlockerContractSwapBootResumeAdmissionNonMutating) {
+		!unsupportedBlockerHas(result.ContractSwapBootResumeAdmission.UnsupportedBlockers, runfork.RunForkBlockerContractSwapBootResumeAdmissionNonMutating) {
 		t.Fatalf("contract-swap admission = %#v", result.ContractSwapBootResumeAdmission)
 	}
 	if result.HistoricalReplayExecutionAdmission == nil ||
-		result.HistoricalReplayExecutionAdmission.Owner != store.RunForkHistoricalReplayExecutionAdmissionOwner ||
+		result.HistoricalReplayExecutionAdmission.Owner != runfork.RunForkHistoricalReplayExecutionAdmissionOwner ||
 		!result.HistoricalReplayExecutionAdmission.NonMutating ||
 		result.HistoricalReplayExecutionAdmission.ExecutionSupported ||
-		result.HistoricalReplayExecutionAdmission.ReplayResumeAdmissionOwner != store.RunForkReplayResumeAdmissionOwner {
+		result.HistoricalReplayExecutionAdmission.ReplayResumeAdmissionOwner != runfork.RunForkReplayResumeAdmissionOwner {
 		t.Fatalf("historical replay admission = %#v", result.HistoricalReplayExecutionAdmission)
 	}
 	if result.RunForkActivation.ForkRunID != forkRunID || !result.Activated {
@@ -102,25 +103,25 @@ func TestActivateSelectedContractRunForkRequiresConcreteStoreForReplayMutation(t
 	plan := testSelectedContractStateOnlyPlan(binding)
 	plan.ExecutionReady = true
 	plan.PendingWorkCount = 1
-	plan.PendingWork = []store.RunForkPendingWork{{
+	plan.PendingWork = []runfork.RunForkPendingWork{{
 		EventID:        uuid.NewString(),
 		DeliveryID:     uuid.NewString(),
 		EventName:      "work.begin",
 		SubscriberType: "agent",
 		SubscriberID:   "safe-agent",
 		Status:         "pending",
-		Classification: store.RunForkPendingClassificationPending,
+		Classification: runfork.RunForkPendingClassificationPending,
 		CreatedAt:      time.Unix(1700001000, 0).UTC(),
 	}}
-	plan.ReplayResumeAdmission = store.RunForkReplayResumeAdmission{
-		Owner:                    store.RunForkReplayResumeAdmissionOwner,
+	plan.ReplayResumeAdmission = runfork.RunForkReplayResumeAdmission{
+		Owner:                    runfork.RunForkReplayResumeAdmissionOwner,
 		DeliveryEventReplayReady: true,
 		ReplayResumeFactsPresent: true,
 		BoundedReplaySupported:   true,
-		Dispositions: []store.RunForkReplayResumeDisposition{{
-			Fact:           store.RunForkReplayResumeFactDeliveryPendingHistory,
-			Disposition:    store.RunForkReplayResumeDispositionForkReplay,
-			Classification: store.RunForkPendingClassificationPending,
+		Dispositions: []runfork.RunForkReplayResumeDisposition{{
+			Fact:           runfork.RunForkReplayResumeFactDeliveryPendingHistory,
+			Disposition:    runfork.RunForkReplayResumeDispositionForkReplay,
+			Classification: runfork.RunForkPendingClassificationPending,
 			EventID:        plan.PendingWork[0].EventID,
 			DeliveryID:     plan.PendingWork[0].DeliveryID,
 			SubscriberType: plan.PendingWork[0].SubscriberType,
@@ -133,26 +134,26 @@ func TestActivateSelectedContractRunForkRequiresConcreteStoreForReplayMutation(t
 		bindingOK:          true,
 		bundleAvailability: testSelectedContractBundleAvailability(forkRunID),
 		plan:               plan,
-		routeRecovery: store.RunForkSelectedContractRouteRecovery{
-			Owner:                  store.RunForkSelectedContractRoutePersistenceOwner,
-			RuntimeRecoveryOwner:   store.RunForkSelectedContractRouteRecoveryOwner,
+		routeRecovery: runfork.RunForkSelectedContractRouteRecovery{
+			Owner:                  runfork.RunForkSelectedContractRoutePersistenceOwner,
+			RuntimeRecoveryOwner:   runfork.RunForkSelectedContractRouteRecoveryOwner,
 			ForkRunID:              binding.ForkRunID,
 			SourceRunID:            binding.SourceRunID,
 			ForkEventID:            binding.ForkEventID,
 			ContractSelection:      binding.ContractSelection,
-			RouteTopologyOwner:     store.RunForkSelectedContractRouteTopologyOwner,
-			RecipientPlanningOwner: store.RunForkSelectedContractRecipientPlanningOwner,
+			RouteTopologyOwner:     runfork.RunForkSelectedContractRouteTopologyOwner,
+			RecipientPlanningOwner: runfork.RunForkSelectedContractRecipientPlanningOwner,
 		},
 		routeOK: true,
 	}
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
 
-	result, err := ActivateSelectedContractRunFork(context.Background(), SelectedContractActivationGateRequest{
+	result, err := ActivateSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,
 	})
-	if err == nil || !strings.Contains(err.Error(), store.RunForkHistoricalReplayContractSwapBootResumeOwner) {
+	if err == nil || !strings.Contains(err.Error(), runfork.RunForkHistoricalReplayContractSwapBootResumeOwner) {
 		t.Fatalf("err = %v, want concrete store requirement for contract-swap historical replay execution", err)
 	}
 	if fakeStore.activateCalled {
@@ -162,12 +163,12 @@ func TestActivateSelectedContractRunForkRequiresConcreteStoreForReplayMutation(t
 		t.Fatalf("admission not consumed before block; require:%v result:%#v", fakeStore.requireCalled, result)
 	}
 	if result.ContractSwapBootResumeAdmission == nil ||
-		!unsupportedBlockerHas(result.ContractSwapBootResumeAdmission.UnsupportedBlockers, store.RunForkBlockerContractSwapBootResumeAdmissionNonMutating) {
+		!unsupportedBlockerHas(result.ContractSwapBootResumeAdmission.UnsupportedBlockers, runfork.RunForkBlockerContractSwapBootResumeAdmissionNonMutating) {
 		t.Fatalf("contract-swap admission = %#v, want non-mutating blocker before source replay block", result.ContractSwapBootResumeAdmission)
 	}
 	if result.HistoricalReplayExecutionAdmission == nil ||
-		!unsupportedBlockerHas(result.HistoricalReplayExecutionAdmission.UnsupportedBlockers, store.RunForkBlockerHistoricalReplayExecutionAdmissionNonMutating) ||
-		!historicalReplayFactHas(result.HistoricalReplayExecutionAdmission.FactAdmissions, store.RunForkHistoricalReplayFactEventDeliveries, store.RunForkHistoricalReplayAdmissionExecutableForkWork) {
+		!unsupportedBlockerHas(result.HistoricalReplayExecutionAdmission.UnsupportedBlockers, runfork.RunForkBlockerHistoricalReplayExecutionAdmissionNonMutating) ||
+		!historicalReplayFactHas(result.HistoricalReplayExecutionAdmission.FactAdmissions, runfork.RunForkHistoricalReplayFactEventDeliveries, runfork.RunForkHistoricalReplayAdmissionExecutableForkWork) {
 		t.Fatalf("historical replay admission = %#v, want non-mutating replayable-source classification before source replay block", result.HistoricalReplayExecutionAdmission)
 	}
 }
@@ -176,15 +177,15 @@ func TestActivateSelectedContractRunForkPassesRecoveredRouteEvidenceToContractSw
 	forkRunID := uuid.NewString()
 	binding := testSelectedContractBinding(forkRunID)
 	plan := testSelectedContractStateOnlyPlan(binding)
-	routeRecovery := store.RunForkSelectedContractRouteRecovery{
-		Owner:                  store.RunForkSelectedContractRoutePersistenceOwner,
-		RuntimeRecoveryOwner:   store.RunForkSelectedContractRouteRecoveryOwner,
+	routeRecovery := runfork.RunForkSelectedContractRouteRecovery{
+		Owner:                  runfork.RunForkSelectedContractRoutePersistenceOwner,
+		RuntimeRecoveryOwner:   runfork.RunForkSelectedContractRouteRecoveryOwner,
 		ForkRunID:              binding.ForkRunID,
 		SourceRunID:            binding.SourceRunID,
 		ForkEventID:            binding.ForkEventID,
 		ContractSelection:      binding.ContractSelection,
-		RouteTopologyOwner:     store.RunForkSelectedContractRouteTopologyOwner,
-		RecipientPlanningOwner: store.RunForkSelectedContractRecipientPlanningOwner,
+		RouteTopologyOwner:     runfork.RunForkSelectedContractRouteTopologyOwner,
+		RecipientPlanningOwner: runfork.RunForkSelectedContractRecipientPlanningOwner,
 	}
 	fakeStore := &fakeSelectedContractActivationStore{
 		binding:            binding,
@@ -193,11 +194,11 @@ func TestActivateSelectedContractRunForkPassesRecoveredRouteEvidenceToContractSw
 		plan:               plan,
 		routeRecovery:      routeRecovery,
 		routeOK:            true,
-		activation:         store.RunForkActivation{SourceRunID: binding.SourceRunID, ForkRunID: forkRunID, Activated: true, SourceFrozen: true},
+		activation:         runfork.RunForkActivation{SourceRunID: binding.SourceRunID, ForkRunID: forkRunID, Activated: true, SourceFrozen: true},
 	}
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
 
-	result, err := ActivateSelectedContractRunFork(context.Background(), SelectedContractActivationGateRequest{
+	result, err := ActivateSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,
@@ -211,16 +212,16 @@ func TestActivateSelectedContractRunForkPassesRecoveredRouteEvidenceToContractSw
 	if result.ContractSwapBootResumeAdmission == nil {
 		t.Fatalf("missing contract-swap admission: %#v", result)
 	}
-	if result.ContractSwapBootResumeAdmission.RouteRecoveryOwner != store.RunForkSelectedContractRoutePersistenceOwner ||
-		result.ContractSwapBootResumeAdmission.RuntimeRouteRecoveryOwner != store.RunForkSelectedContractRouteRecoveryOwner {
+	if result.ContractSwapBootResumeAdmission.RouteRecoveryOwner != runfork.RunForkSelectedContractRoutePersistenceOwner ||
+		result.ContractSwapBootResumeAdmission.RuntimeRouteRecoveryOwner != runfork.RunForkSelectedContractRouteRecoveryOwner {
 		t.Fatalf("contract-swap route recovery owners = %#v", result.ContractSwapBootResumeAdmission)
 	}
-	if unsupportedBlockerHas(result.ContractSwapBootResumeAdmission.UnsupportedBlockers, store.RunForkBlockerContractSwapRouteRecoveryMissing) {
+	if unsupportedBlockerHas(result.ContractSwapBootResumeAdmission.UnsupportedBlockers, runfork.RunForkBlockerContractSwapRouteRecoveryMissing) {
 		t.Fatalf("unexpected missing-route blocker with route recovery evidence: %#v", result.ContractSwapBootResumeAdmission.UnsupportedBlockers)
 	}
 	if result.HistoricalReplayExecutionAdmission == nil ||
-		result.HistoricalReplayExecutionAdmission.RouteRecoveryOwner != store.RunForkSelectedContractRoutePersistenceOwner ||
-		result.HistoricalReplayExecutionAdmission.RuntimeRouteRecoveryOwner != store.RunForkSelectedContractRouteRecoveryOwner {
+		result.HistoricalReplayExecutionAdmission.RouteRecoveryOwner != runfork.RunForkSelectedContractRoutePersistenceOwner ||
+		result.HistoricalReplayExecutionAdmission.RuntimeRouteRecoveryOwner != runfork.RunForkSelectedContractRouteRecoveryOwner {
 		t.Fatalf("historical replay route recovery owners = %#v", result.HistoricalReplayExecutionAdmission)
 	}
 }
@@ -236,7 +237,7 @@ func TestActivateSelectedContractRunForkFailsBeforeMutationOnUnavailableSource(t
 	}
 	loader := &fakeSelectedContractSourceLoader{err: errors.New("selected source unavailable")}
 
-	_, err := ActivateSelectedContractRunFork(context.Background(), SelectedContractActivationGateRequest{
+	_, err := ActivateSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,
@@ -262,7 +263,7 @@ func TestActivateSelectedContractRunForkFailsBeforePlanningOnPersistedIdentityMi
 	loaded.BundleSourceFact = testEphemeralBundleSourceFact("bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	loader := &fakeSelectedContractSourceLoader{loaded: loaded}
 
-	_, err := ActivateSelectedContractRunFork(context.Background(), SelectedContractActivationGateRequest{
+	_, err := ActivateSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,
@@ -287,7 +288,7 @@ func TestActivateSelectedContractRunForkFailsBeforeMutationOnStaleBindingAdmissi
 	}
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
 
-	_, err := ActivateSelectedContractRunFork(context.Background(), SelectedContractActivationGateRequest{
+	_, err := ActivateSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,
@@ -307,8 +308,8 @@ func TestActivateSelectedContractRunForkPreservesPlannerBlockersBeforeMutation(t
 	plan.ExecutionReady = false
 	plan.ReplayResumeAdmission.StateOnlyExecutionReady = false
 	plan.ReplayResumeAdmission.ReplayResumeFactsPresent = true
-	plan.UnsupportedBlockers = []store.RunForkUnsupportedBlocker{{
-		Code:    store.RunForkBlockerSessionHistoryUnproven,
+	plan.UnsupportedBlockers = []runfork.RunForkUnsupportedBlocker{{
+		Code:    runfork.RunForkBlockerSessionHistoryUnproven,
 		Message: "session history is not reconstructable",
 	}}
 	fakeStore := &fakeSelectedContractActivationStore{
@@ -319,12 +320,12 @@ func TestActivateSelectedContractRunForkPreservesPlannerBlockersBeforeMutation(t
 	}
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
 
-	_, err := ActivateSelectedContractRunFork(context.Background(), SelectedContractActivationGateRequest{
+	_, err := ActivateSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 		ForkRunID:    forkRunID,
 		Store:        fakeStore,
 		SourceLoader: loader,
 	})
-	if err == nil || !strings.Contains(err.Error(), store.RunForkBlockerSessionHistoryUnproven) {
+	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerSessionHistoryUnproven) {
 		t.Fatalf("err = %v, want preserved planner blocker", err)
 	}
 	if fakeStore.activateCalled {
@@ -332,7 +333,7 @@ func TestActivateSelectedContractRunForkPreservesPlannerBlockersBeforeMutation(t
 	}
 }
 
-func historicalReplayFactHas(items []store.RunForkHistoricalReplayFactAdmission, fact, admission string) bool {
+func historicalReplayFactHas(items []runfork.RunForkHistoricalReplayFactAdmission, fact, admission string) bool {
 	for _, item := range items {
 		if item.Fact == fact && item.Admission == admission {
 			return true
@@ -342,20 +343,20 @@ func historicalReplayFactHas(items []store.RunForkHistoricalReplayFactAdmission,
 }
 
 type fakeSelectedContractActivationStore struct {
-	binding               store.RunForkSelectedContractBinding
+	binding               runfork.RunForkSelectedContractBinding
 	bindingOK             bool
 	bindingErr            error
 	requireErr            error
 	bundleAvailability    runbundle.Availability
 	bundleAvailabilityErr error
-	plan                  store.RunForkPlan
+	plan                  runfork.RunForkPlan
 	planErr               error
-	routeRecovery         store.RunForkSelectedContractRouteRecovery
+	routeRecovery         runfork.RunForkSelectedContractRouteRecovery
 	routeOK               bool
 	routeErr              error
-	activation            store.RunForkActivation
+	activation            runfork.RunForkActivation
 	activationErr         error
-	activateRequest       store.RunForkActivateRequest
+	activateRequest       runfork.RunForkActivateRequest
 
 	loadCalled       bool
 	loadBundleCalled bool
@@ -373,59 +374,63 @@ func (s *fakeSelectedContractActivationStore) LoadRunBundleAvailability(_ contex
 	return s.bundleAvailability, nil
 }
 
-func (s *fakeSelectedContractActivationStore) LoadRunForkSelectedContractBinding(_ context.Context, _ string) (store.RunForkSelectedContractBinding, bool, error) {
+func (s *fakeSelectedContractActivationStore) LoadRunForkSelectedContractBinding(_ context.Context, _ string) (runfork.RunForkSelectedContractBinding, bool, error) {
 	s.loadCalled = true
 	if s.bindingErr != nil {
-		return store.RunForkSelectedContractBinding{}, false, s.bindingErr
+		return runfork.RunForkSelectedContractBinding{}, false, s.bindingErr
 	}
 	return s.binding, s.bindingOK, nil
 }
 
-func (s *fakeSelectedContractActivationStore) RequireRunForkSelectedContractBinding(_ context.Context, _ string) (store.RunForkSelectedContractBinding, error) {
+func (s *fakeSelectedContractActivationStore) RequireRunForkSelectedContractBinding(_ context.Context, _ string) (runfork.RunForkSelectedContractBinding, error) {
 	s.requireCalled = true
 	if s.requireErr != nil {
-		return store.RunForkSelectedContractBinding{}, s.requireErr
+		return runfork.RunForkSelectedContractBinding{}, s.requireErr
 	}
 	if !s.bindingOK {
-		return store.RunForkSelectedContractBinding{}, errors.New("selected contract binding not found")
+		return runfork.RunForkSelectedContractBinding{}, errors.New("selected contract binding not found")
 	}
 	return s.binding, nil
 }
 
-func (s *fakeSelectedContractActivationStore) LoadRunForkSelectedContractRouteRecovery(_ context.Context, _ string) (store.RunForkSelectedContractRouteRecovery, bool, error) {
+func (s *fakeSelectedContractActivationStore) LoadRunForkSelectedContractRouteRecovery(_ context.Context, _ string) (runfork.RunForkSelectedContractRouteRecovery, bool, error) {
 	s.loadRouteCalled = true
 	if s.routeErr != nil {
-		return store.RunForkSelectedContractRouteRecovery{}, false, s.routeErr
+		return runfork.RunForkSelectedContractRouteRecovery{}, false, s.routeErr
 	}
 	return s.routeRecovery, s.routeOK, nil
 }
 
-func (s *fakeSelectedContractActivationStore) PlanRunFork(_ context.Context, _ store.RunForkPlanRequest) (store.RunForkPlan, error) {
+func (s *fakeSelectedContractActivationStore) PlanRunFork(_ context.Context, _ runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
 	s.planCalled = true
 	if s.planErr != nil {
-		return store.RunForkPlan{}, s.planErr
+		return runfork.RunForkPlan{}, s.planErr
 	}
 	return s.plan, nil
 }
 
-func (s *fakeSelectedContractActivationStore) ActivateRunFork(_ context.Context, req store.RunForkActivateRequest) (store.RunForkActivation, error) {
+func (s *fakeSelectedContractActivationStore) ActivateRunFork(_ context.Context, req runfork.RunForkActivateRequest) (runfork.RunForkActivation, error) {
 	s.activateCalled = true
 	s.activateRequest = req
 	if s.activationErr != nil {
-		return store.RunForkActivation{}, s.activationErr
+		return runfork.RunForkActivation{}, s.activationErr
 	}
 	return s.activation, nil
 }
 
-func testSelectedContractStateOnlyPlan(binding store.RunForkSelectedContractBinding) store.RunForkPlan {
-	return store.RunForkPlan{
+func (s *fakeSelectedContractActivationStore) RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
+	return nil, nil
+}
+
+func testSelectedContractStateOnlyPlan(binding runfork.RunForkSelectedContractBinding) runfork.RunForkPlan {
+	return runfork.RunForkPlan{
 		SourceRunID:      binding.SourceRunID,
 		SourceRunStatus:  "running",
-		ForkPoint:        store.RunForkPoint{Input: binding.ForkEventID, EventID: binding.ForkEventID, EventName: "work.ready", Timestamp: binding.CreatedAt},
+		ForkPoint:        runfork.RunForkPoint{Input: binding.ForkEventID, EventID: binding.ForkEventID, EventName: "work.ready", Timestamp: binding.CreatedAt},
 		EventCountAtFork: 1,
 		ExecutionReady:   true,
-		ReplayResumeAdmission: store.RunForkReplayResumeAdmission{
-			Owner:                   store.RunForkReplayResumeAdmissionOwner,
+		ReplayResumeAdmission: runfork.RunForkReplayResumeAdmission{
+			Owner:                   runfork.RunForkReplayResumeAdmissionOwner,
 			StateOnlyExecutionReady: true,
 		},
 	}
@@ -434,7 +439,7 @@ func testSelectedContractStateOnlyPlan(binding store.RunForkSelectedContractBind
 func testSelectedContractBundleAvailability(forkRunID string) runbundle.Availability {
 	return runbundle.Availability{
 		RunID:        forkRunID,
-		Status:       store.RunForkMaterializedStatus,
+		Status:       runfork.RunForkMaterializedStatus,
 		BundleHash:   runForkTestBundleHash,
 		BundleSource: runbundle.AvailabilitySourceEphemeral,
 	}

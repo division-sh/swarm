@@ -15,6 +15,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -219,6 +220,35 @@ type BudgetGuard interface {
 	IsThrottle(entityID string) bool
 }
 
+type DeliveryRuntimeOwner interface {
+	DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error)
+	RetainDeliveryContinuation(runtimedelivery.Snapshot) error
+	ReleaseDeliveryContinuation(string) error
+}
+
+// PersistenceRoles is the exact immutable persistence and route contract
+// consumed by AgentManager. No role is discovered from Bus or ManagerStore.
+type PersistenceRoles struct {
+	AgentRoutes          AgentRouteBus
+	RouteInstaller       FlowInstanceRouteContextInstaller
+	RouteVerifier        FlowInstanceRouteContextVerifier
+	RouteRestorer        PersistedFlowInstanceRouteRestorer
+	RouteRetirer         PublishedFlowInstanceRouteRetirer
+	RouteRemover         FlowInstanceRouteContextRemover
+	FlowTermination      FlowInstanceTerminalMutationOwner
+	CreationPublisher    runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher
+	LifecycleState       AgentLifecycleStateReader
+	LifecycleEffects     runtimeeffects.Store
+	LifecycleDiagnostics AgentLifecycleDiagnosticPersistence
+	EffectsRecovery      runtimeeffects.RecoveryStore
+	DeliveryQuiescence   ActiveRunDeliveryQuiescenceReader
+	DeliveryRuntime      DeliveryRuntimeOwner
+	EventExistence       EventExistenceReader
+	DirectiveOperations  runtimeagentcontrol.DirectiveOperationStore
+	DirectiveTargets     AgentDirectiveRunTargetResolver
+	FlowRoutes           runtimebus.FlowInstanceRoutePersistence
+}
+
 type StrategicContext = json.RawMessage
 
 type AgentManagerOptions struct {
@@ -229,6 +259,9 @@ type AgentManagerOptions struct {
 	TestLifecycleProbe             runtimelifecycleprobe.Observer
 	Workspaces                     workspace.Lifecycle
 	Sessions                       sessions.Registry
+	SessionLifecycle               sessions.LifecycleProjection
+	SessionResetter                sessions.Resetter
+	PersistenceRoles               PersistenceRoles
 	SemanticSource                 semanticview.Source
 	PromptResolver                 runtimecontracts.PromptResolver
 	WorkflowInstances              flowInstancePersistence

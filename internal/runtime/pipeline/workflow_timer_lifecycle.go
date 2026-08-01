@@ -16,7 +16,7 @@ import (
 )
 
 func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context, evt events.Event) (bool, bool, error) {
-	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() || pc.workflowTimers == nil {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.workflowTimers == nil {
 		return false, false, nil
 	}
 	activation, occurrence, recognized, err := pc.workflowTimers.AuthorizeAcceptedEvent(ctx, evt)
@@ -46,10 +46,10 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 		return true, false, fmt.Errorf("stage timer %s fired without entity_id", timer.ID)
 	}
 	applied := false
-	err = pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+	err = pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
 		currentStage := ""
 		nextStage := strings.TrimSpace(timer.AdvancesTo)
-		if err := pc.workflowStore.MutateE(txctx, entityID, func(instance *WorkflowInstance) error {
+		if err := pc.workflowStore.mutateE(txctx, entityID, func(instance *WorkflowInstance) error {
 			currentStage = strings.TrimSpace(instance.CurrentState)
 			if currentStage != strings.TrimSpace(timer.Stage) {
 				return nil

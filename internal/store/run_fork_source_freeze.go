@@ -3,49 +3,13 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
-
-var ErrRunForkSourceFreezeConfirmationRequired = errors.New("run fork source freeze confirmation required")
-var ErrRunForkSourceFreezeBusy = errors.New("run fork source has in-flight execution authority")
-
-type RunForkSourceFreezeConfirmationError struct {
-	SourceRunID string
-	ForkRunID   string
-}
-
-func (e *RunForkSourceFreezeConfirmationError) Error() string {
-	if e == nil {
-		return ErrRunForkSourceFreezeConfirmationRequired.Error()
-	}
-	return fmt.Sprintf("%s: source_run_id=%s fork_run_id=%s", ErrRunForkSourceFreezeConfirmationRequired, strings.TrimSpace(e.SourceRunID), strings.TrimSpace(e.ForkRunID))
-}
-
-func (e *RunForkSourceFreezeConfirmationError) Unwrap() error {
-	return ErrRunForkSourceFreezeConfirmationRequired
-}
-
-type RunForkSourceFreezeBusyError struct {
-	SourceRunID string
-	Blockers    []string
-}
-
-func (e *RunForkSourceFreezeBusyError) Error() string {
-	if e == nil {
-		return ErrRunForkSourceFreezeBusy.Error()
-	}
-	return fmt.Sprintf("%s: source_run_id=%s blockers=%s", ErrRunForkSourceFreezeBusy, strings.TrimSpace(e.SourceRunID), strings.Join(e.Blockers, ","))
-}
-
-func (e *RunForkSourceFreezeBusyError) Unwrap() error {
-	return ErrRunForkSourceFreezeBusy
-}
 
 // applyRunForkSourceFreeze is the only writer of the terminal forked source
 // state. The caller owns the surrounding serializable transaction.
@@ -58,7 +22,7 @@ func (s *PostgresStore) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx
 		return fmt.Errorf("admit run fork source freeze: %w", err)
 	}
 	if !confirmed {
-		return &RunForkSourceFreezeConfirmationError{SourceRunID: lineage.SourceRunID, ForkRunID: lineage.ForkRunID}
+		return &runfork.RunForkSourceFreezeConfirmationError{SourceRunID: lineage.SourceRunID, ForkRunID: lineage.ForkRunID}
 	}
 	if now.IsZero() {
 		now = time.Now().UTC()
@@ -154,7 +118,7 @@ func requireRunForkSourceFreezeReady(ctx context.Context, tx *sql.Tx, sourceRunI
 		}
 	}
 	if len(blockers) > 0 {
-		return &RunForkSourceFreezeBusyError{SourceRunID: sourceRunID, Blockers: blockers}
+		return &runfork.RunForkSourceFreezeBusyError{SourceRunID: sourceRunID, Blockers: blockers}
 	}
 	return nil
 }

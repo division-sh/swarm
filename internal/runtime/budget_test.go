@@ -253,13 +253,13 @@ func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext
 func TestNewRuntimeConstructsBudgetTrackerFromBackendNeutralStore(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	store := &budgetSpendStoreCapture{}
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
 		EventStore:       &minimalRuntimeEventStore{},
 		BudgetSpendStore: store,
-	}, Options: RuntimeOptions{
-		WorkflowModule: module,
-		LLMRuntime:     noopLLMRuntime{},
-	}})
+		Options: RuntimeOptions{
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
 
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -269,9 +269,6 @@ func TestNewRuntimeConstructsBudgetTrackerFromBackendNeutralStore(t *testing.T) 
 	}
 	if rt.Budget.store != store {
 		t.Fatalf("Runtime Budget store = %#v, want backend-neutral store %#v", rt.Budget.store, store)
-	}
-	if rt.Stores.SQLDB != nil {
-		t.Fatalf("Runtime Stores.SQLDB = %#v, want nil raw SQL handle", rt.Stores.SQLDB)
 	}
 }
 

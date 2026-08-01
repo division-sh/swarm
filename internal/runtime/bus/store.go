@@ -15,6 +15,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 var (
@@ -59,6 +60,11 @@ type CommitPublishRequest struct {
 	PipelineClaim     runtimepipelineobligation.Claim
 	Disposition       *runtimepipelineobligation.Disposition
 	DeadLetter        *runtimedeadletters.Record
+}
+
+type CommitSelectedForkEventRequest struct {
+	Commit  CommitPublishRequest
+	Lineage runfork.RunForkSelectedContractExecutionLineage
 }
 
 // DeliveryCommitReceipt is the transaction result channel for exact committed
@@ -174,6 +180,19 @@ type FlowInstanceRoutePersistence interface {
 // complete active record set inside the selected mutation.
 type FlowInstanceRouteSetPersistence interface {
 	ReplaceFlowInstanceRouteRecords(ctx context.Context, identity runtimeflowidentity.Route, routes []FlowInstanceRouteRecord) error
+}
+
+// FlowInstanceRouteRecordSet is one exact route owner's complete materialized
+// record set within a topology replacement.
+type FlowInstanceRouteRecordSet struct {
+	Identity runtimeflowidentity.Route
+	Routes   []FlowInstanceRouteRecord
+}
+
+// FlowInstanceRouteTopologyPersistence atomically replaces every affected
+// route owner in one closed selected-store operation.
+type FlowInstanceRouteTopologyPersistence interface {
+	ReplaceFlowInstanceRouteTopology(ctx context.Context, sets []FlowInstanceRouteRecordSet) error
 }
 
 type FlowInstanceRouteRecordReader interface {

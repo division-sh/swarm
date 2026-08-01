@@ -90,7 +90,7 @@ func assertCausalFlowEntities(t testing.TB, h *runtimeHarness, rootEntityID stri
 	candidateEntityIDs := catalogCausalEntityIDs(t, h.db, h.startedAt, h.publishedIDs, rootEntityID)
 	for flowID, expected := range want {
 		flowID = strings.TrimSpace(flowID)
-		got, found, err := catalogFlowInstanceForCausalFlow(h.workflow, semanticview.Wrap(h.bundle), candidateEntityIDs, flowID, true)
+		got, found, err := catalogFlowInstanceForCausalFlow(h.db, h.workflow, semanticview.Wrap(h.bundle), candidateEntityIDs, flowID, true)
 		if err != nil {
 			t.Fatalf("load causal flow instance %s: %v", flowID, err)
 		}
@@ -158,7 +158,7 @@ func (h *runtimeHarness) resolveExpectedEntityID(entityID string) string {
 	}
 }
 
-func assertGates(t testing.TB, workflow *runtimepipeline.WorkflowInstanceStore, entityID string, want map[string]bool) {
+func assertGates(t testing.TB, workflow catalogWorkflowPersistence, entityID string, want map[string]bool) {
 	t.Helper()
 	if len(want) == 0 {
 		return
@@ -192,7 +192,7 @@ func assertGates(t testing.TB, workflow *runtimepipeline.WorkflowInstanceStore, 
 	}
 }
 
-func assertEntityFields(t testing.TB, workflow *runtimepipeline.WorkflowInstanceStore, entityID string, want map[string]any) {
+func assertEntityFields(t testing.TB, workflow catalogWorkflowPersistence, entityID string, want map[string]any) {
 	t.Helper()
 	if len(want) == 0 {
 		return
@@ -233,7 +233,7 @@ func assertEntityFields(t testing.TB, workflow *runtimepipeline.WorkflowInstance
 	}
 }
 
-func assertEntityState(t testing.TB, db *sql.DB, workflow *runtimepipeline.WorkflowInstanceStore, entityID, wantState string) {
+func assertEntityState(t testing.TB, db *sql.DB, workflow catalogWorkflowPersistence, entityID, wantState string) {
 	t.Helper()
 	if workflow == nil {
 		t.Fatal("workflow instance store is required")
@@ -273,7 +273,7 @@ func assertFlowState(t testing.TB, h *runtimeHarness, entityID, flowID, wantStat
 	got := strings.TrimSpace(instance.CurrentState)
 	if flowID != "" {
 		candidateEntityIDs := catalogCausalEntityIDs(t, h.db, h.startedAt, h.publishedIDs, entityID)
-		matched, found, err := catalogFlowInstanceForCausalFlow(h.workflow, semanticview.Wrap(h.bundle), candidateEntityIDs, strings.TrimSpace(flowID), false)
+		matched, found, err := catalogFlowInstanceForCausalFlow(h.db, h.workflow, semanticview.Wrap(h.bundle), candidateEntityIDs, strings.TrimSpace(flowID), false)
 		if err != nil {
 			t.Fatalf("load causal flow instance %s: %v", flowID, err)
 		}
@@ -287,13 +287,9 @@ func assertFlowState(t testing.TB, h *runtimeHarness, entityID, flowID, wantStat
 	}
 }
 
-func catalogFlowInstanceForCausalFlow(workflow *runtimepipeline.WorkflowInstanceStore, source semanticview.Source, candidateEntityIDs map[string]struct{}, flowID string, requireCausal bool) (runtimepipeline.WorkflowInstance, bool, error) {
+func catalogFlowInstanceForCausalFlow(db *sql.DB, workflow catalogWorkflowPersistence, source semanticview.Source, candidateEntityIDs map[string]struct{}, flowID string, requireCausal bool) (runtimepipeline.WorkflowInstance, bool, error) {
 	if workflow == nil {
 		return runtimepipeline.WorkflowInstance{}, false, nil
-	}
-	rows, err := workflow.List(catalogRuntimeContext())
-	if err != nil {
-		return runtimepipeline.WorkflowInstance{}, false, err
 	}
 	flowID = strings.TrimSpace(flowID)
 	candidates := map[string]struct{}{}
@@ -347,13 +343,54 @@ func catalogFlowInstanceForCausalFlow(workflow *runtimepipeline.WorkflowInstance
 		}
 		return true
 	}
-	for _, row := range rows {
+	keys := map[string]struct{}{}
+	for entityID := range candidateEntityIDs {
+		if entityID = strings.TrimSpace(entityID); entityID != "" {
+			keys[entityID] = struct{}{}
+		}
+	}
+	for candidate := range candidates {
+		if candidate = strings.Trim(candidate, "/"); candidate != "" {
+			keys[candidate] = struct{}{}
+			keys[runtimepipeline.FlowInstanceEntityID(candidate)] = struct{}{}
+		}
+	}
+	if db != nil {
+		rows, err := db.QueryContext(catalogRuntimeContext(), `SELECT entity_id::text FROM entity_state ORDER BY created_at, entity_id`)
+		if err != nil {
+			return runtimepipeline.WorkflowInstance{}, false, err
+		}
+		for rows.Next() {
+			var key string
+			if err := rows.Scan(&key); err != nil {
+				rows.Close()
+				return runtimepipeline.WorkflowInstance{}, false, err
+			}
+			keys[strings.TrimSpace(key)] = struct{}{}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return runtimepipeline.WorkflowInstance{}, false, err
+		}
+		rows.Close()
+	}
+	instances := make([]runtimepipeline.WorkflowInstance, 0, len(keys))
+	for key := range keys {
+		row, found, err := workflow.Load(catalogRuntimeContext(), key)
+		if err != nil {
+			return runtimepipeline.WorkflowInstance{}, false, err
+		}
+		if found {
+			instances = append(instances, row)
+		}
+	}
+	for _, row := range instances {
 		if matchCausal(row) && matchFlow(row) {
 			return row, true, nil
 		}
 	}
 	if !requireCausal {
-		for _, row := range rows {
+		for _, row := range instances {
 			if matchFlow(row) {
 				return row, true, nil
 			}

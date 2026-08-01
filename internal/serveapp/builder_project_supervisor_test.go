@@ -45,6 +45,13 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
+func runtimeDepsForServeTest(stores storeBundle, cfg *config.Config, options runtimepkg.RuntimeOptions) runtimepkg.RuntimeDeps {
+	deps := stores.runtimeDeps()
+	deps.Config = cfg
+	deps.Options = options
+	return deps
+}
+
 type failOnceFinalizeStartupOwnershipStore struct {
 	delegate runtimestartupownership.Store
 
@@ -763,20 +770,16 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						newHash = runtimeContextTestHash("b")
 					}
 					newRuntime := func(hash string) *runtimepkg.Runtime {
-						rt, err := runtimepkg.NewRuntime(context.Background(), runtimepkg.RuntimeDeps{
-							Config: &config.Config{},
-							Stores: stores.runtimeStores(),
-							Options: runtimepkg.RuntimeOptions{
-								SelfCheck:                        false,
-								WorkflowModule:                   module,
-								LLMRuntime:                       runtimellm.NoopRuntime{},
-								DisablePersistentStartupRecovery: true,
-								ProviderTriggerCatalog:           providerRegistry,
-								ProcessWorkOwner:                 processWorkOwner,
-								RuntimeInstanceID:                runtimeInstanceID,
-								BundleSourceFact:                 mustServeTestEphemeralBundleSourceFact(hash),
-							},
-						})
+						rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
+							SelfCheck:                        false,
+							WorkflowModule:                   module,
+							LLMRuntime:                       runtimellm.NoopRuntime{},
+							DisablePersistentStartupRecovery: true,
+							ProviderTriggerCatalog:           providerRegistry,
+							ProcessWorkOwner:                 processWorkOwner,
+							RuntimeInstanceID:                runtimeInstanceID,
+							BundleSourceFact:                 mustServeTestEphemeralBundleSourceFact(hash),
+						}))
 						if err != nil {
 							t.Fatalf("NewRuntime(%s): %v", hash, err)
 						}
@@ -1038,16 +1041,13 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 			}
 			processWorkOwner := newSupervisorTestProcessOwner(t)
 			newRuntime := func(instanceID string) *runtimepkg.Runtime {
-				rt, err := runtimepkg.NewRuntime(context.Background(), runtimepkg.RuntimeDeps{
-					Config: &config.Config{}, Stores: stores.runtimeStores(),
-					Options: runtimepkg.RuntimeOptions{
-						WorkflowModule: module, LLMRuntime: runtimellm.NoopRuntime{},
-						Credentials: credentials, ProviderCredentials: credentials,
-						ProviderTriggerCatalog: testProviderTriggerCatalog(t),
-						ProcessWorkOwner:       processWorkOwner,
-						RuntimeInstanceID:      instanceID, BundleSourceFact: fact,
-					},
-				})
+				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
+					WorkflowModule: module, LLMRuntime: runtimellm.NoopRuntime{},
+					Credentials: credentials, ProviderCredentials: credentials,
+					ProviderTriggerCatalog: testProviderTriggerCatalog(t),
+					ProcessWorkOwner:       processWorkOwner,
+					RuntimeInstanceID:      instanceID, BundleSourceFact: fact,
+				}))
 				if err != nil {
 					t.Fatalf("NewRuntime(%s): %v", instanceID, err)
 				}
@@ -1236,16 +1236,13 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 						}
 					})
 					newRuntime := func(hash string, workflowModule runtimepipeline.WorkflowModule) *runtimepkg.Runtime {
-						rt, err := runtimepkg.NewRuntime(context.Background(), runtimepkg.RuntimeDeps{
-							Config: &config.Config{}, Stores: stores.runtimeStores(),
-							Options: runtimepkg.RuntimeOptions{
-								WorkflowModule: workflowModule, LLMRuntime: runtimellm.NoopRuntime{},
-								Credentials: credentials, ProviderCredentials: credentials,
-								ProviderTriggerCatalog: catalog, ProcessWorkOwner: processWorkOwner,
-								RuntimeInstanceID: "11111111-1111-1111-1111-111111111111",
-								BundleSourceFact:  mustServeTestEphemeralBundleSourceFact(hash),
-							},
-						})
+						rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
+							WorkflowModule: workflowModule, LLMRuntime: runtimellm.NoopRuntime{},
+							Credentials: credentials, ProviderCredentials: credentials,
+							ProviderTriggerCatalog: catalog, ProcessWorkOwner: processWorkOwner,
+							RuntimeInstanceID: "11111111-1111-1111-1111-111111111111",
+							BundleSourceFact:  mustServeTestEphemeralBundleSourceFact(hash),
+						}))
 						if err != nil {
 							t.Fatalf("NewRuntime(%s): %v", hash, err)
 						}
@@ -1376,10 +1373,7 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 			runtimeInstanceID := "11111111-1111-1111-1111-111111111111"
 			fact := mustServeTestEphemeralBundleSourceFact(hash)
 			newRuntime := func() *runtimepkg.Runtime {
-				rt, err := runtimepkg.NewRuntime(context.Background(), runtimepkg.RuntimeDeps{
-					Config: &config.Config{}, Stores: stores.runtimeStores(),
-					Options: runtimepkg.RuntimeOptions{SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source}, LLMRuntime: runtimellm.NoopRuntime{}, DisablePersistentStartupRecovery: true, ProviderTriggerCatalog: providerRegistry, ProcessWorkOwner: processWorkOwner, BundleSourceFact: fact, RuntimeInstanceID: runtimeInstanceID},
-				})
+				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source}, LLMRuntime: runtimellm.NoopRuntime{}, DisablePersistentStartupRecovery: true, ProviderTriggerCatalog: providerRegistry, ProcessWorkOwner: processWorkOwner, BundleSourceFact: fact, RuntimeInstanceID: runtimeInstanceID}))
 				if err != nil {
 					t.Fatalf("NewRuntime: %v", err)
 				}
@@ -1855,20 +1849,16 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 			}
 			contexts := make([]serveRuntimeBundleContext, 0, len(facts))
 			for _, fact := range facts {
-				rt, err := runtimepkg.NewRuntime(context.Background(), runtimepkg.RuntimeDeps{
-					Config: &config.Config{},
-					Stores: stores.runtimeStores(),
-					Options: runtimepkg.RuntimeOptions{
-						SelfCheck:                        false,
-						WorkflowModule:                   stubWorkflowModule{source: source},
-						LLMRuntime:                       runtimellm.NoopRuntime{},
-						DisablePersistentStartupRecovery: true,
-						ProviderTriggerCatalog:           providerRegistry,
-						ProcessWorkOwner:                 processWorkOwner,
-						RuntimeInstanceID:                runtimeInstanceID,
-						BundleSourceFact:                 fact,
-					},
-				})
+				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
+					SelfCheck:                        false,
+					WorkflowModule:                   stubWorkflowModule{source: source},
+					LLMRuntime:                       runtimellm.NoopRuntime{},
+					DisablePersistentStartupRecovery: true,
+					ProviderTriggerCatalog:           providerRegistry,
+					ProcessWorkOwner:                 processWorkOwner,
+					RuntimeInstanceID:                runtimeInstanceID,
+					BundleSourceFact:                 fact,
+				}))
 				if err != nil {
 					t.Fatalf("NewRuntime(%s): %v", fact.BundleHash(), err)
 				}
@@ -1880,7 +1870,7 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 				t.Fatalf("startServeRuntimeContexts error = %v, want shutdown admission failure", err)
 			}
 
-			registrar, ok := stores.runtimeStores().EventStore.(interface {
+			registrar, ok := stores.runtimeDeps().EventStore.(interface {
 				RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 			})
 			if !ok {

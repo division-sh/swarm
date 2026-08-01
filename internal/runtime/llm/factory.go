@@ -20,6 +20,7 @@ import (
 type RuntimeFactory struct {
 	Cfg                  *config.Config
 	Sessions             sessions.Registry
+	LiveSessions         LiveSessionAcquirer
 	Conversations        ConversationPersistence
 	LockOwner            string
 	Workspaces           workspace.Resolver
@@ -37,17 +38,20 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 	if f.CompletionController == nil || !f.CompletionController.CompletionEnabled() {
 		return nil, fmt.Errorf("llm completion execution controller is required")
 	}
+	profile, err := f.Cfg.LLMBackendProfile()
+	if err != nil {
+		return nil, err
+	}
 	if f.Sessions == nil {
 		f.Sessions = sessions.NewInMemoryRegistry(f.Cfg.LLM.Session.LockTTL)
+	}
+	if f.LiveSessions == nil {
+		return nil, fmt.Errorf("llm live session acquirer is required")
 	}
 	if f.LockOwner == "" {
 		f.LockOwner = defaultLockOwner()
 	}
 
-	profile, err := f.Cfg.LLMBackendProfile()
-	if err != nil {
-		return nil, err
-	}
 	providerAdmission := NewProviderAdmissionRegistry(f.Cfg)
 	providerCredentials := NewProviderCredentialResolver(f.Credentials)
 
@@ -57,6 +61,7 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 		runtime = NewAnthropicAPIRuntimeWithProviderCredentials(f.Cfg, f.Sessions, f.LockOwner, f.Conversations, f.Events, providerCredentials)
 		runtime.(*AnthropicAPIRuntime).providerAdmission = providerAdmission
 		runtime.(*AnthropicAPIRuntime).completionController = f.CompletionController
+		runtime.(*AnthropicAPIRuntime).liveSessions = f.LiveSessions
 	case llmselection.BackendClaudeCLI:
 		runtime = NewClaudeCLIRuntimeWithOptions(f.Cfg, f.Sessions, f.LockOwner, f.Workspaces, f.Conversations, f.Events, ClaudeCLIRuntimeOptions{
 			MCPTurnContextStore:  f.MCPTurns,
@@ -65,16 +70,20 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 			CompletionController: f.CompletionController,
 		})
 		runtime.(*ClaudeCLIRuntime).providerAdmission = providerAdmission
+		runtime.(*ClaudeCLIRuntime).liveSessions = f.LiveSessions
 	case llmselection.BackendOpenAICompatible:
 		runtime = NewOpenAICompatibleRuntimeWithProviderCredentials(f.Cfg, f.Sessions, f.LockOwner, f.Conversations, f.Events, providerCredentials)
 		runtime.(*OpenAICompatibleRuntime).providerAdmission = providerAdmission
 		runtime.(*OpenAICompatibleRuntime).completionController = f.CompletionController
+		runtime.(*OpenAICompatibleRuntime).liveSessions = f.LiveSessions
 	case llmselection.BackendOpenAIResponses:
 		runtime = NewOpenAIResponsesRuntimeWithProviderCredentials(f.Cfg, f.Sessions, f.LockOwner, f.Conversations, f.Events, providerCredentials)
 		runtime.(*OpenAIResponsesRuntime).providerAdmission = providerAdmission
 		runtime.(*OpenAIResponsesRuntime).completionController = f.CompletionController
+		runtime.(*OpenAIResponsesRuntime).liveSessions = f.LiveSessions
 	case llmselection.BackendMock:
 		runtime = NewMockRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Conversations, f.Events, f.CompletionController)
+		runtime.(*MockRuntime).liveSessions = f.LiveSessions
 	default:
 		return nil, fmt.Errorf("unsupported llm backend profile: %s", profile.ID)
 	}

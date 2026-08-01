@@ -24,7 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-type targetFailureDeadLetterRecorder interface {
+type TargetFailureDeadLetterRecorder interface {
 	RecordDeadLetter(context.Context, runtimedeadletters.Record) error
 }
 
@@ -234,8 +234,8 @@ type eventBusCommitPublishPlan struct {
 }
 
 func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublishPlan) (PreparedPublish, error) {
-	owner, ok := eb.store.(CommitPublishOwner)
-	if !ok || owner == nil {
+	owner := eb.store
+	if owner == nil {
 		return PreparedPublish{}, errors.New("selected store does not support the closed CommitPublish operation")
 	}
 	preparedCtx, admitted, err := eb.admitPublishEvent(ctx, plan.event)
@@ -1799,8 +1799,8 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 }
 
 func (eb *EventBus) deliveryTargetsForEvent(ctx context.Context, eventID string) map[string]events.RouteIdentity {
-	reader, ok := eb.store.(EventDeliveryTargetReader)
-	if !ok || reader == nil {
+	reader := eb.durable.DeliveryTargets
+	if reader == nil {
 		return nil
 	}
 	targets, err := reader.ListEventDeliveryTargets(ctx, eventID)
@@ -1811,8 +1811,8 @@ func (eb *EventBus) deliveryTargetsForEvent(ctx context.Context, eventID string)
 }
 
 func (eb *EventBus) deliveryRoutesForEvent(ctx context.Context, eventID string) []events.DeliveryRoute {
-	reader, ok := eb.store.(EventDeliveryRouteSetReader)
-	if ok && reader != nil {
+	reader := eb.durable.DeliveryRouteSets
+	if reader != nil {
 		routes, err := reader.ListEventDeliveryRoutes(ctx, eventID)
 		if err == nil && len(routes) > 0 {
 			return events.NormalizeDeliveryRoutes(routes)
@@ -1829,8 +1829,8 @@ func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.
 	_, detail, record := targetDeliveryFailureRecord(evt, plan, failure)
 	eb.logRuntime(ctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, &record.Failure, 0)
 
-	recorder, ok := eb.store.(targetFailureDeadLetterRecorder)
-	if !ok || recorder == nil {
+	recorder := eb.durable.TargetFailureRecorder
+	if recorder == nil {
 		return
 	}
 	if err := recorder.RecordDeadLetter(ctx, record); err != nil {

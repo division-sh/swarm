@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store/runbundle"
 )
 
 type contractEntityTypeRepair struct {
@@ -19,6 +19,10 @@ type contractEntityTypeRepair struct {
 	WorkflowVersion    string
 	BundleAvailability runbundle.Availability
 	EntityType         string
+}
+
+type RunBundleAvailabilityReader interface {
+	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
 }
 
 func (pc *PipelineCoordinator) RepairContractEntityTypes(ctx context.Context) (int, error) {
@@ -64,7 +68,10 @@ func (pc *PipelineCoordinator) RepairContractEntityTypes(ctx context.Context) (i
 		if !ok {
 			continue
 		}
-		availability, err := runbundle.LoadAvailability(ctx, pc.db, item.RunID)
+		if pc.runBundleAvailability == nil {
+			return 0, fmt.Errorf("run bundle availability reader is required to repair contract entity types")
+		}
+		availability, err := pc.runBundleAvailability.LoadRunBundleAvailability(ctx, item.RunID)
 		if err != nil {
 			return 0, err
 		}
