@@ -103,7 +103,7 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) error {
 		return nil
 	}
 	detail := marshalJSONOrEmpty(e.Detail)
-	payload, err := logRuntimeEventSpec(withoutSQLTxContext(ctx), l.persistence, true, level.String(), component, action, e, detail)
+	payload, err := logRuntimeEventSpec(ctx, l.persistence, true, level.String(), component, action, e, detail)
 	if err != nil {
 		return err
 	}
