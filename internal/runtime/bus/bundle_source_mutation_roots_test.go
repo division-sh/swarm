@@ -19,8 +19,10 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -326,6 +328,33 @@ func sourceMutationFact(t testing.TB, marker string) runtimecorrelation.BundleSo
 	return fact
 }
 
+func sourceMutationRouteSource() semanticview.Source {
+	flow := runtimecontracts.FlowContractView{
+		Path:   "work",
+		Paths:  runtimecontracts.FlowContractPaths{ID: "work", Flow: "work"},
+		Schema: runtimecontracts.FlowSchemaDocument{Mode: "template"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.completed": {},
+			"task.requested": {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"worker": {
+				ID:           "worker-{instance_id}",
+				Produces:     []string{"task.completed"},
+				SubscribesTo: []string{"task.requested"},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{"work": &root.Children[0]},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"work": {Mode: "template"}},
+	})
+}
+
 func newSourceMutationProbeBus(
 	t testing.TB,
 	fact runtimecorrelation.BundleSourceFact,
@@ -339,6 +368,7 @@ func newSourceMutationProbeBusWithStore(
 	store EventStore,
 	fact runtimecorrelation.BundleSourceFact,
 	owner *sourceMutationProbeOwner,
+	sources ...semanticview.Source,
 ) *EventBus {
 	t.Helper()
 	process := worklifetime.NewProcess()
@@ -356,7 +386,7 @@ func newSourceMutationProbeBusWithStore(
 		process.Retire()
 		_, _ = process.Join(ctx)
 	})
-	bus, err := NewEventBusWithOptions(store, EventBusOptions{
+	options := EventBusOptions{
 		BundleSourceFact:    fact,
 		RuntimeInstanceID:   uuid.NewString(),
 		PipelineObligations: owner,
@@ -364,7 +394,11 @@ func newSourceMutationProbeBusWithStore(
 		WorkOwner:           runtimeOwner,
 		ReceiverExecution:   eventreceiver.NormalExecution(),
 		DeliveryAuthority:   mustSourceMutationDeliveryAuthority(t, fact),
-	})
+	}
+	if len(sources) > 0 {
+		options.ContractBundle = sources[0]
+	}
+	bus, err := NewEventBusWithOptions(store, options)
 	if err != nil {
 		t.Fatalf("create event bus: %v", err)
 	}
@@ -514,14 +548,9 @@ func TestAdjacentDurableMutationRootsRejectForeignSourceBeforeMutation(t *testin
 	foreign := sourceMutationFact(t, "d")
 	owner := newSourceMutationProbeOwner()
 	store := &sourceBoundaryProbeStore{}
-	bus := newSourceMutationProbeBusWithStore(t, store, owned, owner)
+	bus := newSourceMutationProbeBusWithStore(t, store, owned, owner, sourceMutationRouteSource())
 	foreignCtx := runtimecorrelation.WithBundleSourceFact(context.Background(), foreign)
 	req := FlowInstanceRouteMaterializationRequest{
-		Template: runtimecontracts.SystemNodeContract{
-			ID:           "worker-{instance_id}",
-			Produces:     []string{"task.completed"},
-			SubscribesTo: []string{"task.requested"},
-		},
 		Identity: runtimeflowidentity.DeriveRoute("work", "instance-a"),
 	}
 

@@ -807,6 +807,7 @@ seam_families:
       - internal/runtime/bus/routing_derivation.go
       - internal/runtime/bus/routing_derivation_test.go
       - internal/runtime/conformance/route_authority_matrix_test.go
+      - internal/runtime/conformance/template_instance_semantic_ownership_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
     search_dimensions: [receiver_carrier, connect_route_plan]
     invalid_authority:

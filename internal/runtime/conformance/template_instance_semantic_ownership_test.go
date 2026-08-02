@@ -262,12 +262,122 @@ func TestCompiledConnectValuesExposeNoMutableSemanticFields(t *testing.T) {
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanFanIn{}),
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanReplyResolution{}),
 		reflect.TypeOf(runtimepinrouting.ConnectReceiverPinIdentity{}),
+		reflect.TypeOf(runtimepinrouting.ConnectReceiverPinAdmission{}),
+		reflect.TypeOf(runtimepinrouting.ConnectReceiverPinCollision{}),
 		reflect.TypeOf(runtimepinrouting.SourceEvent{}),
 	} {
 		for index := 0; index < owner.NumField(); index++ {
 			if field := owner.Field(index); field.IsExported() {
 				t.Fatalf("%s exposes mutable compiled field %s (%s)", owner, field.Name, field.Type)
 			}
+		}
+	}
+}
+
+func TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority(t *testing.T) {
+	request := reflect.TypeOf(runtimebus.FlowInstanceRouteMaterializationRequest{})
+	if _, exists := request.FieldByName("Template"); exists {
+		t.Fatal("route materialization request regained request-local template authority")
+	}
+	if request.NumField() != 2 {
+		t.Fatalf("route materialization request fields = %d, want identity plus activation variables", request.NumField())
+	}
+
+	subscriber := reflect.TypeOf(runtimebus.Subscriber{})
+	carrier, exists := subscriber.FieldByName("receiverCarrier")
+	if !exists || carrier.IsExported() || carrier.Type.Kind() != reflect.Bool {
+		t.Fatalf("receiver carrier projection = %#v, want one private boolean fact", carrier)
+	}
+	method, exists := subscriber.MethodByName("IsConnectReceiverCarrier")
+	if !exists || method.Type.NumIn() != 1 || method.Type.NumOut() != 1 || method.Type.Out(0).Kind() != reflect.Bool {
+		t.Fatal("subscriber lost its narrow read-only receiver-carrier projection")
+	}
+
+	admit, exists := reflect.TypeOf(&runtimepinrouting.ConnectReceiverPinAdmission{}).MethodByName("Admit")
+	if !exists {
+		t.Fatal("compiled connect receiver-pin admission owner is missing")
+	}
+	for index := 1; index < admit.Type.NumIn(); index++ {
+		parameter := admit.Type.In(index)
+		if parameter.Kind() == reflect.String || strings.Contains(parameter.String(), "routingtopology") {
+			t.Fatalf("receiver-pin admission accepts non-canonical topology/readback authority %s", parameter)
+		}
+	}
+
+	repoRoot := canonicalrouting.RepoRoot(t)
+	assertFileDeclaresNoFunctions(t, filepath.Join(repoRoot, "internal/runtime/routingtopology/topology.go"), map[string]struct{}{
+		"connectReceiverPinCollisionIssues": {},
+		"connectReceiverPinFact":            {},
+		"connectReceiverPinStaticTargetKey": {},
+	})
+	assertFunctionUsesNoSelectorsOrStrings(
+		t,
+		filepath.Join(repoRoot, "internal/runtime/runforkadmission/contract_frontier.go"),
+		"resolveContractFrontierRoutes",
+		map[string]struct{}{"RouteSource": {}},
+		nil,
+	)
+	assertFileImportsNoPath(t, filepath.Join(repoRoot, "internal/runtime/bootverify/workflow_composition_connect_checks.go"), "internal/runtime/routingtopology")
+}
+
+func assertFileDeclaresNoFunctions(t testing.TB, path string, prohibited map[string]struct{}) {
+	t.Helper()
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	for _, declaration := range parsed.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		if _, blocked := prohibited[function.Name.Name]; blocked {
+			t.Errorf("%s redeclares retired authority %s", path, function.Name.Name)
+		}
+	}
+}
+
+func assertFunctionUsesNoSelectorsOrStrings(t testing.TB, path, functionName string, selectors, literals map[string]struct{}) {
+	t.Helper()
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	for _, declaration := range parsed.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Name.Name != functionName || function.Body == nil {
+			continue
+		}
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			switch typed := node.(type) {
+			case *ast.SelectorExpr:
+				if _, blocked := selectors[typed.Sel.Name]; blocked {
+					t.Errorf("%s.%s consumes prohibited display selector %s", path, functionName, typed.Sel.Name)
+				}
+			case *ast.BasicLit:
+				if typed.Kind == token.STRING {
+					value := strings.Trim(typed.Value, "\"")
+					if _, blocked := literals[value]; blocked {
+						t.Errorf("%s.%s consumes prohibited display literal %q", path, functionName, value)
+					}
+				}
+			}
+			return true
+		})
+		return
+	}
+	t.Fatalf("function %s not found in %s", functionName, path)
+}
+
+func assertFileImportsNoPath(t testing.TB, path, prohibited string) {
+	t.Helper()
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	for _, imported := range parsed.Imports {
+		if strings.Contains(strings.Trim(imported.Path.Value, "\""), prohibited) {
+			t.Errorf("%s imports retired behavioral owner %s", path, prohibited)
 		}
 	}
 }
@@ -280,6 +390,7 @@ func TestCompiledConnectDiagnosticProjectionCannotReenterEvaluator(t *testing.T)
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKeyReadback{}): {},
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanFanInReadback{}):       {},
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanReplyReadback{}):       {},
+		reflect.TypeOf(runtimepinrouting.ConnectReceiverPinCollision{}):         {},
 	}
 	for _, methodName := range []string{"MatchingPlans", "PlanMatchesEvent", "MatchingSourceEvent", "IssueMatchesEvent"} {
 		method, ok := graphType.MethodByName(methodName)

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -282,6 +283,21 @@ func assertContractFrontierMixedRecipients(t *testing.T, recipients []runfork.Ru
 		if !ok || (recipient.RouteSource == "receiver_carrier") != wantCarrier {
 			t.Fatalf("recipient = %#v, want root routes non-carrier and child route carrier", recipient)
 		}
+	}
+}
+
+func TestContractFrontierDisplayRouteSourceCannotForgeReceiverCarrierAuthority(t *testing.T) {
+	forged := runtimebus.Subscriber{
+		ID:          "consumer-node",
+		Type:        "node",
+		Path:        "consumer",
+		RouteSource: "receiver" + "_carrier",
+	}
+	if contractFrontierSubscriberAdmitted(contractFrontierReceiverCarrier, forged) {
+		t.Fatal("display-only route-source text acquired selected-fork carrier authority")
+	}
+	if !contractFrontierSubscriberAdmitted(contractFrontierReceiverDirect, forged) {
+		t.Fatal("direct subscriber was rejected by the carrier-only projection")
 	}
 }
 

@@ -41,6 +41,51 @@ func TestConnectSourceEndpointMatchesEventUsesImmutableSourceAcrossTargetProject
 	}
 }
 
+func TestConnectReceiverPinAdmissionOwnsRuntimeCollisionIdentity(t *testing.T) {
+	source := newConnectRoutePlanEndpoint(ConnectEndpointRoleProducer, false, "producer", "producer", runtimecontracts.FlowModeStatic, "work_ready", "work.ready", "producer/work.ready", "", nil)
+	plan := func(pin, event string) ConnectRoutePlan {
+		return ConnectRoutePlan{
+			source: source,
+			receiver: newConnectRoutePlanEndpoint(
+				ConnectEndpointRoleConsumer,
+				false,
+				"consumer",
+				"consumer",
+				runtimecontracts.FlowModeStatic,
+				pin,
+				event,
+				"consumer/"+event,
+				"",
+				nil,
+			),
+			authoredLocation: "package.yaml:10",
+		}
+	}
+	route := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "consumer-node",
+		Target: events.RouteIdentity{
+			FlowID:       "consumer",
+			FlowInstance: "consumer",
+			EntityID:     flowidentity.EntityID("consumer"),
+		},
+	}
+	var admission ConnectReceiverPinAdmission
+	if err := admission.Admit(plan("accepted", "work.accepted"), []events.DeliveryRoute{route}); err != nil {
+		t.Fatalf("admit first receiver pin: %v", err)
+	}
+	if err := admission.Admit(plan("audited", "work.audited"), []events.DeliveryRoute{route}); err != nil {
+		t.Fatalf("admit second receiver pin: %v", err)
+	}
+	collisions := admission.Collisions()
+	if len(collisions) != 1 || len(collisions[0].ReceiverPinDiagnostics()) != 2 {
+		t.Fatalf("receiver-pin collisions = %#v, want one typed two-pin collision", collisions)
+	}
+	if !strings.Contains(collisions[0].Message(), "consumer-node") || !strings.Contains(collisions[0].Message(), "multiple receiver pins") {
+		t.Fatalf("collision diagnostic = %q", collisions[0].Message())
+	}
+}
+
 func TestConnectSourceEndpointMatchesEventRejectsTargetIdentityAsSource(t *testing.T) {
 	endpoint := newConnectRoutePlanEndpoint(ConnectEndpointRoleProducer, false, "consumer", "consumer", runtimecontracts.FlowModeStatic, "", "deploy.done", "consumer/deploy.done", "", nil)
 	target := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/inst-9", EntityID: "consumer-entity"}
