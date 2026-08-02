@@ -618,10 +618,10 @@ func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (Workflo
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, false, err
 	}
 	if strings.TrimSpace(identity.StorageRef) == "" {
-		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, false, nil
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, false, &WorkflowInstanceLookupMiss{RequestedKey: strings.TrimSpace(instance.StorageRef)}
 	}
 	if strings.TrimSpace(identity.RowID()) == "" {
-		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, false, nil
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, false, &WorkflowInstanceLookupMiss{RequestedKey: strings.TrimSpace(identity.StorageRef)}
 	}
 	if instance.Metadata == nil {
 		instance.Metadata = map[string]any{}
