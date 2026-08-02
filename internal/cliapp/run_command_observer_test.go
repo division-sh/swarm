@@ -610,6 +610,63 @@ func TestForegroundRunTraceObserverTimeoutInterruptsBlockedRequestWrite(t *testi
 	requireSignal(t, closed, "write-stalled WebSocket close")
 }
 
+func TestRunCommandHealthyTraceBurstWithinTransportBoundDoesNotDetach(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	lastRendered := make(chan struct{})
+	stdout := &notifyingBuffer{needle: "evt-healthy-016", notify: lastRendered}
+	rows := make([]map[string]any, 16)
+	for i := range rows {
+		rows[i] = validRunCommandTraceRow(fmt.Sprintf("evt-healthy-%03d", i+1))
+	}
+	server, _, _ := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			switch req.Method {
+			case "health.check":
+				return runCommandHealthResult()
+			case "run.start":
+				return map[string]any{"run_id": "run-healthy-burst", "status": "running"}
+			case "run.get":
+				run := validDiagnosticRunHeader("run-healthy-burst")
+				select {
+				case <-lastRendered:
+					run["status"] = "completed"
+					run["ended_at"] = "2026-05-13T10:01:00Z"
+				default:
+				}
+				return map[string]any{"run": run}
+			default:
+				t.Fatalf("unexpected method = %q", req.Method)
+				return nil
+			}
+		},
+		wsRows: rows,
+	})
+	defer server.Close()
+
+	var stderr bytes.Buffer
+	code := executeRootCommandWithOptions(
+		context.Background(),
+		t.TempDir(),
+		[]string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath},
+		stdout,
+		&stderr,
+		testRunCommandOptions(server),
+	)
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), runTraceObserverDetachedType) {
+		t.Fatalf("healthy burst detached observer: %s", stderr.String())
+	}
+	for i := range rows {
+		want := fmt.Sprintf("evt-healthy-%03d", i+1)
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q: %s", want, stdout.String())
+		}
+	}
+}
+
 func TestRunCommandQueueOverflowDetachesExactlyOnce(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
