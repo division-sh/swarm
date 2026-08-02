@@ -259,7 +259,7 @@ func TestRuntimePipelineRejectsUnconfiguredReceiverExecution(t *testing.T) {
 		Persistence: WorkflowPersistence{store: &workflowInstanceStore{db: new(sql.DB)}},
 	})
 	opts.ReceiverExecution = eventreceiver.ExecutionVariant{}
-	if coordinator := NewPipelineCoordinatorWithOptions(previewBus{}, nil, opts); coordinator != nil {
+	if coordinator := NewPipelineCoordinatorWithOptions(previewBus{}, opts); coordinator != nil {
 		t.Fatal("runtime Pipeline accepted unconfigured receiver execution")
 	}
 

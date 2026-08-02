@@ -50,16 +50,16 @@ func TestEventBusReceiverOwnershipBoundaryStructuralGuard(t *testing.T) {
 		"localDeliveryContext":           false,
 	}
 	guardedFunctions := map[string]bool{
-		"beginReceiverDispatch":               false,
-		"receiverRouteContext":                false,
-		"completeCommittedPublishDispatch":    false,
-		"publishPersistedRecipientsWithScope": false,
-		"DispatchDeliveryContinuation":        false,
-		"dispatchIntent":                      false,
-		"agentRouteHandle.send":               false,
-		"internalSubscriptionHandle.send":     false,
-		"agentDeliveryExecutionContext":       false,
-		"agentLifecycleCoordinator.terminateIdentityWithTopologyCommitHooks": false,
+		"beginReceiverDispatch":                                           false,
+		"receiverRouteContext":                                            false,
+		"completeCommittedPublishDispatch":                                false,
+		"publishPersistedRecipientsWithScope":                             false,
+		"DispatchDeliveryContinuation":                                    false,
+		"dispatchIntent":                                                  false,
+		"agentRouteHandle.send":                                           false,
+		"internalSubscriptionHandle.send":                                 false,
+		"agentDeliveryExecutionContext":                                   false,
+		"agentLifecycleCoordinator.terminateIdentityWithTopologyExpected": false,
 	}
 	for path, file := range files {
 		for _, declaration := range file.Decls {
@@ -83,13 +83,13 @@ func TestEventBusReceiverOwnershipBoundaryStructuralGuard(t *testing.T) {
 				if !ok {
 					return true
 				}
-				if key != "agentLifecycleCoordinator.terminateIdentityWithTopologyCommitHooks" && selectorCall(call, "context", "WithoutCancel") {
+				if key != "agentLifecycleCoordinator.terminateIdentityWithTopologyExpected" && selectorCall(call, "context", "WithoutCancel") {
 					t.Errorf("%s: %s reintroduced value-bearing cancellation detachment", path, key)
 				}
 				if key == "agentDeliveryExecutionContext" && selectorCall(call, "runtimeeffects", "WithAuthority") {
 					t.Errorf("%s: %s reintroduced receiver-side authority shadowing", path, key)
 				}
-				if key == "agentLifecycleCoordinator.terminateIdentityWithTopologyCommitHooks" && selectorCall(call, "runtimeeffects", "LifecycleTokenFromContext") {
+				if key == "agentLifecycleCoordinator.terminateIdentityWithTopologyExpected" && selectorCall(call, "runtimeeffects", "LifecycleTokenFromContext") {
 					t.Errorf("%s: %s reintroduced publisher-token retirement authority", path, key)
 				}
 				return true
