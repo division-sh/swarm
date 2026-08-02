@@ -60,6 +60,7 @@ type WorkflowInstance struct {
 	Status             string
 	TerminatedAt       time.Time
 	CurrentState       string
+	Revision           int64
 	Config             map[string]any
 	EnteredStageAt     time.Time
 	TransitionHistory  []WorkflowTransitionRecord
@@ -138,6 +139,7 @@ type workflowInstanceStore struct {
 	gateEvents       WorkflowGateMutationPublisher
 	lifecycleOwner   workflowInstanceLifecycleOwner
 	runLifecycle     runtimerunlifecycle.OperationOwner
+	engineMutations  WorkflowEngineMutationOwner
 	deliverySignalMu sync.RWMutex
 	deliverySignals  map[runtimedelivery.ExecutionAuthority]func()
 }
@@ -216,7 +218,8 @@ func NewPostgresWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) Wo
 	activityJournal, _ := runner.(ActivityAttemptJournal)
 	gateRoutes, _ := runner.(GateRouteAdmissionReader)
 	timerObligations, _ := runner.(runtimetimerobligation.Reader)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations}}
+	engineMutations, _ := runner.(WorkflowEngineMutationOwner)
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations}}
 }
 
 func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) WorkflowPersistence {
@@ -226,7 +229,8 @@ func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) Work
 	activityJournal, _ := runner.(ActivityAttemptJournal)
 	gateRoutes, _ := runner.(GateRouteAdmissionReader)
 	timerObligations, _ := runner.(runtimetimerobligation.Reader)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations}}
+	engineMutations, _ := runner.(WorkflowEngineMutationOwner)
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations}}
 }
 
 func (p WorkflowPersistence) empty() bool {
@@ -243,7 +247,7 @@ func (p WorkflowPersistence) Configured() bool {
 // Valid reports whether the selected backend supplied complete workflow
 // persistence, including its private mutation executor.
 func (p WorkflowPersistence) Valid() bool {
-	return !p.empty() && p.store.runtimeMutation != nil
+	return !p.empty() && p.store.runtimeMutation != nil && p.store.engineMutations != nil
 }
 
 var errSQLiteWorkflowMutationOwnerRequired = errors.New("sqlite workflow persistence requires its selected mutation owner")
@@ -890,6 +894,7 @@ func (s *workflowInstanceStore) loadSpec(ctx context.Context, instancePath strin
 			COALESCE(fi.status, ''),
 			fi.terminated_at,
 			es.current_state,
+			es.revision,
 			es.entered_state_at,
 			COALESCE(es.gates, '{}'::jsonb),
 			COALESCE(es.fields, '{}'::jsonb),
@@ -918,6 +923,7 @@ func (s *workflowInstanceStore) loadSpec(ctx context.Context, instancePath strin
 		&status,
 		&terminatedAt,
 		&item.CurrentState,
+		&item.Revision,
 		&item.EnteredStageAt,
 		&gatesRaw,
 		&fieldsRaw,
@@ -1054,6 +1060,7 @@ func (s *workflowInstanceStore) querySpec(ctx context.Context, runID, where stri
 			COALESCE(fi.status, ''),
 			fi.terminated_at,
 			es.current_state,
+			es.revision,
 			es.entered_state_at,
 			COALESCE(es.gates, '{}'::jsonb),
 			COALESCE(es.fields, '{}'::jsonb),
@@ -1094,6 +1101,7 @@ func (s *workflowInstanceStore) querySpec(ctx context.Context, runID, where stri
 			&status,
 			&terminatedAt,
 			&item.CurrentState,
+			&item.Revision,
 			&item.EnteredStageAt,
 			&gatesRaw,
 			&fieldsRaw,

@@ -310,6 +310,10 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 
 	admitted := publication.admitted
 	evt := admitted.Event()
+	descriptor, hasDescriptor, descriptorErr := publicationAuthorDescriptor(ctx, evt)
+	if descriptorErr != nil {
+		return releaseFailure(descriptorErr)
+	}
 	if reader, ok := eb.store.(PreparedPublishEventReader); ok {
 		durable, found, err := reader.LoadPreparedPublishEvent(ctx, admitted.ID())
 		if err != nil {
@@ -327,7 +331,10 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 			}
 			request := prepared.CommitRequest()
 			request.DeliveryReceipt = nil
-			return prepared, PublicationCommand{Commit: request, DynamicFlowCreation: publication.dynamicFlowCreation}, nil
+			return prepared, PublicationCommand{
+				Commit: request, DynamicFlowCreation: publication.dynamicFlowCreation,
+				AuthorDescriptor: descriptor, HasAuthorDescriptor: hasDescriptor,
+			}, nil
 		}
 	}
 
@@ -411,7 +418,21 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		Commit:              request,
 		Activations:         append([]runtimepipeline.FlowInstanceActivationPlan(nil), routePlan.ActivationPlans...),
 		DynamicFlowCreation: publication.dynamicFlowCreation,
+		AuthorDescriptor:    descriptor,
+		HasAuthorDescriptor: hasDescriptor,
 	}, nil
+}
+
+func publicationAuthorDescriptor(ctx context.Context, evt events.Event) (runtimeauthoractivity.EventDescriptor, bool, error) {
+	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+	if !ok || scope.Kind != runtimeauthoractivity.ScopeBundle {
+		return runtimeauthoractivity.EventDescriptor{}, false, nil
+	}
+	descriptor, found, err := runtimeauthoractivity.ResolvedEventDescriptorFromContext(ctx, scope, strings.TrimSpace(string(evt.Type())))
+	if err != nil {
+		return runtimeauthoractivity.EventDescriptor{}, false, err
+	}
+	return descriptor, found, nil
 }
 
 func (eventBusCommitPublishPlan) commitPublishPlan() {}

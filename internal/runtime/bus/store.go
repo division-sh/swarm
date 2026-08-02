@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
@@ -48,11 +49,21 @@ type PublicationCommand struct {
 	Commit              CommitPublishRequest
 	Activations         []runtimepipeline.FlowInstanceActivationPlan
 	DynamicFlowCreation *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
+	AuthorDescriptor    runtimeauthoractivity.EventDescriptor
+	HasAuthorDescriptor bool
 }
 
 func (c PublicationCommand) Validate() error {
 	if err := events.ValidatePersistentEvent(c.Commit.Event.Event()); err != nil {
 		return err
+	}
+	if c.HasAuthorDescriptor {
+		if strings.TrimSpace(c.AuthorDescriptor.EventType) != strings.TrimSpace(string(c.Commit.Event.Event().Type())) {
+			return fmt.Errorf("publication author descriptor does not match event type")
+		}
+		if strings.TrimSpace(string(c.AuthorDescriptor.Disposition)) == "" {
+			return fmt.Errorf("publication author descriptor requires disposition")
+		}
 	}
 	for index, activation := range c.Activations {
 		if err := activation.Validate(); err != nil {

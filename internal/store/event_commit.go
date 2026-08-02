@@ -259,55 +259,100 @@ func commitPublication(
 	if err := command.Validate(); err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
+	ctx = runtimeauthoractivity.WithoutResolvedEventDescriptor(ctx)
+	if command.HasAuthorDescriptor {
+		scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+		if !ok || scope.Kind != runtimeauthoractivity.ScopeBundle {
+			return runtimebus.CommittedPublication{}, fmt.Errorf("publication author descriptor requires exact bundle scope")
+		}
+		var err error
+		ctx, err = runtimeauthoractivity.WithResolvedEventDescriptor(ctx, scope, command.AuthorDescriptor)
+		if err != nil {
+			return runtimebus.CommittedPublication{}, err
+		}
+	}
 	_, postgres := store.(*PostgresStore)
-	request := command.Commit
-	request.DeliveryReceipt = nil
 	result := runtimebus.CommittedPublication{}
 	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		committer := sqlPublishCommitter{tx: tx, store: store, story: runtimeAuthorActivityMutation(story)}
-		creationAlreadyCommitted := false
 		var err error
-		if command.DynamicFlowCreation != nil {
-			creationAlreadyCommitted, err = prepareDynamicFlowCreationOccurrenceCommit(txctx, tx, postgres, *command.DynamicFlowCreation)
-			if err != nil {
-				return err
-			}
-		}
-		outcome, err := store.appendAdmittedEventTxOutcome(txctx, tx, committer.story, request.Event)
-		if err != nil {
-			return err
-		}
-		result.AppendOutcome = outcome
-		if outcome == runtimebus.EventAppendExactDuplicate {
-			if command.DynamicFlowCreation != nil && !creationAlreadyCommitted {
-				return fmt.Errorf("dynamic flow creation event exists before readiness completion")
-			}
-			return nil
-		}
-		if outcome != runtimebus.EventAppendInserted {
-			return fmt.Errorf("publication commit returned invalid append outcome")
-		}
-		if command.DynamicFlowCreation != nil && creationAlreadyCommitted {
-			return fmt.Errorf("dynamic flow readiness is complete without its creation event")
-		}
-		result.Activations, err = commitFlowInstanceActivations(txctx, tx, story, postgres, command.Activations)
-		if err != nil {
-			return err
-		}
-		result.DeliveryHandoffs, err = committer.commitInitialSideEffectEvidence(txctx, request, true)
-		if err != nil {
-			return err
-		}
-		if command.DynamicFlowCreation != nil {
-			return markDynamicFlowCreationOccurrenceCommitted(txctx, tx, postgres, *command.DynamicFlowCreation)
-		}
-		return nil
+		result, err = commitPublicationTx(txctx, tx, story, store, postgres, command)
+		return err
 	})
 	if err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
 	if err := result.Validate(); err != nil {
 		return runtimebus.CommittedPublication{}, fmt.Errorf("validate committed publication: %w", err)
+	}
+	return result, nil
+}
+
+func commitPublicationTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	story *privateauthoractivity.Mutation,
+	store eventCommitTxStore,
+	postgres bool,
+	command runtimebus.PublicationCommand,
+) (runtimebus.CommittedPublication, error) {
+	if tx == nil || story == nil {
+		return runtimebus.CommittedPublication{}, fmt.Errorf("publication commit requires private transaction and story owners")
+	}
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	ctx = runtimeauthoractivity.WithoutResolvedEventDescriptor(ctx)
+	if command.HasAuthorDescriptor {
+		scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+		if !ok || scope.Kind != runtimeauthoractivity.ScopeBundle {
+			return runtimebus.CommittedPublication{}, fmt.Errorf("publication author descriptor requires exact bundle scope")
+		}
+		var err error
+		ctx, err = runtimeauthoractivity.WithResolvedEventDescriptor(ctx, scope, command.AuthorDescriptor)
+		if err != nil {
+			return runtimebus.CommittedPublication{}, err
+		}
+	}
+	request := command.Commit
+	request.DeliveryReceipt = nil
+	committer := sqlPublishCommitter{tx: tx, store: store, story: runtimeAuthorActivityMutation(story)}
+	creationAlreadyCommitted := false
+	var err error
+	if command.DynamicFlowCreation != nil {
+		creationAlreadyCommitted, err = prepareDynamicFlowCreationOccurrenceCommit(ctx, tx, postgres, *command.DynamicFlowCreation)
+		if err != nil {
+			return runtimebus.CommittedPublication{}, err
+		}
+	}
+	outcome, err := store.appendAdmittedEventTxOutcome(ctx, tx, committer.story, request.Event)
+	if err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	result := runtimebus.CommittedPublication{AppendOutcome: outcome}
+	if outcome == runtimebus.EventAppendExactDuplicate {
+		if command.DynamicFlowCreation != nil && !creationAlreadyCommitted {
+			return runtimebus.CommittedPublication{}, fmt.Errorf("dynamic flow creation event exists before readiness completion")
+		}
+		return result, nil
+	}
+	if outcome != runtimebus.EventAppendInserted {
+		return runtimebus.CommittedPublication{}, fmt.Errorf("publication commit returned invalid append outcome")
+	}
+	if command.DynamicFlowCreation != nil && creationAlreadyCommitted {
+		return runtimebus.CommittedPublication{}, fmt.Errorf("dynamic flow readiness is complete without its creation event")
+	}
+	result.Activations, err = commitFlowInstanceActivations(ctx, tx, story, postgres, command.Activations)
+	if err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	result.DeliveryHandoffs, err = committer.commitInitialSideEffectEvidence(ctx, request, true)
+	if err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	if command.DynamicFlowCreation != nil {
+		if err := markDynamicFlowCreationOccurrenceCommitted(ctx, tx, postgres, *command.DynamicFlowCreation); err != nil {
+			return runtimebus.CommittedPublication{}, err
+		}
 	}
 	return result, nil
 }

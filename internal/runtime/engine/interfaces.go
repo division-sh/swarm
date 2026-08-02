@@ -74,6 +74,22 @@ type EngineMutation struct {
 	EmitPrerequisites EmitPersistencePrerequisites
 }
 
+// DurablePublicationPlan is an immutable, already-admitted publication plan.
+// The engine carries it into the selected-store commit without learning the
+// event bus's persistence representation or acquiring transaction authority.
+type DurablePublicationPlan interface {
+	DurablePublicationEventID() string
+	ValidateDurablePublicationPlan() error
+}
+
+// CommittedDurablePublication is exact post-commit evidence for one planned
+// publication. Runtime dispatch consumes it only after the owning mutation has
+// committed successfully.
+type CommittedDurablePublication interface {
+	CommittedDurablePublicationEventID() string
+	ValidateCommittedDurablePublication() error
+}
+
 type CommittedEngineMutation struct {
 	ActivityIntents []ActivityIntent
 	EmitIntents     []EmitIntent

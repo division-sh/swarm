@@ -11,6 +11,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -30,6 +31,142 @@ type pendingOutboxOperation struct {
 	outcome          EventAppendOutcome
 	publicationClaim *pipelinePublicationClaim
 	deliveryReceipt  *DeliveryCommitReceipt
+	deliveryHandoffs []runtimedelivery.DurableHandoffProof
+}
+
+// EnginePublicationPlan is immutable publication data prepared before the
+// selected-store engine mutation begins. The private store adapter can inspect
+// the closed command but cannot invoke EventBus or acquire runtime authority.
+type EnginePublicationPlan struct {
+	prepared PreparedPublish
+	command  PublicationCommand
+	intent   runtimeengine.EmitIntent
+}
+
+func (p EnginePublicationPlan) DurablePublicationEventID() string {
+	return strings.TrimSpace(p.command.Commit.Event.ID())
+}
+
+func (p EnginePublicationPlan) ValidateDurablePublicationPlan() error {
+	if err := p.command.Validate(); err != nil {
+		return err
+	}
+	if p.prepared.Event.ID() != p.DurablePublicationEventID() || p.intent.Event.ID() != p.DurablePublicationEventID() {
+		return fmt.Errorf("engine publication plan event identity is inconsistent")
+	}
+	return nil
+}
+
+func (p EnginePublicationPlan) PublicationCommand() PublicationCommand { return p.command }
+
+// CommittedEnginePublication pairs one immutable plan with exact selected-
+// store evidence. It contains no executable post-commit callback.
+type CommittedEnginePublication struct {
+	plan      EnginePublicationPlan
+	committed CommittedPublication
+}
+
+func NewCommittedEnginePublication(plan EnginePublicationPlan, committed CommittedPublication) (CommittedEnginePublication, error) {
+	if err := plan.ValidateDurablePublicationPlan(); err != nil {
+		return CommittedEnginePublication{}, err
+	}
+	if err := committed.Validate(); err != nil {
+		return CommittedEnginePublication{}, err
+	}
+	return CommittedEnginePublication{plan: plan, committed: committed}, nil
+}
+
+func (p CommittedEnginePublication) CommittedDurablePublicationEventID() string {
+	return p.plan.DurablePublicationEventID()
+}
+
+func (p CommittedEnginePublication) ValidateCommittedDurablePublication() error {
+	if err := p.plan.ValidateDurablePublicationPlan(); err != nil {
+		return err
+	}
+	return p.committed.Validate()
+}
+
+// PrepareEnginePublications resolves exact route/delivery facts before the
+// engine mutation enters its selected-store transaction.
+func (eb *EventBus) PrepareEnginePublications(ctx context.Context, intents []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
+	if eb == nil || len(intents) == 0 {
+		return nil, nil
+	}
+	plans := make([]runtimeengine.DurablePublicationPlan, 0, len(intents))
+	release := func() {
+		_ = eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+	}
+	for _, original := range intents {
+		intent := original
+		if strings.TrimSpace(string(intent.Event.Type())) == "" {
+			continue
+		}
+		intentCtx := events.WithDeliveryContext(ctx, intent.Context)
+		preparedCtx, admitted, err := eb.admitPublishEvent(intentCtx, intent.Event)
+		if err != nil {
+			release()
+			return nil, err
+		}
+		intent.Event = admitted.Event()
+		publication := eventBusCommitPublishPlan{bus: eb, event: intent.Event, admitted: admitted}
+		if len(intent.Recipients) > 0 {
+			publication.direct = true
+			publication.directRecipients = append([]string(nil), intent.Recipients...)
+		}
+		prepared, command, err := eb.prepareClosedPublication(preparedCtx, publication)
+		if err != nil {
+			release()
+			return nil, err
+		}
+		plan := EnginePublicationPlan{prepared: prepared, command: command, intent: intent}
+		if err := plan.ValidateDurablePublicationPlan(); err != nil {
+			_ = prepared.publicationClaim.Release(context.WithoutCancel(preparedCtx))
+			release()
+			return nil, err
+		}
+		plans = append(plans, plan)
+	}
+	return plans, nil
+}
+
+func (eb *EventBus) ReleaseEnginePublications(ctx context.Context, plans []runtimeengine.DurablePublicationPlan) error {
+	var result error
+	for _, value := range plans {
+		plan, ok := value.(EnginePublicationPlan)
+		if !ok {
+			result = errors.Join(result, fmt.Errorf("engine publication plan has unexpected type %T", value))
+			continue
+		}
+		if plan.prepared.publicationClaim != nil {
+			result = errors.Join(result, plan.prepared.publicationClaim.Release(ctx))
+		}
+	}
+	return result
+}
+
+func (eb *EventBus) FinalizeEnginePublications(ctx context.Context, evidence []runtimeengine.CommittedDurablePublication) error {
+	for _, value := range evidence {
+		committed, ok := value.(CommittedEnginePublication)
+		if !ok {
+			return fmt.Errorf("committed engine publication has unexpected type %T", value)
+		}
+		if err := committed.ValidateCommittedDurablePublication(); err != nil {
+			return err
+		}
+		prepared, err := committed.plan.prepared.WithCommitOutcome(committed.committed.AppendOutcome)
+		if err != nil {
+			return err
+		}
+		prepared.committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed.committed.DeliveryHandoffs...)
+		eb.finalizeCommittedFlowInstanceActivations(ctx, prepared.Event, committed.committed.Activations)
+		if eb.testLifecycleProbe != nil && !prepared.exactDuplicate {
+			eb.notifyTestPublishPersisted(ctx, prepared.Event, prepared.plan)
+		}
+		eb.setPendingInternalDeliveryRoutes(prepared.Event.ID(), prepared.plan.InternalDeliveryRoutes())
+		eb.stageCommittedOutboxOperation(committed.plan.intent, committed.committed.AppendOutcome, prepared.publicationClaim, committed.committed.DeliveryHandoffs)
+	}
+	return nil
 }
 
 func (eb *EventBus) EngineOutbox() runtimeengine.OutboxWriter {
@@ -242,9 +379,13 @@ func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fa
 	if operation.outcome != EventAppendInserted {
 		return true, errors.New("pending outbox operation has invalid append outcome")
 	}
-	handoffs, handoffErr := operation.deliveryReceipt.Handoffs()
-	if handoffErr != nil {
-		return true, fmt.Errorf("read committed outbox delivery handoffs: %w", handoffErr)
+	handoffs := append([]runtimedelivery.DurableHandoffProof(nil), operation.deliveryHandoffs...)
+	if operation.deliveryReceipt != nil {
+		var handoffErr error
+		handoffs, handoffErr = operation.deliveryReceipt.Handoffs()
+		if handoffErr != nil {
+			return true, fmt.Errorf("read committed outbox delivery handoffs: %w", handoffErr)
+		}
 	}
 	if err := d.bus.AcceptCommittedDeliveryHandoffs(handoffs); err != nil {
 		return true, err
@@ -490,6 +631,25 @@ func (eb *EventBus) stagePendingOutboxOperation(ctx context.Context, intent runt
 	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func(context.Context) {
 		eb.removePendingOutboxOperation(eventID, sequence)
 	})
+}
+
+func (eb *EventBus) stageCommittedOutboxOperation(intent runtimeengine.EmitIntent, outcome EventAppendOutcome, publicationClaim *pipelinePublicationClaim, handoffs []runtimedelivery.DurableHandoffProof) {
+	if eb == nil {
+		return
+	}
+	intent.Event = clonePostCommitPublish(intent.Event)
+	intent.Recipients = append([]string(nil), intent.Recipients...)
+	eventID := strings.TrimSpace(intent.Event.ID())
+	if eventID == "" {
+		return
+	}
+	eb.mu.Lock()
+	eb.pendingOutboxSequence++
+	eb.pendingOutboxByID[eventID] = append(eb.pendingOutboxByID[eventID], pendingOutboxOperation{
+		sequence: eb.pendingOutboxSequence, intent: intent, outcome: outcome, publicationClaim: publicationClaim,
+		deliveryHandoffs: append([]runtimedelivery.DurableHandoffProof(nil), handoffs...),
+	})
+	eb.mu.Unlock()
 }
 
 func (eb *EventBus) takePendingOutboxOperation(eventID string) (pendingOutboxOperation, bool) {

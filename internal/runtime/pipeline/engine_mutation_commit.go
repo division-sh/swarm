@@ -1,0 +1,222 @@
+package pipeline
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+)
+
+// EnginePublicationPlanner converts engine emission intents into immutable
+// persistence plans and consumes only exact post-commit evidence. It does not
+// expose a transaction or executable callback.
+type EnginePublicationPlanner interface {
+	PrepareEnginePublications(context.Context, []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error)
+	ReleaseEnginePublications(context.Context, []runtimeengine.DurablePublicationPlan) error
+	FinalizeEnginePublications(context.Context, []runtimeengine.CommittedDurablePublication) error
+}
+
+// WorkflowEngineStateRecord is the complete selected-store projection for one
+// workflow state mutation. Runtime owns semantic projection; private adapters
+// own SQL representation and compare-and-write mechanics.
+type WorkflowEngineStateRecord struct {
+	RunID            string
+	Route            runtimeflowidentity.Route
+	EntityID         string
+	WorkflowName     string
+	WorkflowVersion  string
+	Mode             string
+	Status           string
+	CurrentState     string
+	EntityType       string
+	Slug             string
+	Name             string
+	Fields           json.RawMessage
+	Gates            json.RawMessage
+	Accumulator      json.RawMessage
+	Config           json.RawMessage
+	EnteredStageAt   time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	ExpectedState    string
+	ExpectedRevision int64
+	Create           bool
+}
+
+func (r WorkflowEngineStateRecord) Validate() error {
+	r.Route = runtimeflowidentity.StoredRoute(r.Route.ScopeKey, r.Route.InstanceID, r.Route.InstancePath)
+	if strings.TrimSpace(r.RunID) == "" || !r.Route.Valid() || strings.TrimSpace(r.EntityID) == "" {
+		return fmt.Errorf("workflow engine state record requires exact run, route, and entity identity")
+	}
+	if strings.TrimSpace(r.WorkflowName) == "" || strings.TrimSpace(r.CurrentState) == "" {
+		return fmt.Errorf("workflow engine state record requires workflow and current state")
+	}
+	if strings.TrimSpace(r.Mode) == "" || strings.TrimSpace(r.Status) == "" {
+		return fmt.Errorf("workflow engine state record requires mode and status")
+	}
+	for name, raw := range map[string]json.RawMessage{
+		"fields": r.Fields, "gates": r.Gates, "accumulator": r.Accumulator, "config": r.Config,
+	} {
+		if len(raw) == 0 || !json.Valid(raw) {
+			return fmt.Errorf("workflow engine state record %s must be valid JSON", name)
+		}
+	}
+	if r.EnteredStageAt.IsZero() || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
+		return fmt.Errorf("workflow engine state record requires exact persisted times")
+	}
+	if r.UpdatedAt.Before(r.CreatedAt) {
+		return fmt.Errorf("workflow engine state record update time cannot precede creation")
+	}
+	if r.Create {
+		if r.ExpectedRevision != 0 || strings.TrimSpace(r.ExpectedState) != "" {
+			return fmt.Errorf("workflow engine state creation cannot carry an expected existing revision")
+		}
+	} else if r.ExpectedRevision <= 0 || strings.TrimSpace(r.ExpectedState) == "" {
+		return fmt.Errorf("workflow engine state mutation requires exact expected revision and state")
+	}
+	return nil
+}
+
+type WorkflowEngineMutationCommand struct {
+	State            WorkflowEngineStateRecord
+	LifecycleEffects []runtimeworkflowlifecycle.Effect
+	LifecycleNoop    bool
+	ProposedEffects  []WorkflowEngineProposedEffect
+	Publications     []runtimeengine.DurablePublicationPlan
+}
+
+type WorkflowEngineProposedEffect struct {
+	Card         decisioncard.Card
+	Continuation decisioncard.ProposedEffectContinuation
+}
+
+func (p WorkflowEngineProposedEffect) Validate() error {
+	if err := p.Card.Validate(); err != nil {
+		return err
+	}
+	return p.Continuation.Canonical().Validate(p.Card)
+}
+
+func (c WorkflowEngineMutationCommand) Validate() error {
+	if err := c.State.Validate(); err != nil {
+		return err
+	}
+	for index, effect := range c.LifecycleEffects {
+		if !effect.Route().Valid() || strings.TrimSpace(effect.InstanceID()) == "" || effect.OccurredAt().IsZero() {
+			return fmt.Errorf("workflow engine lifecycle effect %d is incomplete", index)
+		}
+	}
+	if c.LifecycleNoop && len(c.LifecycleEffects) == 0 {
+		return fmt.Errorf("workflow engine lifecycle no-op proof requires lifecycle effects")
+	}
+	for index, effect := range c.ProposedEffects {
+		if err := effect.Validate(); err != nil {
+			return fmt.Errorf("workflow engine proposed effect %d: %w", index, err)
+		}
+	}
+	seen := make(map[string]struct{}, len(c.Publications))
+	for index, publication := range c.Publications {
+		if publication == nil {
+			return fmt.Errorf("workflow engine publication %d is required", index)
+		}
+		if err := publication.ValidateDurablePublicationPlan(); err != nil {
+			return fmt.Errorf("workflow engine publication %d: %w", index, err)
+		}
+		eventID := strings.TrimSpace(publication.DurablePublicationEventID())
+		if eventID == "" {
+			return fmt.Errorf("workflow engine publication %d requires event identity", index)
+		}
+		if _, exists := seen[eventID]; exists {
+			return fmt.Errorf("workflow engine publication repeats event %s", eventID)
+		}
+		seen[eventID] = struct{}{}
+	}
+	return nil
+}
+
+func workflowEngineStateRecord(
+	runID string,
+	route runtimeflowidentity.Route,
+	instance WorkflowInstance,
+	expectedState string,
+	expectedRevision int64,
+	create bool,
+	updatedAt time.Time,
+) (WorkflowEngineStateRecord, error) {
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	instance, identity, ok, err := normalizeWorkflowInstanceForPersistence(instance)
+	if err != nil {
+		return WorkflowEngineStateRecord{}, err
+	}
+	if !ok || !route.Valid() || identity.StorageRef != route.InstancePath || identity.InstanceID != route.InstanceID {
+		return WorkflowEngineStateRecord{}, fmt.Errorf("workflow engine state identity disagrees with its canonical route")
+	}
+	projection, err := workflowInstancePersistedProjectionFromInstance(instance, identity.StorageRef)
+	if err != nil {
+		return WorkflowEngineStateRecord{}, err
+	}
+	fields, err := canonicaljson.Bytes(projection.Fields)
+	if err != nil {
+		return WorkflowEngineStateRecord{}, err
+	}
+	gates, err := canonicaljson.Bytes(projection.GatesAny())
+	if err != nil {
+		return WorkflowEngineStateRecord{}, err
+	}
+	accumulator, err := canonicaljson.Bytes(projection.Accumulator)
+	if err != nil {
+		return WorkflowEngineStateRecord{}, err
+	}
+	config, err := canonicaljson.Bytes(projection.ConfigPayload(instance.WorkflowVersion))
+	if err != nil {
+		return WorkflowEngineStateRecord{}, err
+	}
+	status := strings.TrimSpace(instance.Status)
+	if status == "" {
+		status = "active"
+	}
+	record := WorkflowEngineStateRecord{
+		RunID: strings.TrimSpace(runID), Route: route, EntityID: identity.RowID(),
+		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion,
+		Mode: workflowInstanceMode(instance), Status: status, CurrentState: instance.CurrentState,
+		EntityType: projection.Control.EntityType, Slug: projection.Control.Slug, Name: projection.Control.Name,
+		Fields: fields, Gates: gates, Accumulator: accumulator, Config: config,
+		EnteredStageAt: canonicalWorkflowInstancePersistedTime(instance.EnteredStageAt),
+		CreatedAt:      canonicalWorkflowInstancePersistedTime(instance.CreatedAt),
+		UpdatedAt:      canonicalWorkflowInstancePersistedTime(updatedAt),
+		ExpectedState:  strings.TrimSpace(expectedState), ExpectedRevision: expectedRevision, Create: create,
+	}
+	if err := record.Validate(); err != nil {
+		return WorkflowEngineStateRecord{}, err
+	}
+	return record, nil
+}
+
+type CommittedWorkflowEngineMutation struct {
+	Publications []runtimeengine.CommittedDurablePublication
+}
+
+func (r CommittedWorkflowEngineMutation) Validate() error {
+	for index, publication := range r.Publications {
+		if publication == nil {
+			return fmt.Errorf("committed workflow engine publication %d is required", index)
+		}
+		if err := publication.ValidateCommittedDurablePublication(); err != nil {
+			return fmt.Errorf("committed workflow engine publication %d: %w", index, err)
+		}
+	}
+	return nil
+}
+
+// WorkflowEngineMutationOwner owns the complete state/publication transaction.
+// It is implemented by the selected store, never by runtime orchestration.
+type WorkflowEngineMutationOwner interface {
+	CommitWorkflowEngineMutation(context.Context, WorkflowEngineMutationCommand) (CommittedWorkflowEngineMutation, error)
+}
