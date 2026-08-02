@@ -646,14 +646,13 @@ func workflowTimerDeclarationRevision(
 	return revision, nil
 }
 
-func (l *WorkflowTimerLifecycle) CancelSupersededGenerations(ctx context.Context, entityID string, current []attemptgeneration.Generation) error {
+func (l *WorkflowTimerLifecycle) CancelSupersededGenerations(ctx context.Context, route runtimeflowidentity.Route, entityID string, current []attemptgeneration.Generation) error {
 	store := l.store()
 	if store == nil || !store.enabled() {
 		return nil
 	}
-	route, err := workflowInstanceRouteForContext(ctx, l.source, "", "")
-	if err != nil {
-		return fmt.Errorf("workflow timer owner route: %w", err)
+	if !route.Valid() {
+		return fmt.Errorf("workflow timer owner requires an exact workflow instance route")
 	}
 	instance, ok, err := store.Load(ctx, route)
 	if err != nil || !ok {

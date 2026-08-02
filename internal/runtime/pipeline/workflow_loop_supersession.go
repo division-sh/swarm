@@ -87,7 +87,7 @@ func (pc *PipelineCoordinator) reconcileSupersededLoopSchedules(ctx context.Cont
 		}
 	}
 	if pc.workflowTimers != nil {
-		if err := pc.workflowTimers.CancelSupersededGenerations(ctx, entityID, current); err != nil {
+		if err := pc.workflowTimers.CancelSupersededGenerations(ctx, route, entityID, current); err != nil {
 			return err
 		}
 	}

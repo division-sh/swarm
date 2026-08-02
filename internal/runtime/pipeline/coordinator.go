@@ -597,7 +597,12 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 		}
 		executionCtx := heartbeat.Context()
 		executionCtx = runtimecorrelation.WithInboundEvent(executionCtx, evt)
-		currentState, err := pc.currentWorkflowState(executionCtx, workflowEventEntityID(evt))
+		stateRoute, err := workflowInstanceRouteForExecution(source, workflowNodeFlowID(source, nodeID), evt.FlowInstance())
+		if err != nil {
+			_ = heartbeat.Stop()
+			return false, err
+		}
+		currentState, err := pc.currentWorkflowState(executionCtx, stateRoute, workflowEventEntityID(evt))
 		if err != nil {
 			_ = heartbeat.Stop()
 			return false, err

@@ -122,7 +122,11 @@ func (pc *PipelineCoordinator) selectedHandlerEntityFromInstance(ctx context.Con
 	if entityID == "" {
 		return selectedHandlerEntity{}, fmt.Errorf("%s_no_match: node %s flow %s selected entity has empty entity_id", label, nodeID, flowID)
 	}
-	state, err := pc.currentWorkflowState(ctx, entityID)
+	route, err := workflowInstanceRouteForPersisted(pc.SemanticSource(), selected)
+	if err != nil {
+		return selectedHandlerEntity{}, err
+	}
+	state, err := pc.currentWorkflowState(ctx, route, entityID)
 	if err != nil {
 		return selectedHandlerEntity{}, err
 	}

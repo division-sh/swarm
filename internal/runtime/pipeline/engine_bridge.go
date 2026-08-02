@@ -171,7 +171,11 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	entityID, triggerCtx.Event = resolvedEntityID, resolvedEvent
 	if !handler.CreateEntity && entityID != "" && originalStateEntityID != "" && originalStateEntityID != entityID {
-		currentState, err := pc.currentWorkflowState(ctx, entityID)
+		stateRoute, err := workflowInstanceRouteForExecution(source, flowID, firstNonEmptyString(asString(triggerCtx.State.Metadata["flow_path"]), triggerCtx.Event.FlowInstance()))
+		if err != nil {
+			return contractHandlerExecutionResult{}, err
+		}
+		currentState, err := pc.currentWorkflowState(ctx, stateRoute, entityID)
 		if err != nil {
 			return contractHandlerExecutionResult{}, err
 		}

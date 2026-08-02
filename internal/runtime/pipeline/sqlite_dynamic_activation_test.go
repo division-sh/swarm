@@ -52,6 +52,13 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 		t.Fatalf("seed parent workflow instance: %v", err)
 	}
 	parentRoute := seedExactOnceEventDelivery(t, pc, ctx, parent, "fanout-node")
+	state, err := pc.currentWorkflowState(runtimecorrelation.WithInboundEvent(ctx, parent), testWorkflowInstanceRoute("root/parent"), parentEntityID)
+	if err != nil {
+		t.Fatalf("load parent workflow state: %v", err)
+	}
+	if got := strings.TrimSpace(asString(state.Metadata["flow_path"])); got != "root/parent" {
+		t.Fatalf("parent workflow state flow_path = %q, want root/parent", got)
+	}
 
 	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, parentRoute), parent)
 	if err != nil {

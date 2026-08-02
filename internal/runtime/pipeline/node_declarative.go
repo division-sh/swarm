@@ -350,7 +350,11 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	entityID, evt = resolvedEntityID, resolvedEvent
 	ctx = withPipelineFlowScope(ctx, flowID)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
-	currentState, err := e.coordinator.currentWorkflowState(ctx, entityID)
+	stateRoute, err := workflowInstanceRouteForExecution(source, flowID, firstNonEmptyString(asString(selectedState.Metadata["flow_path"]), evt.FlowInstance()))
+	if err != nil {
+		return nil, err
+	}
+	currentState, err := e.coordinator.currentWorkflowState(ctx, stateRoute, entityID)
 	if err != nil {
 		return nil, err
 	}

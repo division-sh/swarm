@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
 func testWorkflowInstanceRoute(instancePath string) runtimeflowidentity.Route {
@@ -13,7 +14,11 @@ func testWorkflowInstanceRoute(instancePath string) runtimeflowidentity.Route {
 
 func mustCurrentWorkflowState(t *testing.T, pc *PipelineCoordinator, ctx context.Context, entityID string) WorkflowState {
 	t.Helper()
-	state, err := pc.currentWorkflowState(ctx, entityID)
+	route := testWorkflowInstanceRoute(entityID)
+	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok && inbound.FlowInstance() != "" {
+		route = testWorkflowInstanceRoute(inbound.FlowInstance())
+	}
+	state, err := pc.currentWorkflowState(ctx, route, entityID)
 	if err != nil {
 		t.Fatalf("load current workflow state: %v", err)
 	}

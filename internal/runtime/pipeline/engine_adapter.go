@@ -158,7 +158,7 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimee
 		}
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
-	state, err := r.coordinator.currentWorkflowState(ctx, entityID.String())
+	state, err := r.coordinator.currentWorkflowState(ctx, address.Route, entityID.String())
 	if err != nil {
 		return runtimeengine.StateSnapshot{}, false, err
 	}
@@ -632,7 +632,7 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 		if bucketID == "" {
 			return runtimeengine.ActionExecution{Handled: true}, fmt.Errorf("node %s handler %s record_evidence is missing evidence_target", execCtx.Request.NodeID.String(), recordEvidenceHandlerLabel(execCtx.Request))
 		}
-		if err := pc.recordWorkflowEvidence(ctx, execCtx.Request.EntityID.String(), execCtx.Request.FlowID.String(), bucketID, payload); err != nil {
+		if err := pc.recordWorkflowEvidence(ctx, execCtx.Request.StateAddress().Route, execCtx.Request.EntityID.String(), execCtx.Request.FlowID.String(), bucketID, payload); err != nil {
 			return runtimeengine.ActionExecution{Handled: true}, err
 		}
 		return runtimeengine.ActionExecution{Handled: true}, nil

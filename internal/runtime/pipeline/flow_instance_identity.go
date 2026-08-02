@@ -1,13 +1,11 @@
 package pipeline
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -19,13 +17,8 @@ func workflowInstanceRouteForPath(instancePath string) (runtimeflowidentity.Rout
 	return route, nil
 }
 
-func workflowInstanceRouteForContext(ctx context.Context, source semanticview.Source, flowID, explicitPath string) (runtimeflowidentity.Route, error) {
+func workflowInstanceRouteForExecution(source semanticview.Source, flowID, explicitPath string) (runtimeflowidentity.Route, error) {
 	instancePath := strings.Trim(strings.TrimSpace(explicitPath), "/")
-	if instancePath == "" {
-		if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
-			instancePath = strings.Trim(strings.TrimSpace(inbound.FlowInstance()), "/")
-		}
-	}
 	if instancePath == "" && source != nil {
 		scope := runtimeflowidentity.ScopeKey(source, strings.TrimSpace(flowID))
 		if schema, ok := source.FlowSchemaByID(strings.TrimSpace(flowID)); ok && !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {

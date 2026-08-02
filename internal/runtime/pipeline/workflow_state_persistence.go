@@ -7,10 +7,11 @@ import (
 	"sync"
 	"time"
 
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
-func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, entityID string) (WorkflowState, error) {
+func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, route runtimeflowidentity.Route, entityID string) (WorkflowState, error) {
 	entityID = strings.TrimSpace(entityID)
 	state := WorkflowState{
 		EntityID: entityID,
@@ -20,9 +21,8 @@ func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, entityI
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || entityID == "" {
 		return state, nil
 	}
-	route, err := workflowInstanceRouteForContext(ctx, pc.SemanticSource(), pipelineFlowScope(ctx), "")
-	if err != nil {
-		return WorkflowState{}, fmt.Errorf("load current workflow state route: %w", err)
+	if !route.Valid() {
+		return WorkflowState{}, fmt.Errorf("load current workflow state requires an exact workflow instance route")
 	}
 	instance, ok, err := pc.workflowStore.Load(ctx, route)
 	if err != nil {
@@ -39,7 +39,7 @@ func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, entityI
 	return state, nil
 }
 
-func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entityID string, flowID string, bucketID string, payload map[string]any) error {
+func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, route runtimeflowidentity.Route, entityID string, flowID string, bucketID string, payload map[string]any) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return nil
 	}
@@ -49,9 +49,8 @@ func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entit
 	if entityID == "" || bucketID == "" {
 		return nil
 	}
-	route, err := workflowInstanceRouteForContext(ctx, pc.SemanticSource(), flowID, "")
-	if err != nil {
-		return fmt.Errorf("record workflow evidence route: %w", err)
+	if !route.Valid() {
+		return fmt.Errorf("record workflow evidence requires an exact workflow instance route")
 	}
 	_, found, err := pc.workflowStore.Load(ctx, route)
 	if err != nil {
