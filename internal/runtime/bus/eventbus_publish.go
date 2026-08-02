@@ -292,24 +292,24 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 
 	admitted := publication.admitted
 	evt := admitted.Event()
-	if !publication.direct {
-		if reader, ok := eb.store.(PreparedPublishEventReader); ok && len(eb.connectRoutePlanner.matchedPlans(ctx, evt)) > 0 {
-			durable, found, err := reader.LoadPreparedPublishEvent(ctx, admitted.ID())
-			if err != nil {
-				return releaseFailure(fmt.Errorf("load durable event route facts: %w", err))
-			}
-			if found {
+	if reader, ok := eb.store.(PreparedPublishEventReader); ok {
+		durable, found, err := reader.LoadPreparedPublishEvent(ctx, admitted.ID())
+		if err != nil {
+			return releaseFailure(fmt.Errorf("load durable event identity: %w", err))
+		}
+		if found {
+			if !publication.direct && len(eb.connectRoutePlanner.matchedPlans(ctx, evt)) > 0 {
 				admitted, evt, err = reuseDurableSubscribedEventRouteFacts(admitted, durable)
 				if err != nil {
 					return releaseFailure(err)
 				}
-				prepared := PreparedPublish{
-					Event: evt, admitted: admitted, publicationClaim: claim,
-				}
-				request := prepared.CommitRequest()
-				request.DeliveryReceipt = nil
-				return prepared, PublicationCommand{Commit: request}, nil
 			}
+			prepared := PreparedPublish{
+				Event: evt, admitted: admitted, publicationClaim: claim,
+			}
+			request := prepared.CommitRequest()
+			request.DeliveryReceipt = nil
+			return prepared, PublicationCommand{Commit: request}, nil
 		}
 	}
 

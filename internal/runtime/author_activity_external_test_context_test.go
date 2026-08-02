@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -26,7 +25,6 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
@@ -332,53 +330,9 @@ func ownRuntimeTestAgentManager(t testing.TB, manager *runtimemanager.AgentManag
 
 func testAuthorActivityEventDescriptors(t *testing.T, opts runtimebus.EventBusOptions) []runtimeauthoractivity.EventDescriptor {
 	t.Helper()
-	if opts.ContractBundle == nil {
-		return nil
-	}
-	resolved := opts.ContractBundle.ResolvedEventCatalog()
-	authored := opts.ContractBundle.AuthoredResolvedEventCatalog()
-	byName := make(map[string]runtimeauthoractivity.EventDescriptor, len(resolved)+len(authored))
-	add := func(name string, descriptor runtimeauthoractivity.EventDescriptor) {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			return
-		}
-		descriptor.EventType = name
-		if previous, ok := byName[name]; ok && previous != descriptor {
-			t.Fatalf("author activity test descriptor %q conflicts: %#v != %#v", name, previous, descriptor)
-		}
-		byName[name] = descriptor
-	}
-	for name, entry := range resolved {
-		disposition := runtimeauthoractivity.StoryDifferent
-		if _, ok := authored[name]; ok {
-			disposition = runtimeauthoractivity.StoryAuthored
-		}
-		add(name, runtimeauthoractivity.EventDescriptor{Disposition: disposition, AuthorSummaryField: strings.TrimSpace(entry.AuthorSummaryField)})
-	}
-	census := semanticview.BuildAuthoredEventEndpointCensus(opts.ContractBundle)
-	endpoints := append(census.Producers(), census.Consumers()...)
-	endpoints = append(endpoints, census.InputPins()...)
-	endpoints = append(endpoints, census.OutputPins()...)
-	for _, endpoint := range endpoints {
-		proof := endpoint.Event
-		if !proof.HasSchema {
-			continue
-		}
-		disposition := runtimeauthoractivity.StoryDifferent
-		if _, ok := authored[strings.TrimSpace(proof.CatalogKey)]; ok {
-			disposition = runtimeauthoractivity.StoryAuthored
-		}
-		add(proof.EventKey(), runtimeauthoractivity.EventDescriptor{Disposition: disposition, AuthorSummaryField: strings.TrimSpace(proof.Entry.AuthorSummaryField)})
-	}
-	names := make([]string, 0, len(byName))
-	for name := range byName {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	descriptors := make([]runtimeauthoractivity.EventDescriptor, 0, len(names))
-	for _, name := range names {
-		descriptors = append(descriptors, byName[name])
+	descriptors, err := runtimepkg.AuthorActivityEventDescriptors(opts.ContractBundle)
+	if err != nil {
+		t.Fatalf("project author activity event descriptors: %v", err)
 	}
 	return descriptors
 }

@@ -164,17 +164,15 @@ func (s *SQLiteRuntimeStore) appendAdmittedEventTxOutcome(ctx context.Context, t
 	}
 	if tx == nil {
 		outcome := runtimebus.EventAppendOutcomeUnknown
-		err := s.runAuthorActivityMutation(ctx, "sqlite append admitted event", func(txctx context.Context, tx *sql.Tx) error {
+		err := s.runPrivateAuthorActivityMutation(ctx, "sqlite append admitted event", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 			var err error
-			outcome, err = s.appendAdmittedEventTxOutcome(txctx, tx, nil, admitted)
+			outcome, err = s.appendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), admitted)
 			return err
 		})
 		return outcome, err
 	}
 	if story == nil {
-		if err := runtimeauthoractivity.Require(ctx); err != nil {
-			return runtimebus.EventAppendOutcomeUnknown, err
-		}
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("persisted event author activity mutation is required")
 	}
 	evt := admitted.Event()
 	wantIdentity, err := eventrecord.FromAdmitted(admitted)

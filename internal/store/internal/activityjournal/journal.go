@@ -22,27 +22,25 @@ const (
 	DialectSQLite
 )
 
-type ActiveRunOwner interface {
-	RequireActiveRun(context.Context, string) error
-}
+type RequireActiveRun func(context.Context, string) error
 
 type QueryRower interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func Start(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
-	return start(ctx, tx, dialect, runs, story, record, true)
+func Start(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun RequireActiveRun, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
+	return start(ctx, tx, dialect, requireActiveRun, story, record, true)
 }
 
-func Claim(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
+func Claim(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun RequireActiveRun, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
 	record = runtimepipeline.NormalizeActivityAttemptRecord(record)
 	if !record.Generation.Valid() {
-		return start(ctx, tx, dialect, runs, story, record, true)
+		return start(ctx, tx, dialect, requireActiveRun, story, record, true)
 	}
-	if err := requireMutation(tx, dialect, runs); err != nil {
+	if err := requireMutation(tx, dialect, requireActiveRun); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
-	if err := runs.RequireActiveRun(ctx, record.RunID); err != nil {
+	if err := requireActiveRun(ctx, record.RunID); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	metadata, stateBuckets, found, err := loadLoopState(ctx, tx, dialect, record.RunID, record.FlowInstance)
@@ -64,7 +62,7 @@ func Claim(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner
 			"revision_id": record.Generation.RevisionID, "expected_stage": record.LoopStage,
 		})
 	}
-	actual, inserted, err := start(ctx, tx, dialect, runs, story, record, false)
+	actual, inserted, err := start(ctx, tx, dialect, requireActiveRun, story, record, false)
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
@@ -74,17 +72,17 @@ func Claim(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner
 	return actual, inserted, nil
 }
 
-func start(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord, verifyRun bool) (runtimepipeline.ActivityAttemptRecord, bool, error) {
+func start(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun RequireActiveRun, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord, verifyRun bool) (runtimepipeline.ActivityAttemptRecord, bool, error) {
 	record = runtimepipeline.NormalizeActivityAttemptRecord(record)
 	record.Status = runtimepipeline.ActivityAttemptStatusStarted
 	if err := runtimepipeline.ValidateActivityAttemptStart(record); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
-	if err := requireMutation(tx, dialect, runs); err != nil {
+	if err := requireMutation(tx, dialect, requireActiveRun); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	if verifyRun {
-		if err := runs.RequireActiveRun(ctx, record.RunID); err != nil {
+		if err := requireActiveRun(ctx, record.RunID); err != nil {
 			return runtimepipeline.ActivityAttemptRecord{}, false, err
 		}
 	}
@@ -144,15 +142,15 @@ func start(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner
 	return actual, rows > 0, nil
 }
 
-func Complete(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, error) {
+func Complete(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun RequireActiveRun, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, error) {
 	record = runtimepipeline.NormalizeActivityAttemptRecord(record)
 	if err := runtimepipeline.ValidateActivityAttemptTerminal(record); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, err
 	}
-	if err := requireMutation(tx, dialect, runs); err != nil {
+	if err := requireMutation(tx, dialect, requireActiveRun); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, err
 	}
-	if err := runs.RequireActiveRun(ctx, record.RunID); err != nil {
+	if err := requireActiveRun(ctx, record.RunID); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, err
 	}
 	payload, err := json.Marshal(record.ResultPayload)
@@ -210,16 +208,16 @@ func Complete(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOw
 	return actual, nil
 }
 
-func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, error) {
+func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun RequireActiveRun, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, error) {
 	record = runtimepipeline.NormalizeActivityAttemptRecord(record)
 	record.Status = runtimepipeline.ActivityAttemptStatusUncertain
 	if err := runtimepipeline.ValidateActivityAttemptTerminal(record); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, err
 	}
-	if err := requireMutation(tx, dialect, runs); err != nil {
+	if err := requireMutation(tx, dialect, requireActiveRun); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, err
 	}
-	if err := runs.RequireActiveRun(ctx, record.RunID); err != nil {
+	if err := requireActiveRun(ctx, record.RunID); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, err
 	}
 	payload, err := json.Marshal(record.ResultPayload)
@@ -397,14 +395,14 @@ func loadLoopState(ctx context.Context, tx *sql.Tx, dialect Dialect, runID, flow
 	return metadata, stateBuckets, true, nil
 }
 
-func requireMutation(tx *sql.Tx, dialect Dialect, runs ActiveRunOwner) error {
+func requireMutation(tx *sql.Tx, dialect Dialect, requireActiveRun RequireActiveRun) error {
 	if tx == nil {
 		return fmt.Errorf("activity attempt operation requires selected-store transaction")
 	}
 	if dialect != DialectPostgres && dialect != DialectSQLite {
 		return fmt.Errorf("activity attempt operation requires selected-store dialect")
 	}
-	if runs == nil {
+	if requireActiveRun == nil {
 		return fmt.Errorf("activity attempt operation requires run lifecycle owner")
 	}
 	return nil

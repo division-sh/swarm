@@ -874,6 +874,20 @@ func AuthorActivityEventDescriptors(source semanticview.Source) ([]runtimeauthor
 		}
 		break
 	}
+	for toolID, entry := range source.ToolEntries() {
+		if entry.Category() != runtimecontracts.ToolCategoryChannelOperation {
+			continue
+		}
+		toolID = strings.TrimSpace(toolID)
+		if toolID == "" {
+			return nil, fmt.Errorf("channel operation tool requires an exact id")
+		}
+		for _, suffix := range []string{".succeeded", ".failed"} {
+			if err := add(toolID+suffix, runtimecontracts.EventCatalogEntry{}, runtimeauthoractivity.StoryDifferent); err != nil {
+				return nil, err
+			}
+		}
+	}
 	descriptors := make([]runtimeauthoractivity.EventDescriptor, 0, len(byName))
 	for _, descriptor := range byName {
 		descriptors = append(descriptors, descriptor)

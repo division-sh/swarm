@@ -20,6 +20,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	"github.com/google/uuid"
@@ -115,9 +116,9 @@ func (s *PostgresStore) appendAdmittedEventTxOutcome(ctx context.Context, tx *sq
 	}
 	if tx == nil {
 		outcome := runtimebus.EventAppendOutcomeUnknown
-		err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 			var err error
-			outcome, err = s.appendAdmittedEventTxOutcome(txctx, tx, nil, admitted)
+			outcome, err = s.appendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), admitted)
 			return err
 		})
 		return outcome, err
@@ -260,9 +261,7 @@ func (s *PostgresStore) ListEventDeliveryRoutes(ctx context.Context, eventID str
 
 func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
 	if story == nil {
-		if err := runtimeauthoractivity.Require(ctx); err != nil {
-			return runtimebus.EventAppendOutcomeUnknown, err
-		}
+		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("persisted event author activity mutation is required")
 	}
 	evt := admitted.Event()
 	wantIdentity, err := eventrecord.FromAdmitted(admitted)

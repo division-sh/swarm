@@ -124,7 +124,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				t.Fatalf("WithRuntimeTools: %v", err)
 			}
 			var coordinator *runtimepipeline.PipelineCoordinator
-			bus, err := newRuntimeTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{
+			bus, err := newScopedTestEventBus(t, eventStore, runtimebus.EventBusOptions{
 				ContractBundle:   source,
 				BundleSourceFact: testBundleSourceFact(t, bundleHash),
 				InterceptorProvider: func() []runtimebus.EventInterceptor {

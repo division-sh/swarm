@@ -52,7 +52,7 @@ func (s *PostgresStore) ActivateDeliveryAuthority(ctx context.Context, authority
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
 		return postgresDeliveryAdapter.ActivateNormalAuthority(txctx, tx, authority)
 	})
 }
@@ -61,7 +61,7 @@ func (s *SQLiteRuntimeStore) ActivateDeliveryAuthority(ctx context.Context, auth
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	return s.runPrivateAuthorActivityMutation(ctx, "sqlite activate delivery authority", func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
 		return sqliteDeliveryAdapter.ActivateNormalAuthority(txctx, tx, authority)
 	})
 }
@@ -130,7 +130,7 @@ func (s *SQLiteRuntimeStore) ClaimDelivery(ctx context.Context, authority runtim
 
 func (s *PostgresStore) ScanDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, cursor runtimedelivery.ContinuationCursor, limit int) (runtimedelivery.ContinuationPage, error) {
 	var page runtimedelivery.ContinuationPage
-	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
 		var err error
 		page, err = postgresDeliveryAdapter.ScanContinuations(txctx, tx, authority, cursor, limit)
 		if err != nil {
@@ -164,7 +164,7 @@ func (s *PostgresStore) ScanDeliveryContinuations(ctx context.Context, authority
 
 func (s *SQLiteRuntimeStore) ScanDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, cursor runtimedelivery.ContinuationCursor, limit int) (runtimedelivery.ContinuationPage, error) {
 	var page runtimedelivery.ContinuationPage
-	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite scan delivery continuations", func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
 		var err error
 		page, err = sqliteDeliveryAdapter.ScanContinuations(txctx, tx, authority, cursor, limit)
 		if err != nil {
@@ -202,7 +202,7 @@ func (s *PostgresStore) ObserveDeliveryContinuation(
 	deliveryID string,
 ) (runtimedelivery.ContinuationObservation, error) {
 	var observation runtimedelivery.ContinuationObservation
-	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
 		var err error
 		observation, err = postgresDeliveryAdapter.ObserveContinuation(txctx, tx, authority, deliveryID)
 		return err
@@ -216,7 +216,7 @@ func (s *SQLiteRuntimeStore) ObserveDeliveryContinuation(
 	deliveryID string,
 ) (runtimedelivery.ContinuationObservation, error) {
 	var observation runtimedelivery.ContinuationObservation
-	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite observe delivery continuation", func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
 		var err error
 		observation, err = sqliteDeliveryAdapter.ObserveContinuation(txctx, tx, authority, deliveryID)
 		return err
