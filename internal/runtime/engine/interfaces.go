@@ -65,12 +65,22 @@ type EmitPersistenceVerifier interface {
 	VerifyEmitPersistence(ctx context.Context, address StateAddress, prerequisites EmitPersistencePrerequisites) error
 }
 
-type Tx interface {
-	Context() context.Context
+type EngineMutation struct {
+	Address           StateAddress
+	State             StateMutation
+	LifecycleEffects  []runtimeworkflowlifecycle.Effect
+	ActivityIntents   []ActivityIntent
+	EmitIntents       []EmitIntent
+	EmitPrerequisites EmitPersistencePrerequisites
 }
 
-type TransactionRunner interface {
-	Run(ctx context.Context, fn func(Tx) error) error
+type CommittedEngineMutation struct {
+	ActivityIntents []ActivityIntent
+	EmitIntents     []EmitIntent
+}
+
+type EngineMutationOwner interface {
+	CommitEngineMutation(ctx context.Context, mutation EngineMutation) (CommittedEngineMutation, error)
 }
 
 type EntityLocker interface {
@@ -117,6 +127,7 @@ type ActionRegistry interface {
 type ActionExecution struct {
 	Handled     bool
 	EmitIntents []EmitIntent
+	State       *StateMutation
 }
 
 type ActionRunner interface {
@@ -134,13 +145,10 @@ type TransitionValidator interface {
 type RuntimeDependencies struct {
 	Source              semanticview.Source
 	StateRepo           StateRepository
-	EmitVerifier        EmitPersistenceVerifier
-	TxRunner            TransactionRunner
+	MutationOwner       EngineMutationOwner
 	Locker              EntityLocker
-	Outbox              OutboxWriter
 	WorkflowLifecycle   WorkflowLifecycleEffectOwner
 	Dispatcher          PostCommitDispatcher
-	ActivityIntents     ActivityIntentWriter
 	ActivityDispatcher  ActivityDispatcher
 	GuardRegistry       GuardRegistry
 	GuardRunner         GuardRunner

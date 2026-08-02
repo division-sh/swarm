@@ -79,28 +79,70 @@ func (e pipelineEngineEvaluator) EvalValue(string, runtimeengine.BaseContext) (a
 	return nil, runtimeengine.ErrNotImplemented
 }
 
-type pipelineEngineTx struct {
-	ctx context.Context
-}
-
-func (t pipelineEngineTx) Context() context.Context { return t.ctx }
-
-type pipelineEngineTxRunner struct {
-	store workflowMutationStore
-}
-
 type workflowMutationStore interface {
 	enabled() bool
 	runPipelineMutation(context.Context, func(context.Context) error) error
 }
 
-func (r pipelineEngineTxRunner) Run(ctx context.Context, fn func(runtimeengine.Tx) error) error {
-	if r.store == nil || !r.store.enabled() {
-		return fn(pipelineEngineTx{ctx: ctx})
+type pipelineEngineMutationOwner struct {
+	store      workflowMutationStore
+	state      runtimeengine.StateRepository
+	verifier   runtimeengine.EmitPersistenceVerifier
+	lifecycle  runtimeengine.WorkflowLifecycleEffectOwner
+	activities runtimeengine.ActivityIntentWriter
+	outbox     runtimeengine.OutboxWriter
+}
+
+func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, mutation runtimeengine.EngineMutation) (runtimeengine.CommittedEngineMutation, error) {
+	commit := func(txctx context.Context) error {
+		if o.state == nil {
+			return runtimeengine.ErrMissingStateRepo
+		}
+		if err := o.state.SaveState(txctx, mutation.Address, mutation.State); err != nil {
+			return err
+		}
+		if len(mutation.LifecycleEffects) > 0 {
+			if o.lifecycle == nil {
+				return fmt.Errorf("workflow lifecycle owner is required for engine mutation")
+			}
+			if err := o.lifecycle.ApplyWorkflowLifecycleEffects(txctx, mutation.LifecycleEffects); err != nil {
+				return err
+			}
+		}
+		if len(mutation.ActivityIntents) > 0 {
+			if o.activities == nil {
+				return fmt.Errorf("activity intent owner is required for engine mutation")
+			}
+			if err := o.activities.WriteActivityIntents(txctx, mutation.ActivityIntents); err != nil {
+				return err
+			}
+		}
+		if len(mutation.EmitIntents) > 0 {
+			if o.verifier != nil && len(mutation.EmitPrerequisites.Fields) > 0 {
+				if err := o.verifier.VerifyEmitPersistence(txctx, mutation.Address, mutation.EmitPrerequisites); err != nil {
+					return err
+				}
+			}
+			if o.outbox == nil {
+				return runtimeengine.ErrMissingOutbox
+			}
+			if err := o.outbox.WriteOutbox(txctx, mutation.EmitIntents); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
-	return r.store.runPipelineMutation(ctx, func(txctx context.Context) error {
-		return fn(pipelineEngineTx{ctx: txctx})
-	})
+	if o.store != nil && o.store.enabled() {
+		if err := o.store.runPipelineMutation(ctx, commit); err != nil {
+			return runtimeengine.CommittedEngineMutation{}, err
+		}
+	} else if err := commit(ctx); err != nil {
+		return runtimeengine.CommittedEngineMutation{}, err
+	}
+	return runtimeengine.CommittedEngineMutation{
+		ActivityIntents: append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...),
+		EmitIntents:     append([]runtimeengine.EmitIntent(nil), mutation.EmitIntents...),
+	}, nil
 }
 
 type pipelineEngineLocker struct {
@@ -418,16 +460,15 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 	if pc.workflowStore != nil && pc.workflowStore.enabled() {
 		lifecycleOwner = pipelineWorkflowLifecycleOwner{coordinator: pc}
 	}
+	stateRepo := pipelineEngineStateRepo{coordinator: pc}
+	activityWriter := pipelineActivityIntentWriter{coordinator: pc}
 	return runtimeengine.RuntimeDependencies{
 		Source:              source,
-		StateRepo:           pipelineEngineStateRepo{coordinator: pc},
-		EmitVerifier:        pipelineEngineStateRepo{coordinator: pc},
-		TxRunner:            pipelineEngineTxRunner{store: pc.workflowStore},
+		StateRepo:           stateRepo,
+		MutationOwner:       pipelineEngineMutationOwner{store: pc.workflowStore, state: stateRepo, verifier: stateRepo, lifecycle: lifecycleOwner, activities: activityWriter, outbox: outbox},
 		Locker:              pipelineEngineLocker{coordinator: pc},
-		Outbox:              outbox,
 		WorkflowLifecycle:   lifecycleOwner,
 		Dispatcher:          dispatcher,
-		ActivityIntents:     pipelineActivityIntentWriter{coordinator: pc},
 		ActivityDispatcher:  pipelineActivityDispatcher{coordinator: pc},
 		GuardRegistry:       pipelineEngineGuardRegistry{registry: pc.GuardRegistry()},
 		GuardRunner:         pipelineEngineGuardRunner{coordinator: pc},
@@ -631,7 +672,7 @@ func hasHumanDecisionProducer(event events.Event) bool {
 
 type pipelineEngineActionRunner struct {
 	coordinator        *PipelineCoordinator
-	artifactRepoCommit func(context.Context, runtimecontracts.ActionSpec, runtimeengine.ExecutionContext) ([]runtimeengine.EmitIntent, error)
+	artifactRepoCommit func(context.Context, runtimecontracts.ActionSpec, runtimeengine.ExecutionContext) (runtimeengine.ActionExecution, error)
 }
 
 func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimeregistry.ActionInstruction, execCtx runtimeengine.ExecutionContext) (runtimeengine.ActionExecution, error) {
@@ -650,10 +691,11 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 		if bucketID == "" {
 			return runtimeengine.ActionExecution{Handled: true}, fmt.Errorf("node %s handler %s record_evidence is missing evidence_target", execCtx.Request.NodeID.String(), recordEvidenceHandlerLabel(execCtx.Request))
 		}
-		if err := pc.recordWorkflowEvidence(ctx, execCtx.Request.StateAddress().Route, execCtx.Request.EntityID.String(), execCtx.Request.FlowID.String(), bucketID, payload); err != nil {
+		mutation, err := pc.projectWorkflowEvidence(execCtx, bucketID, payload)
+		if err != nil {
 			return runtimeengine.ActionExecution{Handled: true}, err
 		}
-		return runtimeengine.ActionExecution{Handled: true}, nil
+		return runtimeengine.ActionExecution{Handled: true, State: mutation}, nil
 	case "create_flow_instance":
 		plan := handlerExecutionPlan{
 			NodeID:         execCtx.Request.NodeID.String(),
@@ -687,11 +729,9 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 		if commit == nil {
 			commit = pc.commitArtifactRepo
 		}
-		intents, err := commit(ctx, action, execCtx)
-		if err != nil {
-			return runtimeengine.ActionExecution{Handled: true, EmitIntents: intents}, err
-		}
-		return runtimeengine.ActionExecution{Handled: true, EmitIntents: intents}, nil
+		execution, err := commit(ctx, action, execCtx)
+		execution.Handled = true
+		return execution, err
 	default:
 		return runtimeengine.ActionExecution{}, nil
 	}

@@ -22,9 +22,8 @@ func TestExecutorPersistPropagatesDeliveryContextToEveryContinuationIntent(t *te
 	outbox := &recordingEmitOutbox{}
 	activities := &deliveryContextActivityWriter{}
 	exec := &Executor{deps: RuntimeDependencies{
-		StateRepo:       stubStateRepo{},
-		Outbox:          outbox,
-		ActivityIntents: activities,
+		StateRepo:     stubStateRepo{},
+		MutationOwner: composedMutationOwner{outbox: outbox, activities: activities},
 	}}
 	deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:intent-propagation"}}
 	ctx := events.WithDeliveryContext(context.Background(), deliveryContext)
@@ -35,7 +34,7 @@ func TestExecutorPersistPropagatesDeliveryContextToEveryContinuationIntent(t *te
 			ActivityIntents: []ActivityIntent{{ActivityID: "provider-call", ExecutionMode: executionmode.Live}},
 		},
 	}
-	if err := exec.persist(ctx, frame); err != nil {
+	if _, err := exec.persist(ctx, frame); err != nil {
 		t.Fatalf("persist: %v", err)
 	}
 	if len(outbox.intents) != 1 || outbox.intents[0].Context.ReplyContextID() != deliveryContext.ReplyContextID() {

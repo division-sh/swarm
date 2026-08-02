@@ -279,7 +279,7 @@ search_dimensions:
     canonical_layer: live_dispatch_non_authority
   - id: event_receipts
     pattern: '\bevent_receipts\b'
-    minimum_matching_files: 58
+    minimum_matching_files: 57
     required_paths:
       - platform-spec.yaml
       - internal/store/pipeline_obligation.go

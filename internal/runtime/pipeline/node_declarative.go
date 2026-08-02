@@ -374,8 +374,13 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	ctx, parentEventCollector, collectedIntents, collectLocally = pipelineCollectorExecutionContext(ctx)
 	if collectLocally {
 		deps := coordinatorEngineDependencies(e.coordinator)
-		deps.Outbox = noOpEngineOutbox{}
-		deps.ActivityIntents = noOpActivityIntentWriter{}
+		owner, ok := deps.MutationOwner.(pipelineEngineMutationOwner)
+		if !ok {
+			return nil, fmt.Errorf("pipeline engine mutation owner is unavailable")
+		}
+		owner.outbox = noOpEngineOutbox{}
+		owner.activities = noOpActivityIntentWriter{}
+		deps.MutationOwner = owner
 		deps.ActivityDispatcher = noOpActivityDispatcher{}
 		tmpExec, err := runtimeengine.NewExecutor(deps, newCoordinatorEngineEvaluator(e.coordinator))
 		if err != nil {

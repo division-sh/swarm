@@ -49,12 +49,11 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
-		Source:     source,
-		StateRepo:  fanOutPinRouteStateRepo{},
-		TxRunner:   fanOutPinRouteTxRunner{},
-		Locker:     fanOutPinRouteLocker{},
-		Outbox:     fanOutPinRouteOutbox{},
-		Dispatcher: fanOutPinRouteDispatcher{},
+		Source:        source,
+		StateRepo:     fanOutPinRouteStateRepo{},
+		MutationOwner: fanOutPinRouteMutationOwner{},
+		Locker:        fanOutPinRouteLocker{},
+		Dispatcher:    fanOutPinRouteDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
@@ -202,12 +201,11 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
-		Source:     source,
-		StateRepo:  fanOutPinRouteStateRepo{},
-		TxRunner:   fanOutPinRouteTxRunner{},
-		Locker:     fanOutPinRouteLocker{},
-		Outbox:     fanOutPinRouteOutbox{},
-		Dispatcher: fanOutPinRouteDispatcher{},
+		Source:        source,
+		StateRepo:     fanOutPinRouteStateRepo{},
+		MutationOwner: fanOutPinRouteMutationOwner{},
+		Locker:        fanOutPinRouteLocker{},
+		Dispatcher:    fanOutPinRouteDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)

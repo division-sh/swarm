@@ -6,7 +6,7 @@ var (
 	ErrChainDepthExceeded           = errors.New("engine: chain depth exceeded")
 	ErrMissingSemanticSource        = errors.New("engine: semantic source is required")
 	ErrMissingStateRepo             = errors.New("engine: state repository is required")
-	ErrMissingTransaction           = errors.New("engine: transaction runner is required")
+	ErrMissingMutationOwner         = errors.New("engine: mutation owner is required")
 	ErrMissingEntityLocker          = errors.New("engine: entity locker is required")
 	ErrMissingOutbox                = errors.New("engine: outbox writer is required")
 	ErrMissingDispatcher            = errors.New("engine: post-commit dispatcher is required")

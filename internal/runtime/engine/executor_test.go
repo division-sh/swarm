@@ -204,12 +204,11 @@ func sourceWithPythonRendererSource(t *testing.T, source []byte) (semanticview.S
 func newStructuredRendererExecutor(t *testing.T, source semanticview.Source) *Executor {
 	t.Helper()
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     source,
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        source,
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
 		`computed.rendered_bundle.format == "yaml"`: func(base BaseContext) (bool, error) {
 			rendered, _ := base.Computed.Raw()["rendered_bundle"].(map[string]any)
@@ -422,7 +421,17 @@ type recordingStateRepo struct {
 type actionMergeStateRepo struct {
 	snapshot StateSnapshot
 }
-type stubRunner struct{}
+type stubMutationOwner struct {
+	state StateRepository
+}
+type composedMutationOwner struct {
+	state      StateRepository
+	verifier   EmitPersistenceVerifier
+	lifecycle  WorkflowLifecycleEffectOwner
+	activities ActivityIntentWriter
+	outbox     OutboxWriter
+	order      *[]string
+}
 type stubLocker struct{}
 type stubOutbox struct{}
 type recordingEmitOutbox struct {
@@ -486,7 +495,51 @@ func (r actionMergeStateRepo) LoadState(context.Context, StateAddress) (StateSna
 func (actionMergeStateRepo) SaveState(context.Context, StateAddress, StateMutation) error {
 	return nil
 }
-func (stubRunner) Run(ctx context.Context, fn func(Tx) error) error { return fn(stubTx{ctx: ctx}) }
+func (o stubMutationOwner) CommitEngineMutation(ctx context.Context, mutation EngineMutation) (CommittedEngineMutation, error) {
+	if o.state != nil {
+		if err := o.state.SaveState(ctx, mutation.Address, mutation.State); err != nil {
+			return CommittedEngineMutation{}, err
+		}
+	}
+	return CommittedEngineMutation{
+		ActivityIntents: append([]ActivityIntent(nil), mutation.ActivityIntents...),
+		EmitIntents:     append([]EmitIntent(nil), mutation.EmitIntents...),
+	}, nil
+}
+func (o composedMutationOwner) CommitEngineMutation(ctx context.Context, mutation EngineMutation) (CommittedEngineMutation, error) {
+	if o.order != nil {
+		*o.order = append(*o.order, "tx")
+	}
+	if o.state != nil {
+		if err := o.state.SaveState(ctx, mutation.Address, mutation.State); err != nil {
+			return CommittedEngineMutation{}, err
+		}
+	}
+	if o.lifecycle != nil && len(mutation.LifecycleEffects) > 0 {
+		if err := o.lifecycle.ApplyWorkflowLifecycleEffects(ctx, mutation.LifecycleEffects); err != nil {
+			return CommittedEngineMutation{}, err
+		}
+	}
+	if o.activities != nil && len(mutation.ActivityIntents) > 0 {
+		if err := o.activities.WriteActivityIntents(ctx, mutation.ActivityIntents); err != nil {
+			return CommittedEngineMutation{}, err
+		}
+	}
+	if o.verifier != nil && len(mutation.EmitPrerequisites.Fields) > 0 {
+		if err := o.verifier.VerifyEmitPersistence(ctx, mutation.Address, mutation.EmitPrerequisites); err != nil {
+			return CommittedEngineMutation{}, err
+		}
+	}
+	if o.outbox != nil && len(mutation.EmitIntents) > 0 {
+		if err := o.outbox.WriteOutbox(ctx, mutation.EmitIntents); err != nil {
+			return CommittedEngineMutation{}, err
+		}
+	}
+	return CommittedEngineMutation{
+		ActivityIntents: append([]ActivityIntent(nil), mutation.ActivityIntents...),
+		EmitIntents:     append([]EmitIntent(nil), mutation.EmitIntents...),
+	}, nil
+}
 func (stubLocker) WithEntityLock(ctx context.Context, _ identity.EntityID, fn func(context.Context) error) error {
 	return fn(ctx)
 }
@@ -581,10 +634,6 @@ func (s *eventErrPayloadShaper) ShapeEmitPayload(_ context.Context, _ ExecutionR
 	return out, nil
 }
 
-type stubTx struct{ ctx context.Context }
-
-func (s stubTx) Context() context.Context { return s.ctx }
-
 type testWorkflowLifecycleOwner struct {
 	effects []runtimeworkflowlifecycle.Effect
 	order   *[]string
@@ -617,7 +666,7 @@ func TestExecutorTimerReconciliationRequiresExactEventAuthority(t *testing.T) {
 			ID: "waiting.timeout", Stage: "waiting", StageOwned: true, Event: "timer.timeout", Delay: "1h",
 		}}},
 	}), WorkflowLifecycle: owner}}
-	frame, err := executor.newExecutionFrame(stubTx{ctx: context.Background()}, ExecutionRequest{
+	frame, err := executor.newExecutionFrame(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		ProducerRoute: events.RouteIdentity{
 			FlowInstance: "flow-1",
@@ -643,7 +692,7 @@ func TestExecutorTimerReconciliationCarriesOnlyActualTransitionTarget(t *testing
 		}}},
 	}), WorkflowLifecycle: owner}}
 	createdAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
-	frame, err := executor.newExecutionFrame(stubTx{ctx: context.Background()}, ExecutionRequest{
+	frame, err := executor.newExecutionFrame(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		ProducerRoute: events.RouteIdentity{
 			FlowInstance: "flow-1",
@@ -698,12 +747,11 @@ func eventPayloadMap(t *testing.T, evt events.Event) map[string]any {
 
 func TestNewExecutor_DefaultsMaxChainDepth(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -717,9 +765,8 @@ func TestExecutor_ValidateRequestAllowsDeepInboundChainDepth(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
-		TxRunner:      stubRunner{},
+		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
-		Outbox:        stubOutbox{},
 		Dispatcher:    stubDispatcher{},
 		MaxChainDepth: 2,
 	}, nil)
@@ -733,12 +780,11 @@ func TestExecutor_ValidateRequestAllowsDeepInboundChainDepth(t *testing.T) {
 
 func TestExecutor_ValidateRequestRejectsConflictingCompletionDialect(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -756,12 +802,11 @@ func TestExecutor_ValidateRequestRejectsConflictingCompletionDialect(t *testing.
 
 func TestExecutor_ValidateRequestRejectsPlatformEntityWriteTargets(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -893,12 +938,11 @@ func TestExecutionScopeResolveOperand_AllowsPlatformEntityRoot(t *testing.T) {
 
 func TestExecutor_ValidateRequestRejectsCreateEntityWithAccumulate(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -916,12 +960,11 @@ func TestExecutor_ValidateRequestRejectsCreateEntityWithAccumulate(t *testing.T)
 
 func TestExecutor_ValidateRequestRejectsCreateEntityWithSelectEntity(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -941,12 +984,11 @@ func TestExecutor_ValidateRequestRejectsCreateEntityWithSelectEntity(t *testing.
 
 func TestExecutor_ValidateRequestRejectsCreateEntityWithSelectOrCreateEntity(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -966,12 +1008,11 @@ func TestExecutor_ValidateRequestRejectsCreateEntityWithSelectOrCreateEntity(t *
 
 func TestExecutor_ValidateRequestRejectsSelectEntityWithSelectOrCreateEntity(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -993,12 +1034,11 @@ func TestExecutor_ValidateRequestRejectsSelectEntityWithSelectOrCreateEntity(t *
 
 func TestExecutor_ValidateRequestRejectsTieredWeightedAverageWithoutDimensionKey(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -1021,12 +1061,11 @@ func TestExecutor_ValidateRequestRejectsTieredWeightedAverageWithoutDimensionKey
 
 func TestExecutor_ValidateRequestRejectsTieredWeightedAverageWithoutScoreKeys(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -1050,12 +1089,11 @@ func TestExecutor_ValidateRequestRejectsTieredWeightedAverageWithoutScoreKeys(t 
 func TestExecutor_LoadsStateInsideEntityLock(t *testing.T) {
 	order := []string{}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  lockOrderStateRepo{order: &order},
-		TxRunner:   stubRunner{},
-		Locker:     lockOrderLocker{order: &order},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     lockOrderStateRepo{order: &order},
+		MutationOwner: stubMutationOwner{},
+		Locker:        lockOrderLocker{order: &order},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -1089,12 +1127,11 @@ func TestExecutor_LoadsStateInsideEntityLock(t *testing.T) {
 
 func TestExecutor_StepOrderIsStable(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -1122,9 +1159,8 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
-		TxRunner:      stubRunner{},
+		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
-		Outbox:        stubOutbox{},
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: shaper,
 	}, nil)
@@ -1271,12 +1307,11 @@ func accumulatorProjectionTestSource() semanticview.Source {
 func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t *testing.T) {
 	source := accumulatorProjectionTestSource()
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     source,
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        source,
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -1544,12 +1579,11 @@ func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitField
 func newAccumulatorProjectionTestExecutor(t *testing.T, evaluator Evaluator) *Executor {
 	t.Helper()
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     accumulatorProjectionTestSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        accumulatorProjectionTestSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, evaluator)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -1602,12 +1636,11 @@ func requireNoProjectedScores(t *testing.T, result ExecutionResult) {
 func TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent(t *testing.T) {
 	source := semanticview.Wrap(loadEngineProjectionFlowBundle(t))
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     source,
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        source,
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -1654,12 +1687,11 @@ func TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent(t *t
 
 func TestExecutor_AccumulatorBucketUsesMatchedHandlerEventKeyForScopedConcreteEvents(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -1757,7 +1789,7 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "orders", Joins: []runtimecontracts.WorkflowJoinPlan{{FlowID: "orders", NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
-		}}), StateRepo: stubStateRepo{}, TxRunner: stubRunner{}, Locker: stubLocker{}, Outbox: stubOutbox{}, Dispatcher: stubDispatcher{},
+		}}), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1831,7 +1863,7 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 	}
 
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source: source, StateRepo: stubStateRepo{}, TxRunner: stubRunner{}, Locker: stubLocker{}, Outbox: stubOutbox{}, Dispatcher: stubDispatcher{},
+		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1887,7 +1919,7 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 				Joins: []runtimecontracts.WorkflowJoinPlan{{FlowID: "orders", NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
 			}})
 			exec, err := NewExecutor(RuntimeDependencies{
-				Source: source, StateRepo: stubStateRepo{}, TxRunner: stubRunner{}, Locker: stubLocker{}, Outbox: stubOutbox{}, Dispatcher: stubDispatcher{},
+				Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
 			}, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -1924,12 +1956,11 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 
 func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -1977,12 +2008,11 @@ func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) 
 
 func TestExecutor_PolicySheetLookupRowFeedsSelectionRow(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
 		`computed.template_path == "templates/service/go"`: func(base BaseContext) (bool, error) {
 			return base.Computed.Raw()["template_path"] == "templates/service/go", nil
@@ -2062,12 +2092,11 @@ func TestExecutor_PolicySheetLookupRowFeedsSelectionRow(t *testing.T) {
 func TestExecutor_PolicySheetComputeModuleRowFeedsSelectionRow(t *testing.T) {
 	source, module := sourceWithStructuredRendererModule(t)
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     source,
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        source,
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
 		`computed.rendered_bundle.format == "yaml"`: func(base BaseContext) (bool, error) {
 			rendered, _ := base.Computed.Raw()["rendered_bundle"].(map[string]any)
@@ -2465,12 +2494,11 @@ func TestExecutor_PolicySheetValidateRowFeedsSelectionRow(t *testing.T) {
 		}},
 	})
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     source,
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        source,
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
 		`computed.validation.deploy_manifest.valid == false`: func(base BaseContext) (bool, error) {
 			validation, _ := base.Computed.Raw()["validation"].(map[string]any)
@@ -2588,12 +2616,11 @@ func TestExecutor_PolicySheetValidateNumericEqualityCanonicalizesRuntimeValues(t
 		}},
 	})
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     source,
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        source,
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
 		`computed.validation.count_match.valid == true`: func(base BaseContext) (bool, error) {
 			validation, _ := base.Computed.Raw()["validation"].(map[string]any)
@@ -2672,12 +2699,11 @@ func TestExecutor_PolicySheetValidateNumericEqualityCanonicalizesRuntimeValues(t
 func TestExecutor_AccumulatorProjectionFailsClosedWhenDeclaredBindingDoesNotResolveAtRuntime(t *testing.T) {
 	source := semanticview.Wrap(loadEngineProjectionFlowBundle(t))
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     source,
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        source,
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -2714,13 +2740,6 @@ func (r *orderedStateRepo) SaveState(_ context.Context, _ StateAddress, mutation
 	*r.order = append(*r.order, "save")
 	r.mutation = mutation
 	return nil
-}
-
-type orderedRunner struct{ order *[]string }
-
-func (r orderedRunner) Run(ctx context.Context, fn func(Tx) error) error {
-	*r.order = append(*r.order, "tx")
-	return fn(stubTx{ctx: ctx})
 }
 
 type orderedLocker struct{ order *[]string }
@@ -2792,11 +2811,9 @@ func TestExecutor_ActivityIntentPersistsBeforePostCommitDispatch(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:             sourceWithActivityTool(),
 		StateRepo:          repo,
-		TxRunner:           orderedRunner{order: &order},
+		MutationOwner:      composedMutationOwner{state: repo, activities: writer, order: &order},
 		Locker:             orderedLocker{order: &order},
-		Outbox:             orderedOutbox{order: &order},
 		Dispatcher:         orderedDispatcher{order: &order},
-		ActivityIntents:    writer,
 		ActivityDispatcher: dispatcher,
 	}, nil)
 	if err != nil {
@@ -2846,11 +2863,9 @@ func TestExecutor_ActivityDispatchDoesNotRunWhenIntentPersistenceFails(t *testin
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:             sourceWithActivityTool(),
 		StateRepo:          &orderedStateRepo{order: &order},
-		TxRunner:           orderedRunner{order: &order},
+		MutationOwner:      composedMutationOwner{state: &orderedStateRepo{order: &order}, activities: writer, order: &order},
 		Locker:             orderedLocker{order: &order},
-		Outbox:             orderedOutbox{order: &order},
 		Dispatcher:         orderedDispatcher{order: &order},
-		ActivityIntents:    writer,
 		ActivityDispatcher: dispatcher,
 	}, nil)
 	if err != nil {
@@ -2889,9 +2904,8 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:            stubSource(),
 		StateRepo:         repo,
-		TxRunner:          orderedRunner{order: &order},
+		MutationOwner:     composedMutationOwner{state: repo, lifecycle: lifecycle, outbox: orderedOutbox{order: &order}, order: &order},
 		Locker:            orderedLocker{order: &order},
-		Outbox:            orderedOutbox{order: &order},
 		WorkflowLifecycle: lifecycle,
 		Dispatcher:        orderedDispatcher{order: &order},
 	}, nil)
@@ -2944,12 +2958,11 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 	order := []string{}
 	repo := &orderedStateRepo{order: &order}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  repo,
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     repo,
+		MutationOwner: stubMutationOwner{state: repo},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -3027,12 +3040,11 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 	order := []string{}
 	repo := &orderedStateRepo{order: &order}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  repo,
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     repo,
+		MutationOwner: stubMutationOwner{state: repo},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -3066,12 +3078,11 @@ func TestExecutor_QueryGroupByStoresCounts(t *testing.T) {
 
 func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     sourceWithPolicy(map[string]any{"score": 6}),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        sourceWithPolicy(map[string]any{"score": 6}),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -3105,12 +3116,11 @@ func TestExecutor_QueryFilterUsesExplicitCollidingScopes(t *testing.T) {
 
 func TestExecutor_FilterRejectsUnqualifiedConditionField(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     sourceWithPolicy(map[string]any{"score": 1}),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        sourceWithPolicy(map[string]any{"score": 1}),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -3136,12 +3146,11 @@ func TestExecutor_FilterRejectsUnqualifiedConditionField(t *testing.T) {
 
 func TestExecutor_GuardRecursesAndUsesRegistryCheck(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 		GuardRegistry: stubGuardRegistry{entries: map[identity.GuardKey]runtimeregistry.GuardInstruction{
 			identity.NormalizeGuardKey("registry_guard"): {
 				Key:   identity.NormalizeGuardKey("registry_guard"),
@@ -3183,12 +3192,11 @@ func TestExecutor_GuardRecursesAndUsesRegistryCheck(t *testing.T) {
 
 func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, stubEvaluator{bools: map[string]bool{
 		"payload.score > 5": true,
 	}})
@@ -3236,12 +3244,11 @@ rules:
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, stubEvaluator{bools: map[string]bool{
 		`payload.mode == "deep"`: true,
 	}})
@@ -3269,12 +3276,11 @@ rules:
 
 func TestExecutor_RulesUseHandlerAdvancesToDefaultWhenRuleOmitsTarget(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, stubEvaluator{bools: map[string]bool{
 		"payload.score > 5": true,
 	}})
@@ -3308,12 +3314,11 @@ func TestExecutor_RulesUseHandlerAdvancesToDefaultWhenRuleOmitsTarget(t *testing
 
 func TestExecutor_HandlerSetsGateAppliesWithMatchedRule(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, stubEvaluator{bools: map[string]bool{
 		"payload.score > 5": true,
 	}})
@@ -3355,9 +3360,8 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRules(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
-		TxRunner:      stubRunner{},
+		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
-		Outbox:        stubOutbox{},
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: stubPayloadShaper{},
 		MaxChainDepth: 5,
@@ -3393,9 +3397,8 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRulesWithoutRuleEmit(t 
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
-		TxRunner:      stubRunner{},
+		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
-		Outbox:        stubOutbox{},
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: stubPayloadShaper{},
 		MaxChainDepth: 5,
@@ -3463,9 +3466,8 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 			exec, err := NewExecutor(RuntimeDependencies{
 				Source:        stubSource(),
 				StateRepo:     stubStateRepo{},
-				TxRunner:      stubRunner{},
+				MutationOwner: composedMutationOwner{outbox: outbox},
 				Locker:        stubLocker{},
-				Outbox:        outbox,
 				Dispatcher:    stubDispatcher{},
 				PayloadShaper: stubPayloadShaper{},
 				MaxChainDepth: 5,
@@ -3559,9 +3561,8 @@ func TestExecutor_EmitFromLoweringQueuesCanonicalPayload(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        emitFromExecutorSource(),
 		StateRepo:     stubStateRepo{},
-		TxRunner:      stubRunner{},
+		MutationOwner: composedMutationOwner{outbox: outbox},
 		Locker:        stubLocker{},
-		Outbox:        outbox,
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: stubPayloadShaper{},
 		MaxChainDepth: 5,
@@ -3647,9 +3648,8 @@ func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
-		TxRunner:      stubRunner{},
+		MutationOwner: composedMutationOwner{outbox: outbox},
 		Locker:        stubLocker{},
-		Outbox:        outbox,
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: stubPayloadShaper{},
 		MaxChainDepth: 5,
@@ -3749,9 +3749,8 @@ func TestExecutor_OnSuccessEmitFiresWhenRulesDoNotMatch(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
-		TxRunner:      stubRunner{},
+		MutationOwner: composedMutationOwner{outbox: outbox},
 		Locker:        stubLocker{},
-		Outbox:        outbox,
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: stubPayloadShaper{},
 		MaxChainDepth: 5,
@@ -3798,9 +3797,8 @@ func TestExecutor_OnSuccessEmitFailsClosedWhenRuleEventMatchesSuccessEvent(t *te
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
-		TxRunner:      stubRunner{},
+		MutationOwner: composedMutationOwner{outbox: outbox},
 		Locker:        stubLocker{},
-		Outbox:        outbox,
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: stubPayloadShaper{},
 		MaxChainDepth: 5,
@@ -3837,9 +3835,8 @@ func TestExecutor_RejectsOnSuccessEmitWithRuleFanOut(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
-		TxRunner:      stubRunner{},
+		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
-		Outbox:        stubOutbox{},
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: stubPayloadShaper{},
 		MaxChainDepth: 5,
@@ -3875,9 +3872,8 @@ func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *tes
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stateRepo,
-		TxRunner:      stubRunner{},
+		MutationOwner: composedMutationOwner{outbox: outbox},
 		Locker:        stubLocker{},
-		Outbox:        outbox,
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: shaper,
 		MaxChainDepth: 5,
@@ -3919,12 +3915,11 @@ func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *tes
 
 func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, stubEvaluator{bools: map[string]bool{"payload.score > 5": true}})
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -3969,12 +3964,11 @@ func TestExecutor_RuleDataAccumulationRunsBeforeTopLevelWrites(t *testing.T) {
 
 func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
 		`entity.branch_target == "handler"`: func(base BaseContext) (bool, error) {
 			return base.Entity.Raw()["branch_target"] == "handler", nil
@@ -4024,12 +4018,11 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 
 func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
 		`entity.branch_target == "handler"`: func(base BaseContext) (bool, error) {
 			return base.Entity.Raw()["branch_target"] == "handler", nil
@@ -4076,9 +4069,8 @@ func TestExecutor_ChainDepthOverflowInterceptsEmitsButSucceeds(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
-		TxRunner:      stubRunner{},
+		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
-		Outbox:        stubOutbox{},
 		Dispatcher:    stubDispatcher{},
 		MaxChainDepth: 1,
 	}, nil)
@@ -4121,9 +4113,8 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        fanOutPayloadSource("task.completed"),
 		StateRepo:     stubStateRepo{},
-		TxRunner:      stubRunner{},
+		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
-		Outbox:        stubOutbox{},
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: stubPayloadShaper{},
 		MaxChainDepth: 5,
@@ -4183,9 +4174,8 @@ func TestExecutor_FanOutBoundExceededFailsClosedBeforeEmit(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        fanOutPayloadSource("task.completed"),
 		StateRepo:     stubStateRepo{},
-		TxRunner:      stubRunner{},
+		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
-		Outbox:        stubOutbox{},
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: stubPayloadShaper{},
 		MaxChainDepth: 5,
@@ -4302,9 +4292,8 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 			exec, err := NewExecutor(RuntimeDependencies{
 				Source:              fanOutPayloadSource("batch.ready"),
 				StateRepo:           stubStateRepo{},
-				TxRunner:            stubRunner{},
+				MutationOwner:       stubMutationOwner{},
 				Locker:              stubLocker{},
-				Outbox:              stubOutbox{},
 				Dispatcher:          stubDispatcher{},
 				PayloadShaper:       stubPayloadShaper{},
 				TransitionValidator: transition,
@@ -4402,7 +4391,7 @@ func TestExecutor_FanOutRejectsInvalidSourceAndExplicitZeroBound(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			exec, err := NewExecutor(RuntimeDependencies{
-				Source: stubSource(), StateRepo: stubStateRepo{}, TxRunner: stubRunner{}, Locker: stubLocker{}, Outbox: stubOutbox{}, Dispatcher: stubDispatcher{},
+				Source: stubSource(), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
 			}, nil)
 			if err != nil {
 				t.Fatalf("NewExecutor error: %v", err)
@@ -4445,12 +4434,11 @@ func TestActiveFanOutSpecEmitSourceNamesOwningSite(t *testing.T) {
 
 func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, stubEvaluator{bools: map[string]bool{"payload.mode == 'corpus'": true}})
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -4519,12 +4507,11 @@ func TestExecutor_PayloadTransformSeesDataAccumulationWrites(t *testing.T) {
 
 func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -4610,12 +4597,11 @@ func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *te
 
 func TestExecutor_EmitIntentUsesAdmittedProducerSourceBeforeStateMetadata(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -4667,12 +4653,11 @@ func TestExecutor_EmitIntentUsesAdmittedProducerSourceBeforeStateMetadata(t *tes
 
 func TestExecutor_EmitIntentUsesExplicitProducerSourceWhenStateFlowPathNormalizesEmpty(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -4760,12 +4745,11 @@ func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *test
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			exec, err := NewExecutor(RuntimeDependencies{
-				Source:     source,
-				StateRepo:  stubStateRepo{},
-				TxRunner:   stubRunner{},
-				Locker:     stubLocker{},
-				Outbox:     stubOutbox{},
-				Dispatcher: stubDispatcher{},
+				Source:        source,
+				StateRepo:     stubStateRepo{},
+				MutationOwner: stubMutationOwner{},
+				Locker:        stubLocker{},
+				Dispatcher:    stubDispatcher{},
 			}, nil)
 			if err != nil {
 				t.Fatalf("NewExecutor error: %v", err)
@@ -4820,12 +4804,11 @@ func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *test
 func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 	source := sourceWithDeclarativeEmitExternalizationFlows()
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     source,
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        source,
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -4871,12 +4854,11 @@ func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 func TestExecutor_ChildPinOutputTargetsStoredParentRoute(t *testing.T) {
 	source := sourceWithChildOutputPin()
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     source,
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        source,
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -4963,12 +4945,11 @@ func sourceWithChildOutputPin() semanticview.Source {
 
 func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSourceWithRootEntityContract(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSourceWithRootEntityContract(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -5009,12 +4990,11 @@ func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T)
 
 func TestExecutor_DataAccumulationAppliesTypedContainedOperations(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSourceWithRootEntityContract(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSourceWithRootEntityContract(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -5123,12 +5103,11 @@ func TestExecutor_SingletonCoordinatorAppliesContainedStateThroughLoadedContract
 		t.Fatalf("ResolveFlowSingletonCoordinator: %v", err)
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     semanticview.Wrap(bundle),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        semanticview.Wrap(bundle),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -5202,12 +5181,11 @@ func TestExecutor_SingletonCoordinatorAppliesContainedStateThroughLoadedContract
 
 func TestExecutor_DataAccumulationContainedOperationRejectsMissingMapKey(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSourceWithRootEntityContract(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSourceWithRootEntityContract(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -5239,12 +5217,11 @@ func TestExecutor_DataAccumulationContainedOperationRejectsMissingMapKey(t *test
 
 func TestExecutor_DataAccumulationRejectsContainedSetOrMergeIndex(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSourceWithRootEntityContract(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSourceWithRootEntityContract(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -5291,12 +5268,11 @@ func TestExecutor_DataAccumulationRejectsContainedSetOrMergeIndex(t *testing.T) 
 
 func TestExecutor_RejectsUndeclaredNestedEntityWriteBeforeExecution(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSourceWithRootEntityContract(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSourceWithRootEntityContract(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -5326,12 +5302,11 @@ func TestExecutor_RejectsUndeclaredNestedEntityWriteBeforeExecution(t *testing.T
 
 func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSourceWithRootEntityContract(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSourceWithRootEntityContract(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -5367,12 +5342,11 @@ func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
 
 func TestExecutor_ClearSpecialTargetsBypassContractValidation(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSourceWithRootEntityContract(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSourceWithRootEntityContract(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -5414,12 +5388,11 @@ func TestExecutor_ClearSpecialTargetsBypassContractValidation(t *testing.T) {
 
 func TestExecutor_EmitFieldsCELFailureReturnsError(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, stubEvaluator{})
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -5448,12 +5421,11 @@ func TestExecutor_EmitFieldsCELFailureReturnsError(t *testing.T) {
 
 func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     fanOutPayloadSource("task.completed"),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        fanOutPayloadSource("task.completed"),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -5490,12 +5462,11 @@ func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 
 func TestExecutor_FanOutInternalCountBypassesEntityContractValidation(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSourceWithRootEntityContract(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSourceWithRootEntityContract(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -5528,9 +5499,8 @@ func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        fanOutPayloadSource("batch.submitted"),
 		StateRepo:     stubStateRepo{},
-		TxRunner:      stubRunner{},
+		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
-		Outbox:        stubOutbox{},
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: stubPayloadShaper{},
 		MaxChainDepth: 5,
@@ -5573,12 +5543,11 @@ func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 
 func TestExecutor_GuardKillTransitionsToKilledStateWhenDeclared(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     sourceWithKilledState(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        sourceWithKilledState(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, stubEvaluator{bools: map[string]bool{"payload.score >= policy.threshold": false}})
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -5614,12 +5583,11 @@ func TestExecutor_GuardKillTransitionsToKilledStateWhenDeclared(t *testing.T) {
 
 func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -5658,12 +5626,11 @@ func TestExecutor_GroupByStoresGroupedItems(t *testing.T) {
 
 func TestExecutor_GroupByBareKeyUsesItemScopeWithoutFallbackAcrossRoots(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     sourceWithPolicy(map[string]any{"category": "policy"}),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        sourceWithPolicy(map[string]any{"category": "policy"}),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -5708,12 +5675,11 @@ func TestExecutor_GroupByBareKeyUsesItemScopeWithoutFallbackAcrossRoots(t *testi
 
 func TestExecutor_ClearGatesWildcardUsesNodeGateSchema(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -5749,12 +5715,11 @@ func TestExecutor_ClearGatesWildcardUsesNodeGateSchema(t *testing.T) {
 
 func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, stubEvaluator{bools: map[string]bool{
 		"_entity.gates.review == false": true,
 	}})
@@ -5786,12 +5751,11 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 	runner := &stubActionRunner{}
 	shaper := &recordingPayloadShaper{}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 		ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
 			identity.NormalizeActionKey("notify"): {
 				Key:   identity.NormalizeActionKey("notify"),
@@ -5837,12 +5801,11 @@ func TestExecutor_ActionRegistryEmitsAndRunsActionRunner(t *testing.T) {
 func TestExecutor_RuleActionRunsOnlyForSelectedRule(t *testing.T) {
 	runner := &stubActionRunner{}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 		ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
 			identity.NormalizeActionKey("auto_action"): {
 				Key: identity.NormalizeActionKey("auto_action"),
@@ -5896,12 +5859,11 @@ func TestExecutor_RuleActionRunsOnlyForSelectedRule(t *testing.T) {
 
 func TestExecutor_RejectsAmbiguousHandlerTopLevelActionWithRules(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 		ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
 			identity.NormalizeActionKey("handler_action"): {
 				Key: identity.NormalizeActionKey("handler_action"),
@@ -5956,12 +5918,11 @@ func TestExecutor_RejectsUnsupportedRuleActionContextsBeforeExecution(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			runner := &stubActionRunner{}
 			exec, err := NewExecutor(RuntimeDependencies{
-				Source:     stubSource(),
-				StateRepo:  stubStateRepo{},
-				TxRunner:   stubRunner{},
-				Locker:     stubLocker{},
-				Outbox:     stubOutbox{},
-				Dispatcher: stubDispatcher{},
+				Source:        stubSource(),
+				StateRepo:     stubStateRepo{},
+				MutationOwner: stubMutationOwner{},
+				Locker:        stubLocker{},
+				Dispatcher:    stubDispatcher{},
 				ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
 					identity.NormalizeActionKey("notify"): {
 						Key: identity.NormalizeActionKey("notify"),
@@ -6016,7 +5977,7 @@ func TestSelectedActionSpecConsumesRuleActionOnlyFromHandlerRules(t *testing.T) 
 	}
 }
 
-func TestExecutor_MergePersistedActionStatePreservesInMemoryWrites(t *testing.T) {
+func TestExecutor_MergeActionStatePreservesInMemoryWrites(t *testing.T) {
 	entityID := identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111")
 	baseline := testStateSnapshot("ready", map[string]any{
 		"same":           "unchanged",
@@ -6026,23 +5987,24 @@ func TestExecutor_MergePersistedActionStatePreservesInMemoryWrites(t *testing.T)
 	}, map[string]map[string]any{
 		"bucket": {"in_memory_only": "frame-write"},
 	})
-	persisted := testStateSnapshot("ready", map[string]any{
+	projected := testStateSnapshot("ready", map[string]any{
 		"same":          "unchanged",
 		"action_output": "persisted-output",
 	}, nil, map[string]map[string]any{
 		"bucket": {"action_output": "persisted-output"},
 	})
-	exec := &Executor{deps: RuntimeDependencies{StateRepo: actionMergeStateRepo{snapshot: persisted}}}
+	exec := &Executor{}
 	frame := &executionFrame{
-		tx:  stubTx{ctx: context.Background()},
+		ctx: context.Background(),
 		req: ExecutionRequest{EntityID: entityID},
 		state: ExecutionState{
 			State: baseline,
 		},
 	}
 
-	if err := exec.mergePersistedActionState(frame, baseline); err != nil {
-		t.Fatalf("mergePersistedActionState: %v", err)
+	mutation := StateMutation{StateCarrier: projected.StateCarrier}
+	if err := exec.mergeActionState(frame, baseline, &mutation); err != nil {
+		t.Fatalf("mergeActionState: %v", err)
 	}
 
 	if got := frame.state.State.StateCarrier.Metadata["in_memory_only"]; got != "frame-write" {
@@ -6063,12 +6025,11 @@ func TestExecutor_ActionRegistryEmitContractViolationRejectsHandler(t *testing.T
 	runner := &stubActionRunner{}
 	shaper := &recordingPayloadShaper{err: errors.Join(ErrEmitPayloadContractViolation, errors.New("wrapped payload contract failure"))}
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 		ActionRegistry: stubActionRegistry{entries: map[identity.ActionKey]runtimeregistry.ActionInstruction{
 			identity.NormalizeActionKey("notify"): {
 				Key:   identity.NormalizeActionKey("notify"),
@@ -6119,9 +6080,8 @@ func TestExecutor_GuardOnFailEscalateCreatesEmitIntent(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
-		TxRunner:      stubRunner{},
+		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
-		Outbox:        stubOutbox{},
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: shaper,
 		MaxChainDepth: 5,
@@ -6167,9 +6127,8 @@ func TestExecutor_GuardOnFailEscalateObjectFieldsShapeExplicitPayload(t *testing
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
-		TxRunner:      stubRunner{},
+		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
-		Outbox:        stubOutbox{},
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: shaper,
 		MaxChainDepth: 5,

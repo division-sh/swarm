@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 type actionEmitIntentCollectorForTestKey struct{}
@@ -38,10 +39,59 @@ func withActionEmitIntentCollectorForTest(ctx context.Context, intents *[]runtim
 
 func (r pipelineEngineActionRunner) executeAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimeregistry.ActionInstruction, execCtx runtimeengine.ExecutionContext) (bool, error) {
 	result, err := r.ExecuteAction(ctx, action, entry, execCtx)
+	if result.State != nil && r.coordinator != nil {
+		state := pipelineEngineStateRepo{coordinator: r.coordinator}
+		owner := pipelineEngineMutationOwner{store: r.coordinator.workflowStore, state: state}
+		_, commitErr := owner.CommitEngineMutation(ctx, runtimeengine.EngineMutation{
+			Address: execCtx.Request.StateAddress(),
+			State:   *result.State,
+		})
+		if commitErr != nil {
+			err = errors.Join(err, commitErr)
+		}
+	}
 	if collector, ok := ctx.Value(actionEmitIntentCollectorForTestKey{}).(*[]runtimeengine.EmitIntent); ok && collector != nil {
 		*collector = append(*collector, result.EmitIntents...)
 	}
 	return result.Handled, err
+}
+
+func commitProjectedWorkflowEvidenceForTest(ctx context.Context, pc *PipelineCoordinator, route runtimeflowidentity.Route, entityID, flowID, bucketID string, payload map[string]any) error {
+	stateRepo := pipelineEngineStateRepo{coordinator: pc}
+	address := runtimeengine.StateAddress{
+		FlowID:   identity.NormalizeFlowID(flowID),
+		Route:    route,
+		EntityID: identity.NormalizeEntityID(entityID),
+	}
+	state, ok, err := stateRepo.LoadState(ctx, address)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		state = runtimeengine.StateSnapshot{EntityID: address.EntityID}
+	}
+	event := eventtest.RunCreatingRootIngress(
+		uuid.NewString(), "workflow.evidence_recorded", "", "", mustJSON(payload), 0, "", "",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), route.InstancePath),
+		time.Now().UTC(),
+	)
+	mutation, err := pc.projectWorkflowEvidence(runtimeengine.ExecutionContext{Request: runtimeengine.ExecutionRequest{
+		EntityID: address.EntityID,
+		FlowID:   address.FlowID,
+		ProducerRoute: events.RouteIdentity{
+			FlowID:       flowID,
+			FlowInstance: route.InstancePath,
+			EntityID:     entityID,
+		},
+		Event: event,
+		State: state,
+	}}, bucketID, payload)
+	if err != nil {
+		return err
+	}
+	owner := pipelineEngineMutationOwner{store: pc.workflowStore, state: stateRepo}
+	_, err = owner.CommitEngineMutation(ctx, runtimeengine.EngineMutation{Address: address, State: *mutation})
+	return err
 }
 
 func testEngineStateMutation(metadata map[string]any, gates map[string]bool, buckets map[string]map[string]any) runtimeengine.StateMutation {
@@ -784,7 +834,7 @@ func TestRecordWorkflowEvidence_ReturnsWorkflowStoreMutationError(t *testing.T) 
 		workflowStore: newPostgresWorkflowInstanceStoreForTest(db),
 	}
 
-	err := pc.recordWorkflowEvidence(testPipelineRunContextNoSeed(t), testWorkflowInstanceRoute("11111111-1111-1111-1111-111111111111"), "11111111-1111-1111-1111-111111111111", "", "research", map[string]any{"summary": "done"})
+	err := commitProjectedWorkflowEvidenceForTest(testPipelineRunContextNoSeed(t), pc, testWorkflowInstanceRoute("11111111-1111-1111-1111-111111111111"), "11111111-1111-1111-1111-111111111111", "", "research", map[string]any{"summary": "done"})
 	if err == nil {
 		t.Fatal("expected recordWorkflowEvidence to fail when workflow store mutate fails")
 	}
@@ -924,7 +974,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTarg
 						EntityID:     tt.entityID,
 					},
 					Event: eventtest.RunCreatingRootIngress(
-						"",
+						uuid.NewString(),
 						tt.concreteEvent,
 						"",
 						"",
@@ -933,7 +983,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTarg
 						"",
 						"",
 						testWorkflowSourceEnvelope("operating", tt.flowInstance, tt.entityID),
-						time.Time{},
+						time.Now().UTC(),
 					),
 					HandlerEventKey: tt.handlerEventKey,
 					Handler:         tt.handler,
@@ -1338,9 +1388,9 @@ func TestPipelineEngineActionRunner_MockArtifactRepoCommitStopsBeforeActionLaunc
 			launches := 0
 			runner := pipelineEngineActionRunner{
 				coordinator: pc,
-				artifactRepoCommit: func(context.Context, runtimecontracts.ActionSpec, runtimeengine.ExecutionContext) ([]runtimeengine.EmitIntent, error) {
+				artifactRepoCommit: func(context.Context, runtimecontracts.ActionSpec, runtimeengine.ExecutionContext) (runtimeengine.ActionExecution, error) {
 					launches++
-					return nil, nil
+					return runtimeengine.ActionExecution{}, nil
 				},
 			}
 			ctx := runtimeeffects.WithExecutionMode(context.Background(), executionmode.Mock)
@@ -1995,15 +2045,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitReturnsExplicitResultEvent
 	if len(result.EmitIntents) != 1 {
 		t.Fatalf("result emit intents = %d, want 1", len(result.EmitIntents))
 	}
-	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
-	if err != nil {
-		t.Fatalf("load workflow instance: %v", err)
+	if result.State == nil {
+		t.Fatal("artifact action did not return projected state")
 	}
-	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "committed" {
+	if got := strings.TrimSpace(asString(result.State.StateCarrier.Metadata["status"])); got != "committed" {
 		t.Fatalf("status = %q, want committed", got)
 	}
-	if _, exists := instance.Metadata["current_ref"]; !exists {
-		t.Fatal("current_ref was not persisted")
+	if _, exists := result.State.StateCarrier.Metadata["current_ref"]; !exists {
+		t.Fatal("current_ref was not projected")
 	}
 	if got := bus.publishedCount(); got != 0 {
 		t.Fatalf("fallback published event count = %d, want 0", got)

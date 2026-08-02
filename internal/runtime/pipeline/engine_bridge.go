@@ -221,7 +221,12 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	deps := coordinatorEngineDependencies(pc)
 	if collectLocally {
-		deps.Outbox = noOpEngineOutbox{}
+		owner, ok := deps.MutationOwner.(pipelineEngineMutationOwner)
+		if !ok {
+			return contractHandlerExecutionResult{}, fmt.Errorf("pipeline engine mutation owner is unavailable")
+		}
+		owner.outbox = noOpEngineOutbox{}
+		deps.MutationOwner = owner
 	}
 	exec, err := runtimeengine.NewExecutor(deps, newCoordinatorEngineEvaluator(pc))
 	if err != nil {

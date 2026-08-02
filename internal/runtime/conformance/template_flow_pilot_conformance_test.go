@@ -278,12 +278,11 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		t.Fatal("portfolio-coordinator notify handler missing")
 	}
 	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
-		Source:     source,
-		StateRepo:  fanOutPinRouteStateRepo{},
-		TxRunner:   fanOutPinRouteTxRunner{},
-		Locker:     fanOutPinRouteLocker{},
-		Outbox:     fanOutPinRouteOutbox{},
-		Dispatcher: fanOutPinRouteDispatcher{},
+		Source:        source,
+		StateRepo:     fanOutPinRouteStateRepo{},
+		MutationOwner: fanOutPinRouteMutationOwner{},
+		Locker:        fanOutPinRouteLocker{},
+		Dispatcher:    fanOutPinRouteDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
@@ -531,30 +530,16 @@ func (fanOutPinRouteStateRepo) SaveState(context.Context, runtimeengine.StateAdd
 	return nil
 }
 
-type fanOutPinRouteTxRunner struct{}
-type fanOutPinRouteTx struct{ ctx context.Context }
+type fanOutPinRouteMutationOwner struct{}
 
-func (fanOutPinRouteTxRunner) Run(ctx context.Context, fn func(runtimeengine.Tx) error) error {
-	return fn(fanOutPinRouteTx{ctx: ctx})
-}
-
-func (t fanOutPinRouteTx) Context() context.Context {
-	if t.ctx == nil {
-		return testAuthorActivityContext(context.Background())
-	}
-	return t.ctx
+func (fanOutPinRouteMutationOwner) CommitEngineMutation(_ context.Context, mutation runtimeengine.EngineMutation) (runtimeengine.CommittedEngineMutation, error) {
+	return runtimeengine.CommittedEngineMutation{EmitIntents: mutation.EmitIntents, ActivityIntents: mutation.ActivityIntents}, nil
 }
 
 type fanOutPinRouteLocker struct{}
 
 func (fanOutPinRouteLocker) WithEntityLock(ctx context.Context, _ runtimeidentity.EntityID, fn func(context.Context) error) error {
 	return fn(ctx)
-}
-
-type fanOutPinRouteOutbox struct{}
-
-func (fanOutPinRouteOutbox) WriteOutbox(context.Context, []runtimeengine.EmitIntent) error {
-	return nil
 }
 
 type fanOutPinRouteDispatcher struct{}

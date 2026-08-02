@@ -199,12 +199,11 @@ func computeModuleReplaySource(t *testing.T) semanticview.Source {
 func newComputeModuleReplayExecutor(t *testing.T, source semanticview.Source) *runtimeengine.Executor {
 	t.Helper()
 	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
-		Source:     source,
-		StateRepo:  replayStateRepo{},
-		TxRunner:   replayTxRunner{},
-		Locker:     replayLocker{},
-		Outbox:     replayOutbox{},
-		Dispatcher: replayDispatcher{},
+		Source:        source,
+		StateRepo:     replayStateRepo{},
+		MutationOwner: replayMutationOwner{},
+		Locker:        replayLocker{},
+		Dispatcher:    replayDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
@@ -278,18 +277,10 @@ func (replayStateRepo) SaveState(context.Context, runtimeengine.StateAddress, ru
 	return nil
 }
 
-type replayTxRunner struct{}
+type replayMutationOwner struct{}
 
-func (replayTxRunner) Run(ctx context.Context, fn func(runtimeengine.Tx) error) error {
-	return fn(replayTx{ctx: ctx})
-}
-
-type replayTx struct {
-	ctx context.Context
-}
-
-func (tx replayTx) Context() context.Context {
-	return tx.ctx
+func (replayMutationOwner) CommitEngineMutation(_ context.Context, mutation runtimeengine.EngineMutation) (runtimeengine.CommittedEngineMutation, error) {
+	return runtimeengine.CommittedEngineMutation{EmitIntents: mutation.EmitIntents, ActivityIntents: mutation.ActivityIntents}, nil
 }
 
 type replayLocker struct{}

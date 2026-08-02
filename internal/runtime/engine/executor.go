@@ -96,7 +96,7 @@ type Executor struct {
 }
 
 type executionFrame struct {
-	tx                        Tx
+	ctx                       context.Context
 	req                       ExecutionRequest
 	base                      BaseContext
 	state                     ExecutionState
@@ -127,15 +127,6 @@ const (
 	handlerRuleSourceJoinTimeout    handlerRuleSource = "handler.join.timeout"
 )
 
-type contextTx struct {
-	Tx
-	ctx context.Context
-}
-
-func (tx contextTx) Context() context.Context {
-	return tx.ctx
-}
-
 func NewExecutor(deps RuntimeDependencies, evaluator Evaluator) (*Executor, error) {
 	if deps.Source == nil {
 		return nil, ErrMissingSemanticSource
@@ -143,14 +134,11 @@ func NewExecutor(deps RuntimeDependencies, evaluator Evaluator) (*Executor, erro
 	if deps.StateRepo == nil {
 		return nil, ErrMissingStateRepo
 	}
-	if deps.TxRunner == nil {
-		return nil, ErrMissingTransaction
+	if deps.MutationOwner == nil {
+		return nil, ErrMissingMutationOwner
 	}
 	if deps.Locker == nil {
 		return nil, ErrMissingEntityLocker
-	}
-	if deps.Outbox == nil {
-		return nil, ErrMissingOutbox
 	}
 	if deps.Dispatcher == nil {
 		return nil, ErrMissingDispatcher
@@ -520,40 +508,39 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 			return err
 		}
 		req.State = loaded
-		return e.deps.TxRunner.Run(lockCtx, func(tx Tx) error {
-			frame, err := e.newExecutionFrame(tx, req)
-			if err != nil {
-				SetExecutionFailure(&result, err, "runtime.engine", "base_context")
-				return err
-			}
-			if err := e.runSteps(&frame); err != nil {
-				result = frame.result
-				var moduleErr *computemodule.Error
-				if errors.As(err, &moduleErr) && moduleErr.Code == computemodule.CodeReplay {
-					SetExecutionFailure(&result, err, "runtime.engine", "compute_replay")
-					return err
-				}
-				if replayErr := verifyComputeModuleReplayTraceCount(frame); replayErr != nil {
-					SetExecutionFailure(&result, replayErr, "runtime.engine", "compute_replay_trace")
-					return replayErr
-				}
-				SetExecutionFailure(&result, err, "runtime.engine", "execute_steps")
-				return err
-			}
-			if err := verifyComputeModuleReplayTraceCount(frame); err != nil {
-				result = frame.result
-				SetExecutionFailure(&result, err, "runtime.engine", "compute_replay_trace")
-				return err
-			}
+		frame, err := e.newExecutionFrame(lockCtx, req)
+		if err != nil {
+			SetExecutionFailure(&result, err, "runtime.engine", "base_context")
+			return err
+		}
+		if err := e.runSteps(&frame); err != nil {
 			result = frame.result
-			if err := e.persist(frame.tx.Context(), frame); err != nil {
+			var moduleErr *computemodule.Error
+			if errors.As(err, &moduleErr) && moduleErr.Code == computemodule.CodeReplay {
+				SetExecutionFailure(&result, err, "runtime.engine", "compute_replay")
 				return err
 			}
+			if replayErr := verifyComputeModuleReplayTraceCount(frame); replayErr != nil {
+				SetExecutionFailure(&result, replayErr, "runtime.engine", "compute_replay_trace")
+				return replayErr
+			}
+			SetExecutionFailure(&result, err, "runtime.engine", "execute_steps")
+			return err
+		}
+		if err := verifyComputeModuleReplayTraceCount(frame); err != nil {
 			result = frame.result
-			intents = append([]EmitIntent(nil), frame.result.EmitIntents...)
-			activityIntents = append([]ActivityIntent(nil), frame.result.ActivityIntents...)
-			return nil
-		})
+			SetExecutionFailure(&result, err, "runtime.engine", "compute_replay_trace")
+			return err
+		}
+		result = frame.result
+		committed, err := e.persist(lockCtx, frame)
+		if err != nil {
+			return err
+		}
+		result = frame.result
+		intents = append([]EmitIntent(nil), committed.EmitIntents...)
+		activityIntents = append([]ActivityIntent(nil), committed.ActivityIntents...)
+		return nil
 	})
 	if err != nil {
 		if errors.Is(err, ErrEmitPersistencePrerequisite) || errors.Is(err, ErrEmitPayloadContractViolation) {
@@ -605,7 +592,7 @@ func (e *Executor) loadState(ctx context.Context, req ExecutionRequest) (StateSn
 	return state, nil
 }
 
-func (e *Executor) newExecutionFrame(tx Tx, req ExecutionRequest) (executionFrame, error) {
+func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) (executionFrame, error) {
 	state := req.State
 	if state.StateCarrier.Metadata == nil {
 		state.StateCarrier.Metadata = map[string]any{}
@@ -630,7 +617,7 @@ func (e *Executor) newExecutionFrame(tx Tx, req ExecutionRequest) (executionFram
 	req.State = state
 	currentState := strings.TrimSpace(state.CurrentState)
 	return executionFrame{
-		tx:                       tx,
+		ctx:                      ctx,
 		req:                      req,
 		base:                     base,
 		payload:                  payload,
@@ -1325,7 +1312,7 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 		trace.SnapshotDigest = identity.SnapshotDigest
 		trace.HarnessABI = identity.HarnessABI
 		trace.SourceHash = computemodule.HashBytes(moduleBytes)
-		result, err := pythonmodule.Execute(frame.tx.Context(), pythonmodule.Request{
+		result, err := pythonmodule.Execute(frame.ctx, pythonmodule.Request{
 			ModuleID:    moduleID,
 			RowID:       rowID,
 			Digest:      strings.TrimSpace(module.Digest),
@@ -2214,7 +2201,7 @@ func (e *Executor) stepAction(frame *executionFrame) error {
 			return fmt.Errorf("action %q is not executable", actionKey.String())
 		}
 		if strings.TrimSpace(entry.Emits) != "" {
-			actionCtx := WithEmitSurface(frame.tx.Context(), EmitSurfaceAction)
+			actionCtx := WithEmitSurface(frame.ctx, EmitSurfaceAction)
 			shaped, err := e.shapeEmitPayloadWithContext(actionCtx, frame, entry.Emits, frame.payload)
 			if err != nil {
 				return err
@@ -2225,7 +2212,7 @@ func (e *Executor) stepAction(frame *executionFrame) error {
 		}
 		if e.deps.ActionRunner != nil {
 			execCtx := e.executionContext(frame, StepAction)
-			execution, err := e.deps.ActionRunner.ExecuteAction(frame.tx.Context(), actionSpec, entry, execCtx)
+			execution, err := e.deps.ActionRunner.ExecuteAction(frame.ctx, actionSpec, entry, execCtx)
 			if err != nil {
 				return err
 			}
@@ -2236,7 +2223,7 @@ func (e *Executor) stepAction(frame *executionFrame) error {
 				frame.result.EmitIntents = append(frame.result.EmitIntents, execution.EmitIntents...)
 			}
 			if execution.Handled {
-				if err := e.mergePersistedActionState(frame, execCtx.Request.State); err != nil {
+				if err := e.mergeActionState(frame, execCtx.Request.State, execution.State); err != nil {
 					return err
 				}
 			}
@@ -2348,28 +2335,24 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 	return nil
 }
 
-func (e *Executor) mergePersistedActionState(frame *executionFrame, baseline StateSnapshot) error {
-	if e == nil || e.deps.StateRepo == nil || frame == nil || frame.req.EntityID.IsZero() {
+func (e *Executor) mergeActionState(frame *executionFrame, baseline StateSnapshot, mutation *StateMutation) error {
+	if e == nil || frame == nil || mutation == nil {
 		return nil
 	}
-	persisted, ok, err := e.deps.StateRepo.LoadState(frame.tx.Context(), frame.req.StateAddress())
-	if err != nil || !ok {
-		return err
-	}
 	metadata := cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
-	for key, value := range persisted.StateCarrier.Metadata {
+	for key, value := range mutation.StateCarrier.Metadata {
 		if baselineValue, ok := baseline.StateCarrier.Metadata[key]; !ok || !reflect.DeepEqual(baselineValue, value) {
 			metadata[key] = value
 		}
 	}
 	gates := mapsClone(frame.state.State.StateCarrier.Gates)
-	for key, value := range persisted.StateCarrier.Gates {
+	for key, value := range mutation.StateCarrier.Gates {
 		if baselineValue, ok := baseline.StateCarrier.Gates[key]; !ok || baselineValue != value {
 			gates[key] = value
 		}
 	}
 	buckets := cloneStateBucketSet(frame.state.State.StateCarrier.StateBuckets)
-	for key, bucket := range persisted.StateCarrier.StateBuckets {
+	for key, bucket := range mutation.StateCarrier.StateBuckets {
 		currentBucket := cloneStringAnyMap(buckets[key])
 		baselineBucket := baseline.StateCarrier.StateBuckets[key]
 		for bucketKey, value := range bucket {
@@ -2384,15 +2367,6 @@ func (e *Executor) mergePersistedActionState(frame *executionFrame, baseline Sta
 	frame.state.State.StateCarrier.Metadata = metadata
 	frame.state.State.StateCarrier.Gates = gates
 	frame.state.State.StateCarrier.StateBuckets = buckets
-	if strings.TrimSpace(frame.state.State.CurrentState) == "" {
-		frame.state.State.CurrentState = strings.TrimSpace(persisted.CurrentState)
-	}
-	if strings.TrimSpace(frame.state.State.WorkflowName) == "" {
-		frame.state.State.WorkflowName = strings.TrimSpace(persisted.WorkflowName)
-	}
-	if strings.TrimSpace(frame.state.State.WorkflowVersion) == "" {
-		frame.state.State.WorkflowVersion = strings.TrimSpace(persisted.WorkflowVersion)
-	}
 	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(metadata)
 	frame.result.StateMutation.StateCarrier.Gates = gates
 	frame.result.StateMutation.SetStateBuckets(buckets)
@@ -2459,10 +2433,10 @@ func (e *Executor) buildWorkflowLifecycleEffect(frame *executionFrame) (runtimew
 	return effect, true, nil
 }
 
-func (e *Executor) persist(ctx context.Context, frame executionFrame) error {
+func (e *Executor) persist(ctx context.Context, frame executionFrame) (CommittedEngineMutation, error) {
 	lifecycleEffect, hasLifecycleEffect, err := e.buildWorkflowLifecycleEffect(&frame)
 	if err != nil {
-		return err
+		return CommittedEngineMutation{}, err
 	}
 	frame.result.StateMutation.TriggerEventID = strings.TrimSpace(frame.req.Event.ID())
 	frame.result.StateMutation.TriggerEventType = strings.TrimSpace(string(frame.req.Event.Type()))
@@ -2487,40 +2461,22 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) error {
 	if frame.result.StateMutation.StateCarrier.StateBuckets == nil {
 		frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
 	}
-	if err := e.deps.StateRepo.SaveState(ctx, frame.req.StateAddress(), frame.result.StateMutation); err != nil {
-		return err
-	}
+	effects := make([]runtimeworkflowlifecycle.Effect, 0, 1)
 	if hasLifecycleEffect {
-		if err := e.deps.WorkflowLifecycle.ApplyWorkflowLifecycleEffects(ctx, []runtimeworkflowlifecycle.Effect{lifecycleEffect}); err != nil {
-			return err
-		}
+		effects = append(effects, lifecycleEffect)
 	}
-	if len(frame.result.ActivityIntents) > 0 {
-		if e.deps.ActivityIntents == nil {
-			return fmt.Errorf("%w: activity intent writer is required when handler declares activity", ErrInvalidConfig)
-		}
-		if err := e.deps.ActivityIntents.WriteActivityIntents(ctx, frame.result.ActivityIntents); err != nil {
-			return err
-		}
+	prerequisites := EmitPersistencePrerequisites{}
+	if len(frame.result.EmitIntents) > 0 {
+		prerequisites = e.emitPersistencePrerequisites(frame)
 	}
-	if len(frame.result.EmitIntents) == 0 {
-		return nil
-	}
-	if err := e.verifyEmitPersistencePrerequisites(ctx, frame); err != nil {
-		return err
-	}
-	return e.deps.Outbox.WriteOutbox(ctx, frame.result.EmitIntents)
-}
-
-func (e *Executor) verifyEmitPersistencePrerequisites(ctx context.Context, frame executionFrame) error {
-	if e == nil || e.deps.EmitVerifier == nil || len(frame.result.EmitIntents) == 0 {
-		return nil
-	}
-	prerequisites := e.emitPersistencePrerequisites(frame)
-	if len(prerequisites.Fields) == 0 {
-		return nil
-	}
-	return e.deps.EmitVerifier.VerifyEmitPersistence(ctx, frame.req.StateAddress(), prerequisites)
+	return e.deps.MutationOwner.CommitEngineMutation(ctx, EngineMutation{
+		Address:           frame.req.StateAddress(),
+		State:             frame.result.StateMutation,
+		LifecycleEffects:  effects,
+		ActivityIntents:   append([]ActivityIntent(nil), frame.result.ActivityIntents...),
+		EmitIntents:       append([]EmitIntent(nil), frame.result.EmitIntents...),
+		EmitPrerequisites: prerequisites,
+	})
 }
 
 func (e *Executor) emitPersistencePrerequisites(frame executionFrame) EmitPersistencePrerequisites {
@@ -2841,7 +2797,7 @@ func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRe
 	}
 	if e.deps.GuardRunner != nil {
 		execCtx := e.executionContext(frame, StepGuard)
-		passed, handled, err := e.deps.GuardRunner.EvaluateGuard(frame.tx.Context(), guardKey, entry, execCtx)
+		passed, handled, err := e.deps.GuardRunner.EvaluateGuard(frame.ctx, guardKey, entry, execCtx)
 		if handled || err != nil {
 			return passed, []string{id}, err
 		}
@@ -3068,7 +3024,7 @@ func selectedRuleIndex(handler runtimecontracts.SystemNodeEventHandler, selected
 }
 
 func (e *Executor) shapeEmitPayload(frame *executionFrame, eventType string, payload map[string]any) (map[string]any, error) {
-	return e.shapeEmitPayloadWithContext(frame.tx.Context(), frame, eventType, payload)
+	return e.shapeEmitPayloadWithContext(frame.ctx, frame, eventType, payload)
 }
 
 func (e *Executor) shapeEmitPayloadWithContext(ctx context.Context, frame *executionFrame, eventType string, payload map[string]any) (map[string]any, error) {
