@@ -2,9 +2,17 @@ package failures
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
+
+type normalizationCause struct {
+	name string
+}
+
+func (e *normalizationCause) Error() string { return e.name }
 
 func TestRegistryIsClosedAndSelectorsArePositiveSets(t *testing.T) {
 	if got := len(Classes()); got != 23 {
@@ -66,6 +74,54 @@ func TestFromErrorNeverDefaultsRawFailureToRetryable(t *testing.T) {
 	failure := FromError(errors.New("temporary"), "engine", "execute")
 	if failure.Failure.Class != ClassInternalFailure || failure.Failure.Retryable {
 		t.Fatalf("raw failure = %#v", failure.Failure)
+	}
+}
+
+func TestFromErrorPreservesCompleteTypedCallerCauseChain(t *testing.T) {
+	innerCause := &normalizationCause{name: "inner cause"}
+	inner := Wrap(ClassConnectorFailure, "provider_rate_limited", "provider", "call", map[string]any{"status": 429}, innerCause).(*Error)
+	outer := fmt.Errorf("outer caller: %w", inner)
+
+	normalized := FromError(outer, "engine", "normalize")
+	if normalized == inner {
+		t.Fatal("FromError returned the extracted inner failure and dropped the caller wrapper")
+	}
+	if !reflect.DeepEqual(normalized.Failure, inner.Failure) {
+		t.Fatalf("normalized envelope = %#v, want %#v", normalized.Failure, inner.Failure)
+	}
+	if !errors.Is(normalized, outer) || !errors.Is(normalized, inner) || !errors.Is(normalized, innerCause) {
+		t.Fatalf("normalized chain does not retain outer, typed, and inner causes: %v", normalized)
+	}
+	var gotCause *normalizationCause
+	if !errors.As(normalized, &gotCause) || gotCause != innerCause {
+		t.Fatalf("errors.As cause = %#v, want %#v", gotCause, innerCause)
+	}
+}
+
+func TestFromErrorMalformedTypedEnvelopeFailsClosedWithoutDroppingCause(t *testing.T) {
+	innerCause := &normalizationCause{name: "malformed inner cause"}
+	malformed := &Error{
+		Failure: Envelope{SchemaVersion: EnvelopeSchemaVersion, Class: ClassConnectorFailure},
+		cause:   innerCause,
+	}
+	outer := fmt.Errorf("outer caller: %w", malformed)
+
+	normalized := FromError(outer, "engine", "normalize")
+	if normalized.Failure.Class != ClassInternalFailure || normalized.Failure.Detail.Code != "invalid_failure_construction" {
+		t.Fatalf("normalized envelope = %#v, want invalid construction", normalized.Failure)
+	}
+	if err := ValidateEnvelope(normalized.Failure); err != nil {
+		t.Fatalf("normalized envelope is invalid: %v", err)
+	}
+	if !errors.Is(normalized, outer) || !errors.Is(normalized, malformed) || !errors.Is(normalized, innerCause) {
+		t.Fatalf("normalized malformed chain does not retain all causes: %v", normalized)
+	}
+	raw, err := MarshalEnvelope(normalized.Failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "outer caller") || strings.Contains(string(raw), innerCause.Error()) {
+		t.Fatalf("durable envelope leaked in-process causes: %s", raw)
 	}
 }
 

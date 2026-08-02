@@ -692,8 +692,9 @@ func TestRunCommandLocalReadinessAuthFailureFailsFast(t *testing.T) {
 func TestRunCommandClosedTraceChannelStillWaitsForRunGet(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
-	var runGetCalls atomic.Int32
+	warning := &notifyingBuffer{needle: string(runTraceDetachStreamClosed), notify: make(chan struct{})}
 	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
+		wsCloseAfterRows: true,
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
 			switch req.Method {
 			case "health.check":
@@ -702,11 +703,12 @@ func TestRunCommandClosedTraceChannelStillWaitsForRunGet(t *testing.T) {
 				return map[string]any{"run_id": "run-closed-ws", "status": "running"}
 			case "run.get":
 				run := validDiagnosticRunHeader("run-closed-ws")
-				if runGetCalls.Add(1) == 1 {
-					return map[string]any{"run": run}
+				select {
+				case <-warning.notify:
+					run["status"] = "completed"
+					run["ended_at"] = "2026-05-13T10:01:00Z"
+				default:
 				}
-				run["status"] = "completed"
-				run["ended_at"] = "2026-05-13T10:01:00Z"
 				return map[string]any{"run": run}
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
@@ -716,34 +718,36 @@ func TestRunCommandClosedTraceChannelStillWaitsForRunGet(t *testing.T) {
 	})
 	defer server.Close()
 
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, testRunCommandOptions(server))
+	var stdout bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, warning, testRunCommandOptions(server))
 	if code != 0 {
-		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), warning.String())
 	}
-	assertRunCommandMethods(t, calls, []string{"health.check", "run.start", "run.get", "run.get"})
+	methods := runCommandMethodNames(*calls)
+	if len(methods) < 3 || methods[0] != "health.check" || methods[1] != "run.start" || methods[len(methods)-1] != "run.get" {
+		t.Fatalf("methods = %v", methods)
+	}
 	if !strings.Contains(stdout.String(), "run terminal: run_id=run-closed-ws status=completed") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
-	if strings.TrimSpace(stderr.String()) != "" {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
-	}
+	fact := requireSingleRunTraceDetachFact(t, warning.String())
+	assertRunTraceDetachFact(t, fact, runTraceDetachStreamClosed, "run-closed-ws", "swarm run start --connect "+server.URL+" --reattach run-closed-ws")
 }
 
-func TestRunCommandMalformedWebSocketFailuresExitThree(t *testing.T) {
+func TestRunCommandMalformedWebSocketFailuresDetachAndUseTerminalStatus(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	for _, tc := range []struct {
 		name       string
 		serverOpts runCommandServerOptions
-		wantStderr string
+		wantReason runTraceDetachReason
 	}{
 		{
 			name: "subscription response missing id",
 			serverOpts: runCommandServerOptions{
 				wsSubscriptionResult: map[string]any{},
 			},
-			wantStderr: "subscription_id is required",
+			wantReason: runTraceDetachSubscriptionResponseInvalid,
 		},
 		{
 			name: "notification missing event id",
@@ -753,79 +757,44 @@ func TestRunCommandMalformedWebSocketFailuresExitThree(t *testing.T) {
 					"event_created_at": "2026-05-13T10:00:01Z",
 				}},
 			},
-			wantStderr: "event_id is required",
+			wantReason: runTraceDetachTraceRowInvalid,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tc.serverOpts.rpcResponder = func(req jsonRPCRequest, _ int) map[string]any {
-				switch req.Method {
-				case "health.check":
-					return runCommandHealthResult()
-				case "run.start":
-					return map[string]any{"run_id": "run-bad-ws", "status": "running"}
-				default:
-					t.Fatalf("unexpected method = %q", req.Method)
-				}
-				return nil
-			}
+			warning := &notifyingBuffer{needle: string(tc.wantReason), notify: make(chan struct{})}
+			tc.serverOpts.rpcResponder = observerTerminalAfterWarningResponder(t, "run-bad-ws", warning.notify)
 			server, _, _ := newRunCommandServer(t, tc.serverOpts)
 			defer server.Close()
 
-			opts := testRunCommandOptions(server)
-			opts.runStatusPoll = time.Hour
-			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
-			if code != 3 {
-				t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			var stdout bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, warning, testRunCommandOptions(server))
+			if code != 0 {
+				t.Fatalf("code = %d, want 0 stdout=%s stderr=%s", code, stdout.String(), warning.String())
 			}
-			if !strings.Contains(stderr.String(), tc.wantStderr) {
-				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.wantStderr)
-			}
+			fact := requireSingleRunTraceDetachFact(t, warning.String())
+			assertRunTraceDetachFact(t, fact, tc.wantReason, "run-bad-ws", "swarm run start --connect "+server.URL+" --reattach run-bad-ws")
 		})
 	}
 }
 
-func TestRunCommandWebSocketHandshakeHTTPErrorUsesSharedDiagnostic(t *testing.T) {
+func TestRunCommandWebSocketHandshakeHTTPErrorDetachesObserver(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	warning := &notifyingBuffer{needle: string(runTraceDetachAttachFailed), notify: make(chan struct{})}
 	server, _, _ := newRunCommandServer(t, runCommandServerOptions{
-		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
-			switch req.Method {
-			case "health.check":
-				return runCommandHealthResult()
-			case "run.start":
-				return map[string]any{"run_id": "run-ws-auth", "status": "running"}
-			default:
-				t.Fatalf("unexpected method = %q", req.Method)
-			}
-			return nil
-		},
+		rpcResponder: observerTerminalAfterWarningResponder(t, "run-ws-auth", warning.notify),
 		wsHTTPStatus: http.StatusUnauthorized,
 		wsHTTPBody:   "invalid bearer token",
 	})
 	defer server.Close()
 
-	opts := testRunCommandOptions(server)
-	opts.runStatusPoll = time.Hour
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
-	if code != 4 {
-		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	var stdout bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, warning, testRunCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d, want 0 stdout=%s stderr=%s", code, stdout.String(), warning.String())
 	}
-	for _, want := range []string{
-		"ERROR: the Swarm runtime at ",
-		"rejected the request with status 401",
-		"Check API credentials",
-	} {
-		if !strings.Contains(stderr.String(), want) {
-			t.Fatalf("stderr = %q, want substring %q", stderr.String(), want)
-		}
-	}
-	for _, forbidden := range []string{"cannot reach", "runtime event stream dial failed", "/v1/ws"} {
-		if strings.Contains(stderr.String(), forbidden) {
-			t.Fatalf("stderr = %q, must not contain %q", stderr.String(), forbidden)
-		}
-	}
+	fact := requireSingleRunTraceDetachFact(t, warning.String())
+	assertRunTraceDetachFact(t, fact, runTraceDetachAttachFailed, "run-ws-auth", "swarm run start --connect "+server.URL+" --reattach run-ws-auth")
 }
 
 func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
@@ -941,8 +910,14 @@ type runCommandServerOptions struct {
 	rpcResponder         func(jsonRPCRequest, int) map[string]any
 	wsRows               []map[string]any
 	wsSubscribed         chan struct{}
+	wsRequestRead        chan struct{}
+	wsClosed             chan struct{}
 	wsSubscriptionResult map[string]any
 	wsCloseAfterRows     bool
+	wsHoldResponse       bool
+	wsAbruptClose        bool
+	wsNotificationMethod string
+	wsNotificationID     string
 	wsHTTPStatus         int
 	wsHTTPBody           string
 	expectedToken        string
@@ -1003,6 +978,9 @@ func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.
 				return
 			}
 			defer conn.Close()
+			if opts.wsClosed != nil {
+				defer close(opts.wsClosed)
+			}
 			var req jsonRPCRequest
 			if err := conn.ReadJSON(&req); err != nil {
 				t.Errorf("read ws request: %v", err)
@@ -1013,6 +991,13 @@ func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.
 			mu.Unlock()
 			if req.Method != "run.subscribe_trace" {
 				t.Errorf("ws method = %q, want run.subscribe_trace", req.Method)
+			}
+			if opts.wsRequestRead != nil {
+				close(opts.wsRequestRead)
+			}
+			if opts.wsHoldResponse {
+				_, _, _ = conn.ReadMessage()
+				return
 			}
 			result := opts.wsSubscriptionResult
 			if result == nil {
@@ -1029,12 +1014,24 @@ func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.
 			if opts.wsSubscribed != nil {
 				close(opts.wsSubscribed)
 			}
+			if opts.wsAbruptClose {
+				_ = conn.UnderlyingConn().Close()
+				return
+			}
 			for _, row := range opts.wsRows {
+				method := opts.wsNotificationMethod
+				if method == "" {
+					method = "rpc.subscription"
+				}
+				subscriptionID := opts.wsNotificationID
+				if subscriptionID == "" {
+					subscriptionID = "sub-run"
+				}
 				if err := conn.WriteJSON(map[string]any{
 					"jsonrpc": "2.0",
-					"method":  "rpc.subscription",
+					"method":  method,
 					"params": map[string]any{
-						"subscription": "sub-run",
+						"subscription": subscriptionID,
 						"result":       row,
 					},
 				}); err != nil {

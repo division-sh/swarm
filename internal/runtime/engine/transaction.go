@@ -17,8 +17,8 @@ func NormalizeFailure(err error, component, operation string) *failures.Error {
 	if err == nil {
 		return nil
 	}
-	if existing, ok := failures.As(err); ok {
-		return existing
+	if _, ok := failures.As(err); ok {
+		return failures.FromError(err, component, operation)
 	}
 	if errors.Is(err, ErrChainDepthExceeded) {
 		return failures.New(
