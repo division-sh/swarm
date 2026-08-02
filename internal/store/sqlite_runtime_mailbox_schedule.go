@@ -17,6 +17,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	timerobligationadapter "github.com/division-sh/swarm/internal/store/timerobligationadapter"
 	"github.com/google/uuid"
 )
@@ -678,7 +679,7 @@ func (s *SQLiteRuntimeStore) sqliteContinueRunControl(ctx context.Context, tx *s
 	return state, nil
 }
 
-func (s *SQLiteRuntimeStore) sqliteStopRunControl(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+func (s *SQLiteRuntimeStore) sqliteStopRunControl(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
 	lifecycleState, err := runtimerunlifecycle.ParseState(state.Status)
 	if err != nil {
 		return runtimeruncontrol.State{}, err
@@ -686,11 +687,11 @@ func (s *SQLiteRuntimeStore) sqliteStopRunControl(ctx context.Context, tx *sql.T
 	if !lifecycleState.Active() {
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: state.RunID, CurrentStatus: state.Status}
 	}
-	abandoned, err := s.sqliteQuiesceStoppedRunWorkTx(ctx, tx, state.RunID, req.Reason, req.Now.UTC())
+	abandoned, err := s.sqliteQuiesceStoppedRunWorkTx(ctx, tx, story, state.RunID, req.Reason, req.Now.UTC())
 	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	if _, _, err := (sqliteRunLifecycleMutation{store: s, tx: tx}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
+	if _, _, err := (sqliteRunLifecycleMutation{store: s, tx: tx, story: story}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
 		RunID: state.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: req.Now.UTC(),
 	}); err != nil {
 		return runtimeruncontrol.State{}, err
@@ -713,8 +714,8 @@ func (s *SQLiteRuntimeStore) sqliteStopRunControl(ctx context.Context, tx *sql.T
 	return state, nil
 }
 
-func (s *SQLiteRuntimeStore) sqliteQuiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time) (int, error) {
-	deliveries, err := s.terminalizeRunDeliveriesTx(ctx, tx, runID, "run_stopped")
+func (s *SQLiteRuntimeStore) sqliteQuiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, runID, reason string, now time.Time) (int, error) {
+	deliveries, err := s.terminalizeRunDeliveriesTx(ctx, tx, story, runID, "run_stopped")
 	if err != nil {
 		return 0, err
 	}

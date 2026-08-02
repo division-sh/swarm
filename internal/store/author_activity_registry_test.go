@@ -177,7 +177,7 @@ func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := recordPersistedEventAuthorActivity(story, resolver, event, "sender", "agent"); err != nil {
+	if err := recordPersistedEventAuthorActivity(story, nil, resolver, event, "sender", "agent"); err != nil {
 		t.Fatal(err)
 	}
 	if err := runtimeauthoractivity.Finalize(story); err != nil {
@@ -207,7 +207,7 @@ func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *test
 		uuid.NewString(), events.EventType(dynamic.EventType), "sender", "", []byte(`{"text":"stale"}`), 0,
 		uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 14, 12, 0, 1, 0, time.UTC),
 	)
-	if err := recordPersistedEventAuthorActivity(story, resolver, stale, "sender", "agent"); err == nil || !strings.Contains(err.Error(), "no live registry lease") {
+	if err := recordPersistedEventAuthorActivity(story, nil, resolver, stale, "sender", "agent"); err == nil || !strings.Contains(err.Error(), "no live registry lease") {
 		t.Fatalf("stale lease error = %v", err)
 	}
 	_ = tx.Rollback()
@@ -232,7 +232,7 @@ func TestDynamicAuthorActivityEventDescriptorRejectsStaticConflict(t *testing.T)
 		uuid.NewString(), events.EventType("message.sent"), "sender", "", []byte(`{"text":"hello"}`), 0,
 		uuid.NewString(), "", events.EventEnvelope{}, time.Now(),
 	)
-	if err := recordPersistedEventAuthorActivity(ctx, dynamicAuthoredEventDescriptorResolver{registry: registry}, event, "sender", "agent"); err == nil || !strings.Contains(err.Error(), "conflicts") {
+	if err := recordPersistedEventAuthorActivity(ctx, nil, dynamicAuthoredEventDescriptorResolver{registry: registry}, event, "sender", "agent"); err == nil || !strings.Contains(err.Error(), "conflicts") {
 		t.Fatalf("descriptor conflict error = %v", err)
 	}
 }

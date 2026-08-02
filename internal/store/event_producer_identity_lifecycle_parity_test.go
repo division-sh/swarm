@@ -354,7 +354,7 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 		t.Fatalf("projectRunForkReplayEvent: %v", err)
 	}
 	pg := fixture.store.(*PostgresStore)
-	outcome, err := pg.appendEventSpec(txctx, tx, replayedProjection)
+	outcome, err := pg.appendEventSpec(txctx, tx, nil, replayedProjection)
 	if err != nil {
 		t.Fatalf("append replay event: %v", err)
 	}

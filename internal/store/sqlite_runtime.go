@@ -158,7 +158,7 @@ func (s *SQLiteRuntimeStore) validateEventPayload(ctx context.Context, eventType
 	return nil
 }
 
-func (s *SQLiteRuntimeStore) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+func (s *SQLiteRuntimeStore) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
@@ -166,13 +166,15 @@ func (s *SQLiteRuntimeStore) appendAdmittedEventTxOutcome(ctx context.Context, t
 		outcome := runtimebus.EventAppendOutcomeUnknown
 		err := s.runAuthorActivityMutation(ctx, "sqlite append admitted event", func(txctx context.Context, tx *sql.Tx) error {
 			var err error
-			outcome, err = s.appendAdmittedEventTxOutcome(txctx, tx, admitted)
+			outcome, err = s.appendAdmittedEventTxOutcome(txctx, tx, nil, admitted)
 			return err
 		})
 		return outcome, err
 	}
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
+	if story == nil {
+		if err := runtimeauthoractivity.Require(ctx); err != nil {
+			return runtimebus.EventAppendOutcomeUnknown, err
+		}
 	}
 	evt := admitted.Event()
 	wantIdentity, err := eventrecord.FromAdmitted(admitted)
@@ -237,11 +239,11 @@ func (s *SQLiteRuntimeStore) appendAdmittedEventTxOutcome(ctx context.Context, t
 		return runtimebus.EventAppendExactDuplicate, nil
 	}
 	if admitted.RunDisposition() != events.AdmittedRunless {
-		if err := (sqliteRunLifecycleMutation{tx: tx}).SyncCounters(ctx, wantIdentity.RunID); err != nil {
+		if err := (sqliteRunLifecycleMutation{tx: tx, story: story}).SyncCounters(ctx, wantIdentity.RunID); err != nil {
 			return runtimebus.EventAppendOutcomeUnknown, err
 		}
 	}
-	if err := recordPersistedEventAuthorActivity(ctx, s, evt, wantIdentity.ProducedBy, string(wantIdentity.ProducedByType)); err != nil {
+	if err := recordPersistedEventAuthorActivity(ctx, story, s, evt, wantIdentity.ProducedBy, string(wantIdentity.ProducedByType)); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	if admitted.RunDisposition() == events.AdmittedRunCreateAuthorized {
@@ -550,11 +552,8 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 		req.ControlledBy = "api.v1"
 	}
 	var state runtimeruncontrol.State
-	if err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
+	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite run control transition", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		var err error
 		state, err = sqliteLoadRunControlState(txctx, tx, runID)
 		if err != nil {
 			return err
@@ -572,7 +571,7 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 			if err := rejectSQLiteStandingRunStopTx(txctx, tx, runID); err != nil {
 				return err
 			}
-			state, err = s.sqliteStopRunControl(txctx, tx, state, req)
+			state, err = s.sqliteStopRunControl(txctx, tx, story, state, req)
 		default:
 			err = fmt.Errorf("unsupported run control action %q", action)
 		}
@@ -596,7 +595,7 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 				return err
 			}
 		}
-		return story.Finalize(txctx)
+		return nil
 	}); err != nil {
 		return runtimeruncontrol.State{}, err
 	}

@@ -153,7 +153,7 @@ func commitDiagnosticRuntimeLogFixtureTx(ctx context.Context, store eventCommitT
 	if admitted.Class() != events.EventAdmissionDiagnosticDirect || admitted.Event().Type() != events.EventTypePlatformRuntimeLog {
 		return fmt.Errorf("runtime-log fixture requires a diagnostic_direct platform.runtime_log event")
 	}
-	outcome, err := store.appendAdmittedEventTxOutcome(ctx, tx, admitted)
+	outcome, err := store.appendAdmittedEventTxOutcome(ctx, tx, nil, admitted)
 	if err != nil {
 		return err
 	}
@@ -228,7 +228,7 @@ func commitDeliveryReplayEventFixture(
 	}
 	defer release()
 	return store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		outcome, err := store.appendAdmittedEventTxOutcome(txctx, tx, replayed)
+		outcome, err := store.appendAdmittedEventTxOutcome(txctx, tx, nil, replayed)
 		if err != nil {
 			return err
 		}
@@ -328,7 +328,7 @@ func commitAdmittedSemanticEventFixtureOutcome(
 	defer release()
 	commit := func(txctx context.Context, tx *sql.Tx, selected eventCommitTxStore) error {
 		var appendErr error
-		outcome, appendErr = selected.appendAdmittedEventTxOutcome(txctx, tx, admitted)
+		outcome, appendErr = selected.appendAdmittedEventTxOutcome(txctx, tx, nil, admitted)
 		if appendErr != nil || outcome == runtimebus.EventAppendExactDuplicate {
 			return appendErr
 		}
@@ -385,7 +385,7 @@ func commitSemanticEventFixtureWithRoutesTx(ctx context.Context, store eventComm
 	defer func() {
 		err = errors.Join(err, owner.Release(context.WithoutCancel(ctx), claim))
 	}()
-	outcome, err := store.appendAdmittedEventTxOutcome(ctx, tx, admitted)
+	outcome, err := store.appendAdmittedEventTxOutcome(ctx, tx, nil, admitted)
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 		return err
 	}

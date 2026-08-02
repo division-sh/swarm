@@ -7,26 +7,29 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
 
 type eventCommitTxStore interface {
-	appendAdmittedEventTxOutcome(context.Context, *sql.Tx, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
+	appendAdmittedEventTxOutcome(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
 	requirePipelinePublicationClaimTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim) error
 	commitInitialDeliveryObligationsTx(context.Context, *sql.Tx, string, string, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority) ([]runtimedelivery.DurableHandoffProof, error)
 	commitInitialPipelineScopeTx(context.Context, *sql.Tx, string, runtimepipelineobligation.CommittedScope) error
 	commitInitialPipelineDispositionTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error
-	RecordDeadLetterTx(context.Context, *sql.Tx, runtimedeadletters.Record) error
+	recordDeadLetterTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, runtimedeadletters.Record, bool) error
 }
 
 type sqlPublishCommitter struct {
 	tx             *sql.Tx
 	store          eventCommitTxStore
+	story          runtimeauthoractivity.Mutation
 	activeEventIDs []string
 }
 
@@ -56,7 +59,7 @@ func (c *sqlPublishCommitter) BeginPreparedPublish(ctx context.Context, event ru
 	if err := events.ValidatePersistentEvent(admitted.Event()); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.tx, admitted)
+	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.tx, c.story, admitted)
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 		return outcome, err
 	}
@@ -89,7 +92,7 @@ func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation str
 	if err := events.ValidateNamedEvent(req.Event, class, eventType); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("%s: %w", operation, err)
 	}
-	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.tx, req.Event)
+	outcome, err := c.store.appendAdmittedEventTxOutcome(ctx, c.tx, c.story, req.Event)
 	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 		return outcome, err
 	}
@@ -130,7 +133,7 @@ func (c sqlPublishCommitter) commitInitialSideEffects(ctx context.Context, req r
 		}
 	}
 	if req.DeadLetter != nil {
-		if err := c.store.RecordDeadLetterTx(ctx, c.tx, *req.DeadLetter); err != nil {
+		if err := c.store.recordDeadLetterTx(ctx, c.tx, c.story, *req.DeadLetter, true); err != nil {
 			return err
 		}
 	}
@@ -164,7 +167,7 @@ func validateSelectedForkCommitRequest(req runtimebus.CommitSelectedForkEventReq
 func commitSelectedForkEvent(
 	ctx context.Context,
 	store eventCommitTxStore,
-	run func(context.Context, func(context.Context, *sql.Tx) error) error,
+	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
 	insertLineage func(context.Context, *sql.Tx, runfork.RunForkSelectedContractExecutionLineage) error,
 	req runtimebus.CommitSelectedForkEventRequest,
 ) (runtimebus.EventAppendOutcome, error) {
@@ -172,10 +175,10 @@ func commitSelectedForkEvent(
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	outcome := runtimebus.EventAppendOutcomeUnknown
-	err := run(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		committer := sqlPublishCommitter{tx: tx, store: store}
+	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		committer := sqlPublishCommitter{tx: tx, store: store, story: story}
 		var err error
-		outcome, err = store.appendAdmittedEventTxOutcome(txctx, tx, req.Commit.Event)
+		outcome, err = store.appendAdmittedEventTxOutcome(txctx, tx, story, req.Commit.Event)
 		if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 			return err
 		}
@@ -203,7 +206,9 @@ func (s *PostgresStore) CommitSelectedForkEvent(ctx context.Context, req runtime
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, runtimepipelineobligation.ErrStaleClaim
 	}
-	return commitSelectedForkEvent(claimCtx, s, s.runEventTransaction, insertPostgresSelectedForkExecutionLineageTx, req)
+	return commitSelectedForkEvent(claimCtx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return fn(txctx, tx, nil) })
+	}, insertPostgresSelectedForkExecutionLineageTx, req)
 }
 
 func (s *SQLiteRuntimeStore) CommitSelectedForkEvent(ctx context.Context, req runtimebus.CommitSelectedForkEventRequest) (runtimebus.EventAppendOutcome, error) {
@@ -212,16 +217,18 @@ func (s *SQLiteRuntimeStore) CommitSelectedForkEvent(ctx context.Context, req ru
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	defer state.operationMu.Unlock()
-	return commitSelectedForkEvent(ctx, s, s.runEventTransaction, insertSQLiteSelectedForkExecutionLineageTx, req)
+	return commitSelectedForkEvent(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return fn(txctx, tx, nil) })
+	}, insertSQLiteSelectedForkExecutionLineageTx, req)
 }
 
-func commitPublish(ctx context.Context, store eventCommitTxStore, run func(context.Context, func(context.Context, *sql.Tx) error) error, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+func commitPublish(ctx context.Context, store eventCommitTxStore, run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	if plan == nil {
 		return runtimebus.PreparedPublish{}, fmt.Errorf("event publish plan is required")
 	}
 	var prepared runtimebus.PreparedPublish
-	err := run(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		committer := &sqlPublishCommitter{tx: tx, store: store}
+	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		committer := &sqlPublishCommitter{tx: tx, store: store, story: story}
 		txctx = runtimebus.WithCommitPublishTransaction(txctx, committer)
 		var err error
 		prepared, err = plan.PrepareCommitPublish(txctx)
@@ -234,21 +241,25 @@ func commitPublish(ctx context.Context, store eventCommitTxStore, run func(conte
 }
 
 func (s *PostgresStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return commitPublish(ctx, s, s.runEventTransaction, plan)
+	return commitPublish(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return fn(txctx, tx, nil) })
+	}, plan)
 }
 
 func (s *SQLiteRuntimeStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return commitPublish(ctx, s, s.runEventTransaction, plan)
+	return commitPublish(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return fn(txctx, tx, nil) })
+	}, plan)
 }
 
-func commitRuntimeLogEvent(ctx context.Context, store eventCommitTxStore, run func(context.Context, func(context.Context, *sql.Tx) error) error, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+func commitRuntimeLogEvent(ctx context.Context, store eventCommitTxStore, run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
 	if err := events.ValidateNamedEvent(admitted, events.EventAdmissionDiagnosticDirect, events.EventTypePlatformRuntimeLog); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("runtime-log operation: %w", err)
 	}
 	outcome := runtimebus.EventAppendOutcomeUnknown
-	err := run(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
-		outcome, err = store.appendAdmittedEventTxOutcome(txctx, tx, admitted)
+		outcome, err = store.appendAdmittedEventTxOutcome(txctx, tx, story, admitted)
 		return err
 	})
 	if err != nil {
@@ -258,18 +269,22 @@ func commitRuntimeLogEvent(ctx context.Context, store eventCommitTxStore, run fu
 }
 
 func (s *PostgresStore) commitRuntimeLogEvent(ctx context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
-	return commitRuntimeLogEvent(ctx, s, s.runEventTransaction, admitted)
+	return commitRuntimeLogEvent(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return fn(txctx, tx, nil) })
+	}, admitted)
 }
 
 func (s *SQLiteRuntimeStore) commitRuntimeLogEvent(ctx context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
-	return commitRuntimeLogEvent(ctx, s, s.runEventTransaction, admitted)
+	return commitRuntimeLogEvent(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return fn(txctx, tx, nil) })
+	}, admitted)
 }
 
-func eventCommitterForPipelineContext(ctx context.Context, store eventCommitTxStore) (context.Context, bool) {
+func eventCommitterForPipelineContext(ctx context.Context, store eventCommitTxStore, story runtimeauthoractivity.Mutation) (context.Context, bool) {
 	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
 	if !ok {
 		return ctx, false
 	}
-	committer := &sqlPublishCommitter{tx: tx, store: store}
+	committer := &sqlPublishCommitter{tx: tx, store: store, story: story}
 	return runtimebus.WithCommitPublishTransaction(ctx, committer), true
 }

@@ -837,7 +837,7 @@ func (s *PostgresStore) executeCompletionCandidateTx(
 			return s.finishBlockedPostgresCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry))
 		}
 	}
-	if _, _, err := s.completeRunTx(ctx, tx, candidate.RunID, selectedNow); err != nil {
+	if _, _, err := s.completeRunTx(ctx, tx, nil, candidate.RunID, selectedNow); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeTerminallyEligible}, nil
@@ -963,7 +963,7 @@ func (s *SQLiteRuntimeStore) executeCompletionCandidateTx(
 			return s.finishBlockedSQLiteCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry), selectedNow)
 		}
 	}
-	if _, _, err := s.completeRunTx(ctx, tx, candidate.RunID, selectedNow); err != nil {
+	if _, _, err := s.completeRunTx(ctx, tx, nil, candidate.RunID, selectedNow); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeTerminallyEligible}, nil

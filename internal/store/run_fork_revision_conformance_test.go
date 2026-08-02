@@ -256,7 +256,7 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load delivery authority: %v", err)
 	}
-	result, err := postgresDeliveryAdapter.ClaimExactResult(deliveryTxCtx, deliveryTx, snapshot.Authority, seedEvent, route, runtimedelivery.DefaultLeaseTTL)
+	result, err := postgresDeliveryAdapter.ClaimExactResult(deliveryTxCtx, deliveryTx, nil, snapshot.Authority, seedEvent, route, runtimedelivery.DefaultLeaseTTL)
 	if err != nil {
 		t.Fatalf("stage delivery start: %v", err)
 	}

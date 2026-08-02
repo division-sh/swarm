@@ -248,7 +248,7 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 	return AdmitDurableHandoffProof(obligation.DeliveryID(), obligation.EventID(), obligation.RouteIdentity().String(), obligation.Authority())
 }
 
-func (a *Adapter) ClaimExactResult(ctx context.Context, tx *sql.Tx, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration) (ClaimResult, error) {
+func (a *Adapter) ClaimExactResult(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration) (ClaimResult, error) {
 	if tx == nil {
 		return ClaimResult{}, fmt.Errorf("delivery claim transaction is required")
 	}
@@ -318,7 +318,7 @@ func (a *Adapter) ClaimExactResult(ctx context.Context, tx *sql.Tx, authority Ex
 		result.Invariant = fmt.Errorf("%w: unknown delivery status", ErrConflict)
 		return result, nil
 	}
-	claimed, err := a.claimLocked(ctx, tx, record, leaseTTL)
+	claimed, err := a.claimLocked(ctx, tx, story, record, leaseTTL)
 	if err != nil {
 		return ClaimResult{}, err
 	}
@@ -625,7 +625,7 @@ func (a *Adapter) SnapshotExact(ctx context.Context, q queryer, event events.Eve
 	return a.Snapshot(ctx, q, deliveryID)
 }
 
-func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, record deliveryRecord, leaseTTL time.Duration) (ClaimedObligation, error) {
+func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, record deliveryRecord, leaseTTL time.Duration) (ClaimedObligation, error) {
 	if leaseTTL <= 0 {
 		leaseTTL = DefaultLeaseTTL
 	}
@@ -691,7 +691,7 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, record deliveryRe
 	if err != nil {
 		return ClaimedObligation{}, err
 	}
-	if err := a.recordTransition(ctx, claimed, "in_progress", nil, now); err != nil {
+	if err := a.recordTransition(ctx, story, claimed, "in_progress", nil, now); err != nil {
 		return ClaimedObligation{}, err
 	}
 	return ClaimedObligation{Snapshot: claimed.Snapshot, Claim: claim}, nil
@@ -825,11 +825,11 @@ func (a *Adapter) RenewClaim(ctx context.Context, tx *sql.Tx, claim Claim, lease
 	return updated.Snapshot, err
 }
 
-func (a *Adapter) SettleSuccess(ctx context.Context, tx *sql.Tx, claim Claim, sideEffects []string, duration time.Duration) (Snapshot, error) {
-	return a.settle(ctx, tx, claim, Settlement{Disposition: "success", SideEffects: sideEffects, Duration: duration})
+func (a *Adapter) SettleSuccess(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, claim Claim, sideEffects []string, duration time.Duration) (Snapshot, error) {
+	return a.settle(ctx, tx, story, claim, Settlement{Disposition: "success", SideEffects: sideEffects, Duration: duration})
 }
 
-func (a *Adapter) SettleFailure(ctx context.Context, tx *sql.Tx, claim Claim, settlement Settlement) (Snapshot, error) {
+func (a *Adapter) SettleFailure(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, claim Claim, settlement Settlement) (Snapshot, error) {
 	if settlement.Disposition != FailureRetry && settlement.Disposition != FailureDeadLetter {
 		return Snapshot{}, fmt.Errorf("delivery failure disposition %q is invalid", settlement.Disposition)
 	}
@@ -839,10 +839,10 @@ func (a *Adapter) SettleFailure(ctx context.Context, tx *sql.Tx, claim Claim, se
 	if settlement.Disposition == FailureDeadLetter && strings.TrimSpace(settlement.ReasonCode) == "" {
 		return Snapshot{}, fmt.Errorf("terminal delivery failure requires a reason code")
 	}
-	return a.settle(ctx, tx, claim, settlement)
+	return a.settle(ctx, tx, story, claim, settlement)
 }
 
-func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, claim Claim, settlement Settlement) (Snapshot, error) {
+func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, claim Claim, settlement Settlement) (Snapshot, error) {
 	if tx == nil {
 		return Snapshot{}, fmt.Errorf("delivery settlement transaction is required")
 	}
@@ -930,7 +930,7 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, claim Claim, settlemen
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if err := a.recordTransition(ctx, updated, transition, effectiveFailure, now); err != nil {
+	if err := a.recordTransition(ctx, story, updated, transition, effectiveFailure, now); err != nil {
 		return Snapshot{}, err
 	}
 	return snapshotAt(updated, now), nil
@@ -1849,7 +1849,7 @@ func (a *Adapter) ActiveSnapshots(ctx context.Context, q queryer) ([]Snapshot, e
 	return out, nil
 }
 
-func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, runID, reason string) ([]Terminalization, error) {
+func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID, reason string) ([]Terminalization, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("delivery run terminalization transaction is required")
 	}
@@ -1927,7 +1927,7 @@ func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, runID, reason 
 		if err != nil {
 			return nil, err
 		}
-		if err := a.recordTransition(ctx, updated, "terminalized", &failure, now); err != nil {
+		if err := a.recordTransition(ctx, story, updated, "terminalized", &failure, now); err != nil {
 			return nil, err
 		}
 		out = append(out, Terminalization{Previous: record.Snapshot, Current: updated.Snapshot})
@@ -2108,7 +2108,7 @@ func (a *Adapter) insertOutcome(ctx context.Context, tx *sql.Tx, deliveryID stri
 	return nil
 }
 
-func (a *Adapter) recordTransition(ctx context.Context, record deliveryRecord, transition string, failure *runtimefailures.Envelope, occurredAt time.Time) error {
+func (a *Adapter) recordTransition(ctx context.Context, story runtimeauthoractivity.Mutation, record deliveryRecord, transition string, failure *runtimefailures.Envelope, occurredAt time.Time) error {
 	currentScope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 	if !ok || strings.TrimSpace(currentScope.RuntimeInstanceID) == "" {
 		return fmt.Errorf("delivery lifecycle transition requires exact runtime instance scope")
@@ -2119,7 +2119,14 @@ func (a *Adapter) recordTransition(ctx context.Context, record deliveryRecord, t
 	} else if currentScope.Kind != runtimeauthoractivity.ScopeBundle || strings.TrimSpace(currentScope.BundleHash) == "" {
 		return fmt.Errorf("delivery lifecycle transition requires persisted run bundle_hash or exact bundle scope")
 	}
-	summary, found, err := runtimeauthoractivity.PersistedAuthorSafeSummary(ctx, "emit:"+record.EventID)
+	var summary string
+	var found bool
+	var err error
+	if story != nil {
+		summary, found, err = story.PersistedAuthorSafeSummary(ctx, "emit:"+record.EventID)
+	} else {
+		summary, found, err = runtimeauthoractivity.PersistedAuthorSafeSummary(ctx, "emit:"+record.EventID)
+	}
 	if err != nil {
 		return fmt.Errorf("load delivery source author-safe summary: %w", err)
 	}
@@ -2141,7 +2148,12 @@ func (a *Adapter) recordTransition(ctx context.Context, record deliveryRecord, t
 		Scope:             transitionScope,
 		AuthorSafeSummary: summary, Failure: runtimefailures.CloneEnvelope(failure),
 	}
-	if err := runtimeauthoractivity.Record(ctx, draft); err != nil {
+	if story != nil {
+		err = story.Record(ctx, draft)
+	} else {
+		err = runtimeauthoractivity.Record(ctx, draft)
+	}
+	if err != nil {
 		return fmt.Errorf("record delivery lifecycle activity: %w", err)
 	}
 	return nil

@@ -118,7 +118,7 @@ func (m *sqlInboundPublicationMutation) FinalizeInboundPublication(ctx context.C
 	if _, err := committer.commitNamedEvent(ctx, "finalize inbound publication evidence", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformInboundRecord, runtimebus.CommitPublishRequest{Event: evidence, ReplayScope: runtimepipelineobligation.ScopeDirect}); err != nil {
 		return fmt.Errorf("commit inbound evidence: %w", err)
 	}
-	if err := recordInboundAuthorActivity(ctx, finalization.EvidenceEvent, m.request.Provider); err != nil {
+	if err := recordInboundAuthorActivity(ctx, nil, finalization.EvidenceEvent, m.request.Provider); err != nil {
 		return fmt.Errorf("record inbound author activity: %w", err)
 	}
 	record, err := m.store.finalizeInboundPublicationTx(ctx, m.tx, m.request, len(finalization.Events))

@@ -11,39 +11,29 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/google/uuid"
 )
 
 func (s *PostgresStore) RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error {
-	return s.runAuthorActivityMutation(ctx, "postgres record dead letter", func(txctx context.Context, tx *sql.Tx) error {
-		return s.RecordDeadLetterTx(txctx, tx, rec)
+	return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		return s.recordDeadLetterTx(txctx, tx, story, rec, true)
 	})
 }
 
-func (s *PostgresStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx, rec runtimedeadletters.Record) error {
+func (s *PostgresStore) recordDeadLetterTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, rec runtimedeadletters.Record, requireActive bool) error {
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return err
+	if requireActive {
+		if err := requireActiveRunForEvent(ctx, tx, rec.OriginalEventID, true); err != nil {
+			return err
+		}
 	}
-	if err := requireActiveRunForEvent(ctx, tx, rec.OriginalEventID, true); err != nil {
-		return err
-	}
-	return s.insertPostgresDeadLetterTx(ctx, tx, rec)
+	return s.insertPostgresDeadLetterTx(ctx, tx, story, rec)
 }
 
-func (s *PostgresStore) recordTerminalizedDeliveryDeadLetterTx(ctx context.Context, tx *sql.Tx, rec runtimedeadletters.Record) error {
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return err
-	}
-	return s.insertPostgresDeadLetterTx(ctx, tx, rec)
-}
-
-func (s *PostgresStore) insertPostgresDeadLetterTx(ctx context.Context, tx *sql.Tx, rec runtimedeadletters.Record) error {
+func (s *PostgresStore) insertPostgresDeadLetterTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, rec runtimedeadletters.Record) error {
 	source, err := loadDeadLetterAuthorActivitySource(ctx, tx, rec.OriginalEventID, true)
 	if err != nil {
 		return err
@@ -55,7 +45,7 @@ func (s *PostgresStore) insertPostgresDeadLetterTx(ctx context.Context, tx *sql.
 	if !result.Inserted {
 		return nil
 	}
-	return recordDeadLetterAuthorActivity(ctx, result.DeadLetterID, rec, source, deadLetterOccurredAt(rec.Timestamp))
+	return recordDeadLetterAuthorActivity(ctx, story, result.DeadLetterID, rec, source, deadLetterOccurredAt(rec.Timestamp))
 }
 
 func insertPostgresDeadLetterRecord(ctx context.Context, tx *sql.Tx, rec runtimedeadletters.Record) (runtimedeadletters.InsertResult, error) {
@@ -152,41 +142,27 @@ func insertPostgresDeadLetterRecord(ctx context.Context, tx *sql.Tx, rec runtime
 }
 
 func (s *SQLiteRuntimeStore) RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error {
-	return s.RecordDeadLetterTx(ctx, nil, rec)
+	return s.runPrivateAuthorActivityMutation(ctx, "sqlite record dead letter", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		return s.recordDeadLetterTx(txctx, tx, story, rec, true)
+	})
 }
 
-func (s *SQLiteRuntimeStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx, rec runtimedeadletters.Record) error {
+func (s *SQLiteRuntimeStore) recordDeadLetterTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, rec runtimedeadletters.Record, requireActive bool) error {
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
 	if tx == nil {
-		return s.runAuthorActivityMutation(ctx, "sqlite record dead letter", func(txctx context.Context, tx *sql.Tx) error {
-			return s.RecordDeadLetterTx(txctx, tx, rec)
-		})
+		return fmt.Errorf("dead letter transaction is required")
 	}
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return err
+	if requireActive {
+		if err := requireActiveRunForEvent(ctx, tx, rec.OriginalEventID, false); err != nil {
+			return err
+		}
 	}
-	if err := requireActiveRunForEvent(ctx, tx, rec.OriginalEventID, false); err != nil {
-		return err
-	}
-	return s.insertSQLiteDeadLetterTx(ctx, tx, rec)
+	return s.insertSQLiteDeadLetterTx(ctx, tx, story, rec)
 }
 
-func (s *SQLiteRuntimeStore) recordTerminalizedDeliveryDeadLetterTx(ctx context.Context, tx *sql.Tx, rec runtimedeadletters.Record) error {
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	if tx == nil {
-		return fmt.Errorf("terminalized delivery dead letter transaction is required")
-	}
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return err
-	}
-	return s.insertSQLiteDeadLetterTx(ctx, tx, rec)
-}
-
-func (s *SQLiteRuntimeStore) insertSQLiteDeadLetterTx(ctx context.Context, tx *sql.Tx, rec runtimedeadletters.Record) error {
+func (s *SQLiteRuntimeStore) insertSQLiteDeadLetterTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, rec runtimedeadletters.Record) error {
 	rec, createdAt, err := normalizeSQLiteDeadLetterRecord(s, rec)
 	if err != nil {
 		return err
@@ -257,7 +233,7 @@ func (s *SQLiteRuntimeStore) insertSQLiteDeadLetterTx(ctx context.Context, tx *s
 	if !inserted {
 		return nil
 	}
-	return recordDeadLetterAuthorActivity(ctx, deadLetterID, rec, source, createdAt)
+	return recordDeadLetterAuthorActivity(ctx, story, deadLetterID, rec, source, createdAt)
 }
 
 type deadLetterAuthorActivitySource struct {
@@ -280,7 +256,7 @@ func loadDeadLetterAuthorActivitySource(ctx context.Context, tx *sql.Tx, eventID
 	return source, nil
 }
 
-func recordDeadLetterAuthorActivity(ctx context.Context, deadLetterID string, rec runtimedeadletters.Record, source deadLetterAuthorActivitySource, occurredAt time.Time) error {
+func recordDeadLetterAuthorActivity(ctx context.Context, story runtimeauthoractivity.Mutation, deadLetterID string, rec runtimedeadletters.Record, source deadLetterAuthorActivitySource, occurredAt time.Time) error {
 	deadLetterID = strings.TrimSpace(deadLetterID)
 	if deadLetterID == "" {
 		return fmt.Errorf("dead letter author activity requires dead_letter_id")
@@ -296,7 +272,7 @@ func recordDeadLetterAuthorActivity(ctx context.Context, deadLetterID string, re
 		return fmt.Errorf("dead letter author activity requires persisted run bundle_hash or exact bundle scope")
 	}
 	retry := rec.RetryCount
-	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+	draft := runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindDeadLetterRecorded, Transition: "recorded",
 		SourceOwner: "dead_letters", SourceIdentity: deadLetterID, DedupKey: "dead-letter:" + deadLetterID,
 		OccurredAt: occurredAt, RunID: source.RunID, EntityID: source.EntityID, FlowID: source.FlowID,
@@ -305,7 +281,11 @@ func recordDeadLetterAuthorActivity(ctx context.Context, deadLetterID string, re
 			RetryCount: &retry, ReasonCode: rec.Failure.Detail.Code, NodeID: strings.TrimSpace(rec.HandlerNode),
 		},
 		Scope: occurrenceScope, Failure: &rec.Failure,
-	})
+	}
+	if story != nil {
+		return story.Record(ctx, draft)
+	}
+	return runtimeauthoractivity.Record(ctx, draft)
 }
 
 func deadLetterOccurredAt(raw string) time.Time {

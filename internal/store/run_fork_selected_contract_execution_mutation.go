@@ -508,7 +508,7 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1::uuid)`, forkRunID).Scan(&preserveCompletionEvidence); err != nil {
 		return fmt.Errorf("check selected-contract completion evidence preservation: %w", err)
 	}
-	if _, err := s.terminalizeRunDeliveriesTx(storyctx, tx, forkRunID, "fork_discarded"); err != nil {
+	if _, err := s.terminalizeRunDeliveriesTx(storyctx, tx, nil, forkRunID, "fork_discarded"); err != nil {
 		return fmt.Errorf("terminalize selected-contract fork deliveries before discard: %w", err)
 	}
 	if preserveCompletionEvidence {

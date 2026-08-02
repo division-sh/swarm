@@ -90,7 +90,7 @@ func (s *PostgresStore) PersistRuntimeLog(ctx context.Context, record runtimepkg
 		return err
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		_, err := s.appendAdmittedEventTxOutcome(ctx, tx, evt)
+		_, err := s.appendAdmittedEventTxOutcome(ctx, tx, nil, evt)
 		return err
 	}
 	_, err = s.commitRuntimeLogEvent(ctx, evt)
@@ -153,7 +153,7 @@ func (s *SQLiteRuntimeStore) PersistRuntimeLog(ctx context.Context, record runti
 		return err
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		_, err := s.appendAdmittedEventTxOutcome(ctx, tx, evt)
+		_, err := s.appendAdmittedEventTxOutcome(ctx, tx, nil, evt)
 		return err
 	}
 	_, err = s.commitRuntimeLogEvent(ctx, evt)

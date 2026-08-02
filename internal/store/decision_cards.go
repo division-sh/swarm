@@ -968,9 +968,11 @@ func supersedeDecisionCardsForStage(ctx context.Context, tx *sql.Tx, runID, enti
 	return err == nil, err
 }
 
-func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return err
+func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
+	if story == nil {
+		if err := runtimeauthoractivity.Require(ctx); err != nil {
+			return err
+		}
 	}
 	runID = strings.TrimSpace(runID)
 	reason = strings.TrimSpace(reason)
@@ -1038,7 +1040,7 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason
 		if _, err := tx.ExecContext(ctx, update, decisioncard.StatusSuperseded, reason, now, cardID); err != nil {
 			return err
 		}
-		if _, err := appendDecisionCardChangeDTO(ctx, tx, runID, cardID, decisioncard.ChangeSuperseded, map[string]any{"reason": reason}, now, postgres); err != nil {
+		if _, err := appendDecisionCardChangeDTOWithStory(ctx, story, tx, runID, cardID, decisioncard.ChangeSuperseded, map[string]any{"reason": reason}, now, postgres); err != nil {
 			return err
 		}
 	}
@@ -1220,17 +1222,27 @@ func listDecisionCardChanges(ctx context.Context, db decisionCardSQL, opts decis
 }
 
 func appendDecisionCardChangeDTO(ctx context.Context, db decisionCardSQL, runID, cardID, changeType string, payload any, now time.Time, postgres bool) (int64, error) {
+	return appendDecisionCardChangeDTOWithStory(ctx, nil, db, runID, cardID, changeType, payload, now, postgres)
+}
+
+func appendDecisionCardChangeDTOWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, db decisionCardSQL, runID, cardID, changeType string, payload any, now time.Time, postgres bool) (int64, error) {
 	admitted, err := canonicaljson.FromGo(payload)
 	if err != nil {
 		return 0, fmt.Errorf("admit decision card change payload: %w", err)
 	}
-	return appendDecisionCardChange(ctx, db, runID, cardID, changeType, admitted, now, postgres)
+	return appendDecisionCardChangeWithStory(ctx, story, db, runID, cardID, changeType, admitted, now, postgres)
 }
 
 func appendDecisionCardChange(ctx context.Context, db decisionCardSQL, runID, cardID, changeType string, payload semanticvalue.Value, now time.Time, postgres bool) (int64, error) {
+	return appendDecisionCardChangeWithStory(ctx, nil, db, runID, cardID, changeType, payload, now, postgres)
+}
+
+func appendDecisionCardChangeWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, db decisionCardSQL, runID, cardID, changeType string, payload semanticvalue.Value, now time.Time, postgres bool) (int64, error) {
 	if cardChangeRegistered(changeType) {
-		if err := runtimeauthoractivity.Require(ctx); err != nil {
-			return 0, err
+		if story == nil {
+			if err := runtimeauthoractivity.Require(ctx); err != nil {
+				return 0, err
+			}
 		}
 	}
 	now = decisioncard.CanonicalTimestamp(now)
@@ -1253,7 +1265,7 @@ func appendDecisionCardChange(ctx context.Context, db decisionCardSQL, runID, ca
 		return 0, fmt.Errorf("append decision card change: %w", err)
 	}
 	if cardChangeRegistered(changeType) {
-		if err := recordDecisionCardChangeAuthorActivity(ctx, db, id, runID, cardID, changeType, now, postgres); err != nil {
+		if err := recordDecisionCardChangeAuthorActivity(ctx, story, db, id, runID, cardID, changeType, now, postgres); err != nil {
 			return 0, err
 		}
 	}
@@ -1269,9 +1281,11 @@ func cardChangeRegistered(changeType string) bool {
 	}
 }
 
-func recordDecisionCardChangeAuthorActivity(ctx context.Context, db decisionCardSQL, changeID int64, runID, cardID, changeType string, now time.Time, postgres bool) error {
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return err
+func recordDecisionCardChangeAuthorActivity(ctx context.Context, story runtimeauthoractivity.Mutation, db decisionCardSQL, changeID int64, runID, cardID, changeType string, now time.Time, postgres bool) error {
+	if story == nil {
+		if err := runtimeauthoractivity.Require(ctx); err != nil {
+			return err
+		}
 	}
 	card, err := loadDecisionCard(ctx, db, cardID, postgres, false)
 	if err != nil {
@@ -1296,13 +1310,17 @@ func recordDecisionCardChangeAuthorActivity(ctx context.Context, db decisionCard
 		deferred := card.DeferredUntil.UTC()
 		projection.DeferUntil = &deferred
 	}
-	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+	draft := runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindCardLifecycle, Transition: strings.TrimSpace(changeType),
 		Scope:       scope,
 		SourceOwner: "decision_card_changes", SourceIdentity: identity, DedupKey: "card-change:" + identity,
 		OccurredAt: now.UTC(), RunID: strings.TrimSpace(runID), EntityID: entityID, FlowID: flowID,
 		Projection: projection,
-	})
+	}
+	if story != nil {
+		return story.Record(ctx, draft)
+	}
+	return runtimeauthoractivity.Record(ctx, draft)
 }
 
 func decisionCardAuthorActivityIdentity(anchor decisioncard.Anchor) (anchorID, entityID, flowID string, err error) {

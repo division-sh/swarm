@@ -368,13 +368,13 @@ func appendAdmittedBoundaryFixture(ctx context.Context, selected any, event even
 	case *PostgresStore:
 		err = store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			var appendErr error
-			outcome, appendErr = store.appendAdmittedEventTxOutcome(txctx, tx, admitted)
+			outcome, appendErr = store.appendAdmittedEventTxOutcome(txctx, tx, nil, admitted)
 			return appendErr
 		})
 	case *SQLiteRuntimeStore:
 		err = store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			var appendErr error
-			outcome, appendErr = store.appendAdmittedEventTxOutcome(txctx, tx, admitted)
+			outcome, appendErr = store.appendAdmittedEventTxOutcome(txctx, tx, nil, admitted)
 			return appendErr
 		})
 	default:

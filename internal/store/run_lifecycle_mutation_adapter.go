@@ -770,7 +770,7 @@ func (m postgresRunLifecycleMutation) MarkTerminal(
 	if m.store == nil {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("PostgreSQL terminal run lifecycle transition requires selected store")
 	}
-	return m.store.markRunTerminalTx(ctx, m.tx, request)
+	return m.store.markRunTerminalTx(ctx, m.tx, m.story, request)
 }
 
 func (m sqliteRunLifecycleMutation) MarkTerminal(
@@ -780,7 +780,7 @@ func (m sqliteRunLifecycleMutation) MarkTerminal(
 	if m.store == nil {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("SQLite terminal run lifecycle transition requires selected store")
 	}
-	return m.store.markRunTerminalTx(ctx, m.tx, request)
+	return m.store.markRunTerminalTx(ctx, m.tx, m.story, request)
 }
 
 func (m postgresRunLifecycleMutation) ForkSource(
@@ -790,7 +790,7 @@ func (m postgresRunLifecycleMutation) ForkSource(
 	if m.store == nil {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("PostgreSQL fork source lifecycle transition requires selected store")
 	}
-	return m.store.markForkSourceTx(ctx, m.tx, request)
+	return m.store.markForkSourceTx(ctx, m.tx, m.story, request)
 }
 
 func (m sqliteRunLifecycleMutation) ForkSource(

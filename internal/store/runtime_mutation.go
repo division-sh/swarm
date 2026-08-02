@@ -89,7 +89,7 @@ func (s *PostgresStore) runPostgresRuntimeMutation(ctx context.Context, fn func(
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
 	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	if eventCtx, ok := eventCommitterForPipelineContext(txctx, s); ok {
+	if eventCtx, ok := eventCommitterForPipelineContext(txctx, s, nil); ok {
 		txctx = eventCtx
 	} else {
 		rollbackErr := rollbackPostgresSessionTransaction(tx, session)
@@ -153,7 +153,7 @@ func (s *SQLiteRuntimeStore) runRuntimeMutationCommitted(
 		ctx = context.Background()
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		eventCtx, attached := eventCommitterForPipelineContext(ctx, s)
+		eventCtx, attached := eventCommitterForPipelineContext(ctx, s, nil)
 		if !attached {
 			return nil, fmt.Errorf("%s could not attach the event commit owner", label)
 		}
@@ -237,7 +237,7 @@ func (s *SQLiteRuntimeStore) runRuntimeMutationOnceLocked(ctx context.Context, f
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
 	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	if eventCtx, ok := eventCommitterForPipelineContext(txctx, s); ok {
+	if eventCtx, ok := eventCommitterForPipelineContext(txctx, s, nil); ok {
 		txctx = eventCtx
 	} else {
 		return nil, errors.Join(

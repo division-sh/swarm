@@ -1128,7 +1128,7 @@ func commitReviewClosureEvent(
 	}
 	defer release()
 	commit := func(txctx context.Context, tx *sql.Tx, store eventCommitTxStore) error {
-		outcome, err := store.appendAdmittedEventTxOutcome(txctx, tx, admitted)
+		outcome, err := store.appendAdmittedEventTxOutcome(txctx, tx, nil, admitted)
 		if err != nil {
 			return err
 		}

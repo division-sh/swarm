@@ -109,7 +109,7 @@ func (s *PostgresStore) validateEventPayload(ctx context.Context, eventType stri
 	return nil
 }
 
-func (s *PostgresStore) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+func (s *PostgresStore) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
@@ -117,7 +117,7 @@ func (s *PostgresStore) appendAdmittedEventTxOutcome(ctx context.Context, tx *sq
 		outcome := runtimebus.EventAppendOutcomeUnknown
 		err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			var err error
-			outcome, err = s.appendAdmittedEventTxOutcome(txctx, tx, admitted)
+			outcome, err = s.appendAdmittedEventTxOutcome(txctx, tx, nil, admitted)
 			return err
 		})
 		return outcome, err
@@ -125,7 +125,7 @@ func (s *PostgresStore) appendAdmittedEventTxOutcome(ctx context.Context, tx *sq
 	outcome := runtimebus.EventAppendOutcomeUnknown
 	err := withEventStoreRetry(ctx, tx, func() error {
 		var err error
-		outcome, err = s.appendEventSpec(ctx, tx, admitted)
+		outcome, err = s.appendEventSpec(ctx, tx, story, admitted)
 		return err
 	})
 	return outcome, err
@@ -258,9 +258,11 @@ func (s *PostgresStore) ListEventDeliveryRoutes(ctx context.Context, eventID str
 	return events.NormalizeDeliveryRoutes(out), nil
 }
 
-func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return runtimebus.EventAppendOutcomeUnknown, err
+func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
+	if story == nil {
+		if err := runtimeauthoractivity.Require(ctx); err != nil {
+			return runtimebus.EventAppendOutcomeUnknown, err
+		}
 	}
 	evt := admitted.Event()
 	wantIdentity, err := eventrecord.FromAdmitted(admitted)
@@ -345,11 +347,11 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, admitte
 		return runtimebus.EventAppendExactDuplicate, nil
 	}
 	if admitted.RunDisposition() != events.AdmittedRunless {
-		if err := (postgresRunLifecycleMutation{tx: tx}).SyncCounters(ctx, wantIdentity.RunID); err != nil {
+		if err := (postgresRunLifecycleMutation{tx: tx, story: story}).SyncCounters(ctx, wantIdentity.RunID); err != nil {
 			return runtimebus.EventAppendOutcomeUnknown, err
 		}
 	}
-	if err := recordPersistedEventAuthorActivity(ctx, s, evt, wantIdentity.ProducedBy, string(wantIdentity.ProducedByType)); err != nil {
+	if err := recordPersistedEventAuthorActivity(ctx, story, s, evt, wantIdentity.ProducedBy, string(wantIdentity.ProducedByType)); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	if admitted.RunDisposition() == events.AdmittedRunCreateAuthorized {

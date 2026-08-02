@@ -887,13 +887,13 @@ func completeRunLifecycleCandidateParity(
 	switch store := fixture.store.(type) {
 	case *PostgresStore:
 		err := store.runAuthorActivityMutation(ctx, "test successful completion", func(txctx context.Context, tx *sql.Tx) error {
-			snapshot, disposition, inner = store.completeRunTx(txctx, tx, runID, endedAt)
+			snapshot, disposition, inner = store.completeRunTx(txctx, tx, nil, runID, endedAt)
 			return inner
 		})
 		return snapshot, disposition, err
 	case *SQLiteRuntimeStore:
 		err := store.runAuthorActivityMutation(ctx, "test successful completion", func(txctx context.Context, tx *sql.Tx) error {
-			snapshot, disposition, inner = store.completeRunTx(txctx, tx, runID, endedAt)
+			snapshot, disposition, inner = store.completeRunTx(txctx, tx, nil, runID, endedAt)
 			return inner
 		})
 		return snapshot, disposition, err

@@ -59,7 +59,7 @@ func (s *PostgresStore) runAuthorActivityMutation(ctx context.Context, label str
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		if runtimeauthoractivity.InMutation(ctx, tx) {
-			eventCtx, attached := eventCommitterForPipelineContext(ctx, s)
+			eventCtx, attached := eventCommitterForPipelineContext(ctx, s, nil)
 			if !attached {
 				return fmt.Errorf("%s could not attach the event commit owner", label)
 			}
@@ -91,7 +91,7 @@ func (s *SQLiteRuntimeStore) runAuthorActivityMutation(ctx context.Context, labe
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		if runtimeauthoractivity.InMutation(ctx, tx) {
-			eventCtx, attached := eventCommitterForPipelineContext(ctx, s)
+			eventCtx, attached := eventCommitterForPipelineContext(ctx, s, nil)
 			if !attached {
 				return fmt.Errorf("%s could not attach the event commit owner", label)
 			}

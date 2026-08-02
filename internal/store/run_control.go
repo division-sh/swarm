@@ -76,11 +76,8 @@ func (s *PostgresStore) runControlTransition(ctx context.Context, req runtimerun
 		return runtimeruncontrol.State{}, err
 	}
 	var state runtimeruncontrol.State
-	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
+	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		var err error
 		state, err = lockRunControlState(txctx, tx, runID)
 		if err != nil {
 			return err
@@ -94,7 +91,7 @@ func (s *PostgresStore) runControlTransition(ctx context.Context, req runtimerun
 			if err := rejectPostgresStandingRunStopTx(txctx, tx, runID); err != nil {
 				return err
 			}
-			state, err = s.stopRunControlTx(txctx, tx, state, req)
+			state, err = s.stopRunControlTx(txctx, tx, story, state, req)
 		case "pause":
 			state, err = s.pauseRunControlTx(txctx, tx, state, req)
 		case "continue":
@@ -122,7 +119,7 @@ func (s *PostgresStore) runControlTransition(ctx context.Context, req runtimerun
 				return err
 			}
 		}
-		return story.Finalize(txctx)
+		return nil
 	})
 	return state, err
 }
@@ -237,7 +234,7 @@ func (s *PostgresStore) continueRunControlTx(ctx context.Context, tx *sql.Tx, st
 	return state, nil
 }
 
-func (s *PostgresStore) stopRunControlTx(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+func (s *PostgresStore) stopRunControlTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
 	lifecycleState, err := runtimerunlifecycle.ParseState(state.Status)
 	if err != nil {
 		return runtimeruncontrol.State{}, err
@@ -245,11 +242,11 @@ func (s *PostgresStore) stopRunControlTx(ctx context.Context, tx *sql.Tx, state 
 	if !lifecycleState.Active() {
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: state.RunID, CurrentStatus: state.Status}
 	}
-	abandoned, err := s.quiesceStoppedRunWorkTx(ctx, tx, state.RunID, req.Reason, req.Now.UTC())
+	abandoned, err := s.quiesceStoppedRunWorkTx(ctx, tx, story, state.RunID, req.Reason, req.Now.UTC())
 	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
+	if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
 		RunID: state.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: req.Now.UTC(),
 	}); err != nil {
 		return runtimeruncontrol.State{}, err
@@ -288,8 +285,8 @@ func rejectPostgresStandingRunStopTx(ctx context.Context, tx *sql.Tx, runID stri
 	return fmt.Errorf("run %s is owned by standing service %s; use `swarm standing suspend %s` or `swarm standing reset %s`", runID, serviceID, serviceID, serviceID)
 }
 
-func (s *PostgresStore) quiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx, runID, reason string, now time.Time) (int, error) {
-	deliveries, err := s.terminalizeRunDeliveriesTx(ctx, tx, runID, "run_stopped")
+func (s *PostgresStore) quiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, runID, reason string, now time.Time) (int, error) {
+	deliveries, err := s.terminalizeRunDeliveriesTx(ctx, tx, story, runID, "run_stopped")
 	if err != nil {
 		return 0, err
 	}

@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/lib/pq"
 )
 
@@ -95,11 +95,10 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 			_ = tx.Rollback()
 		}
 	}()
-	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
 	if err != nil {
 		return preservationcleanup.Result{}, err
 	}
-	ctx = storyctx
 
 	runs, err := lockUnavailableBundlePreservationRunsTx(ctx, tx, runIDs)
 	if err != nil {
@@ -191,7 +190,7 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 
 	for _, runID := range activeRunIDs {
 		target := targetByRun[runID]
-		if _, err := s.terminalizeRunDeliveriesTx(ctx, tx, runID, target.ReasonCode); err != nil {
+		if _, err := s.terminalizeRunDeliveriesTx(ctx, tx, story, runID, target.ReasonCode); err != nil {
 			return preservationcleanup.Result{}, err
 		}
 		terminalized, err := s.terminalizePostgresPipelineRunTx(ctx, tx, runID, runtimepipelineobligation.DeadLetter(target.ReasonCode, nil), now)
@@ -213,7 +212,7 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 	}
 	for _, run := range runs {
 		target := targetByRun[run.RunID]
-		if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
+		if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
 			RunID: run.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: now,
 		}); err != nil {
 			return preservationcleanup.Result{}, err
@@ -222,7 +221,7 @@ func (s *PostgresStore) applyPreservationCleanup(ctx context.Context, req preser
 			return preservationcleanup.Result{}, err
 		}
 	}
-	if err := runtimeauthoractivity.Finalize(ctx); err != nil {
+	if err := story.Finalize(ctx); err != nil {
 		return preservationcleanup.Result{}, err
 	}
 	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {

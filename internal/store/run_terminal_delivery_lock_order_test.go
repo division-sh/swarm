@@ -48,7 +48,7 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 	}
 	defer terminalTx.Rollback()
 	terminalCtx = runtimepipeline.WithPipelineSQLTxContext(terminalCtx, terminalTx)
-	terminalCtx, attached := eventCommitterForPipelineContext(terminalCtx, terminalStore)
+	terminalCtx, attached := eventCommitterForPipelineContext(terminalCtx, terminalStore, nil)
 	if !attached {
 		t.Fatal("attach terminal event commit owner")
 	}
@@ -97,7 +97,7 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 	}
 	terminalDone := make(chan terminalResult, 1)
 	go func() {
-		snapshot, _, err := terminalStore.markRunTerminalTx(storyCtx, terminalTx, runtimerunlifecycle.TerminalRequest{
+		snapshot, _, err := terminalStore.markRunTerminalTx(storyCtx, terminalTx, nil, runtimerunlifecycle.TerminalRequest{
 			RunID: fixture.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
 		})
 		if err == nil {

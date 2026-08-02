@@ -79,7 +79,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *Pos
 			if err != nil {
 				return result, err
 			}
-			outcome, err := store.appendEventSpec(ctx, tx, replayed)
+			outcome, err := store.appendEventSpec(ctx, tx, nil, replayed)
 			if err != nil {
 				return result, err
 			}
