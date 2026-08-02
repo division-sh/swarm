@@ -180,9 +180,10 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 					t.Fatalf("old %s status = %q, want cancelled", declaration, persisted.Status)
 				}
 			}
-			if active, draining := workflowTimerScheduledCounts(schedulerB); active != 3 || draining != 0 {
-				t.Fatalf("source B process wakeups = %d/%d, want 3/0", active, draining)
-			}
+			waitForWorkflowTimerCondition(t, time.Second, func() bool {
+				active, draining := workflowTimerScheduledCounts(schedulerB)
+				return active == 3 && draining == 0
+			}, "source B replacement wakeups")
 
 			stale := sourceAByDeclaration["waiting.changed"]
 			if err := pcB.workflowTimers.ReconcileWakeup(ctx, stale.Ref); err != nil {
@@ -322,9 +323,10 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 			if _, found := activeByDeclaration["waiting.added"]; found {
 				t.Fatal("new initial declaration was retroactively armed after initial entry")
 			}
-			if active, draining := workflowTimerScheduledCounts(schedulerB); active != 1 || draining != 0 {
-				t.Fatalf("progressed source B wakeups = %d/%d, want 1/0", active, draining)
-			}
+			waitForWorkflowTimerCondition(t, time.Second, func() bool {
+				active, draining := workflowTimerScheduledCounts(schedulerB)
+				return active == 1 && draining == 0
+			}, "progressed source B replacement wakeups")
 		})
 	}
 }
@@ -440,8 +442,9 @@ func TestWorkflowTimerLifecycleScopesDeclarationsToOwningFlowOnBothStores(t *tes
 				if instanceFlow == "flow-a" {
 					wantPrefix = "flow-a"
 				}
-				if rows[0].EventType != wantPrefix+".initial" {
-					t.Fatalf("%s initial timer event = %q, want %q", instanceFlow, rows[0].EventType, wantPrefix+".initial")
+				wantInitialEvent := wantPrefix + ".initial"
+				if rows[0].EventType != wantInitialEvent {
+					t.Fatalf("%s initial timer event = %q, want %q", instanceFlow, rows[0].EventType, wantInitialEvent)
 				}
 				if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
 					return pc.workflowTimers.Reconcile(txctx, entityID, "waiting", "waiting", workflowTimerCause{

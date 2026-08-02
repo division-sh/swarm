@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1497,6 +1498,109 @@ func TestCompiledConnectEvaluationStaleSnapshotReevaluatesBeforeMutation(t *test
 	routes := store.routes[evt.ID()]
 	if len(routes) != 1 || routes[0].ConnectClaim.Empty() {
 		t.Fatalf("persisted routes = %#v, want one stamped connect route", routes)
+	}
+}
+
+func TestCompiledConnectEvaluationPostCheckGenerationMutationCannotInterleaveLifecycleOrReply(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		staged bool
+	}{
+		{name: "base route table"},
+		{name: "transaction-staged route table", staged: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, false)
+			routeTable, err := DeriveRouteTable(source)
+			if err != nil {
+				t.Fatalf("derive base route table: %v", err)
+			}
+			ctx := context.Background()
+			generationOwner := routeTable
+			if tc.staged {
+				staged, err := DeriveRouteTable(source)
+				if err != nil {
+					t.Fatalf("derive transaction-staged route table: %v", err)
+				}
+				ctx = context.WithValue(ctx, transactionRouteOverlayKey{}, &transactionRouteOverlay{table: staged})
+				generationOwner = staged
+			}
+
+			replyStore := &connectRoutePlanReplyMutationStore{}
+			activationEntered := make(chan struct{})
+			releaseActivation := make(chan struct{})
+			var activations atomic.Int32
+			resolver := connectRoutePlanResolver{
+				source:     source,
+				routeTable: routeTable,
+				lifecycle: newTemplateInstanceLifecycleOwner(source, routeTable, nil, func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
+					close(activationEntered)
+					<-releaseActivation
+					activations.Add(1)
+					return nil
+				}),
+				replyStore: replyStore,
+			}
+			activation := runtimepipeline.FlowInstanceActivationRequest{}
+			evaluated := connectRoutePlanDispatch{
+				lifecycleApplications: []connectLifecycleApplication{{
+					decision: TemplateInstanceLifecycleDecision{
+						Action:     templateInstanceLifecycleActionPreviewCreate,
+						activation: &activation,
+					},
+				}},
+				replyApplications: []connectReplyApplication{{
+					kind:   connectReplyApplicationCreate,
+					record: runtimereplycontext.Record{ID: "generation-linearization"},
+				}},
+			}
+
+			staleSnapshot := resolver.captureSnapshot(ctx)
+			if err := generationOwner.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
+				Identity: runtimeflowidentity.DeriveRoute("consumer", "before-apply"),
+			}); err != nil {
+				t.Fatalf("advance route generation before apply: %v", err)
+			}
+			if err := resolver.applyEvaluationAtSnapshot(ctx, staleSnapshot, events.Event{}, evaluated); !errors.As(err, new(staleConnectRoutePlanSnapshotError)) {
+				t.Fatalf("stale apply error = %v, want typed stale snapshot", err)
+			}
+			if activations.Load() != 0 || replyStore.creates != 0 {
+				t.Fatalf("stale apply effects = activations:%d replies:%d, want none", activations.Load(), replyStore.creates)
+			}
+
+			currentSnapshot := resolver.captureSnapshot(ctx)
+			applyDone := make(chan error, 1)
+			go func() {
+				applyDone <- resolver.applyEvaluationAtSnapshot(ctx, currentSnapshot, events.Event{}, evaluated)
+			}()
+			<-activationEntered
+
+			mutationStarted := make(chan struct{})
+			mutationDone := make(chan error, 1)
+			go func() {
+				close(mutationStarted)
+				mutationDone <- generationOwner.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
+					Identity: runtimeflowidentity.DeriveRoute("consumer", "during-apply"),
+				})
+			}()
+			<-mutationStarted
+			select {
+			case err := <-mutationDone:
+				t.Fatalf("route generation mutation interleaved before lifecycle/reply completion: %v", err)
+			case <-time.After(50 * time.Millisecond):
+			}
+
+			close(releaseActivation)
+			if err := <-applyDone; err != nil {
+				t.Fatalf("generation-linearized apply: %v", err)
+			}
+			if err := <-mutationDone; err != nil {
+				t.Fatalf("route generation mutation after apply: %v", err)
+			}
+			if activations.Load() != 1 || replyStore.creates != 1 {
+				t.Fatalf("linearized apply effects = activations:%d replies:%d, want one each", activations.Load(), replyStore.creates)
+			}
+		})
 	}
 }
 

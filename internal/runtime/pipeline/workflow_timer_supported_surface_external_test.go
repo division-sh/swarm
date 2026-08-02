@@ -20,6 +20,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
@@ -92,6 +93,96 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 				time.Sleep(10 * time.Millisecond)
 			}
 			t.Fatal("workflow timer did not fire and advance through the real scheduler/EventBus path")
+		})
+	}
+}
+
+func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ParentConnect)
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	fixtureRoot := canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		fixtureRoot,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load parent-connect timer fixture: %v", err)
+	}
+	bundle.Semantics.Timers = []runtimecontracts.WorkflowTimerContract{{
+		ID: "waiting.work_ready", FlowID: "producer", Stage: "waiting", StageOwned: true,
+		Owner: "runtime", Event: "work.ready", StartOn: "state:waiting", Delay: "40ms",
+	}}
+	source := semanticview.Wrap(bundle)
+
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T) gateRecoveryStoreCase
+	}{
+		{name: "sqlite", open: openSQLiteGateRecoveryStore},
+		{name: "postgres", open: openPostgresGateRecoveryStore},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected := tc.open(t)
+			runID := uuid.NewString()
+			entityID := uuid.NewString()
+			insertGateRecoveryRun(t, selected, runID)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
+			eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatalf("new authored timer EventBus: %v", err)
+			}
+			deliveries := internalSubscriptionDeliveriesForTest(t, eventBus, "consumer-node")
+			scheduleStore, ok := selected.events.(runtimepipeline.SchedulePersistence)
+			if !ok {
+				t.Fatalf("selected %s store does not implement SchedulePersistence", selected.name)
+			}
+			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(
+				pipelineExternalTestWorkOwner(t),
+				func(context.Context, runtimepipeline.Schedule) {},
+			)
+			t.Cleanup(scheduler.Stop)
+			coordinator := newGateRecoveryCoordinator(eventBus, selected, runtimepipeline.PipelineCoordinatorOptions{
+				Module:             gateRecoveryModule{source: source},
+				Persistence:        selected.persistence,
+				TimerScheduler:     scheduler,
+				TimerScheduleStore: scheduleStore,
+				WorkOwner:          pipelineExternalTestWorkOwner(t),
+			})
+			eventBus.SetInterceptors(coordinator)
+
+			createdAt := time.Now().UTC()
+			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+				InstanceID: entityID, StorageRef: entityID, WorkflowName: "producer", WorkflowVersion: "1.0.0",
+				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
+				Metadata: map[string]any{"run_id": runID},
+			}, createdAt); err != nil {
+				t.Fatalf("materialize producer workflow instance: %v", err)
+			}
+			if err := coordinator.ArmInitialEntryTimers(ctx, entityID); err != nil {
+				t.Fatalf("arm authored workflow timer: %v", err)
+			}
+
+			select {
+			case delivery := <-deliveries:
+				if delivery.Type() != events.EventType("producer/work.ready") {
+					t.Fatalf("delivered timer event type = %q, want producer/work.ready", delivery.Type())
+				}
+				sourceFact := delivery.Event().RoutingSource()
+				if sourceFact.Kind() != events.RoutingSourceFlowOwnedControl || sourceFact.Route().FlowID != "producer" {
+					t.Fatalf("delivered timer routing source = %#v, want producer flow-owned control", sourceFact)
+				}
+				route := delivery.HandoffRoute()
+				if route.SubscriberID != "consumer-node" || route.ConnectClaim.Empty() {
+					t.Fatalf("timer delivery route = %#v, want consumer-node with stamped connect claim", route)
+				}
+				if err := delivery.Complete(); err != nil {
+					t.Fatalf("complete authored timer delivery: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("authored workflow timer did not deliver through compiled connect")
+			}
+			waitWorkflowTimerRowStatus(t, selected, runID, entityID, "fired")
 		})
 	}
 }
@@ -884,6 +975,26 @@ func assertWorkflowTimerServedRows(t *testing.T, selected gateRecoveryStoreCase,
 	if got != want {
 		t.Fatalf("canonical workflow timers status=%s = %d, want %d", status, got, want)
 	}
+}
+
+func waitWorkflowTimerRowStatus(t *testing.T, selected gateRecoveryStoreCase, runID, entityID, status string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		query := `SELECT COUNT(*) FROM timers WHERE run_id = ? AND entity_id = ? AND task_type = 'workflow_timer' AND status = ?`
+		if selected.postgres {
+			query = `SELECT COUNT(*) FROM timers WHERE run_id = $1::uuid AND entity_id = $2::uuid AND task_type = 'workflow_timer' AND status = $3`
+		}
+		var count int
+		if err := selected.db.QueryRowContext(context.Background(), query, runID, entityID, status).Scan(&count); err != nil {
+			t.Fatalf("read workflow timer status: %v", err)
+		}
+		if count == 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("workflow timer did not reach status %q", status)
 }
 
 func waitWorkflowTimerEventCount(t *testing.T, selected gateRecoveryStoreCase, fireErrors <-chan error, runID, eventType string, want int) {

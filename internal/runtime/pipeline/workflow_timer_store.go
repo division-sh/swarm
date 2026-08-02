@@ -78,12 +78,23 @@ func (a WorkflowTimerActivation) validate() error {
 	if a.RunID == "" || a.EntityID == "" || a.FlowInstance == "" {
 		return fmt.Errorf("workflow timer activation requires run, entity, and flow-instance scope")
 	}
-	if a.RoutingSource.Kind() != events.RoutingSourceFlowOwnedControl ||
-		a.RoutingSource.Route().FlowInstance != a.FlowInstance || a.RoutingSource.Route().EntityID != a.EntityID {
-		return fmt.Errorf("workflow timer activation requires an exact persisted flow-owned routing source")
+	switch a.RoutingSource.Kind() {
+	case events.RoutingSourceRoot:
+		if a.RoutingSource.Route() != (events.RouteIdentity{EntityID: a.EntityID}) {
+			return fmt.Errorf("root workflow timer activation requires its exact persisted entity source")
+		}
+	case events.RoutingSourceFlowOwnedControl:
+		if a.RoutingSource.Route().FlowInstance != a.FlowInstance || a.RoutingSource.Route().EntityID != a.EntityID {
+			return fmt.Errorf("flow workflow timer activation requires its exact persisted flow source")
+		}
+	default:
+		return fmt.Errorf("workflow timer activation requires exact root or flow-owned routing provenance")
 	}
 	if a.OwnerAgent == "" || a.EventType == "" {
 		return fmt.Errorf("workflow timer activation requires owner agent and fire event")
+	}
+	if _, err := events.AdmitRuntimeControlEventType(events.EventType(a.EventType), a.RoutingSource); err != nil {
+		return fmt.Errorf("workflow timer activation event/source admission: %w", err)
 	}
 	if a.FireAt.IsZero() || a.CreatedAt.IsZero() {
 		return fmt.Errorf("workflow timer activation requires created_at and fire_at")

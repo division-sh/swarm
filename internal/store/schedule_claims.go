@@ -25,6 +25,11 @@ func (s *PostgresStore) ClaimSchedule(ctx context.Context, sc runtimepipeline.Sc
 	if err := sc.NormalizeOwner(); err != nil {
 		return false, err
 	}
+	var err error
+	sc, err = sc.AdmitEventIdentity()
+	if err != nil {
+		return false, err
+	}
 	key := scheduleClaimLockKey(sc)
 
 	s.scheduleClaimMu.Lock()
@@ -124,6 +129,11 @@ func (s *PostgresStore) ReleaseSchedule(ctx context.Context, sc runtimepipeline.
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
 	if err := sc.NormalizeOwner(); err != nil {
+		return err
+	}
+	var err error
+	sc, err = sc.AdmitEventIdentity()
+	if err != nil {
 		return err
 	}
 	key := scheduleClaimLockKey(sc)
@@ -270,6 +280,11 @@ func (s *PostgresStore) persistedScheduleRecurring(ctx context.Context, sc runti
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
 	if err := sc.NormalizeOwner(); err != nil {
+		return false, err
+	}
+	var err error
+	sc, err = sc.AdmitEventIdentity()
+	if err != nil {
 		return false, err
 	}
 	identityFields, err := scheduleAgentIdentityFields(sc)

@@ -177,6 +177,37 @@ func TestConnectRoutePlanSourceParentRouteUsesOnlyAdmittedSource(t *testing.T) {
 	}
 }
 
+func TestAdmitRuntimeControlSourceEventResolvesOnceAgainstExactSource(t *testing.T) {
+	source := testRootConnectRoutePlanSource(nil, []connectRoutePlanFlow{{
+		id: "producer", mode: runtimecontracts.FlowModeStatic,
+		outputs: []runtimecontracts.FlowOutputEventPin{{Name: "ready", Event: "work.ready"}},
+	}}, nil)
+	flowSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+		FlowID: "producer", FlowInstance: "producer", EntityID: "producer-entity",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := AdmitRuntimeControlSourceEvent(source, "producer", "work.ready", flowSource)
+	if err != nil || got != "producer/work.ready" {
+		t.Fatalf("admit flow event = %q, %v, want producer/work.ready", got, err)
+	}
+	if _, err := AdmitRuntimeControlSourceEvent(source, "consumer", "work.ready", flowSource); err == nil {
+		t.Fatal("source admission accepted a foreign declared flow")
+	}
+	if _, err := AdmitRuntimeControlSourceEvent(source, "producer", "consumer/work.ready", flowSource); err == nil {
+		t.Fatal("source admission accepted a foreign qualified event")
+	}
+	rootSource, err := events.NewRootRoutingSource("root-entity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = AdmitRuntimeControlSourceEvent(source, "", "root.ready", rootSource)
+	if err != nil || got != "root.ready" {
+		t.Fatalf("admit root event = %q, %v, want root.ready", got, err)
+	}
+}
+
 func TestConnectSourceEndpointMatchesRejectsRootEventWithChildFlowEvidence(t *testing.T) {
 	endpoint := newConnectRoutePlanEndpoint(ConnectEndpointRoleProducer, true, "", "", "root", "", "deploy.done", "deploy.done", "", nil)
 	if connectSourceEndpointMatchesTestSource(endpoint, "deploy.done", mustStaticRoutingSource(t, "child")) {

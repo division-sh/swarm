@@ -20,6 +20,7 @@ func CopyParentConnectRequiredAgent(t testing.TB) string {
 pins:
 `)
 	writeClosedVariantFile(t, root, "flows/producer/agents.yaml", `analyzer:
+  id: analyzer
   model: regular
   subscriptions: [work.requested]
   emit_events: [producer/work.ready]

@@ -235,7 +235,7 @@ func (o templateInstanceLifecycleOwner) resolveInstanceContract(plan runtimepinr
 	if _, err := instance.CanonicalKeyMaterial(material.CanonicalValues()); err != nil {
 		return runtimecontracts.TemplateInstanceContract{}, runtimepinrouting.ConnectFailureInstanceSourceValueMissing
 	}
-	return instance, runtimepinrouting.ConnectRoutePlanFailure{}
+	return instance, 0
 }
 
 func (o templateInstanceLifecycleOwner) activationRequest(evt events.Event, plan runtimepinrouting.ConnectRoutePlan, instanceContract runtimecontracts.TemplateInstanceContract, keyMaterial []runtimecontracts.TemplateInstanceKeyValue) (runtimepipeline.FlowInstanceActivationRequest, TemplateInstanceLifecycleDecision, runtimepinrouting.ConnectRoutePlanFailure) {
@@ -269,7 +269,7 @@ func (o templateInstanceLifecycleOwner) activationRequest(evt events.Event, plan
 		Config:         config,
 		Metadata:       metadata,
 		TriggerEvent:   evt,
-	}, decision, runtimepinrouting.ConnectRoutePlanFailure{}
+	}, decision, 0
 }
 
 func (o templateInstanceLifecycleOwner) reloadDescriptors(ctx context.Context) ([]runtimepinrouting.Descriptor, error) {

@@ -92,8 +92,8 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			if err != nil {
 				t.Fatalf("list canonical workflow timers: %v", err)
 			}
-			if len(activations) != 1 || strings.TrimSpace(activations[0].EventType) != "timer.check" {
-				t.Fatalf("canonical workflow timers = %#v, want one timer.check activation", activations)
+			if len(activations) != 1 || strings.TrimSpace(activations[0].EventType) != "validation/timer.check" {
+				t.Fatalf("canonical workflow timers = %#v, want one validation/timer.check activation", activations)
 			}
 			if got := strings.TrimSpace(instance.CurrentState); got != "done" {
 				t.Fatalf("current state = %q, want done", got)

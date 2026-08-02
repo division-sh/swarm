@@ -41,7 +41,7 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 		return true, true, nil
 	}
 
-	entityID := workflowEventEntityID(evt)
+	entityID := strings.TrimSpace(activation.EntityID)
 	if entityID == "" {
 		return true, false, fmt.Errorf("stage timer %s fired without entity_id", timer.ID)
 	}

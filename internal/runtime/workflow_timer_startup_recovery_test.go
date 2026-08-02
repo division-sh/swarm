@@ -160,9 +160,7 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 				},
 				DueAt: time.Now().UTC().Add(50 * time.Millisecond).Truncate(time.Microsecond),
 			}.Normalize()
-			routingSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
-				FlowID: "root", FlowInstance: "root", EntityID: entityID,
-			})
+			routingSource, err := events.NewRootRoutingSource(entityID)
 			if err != nil {
 				t.Fatalf("build generic schedule routing source: %v", err)
 			}
@@ -174,7 +172,7 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 				Mode:          "once",
 				At:            occurrence.DueAt,
 				EntityID:      entityID,
-				FlowInstance:  "root",
+				FlowInstance:  "",
 				TaskID:        occurrence.TaskID(),
 				Payload:       []byte(`{}`),
 				RoutingSource: routingSource,

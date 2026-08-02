@@ -3,8 +3,10 @@ package conformance
 import (
 	"fmt"
 	"go/ast"
+	"go/importer"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"io/fs"
 	"path/filepath"
 	"reflect"
@@ -73,17 +75,17 @@ func TestCompiledRoutingTypesDoNotImplementStringer(t *testing.T) {
 		semanticview.ConnectorImportSource{},
 		runtimebus.TemplateInstanceLifecycleAction(0),
 		events.DeliveryRouteIdentity{},
-		events.RoutingSourceKind{},
-		events.RoutingSourceAuthority{},
-		runtimepinrouting.ConnectRoutePlanFailure{},
+		events.RoutingSourceKind(0),
+		events.RoutingSourceAuthority(0),
+		runtimepinrouting.ConnectRoutePlanFailure(0),
 		runtimepinrouting.ConnectRoutePlanEndpoint{},
 		runtimepinrouting.ConnectRoutePlan{},
 		runtimepinrouting.ConnectRoutePlanInstanceKey{},
 		runtimepinrouting.ConnectRoutePlanFanIn{},
 		runtimepinrouting.ConnectRoutePlanReplyResolution{},
 		runtimepinrouting.ConnectReceiverPinIdentity{},
-		runtimepinrouting.ConnectRoutePlanResolutionKind{},
-		runtimepinrouting.ConnectRoutePlanTargetKind{},
+		runtimepinrouting.ConnectRoutePlanResolutionKind(0),
+		runtimepinrouting.ConnectRoutePlanTargetKind(0),
 		promotedRoutingMode{},
 	}
 	for _, owner := range owners {
@@ -125,23 +127,131 @@ func TestConnectInterpreterBoundaryRejectsEventGraphMatchOutsideEvaluator(t *tes
 }
 
 func TestCompiledRoutingBoundaryRejectsSemanticStringOperations(t *testing.T) {
+	type hostileRecursiveString struct {
+		variant struct{ code string }
+	}
+	if !semanticTypeContainsString(reflect.TypeOf(hostileRecursiveString{}), map[reflect.Type]struct{}{}) {
+		t.Fatal("semantic string guard accepted recursively nested string storage")
+	}
+	claimType := reflect.TypeOf(events.ConnectExecutionClaim{})
+	recipientKind, ok := claimType.FieldByName("recipientKind")
+	if !ok {
+		t.Fatal("connect execution claim lost its finite recipient discriminant")
+	}
 	for name, owner := range map[string]reflect.Type{
-		"routing source kind":  reflect.TypeOf(events.RoutingSourceKind{}),
-		"routing authority":    reflect.TypeOf(events.RoutingSourceAuthority{}),
-		"connect target kind":  reflect.TypeOf(runtimepinrouting.ConnectRoutePlanTargetKind{}),
-		"connect resolution":   reflect.TypeOf(runtimepinrouting.ConnectRoutePlanResolutionKind{}),
-		"connect failure":      reflect.TypeOf(runtimepinrouting.ConnectRoutePlanFailure{}),
-		"connect endpoint":     reflect.TypeOf(runtimepinrouting.ConnectRoutePlanEndpoint{}),
-		"connect plan":         reflect.TypeOf(runtimepinrouting.ConnectRoutePlan{}),
-		"connect instance key": reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKey{}),
-		"connect fan-in":       reflect.TypeOf(runtimepinrouting.ConnectRoutePlanFanIn{}),
-		"connect reply":        reflect.TypeOf(runtimepinrouting.ConnectRoutePlanReplyResolution{}),
-		"delivery route claim": reflect.TypeOf(events.ConnectExecutionClaim{}),
+		"routing source kind": reflect.TypeOf(events.RoutingSourceKind(0)),
+		"routing authority":   reflect.TypeOf(events.RoutingSourceAuthority(0)),
+		"delivery recipient":  recipientKind.Type,
+		"connect target kind": reflect.TypeOf(runtimepinrouting.ConnectRoutePlanTargetKind(0)),
+		"connect resolution":  reflect.TypeOf(runtimepinrouting.ConnectRoutePlanResolutionKind(0)),
+		"connect failure":     reflect.TypeOf(runtimepinrouting.ConnectRoutePlanFailure(0)),
+		"connect fan-in":      reflect.TypeOf(runtimepinrouting.ConnectFanInAggregation(0)),
+		"connect reply role":  reflect.TypeOf(runtimepinrouting.ConnectReplyRole(0)),
 	} {
-		if owner.Kind() == reflect.String {
-			t.Fatalf("%s regressed to a string-backed semantic authority", name)
+		if semanticTypeContainsString(owner, map[reflect.Type]struct{}{}) {
+			t.Fatalf("%s regressed to direct or recursive string-backed semantic authority (%s)", name, owner)
+		}
+		if owner.Kind() < reflect.Uint || owner.Kind() > reflect.Uint64 {
+			t.Fatalf("%s storage = %s, want an immutable unsigned finite discriminant", name, owner.Kind())
 		}
 	}
+}
+
+func semanticTypeContainsString(owner reflect.Type, seen map[reflect.Type]struct{}) bool {
+	if owner == nil {
+		return false
+	}
+	if _, visited := seen[owner]; visited {
+		return false
+	}
+	seen[owner] = struct{}{}
+	switch owner.Kind() {
+	case reflect.String:
+		return true
+	case reflect.Pointer, reflect.Array, reflect.Slice:
+		return semanticTypeContainsString(owner.Elem(), seen)
+	case reflect.Map:
+		return semanticTypeContainsString(owner.Key(), seen) || semanticTypeContainsString(owner.Elem(), seen)
+	case reflect.Struct:
+		for index := 0; index < owner.NumField(); index++ {
+			if semanticTypeContainsString(owner.Field(index).Type, seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestCompiledRoutingFiniteVariantsAreConstantsNotMutableBindings(t *testing.T) {
+	finiteTypes := map[string]struct{}{
+		"RoutingSourceKind": {}, "RoutingSourceAuthority": {}, "deliveryRecipientKind": {},
+		"ConnectRoutePlanTargetKind": {}, "ConnectRoutePlanResolutionKind": {}, "ConnectRoutePlanFailure": {},
+		"ConnectFanInAggregation": {}, "ConnectReplyRole": {},
+	}
+	repoRoot := canonicalrouting.RepoRoot(t)
+	for _, relative := range []string{"internal/events/types.go", "internal/runtime/core/pinrouting/connect_route_plan.go"} {
+		fset := token.NewFileSet()
+		parsed, err := parser.ParseFile(fset, filepath.Join(repoRoot, relative), nil, 0)
+		if err != nil {
+			t.Fatalf("parse finite routing owner %s: %v", relative, err)
+		}
+		if bindings := mutableFiniteRoutingBindings(fset, parsed, finiteTypes); len(bindings) != 0 {
+			t.Fatalf("%s exposes mutable finite routing bindings: %v", relative, bindings)
+		}
+	}
+
+	hostileSet := token.NewFileSet()
+	hostile, err := parser.ParseFile(hostileSet, "hostile.go", `package pinrouting
+type ConnectRoutePlanFailure uint8
+const FixedFailure ConnectRoutePlanFailure = 1
+var ArbitraryReceiverName = FixedFailure
+`, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bindings := mutableFiniteRoutingBindings(hostileSet, hostile, finiteTypes); len(bindings) != 1 || bindings[0] != "ArbitraryReceiverName" {
+		t.Fatalf("mutable finite binding guard = %v, want arbitrary exported binding", bindings)
+	}
+}
+
+func mutableFiniteRoutingBindings(fset *token.FileSet, file *ast.File, finiteTypes map[string]struct{}) []string {
+	info := &types.Info{Defs: map[*ast.Ident]types.Object{}}
+	config := types.Config{Importer: importer.Default(), Error: func(error) {}}
+	_, _ = config.Check("compiledrouting/owner", fset, []*ast.File{file}, info)
+	var out []string
+	for _, declaration := range file.Decls {
+		generic, ok := declaration.(*ast.GenDecl)
+		if !ok || generic.Tok != token.VAR {
+			continue
+		}
+		for _, specification := range generic.Specs {
+			value, ok := specification.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for _, name := range value.Names {
+				object := info.Defs[name]
+				if name.IsExported() && finiteRoutingNamedType(object) != "" {
+					if _, finite := finiteTypes[finiteRoutingNamedType(object)]; !finite {
+						continue
+					}
+					out = append(out, name.Name)
+				}
+			}
+		}
+	}
+	return out
+}
+
+func finiteRoutingNamedType(object types.Object) string {
+	if object == nil {
+		return ""
+	}
+	named, _ := object.Type().(*types.Named)
+	if named == nil || named.Obj() == nil {
+		return ""
+	}
+	return named.Obj().Name()
 }
 
 func TestCompiledConnectValuesExposeNoMutableSemanticFields(t *testing.T) {
@@ -151,9 +261,6 @@ func TestCompiledConnectValuesExposeNoMutableSemanticFields(t *testing.T) {
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKey{}),
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanFanIn{}),
 		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanReplyResolution{}),
-		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanFailure{}),
-		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanResolutionKind{}),
-		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanTargetKind{}),
 		reflect.TypeOf(runtimepinrouting.ConnectReceiverPinIdentity{}),
 		reflect.TypeOf(runtimepinrouting.SourceEvent{}),
 	} {

@@ -792,7 +792,7 @@ func (eb *EventBus) deriveFlowInstanceRouteTopology(
 	identities := make(map[string]runtimeflowidentity.Route, len(descriptors)+1)
 	exclude = runtimeflowidentity.StoredRoute(exclude.ScopeKey, exclude.InstanceID, exclude.InstancePath)
 	if exclude.Valid() {
-		if err := staged.RemoveFlowInstanceRoute(exclude); err != nil {
+		if err := staged.removeFlowInstanceRouteForContext(ctx, exclude); err != nil {
 			return nil, nil, fmt.Errorf("exclude terminal flow-instance route %s: %w", exclude.InstancePath, err)
 		}
 	}
@@ -814,7 +814,7 @@ func (eb *EventBus) deriveFlowInstanceRouteTopology(
 				identity.ScopeKey,
 			)
 		}
-		if err := staged.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
+		if err := staged.addFlowInstanceRouteForContext(ctx, FlowInstanceRouteMaterializationRequest{
 			Identity:            identity,
 			ActivationVariables: descriptor.AddressFields,
 		}); err != nil {
@@ -824,7 +824,7 @@ func (eb *EventBus) deriveFlowInstanceRouteTopology(
 	}
 	if include != nil {
 		req := include.Normalized()
-		if err := staged.AddFlowInstanceRoute(req); err != nil {
+		if err := staged.addFlowInstanceRouteForContext(ctx, req); err != nil {
 			return nil, nil, err
 		}
 		identities[req.Identity.InstancePath] = req.Identity
@@ -951,7 +951,7 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 			}
 		}
 		hadStagedRoute := staged.HasFlowInstanceRoute(req.Identity)
-		if err := staged.AddFlowInstanceRoute(req); err != nil {
+		if err := staged.addFlowInstanceRouteForContext(ctx, req); err != nil {
 			return err
 		}
 		routes := staged.MaterializedRoutes(req.Identity)
@@ -982,7 +982,7 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 		}
 		return nil
 	}
-	if err := table.AddFlowInstanceRoute(req); err != nil {
+	if err := table.addFlowInstanceRouteForContext(ctx, req); err != nil {
 		return err
 	}
 	addedRoute := !hadRoute && table.HasFlowInstanceRoute(req.Identity)
@@ -991,7 +991,7 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 			if !runtimepipeline.QueuePipelineRollbackAction(ctx, func(context.Context) {
 				_ = table.RemoveFlowInstanceRoute(req.Identity)
 			}) {
-				_ = table.RemoveFlowInstanceRoute(req.Identity)
+				_ = table.removeFlowInstanceRouteForContext(ctx, req.Identity)
 				return errors.New("flow-instance route rollback action is required in pipeline transaction")
 			}
 		}
@@ -1008,7 +1008,7 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 		if err := persister.UpsertFlowInstanceRoute(ctx, route); err != nil {
 			if addedRoute {
 				_ = eb.durable.FlowRouteRollback.RollbackFlowInstanceRoute(ctx, route.Identity)
-				_ = table.RemoveFlowInstanceRoute(route.Identity)
+				_ = table.removeFlowInstanceRouteForContext(ctx, route.Identity)
 			}
 			return err
 		}
@@ -1048,7 +1048,7 @@ func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity
 	persister := eb.durable.FlowRouteTopology
 	if persister == nil {
 		if eb.ephemeral {
-			return table.RemoveFlowInstanceRoute(owner)
+			return table.removeFlowInstanceRouteForContext(ctx, owner)
 		}
 		return errors.New("selected store requires exact flow-instance route-set persistence")
 	}
@@ -1077,7 +1077,7 @@ func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity
 	if err := persister.ReplaceFlowInstanceRouteTopology(ctx, sets); err != nil {
 		return err
 	}
-	return table.RemoveFlowInstanceRoute(owner)
+	return table.removeFlowInstanceRouteForContext(ctx, owner)
 }
 
 func (eb *EventBus) SetLoggerHook(logger LoggerHook) {

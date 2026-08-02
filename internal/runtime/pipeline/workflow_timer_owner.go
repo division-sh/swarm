@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -548,14 +549,22 @@ func workflowTimerActivationForCause(
 	}
 	activationCause := timeridentity.WorkflowTimerActivationCause(strings.TrimSpace(string(cause.Kind)))
 	flowID := strings.TrimSpace(declaration.FlowID)
+	var routingSource events.RoutingSource
 	if flowID == "" {
-		flowID = strings.TrimSpace(source.WorkflowName())
+		routingSource, err = events.NewRootRoutingSource(entityID)
+	} else {
+		routingSource, err = events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+			FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID,
+		})
 	}
-	routingSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
-		FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID,
-	})
 	if err != nil {
 		return WorkflowTimerActivation{}, fmt.Errorf("admit workflow timer owner source: %w", err)
+	}
+	admittedEvent, err := runtimepinrouting.AdmitRuntimeControlSourceEvent(
+		source, flowID, events.EventType(strings.TrimSpace(declaration.Event)), routingSource,
+	)
+	if err != nil {
+		return WorkflowTimerActivation{}, fmt.Errorf("admit workflow timer event identity: %w", err)
 	}
 	activationID := timeridentity.WorkflowTimerActivationID(
 		runID,
@@ -584,7 +593,7 @@ func workflowTimerActivationForCause(
 		FlowInstance:  strings.Trim(strings.TrimSpace(flowInstance), "/"),
 		RoutingSource: routingSource,
 		OwnerAgent:    strings.TrimSpace(declaration.Owner),
-		EventType:     strings.TrimSpace(declaration.Event),
+		EventType:     string(admittedEvent),
 		Payload:       []byte("{}"),
 		FireAt:        canonicalWorkflowTimerTime(cause.OccurredAt.Add(interval)),
 		Recurring:     declaration.Recurring,
@@ -970,12 +979,24 @@ func (l *WorkflowTimerLifecycle) AuthorizeAcceptedEvent(ctx context.Context, evt
 			"accepted workflow timer declaration revision is stale",
 		)
 	}
-	if evt.ID() != timeridentity.WorkflowTimerOccurrenceEventID(occurrence) ||
-		evt.RunID() != activation.RunID || workflowEventEntityID(evt) != activation.EntityID ||
-		strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != activation.FlowInstance ||
-		strings.TrimSpace(string(evt.Type())) != activation.EventType ||
-		!workflowTimerJSONEqual(evt.Payload(), activation.Payload) {
-		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("accepted workflow timer event does not match canonical activation")
+	wantEventID := timeridentity.WorkflowTimerOccurrenceEventID(occurrence)
+	if evt.ID() != wantEventID {
+		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("accepted workflow timer event_id %q does not match canonical activation %q", evt.ID(), wantEventID)
+	}
+	if evt.RunID() != activation.RunID {
+		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("accepted workflow timer run_id %q does not match canonical activation %q", evt.RunID(), activation.RunID)
+	}
+	if source := evt.RoutingSource(); source != activation.RoutingSource {
+		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf(
+			"accepted workflow timer routing source %s/%#v does not match canonical activation %s/%#v",
+			source.Kind().StorageCode(), source.Route(), activation.RoutingSource.Kind().StorageCode(), activation.RoutingSource.Route(),
+		)
+	}
+	if eventType := strings.TrimSpace(string(evt.Type())); eventType != activation.EventType {
+		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("accepted workflow timer event_type %q does not match canonical activation %q", eventType, activation.EventType)
+	}
+	if !workflowTimerJSONEqual(evt.Payload(), activation.Payload) {
+		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("accepted workflow timer payload does not match canonical activation")
 	}
 	if !workflowTimerOccurrenceAccepted(activation, occurrence) {
 		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("workflow timer occurrence was not durably accepted")

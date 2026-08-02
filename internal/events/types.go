@@ -148,25 +148,24 @@ type RouteIdentity struct {
 	FlowID       string `json:"flow_id,omitempty"`
 }
 
-type RoutingSourceKind struct {
-	code string
-}
+type RoutingSourceKind uint8
 
-var (
-	RoutingSourceAbsent                   = RoutingSourceKind{}
-	RoutingSourceExternalIngress          = RoutingSourceKind{code: "external_ingress"}
-	RoutingSourceRoot                     = RoutingSourceKind{code: "root"}
-	RoutingSourceStaticFlow               = RoutingSourceKind{code: "static_flow"}
-	RoutingSourceConcreteTemplateInstance = RoutingSourceKind{code: "concrete_template_instance"}
-	RoutingSourceFlowOwnedControl         = RoutingSourceKind{code: "flow_owned_control"}
-	RoutingSourcePlatformControl          = RoutingSourceKind{code: "platform_control"}
+const (
+	RoutingSourceAbsent RoutingSourceKind = iota
+	RoutingSourceExternalIngress
+	RoutingSourceRoot
+	RoutingSourceStaticFlow
+	RoutingSourceConcreteTemplateInstance
+	RoutingSourceFlowOwnedControl
+	RoutingSourcePlatformControl
 )
 
-type RoutingSourceAuthority struct {
-	code string
-}
+type RoutingSourceAuthority uint8
 
-var RoutingSourceAuthorityProviderAdmissionPlan = RoutingSourceAuthority{code: "provider_admission_plan"}
+const (
+	routingSourceAuthorityAbsent RoutingSourceAuthority = iota
+	RoutingSourceAuthorityProviderAdmissionPlan
+)
 
 // RoutingSource is the opaque event-owned source fact. It records exact source
 // identity only; connect-policy interpretation belongs to the routing owner.
@@ -219,12 +218,32 @@ func newRoutingSource(kind RoutingSourceKind, route RouteIdentity) (RoutingSourc
 		}
 	case RoutingSourceStaticFlow, RoutingSourceConcreteTemplateInstance, RoutingSourceFlowOwnedControl:
 		if route.FlowID == "" || route.FlowInstance == "" || route.EntityID == "" {
-			return RoutingSource{}, fmt.Errorf("%s routing source requires flow_id, flow_instance, and entity_id", kind.code)
+			return RoutingSource{}, fmt.Errorf("%s routing source requires flow_id, flow_instance, and entity_id", kind.StorageCode())
 		}
 	default:
-		return RoutingSource{}, fmt.Errorf("routing source kind %q cannot carry a flow route", kind.code)
+		return RoutingSource{}, fmt.Errorf("routing source kind %q cannot carry a flow route", kind.StorageCode())
 	}
 	return RoutingSource{kind: kind, route: route}, nil
+}
+
+// AdmitRuntimeControlEventType validates an event identity that was resolved at
+// the producer admission boundary. Durable consumers must preserve it exactly.
+func AdmitRuntimeControlEventType(eventType EventType, source RoutingSource) (EventType, error) {
+	canonical := eventidentity.Normalize(string(eventType))
+	if canonical == "" || canonical != string(eventType) {
+		return "", fmt.Errorf("runtime-control event type must be canonical")
+	}
+	switch source.Kind() {
+	case RoutingSourceRoot, RoutingSourcePlatformControl:
+		return EventType(canonical), nil
+	case RoutingSourceFlowOwnedControl:
+		if eventidentity.Normalize(source.Route().FlowID) == "" {
+			return "", fmt.Errorf("flow-owned runtime-control event requires an exact source scope")
+		}
+		return EventType(canonical), nil
+	default:
+		return "", fmt.Errorf("runtime-control event requires root, flow-owned, or platform-control routing source")
+	}
 }
 
 func RestoreRoutingSource(kindCode string, route RouteIdentity, authorityCode string) (RoutingSource, error) {
@@ -299,35 +318,59 @@ func (s *RoutingSource) UnmarshalJSON(raw []byte) error {
 }
 
 func (k RoutingSourceKind) StorageCode() string {
-	if k == RoutingSourceAbsent {
+	switch k {
+	case RoutingSourceAbsent:
 		return "absent"
+	case RoutingSourceExternalIngress:
+		return "external_ingress"
+	case RoutingSourceRoot:
+		return "root"
+	case RoutingSourceStaticFlow:
+		return "static_flow"
+	case RoutingSourceConcreteTemplateInstance:
+		return "concrete_template_instance"
+	case RoutingSourceFlowOwnedControl:
+		return "flow_owned_control"
+	case RoutingSourcePlatformControl:
+		return "platform_control"
+	default:
+		return ""
 	}
-	return k.code
 }
-func (a RoutingSourceAuthority) StorageCode() string { return a.code }
-func (a RoutingSourceAuthority) valid() bool         { return a == RoutingSourceAuthorityProviderAdmissionPlan }
+func (a RoutingSourceAuthority) StorageCode() string {
+	if a == RoutingSourceAuthorityProviderAdmissionPlan {
+		return "provider_admission_plan"
+	}
+	return ""
+}
+func (a RoutingSourceAuthority) valid() bool { return a == RoutingSourceAuthorityProviderAdmissionPlan }
 
 func routingSourceKindFromCode(raw string) (RoutingSourceKind, bool) {
-	raw = strings.TrimSpace(raw)
-	for _, kind := range []RoutingSourceKind{
-		RoutingSourceAbsent,
-		RoutingSourceExternalIngress,
-		RoutingSourceRoot,
-		RoutingSourceStaticFlow,
-		RoutingSourceConcreteTemplateInstance,
-		RoutingSourceFlowOwnedControl,
-		RoutingSourcePlatformControl,
-	} {
-		if raw == kind.StorageCode() {
-			return kind, true
-		}
+	switch strings.TrimSpace(raw) {
+	case "absent":
+		return RoutingSourceAbsent, true
+	case "external_ingress":
+		return RoutingSourceExternalIngress, true
+	case "root":
+		return RoutingSourceRoot, true
+	case "static_flow":
+		return RoutingSourceStaticFlow, true
+	case "concrete_template_instance":
+		return RoutingSourceConcreteTemplateInstance, true
+	case "flow_owned_control":
+		return RoutingSourceFlowOwnedControl, true
+	case "platform_control":
+		return RoutingSourcePlatformControl, true
+	default:
+		return 0, false
 	}
-	return RoutingSourceKind{}, false
 }
 
 func routingSourceAuthorityFromCode(raw string) (RoutingSourceAuthority, bool) {
-	authority := RoutingSourceAuthority{code: strings.TrimSpace(raw)}
-	return authority, authority.valid()
+	if strings.TrimSpace(raw) == RoutingSourceAuthorityProviderAdmissionPlan.StorageCode() {
+		return RoutingSourceAuthorityProviderAdmissionPlan, true
+	}
+	return 0, false
 }
 
 type OperatorReferenceProvenance struct {
@@ -541,13 +584,11 @@ type ConnectExecutionClaim struct {
 	present           bool
 }
 
-type deliveryRecipientKind struct {
-	code string
-}
+type deliveryRecipientKind uint8
 
-var (
-	deliveryRecipientNode  = deliveryRecipientKind{code: "node"}
-	deliveryRecipientAgent = deliveryRecipientKind{code: "agent"}
+const (
+	deliveryRecipientNode deliveryRecipientKind = iota + 1
+	deliveryRecipientAgent
 )
 
 // AdmitConnectExecutionClaim accepts a digest produced by the compiled
@@ -596,7 +637,7 @@ func (c ConnectExecutionClaim) MarshalJSON() ([]byte, error) {
 		HandlerEvent      string `json:"handler_event"`
 	}{
 		Digest: hex.EncodeToString(c.digest[:]), ReceiverPinDigest: hex.EncodeToString(c.receiverPinDigest[:]),
-		RecipientKind: c.recipientKind.code, RecipientID: c.recipientID, HandlerEvent: c.handlerEvent,
+		RecipientKind: c.recipientKind.storageCode(), RecipientID: c.recipientID, HandlerEvent: c.handlerEvent,
 	})
 }
 
@@ -649,12 +690,23 @@ func (c *ConnectExecutionClaim) UnmarshalJSON(raw []byte) error {
 
 func deliveryRecipientKindFromCode(raw string) (deliveryRecipientKind, bool) {
 	switch strings.TrimSpace(raw) {
-	case deliveryRecipientNode.code:
+	case "node":
 		return deliveryRecipientNode, true
-	case deliveryRecipientAgent.code:
+	case "agent":
 		return deliveryRecipientAgent, true
 	default:
-		return deliveryRecipientKind{}, false
+		return 0, false
+	}
+}
+
+func (k deliveryRecipientKind) storageCode() string {
+	switch k {
+	case deliveryRecipientNode:
+		return "node"
+	case deliveryRecipientAgent:
+		return "agent"
+	default:
+		return ""
 	}
 }
 
@@ -1144,6 +1196,13 @@ func newSemanticEvent(class EventAdmissionClass, rootIntent rootIngressRunIntent
 	case EventAdmissionRuntimeControl:
 		if facts.RoutingSource.Kind() != RoutingSourceRoot && facts.RoutingSource.Kind() != RoutingSourceFlowOwnedControl && facts.RoutingSource.Kind() != RoutingSourcePlatformControl {
 			return Event{}, fmt.Errorf("runtime control requires root, flow-owned, or platform-control routing source")
+		}
+		admittedType, err := AdmitRuntimeControlEventType(eventType, facts.RoutingSource)
+		if err != nil {
+			return Event{}, err
+		}
+		if admittedType != eventType {
+			return Event{}, fmt.Errorf("runtime-control event type %q is not admitted for its routing source; use %q", eventType, admittedType)
 		}
 	case EventAdmissionRuntimeDiagnostic, EventAdmissionDiagnosticDirect:
 		if !facts.RoutingSource.Empty() {
