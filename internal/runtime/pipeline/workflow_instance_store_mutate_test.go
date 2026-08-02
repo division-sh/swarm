@@ -123,7 +123,7 @@ func TestWorkflowInstanceStoreAddressesRowsOnlyByExactRouteOnBothStores(t *testi
 		t.Run(setup.name, func(t *testing.T) {
 			store, ctx := setup.open(t)
 			instancePath := "scout-" + uuid.NewString()
-			entityID := FlowInstanceEntityID(instancePath)
+			entityID := uuid.NewString()
 			if err := store.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID:      instancePath,
 				StorageRef:      instancePath,

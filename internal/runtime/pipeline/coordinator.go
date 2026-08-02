@@ -596,6 +596,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 			return false, fmt.Errorf("renew workflow node delivery claim: %w", heartbeatErr)
 		}
 		executionCtx := heartbeat.Context()
+		executionCtx = runtimecorrelation.WithInboundEvent(executionCtx, evt)
 		currentState, err := pc.currentWorkflowState(executionCtx, workflowEventEntityID(evt))
 		if err != nil {
 			_ = heartbeat.Stop()
