@@ -117,7 +117,7 @@ func TestSQLiteRuntimeStoreMarkRunTerminalPreservesFailureAndRejectsConflict(t *
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: store.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
+	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
 	failure := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_quiescence_failed", nil)
 	snap, err := markRunTerminalStatusForTest(ctx, store, runID, "failed", &failure, time.Now().UTC())
 	if err != nil {

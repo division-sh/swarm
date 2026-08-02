@@ -50,3 +50,10 @@ func (s *SQLiteSchemaStore) requireCurrentSchema() error {
 	}
 	return s.schemaAdmission.requireCurrent()
 }
+
+func (s *SQLiteRuntimeStore) requireCurrentSchema() error {
+	if s == nil || s.schema == nil {
+		return fmt.Errorf("sqlite runtime store is required")
+	}
+	return s.schema.requireCurrentSchema()
+}

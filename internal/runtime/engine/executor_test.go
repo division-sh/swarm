@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
@@ -598,7 +599,7 @@ func (o *testWorkflowLifecycleOwner) AcceptedEventEffect(entityID identity.Entit
 		}
 		transition = &value
 	}
-	return runtimeworkflowlifecycle.NewAcceptedEvent(entityID.String(), event.ID(), string(event.Type()), event.CreatedAt(), transition)
+	return runtimeworkflowlifecycle.NewAcceptedEvent(runtimeflowidentity.RouteForInstancePath(event.FlowInstance()), entityID.String(), event.ID(), string(event.Type()), event.CreatedAt(), transition)
 }
 
 func (o *testWorkflowLifecycleOwner) ApplyWorkflowLifecycleEffects(_ context.Context, effects []runtimeworkflowlifecycle.Effect) error {
@@ -619,7 +620,7 @@ func TestExecutorTimerReconciliationRequiresExactEventAuthority(t *testing.T) {
 	frame, err := executor.newExecutionFrame(stubTx{ctx: context.Background()}, ExecutionRequest{
 		EntityID: "entity-1",
 		Event: eventtest.RunCreatingRootIngress(
-			"event-1", "work.received", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{},
+			"event-1", "work.received", "", "", json.RawMessage(`{}`), 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), time.Time{},
 		),
 		State: StateSnapshot{CurrentState: "waiting"},
 	})
@@ -642,7 +643,7 @@ func TestExecutorTimerReconciliationCarriesOnlyActualTransitionTarget(t *testing
 	frame, err := executor.newExecutionFrame(stubTx{ctx: context.Background()}, ExecutionRequest{
 		EntityID: "entity-1",
 		Event: eventtest.RunCreatingRootIngress(
-			"event-1", "work.noted", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, createdAt,
+			"event-1", "work.noted", "", "", json.RawMessage(`{}`), 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), createdAt,
 		),
 		State: StateSnapshot{CurrentState: "waiting"},
 	})
@@ -2895,7 +2896,7 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 		EntityID: "entity-1",
 		NodeID:   "node-1",
 		FlowID:   "flow-1",
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)),
+		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			AdvancesTo: "done",
 			ClearGates: []string{"gate_a"},

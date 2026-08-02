@@ -12,8 +12,10 @@ func NewPostgresStoreForTest(db *sql.DB) *PostgresStore {
 // the selected-store facade. Production construction must use
 // NewSQLiteRuntimeStore.
 func NewSQLiteRuntimeStoreForTest(db *sql.DB) *SQLiteRuntimeStore {
+	backend := &sqliteRuntimeBackend{db: db}
 	return &SQLiteRuntimeStore{
-		SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: db}},
+		schema:  &SQLiteSchemaStore{backend: backend},
+		backend: backend,
 	}
 }
 

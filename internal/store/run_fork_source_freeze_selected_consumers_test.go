@@ -74,7 +74,7 @@ func markSelectedTestRunForked(t *testing.T, fixture selectedCompletionFixture, 
 	ctx := testAuthorActivityBundleSourceContext()
 	var selected any
 	if fixture.sqlite {
-		selected = &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: fixture.db}}}
+		selected = NewSQLiteRuntimeStoreForTest(fixture.db)
 	} else {
 		selected = &PostgresStore{backend: &postgresRuntimeBackend{db: fixture.db}}
 	}

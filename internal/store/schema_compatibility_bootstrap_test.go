@@ -936,7 +936,7 @@ func TestSQLiteSchemaBootstrapCreatesThenValidatesGeneratedState(t *testing.T) {
 	if _, err := store.backend.db.Exec(`ALTER TABLE generated_probe_state ADD COLUMN drift_probe TEXT`); err != nil {
 		t.Fatal(err)
 	}
-	assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(testAuthorActivityContext(), request), SchemaDialectSQLite, store.path, request.Origin, storedOrigin, "generated state table generated_probe_state:", "drift_probe")
+	assertSchemaCompatibilityDiagnostic(t, store.BootstrapSchema(testAuthorActivityContext(), request), SchemaDialectSQLite, store.Path(), request.Origin, storedOrigin, "generated state table generated_probe_state:", "drift_probe")
 	if !sqliteColumnSet(t, testAuthorActivityContext(), store.backend.db, "generated_probe_state")["drift_probe"] {
 		t.Fatal("rejected SQLite generated-state bootstrap mutated the incompatible table")
 	}

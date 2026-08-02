@@ -24,6 +24,19 @@ func TestEntityID_UsesCanonicalRefDerivation(t *testing.T) {
 	}
 }
 
+func TestPersistedRowIDKeepsEntityFactSeparateFromRouteAddress(t *testing.T) {
+	persisted, err := StoredPersisted(nil, "scout", "scout", "scout", "scout", "11111111-1111-1111-1111-111111111111", "")
+	if err != nil {
+		t.Fatalf("StoredPersisted: %v", err)
+	}
+	if got := persisted.StorageRef; got != "scout" {
+		t.Fatalf("StorageRef = %q, want scout", got)
+	}
+	if got := persisted.RowID(); got != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("RowID = %q, want exact entity fact", got)
+	}
+}
+
 func TestStandingForService_UsesCanonicalStableFlowInstanceRoute(t *testing.T) {
 	serviceID := StandingServiceID("root", "service")
 	instance := StandingForService(nil, "service", serviceID)

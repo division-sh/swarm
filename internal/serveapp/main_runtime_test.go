@@ -38,6 +38,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -2990,7 +2991,7 @@ func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofR
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		instance, ok, err := fixture.Workflow.Load(runtimecorrelation.WithRunID(context.Background(), fixture.RunID), fixture.EntityID)
+		instance, ok, err := fixture.Workflow.Load(runtimecorrelation.WithRunID(context.Background(), fixture.RunID), runtimeflowidentity.RouteForInstancePath("root"))
 		if err == nil && ok && instance.CurrentState == "done" {
 			break
 		}
@@ -3377,9 +3378,13 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 		t.Fatalf("store gate activation: %v", err)
 	}
+	instanceMetadata := carrier.PersistedMetadata()
+	instanceMetadata["entity_id"] = entityID
+	instanceMetadata["flow_path"] = "root"
+	instanceMetadata["instance_id"] = "root"
 	if _, err := workflow.MaterializeInitialEntry(runtimecorrelation.WithRunID(ctx, runID), runtimepipeline.WorkflowInstance{
-		InstanceID: entityID, StorageRef: entityID, WorkflowName: "root", WorkflowVersion: "1.0.0",
-		CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: carrier.PersistedMetadata(), StateBuckets: carrier.PersistedStateBuckets(),
+		InstanceID: "root", StorageRef: "root", WorkflowName: "root", WorkflowVersion: "1.0.0",
+		CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: instanceMetadata, StateBuckets: carrier.PersistedStateBuckets(),
 	}, now); err != nil {
 		t.Fatalf("seed gated workflow instance: %v", err)
 	}
@@ -4580,6 +4585,10 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 		t.Fatalf("store %s run.stop gate activation: %v", rt.Backend, err)
 	}
+	instanceMetadata := carrier.PersistedMetadata()
+	instanceMetadata["entity_id"] = entityID
+	instanceMetadata["flow_path"] = "root"
+	instanceMetadata["instance_id"] = "root"
 
 	var cards decisioncard.Store
 	workflow := rt.Runtime.Pipeline
@@ -4599,8 +4608,8 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		t.Fatalf("unknown run.stop decision-card proof backend %q", rt.Backend)
 	}
 	if _, err := workflow.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID: entityID, StorageRef: entityID, WorkflowName: "root", WorkflowVersion: "1.0.0",
-		CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: carrier.PersistedMetadata(), StateBuckets: carrier.PersistedStateBuckets(),
+		InstanceID: "root", StorageRef: "root", WorkflowName: "root", WorkflowVersion: "1.0.0",
+		CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: instanceMetadata, StateBuckets: carrier.PersistedStateBuckets(),
 	}, now); err != nil {
 		t.Fatalf("seed %s run.stop gated workflow instance: %v", rt.Backend, err)
 	}
@@ -4680,7 +4689,7 @@ func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedCon
 	default:
 		t.Fatalf("unknown terminal decision-card proof backend %q", rt.Backend)
 	}
-	instance, ok, err := workflow.Load(runtimecorrelation.WithRunID(context.Background(), runID), entityID)
+	instance, ok, err := workflow.Load(runtimecorrelation.WithRunID(context.Background(), runID), runtimeflowidentity.RouteForInstancePath("root"))
 	if err != nil || !ok {
 		t.Fatalf("load %s terminal gate instance: ok=%v err=%v", rt.Backend, ok, err)
 	}

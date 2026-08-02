@@ -19,11 +19,11 @@ func (s *PostgresStore) LoadActiveWorkflowRoute(ctx context.Context, instancePat
 }
 
 func (s *SQLiteRuntimeStore) LoadActiveWorkflowRoute(ctx context.Context, instancePath string) (runtimeworkflowroute.RecoveryRecord, error) {
-	if s == nil || s.SQLiteSchemaStore == nil || s.SQLiteSchemaStore.backend == nil || s.SQLiteSchemaStore.backend.db == nil {
+	if s == nil || s.backend == nil || s.backend.db == nil {
 		return runtimeworkflowroute.RecoveryRecord{}, fmt.Errorf("sqlite runtime store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimeworkflowroute.RecoveryRecord{}, err
 	}
-	return workflowrouteadapter.LoadActiveSQLite(ctx, s.SQLiteSchemaStore.backend.db, instancePath)
+	return workflowrouteadapter.LoadActiveSQLite(ctx, s.backend.db, instancePath)
 }

@@ -217,5 +217,5 @@ func seedSQLiteBudgetEntity(t *testing.T, ctx context.Context, store *SQLiteRunt
 
 func seedSQLiteBudgetRun(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, runID string, at time.Time) {
 	t.Helper()
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: store.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at})
+	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at})
 }

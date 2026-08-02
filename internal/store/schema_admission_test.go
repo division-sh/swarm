@@ -28,7 +28,7 @@ func TestUnacceptedSelectedStoreRuntimeCallsFailBeforeSQL(t *testing.T) {
 					return err
 				}
 			} else {
-				store := &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: db}}}
+				store := NewSQLiteRuntimeStoreForTest(db)
 				call = func() error {
 					_, err := store.ListActiveAgentDescriptors(context.Background())
 					return err
@@ -82,7 +82,7 @@ func TestUnacceptedSelectedStoreEventMutationBoundariesFailBeforeSQL(t *testing.
 					}},
 				}
 			} else {
-				store := &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: db}}}
+				store := NewSQLiteRuntimeStoreForTest(db)
 				calls = []struct {
 					name string
 					call func() error

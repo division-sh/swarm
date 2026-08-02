@@ -447,7 +447,7 @@ func requireRunningSQLiteRunForTest(
 	startedAt time.Time,
 ) {
 	t.Helper()
-	selected := &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: db}}}
+	selected := NewSQLiteRuntimeStoreForTest(db)
 	if err := selected.BootstrapSchema(context.Background(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
 		t.Fatalf("BootstrapSchema: %v", err)
 	}

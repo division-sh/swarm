@@ -144,7 +144,7 @@ func TestSQLiteRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 	businessEvent := "00000000-0000-0000-0000-000000001817"
 	runtimeLogEvent := "00000000-0000-0000-0000-000000001818"
 	base := time.Unix(1700000600, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: sqliteStore.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
+	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(sqliteStore.backend.db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	if err := commitSemanticEventFixture(ctx, sqliteStore, eventtest.PersistedProjection(
 		businessEvent, events.EventType("item.received"), "runtime", "", json.RawMessage(`{}`), 0,
 		runID, "", events.EventEnvelope{}, base,
@@ -184,7 +184,7 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 	turnID := "00000000-0000-0000-0000-000000001434"
 	agentID := "agent-task"
 
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: sqliteStore.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(sqliteStore.backend.db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base.Add(-time.Minute)})
 	if err := commitSemanticEventFixture(ctx, sqliteStore, eventtest.PersistedProjection(
 		eventID, events.EventType("trace.task_audit"), "runtime", "", json.RawMessage(`{}`), 0,
 		runID, "", events.EventEnvelope{}, base,
@@ -282,7 +282,7 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 		tieTurnBID:        "00000000-0000-0000-0000-000000000203",
 		base:              base,
 	}
-	requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: sqliteStore.backend.db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: base.Add(-time.Minute)})
+	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(sqliteStore.backend.db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: base.Add(-time.Minute)})
 	eventRows := []struct {
 		id   string
 		name string

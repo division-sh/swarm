@@ -173,7 +173,7 @@ func newNeutralEffectParityFixture(t *testing.T, store neutralEffectParityStore,
 			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath); err != nil {
 			t.Fatalf("activate neutral effect agent: %v", err)
 		}
-		requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+		requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	} else {
 		fields := testAgentIdentityStorageFields(t, identity)
 		if _, err := db.ExecContext(ctx, `

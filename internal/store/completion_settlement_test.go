@@ -313,7 +313,7 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 		t.Fatalf("completion agent identity: %v", err)
 	}
 	if sqlite {
-		requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+		requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at) VALUES (?,?,?,?,?,?,?,'worker','regular','claude_cli',1,'authored','active',1,1,'running',?)`,
 			identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
 			identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath, now); err != nil {

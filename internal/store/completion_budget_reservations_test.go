@@ -189,7 +189,7 @@ func newCompletionBudgetRaceFixture(t *testing.T, sqlite bool) completionBudgetR
 	t.Helper()
 	if sqlite {
 		primary := newBootstrappedSQLiteRuntimeStoreForTest(t)
-		secondary := newBootstrappedSQLiteRuntimeStoreForPath(t, primary.SQLiteSchemaStore.path)
+		secondary := newBootstrappedSQLiteRuntimeStoreForPath(t, primary.Path())
 		normal := newCompletionSettlementFixture(t, primary, primary.backend.db, true)
 		return completionBudgetRaceFixture{primary: primary, secondary: secondary, db: primary.backend.db, sqlite: true, normal: normal}
 	}

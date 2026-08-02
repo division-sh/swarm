@@ -81,8 +81,8 @@ func (s *PostgresStore) LoadActivityAttempt(ctx context.Context, requestEventID 
 }
 
 func (s *SQLiteRuntimeStore) LoadActivityAttempt(ctx context.Context, requestEventID string) (runtimepipeline.ActivityAttemptRecord, bool, error) {
-	if s == nil || s.SQLiteSchemaStore == nil || s.SQLiteSchemaStore.backend == nil || s.SQLiteSchemaStore.backend.db == nil {
+	if s == nil || s.backend == nil || s.backend.db == nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("sqlite runtime store is required")
 	}
-	return activityjournaladapter.Load(ctx, s.SQLiteSchemaStore.backend.db, activityjournaladapter.DialectSQLite, requestEventID)
+	return activityjournaladapter.Load(ctx, s.backend.db, activityjournaladapter.DialectSQLite, requestEventID)
 }

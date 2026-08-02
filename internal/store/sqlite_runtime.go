@@ -34,7 +34,8 @@ import (
 // mutexes provide startup/session serialization while persisted rows remain the
 // canonical state consumed by the runtime.
 type SQLiteRuntimeStore struct {
-	*SQLiteSchemaStore
+	schema  *SQLiteSchemaStore
+	backend *sqliteRuntimeBackend
 
 	eventPayloadValidator   EventPayloadValidator
 	authorActivityCatalogMu sync.Mutex
@@ -82,7 +83,8 @@ func OpenSQLiteRuntimeStore(path string) (*SQLiteRuntimeStore, *sql.DB, error) {
 		return nil, nil, err
 	}
 	store := &SQLiteRuntimeStore{
-		SQLiteSchemaStore:   schemaStore,
+		schema:              schemaStore,
+		backend:             schemaStore.backend,
 		pipelineClaimIssuer: runtimepipelineobligation.NewClaimIssuer(),
 		pipelineClaims:      map[string]*pipelineClaimState{},
 		pipelineScanIssuer:  runtimepipelineobligation.NewScanIssuer(),
@@ -91,6 +93,34 @@ func OpenSQLiteRuntimeStore(path string) (*SQLiteRuntimeStore, *sql.DB, error) {
 		nowFn:               time.Now,
 	}
 	return store, schemaStore.backend.db, nil
+}
+
+func (s *SQLiteRuntimeStore) Path() string {
+	if s == nil || s.schema == nil {
+		return ""
+	}
+	return s.schema.Path()
+}
+
+func (s *SQLiteRuntimeStore) Close() error {
+	if s == nil || s.schema == nil {
+		return nil
+	}
+	return s.schema.Close()
+}
+
+func (s *SQLiteRuntimeStore) Ping(ctx context.Context) error {
+	if s == nil || s.schema == nil {
+		return fmt.Errorf("sqlite runtime store is required")
+	}
+	return s.schema.Ping(ctx)
+}
+
+func (s *SQLiteRuntimeStore) BootstrapSchema(ctx context.Context, request SchemaBootstrapRequest) error {
+	if s == nil || s.schema == nil {
+		return fmt.Errorf("sqlite runtime store is required")
+	}
+	return s.schema.BootstrapSchema(ctx, request)
 }
 
 func (s *SQLiteRuntimeStore) SetSessionLockTTL(ttl time.Duration) {

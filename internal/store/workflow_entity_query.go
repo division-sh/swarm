@@ -19,11 +19,11 @@ func (s *PostgresStore) CountWorkflowEntities(ctx context.Context, request entit
 }
 
 func (s *SQLiteRuntimeStore) CountWorkflowEntities(ctx context.Context, request entityquery.Request) (int, error) {
-	if s == nil || s.SQLiteSchemaStore == nil || s.SQLiteSchemaStore.backend == nil || s.SQLiteSchemaStore.backend.db == nil {
+	if s == nil || s.backend == nil || s.backend.db == nil {
 		return 0, fmt.Errorf("sqlite runtime store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
 		return 0, err
 	}
-	return workflowentityquery.CountSQLite(ctx, s.SQLiteSchemaStore.backend.db, request)
+	return workflowentityquery.CountSQLite(ctx, s.backend.db, request)
 }

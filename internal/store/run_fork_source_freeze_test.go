@@ -43,7 +43,7 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 			} else {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				db = store.backend.db
-				requireRunFixtureForTest(t, ctx, &SQLiteRuntimeStore{SQLiteSchemaStore: &SQLiteSchemaStore{backend: &sqliteRuntimeBackend{db: db}}}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+				requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 				mark = func(ctx context.Context, runID, status string, at time.Time) error {
 					_, err := markRunTerminalStatusForTest(ctx, store, runID, status, nil, at)
 					return err

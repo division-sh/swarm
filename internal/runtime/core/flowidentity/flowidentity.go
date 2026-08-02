@@ -352,7 +352,7 @@ func StoredPersisted(
 }
 
 func (p Persisted) RowID() string {
-	return EntityID(p.StorageRef)
+	return strings.TrimSpace(p.EntityID)
 }
 
 func IsDescendant(scopeKey, instancePath string) bool {
