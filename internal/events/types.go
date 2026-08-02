@@ -251,28 +251,45 @@ func RestoreRoutingSource(kindCode string, route RouteIdentity, authorityCode st
 	if !ok {
 		return RoutingSource{}, fmt.Errorf("routing source kind %q is invalid", kindCode)
 	}
+	route = route.Normalized()
+	authorityCode = strings.TrimSpace(authorityCode)
 	switch kind {
 	case RoutingSourceAbsent:
-		if !route.Normalized().Empty() || strings.TrimSpace(authorityCode) != "" {
+		if !route.Empty() || authorityCode != "" {
 			return RoutingSource{}, fmt.Errorf("absent routing source cannot carry route or authority")
 		}
 		return NoRoutingSource(), nil
 	case RoutingSourceExternalIngress:
+		if route.FlowInstance != "" {
+			return RoutingSource{}, fmt.Errorf("external ingress routing source forbids flow_instance")
+		}
 		authority, ok := routingSourceAuthorityFromCode(authorityCode)
 		if !ok {
 			return RoutingSource{}, fmt.Errorf("external ingress routing source authority %q is invalid", authorityCode)
 		}
 		return NewExternalIngressRoutingSource(route.FlowID, route.EntityID, authority)
 	case RoutingSourceRoot:
-		return NewRootRoutingSource(route.EntityID)
+		if authorityCode != "" {
+			return RoutingSource{}, fmt.Errorf("root routing source cannot carry authority")
+		}
+		return newRoutingSource(RoutingSourceRoot, route)
 	case RoutingSourceStaticFlow:
+		if authorityCode != "" {
+			return RoutingSource{}, fmt.Errorf("static flow routing source cannot carry authority")
+		}
 		return NewStaticFlowRoutingSource(route)
 	case RoutingSourceConcreteTemplateInstance:
+		if authorityCode != "" {
+			return RoutingSource{}, fmt.Errorf("concrete template instance routing source cannot carry authority")
+		}
 		return NewConcreteTemplateInstanceRoutingSource(route)
 	case RoutingSourceFlowOwnedControl:
+		if authorityCode != "" {
+			return RoutingSource{}, fmt.Errorf("flow-owned control routing source cannot carry authority")
+		}
 		return NewFlowOwnedControlRoutingSource(route)
 	case RoutingSourcePlatformControl:
-		if !route.Normalized().Empty() || strings.TrimSpace(authorityCode) != "" {
+		if !route.Empty() || authorityCode != "" {
 			return RoutingSource{}, fmt.Errorf("platform control routing source cannot carry route or authority")
 		}
 		return NewPlatformControlRoutingSource(), nil

@@ -519,6 +519,10 @@ func TestEventRecordDecoderRejectsMalformedDurableFactsParity(t *testing.T) {
 				{"child_without_parent", func(record *persistedEventIdentity) { record.Class = events.EventAdmissionChild }},
 				{"root_with_operator_provenance", func(record *persistedEventIdentity) { record.OperatorReferencedEventID = uuid.NewString() }},
 				{"runtime_source_without_route", func(record *persistedEventIdentity) { record.RoutingSourceKind = "concrete_template_instance" }},
+				{"root_source_with_flow_identity", func(record *persistedEventIdentity) {
+					record.RoutingSourceKind = events.RoutingSourceRoot.StorageCode()
+					record.SourceRoute = []byte(fmt.Sprintf(`{"flow_id":"flow-a","flow_instance":"flow-a/one","entity_id":%q}`, uuid.NewString()))
+				}},
 				{"selected_fork_without_lineage", func(record *persistedEventIdentity) { record.Class = events.EventAdmissionSelectedForkReplay }},
 			} {
 				t.Run(mutation.name, func(t *testing.T) {
