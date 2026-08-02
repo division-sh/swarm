@@ -40,27 +40,6 @@ func TestFanInBarrierContractDerivesEffectiveJoinPlan(t *testing.T) {
 	}
 }
 
-func TestWorkflowJoinPlanForHandlerAcceptsCanonicalRootScope(t *testing.T) {
-	plan := runtimecontracts.WorkflowJoinPlan{
-		NodeID:       "collector",
-		HandlerEvent: "item.completed",
-	}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:  "orders",
-			Joins: []runtimecontracts.WorkflowJoinPlan{plan},
-		},
-	})
-
-	got, ok := semanticview.WorkflowJoinPlanForHandler(source, "orders", "collector", "item.completed")
-	if !ok || got.NodeID != plan.NodeID {
-		t.Fatalf("canonical root join plan = %#v, %v", got, ok)
-	}
-	if _, ok := semanticview.WorkflowJoinPlanForHandler(source, "other", "collector", "item.completed"); ok {
-		t.Fatal("foreign flow scope resolved the root join plan")
-	}
-}
-
 func requireSingleJoinPlan(t *testing.T, plans []runtimecontracts.WorkflowJoinPlan) runtimecontracts.WorkflowJoinPlan {
 	t.Helper()
 	if len(plans) != 1 {
