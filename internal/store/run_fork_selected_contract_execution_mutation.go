@@ -235,7 +235,7 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 
 	forkCtx := runtimecorrelation.WithRunID(ctx, forkRunID)
 	for _, entity := range plan.Entities {
-		if err := materializeRunForkEntityState(forkCtx, tx, s, forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
+		if err := materializeRunForkEntityState(forkCtx, tx, postgresActiveRunSourceOwner(s, tx), forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
 			return runfork.RunForkMaterialization{}, err
 		}
 	}

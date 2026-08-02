@@ -113,7 +113,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req runfork.RunF
 
 	forkCtx := runtimecorrelation.WithRunID(ctx, forkRunID)
 	for _, entity := range plan.Entities {
-		if err := materializeRunForkEntityState(forkCtx, tx, s, forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
+		if err := materializeRunForkEntityState(forkCtx, tx, postgresActiveRunSourceOwner(s, tx), forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
 			return runfork.RunForkMaterialization{}, err
 		}
 	}
@@ -369,7 +369,7 @@ func stringFieldValue(fields map[string]any, key string) string {
 	return ""
 }
 
-func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, runLifecycle storerunlifecycle.OperationOwner, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time) error {
+func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, runLifecycle mutationlog.ActiveRunSourceOwner, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time) error {
 	entityID := strings.TrimSpace(entity.EntityID)
 	currentState := strings.TrimSpace(entity.CurrentState)
 	if currentState == "" {

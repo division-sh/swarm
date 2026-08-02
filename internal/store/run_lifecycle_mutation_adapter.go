@@ -24,6 +24,24 @@ type sqliteRunLifecycleMutation struct {
 	tx    *sql.Tx
 }
 
+type activeRunSourceOwnerFunc func(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
+
+func (fn activeRunSourceOwnerFunc) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+	return fn(ctx, runID)
+}
+
+func postgresActiveRunSourceOwner(store *PostgresStore, tx *sql.Tx) activeRunSourceOwnerFunc {
+	return func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+		return (postgresRunLifecycleMutation{store: store, tx: tx}).RequireActiveSource(ctx, runID)
+	}
+}
+
+func sqliteActiveRunSourceOwner(store *SQLiteRuntimeStore, tx *sql.Tx) activeRunSourceOwnerFunc {
+	return func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+		return (sqliteRunLifecycleMutation{store: store, tx: tx}).RequireActiveSource(ctx, runID)
+	}
+}
+
 func requirePostgresRunPresent(ctx context.Context, tx *sql.Tx, runID string) error {
 	return (postgresRunLifecycleMutation{tx: tx}).RequirePresent(ctx, runID)
 }
