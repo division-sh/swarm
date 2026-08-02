@@ -81,7 +81,7 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			if entityID == "" {
 				t.Fatal("expected emitted event to carry created entity id")
 			}
-			instance, ok, err := pc.workflowStore.Load(ctx, testWorkflowInstanceRoute(entityID))
+			instance, ok, err := pc.workflowStore.Load(ctx, testWorkflowInstanceRoute(bus.publishedEvent(0).FlowInstance()))
 			if err != nil {
 				t.Fatalf("load created entity: %v", err)
 			}

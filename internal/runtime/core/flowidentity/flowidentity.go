@@ -161,8 +161,14 @@ func LogicalInstanceID(instancePath string) string {
 
 func Derive(source semanticview.Source, flowID, instanceID string) Instance {
 	scopeKey := normalizeRef(ScopeKey(source, flowID))
-	instancePath := normalizeRef(InstancePath(source, flowID, instanceID))
 	instanceID = strings.TrimSpace(instanceID)
+	instancePath := normalizeRef(InstancePath(source, flowID, instanceID))
+	if source != nil {
+		if schema, ok := source.FlowSchemaByID(strings.TrimSpace(flowID)); ok && !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+			instancePath = scopeKey
+			instanceID = LogicalInstanceID(scopeKey)
+		}
+	}
 	entityID := strings.TrimSpace(instanceID)
 	if instancePath != "" {
 		entityID = EntityID(instancePath)

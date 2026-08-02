@@ -337,7 +337,6 @@ func resolveHandlerEntityIDForFlow(
 			state.Metadata = workflowCreateEntityMetadata(source, flowID, instance)
 		}
 		envelope := events.EnvelopeForFlowInstance(evt.NormalizedEnvelope(), instance.InstancePath)
-		envelope = events.EnvelopeForEntityID(envelope, entityID)
 		resolved, err := events.ResolveEnvelope(evt, envelope)
 		if err != nil {
 			return "", evt, fmt.Errorf("carry created workflow instance route: %w", err)

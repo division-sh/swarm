@@ -1293,8 +1293,8 @@ vertical:
 
 	gotID, gotEvt, _ := resolveHandlerEntityIDForFlow(source, "scoring", handler, inboundEntityID, inbound, &state)
 
-	if gotID != FlowInstanceEntityID("scoring/scoring") {
-		t.Fatalf("entityID = %q, want canonical flow primary %q", gotID, FlowInstanceEntityID("scoring/scoring"))
+	if gotID != FlowInstanceEntityID("scoring") {
+		t.Fatalf("entityID = %q, want canonical flow primary %q", gotID, FlowInstanceEntityID("scoring"))
 	}
 	if got := gotEvt.EntityID(); got != inboundEntityID {
 		t.Fatalf("inbound event entity_id = %q, want preserved %q", got, inboundEntityID)
@@ -1321,11 +1321,11 @@ vertical:
 	if instanceID == "" {
 		t.Fatal("state instance_id is empty, want generated logical instance id")
 	}
-	if got := strings.TrimSpace(asString(state.Metadata["flow_path"])); got != "scoring/"+instanceID {
-		t.Fatalf("state flow_path = %q, want %q", got, "scoring/"+instanceID)
+	if got := strings.TrimSpace(asString(state.Metadata["flow_path"])); got != "scoring" {
+		t.Fatalf("state flow_path = %q, want scoring", got)
 	}
-	if got := strings.TrimSpace(asString(state.Metadata["storage_ref"])); got != "scoring/"+instanceID {
-		t.Fatalf("state storage_ref = %q, want %q", got, "scoring/"+instanceID)
+	if got := strings.TrimSpace(asString(state.Metadata["storage_ref"])); got != "scoring" {
+		t.Fatalf("state storage_ref = %q, want scoring", got)
 	}
 	if got := strings.TrimSpace(asString(state.Metadata["entity_type"])); got != "vertical" {
 		t.Fatalf("state entity_type = %q, want vertical", got)
@@ -1336,7 +1336,7 @@ vertical:
 	if got := state.Metadata["is_duplicate"]; got != false {
 		t.Fatalf("state is_duplicate = %#v, want false", got)
 	}
-	if wantEntityID := FlowInstanceEntityID("scoring/" + instanceID); gotID != wantEntityID {
+	if wantEntityID := FlowInstanceEntityID("scoring"); gotID != wantEntityID {
 		t.Fatalf("entityID = %q, want persisted flow entity id %q", gotID, wantEntityID)
 	}
 }
@@ -1506,7 +1506,7 @@ node-a:
 		t.Fatalf("emitted payload revision_count = %#v, want 0", got)
 	}
 
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID))
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(emitted.FlowInstance()))
 	if err != nil {
 		t.Fatalf("workflowStore.Load: %v", err)
 	}
@@ -1749,7 +1749,7 @@ node-a:
 	if entityID == "" {
 		t.Fatal("expected emitted event to carry created entity id")
 	}
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID))
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(emitted.FlowInstance()))
 	if err != nil {
 		t.Fatalf("workflowStore.Load: %v", err)
 	}
@@ -1768,7 +1768,7 @@ func assertCreatedChildFlowIdentityCoherent(t *testing.T, db *sql.DB, flowID, en
 	if instanceID == "" {
 		t.Fatalf("created %s entity %s missing instance_id metadata: %#v", flowID, entityID, instance.Metadata)
 	}
-	flowPath := flowID + "/" + instanceID
+	flowPath := flowID
 	if got := strings.TrimSpace(instance.StorageRef); got != flowPath {
 		t.Fatalf("created %s entity storage_ref = %q, want %q", flowID, got, flowPath)
 	}
@@ -1872,12 +1872,13 @@ node-a:
 	if got := bus.publishedCount(); got != 1 {
 		t.Fatalf("bus published count = %d, want 1", got)
 	}
-	entityID := bus.publishedEvent(0).EntityID()
+	emitted := bus.publishedEvent(0)
+	entityID := emitted.EntityID()
 	if entityID == "" {
 		t.Fatal("expected emitted event to carry created entity id")
 	}
 
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID))
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(emitted.FlowInstance()))
 	if err != nil {
 		t.Fatalf("workflowStore.Load: %v", err)
 	}

@@ -211,7 +211,8 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, address runtimee
 			}
 			initialState := strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
 			materialization, err := r.coordinator.workflowStore.MaterializeInitialEntry(ctx, WorkflowInstance{
-				InstanceID:         entityID.String(),
+				InstanceID:         address.Route.InstanceID,
+				StorageRef:         address.Route.InstancePath,
 				WorkflowName:       workflowName,
 				WorkflowVersion:    workflowVersion,
 				CurrentState:       initialState,
