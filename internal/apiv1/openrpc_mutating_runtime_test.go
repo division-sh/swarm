@@ -193,7 +193,7 @@ func TestMailboxDecideHTTPUsesTheHumanTaskAnchorRegistry(t *testing.T) {
 	handler, _, state := newMutatingRuntimeProbeHandler(t, "mailbox.decide", func(state *mutatingRuntimeProbeState) {
 		anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
 			RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
-			Scope: decisioncard.Scope{Kind: decisioncard.ScopeGlobal},
+			Scope: decisioncard.Scope{Kind: decisioncard.ScopeGlobal}, Source: eventtest.RootRoutingSource("requester-entity"),
 		})
 		if err != nil {
 			panic(err)
@@ -1304,7 +1304,7 @@ func (p *mutatingProbeEventPublisher) PublishDirectRoutes(_ context.Context, evt
 			return err
 		}
 		deliveries = append(deliveries, store.OperatorEventDelivery{
-			DeliveryID:     "delivery-" + recipient + "-" + identity.String(),
+			DeliveryID:     "delivery-" + recipient + "-" + events.EncodeDeliveryRouteIdentity(identity),
 			SubscriberType: eventReplaySubscriberTypeAgent,
 			SubscriberID:   recipient,
 			Route:          route,
@@ -1721,6 +1721,7 @@ func newMutatingProbeDecisionCardStore(state *mutatingRuntimeProbeState) *mutati
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
 		FlowInstance: "review/primary", FlowID: "review", EntityID: eventtest.UUID("entity-1"),
 		Stage: "awaiting_review", StageActivationID: "activation-1",
+		Source: eventtest.ConcreteTemplateRoutingSource("review", "review/primary", eventtest.UUID("entity-1")),
 	})
 	if err != nil {
 		panic(err)

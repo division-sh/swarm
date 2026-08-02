@@ -216,6 +216,7 @@ func TestForkedSourceTimerConsumersRefuseWhileClaimsCanBeReleased(t *testing.T) 
 				AgentIdentity: testAgentIdentity(t, "freeze-agent", ""), EventType: "freeze.timer", Mode: "once",
 				At: fixture.forkedAt.Add(time.Hour), TaskID: "freeze-timer", Payload: []byte(`{"timer":true}`),
 			}
+			schedule = testAgentOwnedSchedule(t, schedule)
 			var store interface {
 				UpsertSchedule(context.Context, runtimepipeline.Schedule) error
 				CancelScheduleExact(context.Context, runtimepipeline.Schedule) error

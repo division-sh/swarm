@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -35,9 +36,13 @@ func materializeRunForkDecisionCards(ctx context.Context, tx *sql.Tx, forkRunID,
 		if err != nil {
 			return fmt.Errorf("source decision card %s anchor: %w", sourceCard.CardID, err)
 		}
+		forkSource, err := forkDecisionCardExecutionSource(sourceAnchor.Source, sourceAnchor.FlowInstance, entityID)
+		if err != nil {
+			return fmt.Errorf("construct fork stage_gate source: %w", err)
+		}
 		forkCard.Anchor, err = decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
 			FlowInstance: sourceAnchor.FlowInstance, FlowID: sourceAnchor.FlowID,
-			EntityID: strings.TrimSpace(entityID), Stage: sourceAnchor.Stage,
+			EntityID: strings.TrimSpace(entityID), Source: forkSource, Stage: sourceAnchor.Stage,
 			StageActivationID: binding.Fork.ActivationID,
 		})
 		if err != nil {
@@ -219,8 +224,13 @@ func forkPendingProposedEffect(sourceCard decisioncard.Card, source decisioncard
 	scope.FlowInstance = strings.Trim(strings.TrimSpace(scope.FlowInstance), "/")
 	scope.EntityID = strings.TrimSpace(scope.EntityID)
 	scope.EntityID = fork.EntityID
+	forkSource, err := forkDecisionCardExecutionSource(sourceAnchor.Source, fork.FlowInstance, fork.EntityID)
+	if err != nil {
+		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, err
+	}
 	anchor, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
 		RequestEventID: fork.RequestEventID, ActivityID: fork.ActivityID, Decision: sourceAnchor.Decision, Scope: scope,
+		Source: forkSource,
 	})
 	if err != nil {
 		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, err
@@ -260,4 +270,20 @@ func forkPendingProposedEffect(sourceCard decisioncard.Card, source decisioncard
 		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, err
 	}
 	return forkCard, fork, nil
+}
+
+func forkDecisionCardExecutionSource(source events.RoutingSource, flowInstance, entityID string) (events.RoutingSource, error) {
+	route := source.Route()
+	route.FlowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
+	route.EntityID = strings.TrimSpace(entityID)
+	switch source.Kind() {
+	case events.RoutingSourceRoot:
+		return events.NewRootRoutingSource(route.EntityID)
+	case events.RoutingSourceStaticFlow:
+		return events.NewStaticFlowRoutingSource(route)
+	case events.RoutingSourceConcreteTemplateInstance:
+		return events.NewConcreteTemplateInstanceRoutingSource(route)
+	default:
+		return events.RoutingSource{}, fmt.Errorf("fork decision-card source kind %q is not an execution source", source.Kind().StorageCode())
+	}
 }

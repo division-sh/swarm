@@ -1859,6 +1859,12 @@ func requireActivityEventFailure(t testing.TB, evt events.Event) runtimefailures
 }
 
 func testActivityIntent(inputURL string) runtimeengine.ActivityIntent {
+	routingSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
+		FlowID: "research", FlowInstance: "research/entity-1", EntityID: "entity-1",
+	})
+	if err != nil {
+		panic(err)
+	}
 	return runtimeengine.ActivityIntent{
 		ActivityID:    "scanner_source_scrape",
 		Tool:          "source_scrape",
@@ -1876,6 +1882,7 @@ func testActivityIntent(inputURL string) runtimeengine.ActivityIntent {
 		ChainDepth:    4,
 		Attempt:       1,
 		ExecutionMode: executionmode.Live,
+		RoutingSource: routingSource,
 	}.Normalized()
 }
 

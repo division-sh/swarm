@@ -182,6 +182,7 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 						Flow: "discovery",
 					},
 					Schema: runtimecontracts.FlowSchemaDocument{
+						Mode: runtimecontracts.FlowModeStatic,
 						Pins: runtimecontracts.FlowPins{},
 					},
 					Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -200,6 +201,8 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "market-research-agent",
+		Identity:      toolTestAgentIdentity(t, "market-research-agent", "discovery", "discovery"),
+		EntityID:      eventtest.UUID("market-research-discovery-source"),
 		Role:          "market_research",
 		FlowID:        "discovery",
 		FlowPath:      "discovery",
@@ -275,7 +278,7 @@ func TestHandleEmitTool_ValidatesCriteriaCitationsBeforePublish(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			exec, bus, actor := criteriaCitationEmitTestExecutor()
+			exec, bus, actor := criteriaCitationEmitTestExecutor(t)
 			_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_cto_spec_vetoed", tc.payload)
 			if tc.wantReason == "" {
 				if err != nil {
@@ -309,8 +312,8 @@ func TestHandleEmitTool_ValidatesCriteriaCitationsBeforePublish(t *testing.T) {
 	}
 }
 
-func criteriaCitationEmitTestExecutor() (*Executor, *publishBusCapture, models.AgentConfig) {
-	return criteriaCitationEmitTestExecutorWithAgent(runtimecontracts.AgentRegistryEntry{
+func criteriaCitationEmitTestExecutor(t testing.TB) (*Executor, *publishBusCapture, models.AgentConfig) {
+	return criteriaCitationEmitTestExecutorWithAgent(t, runtimecontracts.AgentRegistryEntry{
 		ID:         "cto-agent",
 		Role:       "cto",
 		EmitEvents: []string{"cto.spec_vetoed"},
@@ -318,9 +321,11 @@ func criteriaCitationEmitTestExecutor() (*Executor, *publishBusCapture, models.A
 	})
 }
 
-func criteriaCitationEmitTestExecutorWithAgent(agent runtimecontracts.AgentRegistryEntry) (*Executor, *publishBusCapture, models.AgentConfig) {
+func criteriaCitationEmitTestExecutorWithAgent(t testing.TB, agent runtimecontracts.AgentRegistryEntry) (*Executor, *publishBusCapture, models.AgentConfig) {
 	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
+		Paths:  runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
+		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+		Path:   "validation",
 		Policy: runtimecontracts.PolicyDocument{
 			Criteria: map[string]runtimecontracts.PolicyCriteriaSet{
 				"feasibility_exclusions": {
@@ -383,6 +388,8 @@ func criteriaCitationEmitTestExecutorWithAgent(agent runtimecontracts.AgentRegis
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "cto-agent",
+		Identity:      toolTestAgentIdentity(t, "cto-agent", "validation", "validation"),
+		EntityID:      eventtest.UUID("cto-validation-source"),
 		Role:          "cto",
 		FlowID:        "validation",
 		FlowPath:      "validation",
@@ -393,7 +400,7 @@ func criteriaCitationEmitTestExecutorWithAgent(agent runtimecontracts.AgentRegis
 }
 
 func TestHandleEmitTool_RejectsMutableActorCriteriaGrant(t *testing.T) {
-	exec, bus, actor := criteriaCitationEmitTestExecutorWithAgent(runtimecontracts.AgentRegistryEntry{
+	exec, bus, actor := criteriaCitationEmitTestExecutorWithAgent(t, runtimecontracts.AgentRegistryEntry{
 		ID:         "cto-agent",
 		Role:       "cto",
 		EmitEvents: []string{"cto.spec_vetoed"},
@@ -444,7 +451,8 @@ func TestHandleEmitTool_PreservesInboundChildFlowOwnerAndExecutionMode(t *testin
 					Events: map[string]runtimecontracts.EventCatalogEntry{
 						"research.completed": {},
 					},
-					Path: "validation",
+					Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
+					Path:   "validation",
 				},
 			},
 		},
@@ -457,9 +465,10 @@ func TestHandleEmitTool_PreservesInboundChildFlowOwnerAndExecutionMode(t *testin
 	actor := models.AgentConfig{
 		ExecutionMode: "mock",
 		ID:            "business-research-agent",
+		Identity:      toolTestAgentIdentity(t, "business-research-agent", "validation", "validation/inst-1"),
 		Role:          "business_research",
 		FlowID:        "validation",
-		FlowPath:      "validation",
+		FlowPath:      "validation/inst-1",
 		EmitEvents:    []string{"research.completed"},
 	}
 	inbound := toolTestInboundEvent(
@@ -517,7 +526,8 @@ func TestHandleEmitTool_DoesNotAdoptForeignInboundFlowOwner(t *testing.T) {
 					Events: map[string]runtimecontracts.EventCatalogEntry{
 						"research.completed": {},
 					},
-					Path: "validation",
+					Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+					Path:   "validation",
 				},
 			},
 		},
@@ -530,6 +540,7 @@ func TestHandleEmitTool_DoesNotAdoptForeignInboundFlowOwner(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "business-research-agent",
+		Identity:      toolTestAgentIdentity(t, "business-research-agent", "validation", "validation"),
 		Role:          "business_research",
 		FlowID:        "validation",
 		FlowPath:      "validation",
@@ -575,6 +586,7 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 						Flow: "discovery",
 					},
 					Schema: runtimecontracts.FlowSchemaDocument{
+						Mode: runtimecontracts.FlowModeStatic,
 						Pins: runtimecontracts.FlowPins{
 							Outputs: runtimecontracts.FlowOutputPins{
 								Events: []string{"vertical.discovered"},
@@ -597,6 +609,8 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "discovery-coordinator",
+		Identity:      toolTestAgentIdentity(t, "discovery-coordinator", "discovery", "discovery"),
+		EntityID:      eventtest.UUID("discovery-coordinator-source"),
 		Role:          "discovery_coordinator",
 		FlowID:        "discovery",
 		FlowPath:      "discovery",
@@ -632,6 +646,7 @@ func TestHandleEmitTool_TargetsParentRouteForChildPinOutput(t *testing.T) {
 			Flow: "analyzer-flow",
 		},
 		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: runtimecontracts.FlowModeTemplate,
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
 					Events: []string{"analysis.done"},
@@ -676,6 +691,7 @@ func TestHandleEmitTool_TargetsParentRouteForChildPinOutput(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analyzer",
+		Identity:      toolTestAgentIdentity(t, "analyzer", "analyzer-flow", "analyzer-flow/inst-1"),
 		Role:          "analyzer",
 		FlowID:        "analyzer-flow",
 		FlowPath:      "analyzer-flow/inst-1",
@@ -726,6 +742,7 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 			Flow: "analyzer-flow",
 		},
 		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: runtimecontracts.FlowModeTemplate,
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
 					Events: []string{"analysis.done"},
@@ -764,6 +781,7 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analyzer",
+		Identity:      toolTestAgentIdentity(t, "analyzer", "analyzer-flow", "analyzer-flow/inst-1"),
 		Role:          "analyzer",
 		FlowID:        "analyzer-flow",
 		FlowPath:      "analyzer-flow/inst-1",
@@ -798,6 +816,7 @@ func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) 
 			Flow: "analyzer-flow",
 		},
 		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: runtimecontracts.FlowModeStatic,
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
 					Events: []string{"analysis.done"},
@@ -825,6 +844,7 @@ func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) 
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analyzer",
+		Identity:      toolTestAgentIdentity(t, "analyzer", "analyzer-flow", "root/analyzer-flow"),
 		Role:          "analyzer",
 		FlowID:        "analyzer-flow",
 		FlowPath:      "root/analyzer-flow",
@@ -867,6 +887,7 @@ func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
 			Flow: "analyzer-flow",
 		},
 		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: runtimecontracts.FlowModeStatic,
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
 					Events: []string{"analysis.done"},
@@ -894,6 +915,7 @@ func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analyzer",
+		Identity:      toolTestAgentIdentity(t, "analyzer", "analyzer-flow", "analyzer-flow"),
 		Role:          "analyzer",
 		FlowID:        "analyzer-flow",
 		FlowPath:      "analyzer-flow",
@@ -942,6 +964,8 @@ func TestHandleEmitTool_RootSchemaPinOutputStillRequiresTarget(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "root-agent",
+		Identity:      toolTestRootAgentIdentity(t, "root-agent"),
+		EntityID:      eventtest.UUID("root-agent-source"),
 		Role:          "root-agent",
 		EmitEvents:    []string{"root.ready"},
 	}
@@ -971,7 +995,7 @@ func TestHandleEmitTool_RoutesTypedSameFlowOutputToNodeConsumer(t *testing.T) {
 	source := semanticview.Wrap(bundle)
 	store := newEmitRoutePlanStore()
 	eventBus := newEmitRoutePlanEventBus(t, store, source)
-	actor := models.AgentConfig{ExecutionMode: "live", ID: "root-agent", Role: "root-agent", EmitEvents: []string{"cycle.ping"}}
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "root-agent", Identity: toolTestRootAgentIdentity(t, "root-agent"), Role: "root-agent", EntityID: eventtest.UUID("root-agent-cycle-source"), EmitEvents: []string{"cycle.ping"}}
 	exec := NewExecutorWithOptions(eventBus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
 
 	out, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_cycle_ping", map[string]any{})
@@ -986,8 +1010,9 @@ func TestHandleEmitTool_RoutesTypedSameFlowOutputToNodeConsumer(t *testing.T) {
 
 func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t *testing.T) {
 	source := emitRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
-		From: "producer.deploy_done",
-		To:   "consumer.deploy_completed",
+		From:    "producer.deploy_done",
+		To:      "consumer.deploy_completed",
+		Adapter: "deploy_done_to_completed",
 	})
 	store := newEmitRoutePlanStore()
 	eb := newEmitRoutePlanEventBus(t, store, source)
@@ -995,6 +1020,7 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "producer-agent",
+		Identity:      toolTestAgentIdentity(t, "producer-agent", "producer", "producer"),
 		Role:          "producer",
 		FlowID:        "producer",
 		FlowPath:      "producer",
@@ -1019,7 +1045,7 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 		time.Now().UTC()))
 	out, err := exec.handleEmitTool(ctx, actor, "emit_deploy_done", map[string]any{})
 	if err != nil {
-		t.Fatalf("handleEmitTool: %v", err)
+		t.Fatalf("handleEmitTool: %v (%s)", err, failures.Format(err))
 	}
 	eventID := emitToolResultString(t, out, "event_id")
 	persisted := store.events[eventID]
@@ -1041,6 +1067,9 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	if !emitDeliveryRoutesContain(store.routes[eventID], wantRoute) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", store.routes[eventID], wantRoute)
 	}
+	if store.routes[eventID][0].ConnectClaim.Empty() {
+		t.Fatal("persisted delivery route connect claim is empty")
+	}
 	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
@@ -1055,6 +1084,7 @@ func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflig
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "producer-agent",
+		Identity:      toolTestAgentIdentity(t, "producer-agent", "producer", "producer/inst-1"),
 		Role:          "producer",
 		FlowID:        "producer",
 		FlowPath:      "producer/inst-1",
@@ -1122,6 +1152,7 @@ func TestHandleEmitTool_RootReceiverConnectRejectsMissingOrIncompleteParentIdent
 			actor := models.AgentConfig{
 				ExecutionMode: "live",
 				ID:            "producer-agent",
+				Identity:      toolTestAgentIdentity(t, "producer-agent", "producer", "producer/inst-1"),
 				Role:          "producer",
 				FlowID:        "producer",
 				FlowPath:      "producer/inst-1",
@@ -1160,6 +1191,7 @@ func TestHandleEmitTool_FailsClosedForConnectedOutputWithoutCanonicalRouteAuthor
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "producer-agent",
+		Identity:      toolTestAgentIdentity(t, "producer-agent", "producer", "producer"),
 		Role:          "producer",
 		FlowID:        "producer",
 		FlowPath:      "producer",
@@ -1257,6 +1289,8 @@ func TestHandleEmitTool_AllowsDeclaredTemplateIDBusinessPayload(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "repo-agent",
+		Identity:      toolTestRootAgentIdentity(t, "repo-agent"),
+		EntityID:      eventtest.UUID("repo-agent-source"),
 		Role:          "repo_agent",
 		EmitEvents:    []string{"repo.template.selected"},
 	}
@@ -1320,6 +1354,8 @@ func TestHandleEmitTool_AllowsValidWave1EventPayloadTypes(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "market-research-agent",
+		Identity:      toolTestRootAgentIdentity(t, "market-research-agent"),
+		EntityID:      eventtest.UUID("market-research-source"),
 		Role:          "market_research",
 		EmitEvents:    []string{"scan.completed"},
 	}
@@ -1343,8 +1379,9 @@ func TestHandleEmitTool_AllowsValidWave1EventPayloadTypes(t *testing.T) {
 
 func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testing.T) {
 	reviewFlow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
-		Path:  "review",
+		Paths:  runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Path:   "review",
+		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.requested": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -1357,8 +1394,9 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 		},
 	}
 	validationFlow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
-		Path:  "validation",
+		Paths:  runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
+		Path:   "validation",
+		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"task.requested": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -1413,6 +1451,8 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 	reviewActor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "review-agent",
+		Identity:      toolTestAgentIdentity(t, "review-agent", "review", "review"),
+		EntityID:      eventtest.UUID("review-agent-source"),
 		Role:          "reviewer",
 		FlowID:        "review",
 		FlowPath:      "review",
@@ -1433,6 +1473,8 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 	validationActor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "validation-agent",
+		Identity:      toolTestAgentIdentity(t, "validation-agent", "validation", "validation"),
+		EntityID:      eventtest.UUID("validation-agent-source"),
 		Role:          "validator",
 		FlowID:        "validation",
 		FlowPath:      "validation",
@@ -1735,7 +1777,8 @@ func emitRoutePlanOutputEvents(pins []runtimecontracts.FlowOutputEventPin) []str
 
 func emitDeliveryRoutesContain(in []events.DeliveryRoute, want events.DeliveryRoute) bool {
 	for _, route := range events.NormalizeDeliveryRoutes(in) {
-		if route == want {
+		if events.SameDeliveryRecipientIdentity(route, want) &&
+			(want.ConnectClaim.Empty() || route.ConnectClaim.Equal(want.ConnectClaim)) {
 			return true
 		}
 	}

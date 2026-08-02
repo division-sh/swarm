@@ -25,22 +25,26 @@ import (
 )
 
 func TestAuthorActivityDecisionCardAdapterCoversRegisteredAnchors(t *testing.T) {
+	stageEntityID := uuid.NewString()
 	stage, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		FlowInstance: "root/review", FlowID: "review", EntityID: uuid.NewString(), Stage: "pending", StageActivationID: uuid.NewString(),
+		FlowInstance: "root/review", FlowID: "review", EntityID: stageEntityID, Stage: "pending", StageActivationID: uuid.NewString(),
+		Source: eventtest.ConcreteTemplateRoutingSource("review", "root/review", stageEntityID),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	human, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
 		RequesterAgentID: "reviewer", OperationID: "human-op", Category: "review",
-		Scope: decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: "root/review"},
+		Scope:  decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: "root/review"},
+		Source: eventtest.RootRoutingSource("human-task-owner"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	proposed, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
 		RequestEventID: uuid.NewString(), ActivityID: "send_reply", Decision: "support_reply",
-		Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: "root/review", EntityID: uuid.NewString()},
+		Scope:  decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: "root/review", EntityID: uuid.NewString()},
+		Source: eventtest.RootRoutingSource("proposed-effect-owner"),
 	})
 	if err != nil {
 		t.Fatal(err)

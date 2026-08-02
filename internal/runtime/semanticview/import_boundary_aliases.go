@@ -65,7 +65,7 @@ func ImportBoundaryFlowSites(scope ProjectScope) []ImportBoundaryFlowSite {
 }
 
 func ResolveFlowInputAutoWire(source Source, targetFlowID, eventType string) runtimecontracts.FlowInputAutoWireResolution {
-	return ResolveFlowInputProducer(source, targetFlowID, eventType).AutoWireResolution()
+	return ResolveNonConnectFlowInputProducer(source, targetFlowID, eventType).AutoWireResolution()
 }
 
 func FlowInputProducerPatterns(source Source, targetFlowID, eventType string) []string {

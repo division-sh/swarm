@@ -228,9 +228,10 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileTimerActiveTh
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-			fire_at, owner_agent, owner_kind, task_type, status, created_at
+			routing_source, fire_at, owner_agent, owner_kind, task_type, status, created_at
 		) VALUES (
 			$1::uuid, $2::uuid, 'wait', $3::uuid, '', 'example.timeout', '{}'::jsonb,
+			'{"kind":"platform_control","route":{}}'::jsonb,
 			now() + interval '1 minute', 'timer-agent', 'system', 'timer', 'active', now()
 		)
 	`, timerID, fixture.RunID, fixture.EntityID); err != nil {

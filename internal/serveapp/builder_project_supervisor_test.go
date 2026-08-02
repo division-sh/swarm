@@ -797,11 +797,12 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						t.Fatal("full-store predecessor manager/outbox consumers did not start")
 					}
 					if err := predecessor.Scheduler.Register(context.Background(), runtimepipeline.Schedule{
-						OwnerKind: runtimepipeline.ScheduleOwnerSystem,
-						AgentID:   "replacement-proof",
-						EventType: "platform.boot",
-						Mode:      "once",
-						At:        time.Now().Add(time.Hour),
+						OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+						AgentID:       "replacement-proof",
+						EventType:     "platform.boot",
+						Mode:          "once",
+						At:            time.Now().Add(time.Hour),
+						RoutingSource: events.NewPlatformControlRoutingSource(),
 					}); err != nil {
 						t.Fatalf("register pending predecessor schedule: %v", err)
 					}
@@ -893,11 +894,12 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						t.Fatalf("start rollback predecessor: %v", err)
 					}
 					if err := rollbackPredecessor.Scheduler.Register(context.Background(), runtimepipeline.Schedule{
-						OwnerKind: runtimepipeline.ScheduleOwnerSystem,
-						AgentID:   "rollback-proof",
-						EventType: "platform.boot",
-						Mode:      "once",
-						At:        time.Now().Add(time.Hour),
+						OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+						AgentID:       "rollback-proof",
+						EventType:     "platform.boot",
+						Mode:          "once",
+						At:            time.Now().Add(time.Hour),
+						RoutingSource: events.NewPlatformControlRoutingSource(),
 					}); err != nil {
 						t.Fatalf("register pending rollback schedule: %v", err)
 					}

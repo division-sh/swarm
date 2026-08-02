@@ -51,7 +51,7 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	})); err != nil {
 		t.Fatalf("seed parent workflow instance: %v", err)
 	}
-	parentRoute := seedExactOnceEventDelivery(t, workflowStore, ctx, parent, "fanout-node")
+	parentRoute := seedExactOnceEventDelivery(t, pc, ctx, parent, "fanout-node")
 
 	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, parentRoute), parent)
 	if err != nil {
@@ -66,6 +66,7 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	assertDeliveryStatusCount(t, workflowStore, ctx, parent.ID(), "fanout-node", "delivered", 1)
 
 	children := []events.Event{bus.publishedEvent(0), bus.publishedEvent(1)}
+	childRoutes := make([]events.DeliveryRoute, len(children))
 	for idx, child := range children {
 		if got := strings.TrimSpace(child.ParentEventID()); got != parent.ID() {
 			t.Fatalf("child %s parent_event_id = %q, want %q", child.ID(), got, parent.ID())
@@ -82,11 +83,11 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 		if got, want := strings.TrimSpace(child.RunID()), runtimecorrelation.RunIDFromContext(ctx); got != want {
 			t.Fatalf("child %s run_id = %q, want %q", child.ID(), got, want)
 		}
-		seedExactOnceEventDelivery(t, workflowStore, ctx, child, "spawn-node")
+		childRoutes[idx] = seedExactOnceEventDelivery(t, pc, ctx, child, "spawn-node")
 	}
 
-	for _, child := range children {
-		route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "spawn-node"}
+	for idx, child := range children {
+		route := childRoutes[idx]
 		handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, route), child)
 		if err != nil {
 			t.Fatalf("dispatch child create_flow_instance event: %v", err)
@@ -165,6 +166,10 @@ func sqliteDynamicActivationBundle() *runtimecontracts.WorkflowContractBundle {
 		Paths: runtimecontracts.FlowContractPaths{ID: "review"},
 	}
 	return &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"fanout-node": {ID: "fanout-node", ExecutionType: "system_node"},
+			"spawn-node":  {ID: "spawn-node", ExecutionType: "system_node"},
+		},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &runtimecontracts.FlowContractView{
 				Children: []runtimecontracts.FlowContractView{*reviewFlow},

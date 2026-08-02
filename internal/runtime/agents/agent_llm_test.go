@@ -18,6 +18,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -743,6 +744,8 @@ func TestBoardStep_FactoryCreatedDirectiveTurnPreservesRoleScopedEmitToolSurface
 	agent, bus := newFactoryDirectiveAgent(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "campaign-coordinator",
+		Identity:      agentidentitytest.RootRuntime(t, "campaign-coordinator", "directive-factory-test"),
+		EntityID:      eventtest.UUID("campaign-coordinator-source"),
 		Role:          "campaign_coordinator",
 		Config: mustAgentConfigJSON(t, map[string]any{
 			"system_prompt": "You coordinate workflow launch.",
@@ -799,6 +802,8 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 	agent, bus := newFactoryDirectiveAgent(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "campaign-coordinator",
+		Identity:      agentidentitytest.Runtime(t, "campaign-coordinator", "directive-factory-test", "campaign-flow", "inst-1", "campaign-flow/inst-1"),
+		EntityID:      eventtest.UUID("campaign-flow-inst-1-source"),
 		Role:          "campaign_coordinator",
 		FlowID:        "campaign-flow",
 		FlowPath:      "campaign-flow/inst-1",
@@ -822,7 +827,8 @@ func TestBoardStep_FactoryCreatedDirectiveRemediationPreservesFlowScopedEmitTool
 					Events: map[string]runtimecontracts.EventCatalogEntry{
 						"scan.requested": {},
 					},
-					Path: "campaign-flow",
+					Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
+					Path:   "campaign-flow",
 				},
 			},
 		},

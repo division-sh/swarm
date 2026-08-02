@@ -804,7 +804,7 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 
 			eventID := "99999999-9999-4999-8999-999999999981"
 			target := events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/inst-1", EntityID: artifactActionResultEntityID}
-			event := eventtest.ExistingRunRootIngress(
+			event := eventtest.ExistingRunRootIngressWithRoutingSource(
 				eventID,
 				"repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
 				"test",
@@ -813,6 +813,7 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 				0,
 				templateInstanceDeliveryRunID,
 				events.EnvelopeForTargetRoute(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), target),
+				eventtest.ConcreteTemplateRoutingSource(target.FlowID, target.FlowInstance, target.EntityID),
 				time.Now().UTC(),
 			)
 			route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: target}
@@ -908,11 +909,12 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				t.Fatalf("seed poison workflow instance: %v", err)
 			}
 			installNodeRecoveryPoisonMutation(t, ctx, db, backend.name == "postgres", poisonEntityID)
-			poison := eventtest.ExistingRunRootIngress(
+			poison := eventtest.ExistingRunRootIngressWithRoutingSource(
 				eventtest.UUID("node-recovery-poison-event"),
 				"repo-scaffold/poison/repo_scaffold.repo_commit_succeeded",
 				"test", "", []byte(`{}`), 0, templateInstanceDeliveryRunID,
 				events.EnvelopeForTargetRoute(events.EnvelopeForEntityID(events.EventEnvelope{}, poisonEntityID), poisonTarget),
+				eventtest.ConcreteTemplateRoutingSource(poisonTarget.FlowID, poisonTarget.FlowInstance, poisonTarget.EntityID),
 				time.Now().UTC().Add(-time.Minute),
 			)
 			poisonRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: poisonTarget}
@@ -922,11 +924,12 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			)
 
 			healthyTarget := events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/inst-1", EntityID: artifactActionResultEntityID}
-			healthy := eventtest.ExistingRunRootIngress(
+			healthy := eventtest.ExistingRunRootIngressWithRoutingSource(
 				eventtest.UUID("node-recovery-healthy-event"),
 				"repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
 				"test", "", []byte(`{}`), 0, templateInstanceDeliveryRunID,
 				events.EnvelopeForTargetRoute(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), healthyTarget),
+				eventtest.ConcreteTemplateRoutingSource(healthyTarget.FlowID, healthyTarget.FlowInstance, healthyTarget.EntityID),
 				time.Now().UTC(),
 			)
 			healthyRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: healthyTarget}
@@ -1054,7 +1057,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 
 			eventID := "99999999-9999-4999-8999-999999999982"
 			target := events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/inst-1", EntityID: artifactActionResultEntityID}
-			event := eventtest.ExistingRunRootIngress(
+			event := eventtest.ExistingRunRootIngressWithRoutingSource(
 				eventID,
 				"repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
 				"test",
@@ -1063,6 +1066,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				0,
 				templateInstanceDeliveryRunID,
 				events.EnvelopeForTargetRoute(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), target),
+				eventtest.ConcreteTemplateRoutingSource(target.FlowID, target.FlowInstance, target.EntityID),
 				time.Now().UTC(),
 			)
 			route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: target}
@@ -1085,7 +1089,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			}
 
 			expiringEventID := "99999999-9999-4999-8999-999999999983"
-			expiringEvent := eventtest.ExistingRunRootIngress(
+			expiringEvent := eventtest.ExistingRunRootIngressWithRoutingSource(
 				expiringEventID,
 				"repo-scaffold/inst-1/repo_scaffold.repo_commit_succeeded",
 				"test",
@@ -1094,6 +1098,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				0,
 				templateInstanceDeliveryRunID,
 				events.EnvelopeForTargetRoute(events.EnvelopeForEntityID(events.EventEnvelope{}, artifactActionResultEntityID), target),
+				eventtest.ConcreteTemplateRoutingSource(target.FlowID, target.FlowInstance, target.EntityID),
 				time.Now().UTC(),
 			)
 			storetest.CommitSemanticEventWithInitialFacts(

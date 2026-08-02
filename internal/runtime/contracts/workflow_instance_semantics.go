@@ -28,7 +28,7 @@ func (f TemplateInstanceField) Empty() bool {
 	return f.value == ""
 }
 
-func (f TemplateInstanceField) String() string {
+func (f TemplateInstanceField) Path() string {
 	return f.value
 }
 
@@ -65,7 +65,9 @@ func ParseFlowInputResolutionMode(raw string) (FlowInputResolutionMode, error) {
 	}
 }
 
-func (m FlowInputResolutionMode) String() string {
+// FlowInputResolutionModeCode is the explicit diagnostic/storage projection
+// for the closed resolution variant. Routing behavior compares the variant.
+func FlowInputResolutionModeCode(m FlowInputResolutionMode) string {
 	switch m {
 	case FlowInputResolutionModeCreate:
 		return "create"

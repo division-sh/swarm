@@ -60,7 +60,7 @@ func TestSemanticSourceCapabilitiesAreCompileVisibleAndComplete(t *testing.T) {
 	if got, _ := capabilities.ConnectorGeneration("telegram.send"); got.Permissions()[0].ID() != "messages.write" {
 		t.Fatalf("connector capability leaked readback mutation: %#v", got)
 	}
-	if source, ok := capabilities.ConnectorImportSource("telegram.send"); !ok || source.String() != "pack://telegram" {
+	if source, ok := capabilities.ConnectorImportSource("telegram.send"); !ok || source.URI() != "pack://telegram" {
 		t.Fatalf("connector import source = %q, exists=%v", source, ok)
 	}
 }
@@ -125,7 +125,7 @@ func TestRuntimeToolOverlayPreservesSemanticSourceCapabilities(t *testing.T) {
 	if !got.ConnectorPackImportsApplied() {
 		t.Fatal("runtime tool overlay hid connector-pack capabilities")
 	}
-	if value, exists := got.ConnectorImportSource("deliver"); !exists || value.String() != "pack://connector/deliver" {
+	if value, exists := got.ConnectorImportSource("deliver"); !exists || value.URI() != "pack://connector/deliver" {
 		t.Fatalf("connector provenance = %q, exists=%v", value, exists)
 	}
 	if value, exists := got.ConnectorGeneration("deliver"); !exists || value.GeneratorVersion() != "generation:deliver" {

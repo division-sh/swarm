@@ -594,10 +594,11 @@ func eventReplayNewDeliveries(deliveries []store.OperatorEventDelivery, original
 		if err != nil {
 			return nil, fmt.Errorf("original replay delivery %s route: %w", original.DeliveryID, err)
 		}
-		if _, duplicate := sourceByRoute[identity.String()]; duplicate {
-			return nil, fmt.Errorf("duplicate original replay route identity %s", identity.String())
+		encoded := events.EncodeDeliveryRouteIdentity(identity)
+		if _, duplicate := sourceByRoute[encoded]; duplicate {
+			return nil, fmt.Errorf("duplicate original replay route identity %s", encoded)
 		}
-		sourceByRoute[identity.String()] = original.DeliveryID
+		sourceByRoute[encoded] = original.DeliveryID
 	}
 	out := make([]eventReplayDelivery, 0, len(deliveries))
 	matched := map[string]struct{}{}
@@ -610,7 +611,7 @@ func eventReplayNewDeliveries(deliveries []store.OperatorEventDelivery, original
 		if err != nil {
 			return nil, fmt.Errorf("new replay delivery %s route: %w", delivery.DeliveryID, err)
 		}
-		sourceDeliveryID := sourceByRoute[identity.String()]
+		sourceDeliveryID := sourceByRoute[events.EncodeDeliveryRouteIdentity(identity)]
 		if sourceDeliveryID == "" {
 			return nil, fmt.Errorf("new replay delivery %s has no exact original route", delivery.DeliveryID)
 		}

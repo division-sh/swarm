@@ -272,7 +272,7 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 	}
 	anchor, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
 		RequestEventID: requestEventID, ActivityID: continuation.ActivityID, Decision: "support_reply",
-		Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: "root", EntityID: entityID},
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: "root", EntityID: entityID}, Source: eventtest.RootRoutingSource(entityID),
 	})
 	if err != nil {
 		t.Fatal(err)

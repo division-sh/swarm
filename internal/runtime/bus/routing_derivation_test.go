@@ -14,7 +14,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -1270,7 +1269,7 @@ func TestDeriveRouteTable_NestedPackageConnectLocalizesWithinParentFlow(t *testi
 			To:         ".micro_done",
 		}}},
 	}
-	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
+	plans, issues := compiledConnectPlans(semanticview.Wrap(bundle))
 	if len(issues) != 0 || len(plans) != 1 {
 		t.Fatalf("nested connect plans = %#v issues = %#v, want one valid plan", plans, issues)
 	}

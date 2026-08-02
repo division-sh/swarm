@@ -63,8 +63,8 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 		t.Fatalf("seed session: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-			INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, owner_kind, status)
-			VALUES ($1::uuid, 'bundle-delete-timer', $2::uuid, 'timer.fired', now() + interval '1 hour', 'system', 'active')
+			INSERT INTO timers (timer_id, timer_name, run_id, fire_event, routing_source, fire_at, owner_kind, status)
+			VALUES ($1::uuid, 'bundle-delete-timer', $2::uuid, 'timer.fired', '{"kind":"platform_control","route":{}}'::jsonb, now() + interval '1 hour', 'system', 'active')
 		`, timerID, activeRunID); err != nil {
 		t.Fatalf("seed timer: %v", err)
 	}

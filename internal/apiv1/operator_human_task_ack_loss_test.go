@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -137,7 +138,7 @@ func newAPIHumanTaskAckLossCard(t *testing.T, runID string, now time.Time) (deci
 	t.Helper()
 	anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
 		RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
-		Scope: decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: "provider/instance-a"},
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: "provider/instance-a"}, Source: eventtest.RootRoutingSource("requester-entity"),
 	})
 	if err != nil {
 		t.Fatal(err)

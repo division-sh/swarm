@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
-	"github.com/division-sh/swarm/internal/runtime/routingtopology"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -181,14 +182,11 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 			usage.timerReferences++
 		}
 	}
-	for _, edge := range routingtopology.Build(c.source).Edges {
-		if edge.Scope != routingtopology.DeliveryScopeInterFlowConnect {
-			continue
-		}
-		if deadEventSameScope(decl.FlowID, edge.Producer.FlowID) && eventidentity.Normalize(edge.Producer.Event.Canonical) == eventidentity.Normalize(decl.Canonical) {
+	for _, edge := range runtimepinrouting.CompileConnectGraph(c.source).Edges() {
+		if edge.Producer().Matches(decl.FlowID, events.EventType(decl.Canonical)) {
 			usage.connectOutputs++
 		}
-		if deadEventSameScope(decl.FlowID, edge.Consumer.FlowID) && eventidentity.Normalize(edge.Consumer.Event.Canonical) == eventidentity.Normalize(decl.Canonical) {
+		if edge.Consumer().Matches(decl.FlowID, events.EventType(decl.Canonical)) {
 			usage.connectInputs++
 		}
 	}

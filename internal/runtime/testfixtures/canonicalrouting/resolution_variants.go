@@ -61,7 +61,7 @@ func CopyTemplateCreateThenSelectSameEvent(t testing.TB) string {
 		"      - name: account_create\n")
 	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
 		"  - from: producer.account_ready\n    to: account.account_ready\n",
-		"  - from: producer.account_setup\n    to: account.account_ready\n")
+		"  - from: producer.account_setup\n    to: account.account_ready\n    adapter: account_setup_to_account_ready\n")
 	writeClosedVariantFile(t, root, "flows/account/nodes.yaml", `account-setup-node:
   id: account-setup-node-{instance_id}
   execution_type: system_node

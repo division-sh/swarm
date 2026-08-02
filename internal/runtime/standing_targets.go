@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -375,7 +376,7 @@ func resolveStandingInputEndpointWithCensus(source semanticview.Source, census s
 	if !ok {
 		return semanticview.AuthoredEventEndpoint{}, association.Err()
 	}
-	producer := semanticview.ResolveFlowInputProducer(source, flowID, eventName)
+	producer := runtimepinrouting.ResolveFlowInputProducer(source, flowID, eventName)
 	if !producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress) &&
 		!producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) {
 		return semanticview.AuthoredEventEndpoint{}, fmt.Errorf("event endpoint %q in flow %s is not declared as external ingress", eventName, flowID)

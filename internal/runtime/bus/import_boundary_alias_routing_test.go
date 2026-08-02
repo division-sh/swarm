@@ -10,7 +10,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -73,7 +72,7 @@ func TestImportBoundaryInputBindingDoesNotMaterializeTemplateRouteWithoutConnect
 
 func TestImportBoundaryConnectConsumesBindingsForInputAndRootOutputDelivery(t *testing.T) {
 	source := loadBusImportBoundaryConnectedSource(t)
-	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
+	plans, issues := compiledConnectPlans(source)
 	if len(issues) != 0 || len(plans) != 2 {
 		t.Fatalf("connect plans = %#v, issues = %#v, want two valid plans", plans, issues)
 	}
@@ -87,16 +86,23 @@ func TestImportBoundaryConnectConsumesBindingsForInputAndRootOutputDelivery(t *t
 		eventType string
 		recipient string
 		envelope  events.EventEnvelope
+		source    events.RoutingSource
 	}{
-		{id: eventtest.UUID("evt-input-connect"), eventType: "parent.lead_captured", recipient: "worker-node"},
+		{
+			id: eventtest.UUID("evt-input-connect"), eventType: "parent.lead_captured", recipient: "worker-node",
+			source: mustRootRoutingSource(t, eventtest.UUID("root-input-source")),
+		},
 		{
 			id:        eventtest.UUID("evt-output-connect"),
 			eventType: "worker/work.completed",
 			recipient: "parent-listener",
 			envelope:  events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: eventtest.UUID("root-entity")}),
+			source: mustStaticRoutingSource(t, events.RouteIdentity{
+				FlowID: "worker", FlowInstance: "worker", EntityID: eventtest.UUID("worker-output-source"),
+			}),
 		},
 	} {
-		evt := eventtest.RunCreatingRootIngress(tc.id, events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", tc.envelope, time.Now().UTC())
+		evt := eventtest.RunCreatingRootIngressWithRoutingSource(tc.id, events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", tc.envelope, tc.source, time.Now().UTC())
 		plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 		if err != nil {
 			t.Fatalf("CheckPublishRecipientPlan(%s): %v", tc.eventType, err)
@@ -111,6 +117,24 @@ func TestImportBoundaryConnectConsumesBindingsForInputAndRootOutputDelivery(t *t
 			t.Fatalf("persisted deliveries for %s = %#v, want %s", tc.eventType, got, tc.recipient)
 		}
 	}
+}
+
+func mustRootRoutingSource(t testing.TB, entityID string) events.RoutingSource {
+	t.Helper()
+	source, err := events.NewRootRoutingSource(entityID)
+	if err != nil {
+		t.Fatalf("build root routing source: %v", err)
+	}
+	return source
+}
+
+func mustStaticRoutingSource(t testing.TB, route events.RouteIdentity) events.RoutingSource {
+	t.Helper()
+	source, err := events.NewStaticFlowRoutingSource(route)
+	if err != nil {
+		t.Fatalf("build static routing source: %v", err)
+	}
+	return source
 }
 
 func (s *routePersistenceTestStore) InsertEventDeliveryRoutes(_ context.Context, eventID string, routes []events.DeliveryRoute) error {

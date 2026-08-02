@@ -17,11 +17,9 @@ func TestRunForkRevisionProjectionPreservesSourceRouteSeparatelyFromReceiverCont
 			EventID:      "event-1",
 			EventName:    "producer/inst-1/scan.requested",
 			FlowInstance: "consumer/inst-9",
-			SourceRoute: events.RouteIdentity{
-				FlowID:       " producer ",
-				FlowInstance: "/producer/inst-1/",
-				EntityID:     "source-entity",
-			},
+			RoutingSource: mustRevisionRoutingSource(t, events.RouteIdentity{
+				FlowID: " producer ", FlowInstance: "/producer/inst-1/", EntityID: "source-entity",
+			}),
 		}},
 		Deliveries: []runForkRevisionDelivery{{
 			Snapshot: runtimedelivery.Snapshot{
@@ -45,7 +43,7 @@ func TestRunForkRevisionProjectionPreservesSourceRouteSeparatelyFromReceiverCont
 	if got, want := pending[0].FlowInstance, "consumer/inst-9"; got != want {
 		t.Fatalf("receiver flow instance = %q, want %q", got, want)
 	}
-	if got, want := pending[0].SourceRoute, (events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "source-entity"}); got != want {
+	if got, want := pending[0].RoutingSource.Route(), (events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1", EntityID: "source-entity"}); got != want {
 		t.Fatalf("source route = %#v, want %#v", got, want)
 	}
 
@@ -67,9 +65,18 @@ func TestRunForkRevisionProjectionRejectsMalformedSourceRoute(t *testing.T) {
 		snapshot,
 		runforkrevision.FamilyEvents,
 		runForkRevisionedFact{FirstRevision: 1, Revision: 1},
-		[]byte(`{"event_id":"event-1","event_name":"producer/scan.requested","source_route":{"flow_instance":17}}`),
+		[]byte(`{"event_id":"event-1","event_name":"producer/scan.requested","routing_source":{"kind":"concrete_template_instance","route":{"flow_instance":17}}}`),
 	)
 	if err == nil || !strings.Contains(err.Error(), "decode run fork events revision fact") {
 		t.Fatalf("malformed source route error = %v, want typed revision decode failure", err)
 	}
+}
+
+func mustRevisionRoutingSource(t *testing.T, route events.RouteIdentity) events.RoutingSource {
+	t.Helper()
+	source, err := events.NewConcreteTemplateInstanceRoutingSource(route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source
 }

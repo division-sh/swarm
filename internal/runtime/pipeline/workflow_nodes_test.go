@@ -10,6 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -328,14 +330,15 @@ func TestWorkflowNodeHandlerResolution_ConnectConsumesImportBindings(t *testing.
 		{nodeID: "parent-listener", eventType: "worker/work.completed", wantKey: "parent.lead_enriched"},
 	} {
 		evt := eventtest.RunCreatingRootIngress("", tc.eventType, "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
-		resolved := workflowNodeEventHandlerResolutionForDelivery(source, tc.nodeID, evt)
+		route := workflowNodeStampedConnectRouteForHandlerEvent(t, source, tc.wantKey, tc.nodeID)
+		resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, tc.nodeID, evt)
 		if !resolved.Matched || resolved.HandlerEventKey != tc.wantKey {
 			t.Fatalf("handler resolution for %s = %#v, want %s", tc.eventType, resolved, tc.wantKey)
 		}
 	}
 }
 
-func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesLoweredPackageRootConnect(t *testing.T) {
+func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesStampedPackageRootConnect(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
 	producerEvent := source.ResolveFlowEventReference("grandchild", "micro.done")
 	receiverEvent := source.ResolveFlowEventReference("child", "micro.done")
@@ -344,32 +347,31 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesLoweredPackage
 	}
 
 	evt := eventtest.RunCreatingRootIngress("", events.EventType(producerEvent), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
-	resolved := workflowNodeConnectedInputEventHandlerResolution(source, "child-relay", evt)
+	route := workflowNodeStampedConnectRoute(t, source, "child", "micro_done", "child-relay")
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "child-relay", evt)
 	if !resolved.Matched || resolved.HandlerEventKey != "micro.done" {
 		t.Fatalf("package-root connect handler resolution = %#v, want child-relay micro.done", resolved)
 	}
 }
 
-func TestWorkflowNodeConnectedInputEventHandlerResolution_RootSourceRejectsEmptySourceChildContext(t *testing.T) {
+func TestWorkflowNodeConnectedInputEventHandlerResolution_DoesNotInferClaimFromFlowInstanceShape(t *testing.T) {
 	source := loadWorkflowFixtureSource(t, "test-nested-three-levels")
+	producerEvent := source.ResolveFlowEventReference("grandchild", "micro.done")
 	for _, tc := range []struct {
 		name         string
 		flowInstance string
-		wantMatched  bool
 	}{
 		{name: "child context", flowInstance: "child/inst-1"},
-		{name: "UUID root context", flowInstance: "11111111-1111-4111-8111-111111111111", wantMatched: true},
+		{name: "UUID root context", flowInstance: "11111111-1111-4111-8111-111111111111"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			evt := eventtest.RunCreatingRootIngress("", "step.begin", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+			evt := eventtest.RunCreatingRootIngress("", events.EventType(producerEvent), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
 				FlowInstance: tc.flowInstance,
 			}, time.Unix(1, 0).UTC())
-			resolved := workflowNodeConnectedInputEventHandlerResolution(source, "child-relay", evt)
-			if resolved.Matched != tc.wantMatched {
-				t.Fatalf("connected-input resolution = %#v, want matched %v", resolved, tc.wantMatched)
-			}
-			if tc.wantMatched && resolved.HandlerEventKey != "step.begin" {
-				t.Fatalf("connected-input handler = %q, want step.begin", resolved.HandlerEventKey)
+			route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "child-relay"}
+			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "child-relay", evt)
+			if resolved.Matched {
+				t.Fatalf("connected-input resolution = %#v, want no authority without a stamped claim", resolved)
 			}
 		})
 	}
@@ -384,7 +386,8 @@ func TestWorkflowNodeConnectedInputHandlerMatchesConcreteTemplateProducer(t *tes
 		Target:       events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
 	}, time.Unix(1, 0).UTC())
 
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "receiver-node", evt)
+	route := workflowNodeStampedConnectRoute(t, source, "receiver", "deploy_requested", "receiver-node")
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "receiver-node", evt)
 	if !resolved.Matched || resolved.HandlerEventKey != "deploy.requested" {
 		t.Fatalf("concrete template connect handler resolution = %#v, want receiver deploy.requested", resolved)
 	}
@@ -405,6 +408,7 @@ func TestWorkflowNodeConnectedInputHandlerEnforcesProducerMode(t *testing.T) {
 		{name: "template concrete name without route", mode: "template", eventType: "producer/inst-1/deploy.done"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			source := testWorkflowNodeConnectedInputSource(tc.mode)
 			sourceRoute := tc.source
 			if !sourceRoute.Empty() {
 				sourceRoute.EntityID = "producer-entity"
@@ -415,7 +419,12 @@ func TestWorkflowNodeConnectedInputHandlerEnforcesProducerMode(t *testing.T) {
 				Source:       sourceRoute,
 				Target:       events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
 			}, time.Unix(1, 0).UTC())
-			resolved := workflowNodeEventHandlerResolutionForDelivery(testWorkflowNodeConnectedInputSource(tc.mode), "receiver-node", evt)
+			ctx := context.Background()
+			if tc.want {
+				route := workflowNodeStampedConnectRoute(t, source, "receiver", "deploy_requested", "receiver-node")
+				ctx = withWorkflowNodeDeliveryRoute(ctx, route)
+			}
+			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, "receiver-node", evt)
 			if resolved.Matched != tc.want {
 				t.Fatalf("handler resolution = %#v, want matched %v", resolved, tc.want)
 			}
@@ -423,7 +432,7 @@ func TestWorkflowNodeConnectedInputHandlerEnforcesProducerMode(t *testing.T) {
 	}
 }
 
-func TestWorkflowNodeConnectedInputHandlerRejectsAmbiguousReceiverPins(t *testing.T) {
+func TestWorkflowNodeConnectedInputHandlerUsesExactStampedReceiverPin(t *testing.T) {
 	source := testWorkflowNodeConnectedInputCollisionSource()
 	evt := eventtest.RunCreatingRootIngress("", "producer/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
 		EntityID:     "receiver-entity",
@@ -432,21 +441,49 @@ func TestWorkflowNodeConnectedInputHandlerRejectsAmbiguousReceiverPins(t *testin
 		Target:       events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
 	}, time.Unix(1, 0).UTC())
 
-	resolved := workflowNodeConnectedInputEventHandlerResolution(source, "receiver-node", evt)
-	if resolved.Matched || !strings.Contains(resolved.Failure, "multiple connected input events") || !strings.Contains(resolved.Failure, "deploy.accepted") || !strings.Contains(resolved.Failure, "deploy.audited") {
-		t.Fatalf("ambiguous connected-input resolution = %#v", resolved)
+	route := workflowNodeStampedConnectRoute(t, source, "receiver", "deploy_accepted", "receiver-node")
+	ctx := withWorkflowNodeDeliveryRoute(context.Background(), route)
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, "receiver-node", evt)
+	if !resolved.Matched || resolved.HandlerEventKey != "deploy.accepted" {
+		t.Fatalf("stamped connected-input resolution = %#v, want deploy.accepted", resolved)
 	}
 
-	node := NewNode(runtimecontracts.SystemNodeContract{
-		ID: "receiver-node",
-		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			"deploy.accepted": {},
-			"deploy.audited":  {},
-		},
-	}, source, nil, nil).(*DeclarativeNode)
-	if _, err := node.HandleEvent(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "multiple connected input events") {
-		t.Fatalf("HandleEvent error = %v, want explicit receiver-pin ambiguity", err)
+}
+
+func workflowNodeStampedConnectRouteForHandlerEvent(t testing.TB, source semanticview.Source, handlerEvent, nodeID string) events.DeliveryRoute {
+	t.Helper()
+	for _, plan := range runtimepinrouting.CompileConnectGraph(source).Plans() {
+		if eventidentity.Normalize(plan.Receiver.LocalEventCode()) != eventidentity.Normalize(handlerEvent) {
+			continue
+		}
+		route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID}
+		claim, err := runtimepinrouting.ConnectExecutionClaim(plan, route)
+		if err != nil {
+			t.Fatalf("build stamped connect claim: %v", err)
+		}
+		route.ConnectClaim = claim
+		return route
 	}
+	t.Fatalf("compiled graph has no receiver event %s", handlerEvent)
+	return events.DeliveryRoute{}
+}
+
+func workflowNodeStampedConnectRoute(t testing.TB, source semanticview.Source, receiverFlow, receiverPin, nodeID string) events.DeliveryRoute {
+	t.Helper()
+	for _, plan := range runtimepinrouting.CompileConnectGraph(source).Plans() {
+		if strings.TrimSpace(plan.Receiver.FlowIDCode()) != receiverFlow || strings.TrimSpace(plan.Receiver.PinCode()) != receiverPin {
+			continue
+		}
+		route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID}
+		claim, err := runtimepinrouting.ConnectExecutionClaim(plan, route)
+		if err != nil {
+			t.Fatalf("build stamped connect claim: %v", err)
+		}
+		route.ConnectClaim = claim
+		return route
+	}
+	t.Fatalf("compiled graph has no receiver %s.%s", receiverFlow, receiverPin)
+	return events.DeliveryRoute{}
 }
 
 func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Source {
@@ -488,7 +525,7 @@ func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Sour
 				"receiver": {{Name: "deploy_requested", Event: "deploy.requested"}},
 			},
 			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
-				SourceFile: "package.yaml", SourceLine: 1, From: "producer.deploy_done", To: "receiver.deploy_requested",
+				SourceFile: "package.yaml", SourceLine: 1, From: "producer.deploy_done", To: "receiver.deploy_requested", Adapter: "deploy_done_to_deploy_requested",
 			}},
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"receiver-node": {"deploy.requested": {}},
@@ -540,8 +577,8 @@ func testWorkflowNodeConnectedInputCollisionSource() semanticview.Source {
 			},
 			FlowInputEventPins: map[string][]runtimecontracts.FlowInputEventPin{"receiver": receiverInputs},
 			CompositionConnects: []runtimecontracts.FlowPackageConnect{
-				{SourceFile: "package.yaml", SourceLine: 1, From: "producer.deploy_done", To: "receiver.deploy_accepted"},
-				{SourceFile: "package.yaml", SourceLine: 2, From: "producer.deploy_done", To: "receiver.deploy_audited"},
+				{SourceFile: "package.yaml", SourceLine: 1, From: "producer.deploy_done", To: "receiver.deploy_accepted", Adapter: "deploy_done_to_deploy_accepted"},
+				{SourceFile: "package.yaml", SourceLine: 2, From: "producer.deploy_done", To: "receiver.deploy_audited", Adapter: "deploy_done_to_deploy_audited"},
 			},
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{"receiver-node": receiverHandlers},
 		},
@@ -555,7 +592,52 @@ func testWorkflowNodeConnectedInputCollisionSource() semanticview.Source {
 	})
 }
 
-func TestWorkflowNodeHandlerResolution_LocalizesProducerScopedEventThroughTargetRoute(t *testing.T) {
+func TestWorkflowNodeHandlerResolution_TargetRouteDoesNotAuthorizeProducerScopedEvent(t *testing.T) {
+	source := workflowNodeDirectTemplateDeliverySource()
+	evt := eventtest.RunCreatingRootIngress("", "intake/account.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt = eventtest.TargetRouted(evt, events.RouteIdentity{
+		FlowID:       "account_case",
+		FlowInstance: "account_case/ti-1",
+		EntityID:     "entity-1",
+	})
+	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "account-case-worker", Target: evt.TargetRoute()}
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "account-case-worker", evt)
+	if resolved.Matched || !strings.Contains(resolved.Failure, "stamped connect claim") {
+		t.Fatalf("target-route-only resolution = %#v, want fail-closed stamped-claim error", resolved)
+	}
+}
+
+func TestWorkflowNodeHandlerResolution_DirectConcreteDeliveryRequiresExactSourceTargetAgreement(t *testing.T) {
+	source := workflowNodeDirectTemplateDeliverySource()
+	producerRoute := events.RouteIdentity{FlowID: "account_case", FlowInstance: "account_case/ti-1", EntityID: "entity-1"}
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
+		"", "account_case/ti-1/account.ready", "", "", []byte(`{}`), 0, "", "",
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, producerRoute),
+		eventtest.ConcreteTemplateRoutingSource(producerRoute.FlowID, producerRoute.FlowInstance, producerRoute.EntityID),
+		time.Unix(1, 0).UTC(),
+	)
+	for _, tc := range []struct {
+		name   string
+		target events.RouteIdentity
+		want   bool
+	}{
+		{name: "exact instance", target: producerRoute, want: true},
+		{name: "other instance", target: events.RouteIdentity{FlowID: "account_case", FlowInstance: "account_case/ti-2", EntityID: "entity-2"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "account-case-worker", Target: tc.target}
+			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "account-case-worker", evt)
+			if resolved.Matched != tc.want {
+				t.Fatalf("direct concrete resolution = %#v, want matched=%t", resolved, tc.want)
+			}
+			if tc.want && resolved.HandlerEventKey != "account.ready" {
+				t.Fatalf("handler event key = %q, want account.ready", resolved.HandlerEventKey)
+			}
+		})
+	}
+}
+
+func workflowNodeDirectTemplateDeliverySource() semanticview.Source {
 	accountCase := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "account_case", Flow: "account_case"},
 		Schema: runtimecontracts.FlowSchemaDocument{
@@ -579,7 +661,7 @@ func TestWorkflowNodeHandlerResolution_LocalizesProducerScopedEventThroughTarget
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{accountCase}}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"account-case-worker": {
@@ -594,23 +676,6 @@ func TestWorkflowNodeHandlerResolution_LocalizesProducerScopedEventThroughTarget
 			},
 		},
 	})
-	evt := eventtest.RunCreatingRootIngress("", "intake/account.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
-	evt = eventtest.TargetRouted(evt, events.RouteIdentity{
-		FlowID:       "account_case",
-		FlowInstance: "account_case/ti-1",
-		EntityID:     "entity-1",
-	})
-	if got := workflowNodeTargetRouteLocalEventType("account_case", "account_case", []string{"account.ready"}, "intake/account.ready", evt.TargetRoute()); got != "account.ready" {
-		t.Fatalf("target-route localized event = %q, want account.ready", got)
-	}
-
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "account-case-worker", evt)
-	if !resolved.Matched {
-		t.Fatal("expected account-case-worker handler to resolve through target route")
-	}
-	if got := resolved.HandlerEventKey; got != "account.ready" {
-		t.Fatalf("handler event key = %q, want account.ready", got)
-	}
 }
 
 func TestWorkflowNodeHandlerResolution_PreservesAuthoredKeyForCanonicalCrossFlowEvent(t *testing.T) {
@@ -631,7 +696,9 @@ func TestWorkflowNodeHandlerResolution_PreservesAuthoredKeyForCanonicalCrossFlow
 		EntityID:     FlowInstanceEntityID("portfolio"),
 	})
 
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "portfolio-collector", evt)
+	route := workflowNodeStampedConnectRouteForHandlerEvent(t, source, "operating.reported", "portfolio-collector")
+	route.Target = evt.TargetRoute()
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "portfolio-collector", evt)
 	if !resolved.Matched {
 		t.Fatal("expected portfolio handler to resolve through the canonical cross-flow event")
 	}

@@ -7,7 +7,7 @@ import (
 
 func TestInputPinResolutionGeneratedSourceModeMatrix(t *testing.T) {
 	for _, mode := range []FlowInputResolutionMode{FlowInputResolutionModeSelect, FlowInputResolutionModeSelectOrCreate, FlowInputResolutionModeFanIn, FlowInputResolutionModeReply} {
-		t.Run(mode.String(), func(t *testing.T) {
+		t.Run(FlowInputResolutionModeCode(mode), func(t *testing.T) {
 			_, err := ResolveFlowInputInstanceSource(mode, FlowInputCarrySourceGeneratedUUID)
 			if err == nil || !strings.Contains(err.Error(), "only valid for resolution mode create") {
 				t.Fatalf("ResolveFlowInputInstanceSource error = %v, want create-only rejection", err)

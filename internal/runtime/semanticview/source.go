@@ -41,13 +41,10 @@ type Source interface {
 	FlowOutputEventPins(flowID string) []runtimecontracts.FlowOutputEventPin
 	FlowInputEventPin(flowID, pinName string) (runtimecontracts.FlowInputEventPin, bool)
 	FlowOutputEventPin(flowID, pinName string) (runtimecontracts.FlowOutputEventPin, bool)
-	CompositionConnects() []runtimecontracts.FlowPackageConnect
 	FlowWritePins(flowID string) []string
 	WritePinOwners(pin string) []string
 	FlowHasInputEvent(flowID, eventType string) bool
 	FlowHasOutputEvent(flowID, eventType string) bool
-	ResolveFlowInputAutoWire(flowID, eventType string) runtimecontracts.FlowInputAutoWireResolution
-	FlowInputProducerPatterns(flowID, eventType string) []string
 	ResolveFlowEventReference(flowID, eventType string) string
 	ResolveFlowEventPattern(flowID, pattern string) string
 	FlowEventMatches(flowID, subscription, eventType string) bool

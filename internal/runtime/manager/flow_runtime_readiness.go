@@ -1250,7 +1250,9 @@ func dynamicFlowRuntimeCreationEvent(plan runtimepipeline.DynamicFlowRuntimeRead
 	if creation == nil {
 		return empty, fmt.Errorf("dynamic flow creation event plan is required")
 	}
-	routingSource, err := events.NewRuntimeRoutingSource(plan.Identity.TemplateID, plan.Identity.InstancePath, plan.Identity.EntityID)
+	routingSource, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
+		FlowID: plan.Identity.TemplateID, FlowInstance: plan.Identity.InstancePath, EntityID: plan.Identity.EntityID,
+	})
 	if err != nil {
 		return empty, err
 	}

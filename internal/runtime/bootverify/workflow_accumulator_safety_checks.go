@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -119,7 +120,7 @@ func (p accumulatorProducerPaths) message(flowID, nodeID, eventType string) stri
 
 func (c *checkerContext) accumulatorProducerPaths(flowID, eventType string) accumulatorProducerPaths {
 	return accumulatorProducerPaths{
-		inputProof: inputPinProducerSourceProof{resolution: semanticview.ResolveFlowInputProducerWithOptions(c.source, flowID, eventType, runtimecontracts.FlowInputProducerResolutionOptions{
+		inputProof: inputPinProducerSourceProof{resolution: runtimepinrouting.ResolveFlowInputProducerWithOptions(c.source, flowID, eventType, runtimecontracts.FlowInputProducerResolutionOptions{
 			AllowNonInputEvent: true,
 		})},
 	}

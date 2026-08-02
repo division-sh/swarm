@@ -15,7 +15,7 @@ func TestResolveFlowInputProducer_ClassifiesIntrinsicInputPinSource(t *testing.T
 		Source: "external",
 	}, nil)
 
-	resolution := ResolveFlowInputProducer(source, "worker", "work.requested")
+	resolution := ResolveNonConnectFlowInputProducer(source, "worker", "work.requested")
 
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress) {
 		t.Fatalf("evidence = %#v, want intrinsic ingress", resolution.Evidence)
@@ -34,14 +34,14 @@ func TestResolveFlowInputProducer_ClassifiesRootBoundaryExternalIngress(t *testi
 		},
 	}
 
-	resolution := ResolveFlowInputProducer(Wrap(bundle), "", "work.requested")
+	resolution := ResolveNonConnectFlowInputProducer(Wrap(bundle), "", "work.requested")
 
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) {
 		t.Fatalf("evidence = %#v, want boundary external ingress", resolution.Evidence)
 	}
 }
 
-func TestResolveFlowInputProducer_ExplicitConnectOwnsRootInput(t *testing.T) {
+func TestResolveNonConnectFlowInputProducer_DoesNotInterpretRootConnect(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
@@ -62,13 +62,13 @@ func TestResolveFlowInputProducer_ExplicitConnectOwnsRootInput(t *testing.T) {
 		},
 	}
 
-	resolution := ResolveFlowInputProducer(Wrap(bundle), "", "work.requested")
+	resolution := ResolveNonConnectFlowInputProducer(Wrap(bundle), "", "work.requested")
 
-	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
-		t.Fatalf("evidence = %#v, want parent connect", resolution.Evidence)
+	if resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
+		t.Fatalf("evidence = %#v, non-connect projection must not interpret authored connects", resolution.Evidence)
 	}
-	if resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) {
-		t.Fatalf("evidence = %#v, connected root pin must not retain external-ingress authority", resolution.Evidence)
+	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) {
+		t.Fatalf("evidence = %#v, want repository-root ingress before compiled graph projection", resolution.Evidence)
 	}
 }
 
@@ -102,7 +102,7 @@ func TestResolveFlowInputProducer_NestedPackageRootConnectDoesNotSuppressReposit
 	}
 	source := Wrap(bundle)
 
-	rootResolution := ResolveFlowInputProducer(source, "", rootInput.EventType())
+	rootResolution := ResolveNonConnectFlowInputProducer(source, "", rootInput.EventType())
 	if !rootResolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) {
 		t.Fatalf("root evidence = %#v, want repository-root external ingress", rootResolution.Evidence)
 	}
@@ -110,22 +110,22 @@ func TestResolveFlowInputProducer_NestedPackageRootConnectDoesNotSuppressReposit
 		t.Fatalf("root evidence = %#v, nested package-root connect must not own the repository-root pin", rootResolution.Evidence)
 	}
 
-	childResolution := ResolveFlowInputProducer(source, "child", childInput.EventType())
-	if !childResolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
-		t.Fatalf("child evidence = %#v, want nested package-root connect ownership", childResolution.Evidence)
+	childResolution := ResolveNonConnectFlowInputProducer(source, "child", childInput.EventType())
+	if childResolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
+		t.Fatalf("child evidence = %#v, non-connect projection must not interpret nested connects", childResolution.Evidence)
 	}
 }
 
-func TestResolveFlowInputProducer_ClassifiesParentConnectWithoutRoutePattern(t *testing.T) {
+func TestResolveNonConnectFlowInputProducer_DoesNotClassifyParentConnect(t *testing.T) {
 	source := flowInputProducerFixture(runtimecontracts.FlowInputEventPin{
 		Name:  "work.requested",
 		Event: "work.requested",
 	}, []runtimecontracts.FlowPackageConnect{{From: ".work.requested", To: "worker.work.requested"}})
 
-	resolution := ResolveFlowInputProducer(source, "worker", "work.requested")
+	resolution := ResolveNonConnectFlowInputProducer(source, "worker", "work.requested")
 
-	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
-		t.Fatalf("evidence = %#v, want parent connect", resolution.Evidence)
+	if resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
+		t.Fatalf("evidence = %#v, non-connect projection must not interpret authored connects", resolution.Evidence)
 	}
 	if len(resolution.ProducerPatterns()) != 0 {
 		t.Fatalf("patterns = %#v, want none for direct parent connect route proof", resolution.ProducerPatterns())
@@ -139,7 +139,7 @@ func TestResolveFlowInputProducer_ClassifiesDeclaredHarnessSource(t *testing.T) 
 		Source: "harness",
 	}, nil)
 
-	resolution := ResolveFlowInputProducer(source, "worker", "work.requested")
+	resolution := ResolveNonConnectFlowInputProducer(source, "worker", "work.requested")
 
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryHarnessInjection) {
 		t.Fatalf("evidence = %#v, want harness injection", resolution.Evidence)
@@ -188,7 +188,7 @@ func TestResolveFlowInputProducer_ClassifiesPlatformSource(t *testing.T) {
 		Event: "platform.runtime_log",
 	}, nil)
 
-	resolution := ResolveFlowInputProducer(source, "worker", "platform.runtime_log")
+	resolution := ResolveNonConnectFlowInputProducer(source, "worker", "platform.runtime_log")
 
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerPlatformSource) {
 		t.Fatalf("evidence = %#v, want platform source", resolution.Evidence)
@@ -201,7 +201,7 @@ func TestResolveFlowInputProducer_ClassifiesInternalTopologyWithoutAutoWirePatte
 		Event: "work.requested",
 	}, nil)
 
-	resolution := ResolveFlowInputProducer(source, "worker", "work.requested")
+	resolution := ResolveNonConnectFlowInputProducer(source, "worker", "work.requested")
 
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerInternalTopology) {
 		t.Fatalf("evidence = %#v, want internal topology producer", resolution.Evidence)
@@ -233,7 +233,7 @@ func TestResolveFlowInputProducer_ClassifiesAutoEmitOnCreateAsInternalTopology(t
 	bundle.FlowSchemas["worker"] = worker
 	bundle.FlowTree.ByID["worker"].Schema = worker
 
-	resolution := ResolveFlowInputProducer(source, "worker", "work.created")
+	resolution := ResolveNonConnectFlowInputProducer(source, "worker", "work.created")
 
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerInternalTopology) {
 		t.Fatalf("evidence = %#v, want auto_emit_on_create internal topology proof", resolution.Evidence)
@@ -246,7 +246,7 @@ func TestResolveFlowInputProducer_ReportsMissingAndInvalidContext(t *testing.T) 
 		Event: "work.requested",
 	}, nil)
 
-	missing := ResolveFlowInputProducer(source, "worker", "work.missing")
+	missing := ResolveNonConnectFlowInputProducer(source, "worker", "work.missing")
 	if missing.HasEvidence() || !missing.HasEvidenceKind(runtimecontracts.FlowInputProducerInvalidContext) {
 		t.Fatalf("missing input evidence = %#v, want invalid context outcome without proof", missing.Evidence)
 	}
@@ -255,7 +255,7 @@ func TestResolveFlowInputProducer_ReportsMissingAndInvalidContext(t *testing.T) 
 		Name:  "work.unproduced",
 		Event: "work.unproduced",
 	}, nil)
-	resolution := ResolveFlowInputProducer(noProducer, "worker", "work.unproduced")
+	resolution := ResolveNonConnectFlowInputProducer(noProducer, "worker", "work.unproduced")
 	if resolution.HasEvidence() {
 		t.Fatalf("evidence = %#v, want no producer proof", resolution.Evidence)
 	}

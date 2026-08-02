@@ -7,7 +7,6 @@ import (
 
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
@@ -95,7 +94,7 @@ func TestSingletonCoordinatorPilotConformance_CoversSingletonMapCoordinatorOwner
 		t.Fatalf("map append key = %#v, want explicit payload.lead_id ref", containedWrites[2].Key)
 	}
 
-	plans, issues := pinrouting.LowerCompositionConnectRoutePlans(source)
+	plans, issues := compiledConnectPlans(source)
 	if len(issues) != 0 {
 		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
 	}

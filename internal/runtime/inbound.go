@@ -479,7 +479,7 @@ func projectInboundPublication(target InboundTarget, admitted providertriggers.A
 	if delivery.ProviderEventID != admitted.ProviderEventID || delivery.ProviderEventType != admitted.ProviderEventType {
 		return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, fmt.Errorf("compiled provider projection changed admitted request identity")
 	}
-	routingSource, err := events.NewDeclaredIngressRoutingSource(target.FlowID, "", request.EntityID, "provider_admission_plan")
+	routingSource, err := events.NewExternalIngressRoutingSource(target.FlowID, request.EntityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		return nil, noEvidence, runtimeauthoractivity.InboundProjection{}, err
 	}

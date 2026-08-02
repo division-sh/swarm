@@ -69,7 +69,7 @@ func TestAdmitSelectedContractRouteHistoryDerivesSelectedRoutesWithoutMutating(t
 
 func TestAdmitSelectedContractRouteHistoryConnectMatchesConcreteTemplateSourceEndpoint(t *testing.T) {
 	plan := testRunForkPlan("producer/inst-1/scan.requested", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
-	plan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}
+	plan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "producer", "producer/inst-1")
 	source := testContractFrontierTemplateConnectSource()
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
@@ -96,6 +96,7 @@ func TestAdmitSelectedContractRouteHistoryConnectMatchesConcreteTemplateSourceEn
 
 func TestAdmitSelectedContractRouteHistoryRejectsConcreteTemplateIdentityWhenSourceRouteIsAbsent(t *testing.T) {
 	plan := testRunForkPlan("producer/inst-1/scan.requested", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
+	plan.PendingWork[0].RoutingSource = events.NoRoutingSource()
 	source := testContractFrontierTemplateConnectSource()
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
@@ -123,7 +124,7 @@ func TestAdmitSelectedContractRouteHistoryRejectsConcreteTemplateIdentityWhenSou
 func TestSelectedContractAdmissionsRejectConflictingExplicitTemplateIdentity(t *testing.T) {
 	source := testContractFrontierTemplateConnectSource()
 	frontierPlan := testRunForkPlan("producer/inst-1/scan.requested", runfork.RunForkPendingClassificationPending, "node", "source-node")
-	frontierPlan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "unrelated", FlowInstance: "unrelated/inst-1"}
+	frontierPlan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "unrelated", "unrelated/inst-1")
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              frontierPlan,
 		Source:            source,
@@ -140,7 +141,7 @@ func TestSelectedContractAdmissionsRejectConflictingExplicitTemplateIdentity(t *
 	}
 
 	historyPlan := testRunForkPlan("producer/inst-1/scan.requested", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
-	historyPlan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "unrelated", FlowInstance: "unrelated/inst-1"}
+	historyPlan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "unrelated", "unrelated/inst-1")
 	historyFrontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              historyPlan,
 		Source:            source,
@@ -165,7 +166,7 @@ func TestSelectedContractAdmissionsRejectConflictingExplicitTemplateIdentity(t *
 
 func TestAdmitSelectedContractRouteHistoryConnectRejectsUnrelatedTemplateSameLeaf(t *testing.T) {
 	plan := testRunForkPlan("unrelated/inst-1/scan.requested", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
-	plan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "unrelated", FlowInstance: "unrelated/inst-1"}
+	plan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "unrelated", "unrelated/inst-1")
 	source := testContractFrontierTemplateConnectSource()
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
@@ -196,6 +197,7 @@ func TestAdmitSelectedContractRouteHistoryDoesNotDuplicateFrontierRecipients(t *
 	plan.PendingWork = append(plan.PendingWork, runfork.RunForkPendingWork{
 		EventID:        historyEventID,
 		EventName:      "producer/scan.requested",
+		RoutingSource:  plan.PendingWork[0].RoutingSource,
 		DeliveryID:     uuid.NewString(),
 		SubscriberType: "node",
 		SubscriberID:   "completed-node",
@@ -241,7 +243,7 @@ func TestAdmitSelectedContractRouteHistoryDoesNotDuplicateFrontierRecipients(t *
 
 func TestAdmitSelectedContractRouteHistoryClassifiesDynamicFlowInstances(t *testing.T) {
 	plan := testRunForkPlan("review/inst-1/task.started", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
-	plan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "review", FlowInstance: "review/inst-1"}
+	plan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "review", "review/inst-1")
 	source := testContractFrontierTemplateSource()
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,

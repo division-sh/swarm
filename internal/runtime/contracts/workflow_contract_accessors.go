@@ -697,6 +697,9 @@ func (b *WorkflowContractBundle) NodeContractSource(nodeID string) (ContractItem
 	if ok {
 		return source, true
 	}
+	if _, ok := b.Nodes[nodeID]; ok {
+		return ContractItemSource{Layer: "project"}, true
+	}
 	for _, view := range b.ProjectViews() {
 		for key := range view.Nodes {
 			if strings.TrimSpace(key) != nodeID {

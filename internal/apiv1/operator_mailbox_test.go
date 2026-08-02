@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -119,7 +120,7 @@ func TestOperatorMailboxProjectsProposedEffectAuthorizationAndDispatchSeparately
 	state := newMutatingRuntimeProbeState(t, "mailbox.get")
 	anchor, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
 		RequestEventID: "00000000-0000-0000-0000-000000000303", ActivityID: "send_support_reply", Decision: "support_reply",
-		Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: "root", EntityID: "entity-1"},
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: "root", EntityID: "entity-1"}, Source: eventtest.RootRoutingSource("entity-1"),
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -9,11 +9,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 )
 
-func ResolveFlowInputProducer(source Source, flowID, eventType string) runtimecontracts.FlowInputProducerResolution {
-	return ResolveFlowInputProducerWithOptions(source, flowID, eventType, runtimecontracts.FlowInputProducerResolutionOptions{})
+func ResolveNonConnectFlowInputProducer(source Source, flowID, eventType string) runtimecontracts.FlowInputProducerResolution {
+	return ResolveNonConnectFlowInputProducerWithOptions(source, flowID, eventType, runtimecontracts.FlowInputProducerResolutionOptions{})
 }
 
-func ResolveFlowInputProducerWithOptions(source Source, flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions) runtimecontracts.FlowInputProducerResolution {
+func ResolveNonConnectFlowInputProducerWithOptions(source Source, flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions) runtimecontracts.FlowInputProducerResolution {
 	flowID = strings.TrimSpace(flowID)
 	eventType = eventidentity.Normalize(eventType)
 	out := runtimecontracts.FlowInputProducerResolution{FlowID: flowID, EventType: eventType}
@@ -59,11 +59,7 @@ func ResolveFlowInputProducerWithOptions(source Source, flowID, eventType string
 
 	if isInputEvent && !opts.AllowNonInputEvent {
 		appendBoundaryIngressEvidence(source, flowID, eventType, opts, appendEvidence)
-		appendParentConnectEvidence(source, flowID, eventType, appendEvidence)
 	} else {
-		if isInputEvent {
-			appendParentConnectEvidence(source, flowID, eventType, appendEvidence)
-		}
 		appendExternalMetadataEvidence(source, flowID, eventType, appendEvidence)
 	}
 	if isInputEvent {
@@ -82,11 +78,6 @@ func ResolveFlowInputProducerWithOptions(source Source, flowID, eventType string
 
 func appendBoundaryIngressEvidence(source Source, flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
 	if flowID == "" && !opts.AllowNonInputEvent {
-		for _, pin := range flowInputPinsForEvent(source, flowID, eventType) {
-			if len(ResolvedCompositionConnectsTo(source, flowID, pin.PinName())) > 0 {
-				return
-			}
-		}
 		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
 			Kind:      runtimecontracts.FlowInputProducerBoundaryExternalIngress,
 			EventType: eventType,
@@ -104,24 +95,6 @@ func appendBoundaryIngressEvidence(source Source, flowID, eventType string, opts
 			Pin:       pin.PinName(),
 			Detail:    "input pin declares source: external",
 		})
-	}
-}
-
-func appendParentConnectEvidence(source Source, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
-	for _, pin := range flowInputPinsForEvent(source, flowID, eventType) {
-		connects := ResolvedCompositionConnectsTo(source, flowID, pin.PinName())
-		if len(connects) == 0 {
-			continue
-		}
-		for _, connect := range connects {
-			appendEvidence(runtimecontracts.FlowInputProducerEvidence{
-				Kind:      runtimecontracts.FlowInputProducerBoundaryParentConnect,
-				FlowID:    connect.From.FlowID,
-				EventType: eventType,
-				Pin:       pin.PinName(),
-				Detail:    fmt.Sprintf("parent connect from %s", strings.TrimSpace(connect.Connect.From)),
-			})
-		}
 	}
 }
 

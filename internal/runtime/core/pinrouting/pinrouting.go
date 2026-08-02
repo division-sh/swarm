@@ -163,13 +163,12 @@ func compositionConnectRoutePlansFromOutputEvent(source semanticview.Source, flo
 	if eventType == "" {
 		return nil
 	}
-	plans, _ := LowerCompositionConnectRoutePlans(source)
 	out := make([]ConnectRoutePlan, 0)
-	for _, plan := range plans {
-		if strings.TrimSpace(plan.Source.FlowID) != flowID {
+	for _, plan := range CompileConnectGraph(source).plans {
+		if strings.TrimSpace(plan.Source.flowID) != flowID {
 			continue
 		}
-		if eventReferencesOverlap(source, flowID, []string{eventType}, flowID, []string{plan.Source.Event, plan.Source.ResolvedEvent}) {
+		if eventReferencesOverlap(source, flowID, []string{eventType}, flowID, []string{plan.Source.event, plan.Source.resolvedEvent}) {
 			out = append(out, plan)
 		}
 	}
@@ -329,7 +328,7 @@ func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resol
 
 func connectPlansContainRootReceiver(plans []ConnectRoutePlan) bool {
 	for _, plan := range plans {
-		if plan.Receiver.Root {
+		if plan.Receiver.IsRoot() {
 			return true
 		}
 	}

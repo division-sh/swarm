@@ -140,7 +140,7 @@ func (a *Adapter) ActivateNormalAuthority(ctx context.Context, tx *sql.Tx, autho
 }
 
 func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligation Obligation) (DurableHandoffProof, error) {
-	target, deliveryContext, projection, err := encodeRoute(obligation.Route())
+	target, deliveryContext, projection, connectClaim, err := encodeRoute(obligation.Route())
 	if err != nil {
 		return DurableHandoffProof{}, err
 	}
@@ -165,7 +165,7 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 			delivery_id, run_id, event_id, route_identity, subscriber_type, subscriber_id,
 			agent_name_owner, agent_name_source, agent_route_presence,
 			agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path,
-			delivery_target_route, delivery_context, delivery_payload_projection,
+			delivery_target_route, delivery_context, delivery_payload_projection, connect_execution_claim,
 			execution_authority_kind, authority_bundle_hash, authority_bundle_source,
 			execution_authority_id, execution_authority_generation,
 			selected_execution_id, selected_fork_run_id, selected_execution_generation,
@@ -174,17 +174,17 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 		) VALUES (
 			$1::uuid, NULLIF($2, '')::uuid, $3::uuid, $4, $5, $6,
 			$7, $8, $9, $10, $11, $12,
-			$13::jsonb, $14::jsonb, $15::jsonb,
-			$16, $17, $18, $19, $20,
-			NULLIF($21, '')::uuid, NULLIF($22, '')::uuid, $23,
-			'pending', 0, $24, $25, 0, $25, $25
+			$13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb,
+			$17, $18, $19, $20, $21,
+			NULLIF($22, '')::uuid, NULLIF($23, '')::uuid, $24,
+			'pending', 0, $25, $26, 0, $26, $26
 		) ON CONFLICT (event_id, route_identity) DO NOTHING`
 	args := []any{
-		obligation.DeliveryID(), obligation.RunID(), obligation.EventID(), obligation.RouteIdentity().String(),
+		obligation.DeliveryID(), obligation.RunID(), obligation.EventID(), events.EncodeDeliveryRouteIdentity(obligation.RouteIdentity()),
 		string(obligation.SubscriberClass()), obligation.SubscriberID(),
 		agentFields.NameOwner, agentFields.NameSource, agentFields.RoutePresence,
 		agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath,
-		string(target), string(deliveryContext), string(projection),
+		string(target), string(deliveryContext), string(projection), string(connectClaim),
 		string(obligation.Authority().Kind()), bundleHash, bundleSource, obligation.Authority().ExecutionID(), obligation.Authority().Generation(),
 		selectedExecutionID, selectedForkRunID, selectedGeneration, obligation.MaxRetries(), now,
 	}
@@ -194,7 +194,7 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 				delivery_id, run_id, event_id, route_identity, subscriber_type, subscriber_id,
 				agent_name_owner, agent_name_source, agent_route_presence,
 				agent_flow_scope_key, agent_flow_instance_id, agent_flow_instance_path,
-				delivery_target_route, delivery_context, delivery_payload_projection,
+				delivery_target_route, delivery_context, delivery_payload_projection, connect_execution_claim,
 				execution_authority_kind, authority_bundle_hash, authority_bundle_source,
 				execution_authority_id, execution_authority_generation,
 				selected_execution_id, selected_fork_run_id, selected_execution_generation,
@@ -203,18 +203,18 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 			) VALUES (
 				?1, NULLIF(?2, ''), ?3, ?4, ?5, ?6,
 				?7, ?8, ?9, ?10, ?11, ?12,
-				?13, ?14, ?15,
-				?16, ?17, ?18, ?19, ?20,
-				NULLIF(?21, ''), NULLIF(?22, ''), ?23,
-				'pending', 0, ?24, ?25, 0, ?26, ?27
+				?13, ?14, ?15, ?16,
+				?17, ?18, ?19, ?20, ?21,
+				NULLIF(?22, ''), NULLIF(?23, ''), ?24,
+				'pending', 0, ?25, ?26, 0, ?27, ?28
 			)
 			ON CONFLICT(event_id, route_identity) DO NOTHING`
 		args = []any{
-			obligation.DeliveryID(), obligation.RunID(), obligation.EventID(), obligation.RouteIdentity().String(),
+			obligation.DeliveryID(), obligation.RunID(), obligation.EventID(), events.EncodeDeliveryRouteIdentity(obligation.RouteIdentity()),
 			string(obligation.SubscriberClass()), obligation.SubscriberID(),
 			agentFields.NameOwner, agentFields.NameSource, agentFields.RoutePresence,
 			agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath,
-			string(target), string(deliveryContext), string(projection),
+			string(target), string(deliveryContext), string(projection), string(connectClaim),
 			string(obligation.Authority().Kind()), bundleHash, bundleSource, obligation.Authority().ExecutionID(), obligation.Authority().Generation(),
 			selectedExecutionID, selectedForkRunID, selectedGeneration, obligation.MaxRetries(), now, now, now,
 		}
@@ -242,7 +242,7 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 	}
 	return DurableHandoffProof{
 		deliveryID: obligation.DeliveryID(), eventID: obligation.EventID(),
-		routeIdentity: obligation.RouteIdentity().String(), authority: obligation.Authority(),
+		routeIdentity: events.EncodeDeliveryRouteIdentity(obligation.RouteIdentity()), authority: obligation.Authority(),
 	}, nil
 }
 
@@ -680,7 +680,7 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, record deliveryRe
 			return ClaimedObligation{}, err
 		}
 	}
-	claim := Claim{deliveryID: record.DeliveryID, runID: record.RunID, routeIdentity: record.RouteIdentity.String(), token: token, version: version, class: record.SubscriberClass, subscriberID: record.SubscriberID}
+	claim := Claim{deliveryID: record.DeliveryID, runID: record.RunID, routeIdentity: events.EncodeDeliveryRouteIdentity(record.RouteIdentity), token: token, version: version, class: record.SubscriberClass, subscriberID: record.SubscriberID}
 	claimed, err := a.loadByID(ctx, tx, record.DeliveryID, false)
 	if err != nil {
 		return ClaimedObligation{}, err
@@ -1066,7 +1066,7 @@ func (a *Adapter) ProveHandoff(ctx context.Context, q queryer, eventID string, r
 	}
 	return DurableHandoffProof{
 		deliveryID: record.DeliveryID, eventID: record.EventID,
-		routeIdentity: record.RouteIdentity.String(), authority: record.Authority,
+		routeIdentity: events.EncodeDeliveryRouteIdentity(record.RouteIdentity), authority: record.Authority,
 	}, nil
 }
 
@@ -1909,7 +1909,7 @@ func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, runID, reason 
 			return nil, fmt.Errorf("%w: run terminalization lost delivery claim fence", ErrConflict)
 		}
 		if record.claimToken != "" && record.ClaimVersion > 0 {
-			claim := Claim{deliveryID: id, routeIdentity: record.RouteIdentity.String(), token: record.claimToken, version: record.ClaimVersion, class: record.SubscriberClass, subscriberID: record.SubscriberID}
+			claim := Claim{deliveryID: id, routeIdentity: events.EncodeDeliveryRouteIdentity(record.RouteIdentity), token: record.claimToken, version: record.ClaimVersion, class: record.SubscriberClass, subscriberID: record.SubscriberID}
 			if err := a.closeAttemptForTerminalization(ctx, tx, claim, reason, &failure, now); err != nil {
 				return nil, err
 			}
@@ -2010,7 +2010,7 @@ func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cla
 		return deliveryRecord{}, time.Time{}, err
 	}
 	if record.Status != StatusInProgress || record.claimToken != claim.token || record.ClaimVersion != claim.version ||
-		record.RouteIdentity.String() != claim.routeIdentity || record.ClaimExpiresAt.IsZero() || !record.ClaimExpiresAt.After(now) {
+		events.EncodeDeliveryRouteIdentity(record.RouteIdentity) != claim.routeIdentity || record.ClaimExpiresAt.IsZero() || !record.ClaimExpiresAt.After(now) {
 		return deliveryRecord{}, time.Time{}, fmt.Errorf("%w: delivery claim is stale", ErrConflict)
 	}
 	return record, now, nil
@@ -2175,7 +2175,7 @@ func (a *Adapter) loadByEventAndRoute(ctx context.Context, q interface {
 	if a.dialect == DialectSQLite {
 		query = a.selectRecord() + ` WHERE d.event_id = ? AND d.route_identity = ?`
 	}
-	return a.scanRecord(q.QueryRowContext(ctx, query, strings.TrimSpace(eventID), identity.String()))
+	return a.scanRecord(q.QueryRowContext(ctx, query, strings.TrimSpace(eventID), events.EncodeDeliveryRouteIdentity(identity)))
 }
 
 func (a *Adapter) selectRecord() string {
@@ -2186,7 +2186,7 @@ func (a *Adapter) selectRecord() string {
 				d.agent_name_owner, d.agent_name_source, d.agent_route_presence,
 				d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path,
 				d.delivery_target_route, d.delivery_context,
-				d.delivery_payload_projection, d.execution_authority_kind, d.authority_bundle_hash,
+				d.delivery_payload_projection, d.connect_execution_claim, d.execution_authority_kind, d.authority_bundle_hash,
 				d.authority_bundle_source, d.execution_authority_id, d.execution_authority_generation,
 				COALESCE(d.selected_execution_id, ''), COALESCE(d.selected_fork_run_id, ''),
 				COALESCE(d.selected_execution_generation, 0),
@@ -2208,7 +2208,7 @@ func (a *Adapter) selectRecord() string {
 			d.agent_name_owner, d.agent_name_source, d.agent_route_presence,
 			d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path,
 			d.delivery_target_route, d.delivery_context,
-			d.delivery_payload_projection, d.execution_authority_kind, d.authority_bundle_hash,
+			d.delivery_payload_projection, d.connect_execution_claim, d.execution_authority_kind, d.authority_bundle_hash,
 			d.authority_bundle_source, d.execution_authority_id, d.execution_authority_generation,
 			COALESCE(d.selected_execution_id::text, ''), COALESCE(d.selected_fork_run_id::text, ''),
 			COALESCE(d.selected_execution_generation, 0),
@@ -2232,14 +2232,14 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 	var agentFlowScopeKey, agentFlowInstanceID, agentFlowInstancePath string
 	var authorityBundleHash, authorityBundleSource, authorityExecutionID, selectedExecutionID, selectedForkRunID string
 	var authorityGeneration, selectedGeneration uint64
-	var targetRaw, contextRaw, projectionRaw, failureRaw []byte
+	var targetRaw, contextRaw, projectionRaw, connectClaimRaw, failureRaw []byte
 	var nextEligible, claimExpires, started, settled, created, updated any
 	err := row.Scan(
 		&record.DeliveryID, &record.EventID, &record.RunID, &routeIdentity,
 		&subscriberType, &record.SubscriberID,
 		&agentNameOwner, &agentNameSource, &agentRoutePresence,
 		&agentFlowScopeKey, &agentFlowInstanceID, &agentFlowInstancePath,
-		&targetRaw, &contextRaw, &projectionRaw,
+		&targetRaw, &contextRaw, &projectionRaw, &connectClaimRaw,
 		&authorityKind, &authorityBundleHash, &authorityBundleSource, &authorityExecutionID, &authorityGeneration,
 		&selectedExecutionID, &selectedForkRunID, &selectedGeneration,
 		&status, &record.RetryCount, &record.MaxRetries, &nextEligible, &record.ClaimVersion,
@@ -2297,6 +2297,7 @@ func (a *Adapter) scanRecord(row scanner) (deliveryRecord, error) {
 		targetRaw,
 		contextRaw,
 		projectionRaw,
+		connectClaimRaw,
 	)
 	if err != nil {
 		return deliveryRecord{}, fmt.Errorf("%w: persisted delivery route: %v", ErrConflict, err)
@@ -2412,21 +2413,25 @@ func (a *Adapter) databaseNow(ctx context.Context, q interface {
 	return now.UTC().Truncate(time.Microsecond), nil
 }
 
-func encodeRoute(route events.DeliveryRoute) ([]byte, []byte, []byte, error) {
+func encodeRoute(route events.DeliveryRoute) ([]byte, []byte, []byte, []byte, error) {
 	route = route.Normalized()
 	target, err := json.Marshal(route.Target)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	deliveryContext, err := json.Marshal(route.Context)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	projection, err := json.Marshal(route.PayloadProjection)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	return target, deliveryContext, projection, nil
+	connectClaim, err := json.Marshal(route.ConnectClaim)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return target, deliveryContext, projection, connectClaim, nil
 }
 
 func deliveryRouteAgentStorageFields(route events.DeliveryRoute) (agentidentity.StorageFields, error) {
@@ -2455,11 +2460,12 @@ func decodeRoute(
 	class SubscriberClass,
 	subscriberID string,
 	agentFields agentidentity.StorageFields,
-	targetRaw, contextRaw, projectionRaw []byte,
+	targetRaw, contextRaw, projectionRaw, connectClaimRaw []byte,
 ) (events.DeliveryRoute, error) {
 	var target events.RouteIdentity
 	var deliveryContext events.DeliveryContext
 	var projection events.DeliveryPayloadProjection
+	var connectClaim events.ConnectExecutionClaim
 	if err := json.Unmarshal(targetRaw, &target); err != nil {
 		return events.DeliveryRoute{}, fmt.Errorf("decode delivery target: %w", err)
 	}
@@ -2468,6 +2474,9 @@ func decodeRoute(
 	}
 	if err := json.Unmarshal(projectionRaw, &projection); err != nil {
 		return events.DeliveryRoute{}, fmt.Errorf("decode delivery projection: %w", err)
+	}
+	if err := json.Unmarshal(connectClaimRaw, &connectClaim); err != nil {
+		return events.DeliveryRoute{}, fmt.Errorf("decode connect execution claim: %w", err)
 	}
 	identity := agentidentity.Identity{}
 	switch class {
@@ -2493,6 +2502,7 @@ func decodeRoute(
 		Target:            target,
 		Context:           deliveryContext,
 		PayloadProjection: projection,
+		ConnectClaim:      connectClaim,
 	}.Normalized(), nil
 }
 

@@ -85,7 +85,7 @@ func TestAdmitContractFrontier_SelectedContractChangesRecipients(t *testing.T) {
 
 func TestAdmitContractFrontier_ConnectMatchesConcreteTemplateSourceEndpoint(t *testing.T) {
 	plan := testRunForkPlan("producer/inst-1/scan.requested", runfork.RunForkPendingClassificationPending, "node", "source-node")
-	plan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "producer", FlowInstance: "producer/inst-1"}
+	plan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "producer", "producer/inst-1")
 	source := testContractFrontierTemplateConnectSource()
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -107,6 +107,7 @@ func TestAdmitContractFrontier_ConnectMatchesConcreteTemplateSourceEndpoint(t *t
 
 func TestAdmitContractFrontier_ConnectRejectsConcreteTemplateIdentityWhenSourceRouteIsAbsent(t *testing.T) {
 	plan := testRunForkPlan("producer/inst-1/scan.requested", runfork.RunForkPendingClassificationPending, "node", "source-node")
+	plan.PendingWork[0].RoutingSource = events.NoRoutingSource()
 	source := testContractFrontierTemplateConnectSource()
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -128,7 +129,7 @@ func TestAdmitContractFrontier_ConnectRejectsConcreteTemplateIdentityWhenSourceR
 
 func TestAdmitContractFrontier_ConnectRejectsUnrelatedTemplateSameLeaf(t *testing.T) {
 	plan := testRunForkPlan("unrelated/inst-1/scan.requested", runfork.RunForkPendingClassificationPending, "node", "source-node")
-	plan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "unrelated", FlowInstance: "unrelated/inst-1"}
+	plan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "unrelated", "unrelated/inst-1")
 	source := testContractFrontierTemplateConnectSource()
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -162,7 +163,7 @@ func TestSelectedContractAdmissionsEnforceProducerMode(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			source := testContractFrontierConnectSource(tc.mode)
 			frontierPlan := testRunForkPlan(tc.eventName, runfork.RunForkPendingClassificationPending, "node", "source-node")
-			frontierPlan.PendingWork[0].SourceRoute = tc.source
+			frontierPlan.PendingWork[0].RoutingSource = testRoutingSourceForRoute(t, tc.source)
 			frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 				Plan:              frontierPlan,
 				Source:            source,
@@ -179,7 +180,7 @@ func TestSelectedContractAdmissionsEnforceProducerMode(t *testing.T) {
 			}
 
 			historyPlan := testRunForkPlan(tc.eventName, runfork.RunForkPendingClassificationDeliveredCompleted, "node", "source-node")
-			historyPlan.PendingWork[0].SourceRoute = tc.source
+			historyPlan.PendingWork[0].RoutingSource = testRoutingSourceForRoute(t, tc.source)
 			historyFrontier, err := AdmitContractFrontier(ContractFrontierRequest{
 				Plan:              historyPlan,
 				Source:            source,
@@ -415,7 +416,7 @@ func TestAdmitContractFrontier_SelectedDeadLetterRemainsExecutableFrontier(t *te
 
 func TestAdmitContractFrontier_MaterializesSourceFlowInstanceRoutes(t *testing.T) {
 	plan := testRunForkPlan("review/inst-1/task.started", runfork.RunForkPendingClassificationPending, "node", "source-node")
-	plan.PendingWork[0].SourceRoute = events.RouteIdentity{FlowID: "review", FlowInstance: "review/inst-1"}
+	plan.PendingWork[0].RoutingSource = testConcreteRoutingSource(t, "review", "review/inst-1")
 	source := testContractFrontierTemplateSource()
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -455,6 +456,7 @@ func TestAdmitContractFrontier_FailsClosedWithoutSelectedSource(t *testing.T) {
 
 func TestAdmitContractFrontier_DoesNotInferFlowInstanceRouteFromEventName(t *testing.T) {
 	plan := testRunForkPlan("review/inst-1/task.started", runfork.RunForkPendingClassificationPending, "node", "source-node")
+	plan.PendingWork[0].RoutingSource = events.NoRoutingSource()
 	source := testContractFrontierTemplateSource()
 
 	admission, err := AdmitContractFrontier(ContractFrontierRequest{
@@ -474,6 +476,12 @@ func TestAdmitContractFrontier_DoesNotInferFlowInstanceRouteFromEventName(t *tes
 func testRunForkPlan(eventName, classification, subscriberType, subscriberID string) runfork.RunForkPlan {
 	now := time.Unix(1700001000, 0).UTC()
 	eventID := uuid.NewString()
+	routingSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
+		FlowID: "producer", FlowInstance: "producer", EntityID: "producer-entity",
+	})
+	if err != nil {
+		panic(err)
+	}
 	return runfork.RunForkPlan{
 		SourceRunID: uuid.NewString(),
 		ForkPoint: runfork.RunForkPoint{
@@ -485,6 +493,7 @@ func testRunForkPlan(eventName, classification, subscriberType, subscriberID str
 		PendingWork: []runfork.RunForkPendingWork{{
 			EventID:        eventID,
 			EventName:      eventName,
+			RoutingSource:  routingSource,
 			DeliveryID:     uuid.NewString(),
 			SubscriberType: subscriberType,
 			SubscriberID:   subscriberID,
@@ -720,6 +729,38 @@ func testContractFrontierMixedReceiverSource(t testing.TB, includeRuntimeReceive
 		t.Fatalf("load composition connect receiver fanout: %v", err)
 	}
 	return semanticview.Wrap(bundle)
+}
+
+func testConcreteRoutingSource(t testing.TB, flowID, flowInstance string) events.RoutingSource {
+	t.Helper()
+	source, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
+		FlowID: flowID, FlowInstance: flowInstance, EntityID: flowID + "-entity",
+	})
+	if err != nil {
+		t.Fatalf("construct concrete routing source: %v", err)
+	}
+	return source
+}
+
+func testRoutingSourceForRoute(t testing.TB, route events.RouteIdentity) events.RoutingSource {
+	t.Helper()
+	route = route.Normalized()
+	if route.EntityID == "" {
+		route.EntityID = route.FlowID + "-entity"
+	}
+	var (
+		source events.RoutingSource
+		err    error
+	)
+	if route.FlowInstance == route.FlowID {
+		source, err = events.NewStaticFlowRoutingSource(route)
+	} else {
+		source, err = events.NewConcreteTemplateInstanceRoutingSource(route)
+	}
+	if err != nil {
+		t.Fatalf("construct routing source: %v", err)
+	}
+	return source
 }
 
 func hasString(values []string, want string) bool {

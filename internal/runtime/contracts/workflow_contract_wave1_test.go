@@ -7,6 +7,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestWorkflowContractBundleNodeContractSourceUsesCanonicalRootNodeTable(t *testing.T) {
+	bundle := &WorkflowContractBundle{Nodes: map[string]SystemNodeContract{
+		"root-node": {ID: "root-node"},
+	}}
+
+	source, ok := bundle.NodeContractSource("root-node")
+	if !ok {
+		t.Fatal("canonical root node did not have contract source")
+	}
+	if source.Layer != "project" || source.FlowID != "" {
+		t.Fatalf("root node source = %#v, want project-owned", source)
+	}
+}
+
 func TestLoadWorkflowContractBundle_LoadsWave1TypeAndEntityDocuments(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
@@ -161,7 +175,7 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_UsesScalarIdentity(t 
 	if err != nil {
 		t.Fatalf("ResolveFlowTemplateInstance: %v", err)
 	}
-	if got, want := resolved.Field.String(), "scope_id"; got != want {
+	if got, want := resolved.Field.Path(), "scope_id"; got != want {
 		t.Fatalf("resolved Field = %q, want %q", got, want)
 	}
 	key, err := resolved.CanonicalKeyMaterial(map[string]any{
@@ -381,7 +395,7 @@ func TestWorkflowContractBundleResolveFlowSingletonCoordinator_RejectsInvalidDec
 func keyMaterialString(values []TemplateInstanceKeyValue) string {
 	parts := make([]string, 0, len(values))
 	for _, value := range values {
-		parts = append(parts, value.Field.String()+"="+value.Value)
+		parts = append(parts, value.Field.Path()+"="+value.Value)
 	}
 	return strings.Join(parts, ",")
 }

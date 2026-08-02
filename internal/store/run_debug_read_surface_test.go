@@ -319,11 +319,11 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, fire_event, fire_payload,
-			fire_at, owner_agent, owner_kind, task_type, status, created_at
+			routing_source, fire_at, owner_agent, owner_kind, task_type, status, created_at
 		)
 		VALUES
-			(gen_random_uuid(), $1::uuid, 'due', 'quiescence.timeout', '{}'::jsonb, now() - interval '1 minute', 'timer-agent', 'system', 'timer', 'active', now()),
-			(gen_random_uuid(), $2::uuid, 'settled', 'quiescence.timeout', '{}'::jsonb, now() - interval '1 minute', 'timer-agent', 'system', 'timer', 'fired', now())
+			(gen_random_uuid(), $1::uuid, 'due', 'quiescence.timeout', '{}'::jsonb, '{"kind":"platform_control","route":{}}'::jsonb, now() - interval '1 minute', 'timer-agent', 'system', 'timer', 'active', now()),
+			(gen_random_uuid(), $2::uuid, 'settled', 'quiescence.timeout', '{}'::jsonb, '{"kind":"platform_control","route":{}}'::jsonb, now() - interval '1 minute', 'timer-agent', 'system', 'timer', 'fired', now())
 	`, blockedRunID, readyRunID); err != nil {
 		t.Fatalf("seed timers: %v", err)
 	}

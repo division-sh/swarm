@@ -14,6 +14,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -301,7 +302,9 @@ func publishFanInBarrierEvent(t *testing.T, ctx context.Context, eventBus *runti
 		raw,
 		0,
 		runtimecorrelation.RunIDFromContext(ctx),
-		events.EventEnvelope{},
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
+			FlowID: flowID, FlowInstance: flowID, EntityID: runtimeflowidentity.EntityID(flowID),
+		}),
 		time.Now().UTC(),
 	)
 	if err := eventBus.PublishAcknowledged(ctx, evt); err != nil {

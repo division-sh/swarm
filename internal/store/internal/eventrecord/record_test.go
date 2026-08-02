@@ -48,7 +48,7 @@ func TestRecordValidateRejectsEveryNormalizedScalarFamily(t *testing.T) {
 		{"producer_id", func(r *Record) { r.ProducedBy += " " }},
 		{"producer_type", func(r *Record) { r.ProducedByType = events.EventProducerType(" external ") }},
 		{"source_event_id", func(r *Record) { r.SourceEventID = " " }},
-		{"routing_source_kind", func(r *Record) { r.RoutingSourceKind = events.RoutingSourceKind(" ") }},
+		{"routing_source_kind", func(r *Record) { r.RoutingSourceKind = " " }},
 		{"routing_authority", func(r *Record) { r.RoutingSourceAuthority = " " }},
 		{"operator_reference", func(r *Record) { r.OperatorReferencedEventID = " " }},
 		{"selected_source_run", func(r *Record) { r.SelectedForkSourceRunID = " " }},

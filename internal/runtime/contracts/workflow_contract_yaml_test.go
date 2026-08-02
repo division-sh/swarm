@@ -1128,7 +1128,7 @@ instance: scope_id
 	if got, want := doc.Mode, "template"; got != want {
 		t.Fatalf("Mode = %q, want %q", got, want)
 	}
-	if got, want := doc.Instance.String(), "scope_id"; got != want {
+	if got, want := doc.Instance.Path(), "scope_id"; got != want {
 		t.Fatalf("Instance = %q, want %q", got, want)
 	}
 }

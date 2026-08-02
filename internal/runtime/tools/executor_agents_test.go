@@ -28,6 +28,16 @@ func toolTestRootAgentIdentity(t testing.TB, agentID string) agentidentity.Ident
 	return agentidentitytest.RootRuntime(t, agentID, "runtime-tools-test")
 }
 
+func toolTestAgentIdentity(t testing.TB, agentID, flowID, flowPath string) agentidentity.Identity {
+	t.Helper()
+	flowID = strings.TrimSpace(flowID)
+	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
+	if flowID == "" && flowPath == "" {
+		return toolTestRootAgentIdentity(t, agentID)
+	}
+	return agentidentitytest.Runtime(t, agentID, "runtime-tools-test", flowID, "test-instance", flowPath)
+}
+
 type managerStub struct {
 	agents map[string]models.AgentConfig
 }
@@ -1050,6 +1060,7 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 	reviewFlow := &runtimecontracts.FlowContractView{
 		Paths:  runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
 		Path:   "review",
+		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
 		Agents: agents,
 	}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
@@ -1112,7 +1123,7 @@ func TestExecAgentMessage_PublishesOnlyResolvedSameSlugRoute(t *testing.T) {
 	}
 	reviewFlow := &runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
-		Path:  "review", Agents: agents,
+		Path:  "review", Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate}, Agents: agents,
 	}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{

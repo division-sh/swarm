@@ -337,6 +337,7 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-emit-1",
+		Identity:      toolTestRootAgentIdentity(t, "agent-emit-1"),
 		EntityID:      "entity-actor",
 		EmitEvents: []string{
 			"category.assessed",
@@ -419,6 +420,7 @@ func TestExecutorTelemetry_PreservesTypedLineageForEmitToolOutcome(t *testing.T)
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "selected-agent",
+		Identity:      toolTestRootAgentIdentity(t, "selected-agent"),
 		EntityID:      "entity-typed-lineage",
 		EmitEvents:    []string{"category.assessed"},
 	}
@@ -569,6 +571,8 @@ func TestExecutorTelemetry_EmitToolLogsPublishFailureWithCanonicalEventIdentity(
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-emit-3",
+		Identity:      toolTestRootAgentIdentity(t, "agent-emit-3"),
+		EntityID:      eventtest.UUID("agent-emit-3-source"),
 		EmitEvents:    []string{"category.assessed"},
 	})
 	ctx = runtimebus.WithInboundEvent(ctx, toolTestInboundEvent("trigger.input", nil, events.EventEnvelope{}, executionmode.Live))

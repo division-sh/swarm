@@ -36,6 +36,7 @@ type Schedule struct {
 	FlowInstance  string
 	TaskID        string
 	Payload       []byte
+	RoutingSource events.RoutingSource
 }
 
 type scheduledProjectionKind uint8
@@ -1214,6 +1215,9 @@ func validateSchedule(sc Schedule) (Schedule, cronSpec, error) {
 	if err := sc.NormalizeOwner(); err != nil {
 		return Schedule{}, cronSpec{}, err
 	}
+	if err := sc.ValidateRoutingSource(); err != nil {
+		return Schedule{}, cronSpec{}, err
+	}
 	if sc.Mode == "" {
 		sc.Mode = "once"
 	}
@@ -1233,6 +1237,28 @@ func validateSchedule(sc Schedule) (Schedule, cronSpec, error) {
 		return Schedule{}, cronSpec{}, fmt.Errorf("unsupported schedule mode: %s", sc.Mode)
 	}
 	return sc, spec, nil
+}
+
+func (sc Schedule) ValidateRoutingSource() error {
+	switch sc.RoutingSource.Kind() {
+	case events.RoutingSourceRoot:
+		route := sc.RoutingSource.Route()
+		if route.EntityID != sc.EntityID || sc.FlowInstance != "" {
+			return errors.New("root-owned schedule routing source does not match its persisted entity scope")
+		}
+	case events.RoutingSourceFlowOwnedControl:
+		route := sc.RoutingSource.Route()
+		if route.FlowInstance != sc.FlowInstance || route.EntityID != sc.EntityID {
+			return errors.New("flow-owned schedule routing source does not match its persisted scope")
+		}
+	case events.RoutingSourcePlatformControl:
+		if sc.OwnerKind != ScheduleOwnerSystem || sc.EntityID != "" || sc.FlowInstance != "" {
+			return errors.New("platform-control schedule must be a closed system schedule without flow or entity scope")
+		}
+	default:
+		return errors.New("schedule requires an exact flow-owned or platform-control routing source")
+	}
+	return nil
 }
 
 func validateScheduledProjection(projection scheduledProjection) (scheduledProjection, cronSpec, error) {

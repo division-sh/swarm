@@ -58,7 +58,7 @@ func TestEventConstructionClassInvariantMatrix(t *testing.T) {
 			_, err := NewSelectedForkReplayEvent(SelectedForkReplayEventInput{Facts: f, Lineage: selectedLineage})
 			return err
 		}},
-		{name: "runtime control", baseFacts: validFacts(), build: func(f EventFacts) error {
+		{name: "runtime control", baseFacts: platformControlFacts(), build: func(f EventFacts) error {
 			_, err := NewStandaloneRuntimeControlEvent(StandaloneRuntimeEventInput{Facts: f})
 			return err
 		}},
@@ -95,6 +95,9 @@ func TestEventConstructionClassInvariantMatrix(t *testing.T) {
 				facts := test.baseFacts
 				mutation.mutate(&facts)
 				want := mutation.want
+				if test.name == "runtime control" && mutation.name == "untyped routing source" {
+					want = "opaque routing source"
+				}
 				if test.name == "diagnostic direct" && (mutation.name == "invalid envelope" || mutation.name == "untyped routing source") {
 					want = "non-routed"
 				}
@@ -134,7 +137,7 @@ func TestAdmissionAllocatesOnlyAuthorizedFacts(t *testing.T) {
 
 func TestAdmissionCarriesExactRunDispositionAndReadbackNeverRegainsCreation(t *testing.T) {
 	runtimeFacts := func(eventType EventType) EventFacts {
-		facts := validFacts()
+		facts := platformControlFacts()
 		facts.Type = eventType
 		facts.Producer = ProducerClaim{Type: EventProducerPlatform, ID: "runtime"}
 		facts.TaskID = ""
@@ -282,6 +285,11 @@ func TestRuntimeConstructorsEncodeExplicitLineageIntent(t *testing.T) {
 		facts.TaskID = ""
 		return facts
 	}
+	runtimeControlFacts := func(eventType EventType) EventFacts {
+		facts := runtimeFacts(eventType)
+		facts.RoutingSource = NewPlatformControlRoutingSource()
+		return facts
+	}
 	directFacts := func() EventFacts {
 		facts := diagnosticDirectFacts()
 		facts.TaskID = ""
@@ -296,7 +304,7 @@ func TestRuntimeConstructorsEncodeExplicitLineageIntent(t *testing.T) {
 		wantMode   executionmode.Mode
 	}{
 		{name: "causal control", build: func() (Event, error) {
-			return NewCausalRuntimeControlEvent(CausalRuntimeEventInput{Facts: runtimeFacts("platform.auth_required"), Lineage: lineage})
+			return NewCausalRuntimeControlEvent(CausalRuntimeEventInput{Facts: runtimeControlFacts("platform.auth_required"), Lineage: lineage})
 		}, wantRun: testRunID, wantParent: parentID, wantTask: "task-lineage", wantMode: executionmode.Mock},
 		{name: "causal diagnostic", build: func() (Event, error) {
 			return NewCausalRuntimeDiagnosticEvent(CausalRuntimeEventInput{Facts: runtimeFacts("platform.dead_letter"), Lineage: lineage})
@@ -305,7 +313,7 @@ func TestRuntimeConstructorsEncodeExplicitLineageIntent(t *testing.T) {
 			return NewCausalDiagnosticDirectEvent(CausalRuntimeEventInput{Facts: directFacts(), Lineage: lineage})
 		}, wantRun: testRunID, wantParent: parentID, wantTask: "task-lineage", wantMode: executionmode.Mock},
 		{name: "run-scoped control", build: func() (Event, error) {
-			return NewRunScopedRuntimeControlEvent(RunScopedRuntimeEventInput{Facts: runtimeFacts("platform.scheduled"), RunID: testRunID})
+			return NewRunScopedRuntimeControlEvent(RunScopedRuntimeEventInput{Facts: runtimeControlFacts("platform.scheduled"), RunID: testRunID})
 		}, wantRun: testRunID, wantMode: executionmode.Live},
 		{name: "run-scoped diagnostic", build: func() (Event, error) {
 			return NewRunScopedRuntimeDiagnosticEvent(RunScopedRuntimeEventInput{Facts: runtimeFacts("platform.run_stalled"), RunID: testRunID})
@@ -319,7 +327,7 @@ func TestRuntimeConstructorsEncodeExplicitLineageIntent(t *testing.T) {
 			return NewRunCreatingDiagnosticDirectEvent(RunCreatingRuntimeEventInput{Facts: facts, RunID: testRunID})
 		}, wantRun: testRunID, wantMode: executionmode.Live},
 		{name: "standalone control", build: func() (Event, error) {
-			return NewStandaloneRuntimeControlEvent(StandaloneRuntimeEventInput{Facts: runtimeFacts("platform.boot")})
+			return NewStandaloneRuntimeControlEvent(StandaloneRuntimeEventInput{Facts: runtimeControlFacts("platform.boot")})
 		}, wantMode: executionmode.Live},
 		{name: "standalone diagnostic", build: func() (Event, error) {
 			return NewStandaloneRuntimeDiagnosticEvent(StandaloneRuntimeEventInput{Facts: runtimeFacts("platform.recovery_failed")})
@@ -365,7 +373,7 @@ func TestRoutingSourceConstructorsRejectIncompleteRuntimeIdentity(t *testing.T) 
 		{FlowID: "flow", FlowInstance: "flow/one"},
 		{FlowInstance: "flow/one", EntityID: "entity"},
 	} {
-		if _, err := NewRuntimeRoutingSource(route.FlowID, route.FlowInstance, route.EntityID); err == nil {
+		if _, err := NewConcreteTemplateInstanceRoutingSource(route); err == nil {
 			t.Fatalf("runtime source %#v succeeded", route)
 		}
 	}
@@ -375,6 +383,7 @@ func TestAdmissionRuntimePlatformEventAllocatesStandaloneRun(t *testing.T) {
 	facts := validFactsWithoutIdentity()
 	facts.Type = "platform.boot"
 	facts.Producer = ProducerClaim{Type: EventProducerPlatform, ID: "runtime"}
+	facts.RoutingSource = NewPlatformControlRoutingSource()
 	candidate, constructErr := NewStandaloneRuntimeControlEvent(StandaloneRuntimeEventInput{Facts: facts})
 	event := mustConstruct(t, candidate, constructErr)
 	admitted, err := AdmitForPublish(event, AdmissionOptions{})
@@ -390,6 +399,7 @@ func TestRuntimeAdmissionRejectsOmittedConstructorIntent(t *testing.T) {
 	facts := validFacts()
 	facts.Type = "platform.boot"
 	facts.Producer = ProducerClaim{Type: EventProducerPlatform, ID: "runtime"}
+	facts.RoutingSource = NewPlatformControlRoutingSource()
 	event, err := NewStandaloneRuntimeControlEvent(StandaloneRuntimeEventInput{Facts: facts})
 	if err != nil {
 		t.Fatalf("NewStandaloneRuntimeControlEvent: %v", err)
@@ -490,6 +500,12 @@ func diagnosticDirectFacts() EventFacts {
 	facts := validFacts()
 	facts.Type = EventTypePlatformRuntimeLog
 	facts.Producer = ProducerClaim{Type: EventProducerPlatform, ID: "runtime"}
+	return facts
+}
+
+func platformControlFacts() EventFacts {
+	facts := validFacts()
+	facts.RoutingSource = NewPlatformControlRoutingSource()
 	return facts
 }
 

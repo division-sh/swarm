@@ -25,6 +25,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -49,7 +50,8 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			ctx := testAuthorActivityContext(context.Background())
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
-			flowInstance := "channel-runtime-" + selected
+			flowInstanceID := "channel-runtime-" + selected
+			flowInstance := "global/" + flowInstanceID
 			var (
 				db                  *sql.DB
 				eventStore          runtimebus.EventStore
@@ -104,8 +106,18 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			if err != nil {
 				t.Fatalf("RuntimeTools: %v", err)
 			}
+			global := runtimecontracts.FlowContractView{
+				Paths:  runtimecontracts.FlowContractPaths{ID: "global", Flow: "global", Mode: runtimecontracts.FlowModeTemplate},
+				Path:   "global",
+				Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
+			}
 			base := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 				Semantics: runtimecontracts.WorkflowSemanticView{Name: "channel_runtime", Version: "1.0.0"},
+				FlowTree: runtimecontracts.FlowTree{
+					Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{global}},
+					ByID: map[string]*runtimecontracts.FlowContractView{"global": &global},
+				},
+				FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"global": global.Schema},
 			})
 			source, err := semanticview.WithRuntimeTools(base, publicTools)
 			if err != nil {
@@ -155,7 +167,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 			stopActivityNode := startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
 			executor := configuredChannelExecutor(source, binding, credentialStore, coordinator)
 			actor := models.AgentConfig{
-				ExecutionMode: "live", ID: "channel-sender", Role: "worker", FlowID: "global",
+				ExecutionMode: "live", ID: "channel-sender", Identity: agentidentitytest.Runtime(t, "channel-sender", "channel-runtime-test", "global", flowInstanceID, flowInstance), Role: "worker", FlowID: "global",
 				FlowPath: flowInstance, EntityID: entityID, Tools: []string{"channel.ops.deliver"},
 			}
 			input := map[string]any{

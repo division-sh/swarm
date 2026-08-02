@@ -13,6 +13,7 @@ import (
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -117,9 +118,11 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 	lineage.TaskID = in.TaskID
 	lineage.ExecutionMode = executionMode
 	sourceEntity := actor.EffectiveEntityID()
-	sourceFlowInstance := actor.CanonicalFlowPath()
-	sourceFlowID := emitActorFlowID(e.workflowSource, actor, sourceFlowInstance)
-	routingSource, err := events.NewRuntimeRoutingSource(sourceFlowID, sourceFlowInstance, sourceEntity)
+	actorIdentity, err := actor.ConcreteIdentity()
+	if err != nil {
+		return nil, err
+	}
+	routingSource, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actorIdentity, sourceEntity)
 	if err != nil {
 		return nil, err
 	}
@@ -231,6 +234,14 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 	if len(payload) == 0 || string(payload) == "null" {
 		payload = []byte("{}")
 	}
+	executionSource, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor.Identity, entityID)
+	if err != nil {
+		return nil, fmt.Errorf("admit schedule owner source: %w", err)
+	}
+	routingSource, err := events.NewFlowOwnedControlRoutingSource(executionSource.Route())
+	if err != nil {
+		return nil, fmt.Errorf("admit schedule control source: %w", err)
+	}
 
 	schedule := Schedule{
 		RunID:         runtimecorrelation.RunIDFromContext(ctx),
@@ -245,6 +256,7 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 		FlowInstance:  actor.CanonicalFlowPath(),
 		TaskID:        in.TaskID,
 		Payload:       payload,
+		RoutingSource: routingSource,
 	}
 	if err := e.scheduler.Register(ctx, schedule); err != nil {
 		return nil, err

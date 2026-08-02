@@ -119,7 +119,7 @@ func assertSealedPackageConformanceWildcardScope(t *testing.T, source semanticvi
 func assertSealedPackageConformanceConnectRoutePlan(t *testing.T, source semanticview.Source) {
 	t.Helper()
 
-	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
+	plans, issues := compiledConnectPlans(source)
 	if len(issues) != 0 {
 		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
 	}
@@ -128,18 +128,18 @@ func assertSealedPackageConformanceConnectRoutePlan(t *testing.T, source semanti
 	}
 	var plan runtimepinrouting.ConnectRoutePlan
 	for _, candidate := range plans {
-		if candidate.Source.ResolvedEvent == "producer/work.ready" && candidate.Receiver.ResolvedEvent == "consumer/work.ready" {
+		if candidate.Source.ResolvedEventCode() == "producer/work.ready" && candidate.Receiver.ResolvedEventCode() == "consumer/work.ready" {
 			plan = candidate
 			break
 		}
 	}
-	if plan.Source.ResolvedEvent == "" {
+	if plan.Source.ResolvedEventCode() == "" {
 		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, missing producer/work.ready -> consumer/work.ready", plans)
 	}
-	if got, want := plan.Source.ResolvedEvent, "producer/work.ready"; got != want {
+	if got, want := plan.Source.ResolvedEventCode(), "producer/work.ready"; got != want {
 		t.Fatalf("source resolved event = %q, want %q", got, want)
 	}
-	if got, want := plan.Receiver.ResolvedEvent, "consumer/work.ready"; got != want {
+	if got, want := plan.Receiver.ResolvedEventCode(), "consumer/work.ready"; got != want {
 		t.Fatalf("receiver resolved event = %q, want %q", got, want)
 	}
 	if plan.Target.FlowInstance != "consumer" || plan.Target.EntityID != runtimeflowidentity.EntityID("consumer") {
@@ -178,7 +178,9 @@ func assertSealedPackageConformancePublishPreflight(t *testing.T, source semanti
 		json.RawMessage(`{"work_id":"work-1"}`),
 		1,
 		events.EventLineage{RunID: eventtest.UUID("run-sealed-package-conformance"), ParentEventID: eventtest.UUID("evt-sealed-parent"), TaskID: "producer-node", ExecutionMode: executionmode.Live},
-		events.EventEnvelope{},
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
+			FlowID: "producer", FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer"),
+		}),
 		time.Now().UTC(),
 	)
 	plan, err := eb.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt)
@@ -200,7 +202,9 @@ func assertSealedPackageConformancePublishPreflight(t *testing.T, source semanti
 		json.RawMessage(`{"flow_instance":"consumer"}`),
 		1,
 		events.EventLineage{RunID: eventtest.UUID("run-sealed-package-conformance"), ParentEventID: eventtest.UUID("evt-sealed-parent"), TaskID: "producer-node", ExecutionMode: executionmode.Live},
-		events.EventEnvelope{},
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
+			FlowID: "producer", FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer"),
+		}),
 		time.Now().UTC(),
 	)
 	siblingPlan, err := eb.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), sibling)
@@ -236,7 +240,10 @@ func sealedPackageConformanceSubscribersContain(subscribers []runtimebus.Subscri
 func sealedPackageConformanceRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRoute) bool {
 	want = want.Normalized()
 	for _, got := range events.NormalizeDeliveryRoutes(routes) {
-		if got == want {
+		claim := got.ConnectClaim
+		got.ConnectClaim = events.ConnectExecutionClaim{}
+		handlerEvent, claimed := claim.NodeHandlerEvent(want.SubscriberID)
+		if got == want && claimed && handlerEvent == events.EventType("work.ready") {
 			return true
 		}
 	}

@@ -23,7 +23,9 @@ func TestEventContractRejectsHostileClassCatalogProducerCombinations(t *testing.
 			return NewRunCreatingRootIngressEvent(RunCreatingRootIngressEventInput{Facts: f, RunID: runID})
 		}, "requires external producer"},
 		{"runtime external producer", func() (Event, error) {
-			return NewRunScopedRuntimeControlEvent(RunScopedRuntimeEventInput{Facts: base, RunID: runID})
+			f := base
+			f.RoutingSource = NewPlatformControlRoutingSource()
+			return NewRunScopedRuntimeControlEvent(RunScopedRuntimeEventInput{Facts: f, RunID: runID})
 		}, "requires platform producer"},
 		{"closed label under root", func() (Event, error) {
 			f := base
@@ -116,7 +118,7 @@ func TestGenericPublishRejectsEveryClosedSubtypeAndSelectedFork(t *testing.T) {
 
 func TestPersistentContractValidatesNestedDurableUUIDFacts(t *testing.T) {
 	runID := uuid.NewString()
-	source, err := NewDeclaredIngressRoutingSource("flow-a", "", "not-a-uuid", "resolution:test")
+	source, err := NewExternalIngressRoutingSource("flow-a", "not-a-uuid", RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
 	}

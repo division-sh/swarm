@@ -1397,7 +1397,7 @@ func (c TemplateInstanceContract) CanonicalKeyMaterial(values map[string]any) ([
 	if c.Field.Empty() {
 		return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s must declare instance: <field>", defaultPrimaryEntityFlowLabel(c.FlowID))
 	}
-	field := c.Field.String()
+	field := c.Field.Path()
 	value, ok := values[field]
 	if !ok || value == nil {
 		return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance key field %q is missing", defaultPrimaryEntityFlowLabel(c.FlowID), field)
@@ -1458,11 +1458,11 @@ func ParseFlowOutputSink(raw string) (FlowOutputSink, error) {
 	case "harness":
 		return FlowOutputSinkHarness, nil
 	default:
-		return FlowOutputSinkNone, fmt.Errorf("output event pin sink must be %q", FlowOutputSinkHarness)
+		return FlowOutputSinkNone, fmt.Errorf("output event pin sink must be %q", FlowOutputSinkCode(FlowOutputSinkHarness))
 	}
 }
 
-func (s FlowOutputSink) String() string {
+func FlowOutputSinkCode(s FlowOutputSink) string {
 	switch s {
 	case FlowOutputSinkNone:
 		return ""
@@ -1791,7 +1791,7 @@ const (
 	EventConsumerBoundaryExternal
 )
 
-func (b EventConsumerBoundary) String() string {
+func EventConsumerBoundaryCode(b EventConsumerBoundary) string {
 	if b == EventConsumerBoundaryExternal {
 		return "external"
 	}
@@ -1816,7 +1816,7 @@ func (e EventCatalogEntry) SwarmConsumer() []string {
 
 func (e EventCatalogEntry) AcceptedConsumerBoundary() EventConsumerBoundary {
 	consumers := e.SwarmConsumer()
-	if len(consumers) != 1 || !strings.EqualFold(strings.TrimSpace(consumers[0]), EventConsumerBoundaryExternal.String()) {
+	if len(consumers) != 1 || !strings.EqualFold(strings.TrimSpace(consumers[0]), EventConsumerBoundaryCode(EventConsumerBoundaryExternal)) {
 		return EventConsumerBoundaryNone
 	}
 	return EventConsumerBoundaryExternal

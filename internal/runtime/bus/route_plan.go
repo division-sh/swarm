@@ -122,7 +122,7 @@ func (p routeIntentProducer) Empty() bool {
 	return p.Normalized() == routeIntentProducerUnknown
 }
 
-func (p routeIntentProducer) String() string {
+func routeIntentProducerCode(p routeIntentProducer) string {
 	p = p.Normalized()
 	source := p.Source()
 	reason := p.Reason()
@@ -194,6 +194,7 @@ type RoutePlanDeliveryIntent struct {
 	Target                events.RouteIdentity
 	Context               events.DeliveryContext
 	PayloadProjection     events.DeliveryPayloadProjection
+	ConnectClaim          events.ConnectExecutionClaim
 	Producer              routeIntentProducer
 	Persist               bool
 	PendingAgentLifecycle bool
@@ -363,6 +364,7 @@ func (p RoutePlan) DeliveryRoutes() []events.DeliveryRoute {
 			Target:            intent.Target,
 			Context:           intent.Context,
 			PayloadProjection: intent.PayloadProjection,
+			ConnectClaim:      intent.ConnectClaim,
 		})
 	}
 	return events.NormalizeDeliveryRoutes(out)
@@ -393,6 +395,7 @@ func (p RoutePlan) liveDispatchDeliveryRoutes() []events.DeliveryRoute {
 			Target:            intent.Target,
 			Context:           intent.Context,
 			PayloadProjection: intent.PayloadProjection,
+			ConnectClaim:      intent.ConnectClaim,
 		})
 	}
 	return events.NormalizeDeliveryRoutes(out)
@@ -563,6 +566,7 @@ func routePlanDeliveryIntentsFromRoutes(routes []events.DeliveryRoute, producer 
 			Target:            route.Target,
 			Context:           route.Context,
 			PayloadProjection: route.PayloadProjection,
+			ConnectClaim:      route.ConnectClaim,
 			Producer:          producer,
 			Persist:           true,
 		})
@@ -675,6 +679,7 @@ type deliveryIntentKey struct {
 	target         events.RouteIdentity
 	replyContextID string
 	projection     string
+	connectClaim   events.ConnectExecutionClaim
 }
 
 func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlanDeliveryIntent {
@@ -709,6 +714,7 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 			target:         intent.Target,
 			replyContextID: intent.Context.ReplyContextID(),
 			projection:     intent.PayloadProjection.Fingerprint(),
+			connectClaim:   intent.ConnectClaim,
 		}
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].Persist = out[idx].Persist || intent.Persist

@@ -2415,6 +2415,7 @@ func testArtifactRepoResultEventSource(t *testing.T) semanticview.Source {
 	return loadWorkflowTempSource(t, map[string]string{
 		"package.yaml": "name: artifact-result-events\nversion: 1.0.0\ndescription: artifact result event fixture\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n",
 		"schema.yaml":  "initial_state: ready\nterminal_states: [ready]\nstates: [ready]\n",
+		"nodes.yaml":   "artifact-node:\n  id: artifact-node\n  execution_type: system_node\n",
 		"types.yaml": `types:
   ArtifactProvenance:
     artifact_type: text
@@ -2574,11 +2575,11 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 				FlowID:   identity.NormalizeFlowID("artifact-repo"),
 				NodeID:   identity.NormalizeNodeID("artifact-node"),
 				Event:    evt,
-				ProducerRoute: events.RouteIdentity{
+				ProducerSource: mustStaticExecutionRoutingSource(events.RouteIdentity{
 					FlowID:       "artifact-repo",
 					FlowInstance: "artifact-repo",
 					EntityID:     entityID,
-				},
+				}),
 				State: runtimeengine.StateSnapshot{
 					EntityID:        identity.NormalizeEntityID(entityID),
 					WorkflowName:    "artifact-repo",
@@ -2588,6 +2589,14 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 				},
 			},
 		}
+}
+
+func mustStaticExecutionRoutingSource(route events.RouteIdentity) events.RoutingSource {
+	source, err := events.NewStaticFlowRoutingSource(route)
+	if err != nil {
+		panic(err)
+	}
+	return source
 }
 
 func TestPipelineEngineEvaluator_ExposesAccumulatedScopeForCEL(t *testing.T) {
@@ -3164,13 +3173,13 @@ func TestPipelineEngineLifecycleEffectApplierPersistsTimersAndDefersSchedulerToP
 	rollbackActions := make([]OwnerAction, 0, 2)
 	ctx = withPipelineRollbackActions(ctx, &rollbackActions)
 	sc := Schedule{
-		AgentID:   "owner",
-		OwnerKind: ScheduleOwnerSystem,
-		EventType: "timer.review",
-		Mode:      "once",
-		At:        time.Now().Add(time.Hour),
-		EntityID:  "ent-1",
-		TaskID:    "timer-1",
+		AgentID:       "owner",
+		OwnerKind:     ScheduleOwnerSystem,
+		EventType:     "timer.review",
+		Mode:          "once",
+		At:            time.Now().Add(time.Hour),
+		TaskID:        "timer-1",
+		RoutingSource: events.NewPlatformControlRoutingSource(),
 	}
 
 	if err := pc.persistGenericSchedule(ctx, sc); err != nil {

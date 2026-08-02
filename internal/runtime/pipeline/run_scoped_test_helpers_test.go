@@ -167,11 +167,18 @@ func testPersistedWorkflowStateTransitionContext(t *testing.T, store *workflowIn
 
 func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Event, nodeID string) events.DeliveryRoute {
 	t.Helper()
+	return seedPipelineNodeDeliveryRouteAuthority(t, db, evt, events.DeliveryRoute{
+		SubscriberType: "node", SubscriberID: strings.TrimSpace(nodeID), Target: evt.TargetRoute(),
+	})
+}
+
+func seedPipelineNodeDeliveryRouteAuthority(t *testing.T, db *sql.DB, evt events.Event, route events.DeliveryRoute) events.DeliveryRoute {
+	t.Helper()
 	if db == nil {
 		t.Fatal("seed pipeline node delivery authority requires db")
 	}
-	nodeID = strings.TrimSpace(nodeID)
-	if nodeID == "" {
+	route = route.Normalized()
+	if route.SubscriberType != "node" || route.SubscriberID == "" {
 		t.Fatal("seed pipeline node delivery authority requires nodeID")
 	}
 	eventID := strings.TrimSpace(evt.ID())
@@ -219,7 +226,6 @@ func seedPipelineNodeDeliveryAuthority(t *testing.T, db *sql.DB, evt events.Even
 		}
 	}
 	owner := newPipelineTestDeliveryOwnerForDB(t, db)
-	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID, Target: evt.TargetRoute()}
 	if err := owner.commitInitial(ctx, deliveryEvent, route); err != nil {
 		t.Fatalf("seed pipeline node delivery authority: %v", err)
 	}

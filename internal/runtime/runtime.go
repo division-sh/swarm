@@ -1403,7 +1403,7 @@ func scheduleEventPayload(sc runtimepipeline.Schedule) []byte {
 func scheduledEvent(sc runtimepipeline.Schedule) (events.Event, error) {
 	return events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{Facts: events.EventFacts{
 		ID: uuid.NewString(), Type: events.EventType(sc.EventType), Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime.scheduler"},
-		TaskID: sc.TaskID, Payload: scheduleEventPayload(sc), CreatedAt: time.Now(), ExecutionMode: executionmode.Live,
+		TaskID: sc.TaskID, Payload: scheduleEventPayload(sc), RoutingSource: sc.RoutingSource, CreatedAt: time.Now(), ExecutionMode: executionmode.Live,
 		Envelope: events.EventEnvelope{
 			EntityID:     sc.EffectiveEntityID(),
 			FlowInstance: sc.EffectiveFlowInstance(),
@@ -2197,7 +2197,7 @@ func (rt *Runtime) publishBootCompleted(ctx context.Context, report bootComplete
 	eventID := uuid.NewString()
 	evt, err := events.NewStandaloneRuntimeControlEvent(events.StandaloneRuntimeEventInput{Facts: events.EventFacts{
 		ID: eventID, Type: t, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
-		Payload: payload, CreatedAt: time.Now(), ExecutionMode: executionmode.Live,
+		Payload: payload, RoutingSource: events.NewPlatformControlRoutingSource(), CreatedAt: time.Now(), ExecutionMode: executionmode.Live,
 	}})
 	if err != nil {
 		return "", err
@@ -2326,13 +2326,14 @@ func bootWorkflowTimerSchedule(source semanticview.Source, timer runtimecontract
 	}
 	handle := timeridentity.WorkflowTimerHandle(timer.ID)
 	sc := runtimepipeline.Schedule{
-		AgentID:   owner,
-		OwnerKind: runtimepipeline.ScheduleOwnerSystem,
-		EventType: eventType,
-		Mode:      "once",
-		At:        now.Add(interval),
-		TaskID:    handle.TaskID(),
-		Payload:   workflowTimerPayload(timer),
+		AgentID:       owner,
+		OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+		EventType:     eventType,
+		Mode:          "once",
+		At:            now.Add(interval),
+		TaskID:        handle.TaskID(),
+		Payload:       workflowTimerPayload(timer),
+		RoutingSource: events.NewPlatformControlRoutingSource(),
 	}
 	if timer.Recurring {
 		sc.Mode = "cron"

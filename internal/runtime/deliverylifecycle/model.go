@@ -141,7 +141,7 @@ func DeliveryID(eventID string, route events.DeliveryRoute) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return uuid.NewSHA1(obligationNamespace, []byte(eventID+"\x00"+identity.String())).String(), nil
+	return uuid.NewSHA1(obligationNamespace, []byte(eventID+"\x00"+events.EncodeDeliveryRouteIdentity(identity))).String(), nil
 }
 
 type ExecutionAuthorityKind string

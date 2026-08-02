@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -20,7 +21,7 @@ func resolveDeclaredInputProducerSource(source semanticview.Source, flowID, even
 	if !ok {
 		return runtimecontracts.FlowInputProducerResolution{}, false
 	}
-	return semanticview.ResolveFlowInputProducerWithOptions(source, flowID, endpoint.Event.Authored, opts), true
+	return runtimepinrouting.ResolveFlowInputProducerWithOptions(source, flowID, endpoint.Event.Authored, opts), true
 }
 
 func inputProducerSourceIsExternalNoTarget(resolution runtimecontracts.FlowInputProducerResolution) bool {

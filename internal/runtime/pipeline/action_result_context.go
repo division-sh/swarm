@@ -1,145 +1,28 @@
 package pipeline
 
 import (
+	"context"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func actionResultProducerRoute(source semanticview.Source, flowID, entityID string, evt events.Event, state runtimeengine.StateSnapshot, admitted events.RouteIdentity) events.RouteIdentity {
-	flowID = strings.TrimSpace(flowID)
-	entityID = strings.TrimSpace(entityID)
-	admitted = admitted.Normalized()
-	if sourceFact, err := events.RuntimeRoutingSourceFromRoute(admitted); err == nil && !sourceFact.Empty() &&
-		(flowID == "" || admitted.FlowID == flowID) && (entityID == "" || admitted.EntityID == entityID) {
-		return admitted
-	}
-	candidates := []events.RouteIdentity{
-		{
-			FlowID:       flowID,
-			FlowInstance: asString(state.StateCarrier.Metadata["flow_path"]),
-			EntityID:     entityID,
-		},
-		staticActionResultProducerRoute(source, flowID, entityID),
-		{
-			FlowID:       flowID,
-			FlowInstance: evt.FlowInstance(),
-			EntityID:     entityID,
-		},
-	}
-	for _, candidate := range candidates {
-		if route, ok := normalizeActionResultProducerRouteCandidate(source, flowID, entityID, candidate); ok {
-			return route
-		}
-	}
-	return events.RouteIdentity{
-		FlowID:   flowID,
-		EntityID: entityID,
-	}.Normalized()
-}
-
-func workflowNodeProducerRoute(source semanticview.Source, nodeID, flowID, entityID string, state runtimeengine.StateSnapshot) events.RouteIdentity {
-	flowID = strings.TrimSpace(flowID)
-	if route := staticActionResultProducerRoute(source, flowID, entityID); !route.Empty() {
-		return route
-	}
-	if flowID == "" && source != nil {
-		contractSource, ok := source.NodeContractSource(strings.TrimSpace(nodeID))
-		if ok && strings.TrimSpace(contractSource.Layer) == "project" {
-			flowID = strings.TrimSpace(source.WorkflowName())
-		}
-	}
-	route := events.RouteIdentity{
-		FlowID:       flowID,
-		FlowInstance: asString(state.StateCarrier.Metadata["flow_path"]),
-		EntityID:     strings.TrimSpace(entityID),
-	}.Normalized()
-	sourceFact, err := events.RuntimeRoutingSourceFromRoute(route)
-	if err != nil || sourceFact.Empty() {
-		return events.RouteIdentity{}
-	}
-	return route
-}
-
-func normalizeActionResultProducerRouteCandidate(source semanticview.Source, flowID, entityID string, route events.RouteIdentity) (events.RouteIdentity, bool) {
-	route = route.Normalized()
+func workflowNodeProducerSource(ctx context.Context, source semanticview.Source, nodeID, flowID, entityID string, admittedSource events.RoutingSource) (events.RoutingSource, error) {
+	route := admittedSource.Route().Normalized()
 	if route.Empty() {
-		return events.RouteIdentity{}, false
+		route = events.RouteIdentity{FlowID: strings.TrimSpace(flowID), EntityID: strings.TrimSpace(entityID)}
+	} else if strings.TrimSpace(entityID) != "" {
+		route.EntityID = strings.TrimSpace(entityID)
 	}
-	if flowID != "" && route.FlowID != "" && route.FlowID != flowID {
-		return events.RouteIdentity{}, false
+	if delivery, ok := runtimedelivery.RouteFromContext(ctx); ok {
+		route = delivery.Target.Normalized()
+		route.EntityID = strings.TrimSpace(entityID)
 	}
-	route.FlowID = firstNonEmptyString(flowID, route.FlowID)
-	if entityID != "" {
-		route.EntityID = entityID
-	}
-	if route.FlowInstance == "" {
-		if route.FlowID != "" {
-			if flowPath := actionResultFlowPath(source, route.FlowID); flowPath != "" {
-				return events.RouteIdentity{}, false
-			}
-		}
-		return route.Normalized(), true
-	}
-	if actionResultFlowInstanceBelongsToFlow(source, flowID, route.FlowInstance) {
-		return route.Normalized(), true
-	}
-	return events.RouteIdentity{}, false
-}
-
-func staticActionResultProducerRoute(source semanticview.Source, flowID, entityID string) events.RouteIdentity {
-	flowID = strings.TrimSpace(flowID)
-	if source == nil || flowID == "" {
-		return events.RouteIdentity{}
-	}
-	scope, ok := source.FlowScopeByID(flowID)
-	if ok && strings.EqualFold(strings.TrimSpace(scope.Mode), "template") {
-		return events.RouteIdentity{}
-	}
-	flowPath := strings.Trim(strings.TrimSpace(scope.Path), "/")
-	if flowPath == "" {
-		flowPath = strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
-	}
-	if flowPath == "" {
-		return events.RouteIdentity{}
-	}
-	return events.RouteIdentity{
-		FlowID:       flowID,
-		FlowInstance: flowPath,
-		EntityID:     strings.TrimSpace(entityID),
-	}.Normalized()
-}
-
-func actionResultFlowInstanceBelongsToFlow(source semanticview.Source, flowID, flowInstance string) bool {
-	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
-	if flowInstance == "" {
-		return false
-	}
-	flowPath := actionResultFlowPath(source, flowID)
-	if flowPath == "" {
-		return source == nil
-	}
-	if flowInstance == flowPath {
-		return true
-	}
-	if !actionResultFlowAllowsDescendantInstances(source, flowID) {
-		return false
-	}
-	return strings.HasPrefix(flowInstance, flowPath+"/")
-}
-
-func actionResultFlowAllowsDescendantInstances(source semanticview.Source, flowID string) bool {
-	if source == nil {
-		return true
-	}
-	scope, ok := source.FlowScopeByID(strings.TrimSpace(flowID))
-	if !ok {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(scope.Mode), "template")
+	return runtimepinrouting.AdmitNodeExecutionRoutingSource(source, nodeID, route)
 }
 
 func actionResultFlowPath(source semanticview.Source, flowID string) string {
@@ -156,6 +39,19 @@ func actionResultFlowPath(source semanticview.Source, flowID string) string {
 		return path
 	}
 	return flowID
+}
+
+func actionResultFlowInstanceBelongsToFlow(source semanticview.Source, flowID, flowInstance string) bool {
+	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
+	flowPath := actionResultFlowPath(source, flowID)
+	if flowInstance == "" || flowPath == "" {
+		return false
+	}
+	if flowInstance == flowPath {
+		return true
+	}
+	scope, ok := semanticview.FlowScopeByID(source, strings.TrimSpace(flowID))
+	return ok && strings.EqualFold(strings.TrimSpace(scope.Mode), "template") && strings.HasPrefix(flowInstance, flowPath+"/")
 }
 
 func actionResultEventType(source semanticview.Source, flowID, eventType string, producerRoute events.RouteIdentity) string {

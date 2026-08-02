@@ -136,8 +136,8 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 		t.Fatal("implementation_slice_1475 missing complete retirement proof surface")
 	}
 	slice1508 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1508")
-	if !sequenceContainsScalar(mustMappingValue(t, slice1508, "proof_obligations"), "semanticview exposes package-aware root connect facts through ResolvedCompositionConnectsFrom, and runtime delivery consumes the same endpoints through lowered ConnectRoutePlan authority") {
-		t.Fatal("implementation_slice_1508 must name the package-aware resolved relation and lowered route-plan owner")
+	if !sequenceContainsScalar(mustMappingValue(t, slice1508, "proof_obligations"), "the confined compiled-connect owner resolves package-aware root endpoints once, and static verification plus runtime delivery consume its typed graph projections") {
+		t.Fatal("implementation_slice_1508 must name the confined compiled graph owner")
 	}
 
 	entityContracts := mustYAMLPath(t, root, "entity_contracts")

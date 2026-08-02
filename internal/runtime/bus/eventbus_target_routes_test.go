@@ -684,7 +684,7 @@ func TestEventBusRecipientPlanMaterializerNormalizesRoutePlanDirectly(t *testing
 		t.Fatalf("route plan delivery intent = %#v, want route %#v", intent, want)
 	}
 	if intent.Producer != routeIntentProducerRecipientMaterializer {
-		t.Fatalf("route plan materializer producer = %s, want materializer route", intent.Producer)
+		t.Fatalf("route plan materializer producer = %q, want materializer route", routeIntentProducerCode(intent.Producer))
 	}
 	projected := eb.publishRecipientPlan(evt, plan)
 	if !deliveryRoutesContain(projected.DeliveryRoutes, want) {
@@ -758,6 +758,9 @@ func TestEventBusWorkflowRuntimeCarrierPrefersConcreteNodeRouteOverPlaceholder(t
 func deliveryRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRoute) bool {
 	want = want.Normalized()
 	for _, got := range events.NormalizeDeliveryRoutes(routes) {
+		if want.ConnectClaim.Empty() {
+			got.ConnectClaim = events.ConnectExecutionClaim{}
+		}
 		if got == want {
 			return true
 		}
@@ -2034,9 +2037,17 @@ func TestEventBusPublish_CanonicalParentConnectPersistsSingularStaticRoute(t *te
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	evt := eventtest.RunCreatingRootIngress(
+	sourceFact, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
+		FlowID:       "producer",
+		FlowInstance: "producer",
+		EntityID:     eventtest.UUID("parent-connect-producer"),
+	})
+	if err != nil {
+		t.Fatalf("build parent-connect routing source: %v", err)
+	}
+	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
 		uuid.NewString(), events.EventType("producer/work.ready"), "", "",
-		[]byte(`{"work_id":"work-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC(),
+		[]byte(`{"work_id":"work-1"}`), 0, "", "", events.EventEnvelope{}, sourceFact, time.Now().UTC(),
 	)
 	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 	if err != nil {

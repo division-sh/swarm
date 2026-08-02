@@ -15,6 +15,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -255,14 +256,16 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationOnBothStores(t *testing.
 					"max_tasks_per_week": 3, "budget_reset": "monday", "auto_expire_hours": 48,
 				}},
 			}}
-			exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
-				Config: cfg, HumanTaskStore: tc.store, AuthorityProvider: allowHumanTaskAuthority{},
-			})
 			requester := models.AgentConfig{
 				ExecutionMode: "live",
-				ID:            "requester", Role: "worker", FlowPath: "provider", EntityID: uuid.NewString(),
+				ID:            "requester", Identity: agentidentitytest.Runtime(t, "requester", "human-task-test", "provider", "provider", "provider"),
+				Role: "worker", FlowID: "provider", FlowPath: "provider", EntityID: uuid.NewString(),
 				Tools: []string{"human_task_request"}, Permissions: []string{"human_task_request"},
 			}
+			bundle := loadWave1EntityToolBundle(t, requester, "provider", "provider_record", "types: {}\n", "provider_record:\n  status: text\n")
+			exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+				Config: cfg, HumanTaskStore: tc.store, AuthorityProvider: allowHumanTaskAuthority{}, WorkflowSource: semanticview.Wrap(bundle),
+			})
 			ctx, replyContextID, sourceEventID := seedReplyToolContext(t, tc.store)
 			ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "provider-turn/tool-call-1")
 			ctx = runtimecorrelation.WithBundleSourceFact(ctx, authorActivityTestBundleSourceFact)

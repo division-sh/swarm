@@ -522,7 +522,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	if trigger == "" {
 		return false, nil
 	}
-	resolved := workflowNodeEventHandlerResolutionForDelivery(source, nodeID, evt)
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, nodeID, evt)
 	if resolved.Failure != "" {
 		return false, fmt.Errorf("resolve workflow handler for node %s: %s", nodeID, resolved.Failure)
 	}

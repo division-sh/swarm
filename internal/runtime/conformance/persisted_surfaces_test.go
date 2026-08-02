@@ -1034,12 +1034,13 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
 	if err := pg.UpsertSchedule(ctx, runtimepipeline.Schedule{
-		AgentID:   "runtime",
-		OwnerKind: runtimepipeline.ScheduleOwnerSystem,
-		EventType: "timer.check",
-		Mode:      "once",
-		At:        time.Now().Add(time.Minute),
-		TaskID:    "recover-me",
+		AgentID:       "runtime",
+		OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+		EventType:     "timer.check",
+		Mode:          "once",
+		At:            time.Now().Add(time.Minute),
+		TaskID:        "recover-me",
+		RoutingSource: events.NewPlatformControlRoutingSource(),
 	}); err != nil {
 		t.Fatalf("UpsertSchedule: %v", err)
 	}
@@ -1225,28 +1226,31 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 	scheduleStore := &conformanceTimerRecoveryScheduleStore{
 		active: []runtimepipeline.Schedule{
 			{
-				AgentID:   "runtime",
-				OwnerKind: runtimepipeline.ScheduleOwnerSystem,
-				EventType: "timer.replay",
-				Mode:      "once",
-				At:        time.Now().Add(time.Minute),
-				TaskID:    "replay-me",
+				AgentID:       "runtime",
+				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+				EventType:     "timer.replay",
+				Mode:          "once",
+				At:            time.Now().Add(time.Minute),
+				TaskID:        "replay-me",
+				RoutingSource: events.NewPlatformControlRoutingSource(),
 			},
 			{
-				AgentID:   "runtime",
-				OwnerKind: runtimepipeline.ScheduleOwnerSystem,
-				EventType: "timer.skip",
-				Mode:      "once",
-				At:        time.Now().Add(2 * time.Minute),
-				TaskID:    "skip-me",
+				AgentID:       "runtime",
+				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+				EventType:     "timer.skip",
+				Mode:          "once",
+				At:            time.Now().Add(2 * time.Minute),
+				TaskID:        "skip-me",
+				RoutingSource: events.NewPlatformControlRoutingSource(),
 			},
 			{
-				AgentID:   "runtime",
-				OwnerKind: runtimepipeline.ScheduleOwnerSystem,
-				EventType: "timer.drop",
-				Mode:      "once",
-				At:        time.Now().Add(3 * time.Minute),
-				TaskID:    "drop-me",
+				AgentID:       "runtime",
+				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+				EventType:     "timer.drop",
+				Mode:          "once",
+				At:            time.Now().Add(3 * time.Minute),
+				TaskID:        "drop-me",
+				RoutingSource: events.NewPlatformControlRoutingSource(),
 			},
 		},
 		claims: []conformanceScheduleClaim{

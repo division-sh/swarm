@@ -46,11 +46,12 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if err := installContractFrontierFlowInstanceRoutes(routeTable, req.Source, req.Plan.PendingWork); err != nil {
 		return runfork.RunForkSelectedContractRouteAdmission{}, err
 	}
-	connectPlans, connectIssues := runtimepinrouting.LowerCompositionConnectRoutePlans(req.Source)
+	connectGraph := runtimepinrouting.CompileConnectGraph(req.Source)
+	connectIssues := connectGraph.Issues()
 	if len(connectIssues) != 0 {
 		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission connect routes: %#v", connectIssues)
 	}
-	routeEvents, incompleteRoutes := selectedRouteHistoryEvents(routeTable, connectPlans, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
+	routeEvents, incompleteRoutes := selectedRouteHistoryEvents(routeTable, connectGraph, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
 	dynamicFlowInstances := selectedRouteHistoryDynamicFlowInstances(req.Source, req.Plan, req.FrontierAdmission)
 	blockers := []runfork.RunForkUnsupportedBlocker{{
 		Code:    runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
@@ -111,7 +112,8 @@ func selectedRouteHistoryHasSourceRouteFacts(plan runfork.RunForkPlan) bool {
 type selectedRouteHistoryEvent struct {
 	sourceEventID string
 	eventName     string
-	sourceRoute   events.RouteIdentity
+	routingSource events.RoutingSource
+	deliveryRoute events.DeliveryRoute
 }
 
 func selectedRouteHistoryEventEvidence(plan runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission) []selectedRouteHistoryEvent {
@@ -122,10 +124,9 @@ func selectedRouteHistoryEventEvidence(plan runfork.RunForkPlan, frontier runfor
 		}
 	}
 	seen := map[string]selectedRouteHistoryEvent{}
-	add := func(sourceEventID, eventName string, sourceRoute events.RouteIdentity) {
+	add := func(sourceEventID, eventName string, routingSource events.RoutingSource, deliveryRoute events.DeliveryRoute) {
 		sourceEventID = strings.TrimSpace(sourceEventID)
 		eventName = strings.TrimSpace(eventName)
-		sourceRoute = sourceRoute.Normalized()
 		if eventName == "" {
 			return
 		}
@@ -136,12 +137,12 @@ func selectedRouteHistoryEventEvidence(plan runfork.RunForkPlan, frontier runfor
 		if key == "" {
 			key = eventName
 		}
-		seen[key] = selectedRouteHistoryEvent{sourceEventID: sourceEventID, eventName: eventName, sourceRoute: sourceRoute}
+		seen[key] = selectedRouteHistoryEvent{sourceEventID: sourceEventID, eventName: eventName, routingSource: routingSource, deliveryRoute: deliveryRoute}
 	}
-	add(plan.ForkPoint.EventID, plan.ForkPoint.EventName, plan.ForkPoint.SourceRoute)
+	add(plan.ForkPoint.EventID, plan.ForkPoint.EventName, plan.ForkPoint.RoutingSource, events.DeliveryRoute{})
 	for _, item := range plan.PendingWork {
 		if strings.TrimSpace(item.Classification) == runfork.RunForkPendingClassificationDeliveredCompleted {
-			add(item.EventID, item.EventName, item.SourceRoute)
+			add(item.EventID, item.EventName, item.RoutingSource, item.DeliveryRoute)
 		}
 	}
 	keys := make(map[string]struct{}, len(seen))
@@ -156,11 +157,19 @@ func selectedRouteHistoryEventEvidence(plan runfork.RunForkPlan, frontier runfor
 	return out
 }
 
-func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectPlans []runtimepinrouting.ConnectRoutePlan, events []selectedRouteHistoryEvent) ([]runfork.RunForkSelectedContractRouteEvent, bool) {
+func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectGraph runtimepinrouting.CompiledConnectGraph, events []selectedRouteHistoryEvent) ([]runfork.RunForkSelectedContractRouteEvent, bool) {
 	out := make([]runfork.RunForkSelectedContractRouteEvent, 0, len(events))
 	incomplete := false
 	for _, event := range events {
-		lookups := contractFrontierRouteLookups(event.eventName, event.sourceRoute, connectPlans)
+		if recipient, ok := contractFrontierRecipientFromStampedRoute(event.deliveryRoute); ok {
+			out = append(out, runfork.RunForkSelectedContractRouteEvent{
+				SourceEventID: event.sourceEventID, EventName: event.eventName,
+				DerivedRecipients: []runfork.RunForkContractFrontierRecipient{recipient},
+				Disposition:       runfork.RunForkSelectedContractDispositionEvidenceOnly,
+			})
+			continue
+		}
+		lookups := contractFrontierRouteLookups(event.eventName, event.routingSource, connectGraph)
 		eventIncomplete := contractFrontierLookupsRequireRuntimeResolution(lookups)
 		incomplete = incomplete || eventIncomplete
 		disposition := runfork.RunForkSelectedContractDispositionEvidenceOnly
@@ -185,9 +194,9 @@ func selectedRouteHistoryDynamicFlowInstances(source semanticview.Source, plan r
 			seen[value] = struct{}{}
 		}
 	}
-	add(plan.ForkPoint.SourceRoute.Normalized().FlowInstance)
+	add(plan.ForkPoint.RoutingSource.Route().FlowInstance)
 	for _, item := range plan.PendingWork {
-		add(item.SourceRoute.Normalized().FlowInstance)
+		add(item.RoutingSource.Route().FlowInstance)
 	}
 	for _, event := range frontier.FrontierEvents {
 		for _, flowInstance := range event.SourceFlowInstances {

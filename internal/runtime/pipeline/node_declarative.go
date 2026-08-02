@@ -176,7 +176,7 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 	}
 	eventType := strings.TrimSpace(string(evt.Type()))
 	handlerEventKey := eventType
-	resolved := workflowNodeEventHandlerResolutionForDelivery(n.source, n.NodeID(), evt)
+	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, n.source, n.NodeID(), evt)
 	if resolved.Failure != "" {
 		return nil, fmt.Errorf("resolve workflow handler for node %s: %s", n.NodeID(), resolved.Failure)
 	}
@@ -188,7 +188,7 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 		}
 	}
 	if ok {
-		handlerEventKey = workflowNodeHandlerEventKeyForExecution(n.source, n.NodeID(), evt)
+		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, n.source, n.NodeID(), evt)
 	}
 	if !ok && !denyRawHandlerFallback {
 		for pattern, candidate := range n.contract.EventHandlers {
@@ -374,7 +374,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	}
 	handlerEventKey = strings.TrimSpace(handlerEventKey)
 	if handlerEventKey == "" {
-		handlerEventKey = workflowNodeHandlerEventKeyForExecution(source, e.nodeID, evt)
+		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, source, e.nodeID, evt)
 	}
 	workflowVersion := ""
 	if source != nil {
@@ -384,19 +384,16 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if err != nil {
 		return nil, err
 	}
+	producerSource, err := workflowNodeProducerSource(ctx, source, e.nodeID, flowID, entityID, evt.RoutingSource())
+	if err != nil {
+		return nil, fmt.Errorf("admit workflow node producer source: %w", err)
+	}
 	result, err := node.Handle(ctx, runtimeengine.ExecutionRequest{
-		EntityID: identity.NormalizeEntityID(entityID),
-		NodeID:   identity.NormalizeNodeID(e.nodeID),
-		FlowID:   identity.NormalizeFlowID(flowID),
-		Event:    evt,
-		ProducerRoute: actionResultProducerRoute(
-			source,
-			flowID,
-			entityID,
-			evt,
-			stateSnapshot,
-			workflowNodeProducerRoute(source, e.nodeID, flowID, entityID, stateSnapshot),
-		),
+		EntityID:        identity.NormalizeEntityID(entityID),
+		NodeID:          identity.NormalizeNodeID(e.nodeID),
+		FlowID:          identity.NormalizeFlowID(flowID),
+		Event:           evt,
+		ProducerSource:  producerSource,
 		HandlerEventKey: handlerEventKey,
 		ChainDepth:      evt.ChainDepth(),
 		Handler:         handler,

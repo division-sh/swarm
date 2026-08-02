@@ -78,8 +78,8 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 			t.Fatalf("seed retryable delivery %s: snapshot=%#v err=%v", source, snapshot, err)
 		}
 		if _, err := pg.DB.ExecContext(ctx, `
-			INSERT INTO timers (timer_id, timer_name, run_id, fire_event, fire_at, owner_kind, status)
-			VALUES ($1::uuid, $2, $3::uuid, 'timer.fired', now() + interval '1 hour', 'system', 'active')
+			INSERT INTO timers (timer_id, timer_name, run_id, fire_event, routing_source, fire_at, owner_kind, status)
+			VALUES ($1::uuid, $2, $3::uuid, 'timer.fired', '{"kind":"platform_control","route":{}}'::jsonb, now() + interval '1 hour', 'system', 'active')
 		`, timerID, aggregateWorkflowTimerTaskID(timerID), runID); err != nil {
 			t.Fatalf("seed timer %s: %v", source, err)
 		}

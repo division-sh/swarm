@@ -99,7 +99,7 @@ func (s *PostgresStore) PlanRunFork(ctx context.Context, req runfork.RunForkPlan
 		SourceEventID:  cursor.SourceEventID,
 		ProducedBy:     cursor.ProducedBy,
 		ProducedByType: cursor.ProducedByType,
-		SourceRoute:    forkEvent.SourceRoute.Normalized(),
+		RoutingSource:  forkEvent.RoutingSource,
 		Timestamp:      cursor.CreatedAt,
 		Revision:       cursor.Revision,
 	}

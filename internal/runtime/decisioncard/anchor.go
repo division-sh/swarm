@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
@@ -56,6 +57,7 @@ type StageGateAnchor struct {
 	FlowInstance      string
 	FlowID            string
 	EntityID          string
+	Source            events.RoutingSource
 	Stage             string
 	StageActivationID string
 }
@@ -65,6 +67,7 @@ type HumanTaskAnchor struct {
 	OperationID      string
 	Category         string
 	Scope            Scope
+	Source           events.RoutingSource
 }
 
 type ProposedEffectAnchor struct {
@@ -72,6 +75,7 @@ type ProposedEffectAnchor struct {
 	ActivityID     string
 	Decision       string
 	Scope          Scope
+	Source         events.RoutingSource
 }
 
 func RegisteredAnchorKinds() []AnchorKind {
@@ -122,9 +126,16 @@ func NewStageGateAnchor(in StageGateAnchor) (Anchor, error) {
 			return Anchor{}, fmt.Errorf("stage_gate anchor %s is required", name)
 		}
 	}
+	if err := validateAnchorExecutionSource(in.Source); err != nil {
+		return Anchor{}, fmt.Errorf("stage_gate anchor source: %w", err)
+	}
+	if err := validateStageGateSourceOwner(in); err != nil {
+		return Anchor{}, err
+	}
 	values := map[string]any{
 		"flow_instance":       in.FlowInstance,
 		"entity_id":           in.EntityID,
+		"routing_source":      in.Source,
 		"stage":               in.Stage,
 		"stage_activation_id": in.StageActivationID,
 	}
@@ -154,11 +165,15 @@ func NewHumanTaskAnchor(in HumanTaskAnchor) (Anchor, error) {
 	if err := in.Scope.Validate(); err != nil {
 		return Anchor{}, err
 	}
+	if err := validateAnchorExecutionSource(in.Source); err != nil {
+		return Anchor{}, fmt.Errorf("human_task anchor source: %w", err)
+	}
 	data, err := canonicaljson.FromGo(map[string]any{
 		"requester_agent_id": in.RequesterAgentID,
 		"operation_id":       in.OperationID,
 		"category":           in.Category,
 		"scope":              in.Scope,
+		"routing_source":     in.Source,
 	})
 	if err != nil {
 		return Anchor{}, fmt.Errorf("admit human_task anchor: %w", err)
@@ -176,16 +191,50 @@ func NewProposedEffectAnchor(in ProposedEffectAnchor) (Anchor, error) {
 	if err := in.Scope.Validate(); err != nil {
 		return Anchor{}, err
 	}
+	if err := validateAnchorExecutionSource(in.Source); err != nil {
+		return Anchor{}, fmt.Errorf("proposed_effect anchor source: %w", err)
+	}
 	data, err := canonicaljson.FromGo(map[string]any{
 		"request_event_id": in.RequestEventID,
 		"activity_id":      in.ActivityID,
 		"decision":         in.Decision,
 		"scope":            in.Scope,
+		"routing_source":   in.Source,
 	})
 	if err != nil {
 		return Anchor{}, fmt.Errorf("admit proposed_effect anchor: %w", err)
 	}
 	return Anchor{kind: AnchorKindProposedEffect, data: data}, nil
+}
+
+func validateAnchorExecutionSource(source events.RoutingSource) error {
+	switch source.Kind() {
+	case events.RoutingSourceRoot, events.RoutingSourceStaticFlow, events.RoutingSourceConcreteTemplateInstance:
+		return nil
+	default:
+		return fmt.Errorf("requires root, static-flow, or concrete-template execution source")
+	}
+}
+
+func validateStageGateSourceOwner(in StageGateAnchor) error {
+	route := in.Source.Route()
+	switch in.Source.Kind() {
+	case events.RoutingSourceRoot:
+		if in.FlowID != "" || route != (events.RouteIdentity{EntityID: in.EntityID}.Normalized()) {
+			return fmt.Errorf("root stage_gate anchor source does not match its project owner")
+		}
+	case events.RoutingSourceStaticFlow:
+		if in.FlowID == "" || route.FlowID != in.FlowID || route.EntityID != in.EntityID {
+			return fmt.Errorf("flow stage_gate anchor source does not match its flow owner")
+		}
+	case events.RoutingSourceConcreteTemplateInstance:
+		if in.FlowID == "" || route != (events.RouteIdentity{FlowID: in.FlowID, FlowInstance: in.FlowInstance, EntityID: in.EntityID}.Normalized()) {
+			return fmt.Errorf("flow stage_gate anchor source does not match its flow owner")
+		}
+	default:
+		return fmt.Errorf("stage_gate anchor source kind %q is not an execution owner", in.Source.Kind())
+	}
+	return nil
 }
 
 func DecodeAnchor(kind string, raw []byte) (Anchor, error) {
@@ -245,6 +294,40 @@ func (a Anchor) Scope() (Scope, error) {
 	}
 }
 
+func (a Anchor) ExecutionRoutingSource() (events.RoutingSource, error) {
+	switch a.kind {
+	case AnchorKindStageGate:
+		anchor, err := a.StageGate()
+		return anchor.Source, err
+	case AnchorKindHumanTask:
+		anchor, err := a.HumanTask()
+		return anchor.Source, err
+	case AnchorKindProposedEffect:
+		anchor, err := a.ProposedEffect()
+		return anchor.Source, err
+	default:
+		return events.RoutingSource{}, fmt.Errorf("decision-card anchor kind %q is not registered", a.kind)
+	}
+}
+
+// ControlRoutingSource projects an immutable card owner into its non-authored
+// runtime-control source. Root-owned cards are closed platform controls;
+// flow-owned cards retain their exact typed route.
+func (a Anchor) ControlRoutingSource() (events.RoutingSource, error) {
+	source, err := a.ExecutionRoutingSource()
+	if err != nil {
+		return events.RoutingSource{}, err
+	}
+	if source.Kind() == events.RoutingSourceRoot {
+		return events.NewPlatformControlRoutingSource(), nil
+	}
+	control, err := events.NewFlowOwnedControlRoutingSource(source.Route())
+	if err != nil {
+		return events.RoutingSource{}, fmt.Errorf("decision-card control source: %w", err)
+	}
+	return control, nil
+}
+
 func (a Anchor) ProposedEffect() (ProposedEffectAnchor, error) {
 	if a.kind != AnchorKindProposedEffect {
 		return ProposedEffectAnchor{}, fmt.Errorf("decision-card anchor %q is not proposed_effect", a.kind)
@@ -253,7 +336,7 @@ func (a Anchor) ProposedEffect() (ProposedEffectAnchor, error) {
 	if !ok {
 		return ProposedEffectAnchor{}, fmt.Errorf("proposed_effect anchor must be an object")
 	}
-	if err := exactAnchorFields(values, "proposed_effect", []string{"request_event_id", "activity_id", "decision", "scope"}, nil); err != nil {
+	if err := exactAnchorFields(values, "proposed_effect", []string{"request_event_id", "activity_id", "decision", "scope", "routing_source"}, nil); err != nil {
 		return ProposedEffectAnchor{}, err
 	}
 	scopeValue, ok := values["scope"]
@@ -275,11 +358,17 @@ func (a Anchor) ProposedEffect() (ProposedEffectAnchor, error) {
 			Kind: ScopeKind(requiredAnchorString(scopeMap, "kind")), FlowInstance: optionalAnchorString(scopeMap, "flow_instance"), EntityID: optionalAnchorString(scopeMap, "entity_id"),
 		},
 	}
+	if err := canonicaljson.ValueInto(values["routing_source"], &out.Source); err != nil {
+		return ProposedEffectAnchor{}, fmt.Errorf("proposed_effect anchor routing_source: %w", err)
+	}
 	if out.RequestEventID == "" || out.ActivityID == "" || out.Decision == "" {
 		return ProposedEffectAnchor{}, fmt.Errorf("proposed_effect anchor contains an empty required identity")
 	}
 	if err := out.Scope.Validate(); err != nil {
 		return ProposedEffectAnchor{}, err
+	}
+	if err := validateAnchorExecutionSource(out.Source); err != nil {
+		return ProposedEffectAnchor{}, fmt.Errorf("proposed_effect anchor source: %w", err)
 	}
 	return out, nil
 }
@@ -292,7 +381,7 @@ func (a Anchor) StageGate() (StageGateAnchor, error) {
 	if !ok {
 		return StageGateAnchor{}, fmt.Errorf("stage_gate anchor must be an object")
 	}
-	if err := exactAnchorFields(values, "stage_gate", []string{"flow_instance", "entity_id", "stage", "stage_activation_id"}, []string{"flow_id"}); err != nil {
+	if err := exactAnchorFields(values, "stage_gate", []string{"flow_instance", "entity_id", "routing_source", "stage", "stage_activation_id"}, []string{"flow_id"}); err != nil {
 		return StageGateAnchor{}, err
 	}
 	out := StageGateAnchor{
@@ -302,8 +391,17 @@ func (a Anchor) StageGate() (StageGateAnchor, error) {
 		Stage:             requiredAnchorString(values, "stage"),
 		StageActivationID: requiredAnchorString(values, "stage_activation_id"),
 	}
+	if err := canonicaljson.ValueInto(values["routing_source"], &out.Source); err != nil {
+		return StageGateAnchor{}, fmt.Errorf("stage_gate anchor routing_source: %w", err)
+	}
 	if out.FlowInstance == "" || out.EntityID == "" || out.Stage == "" || out.StageActivationID == "" {
 		return StageGateAnchor{}, fmt.Errorf("stage_gate anchor contains an empty required identity")
+	}
+	if err := validateAnchorExecutionSource(out.Source); err != nil {
+		return StageGateAnchor{}, fmt.Errorf("stage_gate anchor source: %w", err)
+	}
+	if err := validateStageGateSourceOwner(out); err != nil {
+		return StageGateAnchor{}, err
 	}
 	return out, nil
 }
@@ -316,7 +414,7 @@ func (a Anchor) HumanTask() (HumanTaskAnchor, error) {
 	if !ok {
 		return HumanTaskAnchor{}, fmt.Errorf("human_task anchor must be an object")
 	}
-	if err := exactAnchorFields(values, "human_task", []string{"requester_agent_id", "operation_id", "category", "scope"}, nil); err != nil {
+	if err := exactAnchorFields(values, "human_task", []string{"requester_agent_id", "operation_id", "category", "scope", "routing_source"}, nil); err != nil {
 		return HumanTaskAnchor{}, err
 	}
 	scopeValue, ok := values["scope"]
@@ -340,11 +438,17 @@ func (a Anchor) HumanTask() (HumanTaskAnchor, error) {
 			EntityID:     optionalAnchorString(scopeMap, "entity_id"),
 		},
 	}
+	if err := canonicaljson.ValueInto(values["routing_source"], &out.Source); err != nil {
+		return HumanTaskAnchor{}, fmt.Errorf("human_task anchor routing_source: %w", err)
+	}
 	if out.RequesterAgentID == "" || out.OperationID == "" || out.Category == "" {
 		return HumanTaskAnchor{}, fmt.Errorf("human_task anchor contains an empty required identity")
 	}
 	if err := out.Scope.Validate(); err != nil {
 		return HumanTaskAnchor{}, err
+	}
+	if err := validateAnchorExecutionSource(out.Source); err != nil {
+		return HumanTaskAnchor{}, fmt.Errorf("human_task anchor source: %w", err)
 	}
 	return out, nil
 }

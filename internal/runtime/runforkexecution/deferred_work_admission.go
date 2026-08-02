@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -121,13 +122,16 @@ func selectedContractSourceCanCreateDynamicFlow(source semanticview.Source) bool
 	if source == nil {
 		return false
 	}
+	graph := runtimepinrouting.CompileConnectGraph(source)
 	for flowID := range source.FlowSchemaEntries() {
 		for _, pin := range source.FlowInputEventPins(flowID) {
 			if !selectedContractFlowInputResolutionRequiresDynamicFlowOwner(pin.Resolution.Mode) {
 				continue
 			}
-			if len(semanticview.ResolvedCompositionConnectsTo(source, flowID, pin.PinName())) > 0 {
-				return true
+			for _, edge := range graph.Edges() {
+				if edge.Consumer().FlowID() == strings.TrimSpace(flowID) && edge.Consumer().Pin() == strings.TrimSpace(pin.PinName()) {
+					return true
+				}
 			}
 		}
 	}

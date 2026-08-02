@@ -185,7 +185,7 @@ func TestRun_FailsClosedForInvalidSelectInputResolution(t *testing.T) {
 	}
 	for _, mode := range []runtimecontracts.FlowInputResolutionMode{runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate} {
 		for _, tc := range tests {
-			t.Run(mode.String()+"/"+tc.name, func(t *testing.T) {
+			t.Run(runtimecontracts.FlowInputResolutionModeCode(mode)+"/"+tc.name, func(t *testing.T) {
 				tc.opts.mode = mode
 				root := writeSelectResolutionCompositionConnectFixture(t, tc.opts)
 				bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
@@ -511,7 +511,7 @@ func runFanInBarrierMutation(t *testing.T, mutation canonicalrouting.FanInNegati
 	root := canonicalrouting.CopyExample(t, canonicalrouting.FanInBarrier)
 	if mutation == canonicalrouting.FanInMultipleJoinRows {
 		bundle := loadFixtureBundleAt(t, repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-		applyFanInMultipleJoinRows(t, bundle)
+		applyFanInMultipleJoinPlan(t, bundle)
 		return Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	}
 	canonicalrouting.ApplyFanInNegativeMutation(t, root, mutation)
@@ -519,41 +519,11 @@ func runFanInBarrierMutation(t *testing.T, mutation canonicalrouting.FanInNegati
 	return Run(context.Background(), semanticview.Wrap(bundle), Options{})
 }
 
-func applyFanInMultipleJoinRows(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) {
+func applyFanInMultipleJoinPlan(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) {
 	t.Helper()
-	if bundle == nil {
-		t.Fatal("fan-in semantic mutation requires a bundle")
-	}
-	flow, ok := bundle.FlowViewByID("portfolio")
-	if !ok || flow == nil {
-		t.Fatal("canonical portfolio flow is unavailable")
-	}
-	const sourceNodeID = "portfolio-collector"
-	const duplicateNodeID = "portfolio-collector-duplicate"
-	node, ok := flow.Nodes[sourceNodeID]
-	if !ok {
-		t.Fatal("canonical portfolio collector is unavailable")
-	}
-	node.ID = duplicateNodeID
-	flow.Nodes[duplicateNodeID] = node
-	if bundle.Nodes == nil {
-		bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{}
-	}
-	bundle.Nodes[duplicateNodeID] = node
-	if bundle.Semantics.NodeHandlers == nil {
-		bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
-	}
-	bundle.Semantics.NodeHandlers[duplicateNodeID] = node.EventHandlers
-	if bundle.Semantics.EffectiveNodes == nil {
-		bundle.Semantics.EffectiveNodes = map[string]runtimecontracts.SystemNodeEffectiveSemantics{}
-	}
-	bundle.Semantics.EffectiveNodes[duplicateNodeID] = runtimecontracts.SystemNodeEffectiveSemantics{
-		ID:                   duplicateNodeID,
-		RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(node),
-	}
 	for _, plan := range bundle.Semantics.Joins {
-		if plan.FlowID == "portfolio" && plan.NodeID == sourceNodeID && plan.HandlerEvent == "operating.reported" {
-			plan.NodeID = duplicateNodeID
+		if plan.FlowID == "portfolio" && plan.NodeID == "portfolio-collector" && plan.HandlerEvent == "operating.reported" {
+			plan.NodeID = "portfolio-collector-duplicate"
 			bundle.Semantics.Joins = append(bundle.Semantics.Joins, plan)
 			return
 		}

@@ -31,9 +31,9 @@ func eventFacts(
 	if !source.Empty() {
 		var err error
 		if source.FlowInstance != "" {
-			routingSource, err = events.NewRuntimeRoutingSource(source.FlowID, source.FlowInstance, source.EntityID)
+			routingSource, err = events.NewConcreteTemplateInstanceRoutingSource(source)
 		} else {
-			routingSource, err = events.NewDeclaredIngressRoutingSource(source.FlowID, source.FlowInstance, source.EntityID, "eventfixture")
+			routingSource, err = events.NewExternalIngressRoutingSource(source.FlowID, source.EntityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
 		}
 		if err != nil {
 			return events.EventFacts{}, err

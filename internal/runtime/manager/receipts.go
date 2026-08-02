@@ -428,7 +428,7 @@ func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, stat
 		return runtimedelivery.Snapshot{}, fmt.Errorf("delivery settlement route: %w", err)
 	}
 	claim, ok := runtimedelivery.ClaimFromContext(ctx)
-	if !ok || claim.SubscriberClass() != runtimedelivery.SubscriberAgent || claim.SubscriberID() != agentID || claim.RouteIdentity() != routeIdentity.String() {
+	if !ok || claim.SubscriberClass() != runtimedelivery.SubscriberAgent || claim.SubscriberID() != agentID || claim.RouteIdentity() != events.EncodeDeliveryRouteIdentity(routeIdentity) {
 		if am.bus != nil {
 			_ = am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 				Level: "error", Component: "agent-manager", Action: "delivery_settlement_claim_missing",

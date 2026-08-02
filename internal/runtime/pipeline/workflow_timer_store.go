@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -30,6 +31,7 @@ type WorkflowTimerActivation struct {
 	RunID               string
 	EntityID            string
 	FlowInstance        string
+	RoutingSource       events.RoutingSource
 	OwnerAgent          string
 	EventType           string
 	Payload             []byte
@@ -75,6 +77,10 @@ func (a WorkflowTimerActivation) validate() error {
 	}
 	if a.RunID == "" || a.EntityID == "" || a.FlowInstance == "" {
 		return fmt.Errorf("workflow timer activation requires run, entity, and flow-instance scope")
+	}
+	if a.RoutingSource.Kind() != events.RoutingSourceFlowOwnedControl ||
+		a.RoutingSource.Route().FlowInstance != a.FlowInstance || a.RoutingSource.Route().EntityID != a.EntityID {
+		return fmt.Errorf("workflow timer activation requires an exact persisted flow-owned routing source")
 	}
 	if a.OwnerAgent == "" || a.EventType == "" {
 		return fmt.Errorf("workflow timer activation requires owner agent and fire event")
@@ -154,6 +160,10 @@ func (s *workflowInstanceStore) insertWorkflowTimerActivation(ctx context.Contex
 	if err := activation.validate(); err != nil {
 		return WorkflowTimerActivation{}, false, err
 	}
+	routingSourceRaw, err := json.Marshal(activation.RoutingSource)
+	if err != nil {
+		return WorkflowTimerActivation{}, false, fmt.Errorf("encode workflow timer routing source: %w", err)
+	}
 	tx, ok := sqlTxFromContext(ctx)
 	if !ok || tx == nil || !authoractivity.InMutation(ctx, tx) {
 		return WorkflowTimerActivation{}, false, fmt.Errorf("workflow timer activation requires the pipeline mutation owner")
@@ -169,33 +179,33 @@ func (s *workflowInstanceStore) insertWorkflowTimerActivation(ctx context.Contex
 	if s.isSQLite() {
 		result, err = tx.ExecContext(ctx, `
 			INSERT INTO timers (
-				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, routing_source,
 				fire_at, recurring, recurrence_interval, owner_node, owner_agent, owner_kind, task_type,
 				status, created_at, source_timer_id, forked_from_run_id, forked_from_event_id,
 				reconstruction_owner
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULL, ?, 'system', ?, 'active', ?,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULL, ?, 'system', ?, 'active', ?,
 			        NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''))
 			ON CONFLICT(timer_id) DO NOTHING
 		`, activation.Ref.ActivationID, activation.RunID, activation.Ref.TaskID(), activation.EntityID,
-			activation.FlowInstance, activation.EventType, string(activation.Payload), activation.FireAt,
+			activation.FlowInstance, activation.EventType, string(activation.Payload), string(routingSourceRaw), activation.FireAt,
 			activation.Recurring, workflowTimerIntervalString(activation), activation.OwnerAgent,
 			workflowTimerTaskFamily, activation.CreatedAt, activation.SourceTimerID,
 			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner)
 	} else {
 		result, err = tx.ExecContext(ctx, `
 			INSERT INTO timers (
-				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, routing_source,
 				fire_at, recurring, recurrence_interval, owner_node, owner_agent, owner_kind, task_type,
 				status, created_at, source_timer_id, forked_from_run_id, forked_from_event_id,
 				reconstruction_owner
 			)
-			VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb, $8, $9, NULLIF($10, ''),
-			        NULL, $11, 'system', $12, 'active', $13, NULLIF($14, '')::uuid, NULLIF($15, '')::uuid,
-			        NULLIF($16, '')::uuid, NULLIF($17, ''))
+			VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb, $8::jsonb, $9, $10, NULLIF($11, ''),
+			        NULL, $12, 'system', $13, 'active', $14, NULLIF($15, '')::uuid, NULLIF($16, '')::uuid,
+			        NULLIF($17, '')::uuid, NULLIF($18, ''))
 			ON CONFLICT(timer_id) DO NOTHING
 		`, activation.Ref.ActivationID, activation.RunID, activation.Ref.TaskID(), activation.EntityID,
-			activation.FlowInstance, activation.EventType, string(activation.Payload), activation.FireAt,
+			activation.FlowInstance, activation.EventType, string(activation.Payload), string(routingSourceRaw), activation.FireAt,
 			activation.Recurring, workflowTimerIntervalString(activation), activation.OwnerAgent,
 			workflowTimerTaskFamily, activation.CreatedAt, activation.SourceTimerID,
 			activation.ForkedFromRunID, activation.ForkedFromEventID, activation.ReconstructionOwner)
@@ -235,7 +245,7 @@ func workflowTimerIntervalString(activation WorkflowTimerActivation) string {
 func requireSameWorkflowTimerActivationFacts(actual, expected WorkflowTimerActivation) error {
 	actual, expected = actual.normalized(), expected.normalized()
 	if actual.Ref != expected.Ref || actual.RunID != expected.RunID || actual.EntityID != expected.EntityID ||
-		actual.FlowInstance != expected.FlowInstance || actual.OwnerAgent != expected.OwnerAgent ||
+		actual.FlowInstance != expected.FlowInstance || actual.RoutingSource.Kind() != expected.RoutingSource.Kind() || actual.RoutingSource.Route() != expected.RoutingSource.Route() || actual.OwnerAgent != expected.OwnerAgent ||
 		actual.EventType != expected.EventType || actual.Recurring != expected.Recurring ||
 		actual.RecurrenceInterval != expected.RecurrenceInterval || !actual.CreatedAt.Equal(expected.CreatedAt) ||
 		actual.SourceTimerID != expected.SourceTimerID || actual.ForkedFromRunID != expected.ForkedFromRunID ||
@@ -379,7 +389,7 @@ func workflowTimerSelectColumns() string {
 		SELECT
 			CAST(t.timer_id AS TEXT), t.timer_name, COALESCE(CAST(t.run_id AS TEXT), ''),
 			COALESCE(CAST(t.entity_id AS TEXT), ''), COALESCE(t.flow_instance, ''),
-			t.fire_event, COALESCE(t.fire_payload, '{}'), t.fire_at, t.recurring,
+			t.fire_event, COALESCE(t.fire_payload, '{}'), t.routing_source, t.fire_at, t.recurring,
 			COALESCE(t.recurrence_interval, ''), COALESCE(t.owner_node, ''),
 			COALESCE(t.owner_agent, ''), t.task_type, t.status, t.fired_at, t.created_at,
 			COALESCE(CAST(t.source_timer_id AS TEXT), ''),
@@ -393,14 +403,14 @@ func workflowTimerSelectColumns() string {
 
 func scanWorkflowTimerActivation(scanner workflowTimerScanner) (WorkflowTimerActivation, error) {
 	var (
-		activation                                      WorkflowTimerActivation
-		activationID, taskID, ownerNode, taskType       string
-		payloadRaw, fireAtRaw, firedAtRaw, createdAtRaw any
-		intervalRaw                                     string
+		activation                                                        WorkflowTimerActivation
+		activationID, taskID, ownerNode, taskType                         string
+		payloadRaw, routingSourceRaw, fireAtRaw, firedAtRaw, createdAtRaw any
+		intervalRaw                                                       string
 	)
 	if err := scanner.Scan(
 		&activationID, &taskID, &activation.RunID, &activation.EntityID, &activation.FlowInstance,
-		&activation.EventType, &payloadRaw, &fireAtRaw, &activation.Recurring, &intervalRaw,
+		&activation.EventType, &payloadRaw, &routingSourceRaw, &fireAtRaw, &activation.Recurring, &intervalRaw,
 		&ownerNode, &activation.OwnerAgent, &taskType, &activation.Status, &firedAtRaw, &createdAtRaw,
 		&activation.SourceTimerID, &activation.ForkedFromRunID, &activation.ForkedFromEventID,
 		&activation.ReconstructionOwner,
@@ -419,6 +429,9 @@ func scanWorkflowTimerActivation(scanner workflowTimerScanner) (WorkflowTimerAct
 	}
 	activation.Ref = ref
 	activation.Payload = sqliteWorkflowJSONBytes(payloadRaw)
+	if err := json.Unmarshal(sqliteWorkflowJSONBytes(routingSourceRaw), &activation.RoutingSource); err != nil {
+		return WorkflowTimerActivation{}, fmt.Errorf("workflow timer %s has invalid routing source: %w", activationID, err)
+	}
 	var err error
 	if activation.FireAt, _, err = sqliteWorkflowTimeValue(fireAtRaw); err != nil {
 		return WorkflowTimerActivation{}, err

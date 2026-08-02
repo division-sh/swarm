@@ -8,6 +8,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -262,7 +263,7 @@ func (p inputPinProducerSourceProof) nonHarnessProofDetails() string {
 
 func (c *checkerContext) inputPinProducerSourceProof(flowID, eventType string) inputPinProducerSourceProof {
 	return inputPinProducerSourceProof{
-		resolution: semanticview.ResolveFlowInputProducer(c.source, flowID, eventType),
+		resolution: runtimepinrouting.ResolveFlowInputProducer(c.source, flowID, eventType),
 	}
 }
 
@@ -315,7 +316,7 @@ func (c *checkerContext) crossFlowPinAmbiguityValidation() []Finding {
 			if eventType == "" {
 				continue
 			}
-			resolution := semanticview.ResolveFlowInputProducer(c.source, flowID, eventType)
+			resolution := runtimepinrouting.ResolveFlowInputProducer(c.source, flowID, eventType)
 			if !resolution.HasAmbiguousBoundaryEvidence() {
 				continue
 			}
@@ -768,7 +769,7 @@ func flowInputHandlerUsesResolutionMode(source semanticview.Source, flowID, hand
 		return false
 	}
 	endpoint, ok := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint(flowID, handlerEvent).Endpoint()
-	return ok && strings.TrimSpace(endpoint.ResolutionMode) == mode.String()
+	return ok && endpoint.ResolutionMode == mode
 }
 
 func eventEntryDeclaresPayloadField(entry runtimecontracts.EventCatalogEntry, field string) bool {

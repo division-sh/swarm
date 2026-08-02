@@ -945,7 +945,7 @@ func importBoundaryFlowInputHasExternalProducer(source Source, flowID, eventType
 	if source == nil || strings.TrimSpace(flowID) == "" || eventidentity.Normalize(eventType) == "" {
 		return false
 	}
-	return len(source.ResolveFlowInputAutoWire(flowID, eventType).Patterns) > 0
+	return len(ResolveNonConnectFlowInputProducer(source, flowID, eventType).AutoWireResolution().Patterns) > 0
 }
 
 func importBoundaryProjectLocalEventSet(scope ProjectScope) map[string]struct{} {

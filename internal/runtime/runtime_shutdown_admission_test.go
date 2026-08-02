@@ -80,6 +80,7 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 				agent_route_presence TEXT NOT NULL, agent_flow_scope_key TEXT NOT NULL,
 				agent_flow_instance_id TEXT NOT NULL, agent_flow_instance_path TEXT NOT NULL,
 				delivery_context BLOB NOT NULL, delivery_payload_projection BLOB NOT NULL,
+				connect_execution_claim BLOB NOT NULL,
 				execution_authority_kind TEXT NOT NULL, authority_bundle_hash TEXT NOT NULL,
 				authority_bundle_source TEXT NOT NULL, execution_authority_id TEXT NOT NULL,
 				execution_authority_generation INTEGER NOT NULL, selected_execution_id TEXT,

@@ -235,7 +235,9 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	)
 
 	configurePipelineTestDeliveryOwner(t, pc)
-	route := seedPipelineNodeDeliveryAuthority(t, db, evt, "listener")
+	route := workflowNodeStampedConnectRouteForHandlerEvent(t, pc.SemanticSource(), "task.done", "listener")
+	route.Target = events.RouteIdentity{EntityID: "ent-001"}
+	route = seedPipelineNodeDeliveryRouteAuthority(t, db, evt, route)
 	deliveryCtx := withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route)
 
 	if handled := pc.executeNodeHandlerPlan(deliveryCtx, "dispatcher", evt); handled {
@@ -252,8 +254,8 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 		t.Fatalf("state after wrong node execution = %q, want waiting", got)
 	}
 
-	if handled := pc.executeNodeHandlerPlan(deliveryCtx, "listener", evt); !handled {
-		t.Fatal("listener should handle child/task.done")
+	if handled, err := pc.executeNodeHandlerPlanResult(deliveryCtx, "listener", evt); err != nil || !handled {
+		t.Fatalf("listener should handle child/task.done: handled=%v err=%v", handled, err)
 	}
 	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), "ent-001")
 	if err != nil {
@@ -501,14 +503,11 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 	configurePipelineTestDeliveryOwner(t, pc)
 	route := seedPipelineNodeDeliveryAuthority(t, db, completion, "root-collector")
 	passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), completion)
-	if err != nil {
-		t.Fatalf("Intercept: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
+		t.Fatalf("Intercept error = %v, want stamped connect claim", err)
 	}
-	if !passThrough {
-		t.Fatal("expected nested descendant completion to remain visible downstream")
-	}
-	if len(emitted) != 0 {
-		t.Fatalf("emitted = %#v, want none without subject-link back-propagation", emitted)
+	if passThrough || len(emitted) != 0 {
+		t.Fatalf("failed delivery result = passThrough:%v emitted:%#v, want no output", passThrough, emitted)
 	}
 
 	child, found, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), childEntityID)
@@ -583,8 +582,8 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 		"",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, childRowID),
 		time.Time{},
-	)); err != nil || !handled {
-		t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, err = %v, want handled", handled, consume, err)
+	)); err != nil || handled || consume {
+		t.Fatalf("workflowNodeInterceptPolicy handled = %v, consume = %v, err = %v, want no unstamped match", handled, consume, err)
 	}
 
 	completion := eventtest.RunCreatingRootIngress(
@@ -603,14 +602,11 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 	configurePipelineTestDeliveryOwner(t, pc)
 	route := seedPipelineNodeDeliveryAuthority(t, db, completion, "root-collector")
 	passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), route), completion)
-	if err != nil {
-		t.Fatalf("Intercept: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
+		t.Fatalf("Intercept error = %v, want stamped connect claim", err)
 	}
-	if !passThrough {
-		t.Fatal("expected nested descendant completion to remain visible downstream")
-	}
-	if len(emitted) != 0 {
-		t.Fatalf("emitted = %#v, want none from an unauthorized repository-root handler", emitted)
+	if passThrough || len(emitted) != 0 {
+		t.Fatalf("failed delivery result = passThrough:%v emitted:%#v, want no output", passThrough, emitted)
 	}
 }
 
@@ -690,13 +686,10 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDo
 		t.Fatalf("begin nested completion author activity story: %v", err)
 	}
 	passThrough, emitted, _, err := pc.Intercept(withWorkflowNodeDeliveryRoute(ctx, route), completion)
-	if err != nil {
-		t.Fatalf("Intercept: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
+		t.Fatalf("Intercept error = %v, want stamped connect claim", err)
 	}
-	if !passThrough {
-		t.Fatal("expected nested descendant completion to remain visible downstream")
-	}
-	if len(emitted) != 0 {
-		t.Fatalf("emitted = %#v, want none from an unauthorized repository-root handler", emitted)
+	if passThrough || len(emitted) != 0 {
+		t.Fatalf("failed delivery result = passThrough:%v emitted:%#v, want no output", passThrough, emitted)
 	}
 }
