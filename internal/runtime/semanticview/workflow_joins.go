@@ -63,7 +63,9 @@ func WorkflowJoinPlanForHandler(source Source, flowID, nodeID, handlerEvent stri
 	}
 	flowID, nodeID, handlerEvent = strings.TrimSpace(flowID), strings.TrimSpace(nodeID), strings.TrimSpace(handlerEvent)
 	for _, plan := range source.WorkflowJoins() {
-		if strings.TrimSpace(plan.FlowID) == flowID && strings.TrimSpace(plan.NodeID) == nodeID && strings.TrimSpace(plan.HandlerEvent) == handlerEvent {
+		planFlowID := strings.TrimSpace(plan.FlowID)
+		flowMatches := planFlowID == flowID || (planFlowID == "" && flowID == strings.TrimSpace(source.WorkflowName()))
+		if flowMatches && strings.TrimSpace(plan.NodeID) == nodeID && strings.TrimSpace(plan.HandlerEvent) == handlerEvent {
 			return plan, true
 		}
 	}
