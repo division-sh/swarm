@@ -16,6 +16,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -28,6 +29,7 @@ type workflowTestSelectedStore interface {
 	decisioncard.HumanTaskStore
 	runtimepipeline.DecisionCardDraftExpiry
 	runtimepipeline.HumanTaskExpiry
+	runtimetimerobligation.Reader
 	PipelineObligations() runtimepipelineobligation.Store
 }
 
@@ -112,6 +114,7 @@ func completeWorkflowTestCoordinatorOptions(
 		HumanTasks:              selected,
 		DecisionCardDraftExpiry: selected,
 		HumanTaskExpiry:         selected,
+		TimerObligationReader:   selected,
 		GatePublisher:           bus,
 		DirectDecisionPublisher: bus,
 		DeliveryRuntime:         bus,
