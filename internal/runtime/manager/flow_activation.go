@@ -253,6 +253,8 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 			CurrentState:     initialState,
 			Config:           cloneFlowConfig(req.Config),
 			Metadata:         metadata,
+			EnteredStageAt:   occurredAt,
+			CreatedAt:        occurredAt,
 		},
 		Identity:            instance,
 		Readiness:           readinessPlan,
