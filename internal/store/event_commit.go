@@ -33,6 +33,13 @@ type sqlPublishCommitter struct {
 	activeEventIDs []string
 }
 
+func runtimeAuthorActivityMutation(story *privateauthoractivity.Mutation) runtimeauthoractivity.Mutation {
+	if story == nil {
+		return nil
+	}
+	return story
+}
+
 type preparedPublishEventTxReader interface {
 	loadPreparedPublishEventTx(context.Context, *sql.Tx, string) (events.AdmittedEvent, bool, error)
 }
@@ -176,9 +183,10 @@ func commitSelectedForkEvent(
 	}
 	outcome := runtimebus.EventAppendOutcomeUnknown
 	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		committer := sqlPublishCommitter{tx: tx, store: store, story: story}
+		runtimeStory := runtimeAuthorActivityMutation(story)
+		committer := sqlPublishCommitter{tx: tx, store: store, story: runtimeStory}
 		var err error
-		outcome, err = store.appendAdmittedEventTxOutcome(txctx, tx, story, req.Commit.Event)
+		outcome, err = store.appendAdmittedEventTxOutcome(txctx, tx, runtimeStory, req.Commit.Event)
 		if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
 			return err
 		}
@@ -228,7 +236,7 @@ func commitPublish(ctx context.Context, store eventCommitTxStore, run func(conte
 	}
 	var prepared runtimebus.PreparedPublish
 	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		committer := &sqlPublishCommitter{tx: tx, store: store, story: story}
+		committer := &sqlPublishCommitter{tx: tx, store: store, story: runtimeAuthorActivityMutation(story)}
 		txctx = runtimebus.WithCommitPublishTransaction(txctx, committer)
 		var err error
 		prepared, err = plan.PrepareCommitPublish(txctx)
@@ -259,7 +267,7 @@ func commitRuntimeLogEvent(ctx context.Context, store eventCommitTxStore, run fu
 	outcome := runtimebus.EventAppendOutcomeUnknown
 	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
-		outcome, err = store.appendAdmittedEventTxOutcome(txctx, tx, story, admitted)
+		outcome, err = store.appendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), admitted)
 		return err
 	})
 	if err != nil {
