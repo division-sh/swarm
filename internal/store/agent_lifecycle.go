@@ -13,6 +13,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/google/uuid"
 )
 
@@ -221,7 +222,11 @@ func (s *PostgresStore) CommitAgentLifecycleTransition(ctx context.Context, req 
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	var result runtimemanager.AgentLifecycleTransitionResult
-	err = s.runAuthorActivityMutation(ctx, "postgres commit agent lifecycle transition", func(txctx context.Context, tx *sql.Tx) error {
+	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
+		if err != nil {
+			return err
+		}
 		fingerprint, err := req.Identity.Fingerprint()
 		if err != nil {
 			return err
@@ -254,7 +259,10 @@ func (s *PostgresStore) CommitAgentLifecycleTransition(ctx context.Context, req 
 		if err := insertPostgresLifecycleEvidence(txctx, tx, req, result); err != nil {
 			return err
 		}
-		return recordAgentLifecycleAuthorActivity(txctx, req, result)
+		if err := story.Record(txctx, agentLifecycleAuthorActivityDraft(req, result)); err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
@@ -269,7 +277,11 @@ func (s *SQLiteRuntimeStore) CommitAgentLifecycleTransition(ctx context.Context,
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	var result runtimemanager.AgentLifecycleTransitionResult
-	err = s.runAuthorActivityMutation(ctx, "sqlite commit agent lifecycle transition", func(txctx context.Context, tx *sql.Tx) error {
+	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
+		if err != nil {
+			return err
+		}
 		previous, exists, err := loadSQLiteLifecycleCell(txctx, tx, req.Identity)
 		if err != nil {
 			return err
@@ -296,15 +308,18 @@ func (s *SQLiteRuntimeStore) CommitAgentLifecycleTransition(ctx context.Context,
 		if err := insertSQLiteLifecycleEvidenceTx(txctx, tx, req, result); err != nil {
 			return err
 		}
-		return recordAgentLifecycleAuthorActivity(txctx, req, result)
+		if err := story.Record(txctx, agentLifecycleAuthorActivityDraft(req, result)); err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 	return result, err
 }
 
-func recordAgentLifecycleAuthorActivity(ctx context.Context, req runtimemanager.AgentLifecycleTransition, result runtimemanager.AgentLifecycleTransitionResult) error {
+func agentLifecycleAuthorActivityDraft(req runtimemanager.AgentLifecycleTransition, result runtimemanager.AgentLifecycleTransitionResult) runtimeauthoractivity.Draft {
 	previousGeneration := result.PreviousGeneration
 	nextGeneration := result.Generation
-	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+	return runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindAgentLifecycle, Transition: string(result.Phase),
 		SourceOwner: "agent_lifecycle_transition_facts", SourceIdentity: result.TransitionID,
 		DedupKey: "agent-transition:" + result.TransitionID, OccurredAt: req.Now.UTC(), AgentID: result.AgentID,
@@ -313,7 +328,7 @@ func recordAgentLifecycleAuthorActivity(ctx context.Context, req runtimemanager.
 			NextPhase: string(result.Phase), PreviousGeneration: &previousGeneration, NextGeneration: &nextGeneration,
 			RunMode: string(result.RunMode),
 		},
-	})
+	}
 }
 
 type lifecycleCell struct {
