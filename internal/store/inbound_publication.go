@@ -14,6 +14,7 @@ import (
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
 
 var errInboundPublicationNotFound = errors.New("inbound publication not found")
@@ -28,15 +29,16 @@ type sqlInboundPublicationMutation struct {
 	tx         *sql.Tx
 	store      inboundPublicationTransactionStore
 	eventStore eventCommitTxStore
+	story      *privateauthoractivity.Mutation
 	request    runtimeinbound.Request
 	finalized  bool
 	record     runtimeinbound.Record
 }
 
-func newSQLInboundPublicationMutation(ctx context.Context, tx *sql.Tx, eventStore eventCommitTxStore, store inboundPublicationTransactionStore) *sqlInboundPublicationMutation {
-	committer := &sqlPublishCommitter{tx: tx, store: eventStore}
+func newSQLInboundPublicationMutation(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, eventStore eventCommitTxStore, store inboundPublicationTransactionStore) *sqlInboundPublicationMutation {
+	committer := &sqlPublishCommitter{tx: tx, store: eventStore, story: story}
 	ctx = runtimebus.WithCommitPublishTransaction(ctx, committer)
-	return &sqlInboundPublicationMutation{ctx: ctx, tx: tx, store: store, eventStore: eventStore}
+	return &sqlInboundPublicationMutation{ctx: ctx, tx: tx, story: story, store: store, eventStore: eventStore}
 }
 
 func (m *sqlInboundPublicationMutation) Context() context.Context {
@@ -114,11 +116,11 @@ func (m *sqlInboundPublicationMutation) FinalizeInboundPublication(ctx context.C
 	if err != nil {
 		return fmt.Errorf("admit inbound evidence: %w", err)
 	}
-	committer := sqlPublishCommitter{tx: m.tx, store: m.eventStore}
+	committer := sqlPublishCommitter{tx: m.tx, store: m.eventStore, story: m.story}
 	if _, err := committer.commitNamedEvent(ctx, "finalize inbound publication evidence", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformInboundRecord, runtimebus.CommitPublishRequest{Event: evidence, ReplayScope: runtimepipelineobligation.ScopeDirect}); err != nil {
 		return fmt.Errorf("commit inbound evidence: %w", err)
 	}
-	if err := recordInboundAuthorActivity(ctx, nil, finalization.EvidenceEvent, m.request.Provider); err != nil {
+	if err := recordInboundAuthorActivity(ctx, m.story, finalization.EvidenceEvent, m.request.Provider); err != nil {
 		return fmt.Errorf("record inbound author activity: %w", err)
 	}
 	record, err := m.store.finalizeInboundPublicationTx(ctx, m.tx, m.request, len(finalization.Events))
@@ -139,7 +141,7 @@ func (s *PostgresStore) RunInboundPublicationMutation(ctx context.Context, reque
 		return runtimeinbound.Record{}, fmt.Errorf("inbound publication mutation callback is required")
 	}
 	var result runtimeinbound.Record
-	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		identityKey := inboundEventIdempotencyKey(request.ProviderEventID, request.EntityID, request.Provider)
 		if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, identityKey); err != nil {
 			return fmt.Errorf("lock inbound publication identity: %w", err)
@@ -168,7 +170,7 @@ func (s *PostgresStore) RunInboundPublicationMutation(ctx context.Context, reque
 		if err := insertPostgresInboundPublicationPreparedTx(txctx, tx, request); err != nil {
 			return err
 		}
-		mutation := newSQLInboundPublicationMutation(txctx, tx, s, s)
+		mutation := newSQLInboundPublicationMutation(txctx, tx, story, s, s)
 		mutation.request = request
 		if err := fn(mutation); err != nil {
 			return err

@@ -56,6 +56,9 @@ type authoredEventCatalogLeaseResolver interface {
 }
 
 func recordPersistedEventAuthorActivity(ctx context.Context, story runtimeauthoractivity.Mutation, resolver authoredEventDescriptorResolver, evt events.Event, producedBy, producedByType string) error {
+	if story == nil {
+		return fmt.Errorf("persisted event author activity mutation is required")
+	}
 	if platformEventRegistered(strings.TrimSpace(string(evt.Type()))) {
 		return recordPlatformSignalAuthorActivity(ctx, story, evt)
 	}
@@ -63,10 +66,7 @@ func recordPersistedEventAuthorActivity(ctx context.Context, story runtimeauthor
 	if err != nil || !ok {
 		return err
 	}
-	if story != nil {
-		return story.Record(ctx, draft)
-	}
-	return runtimeauthoractivity.Record(ctx, draft)
+	return story.Record(ctx, draft)
 }
 
 func persistedEventAuthorActivityDraft(ctx context.Context, resolver authoredEventDescriptorResolver, evt events.Event, producedBy, producedByType string) (runtimeauthoractivity.Draft, bool, error) {
@@ -149,6 +149,9 @@ func authoredEventSummary(payload []byte, field string) (string, error) {
 }
 
 func recordInboundAuthorActivity(ctx context.Context, story runtimeauthoractivity.Mutation, evt events.Event, provider string) error {
+	if story == nil {
+		return fmt.Errorf("inbound author activity mutation is required")
+	}
 	projection, _ := runtimeauthoractivity.InboundProjectionFromContext(ctx)
 	draft := runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindInboundReceived, Transition: "received",
@@ -157,10 +160,7 @@ func recordInboundAuthorActivity(ctx context.Context, story runtimeauthoractivit
 		AuthorSafeSummary: projection.Summary,
 		Projection:        runtimeauthoractivity.Projection{SubjectType: "entity", SubjectID: evt.EntityID(), Provider: strings.TrimSpace(provider), AuthorSubjectType: projection.SubjectType, AuthorSubjectID: projection.SubjectID},
 	}
-	if story != nil {
-		return story.Record(ctx, draft)
-	}
-	return runtimeauthoractivity.Record(ctx, draft)
+	return story.Record(ctx, draft)
 }
 
 const (
@@ -235,6 +235,9 @@ type platformSignalPayload struct {
 }
 
 func recordPlatformSignalAuthorActivity(ctx context.Context, story runtimeauthoractivity.Mutation, evt events.Event) error {
+	if story == nil {
+		return fmt.Errorf("platform signal author activity mutation is required")
+	}
 	var payload platformSignalPayload
 	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
 		return fmt.Errorf("decode registered author activity platform event %s: %w", evt.Type(), err)
@@ -292,10 +295,7 @@ func recordPlatformSignalAuthorActivity(ctx context.Context, story runtimeauthor
 		OccurredAt: evt.CreatedAt(), RunID: runID, EntityID: entityID, AgentID: payload.AgentID, FlowID: flowID,
 		Projection: projection, Failure: failure,
 	}
-	if story != nil {
-		return story.Record(ctx, draft)
-	}
-	return runtimeauthoractivity.Record(ctx, draft)
+	return story.Record(ctx, draft)
 }
 
 func budgetTransition(level string) (string, error) {

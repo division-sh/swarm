@@ -12,6 +12,7 @@ import (
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
 
 func (s *SQLiteRuntimeStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
@@ -23,7 +24,7 @@ func (s *SQLiteRuntimeStore) RunInboundPublicationMutation(ctx context.Context, 
 		return runtimeinbound.Record{}, fmt.Errorf("inbound publication mutation callback is required")
 	}
 	var result runtimeinbound.Record
-	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite inbound publication", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		existing, found, err := loadSQLiteInboundPublicationTx(txctx, tx, request.Provider, request.EntityID, request.ProviderEventID)
 		if err != nil {
 			return err
@@ -48,7 +49,7 @@ func (s *SQLiteRuntimeStore) RunInboundPublicationMutation(ctx context.Context, 
 		if err := insertSQLiteInboundPublicationPreparedTx(txctx, tx, request); err != nil {
 			return err
 		}
-		mutation := newSQLInboundPublicationMutation(txctx, tx, s, s)
+		mutation := newSQLInboundPublicationMutation(txctx, tx, story, s, s)
 		mutation.request = request
 		if err := fn(mutation); err != nil {
 			return err
