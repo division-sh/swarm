@@ -122,6 +122,30 @@ func TestRoutingSourceVariantsRequireExactClaims(t *testing.T) {
 	}
 }
 
+func TestRestoreRoutingSourceRejectsCrossVariantClaims(t *testing.T) {
+	exactFlowRoute := RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/one", EntityID: "entity-1"}
+	for _, tc := range []struct {
+		name      string
+		kind      RoutingSourceKind
+		route     RouteIdentity
+		authority string
+	}{
+		{name: "root with flow id", kind: RoutingSourceRoot, route: RouteIdentity{FlowID: "flow-a", EntityID: "entity-1"}},
+		{name: "root with flow instance", kind: RoutingSourceRoot, route: RouteIdentity{FlowInstance: "flow-a/one", EntityID: "entity-1"}},
+		{name: "root with authority", kind: RoutingSourceRoot, route: RouteIdentity{EntityID: "entity-1"}, authority: RoutingSourceAuthorityProviderAdmissionPlan.StorageCode()},
+		{name: "external ingress with flow instance", kind: RoutingSourceExternalIngress, route: exactFlowRoute, authority: RoutingSourceAuthorityProviderAdmissionPlan.StorageCode()},
+		{name: "static flow with authority", kind: RoutingSourceStaticFlow, route: exactFlowRoute, authority: RoutingSourceAuthorityProviderAdmissionPlan.StorageCode()},
+		{name: "concrete template with authority", kind: RoutingSourceConcreteTemplateInstance, route: exactFlowRoute, authority: RoutingSourceAuthorityProviderAdmissionPlan.StorageCode()},
+		{name: "flow owned control with authority", kind: RoutingSourceFlowOwnedControl, route: exactFlowRoute, authority: RoutingSourceAuthorityProviderAdmissionPlan.StorageCode()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := RestoreRoutingSource(tc.kind.StorageCode(), tc.route, tc.authority); err == nil {
+				t.Fatal("RestoreRoutingSource accepted cross-variant routing facts")
+			}
+		})
+	}
+}
+
 func TestEventDeliveryProjectionCannotPersist(t *testing.T) {
 	event, err := NewRunCreatingRootIngressEvent(RunCreatingRootIngressEventInput{Facts: EventFacts{
 		Type: "message.received", Producer: ProducerClaim{Type: EventProducerExternal, ID: "telegram"},
