@@ -24,6 +24,7 @@ type connectRoutePlanDescriptorLoader func(context.Context) ([]runtimepinrouting
 type connectAgentDescriptorLoader func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error)
 
 type connectRoutePlanPreviewRoutesKey struct{}
+type closedPublicationPlanningKey struct{}
 
 type connectRoutePlanPreviewRoutes struct {
 	table *RouteTable
@@ -59,6 +60,18 @@ type staleConnectRoutePlanSnapshotError struct{}
 
 func (staleConnectRoutePlanSnapshotError) Error() string {
 	return "connect route snapshot generation is stale"
+}
+
+func withClosedPublicationPlanning(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, closedPublicationPlanningKey{}, true)
+}
+
+func closedPublicationPlanning(ctx context.Context) bool {
+	enabled, _ := ctx.Value(closedPublicationPlanningKey{}).(bool)
+	return enabled
 }
 
 type connectRoutePlanResolver struct {

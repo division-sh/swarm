@@ -62,8 +62,32 @@ func (s *PostgresStore) loadPreparedPublishEventTx(ctx context.Context, tx *sql.
 	return admitted, err == nil, err
 }
 
+func (s *PostgresStore) LoadPreparedPublishEvent(ctx context.Context, eventID string) (events.AdmittedEvent, bool, error) {
+	if s == nil || s.backend == nil || s.backend.db == nil {
+		return events.AdmittedEvent{}, false, fmt.Errorf("postgres store is required")
+	}
+	row, found, err := loadPostgresEventIdentity(ctx, s.backend.db, eventID)
+	if err != nil || !found {
+		return events.AdmittedEvent{}, found, err
+	}
+	admitted, err := decodeEventRecord(row)
+	return admitted, err == nil, err
+}
+
 func (s *SQLiteRuntimeStore) loadPreparedPublishEventTx(ctx context.Context, tx *sql.Tx, eventID string) (events.AdmittedEvent, bool, error) {
 	row, found, err := loadSQLiteEventIdentity(ctx, tx, eventID)
+	if err != nil || !found {
+		return events.AdmittedEvent{}, found, err
+	}
+	admitted, err := decodeEventRecord(row)
+	return admitted, err == nil, err
+}
+
+func (s *SQLiteRuntimeStore) LoadPreparedPublishEvent(ctx context.Context, eventID string) (events.AdmittedEvent, bool, error) {
+	if s == nil || s.backend == nil || s.backend.db == nil {
+		return events.AdmittedEvent{}, false, fmt.Errorf("sqlite runtime store is required")
+	}
+	row, found, err := loadSQLiteEventIdentity(ctx, s.backend.db, eventID)
 	if err != nil || !found {
 		return events.AdmittedEvent{}, found, err
 	}

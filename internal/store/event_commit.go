@@ -116,24 +116,7 @@ func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation str
 }
 
 func (c sqlPublishCommitter) commitInitialSideEffects(ctx context.Context, req runtimebus.CommitPublishRequest, requirePublicationClaim bool) error {
-	for _, record := range req.ReplyCreations {
-		if err := c.store.createReplyContextTx(ctx, c.tx, record); err != nil {
-			return fmt.Errorf("commit reply context creation: %w", err)
-		}
-	}
-	for _, claim := range req.ReplyClaims {
-		if err := c.store.claimReplyContextTx(ctx, c.tx, claim); err != nil {
-			return fmt.Errorf("commit reply context claim: %w", err)
-		}
-	}
-	if requirePublicationClaim {
-		if err := c.store.requirePipelinePublicationClaimTx(ctx, c.tx, req.Event.ID(), req.PipelineClaim); err != nil {
-			return fmt.Errorf("executable event commit requires its current publication claim: %w", err)
-		}
-	}
-	proofs, err := c.store.commitInitialDeliveryObligationsTx(
-		ctx, c.tx, req.Event.ID(), req.Event.Event().RunID(), req.DeliveryRoutes, req.DeliveryAuthority,
-	)
+	proofs, err := c.commitInitialSideEffectEvidence(ctx, req, requirePublicationClaim)
 	if err != nil {
 		return err
 	}
@@ -141,23 +124,47 @@ func (c sqlPublishCommitter) commitInitialSideEffects(ctx context.Context, req r
 		if len(proofs) != 0 {
 			return fmt.Errorf("executable event commit requires a delivery handoff receipt")
 		}
-	} else if err := req.DeliveryReceipt.Record(proofs); err != nil {
-		return err
+		return nil
+	}
+	return req.DeliveryReceipt.Record(proofs)
+}
+
+func (c sqlPublishCommitter) commitInitialSideEffectEvidence(ctx context.Context, req runtimebus.CommitPublishRequest, requirePublicationClaim bool) ([]runtimedelivery.DurableHandoffProof, error) {
+	for _, record := range req.ReplyCreations {
+		if err := c.store.createReplyContextTx(ctx, c.tx, record); err != nil {
+			return nil, fmt.Errorf("commit reply context creation: %w", err)
+		}
+	}
+	for _, claim := range req.ReplyClaims {
+		if err := c.store.claimReplyContextTx(ctx, c.tx, claim); err != nil {
+			return nil, fmt.Errorf("commit reply context claim: %w", err)
+		}
+	}
+	if requirePublicationClaim {
+		if err := c.store.requirePipelinePublicationClaimTx(ctx, c.tx, req.Event.ID(), req.PipelineClaim); err != nil {
+			return nil, fmt.Errorf("executable event commit requires its current publication claim: %w", err)
+		}
+	}
+	proofs, err := c.store.commitInitialDeliveryObligationsTx(
+		ctx, c.tx, req.Event.ID(), req.Event.Event().RunID(), req.DeliveryRoutes, req.DeliveryAuthority,
+	)
+	if err != nil {
+		return nil, err
 	}
 	if err := c.store.commitInitialPipelineScopeTx(ctx, c.tx, req.Event.ID(), req.ReplayScope); err != nil {
-		return err
+		return nil, err
 	}
 	if req.Disposition != nil {
 		if err := c.store.commitInitialPipelineDispositionTx(ctx, c.tx, req.Event.ID(), req.PipelineClaim, *req.Disposition); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if req.DeadLetter != nil {
 		if err := c.store.recordDeadLetterTx(ctx, c.tx, c.story, *req.DeadLetter, true); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return proofs, nil
 }
 
 func validateSelectedForkCommitRequest(req runtimebus.CommitSelectedForkEventRequest) error {
@@ -241,6 +248,58 @@ func (s *SQLiteRuntimeStore) CommitSelectedForkEvent(ctx context.Context, req ru
 	return commitSelectedForkEvent(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 		return s.runPrivateAuthorActivityMutation(ctx, "sqlite selected-fork event commit", fn)
 	}, insertSQLiteSelectedForkExecutionLineageTx, req)
+}
+
+func commitPublication(
+	ctx context.Context,
+	store eventCommitTxStore,
+	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
+	command runtimebus.PublicationCommand,
+) (runtimebus.CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	if len(command.Activations) != 0 {
+		return runtimebus.CommittedPublication{}, fmt.Errorf("publication flow activation persistence is not configured")
+	}
+	request := command.Commit
+	request.DeliveryReceipt = nil
+	result := runtimebus.CommittedPublication{}
+	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		committer := sqlPublishCommitter{tx: tx, store: store, story: runtimeAuthorActivityMutation(story)}
+		outcome, err := store.appendAdmittedEventTxOutcome(txctx, tx, committer.story, request.Event)
+		if err != nil {
+			return err
+		}
+		result.AppendOutcome = outcome
+		if outcome == runtimebus.EventAppendExactDuplicate {
+			return nil
+		}
+		if outcome != runtimebus.EventAppendInserted {
+			return fmt.Errorf("publication commit returned invalid append outcome")
+		}
+		result.DeliveryHandoffs, err = committer.commitInitialSideEffectEvidence(txctx, request, true)
+		return err
+	})
+	if err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	if err := result.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, fmt.Errorf("validate committed publication: %w", err)
+	}
+	return result, nil
+}
+
+func (s *PostgresStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return commitPublication(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		return s.runPrivateAuthorActivityMutation(ctx, fn)
+	}, command)
+}
+
+func (s *SQLiteRuntimeStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return commitPublication(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		return s.runPrivateAuthorActivityMutation(ctx, "sqlite publication commit", fn)
+	}, command)
 }
 
 func commitPublish(ctx context.Context, store eventCommitTxStore, run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {

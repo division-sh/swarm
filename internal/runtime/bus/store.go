@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +32,60 @@ type EventStore interface {
 
 type CommitPublishOwner interface {
 	CommitPublish(ctx context.Context, plan CommitPublishPlan) (PreparedPublish, error)
+}
+
+// CommitPublicationOwner owns the closed selected-store publication
+// operation. Runtime supplies immutable semantic facts and receives immutable
+// commit evidence; no callback or transaction capability crosses this port.
+type CommitPublicationOwner interface {
+	CommitPublication(context.Context, PublicationCommand) (CommittedPublication, error)
+}
+
+// PublicationCommand is the complete durable publication command after event
+// admission and route planning. Activation plans are semantic facts derived by
+// the runtime; selected-store adapters persist them atomically with the event.
+type PublicationCommand struct {
+	Commit      CommitPublishRequest
+	Activations []runtimepipeline.FlowInstanceActivationPlan
+}
+
+func (c PublicationCommand) Validate() error {
+	if err := events.ValidatePersistentEvent(c.Commit.Event.Event()); err != nil {
+		return err
+	}
+	for index, activation := range c.Activations {
+		if err := activation.Validate(); err != nil {
+			return fmt.Errorf("publication activation %d: %w", index, err)
+		}
+	}
+	return nil
+}
+
+// CommittedPublication is exact post-commit evidence. Delivery handoffs are
+// transferred to the process-local generation owner only after this value is
+// returned.
+type CommittedPublication struct {
+	AppendOutcome    EventAppendOutcome
+	DeliveryHandoffs []runtimedelivery.DurableHandoffProof
+}
+
+func (r CommittedPublication) Validate() error {
+	if err := validateEventAppendOutcome(r.AppendOutcome); err != nil {
+		return err
+	}
+	for index, handoff := range r.DeliveryHandoffs {
+		if err := handoff.Validate(); err != nil {
+			return fmt.Errorf("committed delivery handoff %d: %w", index, err)
+		}
+	}
+	return nil
+}
+
+// PreparedPublishEventReader exposes canonical persisted event facts without
+// exposing a query handle. It exists so duplicate planning can reuse stamped
+// route identity instead of consulting changed topology.
+type PreparedPublishEventReader interface {
+	LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error)
 }
 
 // CommitPublishPlan is a sealed EventBus-owned publication plan. Selected
