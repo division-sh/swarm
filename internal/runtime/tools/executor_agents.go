@@ -245,13 +245,21 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 			return nil, fmt.Errorf("admit schedule control source: %w", err)
 		}
 	}
+	flowID := ""
+	if routingSource.Kind() == events.RoutingSourceFlowOwnedControl {
+		flowID = routingSource.Route().FlowID
+	}
+	admittedEvent, err := runtimepinrouting.AdmitRuntimeControlSourceEvent(e.workflowSource, flowID, events.EventType(strings.TrimSpace(in.EventType)), routingSource)
+	if err != nil {
+		return nil, fmt.Errorf("admit schedule event identity: %w", err)
+	}
 
 	schedule := Schedule{
 		RunID:         runtimecorrelation.RunIDFromContext(ctx),
 		AgentID:       in.AgentID,
 		OwnerKind:     ScheduleOwnerAgent,
 		AgentIdentity: actor.Identity,
-		EventType:     in.EventType,
+		EventType:     string(admittedEvent),
 		Mode:          in.Mode,
 		Cron:          in.Cron,
 		At:            at,

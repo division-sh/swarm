@@ -242,6 +242,46 @@ func TestRunScopedRuntimeControlPreservesExactRootRoutingSource(t *testing.T) {
 	}
 }
 
+func TestAdmitRuntimeControlEventTypeBindsFlowOwnedSourceExactly(t *testing.T) {
+	flowSource, err := NewFlowOwnedControlRoutingSource(RouteIdentity{
+		FlowID: "producer", FlowInstance: "producer", EntityID: "entity-producer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootSource, err := NewRootRoutingSource("entity-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		event  EventType
+		source RoutingSource
+		want   EventType
+	}{
+		{name: "opaque resolved", event: "work.ready", source: flowSource, want: "work.ready"},
+		{name: "qualified", event: "producer/work.ready", source: flowSource, want: "producer/work.ready"},
+		{name: "platform", event: "platform.stage_timer", source: flowSource, want: "platform.stage_timer"},
+		{name: "root", event: "root.timer", source: rootSource, want: "root.timer"},
+		{name: "platform control", event: "platform.maintenance", source: NewPlatformControlRoutingSource(), want: "platform.maintenance"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := AdmitRuntimeControlEventType(test.event, test.source)
+			if err != nil || got != test.want {
+				t.Fatalf("admit %q = %q, %v, want %q", test.event, got, err, test.want)
+			}
+		})
+	}
+	for _, eventType := range []EventType{" producer/work.ready "} {
+		if _, err := AdmitRuntimeControlEventType(eventType, flowSource); err == nil {
+			t.Fatalf("flow-owned admission accepted invalid event %q", eventType)
+		}
+	}
+	if _, err := AdmitRuntimeControlEventType("work.ready", NoRoutingSource()); err == nil {
+		t.Fatal("runtime-control admission accepted absent source")
+	}
+}
+
 func TestExistingRunRootIngressRequiresExactRun(t *testing.T) {
 	if _, err := NewExistingRunRootIngressEvent(ExistingRunRootIngressEventInput{Facts: validFacts()}); err == nil || !strings.Contains(err.Error(), "requires run_id") {
 		t.Fatalf("missing-run error = %v, want run_id failure", err)

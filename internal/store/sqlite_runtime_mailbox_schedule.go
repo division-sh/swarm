@@ -247,7 +247,8 @@ func (s *SQLiteRuntimeStore) UpsertSchedule(ctx context.Context, sc runtimepipel
 	if err := sc.NormalizeOwner(); err != nil {
 		return err
 	}
-	if err := sc.ValidateRoutingSource(); err != nil {
+	sc, err = sc.AdmitEventIdentity()
+	if err != nil {
 		return err
 	}
 	identityFields, err := scheduleAgentIdentityFields(sc)
@@ -309,6 +310,11 @@ func (s *SQLiteRuntimeStore) cancelSQLiteScheduleExact(ctx context.Context, sc r
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
 	if err := sc.NormalizeOwner(); err != nil {
+		return err
+	}
+	var err error
+	sc, err = sc.AdmitEventIdentity()
+	if err != nil {
 		return err
 	}
 	identityFields, err := scheduleAgentIdentityFields(sc)
@@ -418,6 +424,10 @@ func (s *SQLiteRuntimeStore) LoadActiveSchedules(ctx context.Context) ([]runtime
 		if err := sc.NormalizeOwner(); err != nil {
 			return nil, fmt.Errorf("load sqlite schedule owner: %w", err)
 		}
+		sc, err = sc.AdmitEventIdentity()
+		if err != nil {
+			return nil, fmt.Errorf("load sqlite schedule event identity: %w", err)
+		}
 		out = append(out, sc)
 	}
 	return out, rows.Err()
@@ -429,6 +439,11 @@ func (s *SQLiteRuntimeStore) MarkScheduleFiredExact(ctx context.Context, sc runt
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
 	if err := sc.NormalizeOwner(); err != nil {
+		return err
+	}
+	var err error
+	sc, err = sc.AdmitEventIdentity()
+	if err != nil {
 		return err
 	}
 	identityFields, err := scheduleAgentIdentityFields(sc)
@@ -478,6 +493,11 @@ func (s *SQLiteRuntimeStore) ClaimSchedule(ctx context.Context, sc runtimepipeli
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
 	if err := sc.NormalizeOwner(); err != nil {
+		return false, err
+	}
+	var err error
+	sc, err = sc.AdmitEventIdentity()
+	if err != nil {
 		return false, err
 	}
 	identityFields, err := scheduleAgentIdentityFields(sc)

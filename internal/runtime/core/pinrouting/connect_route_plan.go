@@ -93,7 +93,7 @@ type connectExecutionClaimPlanCodec struct {
 func connectExecutionClaimCodec(plan ConnectRoutePlan, route events.DeliveryRoute) connectExecutionClaimPlanCodec {
 	codec := connectExecutionClaimPlanCodec{
 		Source: connectEndpointCodec(plan.source), Receiver: connectEndpointCodec(plan.receiver),
-		TargetKind: uint8(plan.targetKind.value), ResolutionKind: uint8(plan.resolutionKind.value),
+		TargetKind: uint8(plan.targetKind), ResolutionKind: uint8(plan.resolutionKind),
 		Target: plan.target.Normalized(), TargetSet: connectClaimTargets(plan.targetSet),
 		ProviderOutputAuthorization: plan.ProviderOutputAuthorization(), Recipient: route,
 	}
@@ -109,14 +109,14 @@ func connectExecutionClaimCodec(plan ConnectRoutePlan, route events.DeliveryRout
 			dedupBy = append(dedupBy, field.value)
 		}
 		codec.FanIn = &connectExecutionClaimFanInCodec{
-			Aggregation: uint8(plan.fanIn.aggregation.value), Window: plan.fanIn.window.value,
+			Aggregation: uint8(plan.fanIn.aggregation), Window: plan.fanIn.window.value,
 			DedupBy: dedupBy, Singleton: plan.fanIn.singleton.value,
 		}
 	}
 	if plan.replyResolution != nil {
 		reply := plan.replyResolution
 		codec.Reply = &connectExecutionClaimReplyCodec{
-			Role: uint8(reply.role.value), RequesterFlowID: reply.requesterFlowID.value,
+			Role: uint8(reply.role), RequesterFlowID: reply.requesterFlowID.value,
 			RequestOutputPin: reply.requestOutputPin.value, ReplyInputPin: reply.replyInputPin.value,
 			ProviderFlowID: reply.providerFlowID.value, ProviderInputPin: reply.providerInputPin.value,
 			ProviderOutputPin: reply.providerOutputPin.value, CorrelationKey: reply.correlationKey.value,
@@ -165,11 +165,11 @@ func connectEndpointPinCodec(endpoint ConnectRoutePlanEndpoint) any {
 	}{endpoint.flowID.value, endpoint.flowPath.value, endpoint.pin.direction, endpoint.pin.value, endpoint.event.value}
 }
 
-type ConnectRoutePlanTargetKind struct{ value uint8 }
+type ConnectRoutePlanTargetKind uint8
 
-var (
-	ConnectTargetKindTarget    = ConnectRoutePlanTargetKind{value: 1}
-	ConnectTargetKindTargetSet = ConnectRoutePlanTargetKind{value: 2}
+const (
+	ConnectTargetKindTarget ConnectRoutePlanTargetKind = iota + 1
+	ConnectTargetKindTargetSet
 )
 
 func (k ConnectRoutePlanTargetKind) Code() string {
@@ -183,12 +183,12 @@ func (k ConnectRoutePlanTargetKind) Code() string {
 	}
 }
 
-type ConnectRoutePlanResolutionKind struct{ value uint8 }
+type ConnectRoutePlanResolutionKind uint8
 
-var (
-	ConnectResolutionStatic      = ConnectRoutePlanResolutionKind{value: 1}
-	ConnectResolutionInstanceKey = ConnectRoutePlanResolutionKind{value: 2}
-	ConnectResolutionReply       = ConnectRoutePlanResolutionKind{value: 3}
+const (
+	ConnectResolutionStatic ConnectRoutePlanResolutionKind = iota + 1
+	ConnectResolutionInstanceKey
+	ConnectResolutionReply
 )
 
 func (k ConnectRoutePlanResolutionKind) Code() string {
@@ -204,33 +204,33 @@ func (k ConnectRoutePlanResolutionKind) Code() string {
 	}
 }
 
-func (k ConnectRoutePlanResolutionKind) empty() bool { return k == ConnectRoutePlanResolutionKind{} }
+func (k ConnectRoutePlanResolutionKind) empty() bool { return k == 0 }
 
-type ConnectRoutePlanFailure struct{ value uint8 }
+type ConnectRoutePlanFailure uint8
 
-var (
-	ConnectFailureSourceMissing              = ConnectRoutePlanFailure{value: 1}
-	ConnectFailureSourceLocationMissing      = ConnectRoutePlanFailure{value: 2}
-	ConnectFailurePinRefInvalid              = ConnectRoutePlanFailure{value: 3}
-	ConnectFailureProducerFlowMissing        = ConnectRoutePlanFailure{value: 4}
-	ConnectFailureProducerOutputPinMissing   = ConnectRoutePlanFailure{value: 5}
-	ConnectFailureReceiverFlowMissing        = ConnectRoutePlanFailure{value: 6}
-	ConnectFailureReceiverInputPinMissing    = ConnectRoutePlanFailure{value: 7}
-	ConnectFailureReceiverResolutionMissing  = ConnectRoutePlanFailure{value: 8}
-	ConnectFailureEventAliasAdapterInvalid   = ConnectRoutePlanFailure{value: 9}
-	ConnectFailureSyntheticCarryCollision    = ConnectRoutePlanFailure{value: 10}
-	ConnectFailureRootReceiverResolution     = ConnectRoutePlanFailure{value: 11}
-	ConnectFailureDeliveryTopologyInvalid    = ConnectRoutePlanFailure{value: 12}
-	ConnectFailureReplyLineageMissing        = ConnectRoutePlanFailure{value: 13}
-	ConnectFailureInstanceSourceValueMissing = ConnectRoutePlanFailure{value: 14}
-	ConnectFailureTargetUnresolved           = ConnectRoutePlanFailure{value: 15}
-	ConnectFailureTargetAmbiguous            = ConnectRoutePlanFailure{value: 16}
-	ConnectFailureInstanceResolutionInvalid  = ConnectRoutePlanFailure{value: 17}
-	ConnectFailureInstanceConflict           = ConnectRoutePlanFailure{value: 18}
-	ConnectFailureLifecycleUnavailable       = ConnectRoutePlanFailure{value: 19}
+const (
+	ConnectFailureSourceMissing ConnectRoutePlanFailure = iota + 1
+	ConnectFailureSourceLocationMissing
+	ConnectFailurePinRefInvalid
+	ConnectFailureProducerFlowMissing
+	ConnectFailureProducerOutputPinMissing
+	ConnectFailureReceiverFlowMissing
+	ConnectFailureReceiverInputPinMissing
+	ConnectFailureReceiverResolutionMissing
+	ConnectFailureEventAliasAdapterInvalid
+	ConnectFailureSyntheticCarryCollision
+	ConnectFailureRootReceiverResolution
+	ConnectFailureDeliveryTopologyInvalid
+	ConnectFailureReplyLineageMissing
+	ConnectFailureInstanceSourceValueMissing
+	ConnectFailureTargetUnresolved
+	ConnectFailureTargetAmbiguous
+	ConnectFailureInstanceResolutionInvalid
+	ConnectFailureInstanceConflict
+	ConnectFailureLifecycleUnavailable
 )
 
-func (f ConnectRoutePlanFailure) Empty() bool { return f == ConnectRoutePlanFailure{} }
+func (f ConnectRoutePlanFailure) Empty() bool { return f == 0 }
 
 func (f ConnectRoutePlanFailure) Code() string {
 	switch f {
@@ -510,7 +510,7 @@ func (p ConnectRoutePlan) SubscriberPathMatchesFanInReceiver(subscriberPath stri
 
 func (p ConnectRoutePlan) ReplyRole() ConnectReplyRole {
 	if p.replyResolution == nil {
-		return ConnectReplyRole{}
+		return 0
 	}
 	return p.replyResolution.role
 }
@@ -659,11 +659,11 @@ func (f ConnectRoutePlanFanIn) Readback() ConnectRoutePlanFanInReadback {
 	}
 }
 
-type ConnectFanInAggregation struct{ value uint8 }
+type ConnectFanInAggregation uint8
 
-var (
-	ConnectFanInStream  = ConnectFanInAggregation{value: 1}
-	ConnectFanInBarrier = ConnectFanInAggregation{value: 2}
+const (
+	ConnectFanInStream ConnectFanInAggregation = iota + 1
+	ConnectFanInBarrier
 )
 
 func (a ConnectFanInAggregation) Code() string {
@@ -770,11 +770,11 @@ func (r ConnectRoutePlanReplyResolution) responseCorrelation(values ConnectRoute
 	return value, value != ""
 }
 
-type ConnectReplyRole struct{ value uint8 }
+type ConnectReplyRole uint8
 
-var (
-	ConnectReplyRoleRequest  = ConnectReplyRole{value: 1}
-	ConnectReplyRoleResponse = ConnectReplyRole{value: 2}
+const (
+	ConnectReplyRoleRequest ConnectReplyRole = iota + 1
+	ConnectReplyRoleResponse
 )
 
 func (r ConnectReplyRole) Code() string {
@@ -1170,6 +1170,48 @@ func AdmitSourceEvent(eventType events.EventType, source events.RoutingSource) (
 		return SourceEvent{}, fmt.Errorf("connect source event requires explicit routing provenance")
 	}
 	return SourceEvent{eventType: eventType, kind: source.Kind(), route: source.Route()}, nil
+}
+
+// AdmitRuntimeControlSourceEvent resolves one authored producer event against
+// its semantic flow and binds that result to the already-admitted source fact.
+// Persistence and firing copy the returned event identity unchanged.
+func AdmitRuntimeControlSourceEvent(source semanticview.Source, flowID string, eventType events.EventType, routingSource events.RoutingSource) (events.EventType, error) {
+	if source == nil {
+		return "", fmt.Errorf("runtime-control source event requires semantic source")
+	}
+	flowID = strings.TrimSpace(flowID)
+	switch routingSource.Kind() {
+	case events.RoutingSourceRoot:
+		if flowID != "" {
+			return "", fmt.Errorf("root runtime-control source event cannot claim flow %q", flowID)
+		}
+	case events.RoutingSourceFlowOwnedControl:
+		if flowID == "" || routingSource.Route().FlowID != flowID {
+			return "", fmt.Errorf("flow-owned runtime-control source event requires its exact declared flow")
+		}
+	default:
+		return "", fmt.Errorf("runtime-control source event requires root or flow-owned provenance")
+	}
+	authored := eventidentity.Normalize(string(eventType))
+	if authored == "" || authored != string(eventType) {
+		return "", fmt.Errorf("runtime-control authored event identity is not canonical")
+	}
+	resolved := events.EventType(eventidentity.Normalize(source.ResolveFlowEventReference(flowID, authored)))
+	if routingSource.Kind() == events.RoutingSourceFlowOwnedControl {
+		scope := eventidentity.Normalize(source.FlowPath(flowID))
+		if scope != "" && !strings.HasPrefix(string(resolved), "platform.") &&
+			string(resolved) != scope && !strings.HasPrefix(string(resolved), scope+"/") {
+			return "", fmt.Errorf("runtime-control event %q is outside declared flow path %q", resolved, scope)
+		}
+	}
+	admitted, err := events.AdmitRuntimeControlEventType(resolved, routingSource)
+	if err != nil {
+		return "", err
+	}
+	if _, err := AdmitSourceEvent(admitted, routingSource); err != nil {
+		return "", err
+	}
+	return admitted, nil
 }
 
 func SourceEventFromEvent(evt events.Event) (SourceEvent, error) {
@@ -1689,7 +1731,7 @@ func InstanceKeyMaterialForConnectRoutePlan(plan ConnectRoutePlan, matchValues C
 	return ConnectRoutePlanInstanceKeyMaterial{
 		values: values,
 		Keys:   append([]runtimecontracts.TemplateInstanceKeyValue{}, keys...),
-	}, ConnectRoutePlanFailure{}
+	}, 0
 }
 
 func EventSourcedInstanceKeyMaterialForConnectRoutePlan(plan ConnectRoutePlan, eventID string) (ConnectRoutePlanInstanceKeyMaterial, ConnectRoutePlanFailure) {
@@ -1721,7 +1763,7 @@ func EventSourcedInstanceKeyMaterialForConnectRoutePlan(plan ConnectRoutePlan, e
 	return ConnectRoutePlanInstanceKeyMaterial{
 		values: values,
 		Keys:   append([]runtimecontracts.TemplateInstanceKeyValue{}, keys...),
-	}, ConnectRoutePlanFailure{}
+	}, 0
 }
 
 func deterministicResolutionUUID(plan ConnectRoutePlan, eventID string) string {
@@ -2033,7 +2075,7 @@ func connectResolutionKind(scope semanticview.FlowScope, instanceKey *ConnectRou
 	if instanceKey != nil {
 		return ConnectResolutionInstanceKey
 	}
-	return ConnectRoutePlanResolutionKind{}
+	return 0
 }
 
 func connectRoutePlanResolutionKind(plan ConnectRoutePlan) ConnectRoutePlanResolutionKind {
@@ -2046,7 +2088,7 @@ func connectRoutePlanResolutionKind(plan ConnectRoutePlan) ConnectRoutePlanResol
 	if plan.instanceKey != nil {
 		return ConnectResolutionInstanceKey
 	}
-	return ConnectRoutePlanResolutionKind{}
+	return 0
 }
 
 func receiverRequiresRuntimeResolution(scope semanticview.FlowScope) bool {

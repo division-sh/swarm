@@ -59,7 +59,9 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 	if err := sc.NormalizeOwner(); err != nil {
 		return err
 	}
-	if err := sc.ValidateRoutingSource(); err != nil {
+	var err error
+	sc, err = sc.AdmitEventIdentity()
+	if err != nil {
 		return err
 	}
 
@@ -82,7 +84,9 @@ func (s *PostgresStore) CancelScheduleExact(ctx context.Context, sc runtimepipel
 	if err := sc.NormalizeOwner(); err != nil {
 		return err
 	}
-	if err := sc.ValidateRoutingSource(); err != nil {
+	var err error
+	sc, err = sc.AdmitEventIdentity()
+	if err != nil {
 		return err
 	}
 	return s.cancelScheduleExactSpec(ctx, sc)
@@ -111,7 +115,9 @@ func (s *PostgresStore) MarkScheduleFiredExact(ctx context.Context, sc runtimepi
 	if err := sc.NormalizeOwner(); err != nil {
 		return err
 	}
-	if err := sc.ValidateRoutingSource(); err != nil {
+	var err error
+	sc, err = sc.AdmitEventIdentity()
+	if err != nil {
 		return err
 	}
 	return s.markScheduleFiredExactSpec(ctx, sc)
@@ -394,6 +400,10 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 		}
 		if err := sc.NormalizeOwner(); err != nil {
 			return nil, fmt.Errorf("load schedule owner: %w", err)
+		}
+		sc, err = sc.AdmitEventIdentity()
+		if err != nil {
+			return nil, fmt.Errorf("load schedule event identity: %w", err)
 		}
 		out = append(out, sc)
 	}

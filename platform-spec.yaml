@@ -1255,6 +1255,18 @@ contract_formats:
             against the same snapshot generation. A stale generation rejects before mutation and requires a fresh evaluation.
             Replay, duplicate recovery, settlement, handler execution, and selected-fork execution consume the persisted
             connect execution claim and MUST NOT rematch current connect topology.
+          finite_variant_boundary: |
+            Routing-source kind and authority, delivery-recipient kind, compiled target and resolution kind, failure,
+            fan-in aggregation, and reply role are immutable integer-backed named constants. They MUST NOT store their
+            semantic value as a string, expose mutable package variables as variants, or permit an enclosing compiled value
+            to recover semantic authority from a recursively nested string field. Explicit exhaustive persistence and
+            diagnostic codecs are boundary projections only; they cannot become behavioral equality or dispatch authority.
+          generation_linearization: |
+            Snapshot generation validation and lifecycle/reply application are one exclusive linearized operation. The
+            EventBus holds generation ownership for every base and transaction-staged RouteTable whose snapshot participated
+            in the evaluation until all admitted lifecycle and reply mutations finish. Route installation and retirement
+            consume that same owner. A stale base or staged generation produces no lifecycle or reply effect, and no
+            concurrent evaluation or post-check route mutation may interleave before those effects complete.
           no_delivery_postcondition: |
             Every matched admitted connect evaluation produces at least one durable delivery intent or one typed fail-closed
             no-delivery disposition. A matched event cannot settle with both zero delivery intents and no disposition.
@@ -6561,6 +6573,16 @@ engine:
       sole semantic owner for run/entity-scoped workflow timer activation, cancellation, occurrence completion, restore,
       fork identity, scheduler projection, and accepted-fire authorization. Generic schedules such as join closure and
       boot-start platform work are separate schedule families and cannot interpret workflow activation rows.
+    event_source_admission: |
+      Generic schedules and workflow timer activations admit the authored event and one exact typed RoutingSource together
+      at the producer boundary, before persistence. The semantic source resolves a non-root local event exactly once through
+      its declared flow scope; durable schedule and timer stores validate and preserve the resolved pair but never qualify,
+      repair, or reinterpret it. Root schedules and root workflow timers retain root provenance and their root event identity;
+      non-root schedule and timer controls retain flow-owned provenance and the resolved flow event; global `platform.*`
+      events remain global. Firing consumes the persisted admitted event and source unchanged rather than reinterpreting
+      either from task metadata, target projection, flow-instance shape, or event suffix. Workflow timer accepted-fire
+      authorization compares the event's exact admitted RoutingSource with the activation owner; the receiver target route
+      cannot substitute for producer provenance.
     declaration:
       description: >
         Public staged lifecycle timers are declared as stage-resident rows in schema.yaml. Legacy/kernel timers are

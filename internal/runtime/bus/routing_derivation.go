@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -27,6 +28,7 @@ type Subscriber struct {
 
 type RouteTable struct {
 	mu                sync.RWMutex
+	generationMu      sync.RWMutex
 	generation        uint64
 	source            semanticview.Source
 	routes            map[string][]Subscriber
@@ -258,6 +260,12 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 	if rt == nil {
 		return fmt.Errorf("route table is required")
 	}
+	rt.generationMu.Lock()
+	defer rt.generationMu.Unlock()
+	return rt.addFlowInstanceRoute(req)
+}
+
+func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
 
 	req = req.Normalized()
 
@@ -398,6 +406,12 @@ func (rt *RouteTable) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route
 	if rt == nil {
 		return fmt.Errorf("route table is required")
 	}
+	rt.generationMu.Lock()
+	defer rt.generationMu.Unlock()
+	return rt.removeFlowInstanceRoute(identity)
+}
+
+func (rt *RouteTable) removeFlowInstanceRoute(identity runtimeflowidentity.Route) error {
 	identity, err := normalizeFlowInstanceRouteIdentity(identity)
 	if err != nil {
 		return err
@@ -517,6 +531,12 @@ type routeTableSnapshotGeneration struct {
 	value uint64
 }
 
+type routeTableGenerationLeaseKey struct{}
+
+type routeTableGenerationLease struct {
+	table *RouteTable
+}
+
 func (rt *RouteTable) snapshotGeneration() routeTableSnapshotGeneration {
 	if rt == nil {
 		return routeTableSnapshotGeneration{}
@@ -533,6 +553,43 @@ func (rt *RouteTable) snapshotGenerationCurrent(snapshot routeTableSnapshotGener
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
 	return snapshot.value != 0 && rt.generation == snapshot.value
+}
+
+func (rt *RouteTable) applyAtGeneration(ctx context.Context, snapshot routeTableSnapshotGeneration, apply func(context.Context) error) (bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if rt == nil {
+		if snapshot.value != 0 {
+			return false, nil
+		}
+		return true, apply(ctx)
+	}
+	rt.generationMu.Lock()
+	defer rt.generationMu.Unlock()
+	if !rt.snapshotGenerationCurrent(snapshot) {
+		return false, nil
+	}
+	leaseCtx := context.WithValue(ctx, routeTableGenerationLeaseKey{}, routeTableGenerationLease{table: rt})
+	return true, apply(leaseCtx)
+}
+
+func (rt *RouteTable) addFlowInstanceRouteForContext(ctx context.Context, req FlowInstanceRouteMaterializationRequest) error {
+	if ctx != nil {
+		if lease, _ := ctx.Value(routeTableGenerationLeaseKey{}).(routeTableGenerationLease); lease.table == rt {
+			return rt.addFlowInstanceRoute(req)
+		}
+	}
+	return rt.AddFlowInstanceRoute(req)
+}
+
+func (rt *RouteTable) removeFlowInstanceRouteForContext(ctx context.Context, identity runtimeflowidentity.Route) error {
+	if ctx != nil {
+		if lease, _ := ctx.Value(routeTableGenerationLeaseKey{}).(routeTableGenerationLease); lease.table == rt {
+			return rt.removeFlowInstanceRoute(identity)
+		}
+	}
+	return rt.RemoveFlowInstanceRoute(identity)
 }
 
 func (rt *RouteTable) addTopLevelRootInputNodeRoutesLocked(source semanticview.Source) {

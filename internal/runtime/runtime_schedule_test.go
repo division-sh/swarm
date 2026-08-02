@@ -11,12 +11,18 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 func TestScheduleEventPayloadInjectsEntityID(t *testing.T) {
@@ -94,7 +100,7 @@ func TestScheduledEventUsesTypedScheduleEnvelope(t *testing.T) {
 	evt, err := scheduledEvent(runtimepipeline.Schedule{
 		RunID:         "11111111-1111-1111-1111-111111111111",
 		AgentID:       "runtime",
-		EventType:     "timer.check",
+		EventType:     "review/timer.check",
 		EntityID:      "ent-001",
 		FlowInstance:  "review/inst-1",
 		Payload:       []byte(`{"entity_id":"payload-entity","flow_instance":"payload-flow"}`),
@@ -148,6 +154,115 @@ func TestScheduledEventPreservesRootScheduleRoutingSource(t *testing.T) {
 	}
 	if got := evt.FlowInstance(); got != "" {
 		t.Fatalf("flow instance = %q, want absent for root schedule", got)
+	}
+}
+
+func TestAgentScheduleExecutesCompiledConnectRoute(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ParentConnect)
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	fixtureRoot := canonicalrouting.CopyParentConnectRequiredAgent(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		fixtureRoot,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load parent-connect schedule fixture: %v", err)
+	}
+	scheduleInput, err := runtimecontracts.AdmitToolInputSchemaMap(runtimetools.ObjectSchema(map[string]any{
+		"event_type": map[string]any{"type": "string", "minLength": 1},
+		"mode":       map[string]any{"type": "string", "enum": []any{"once"}},
+		"at":         map[string]any{"type": "string", "format": "date-time"},
+		"payload":    map[string]any{"type": "object"},
+	}, "event_type", "mode", "at"))
+	if err != nil {
+		t.Fatalf("admit schedule tool input: %v", err)
+	}
+	scheduleTool, err := runtimecontracts.NewToolSchemaEntry(
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerPlatformBuiltin),
+		runtimecontracts.WithToolPermission("schedule"),
+		runtimecontracts.WithToolSchemas(scheduleInput, runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
+	)
+	if err != nil {
+		t.Fatalf("admit schedule tool contract: %v", err)
+	}
+	bundle.Tools["schedule"] = scheduleTool
+	source := semanticview.Wrap(bundle)
+	eventBus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("new schedule proof EventBus: %v", err)
+	}
+	subscription, err := eventBus.SubscribeInternal(context.Background(), "consumer-node")
+	if err != nil {
+		t.Fatalf("subscribe consumer node: %v", err)
+	}
+	subscription.MarkReady()
+	t.Cleanup(func() { _ = subscription.Complete(false) })
+
+	fired := make(chan error, 1)
+	scheduleStore := &recordingRuntimeScheduleStore{}
+	scheduler := runtimepipeline.NewSchedulerWithWorkOwner(runtimeTestEventBusWorkOwner(t, eventBus), func(ctx context.Context, schedule runtimepipeline.Schedule) {
+		evt, fireErr := scheduledEvent(schedule)
+		if fireErr == nil {
+			fireErr = eventBus.Publish(ctx, evt)
+		}
+		fired <- fireErr
+	})
+	t.Cleanup(scheduler.Stop)
+	executor := runtimetools.NewExecutorWithOptions(eventBus, scheduler, runtimetools.ExecutorOptions{WorkflowSource: source}, scheduleStore)
+	actor := models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "analyzer",
+		Identity:      agentidentitytest.Runtime(t, "analyzer", "schedule-connect-proof", "producer", "producer", "producer"),
+		Role:          "analyzer",
+		Tools:         []string{"schedule"},
+		Permissions:   []string{"schedule"},
+		EntityID:      "11111111-1111-1111-1111-111111111111",
+		FlowID:        "producer",
+		FlowPath:      "producer",
+	}
+	runID := "22222222-2222-2222-2222-222222222222"
+	ctx := runtimetools.WithActor(testAuthorActivityContext(runtimecorrelation.WithRunID(context.Background(), runID)), actor)
+	dueAt := time.Now().UTC().Truncate(time.Second).Add(time.Second)
+	if _, err := executor.Execute(ctx, "schedule", map[string]any{
+		"event_type": "work.ready",
+		"mode":       "once",
+		"at":         dueAt.Format(time.RFC3339),
+		"payload":    map[string]any{"work_id": "scheduled-work"},
+	}); err != nil {
+		t.Fatalf("execute schedule.create: %v", err)
+	}
+	if len(scheduleStore.schedules) != 1 || scheduleStore.schedules[0].EventType != "producer/work.ready" ||
+		scheduleStore.schedules[0].RoutingSource.Kind() != events.RoutingSourceFlowOwnedControl {
+		t.Fatalf("persisted admitted schedule = %#v, want producer/work.ready with flow-owned source", scheduleStore.schedules)
+	}
+
+	select {
+	case fireErr := <-fired:
+		if fireErr != nil {
+			t.Fatalf("scheduler fire through EventBus: %v", fireErr)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("schedule did not fire through the real scheduler")
+	}
+	select {
+	case delivery := <-subscription.Deliveries():
+		if delivery.Type() != events.EventType("producer/work.ready") {
+			t.Fatalf("delivered event type = %q, want canonical producer/work.ready", delivery.Type())
+		}
+		sourceFact := delivery.Event().RoutingSource()
+		if sourceFact.Kind() != events.RoutingSourceFlowOwnedControl || sourceFact.Route().FlowID != "producer" {
+			t.Fatalf("delivered routing source = %#v, want producer flow-owned control", sourceFact)
+		}
+		route := delivery.HandoffRoute()
+		if route.SubscriberID != "consumer-node" || route.ConnectClaim.Empty() {
+			t.Fatalf("delivery route = %#v, want consumer-node with stamped connect claim", route)
+		}
+		if err := delivery.Complete(); err != nil {
+			t.Fatalf("complete connected schedule delivery: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("compiled connect did not deliver the scheduled event")
 	}
 }
 

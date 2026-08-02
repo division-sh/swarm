@@ -438,10 +438,11 @@ func (s *Scheduler) Wait(ctx context.Context) error {
 }
 
 func (s *Scheduler) CancelExact(sc Schedule) error {
-	if _, _, err := validateSchedule(sc); err != nil {
+	normalized, _, err := validateSchedule(sc)
+	if err != nil {
 		return err
 	}
-	key := scheduleKey(sc)
+	key := scheduleKey(normalized)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, reserved := s.reservations[key]; reserved {
@@ -1215,7 +1216,9 @@ func validateSchedule(sc Schedule) (Schedule, cronSpec, error) {
 	if err := sc.NormalizeOwner(); err != nil {
 		return Schedule{}, cronSpec{}, err
 	}
-	if err := sc.ValidateRoutingSource(); err != nil {
+	var err error
+	sc, err = sc.AdmitEventIdentity()
+	if err != nil {
 		return Schedule{}, cronSpec{}, err
 	}
 	if sc.Mode == "" {
@@ -1259,6 +1262,18 @@ func (sc Schedule) ValidateRoutingSource() error {
 		return errors.New("schedule requires an exact flow-owned or platform-control routing source")
 	}
 	return nil
+}
+
+func (sc Schedule) AdmitEventIdentity() (Schedule, error) {
+	if err := sc.ValidateRoutingSource(); err != nil {
+		return Schedule{}, err
+	}
+	admitted, err := events.AdmitRuntimeControlEventType(events.EventType(sc.EventType), sc.RoutingSource)
+	if err != nil {
+		return Schedule{}, err
+	}
+	sc.EventType = string(admitted)
+	return sc, nil
 }
 
 func validateScheduledProjection(projection scheduledProjection) (scheduledProjection, cronSpec, error) {

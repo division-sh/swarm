@@ -55,6 +55,30 @@ func selectedScheduleTestContext(t *testing.T, runID string) context.Context {
 	)
 }
 
+func TestFlowOwnedScheduleEventSourceAdmissionRoundTripsOnBothStores(t *testing.T) {
+	for _, tc := range selectedScheduleStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, _, ctx := tc.open(t)
+			schedule := testAgentOwnedSchedule(t, runtimepipeline.Schedule{
+				RunID: runtimecorrelation.RunIDFromContext(ctx), AgentID: "producer-agent",
+				EventType: "producer/work.ready", Mode: "once", At: time.Now().UTC().Add(time.Hour),
+				FlowInstance: "producer/instance-1", EntityID: uuid.NewString(), TaskID: "admitted-source-event",
+				Payload: json.RawMessage(`{"work_id":"selected-store"}`),
+			})
+			if err := selected.UpsertSchedule(ctx, schedule); err != nil {
+				t.Fatalf("persist admitted schedule: %v", err)
+			}
+			active, err := selected.LoadActiveSchedules(ctx)
+			if err != nil || len(active) != 1 {
+				t.Fatalf("load admitted schedule = %#v, %v", active, err)
+			}
+			if active[0].EventType != schedule.EventType || active[0].RoutingSource != schedule.RoutingSource {
+				t.Fatalf("admitted event/source round trip = %#v/%#v, want %#v/%#v", active[0].EventType, active[0].RoutingSource, schedule.EventType, schedule.RoutingSource)
+			}
+		})
+	}
+}
+
 func TestGenericScheduleAPIsCannotInterpretWorkflowTimerFamilyOnBothStores(t *testing.T) {
 	for _, tc := range selectedScheduleStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
@@ -316,9 +340,7 @@ func newWorkflowTimerDDLProofRow(runID string) workflowTimerDDLProofRow {
 		DeclarationRevision: "sha256:waiting-timeout",
 		Cause:               timeridentity.WorkflowTimerActivationCauseInitial,
 	}
-	routingSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
-		FlowID: "root", FlowInstance: "root", EntityID: entityID,
-	})
+	routingSource, err := events.NewRootRoutingSource(entityID)
 	if err != nil {
 		panic(err)
 	}

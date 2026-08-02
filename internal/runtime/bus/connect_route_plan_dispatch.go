@@ -143,9 +143,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		if templateInstanceLifecyclePreview(ctx) || memo.applied || memo.dispatch.Failure != "" {
 			return memo.dispatch, nil
 		}
-		if !r.snapshotCurrent(ctx, memo.snapshot) {
-			memo.ready = false
-		} else if err := r.applyEvaluation(ctx, evt, memo.dispatch); err == nil {
+		if err := r.applyEvaluationAtSnapshot(ctx, memo.snapshot, evt, memo.dispatch); err == nil {
 			memo.applied = true
 			return memo.dispatch, nil
 		} else {
@@ -180,13 +178,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		if evaluated.Failure != "" || templateInstanceLifecyclePreview(ctx) {
 			return evaluated, nil
 		}
-		if !r.snapshotCurrent(ctx, snapshot) {
-			if memo != nil {
-				memo.ready = false
-			}
-			continue
-		}
-		if err := r.applyEvaluation(ctx, evt, evaluated); err != nil {
+		if err := r.applyEvaluationAtSnapshot(ctx, snapshot, evt, evaluated); err != nil {
 			var stale staleConnectRoutePlanSnapshotError
 			if errors.As(err, &stale) {
 				if memo != nil {
@@ -213,15 +205,29 @@ func (r connectRoutePlanResolver) captureSnapshot(ctx context.Context) connectRo
 	return snapshot
 }
 
-func (r connectRoutePlanResolver) snapshotCurrent(ctx context.Context, snapshot connectRoutePlanSnapshot) bool {
-	if !r.routeTable.snapshotGenerationCurrent(snapshot.base) {
-		return false
+func (r connectRoutePlanResolver) applyEvaluationAtSnapshot(ctx context.Context, snapshot connectRoutePlanSnapshot, evt events.Event, evaluated connectRoutePlanDispatch) error {
+	current, err := r.routeTable.applyAtGeneration(ctx, snapshot.base, func(leaseCtx context.Context) error {
+		staged := transactionRouteTableFromContext(leaseCtx)
+		if snapshot.staging {
+			if staged == nil || staged == r.routeTable {
+				return staleConnectRoutePlanSnapshotError{}
+			}
+			stagedCurrent, stagedErr := staged.applyAtGeneration(leaseCtx, snapshot.staged, func(stagedLeaseCtx context.Context) error {
+				return r.applyEvaluation(stagedLeaseCtx, evt, evaluated)
+			})
+			if !stagedCurrent {
+				return staleConnectRoutePlanSnapshotError{}
+			}
+			return stagedErr
+		} else if staged != nil && staged != r.routeTable {
+			return staleConnectRoutePlanSnapshotError{}
+		}
+		return r.applyEvaluation(leaseCtx, evt, evaluated)
+	})
+	if !current {
+		return staleConnectRoutePlanSnapshotError{}
 	}
-	staged := transactionRouteTableFromContext(ctx)
-	if snapshot.staging {
-		return staged != nil && staged != r.routeTable && staged.snapshotGenerationCurrent(snapshot.staged)
-	}
-	return staged == nil || staged == r.routeTable
+	return err
 }
 
 func (r connectRoutePlanResolver) applyEvaluation(ctx context.Context, evt events.Event, evaluated connectRoutePlanDispatch) error {

@@ -51,7 +51,11 @@ func TestSchedulerKeysSchedulesByRunID(t *testing.T) {
 	if len(s.tasks) != 1 {
 		t.Fatalf("registered tasks after exact cancel = %d, want 1", len(s.tasks))
 	}
-	if _, ok := s.tasks[scheduleKey(scB)]; !ok {
+	normalizedB, _, err := validateSchedule(scB)
+	if err != nil {
+		t.Fatalf("validate run B schedule: %v", err)
+	}
+	if _, ok := s.tasks[scheduleKey(normalizedB)]; !ok {
 		t.Fatalf("run B schedule was cancelled by run A exact cancel")
 	}
 	s.Stop()
