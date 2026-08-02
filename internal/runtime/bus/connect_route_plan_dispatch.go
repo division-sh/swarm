@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -127,12 +126,12 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		return connectRoutePlanDispatch{}, nil
 	}
 	for _, issue := range r.issues {
-		if r.graph.IssueMatchesEvent(issue, evt) && providerOutputAuthorizationMatches(ctx, issue.ProviderOutputAuthorization) {
+		if r.graph.IssueMatchesEvent(issue, evt) && providerOutputAuthorizationMatches(ctx, issue.ProviderOutputAuthorization()) {
 			return connectRoutePlanDispatch{
 				Matched: true,
 				Failure: connectRoutePlanTargetFailure(issue.Failure),
 				ExtraDetail: map[string]any{
-					"connect_route_plan_failure": string(issue.Failure),
+					"connect_route_plan_failure": issue.Failure.Code(),
 					"connect_route_plan_detail":  strings.TrimSpace(issue.Detail),
 				},
 			}, nil
@@ -266,7 +265,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 	createdRoutes := make(map[runtimeflowidentity.Route]struct{}, len(matched))
 	replyContextConsumed := false
 	for _, plan := range matched {
-		if plan.ReplyResolution != nil && plan.ReplyResolution.Role == runtimepinrouting.ConnectReplyRoleResponse {
+		if plan.ReplyResolution() != nil && plan.ReplyResolution().Role() == runtimepinrouting.ConnectReplyRoleResponse {
 			routes, subscribers, failure, detail, application, err := r.materializeReplyResponse(ctx, evt, plan, values)
 			if err != nil {
 				return connectRoutePlanDispatch{}, err
@@ -282,9 +281,9 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			if err != nil {
 				return connectRoutePlanDispatch{}, err
 			}
-			if previous, current, collision := admitConnectReceiverPinFacts(&receiverPinFacts, routes, plan.Receiver.PinCode(), plan.Receiver.LocalEventCode()); collision {
+			if previous, current, collision := admitConnectReceiverPinFacts(&receiverPinFacts, routes, plan.ReceiverPinIdentity()); collision {
 				out.Failure = connectRoutePlanTargetFailure(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
-				out.ExtraDetail["connect_route_plan_failure"] = string(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
+				out.ExtraDetail["connect_route_plan_failure"] = runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code()
 				out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = []string{previous, current}
 				return out, nil
 			}
@@ -301,11 +300,11 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 		if err != nil {
 			return connectRoutePlanDispatch{}, err
 		}
-		if materialized.Failure != "" {
+		if !materialized.Failure.Empty() {
 			out.Failure = connectRoutePlanTargetFailure(materialized.Failure)
-			out.ExtraDetail["connect_route_plan_failure"] = string(materialized.Failure)
-			out.ExtraDetail["connect_route_plan_source_event"] = plan.Source.ResolvedEventCode()
-			out.ExtraDetail["connect_route_plan_receiver_event"] = plan.Receiver.ResolvedEventCode()
+			out.ExtraDetail["connect_route_plan_failure"] = materialized.Failure.Code()
+			out.ExtraDetail["connect_route_plan_source_event"] = plan.SourceEndpoint().Readback().ResolvedEvent
+			out.ExtraDetail["connect_route_plan_receiver_event"] = plan.ReceiverEndpoint().Readback().ResolvedEvent
 			for key, value := range connectRoutePlanFailureDetail(plan, materialized.Failure, values, descriptors) {
 				out.ExtraDetail[key] = value
 			}
@@ -337,7 +336,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 		if err != nil {
 			return connectRoutePlanDispatch{}, err
 		}
-		if plan.ReplyResolution != nil && plan.ReplyResolution.Role == runtimepinrouting.ConnectReplyRoleRequest {
+		if plan.ReplyResolution() != nil && plan.ReplyResolution().Role() == runtimepinrouting.ConnectReplyRoleRequest {
 			var application *connectReplyApplication
 			routes, application, err = r.materializeReplyRequest(ctx, evt, plan, routes, values)
 			if err != nil {
@@ -365,13 +364,13 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 		if len(routes) == 0 {
 			out.Failure = runtimepinrouting.FailureTargetNotSubscribed
 			out.ExtraDetail["connect_route_plan_failure"] = string(runtimepinrouting.FailureTargetNotSubscribed)
-			out.ExtraDetail["connect_route_plan_source_event"] = plan.Source.ResolvedEventCode()
-			out.ExtraDetail["connect_route_plan_receiver_event"] = plan.Receiver.ResolvedEventCode()
+			out.ExtraDetail["connect_route_plan_source_event"] = plan.SourceEndpoint().Readback().ResolvedEvent
+			out.ExtraDetail["connect_route_plan_receiver_event"] = plan.ReceiverEndpoint().Readback().ResolvedEvent
 			return out, nil
 		}
-		if previous, current, collision := admitConnectReceiverPinFacts(&receiverPinFacts, routes, plan.Receiver.PinCode(), plan.Receiver.LocalEventCode()); collision {
+		if previous, current, collision := admitConnectReceiverPinFacts(&receiverPinFacts, routes, plan.ReceiverPinIdentity()); collision {
 			out.Failure = connectRoutePlanTargetFailure(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
-			out.ExtraDetail["connect_route_plan_failure"] = string(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
+			out.ExtraDetail["connect_route_plan_failure"] = runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code()
 			out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = []string{previous, current}
 			return out, nil
 		}
@@ -398,78 +397,42 @@ func stampConnectExecutionClaims(plan runtimepinrouting.ConnectRoutePlan, routes
 }
 
 type connectReceiverPinFact struct {
-	route              events.DeliveryRoute
-	receiverPin        string
-	receiverLocalEvent string
+	route    events.DeliveryRoute
+	identity runtimepinrouting.ConnectReceiverPinIdentity
 }
 
-func admitConnectReceiverPinFacts(admitted *[]connectReceiverPinFact, routes []events.DeliveryRoute, receiverPin, receiverLocalEvent string) (string, string, bool) {
-	receiverPin = strings.TrimSpace(receiverPin)
-	receiverLocalEvent = eventidentity.Normalize(receiverLocalEvent)
-	if admitted == nil || receiverPin == "" || receiverLocalEvent == "" {
+func admitConnectReceiverPinFacts(admitted *[]connectReceiverPinFact, routes []events.DeliveryRoute, identity runtimepinrouting.ConnectReceiverPinIdentity) (string, string, bool) {
+	if admitted == nil || identity.Empty() {
 		return "", "", false
 	}
-	currentIdentity := receiverPin + ":" + receiverLocalEvent
 	for _, route := range routes {
 		route = route.Normalized()
 		if route.SubscriberType == "" || route.SubscriberID == "" {
 			continue
 		}
 		for _, previous := range *admitted {
-			previousIdentity := previous.receiverPin + ":" + previous.receiverLocalEvent
-			if events.SameDeliveryRecipientIdentity(previous.route, route) && previousIdentity != currentIdentity {
-				return previousIdentity, currentIdentity, true
+			if events.SameDeliveryRecipientIdentity(previous.route, route) && !previous.identity.Equal(identity) {
+				return previous.identity.Diagnostic(), identity.Diagnostic(), true
 			}
 		}
-		*admitted = append(*admitted, connectReceiverPinFact{route: route, receiverPin: receiverPin, receiverLocalEvent: receiverLocalEvent})
+		*admitted = append(*admitted, connectReceiverPinFact{route: route, identity: identity})
 	}
 	return "", "", false
 }
 
 func (r connectRoutePlanResolver) materializeReplyRequest(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, routes []events.DeliveryRoute, values map[string]string) ([]events.DeliveryRoute, *connectReplyApplication, error) {
-	reply := plan.ReplyResolution
-	if reply == nil || reply.Role != runtimepinrouting.ConnectReplyRoleRequest {
+	if plan.ReplyRole() != runtimepinrouting.ConnectReplyRoleRequest {
 		return routes, nil, nil
 	}
 	origin := evt.SourceRoute().Normalized()
-	if origin.Empty() {
-		origin = events.RouteIdentity{
-			FlowID:       strings.TrimSpace(reply.RequesterFlowID),
-			FlowInstance: strings.Trim(evt.FlowInstance(), "/"),
-			EntityID:     strings.TrimSpace(evt.EntityID()),
-		}.Normalized()
-	}
-	if origin.Empty() {
-		return nil, nil, fmt.Errorf("reply request %s.%s has no concrete origin route", reply.RequesterFlowID, reply.RequestOutputPin)
-	}
-	correlation := strings.TrimSpace(evt.ID())
-	if key := strings.TrimSpace(reply.CorrelationKey); key != "" {
-		correlation = strings.TrimSpace(values["payload."+key])
-		if correlation == "" {
-			return nil, nil, fmt.Errorf("reply request %s.%s is missing declared carried correlation key %s", reply.RequesterFlowID, reply.RequestOutputPin, key)
-		}
-	}
 	now := evt.CreatedAt()
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	record := runtimereplycontext.Record{
-		RunID:                evt.RunID(),
-		RequestEventID:       evt.ID(),
-		RequesterFlowID:      reply.RequesterFlowID,
-		RequestOutputPin:     reply.RequestOutputPin,
-		ReplyInputPin:        reply.ReplyInputPin,
-		ProviderFlowID:       reply.ProviderFlowID,
-		ProviderInputPin:     reply.ProviderInputPin,
-		ProviderOutputPin:    reply.ProviderOutputPin,
-		Origin:               origin,
-		RequestCorrelationID: correlation,
-		CorrelationKey:       reply.CorrelationKey,
-		State:                runtimereplycontext.StateOpen,
-		CreatedAt:            now,
-		UpdatedAt:            now,
+	record, err := plan.ReplyRequestRecord(evt, origin, runtimepinrouting.AdmitConnectRouteMatchValues(values), now)
+	if err != nil {
+		return nil, nil, err
 	}
-	record.ID = runtimereplycontext.DeterministicID(record.RequestEventID, record.RequesterFlowID, record.RequestOutputPin, record.ReplyInputPin, record.ProviderFlowID, record.Origin)
 	if r.replyStore == nil {
 		return nil, nil, fmt.Errorf("ReplyContextStore is required for resolution mode reply")
 	}
@@ -481,7 +444,7 @@ func (r connectRoutePlanResolver) materializeReplyRequest(ctx context.Context, e
 }
 
 func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string) ([]events.DeliveryRoute, []Subscriber, runtimepinrouting.TargetFailure, map[string]any, *connectReplyApplication, error) {
-	reply := plan.ReplyResolution
+	reply := plan.ReplyResolution().Readback()
 	contextID := events.DeliveryContextFromContext(ctx).ReplyContextID()
 	detail := map[string]any{
 		"connect_route_plan_resolution_mode": "reply",
@@ -500,13 +463,13 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 		}
 		return nil, nil, "", nil, nil, err
 	}
-	if record.RequesterFlowID != reply.RequesterFlowID || record.RequestOutputPin != reply.RequestOutputPin || record.ReplyInputPin != reply.ReplyInputPin || record.ProviderFlowID != reply.ProviderFlowID || record.ProviderInputPin != reply.ProviderInputPin || record.ProviderOutputPin != reply.ProviderOutputPin || record.CorrelationKey != strings.TrimSpace(reply.CorrelationKey) {
+	if !plan.MatchesReplyRecord(record) {
 		detail["connect_route_plan_failure"] = string(runtimepinrouting.FailureStaleArrival)
 		return nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil, nil
 	}
 	if key := record.CorrelationKey; key != "" {
-		actual := strings.TrimSpace(values["payload."+key])
-		if actual == "" || actual != record.RequestCorrelationID {
+		actual, present := plan.ReplyResponseCorrelation(runtimepinrouting.AdmitConnectRouteMatchValues(values))
+		if !present || actual != record.RequestCorrelationID {
 			detail["connect_route_plan_failure"] = string(runtimepinrouting.FailureStaleArrival)
 			detail["reply_context_id"] = contextID
 			detail["reply_correlation_key"] = key
@@ -568,7 +531,7 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 }
 
 func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, descriptors []runtimepinrouting.Descriptor) (runtimepinrouting.ConnectRoutePlanMaterialization, TemplateInstanceLifecycleDecision, error) {
-	if plan.Receiver.IsRoot() {
+	if plan.ReceiverEndpoint().IsRoot() {
 		target := evt.TargetRoute().Normalized()
 		if target.EntityID == "" {
 			return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetUnresolved}, TemplateInstanceLifecycleDecision{}, nil
@@ -579,7 +542,7 @@ func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Contex
 		return materialized, decision, err
 	}
 	return runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{
-		MatchValues: values,
+		MatchValues: runtimepinrouting.AdmitConnectRouteMatchValues(values),
 		Descriptors: descriptors,
 	}), TemplateInstanceLifecycleDecision{}, nil
 }
@@ -622,7 +585,7 @@ func (r connectRoutePlanResolver) matchedPlans(ctx context.Context, evt events.E
 	candidates := r.graph.MatchingPlans(evt)
 	out := make([]runtimepinrouting.ConnectRoutePlan, 0, len(candidates))
 	for _, plan := range candidates {
-		if providerOutputAuthorizationMatches(ctx, plan.ProviderOutputAuthorization) {
+		if providerOutputAuthorizationMatches(ctx, plan.ProviderOutputAuthorization()) {
 			out = append(out, plan)
 		}
 	}
@@ -632,7 +595,7 @@ func (r connectRoutePlanResolver) matchedPlans(ctx context.Context, evt events.E
 func (r connectRoutePlanResolver) descriptorsForPlans(ctx context.Context, plans []runtimepinrouting.ConnectRoutePlan) ([]runtimepinrouting.Descriptor, error) {
 	needsDescriptors := false
 	for _, plan := range plans {
-		if plan.RequiresRuntimeResolution {
+		if plan.RequiresRuntimeResolution() {
 			needsDescriptors = true
 			break
 		}
@@ -645,7 +608,7 @@ func (r connectRoutePlanResolver) descriptorsForPlans(ctx context.Context, plans
 
 func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, materialized runtimepinrouting.ConnectRoutePlanMaterialization, decision TemplateInstanceLifecycleDecision, routeCreatedInPlan bool) ([]events.DeliveryRoute, []events.DeliveryRoute, []Subscriber, error) {
 	targets := connectMaterializedTargets(materialized)
-	if plan.Receiver.IsRoot() && len(targets) == 0 {
+	if plan.ReceiverEndpoint().IsRoot() && len(targets) == 0 {
 		targets = []events.RouteIdentity{{}}
 	}
 	if len(targets) == 0 {
@@ -795,11 +758,12 @@ func plannedCreateAgentCarrierIdentity(
 }
 
 func syntheticDeliveryPayloadProjection(plan runtimepinrouting.ConnectRoutePlan, decision TemplateInstanceLifecycleDecision) (events.DeliveryPayloadProjection, error) {
-	if plan.InstanceKey == nil || !plan.InstanceKey.Source.RequiresDeliveryProjection() {
+	if plan.InstanceKey() == nil || !plan.InstanceKey().RequiresDeliveryProjection() {
 		return events.DeliveryPayloadProjection{}, nil
 	}
+	receiver := plan.ReceiverEndpoint().Readback()
 	if decision.Empty() {
-		return events.DeliveryPayloadProjection{}, fmt.Errorf("create resolution for %s requires lifecycle key material before delivery route construction", strings.TrimSpace(plan.Receiver.FlowIDCode()))
+		return events.DeliveryPayloadProjection{}, fmt.Errorf("create resolution for %s requires lifecycle key material before delivery route construction", receiver.FlowID)
 	}
 	fields := make(map[string]string, len(decision.KeyMaterial))
 	for _, key := range decision.KeyMaterial {
@@ -807,7 +771,7 @@ func syntheticDeliveryPayloadProjection(plan runtimepinrouting.ConnectRoutePlan,
 	}
 	projection, err := events.NewDeliveryPayloadProjection(fields)
 	if err != nil {
-		return events.DeliveryPayloadProjection{}, fmt.Errorf("create resolution for %s produced invalid synthetic carry material: %w", strings.TrimSpace(plan.Receiver.FlowIDCode()), err)
+		return events.DeliveryPayloadProjection{}, fmt.Errorf("create resolution for %s produced invalid synthetic carry material: %w", receiver.FlowID, err)
 	}
 	return projection, nil
 }
@@ -836,7 +800,7 @@ func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(ctx context.Co
 				if !connectSubscriberMatchesPlanTarget(plan, subscriber, target) {
 					continue
 				}
-				subscriber.LocalizedEvent = eventidentity.Normalize(plan.Receiver.LocalEventCode())
+				subscriber.LocalizedEvent = string(plan.ReceiverLocalEvent())
 				out = append(out, subscriber)
 			}
 		}
@@ -848,20 +812,14 @@ func connectSubscriberMatchesPlanTarget(plan runtimepinrouting.ConnectRoutePlan,
 	if connectSubscriberMatchesTarget(subscriber, target) {
 		return true
 	}
-	if plan.FanIn == nil {
+	if plan.FanIn() == nil {
 		return false
 	}
-	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-	receiverPath := strings.Trim(strings.TrimSpace(plan.Receiver.FlowPathCode()), "/")
-	targetPath := strings.Trim(strings.TrimSpace(target.FlowInstance), "/")
-	if path == "" || receiverPath == "" || targetPath == "" || path != receiverPath {
-		return false
-	}
-	return targetPath == receiverPath || strings.HasPrefix(targetPath, receiverPath+"/")
+	return plan.SubscriberPathMatchesFanInReceiver(strings.Trim(strings.TrimSpace(subscriber.Path), "/"), target)
 }
 
 func connectRoutePlanMatchesEvent(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, evt events.Event) bool {
-	return (runtimepinrouting.CompiledConnectGraph{}).PlanMatchesEvent(plan, evt) && providerOutputAuthorizationMatches(ctx, plan.ProviderOutputAuthorization)
+	return (runtimepinrouting.CompiledConnectGraph{}).PlanMatchesEvent(plan, evt) && providerOutputAuthorizationMatches(ctx, plan.ProviderOutputAuthorization())
 }
 
 func connectMaterializedTargets(materialized runtimepinrouting.ConnectRoutePlanMaterialization) []events.RouteIdentity {
@@ -872,23 +830,10 @@ func connectMaterializedTargets(materialized runtimepinrouting.ConnectRoutePlanM
 }
 
 func connectReceiverCarrierRouteKeys(plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) []string {
-	target = target.Normalized()
-	local := strings.Trim(strings.TrimSpace(plan.Receiver.LocalEventCode()), "/")
-	resolved := strings.Trim(strings.TrimSpace(plan.Receiver.ResolvedEventCode()), "/")
-	receiverPath := strings.Trim(strings.TrimSpace(plan.Receiver.FlowPathCode()), "/")
-	if receiverPath == "" {
-		receiverPath = strings.Trim(strings.TrimSpace(plan.Receiver.FlowIDCode()), "/")
-	}
-	out := make([]string, 0, 6)
-	if target.FlowInstance != "" && local != "" {
-		out = append(out, target.FlowInstance+"/"+local)
-	}
-	if receiverPath != "" && local != "" {
-		out = append(out, receiverPath+"/"+local)
-	}
-	out = append(out, resolved)
-	if receiverPath == "" {
-		out = append(out, local)
+	eventTypes := plan.ReceiverEventTypes(target)
+	out := make([]string, 0, len(eventTypes))
+	for _, eventType := range eventTypes {
+		out = append(out, string(eventType))
 	}
 	return uniqueStrings(out)
 }
@@ -951,32 +896,32 @@ func connectRoutePlanDeliveryIntents(routes, liveRoutes []events.DeliveryRoute, 
 }
 
 func connectRoutePlanTargetFailure(failure runtimepinrouting.ConnectRoutePlanFailure) runtimepinrouting.TargetFailure {
-	if failure == "" {
+	if failure.Empty() {
 		return ""
 	}
-	return runtimepinrouting.TargetFailure(strings.TrimSpace(string(failure)))
+	return runtimepinrouting.TargetFailure(failure.Code())
 }
 
 func connectRoutePlanFailureDetail(plan runtimepinrouting.ConnectRoutePlan, failure runtimepinrouting.ConnectRoutePlanFailure, values map[string]string, descriptors []runtimepinrouting.Descriptor) map[string]any {
-	if plan.InstanceKey == nil {
+	if plan.InstanceKey() == nil {
 		return nil
 	}
-	mode := plan.InstanceKey.Mode
+	mode := plan.InstanceKey().Mode()
 	if mode != runtimecontracts.FlowInputResolutionModeSelect && mode != runtimecontracts.FlowInputResolutionModeSelectOrCreate {
 		return nil
 	}
-	keyField := plan.InstanceKey.Field.Path()
+	keyField := plan.InstanceKey().Field().Path()
 	if keyField == "" {
 		return nil
 	}
 	out := map[string]any{
 		"connect_route_plan_resolution_mode":     runtimecontracts.FlowInputResolutionModeCode(mode),
-		"connect_route_plan_receiver_flow":       strings.TrimSpace(plan.Receiver.FlowIDCode()),
+		"connect_route_plan_receiver_flow":       plan.ReceiverEndpoint().Readback().FlowID,
 		"connect_route_plan_instance_key_field":  keyField,
 		"connect_route_plan_failure_remediation": connectRoutePlanInstanceResolutionRemediation(plan, failure, keyField, "", mode),
 	}
-	material, materialFailure := runtimepinrouting.InstanceKeyMaterialForConnectRoutePlan(plan, values)
-	if materialFailure != "" {
+	material, materialFailure := runtimepinrouting.InstanceKeyMaterialForConnectRoutePlan(plan, runtimepinrouting.AdmitConnectRouteMatchValues(values))
+	if !materialFailure.Empty() {
 		if failure == runtimepinrouting.ConnectFailureInstanceSourceValueMissing {
 			out["connect_route_plan_failure_remediation"] = connectRoutePlanInstanceResolutionRemediation(plan, failure, keyField, "", mode)
 		}
@@ -1000,7 +945,7 @@ func connectRoutePlanFailureDetail(plan runtimepinrouting.ConnectRoutePlan, fail
 }
 
 func connectRoutePlanInstanceResolutionRemediation(plan runtimepinrouting.ConnectRoutePlan, failure runtimepinrouting.ConnectRoutePlanFailure, keyField, keyValue string, mode runtimecontracts.FlowInputResolutionMode) string {
-	receiverFlow := strings.TrimSpace(plan.Receiver.FlowIDCode())
+	receiverFlow := plan.ReceiverEndpoint().Readback().FlowID
 	if receiverFlow == "" {
 		receiverFlow = "receiver flow"
 	}
@@ -1013,8 +958,8 @@ func connectRoutePlanInstanceResolutionRemediation(plan runtimepinrouting.Connec
 		valueText = " = " + value
 	}
 	sourcePath := ""
-	if plan.InstanceKey != nil {
-		sourcePath = strings.TrimSpace(plan.InstanceKey.Source.Path)
+	if plan.InstanceKey() != nil {
+		sourcePath = plan.InstanceKey().Readback().SourcePath
 	}
 	if sourcePath == "" {
 		sourcePath = "the authored instance-key source"

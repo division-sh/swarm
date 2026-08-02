@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
@@ -52,9 +51,8 @@ func TestDeliveryRouteProjectionPreservesUntargetedLiveRecipientEnvelope(t *test
 }
 
 func TestPayloadCarriesAreNotPersistedInDeliveryProjection(t *testing.T) {
-	projection, err := syntheticDeliveryPayloadProjection(runtimepinrouting.ConnectRoutePlan{
-		InstanceKey: &runtimepinrouting.ConnectRoutePlanInstanceKey{Mode: runtimecontracts.FlowInputResolutionModeSelect},
-	}, TemplateInstanceLifecycleDecision{
+	plan := mustInstanceKeyConnectRoutePlan(t, connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelect))
+	projection, err := syntheticDeliveryPayloadProjection(plan, TemplateInstanceLifecycleDecision{
 		Action:      templateInstanceLifecycleActionSelectedExisting,
 		KeyMaterial: []runtimecontracts.TemplateInstanceKeyValue{{Field: mustBusTemplateInstanceField(t, "account_id"), Value: "acct-1"}},
 	})

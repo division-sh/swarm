@@ -172,7 +172,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 		{
 			name:        "missing renamed producer key",
 			payload:     json.RawMessage(`{"score":"91","decision":"approved"}`),
-			wantFailure: string(runtimepinrouting.ConnectFailureInstanceSourceValueMissing),
+			wantFailure: runtimepinrouting.ConnectFailureInstanceSourceValueMissing.Code(),
 		},
 		{
 			name:    "ambiguous receiver key",
@@ -181,7 +181,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 				{InstanceID: "one", EntityID: "ent-1", FlowInstance: finalflowinstanceauthoring.TemplateFlowID + "/one", FlowTemplate: finalflowinstanceauthoring.TemplateFlowID, AddressFields: map[string]string{"entity.account_id": "acct-42"}},
 				{InstanceID: "two", EntityID: "ent-2", FlowInstance: finalflowinstanceauthoring.TemplateFlowID + "/two", FlowTemplate: finalflowinstanceauthoring.TemplateFlowID, AddressFields: map[string]string{"entity.account_id": "acct-42"}},
 			},
-			wantFailure: string(runtimepinrouting.ConnectFailureTargetAmbiguous),
+			wantFailure: runtimepinrouting.ConnectFailureTargetAmbiguous.Code(),
 		},
 	}
 	for _, tc := range tests {

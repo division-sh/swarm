@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
@@ -1089,15 +1090,7 @@ func routeFlowInputHasLoweredConnectReceiver(source semanticview.Source, flowID,
 	if eventType == "" {
 		return false
 	}
-	for _, plan := range runtimepinrouting.CompileConnectGraph(source).Plans() {
-		if strings.TrimSpace(plan.Receiver.FlowIDCode()) != strings.TrimSpace(flowID) {
-			continue
-		}
-		if eventidentity.Normalize(plan.Receiver.LocalEventCode()) == eventType {
-			return true
-		}
-	}
-	return false
+	return runtimepinrouting.CompileConnectGraph(source).HasConsumer(strings.TrimSpace(flowID), events.EventType(eventType))
 }
 
 func routeNodeLocalEventSet(node runtimecontracts.SystemNodeContract) map[string]struct{} {

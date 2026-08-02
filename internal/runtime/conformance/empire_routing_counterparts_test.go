@@ -25,10 +25,10 @@ func TestEmpireValidationCreateMintedKeyCounterpart(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.TemplateCreateMintedKey)
 	_, plans := canonicalCounterpartPlans(t, canonicalrouting.TemplateCreateMintedKey)
 	plan := requireCounterpartPlan(t, plans, func(plan runtimepinrouting.ConnectRoutePlan) bool {
-		return plan.InstanceKey != nil && plan.InstanceKey.Mode == runtimecontracts.FlowInputResolutionModeCreate
+		return plan.InstanceKey() != nil && plan.InstanceKey().Mode() == runtimecontracts.FlowInputResolutionModeCreate
 	})
-	if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourceGeneratedUUID || plan.InstanceKey.Source.Path != runtimecontracts.FlowInputCarrySourceGeneratedUUID || plan.InstanceKey.Field.Path() != "validation_case_id" {
-		t.Fatalf("%s counterpart = %#v, want UUID-minted validation_case_id", empireValidationNodes, plan.InstanceKey)
+	if key := plan.InstanceKey().Readback(); key.SourceKind != string(runtimecontracts.FlowInputInstanceSourceGeneratedUUID) || key.SourcePath != runtimecontracts.FlowInputCarrySourceGeneratedUUID || key.Field != "validation_case_id" {
+		t.Fatalf("%s counterpart = %#v, want UUID-minted validation_case_id", empireValidationNodes, plan.InstanceKey())
 	}
 }
 
@@ -36,14 +36,14 @@ func TestEmpireTreasuryPortfolioFanInCounterpart(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.FanInStream, canonicalrouting.FanInBarrier)
 	_, streamPlans := canonicalCounterpartPlans(t, canonicalrouting.FanInStream)
 	stream := requireCounterpartPlan(t, streamPlans, func(plan runtimepinrouting.ConnectRoutePlan) bool {
-		return plan.FanIn != nil && plan.FanIn.Aggregation == runtimepinrouting.ConnectFanInStream
+		return plan.FanIn() != nil && plan.FanIn().Aggregation() == runtimepinrouting.ConnectFanInStream
 	})
 	_, barrierPlans := canonicalCounterpartPlans(t, canonicalrouting.FanInBarrier)
 	barrier := requireCounterpartPlan(t, barrierPlans, func(plan runtimepinrouting.ConnectRoutePlan) bool {
-		return plan.FanIn != nil && plan.FanIn.Aggregation == runtimepinrouting.ConnectFanInBarrier
+		return plan.FanIn() != nil && plan.FanIn().Aggregation() == runtimepinrouting.ConnectFanInBarrier
 	})
-	if stream.FanIn.Singleton != "portfolio" || barrier.FanIn.Singleton != "portfolio" {
-		t.Fatalf("%s/%s counterparts do not resolve to the portfolio singleton: stream=%#v barrier=%#v", empireTreasuryNodes, empireOperatingNodes, stream.FanIn, barrier.FanIn)
+	if stream.FanIn().Readback().Singleton != "portfolio" || barrier.FanIn().Readback().Singleton != "portfolio" {
+		t.Fatalf("%s/%s counterparts do not resolve to the portfolio singleton: stream=%#v barrier=%#v", empireTreasuryNodes, empireOperatingNodes, stream.FanIn(), barrier.FanIn())
 	}
 }
 
@@ -51,13 +51,13 @@ func TestEmpireComponentScaffoldReplyCounterpart(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.TemplateReply)
 	_, plans := canonicalCounterpartPlans(t, canonicalrouting.TemplateReply)
 	request := requireCounterpartPlan(t, plans, func(plan runtimepinrouting.ConnectRoutePlan) bool {
-		return plan.ReplyResolution != nil && plan.ReplyResolution.Role == runtimepinrouting.ConnectReplyRoleRequest
+		return plan.ReplyRole() == runtimepinrouting.ConnectReplyRoleRequest
 	})
 	response := requireCounterpartPlan(t, plans, func(plan runtimepinrouting.ConnectRoutePlan) bool {
-		return plan.ReplyResolution != nil && plan.ReplyResolution.Role == runtimepinrouting.ConnectReplyRoleResponse
+		return plan.ReplyRole() == runtimepinrouting.ConnectReplyRoleResponse
 	})
-	if request.ReplyResolution.RequesterFlowID == "" || response.ReplyResolution.RequesterFlowID != request.ReplyResolution.RequesterFlowID {
-		t.Fatalf("%s reply counterpart lacks one requester identity: request=%#v response=%#v", empireComponentScaffoldNodes, request.ReplyResolution, response.ReplyResolution)
+	if requestReadback, responseReadback := request.ReplyResolution().Readback(), response.ReplyResolution().Readback(); requestReadback.RequesterFlowID == "" || responseReadback.RequesterFlowID != requestReadback.RequesterFlowID {
+		t.Fatalf("%s reply counterpart lacks one requester identity: request=%#v response=%#v", empireComponentScaffoldNodes, request.ReplyResolution(), response.ReplyResolution())
 	}
 }
 
@@ -65,14 +65,14 @@ func TestEmpireKeyedRoutingCounterparts(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.TemplateSelectExisting, canonicalrouting.TemplateSelectOrCreate)
 	_, selectPlans := canonicalCounterpartPlans(t, canonicalrouting.TemplateSelectExisting)
 	selected := requireCounterpartPlan(t, selectPlans, func(plan runtimepinrouting.ConnectRoutePlan) bool {
-		return plan.InstanceKey != nil && plan.InstanceKey.Mode == runtimecontracts.FlowInputResolutionModeSelect
+		return plan.InstanceKey() != nil && plan.InstanceKey().Mode() == runtimecontracts.FlowInputResolutionModeSelect
 	})
 	_, selectOrCreatePlans := canonicalCounterpartPlans(t, canonicalrouting.TemplateSelectOrCreate)
 	selectedOrCreated := requireCounterpartPlan(t, selectOrCreatePlans, func(plan runtimepinrouting.ConnectRoutePlan) bool {
-		return plan.InstanceKey != nil && plan.InstanceKey.Mode == runtimecontracts.FlowInputResolutionModeSelectOrCreate
+		return plan.InstanceKey() != nil && plan.InstanceKey().Mode() == runtimecontracts.FlowInputResolutionModeSelectOrCreate
 	})
-	if selected.InstanceKey.Field.Empty() || selectedOrCreated.InstanceKey.Field.Empty() {
-		t.Fatalf("%s/%s/%s keyed counterparts require one carried key: select=%#v select-or-create=%#v", empireValidationNodes, empireSpecRepoNodes, empireRepoScaffoldNodes, selected.InstanceKey, selectedOrCreated.InstanceKey)
+	if selected.InstanceKey().Field().Empty() || selectedOrCreated.InstanceKey().Field().Empty() {
+		t.Fatalf("%s/%s/%s keyed counterparts require one carried key: select=%#v select-or-create=%#v", empireValidationNodes, empireSpecRepoNodes, empireRepoScaffoldNodes, selected.InstanceKey(), selectedOrCreated.InstanceKey())
 	}
 }
 
@@ -108,11 +108,11 @@ func TestEmpireResolutionCounterpartsRequireNoSeventhModeOrMultiPrimaryInstance(
 		for _, plan := range plans {
 			switch item.mode {
 			case runtimecontracts.FlowInputResolutionModeReply:
-				matched = matched || plan.ReplyResolution != nil
+				matched = matched || plan.ReplyResolution() != nil
 			case runtimecontracts.FlowInputResolutionModeFanIn:
-				matched = matched || plan.FanIn != nil
+				matched = matched || plan.FanIn() != nil
 			default:
-				matched = matched || (plan.InstanceKey != nil && plan.InstanceKey.Mode == item.mode)
+				matched = matched || (plan.InstanceKey() != nil && plan.InstanceKey().Mode() == item.mode)
 			}
 		}
 		if !matched {
@@ -122,12 +122,13 @@ func TestEmpireResolutionCounterpartsRequireNoSeventhModeOrMultiPrimaryInstance(
 		// The named key remains routing identity inside that single-entity model.
 		if item.mode != runtimecontracts.FlowInputResolutionModeReply && item.mode != runtimecontracts.FlowInputResolutionModeFanIn {
 			for _, plan := range plans {
-				if plan.InstanceKey == nil || plan.InstanceKey.Mode != item.mode {
+				if plan.InstanceKey() == nil || plan.InstanceKey().Mode() != item.mode {
 					continue
 				}
-				primary, err := bundle.ResolveFlowPrimaryEntity(plan.Receiver.FlowIDCode())
+				receiver := plan.ReceiverEndpoint().Readback()
+				primary, err := bundle.ResolveFlowPrimaryEntity(receiver.FlowID)
 				if err != nil || primary.EntityType == "" {
-					t.Fatalf("%s receiver %s lacks one primary entity contract: primary=%#v err=%v", item.path, plan.Receiver.FlowIDCode(), primary, err)
+					t.Fatalf("%s receiver %s lacks one primary entity contract: primary=%#v err=%v", item.path, receiver.FlowID, primary, err)
 				}
 				if item.key == "" {
 					t.Fatalf("%s counterpart key is empty", item.path)

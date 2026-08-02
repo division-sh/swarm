@@ -26,8 +26,8 @@ func checkCompositionConnectValidation(c *checkerContext) []Finding {
 		findings = append(findings, Finding{
 			CheckID: "composition_connect_validation", Severity: "error",
 			Location: strings.TrimSpace(issue.AuthoredLocation),
-			Message:  fmt.Sprintf("%scompiled connect is invalid: %s: %s", context, issue.Failure, strings.TrimSpace(issue.Detail)),
-			Evidence: []string{"classification: " + string(issue.Failure)},
+			Message:  fmt.Sprintf("%scompiled connect is invalid: %s: %s", context, issue.Failure.Code(), strings.TrimSpace(issue.Detail)),
+			Evidence: []string{"classification: " + issue.Failure.Code()},
 		})
 	}
 	for _, issue := range routingtopology.Build(c.source).Issues {
@@ -126,16 +126,8 @@ func validateReplyInputPinResolution(source semanticview.Source, flowID string, 
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply correlation_key %q must name a carry declared by output pin %s", correlationKey, requestPinName), location))
 	}
 	graph := runtimepinrouting.CompileConnectGraph(source)
-	requestConnects := make([]runtimepinrouting.ConnectRoutePlan, 0, 1)
-	replyConnects := make([]runtimepinrouting.ConnectRoutePlan, 0, 1)
-	for _, plan := range graph.Plans() {
-		if strings.TrimSpace(plan.Source.FlowIDCode()) == strings.TrimSpace(flowID) && strings.TrimSpace(plan.Source.PinCode()) == requestPinName {
-			requestConnects = append(requestConnects, plan)
-		}
-		if strings.TrimSpace(plan.Receiver.FlowIDCode()) == strings.TrimSpace(flowID) && strings.TrimSpace(plan.Receiver.PinCode()) == strings.TrimSpace(pin.PinName()) {
-			replyConnects = append(replyConnects, plan)
-		}
-	}
+	requestConnects := graph.PlansFromOutputPin(strings.TrimSpace(flowID), requestPin)
+	replyConnects := graph.PlansToInputPin(strings.TrimSpace(flowID), pin)
 	if len(requestConnects) != 1 {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply request pin %s.%s must have exactly one connected counterpart, got %d", flowID, requestPinName, len(requestConnects)), location))
 		return findings
@@ -144,9 +136,9 @@ func validateReplyInputPinResolution(source semanticview.Source, flowID string, 
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply input pin %s.%s must have exactly one connected provider output, got %d", flowID, pin.PinName(), len(replyConnects)), location))
 		return findings
 	}
-	requestTarget := requestConnects[0].Receiver
-	replySource := replyConnects[0].Source
-	if requestTarget.IsRoot() || replySource.IsRoot() || strings.TrimSpace(requestTarget.FlowIDCode()) != strings.TrimSpace(replySource.FlowIDCode()) {
+	requestTarget := requestConnects[0].ReceiverEndpoint()
+	replySource := replyConnects[0].SourceEndpoint()
+	if requestTarget.IsRoot() || replySource.IsRoot() || !runtimepinrouting.ConnectEndpointsShareFlow(requestTarget, replySource) {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", "resolution mode reply request and reply edges must connect the same provider flow", location))
 	}
 	return findings

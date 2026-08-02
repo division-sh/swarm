@@ -22,15 +22,13 @@ import (
 func TestTemplateInstanceSemanticOwnersRemainTypedAndOpaque(t *testing.T) {
 	templateFieldType := reflect.TypeOf(runtimecontracts.TemplateInstanceField{})
 	modeType := reflect.TypeOf(runtimecontracts.FlowInputResolutionMode(0))
-	sourceType := reflect.TypeOf(runtimecontracts.FlowInputInstanceSource{})
 	actionType := reflect.TypeOf(runtimebus.TemplateInstanceLifecycleAction(0))
 
 	assertSemanticOwnerFieldType(t, reflect.TypeOf(runtimecontracts.FlowSchemaDocument{}), "Instance", templateFieldType)
 	assertSemanticOwnerFieldType(t, reflect.TypeOf(runtimecontracts.TemplateInstanceContract{}), "Field", templateFieldType)
 	assertSemanticOwnerFieldType(t, reflect.TypeOf(runtimecontracts.FlowInputPinResolution{}), "Mode", modeType)
-	assertSemanticOwnerFieldType(t, reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKey{}), "Field", templateFieldType)
-	assertSemanticOwnerFieldType(t, reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKey{}), "Mode", modeType)
-	assertSemanticOwnerFieldType(t, reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKey{}), "Source", sourceType)
+	assertSemanticOwnerMethodResult(t, reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKey{}), "Field", templateFieldType)
+	assertSemanticOwnerMethodResult(t, reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKey{}), "Mode", modeType)
 	assertSemanticOwnerFieldType(t, reflect.TypeOf(runtimebus.TemplateInstanceLifecycleDecision{}), "Action", actionType)
 
 	if templateFieldType.Kind() != reflect.Struct || templateFieldType.NumField() != 1 {
@@ -77,6 +75,13 @@ func TestCompiledRoutingTypesDoNotImplementStringer(t *testing.T) {
 		events.DeliveryRouteIdentity{},
 		events.RoutingSourceKind{},
 		events.RoutingSourceAuthority{},
+		runtimepinrouting.ConnectRoutePlanFailure{},
+		runtimepinrouting.ConnectRoutePlanEndpoint{},
+		runtimepinrouting.ConnectRoutePlan{},
+		runtimepinrouting.ConnectRoutePlanInstanceKey{},
+		runtimepinrouting.ConnectRoutePlanFanIn{},
+		runtimepinrouting.ConnectRoutePlanReplyResolution{},
+		runtimepinrouting.ConnectReceiverPinIdentity{},
 		runtimepinrouting.ConnectRoutePlanResolutionKind{},
 		runtimepinrouting.ConnectRoutePlanTargetKind{},
 		promotedRoutingMode{},
@@ -125,6 +130,12 @@ func TestCompiledRoutingBoundaryRejectsSemanticStringOperations(t *testing.T) {
 		"routing authority":    reflect.TypeOf(events.RoutingSourceAuthority{}),
 		"connect target kind":  reflect.TypeOf(runtimepinrouting.ConnectRoutePlanTargetKind{}),
 		"connect resolution":   reflect.TypeOf(runtimepinrouting.ConnectRoutePlanResolutionKind{}),
+		"connect failure":      reflect.TypeOf(runtimepinrouting.ConnectRoutePlanFailure{}),
+		"connect endpoint":     reflect.TypeOf(runtimepinrouting.ConnectRoutePlanEndpoint{}),
+		"connect plan":         reflect.TypeOf(runtimepinrouting.ConnectRoutePlan{}),
+		"connect instance key": reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKey{}),
+		"connect fan-in":       reflect.TypeOf(runtimepinrouting.ConnectRoutePlanFanIn{}),
+		"connect reply":        reflect.TypeOf(runtimepinrouting.ConnectRoutePlanReplyResolution{}),
 		"delivery route claim": reflect.TypeOf(events.ConnectExecutionClaim{}),
 	} {
 		if owner.Kind() == reflect.String {
@@ -133,8 +144,36 @@ func TestCompiledRoutingBoundaryRejectsSemanticStringOperations(t *testing.T) {
 	}
 }
 
+func TestCompiledConnectValuesExposeNoMutableSemanticFields(t *testing.T) {
+	for _, owner := range []reflect.Type{
+		reflect.TypeOf(runtimepinrouting.ConnectRoutePlan{}),
+		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanEndpoint{}),
+		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKey{}),
+		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanFanIn{}),
+		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanReplyResolution{}),
+		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanFailure{}),
+		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanResolutionKind{}),
+		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanTargetKind{}),
+		reflect.TypeOf(runtimepinrouting.ConnectReceiverPinIdentity{}),
+		reflect.TypeOf(runtimepinrouting.SourceEvent{}),
+	} {
+		for index := 0; index < owner.NumField(); index++ {
+			if field := owner.Field(index); field.IsExported() {
+				t.Fatalf("%s exposes mutable compiled field %s (%s)", owner, field.Name, field.Type)
+			}
+		}
+	}
+}
+
 func TestCompiledConnectDiagnosticProjectionCannotReenterEvaluator(t *testing.T) {
 	graphType := reflect.TypeOf(runtimepinrouting.CompiledConnectGraph{})
+	diagnostics := map[reflect.Type]struct{}{
+		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanReadback{}):            {},
+		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanEndpointReadback{}):    {},
+		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanInstanceKeyReadback{}): {},
+		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanFanInReadback{}):       {},
+		reflect.TypeOf(runtimepinrouting.ConnectRoutePlanReplyReadback{}):       {},
+	}
 	for _, methodName := range []string{"MatchingPlans", "PlanMatchesEvent", "MatchingSourceEvent", "IssueMatchesEvent"} {
 		method, ok := graphType.MethodByName(methodName)
 		if !ok {
@@ -142,10 +181,47 @@ func TestCompiledConnectDiagnosticProjectionCannotReenterEvaluator(t *testing.T)
 		}
 		for index := 1; index < method.Type.NumIn(); index++ {
 			parameter := method.Type.In(index)
-			if parameter.Kind() == reflect.String || parameter == reflect.TypeOf(runtimepinrouting.ConnectEndpointRole{}) || parameter == reflect.TypeOf(runtimepinrouting.ConnectEdgeEvidence{}) {
+			_, diagnostic := diagnostics[parameter]
+			if parameter.Kind() == reflect.String || diagnostic || parameter == reflect.TypeOf(runtimepinrouting.ConnectEndpointRole{}) || parameter == reflect.TypeOf(runtimepinrouting.ConnectEdgeEvidence{}) {
 				t.Fatalf("compiled graph evaluator %s accepts diagnostic projection %s", methodName, parameter)
 			}
 		}
+	}
+}
+
+func TestCompiledConnectEvaluatorsDoNotNormalizeOrConsumeReadback(t *testing.T) {
+	guarded := map[string]struct{}{
+		"connectSourceEndpointMatches": {},
+		"PlanMatchesEvent":             {},
+		"MatchingSourceEvent":          {},
+		"IssueMatchesEvent":            {},
+		"SourceParentRoute":            {},
+	}
+	repoRoot := canonicalrouting.RepoRoot(t)
+	path := filepath.Join(repoRoot, "internal/runtime/core/pinrouting/connect_route_plan.go")
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse compiled connect owner: %v", err)
+	}
+	for _, declaration := range parsed.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Body == nil {
+			continue
+		}
+		if _, ok := guarded[function.Name.Name]; !ok {
+			continue
+		}
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch selector.Sel.Name {
+			case "Normalize", "Trim", "TrimSpace", "Split", "HasPrefix", "HasSuffix", "Readback":
+				t.Errorf("compiled connect evaluator %s calls prohibited semantic projection %s", function.Name.Name, selector.Sel.Name)
+			}
+			return true
+		})
 	}
 }
 
@@ -240,5 +316,16 @@ func assertSemanticOwnerFieldType(t *testing.T, owner reflect.Type, fieldName st
 	}
 	if field.Type != want {
 		t.Fatalf("%s.%s type = %s, want canonical %s", owner, fieldName, field.Type, want)
+	}
+}
+
+func assertSemanticOwnerMethodResult(t *testing.T, owner reflect.Type, methodName string, want reflect.Type) {
+	t.Helper()
+	method, ok := owner.MethodByName(methodName)
+	if !ok {
+		t.Fatalf("%s.%s is missing", owner, methodName)
+	}
+	if method.Type.NumOut() != 1 || method.Type.Out(0) != want {
+		t.Fatalf("%s.%s result = %s, want canonical %s", owner, methodName, method.Type.Out(0), want)
 	}
 }

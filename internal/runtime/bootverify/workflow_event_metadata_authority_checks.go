@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -146,13 +147,14 @@ func eventMetadataAddGlobalFlowTopologyNames(source semanticview.Source, names e
 
 func eventMetadataAddGlobalCompositionConnectNames(source semanticview.Source, names eventMetadataNameIndex) {
 	for _, role := range runtimepinrouting.CompileConnectGraph(source).EndpointRoles() {
+		endpoint := role.Readback()
 		switch role.Kind() {
 		case runtimepinrouting.ConnectEndpointRoleProducer:
-			eventMetadataAddFlowRole(names, role.FlowID(), role.Pin(), "parent connect output producer")
-			eventMetadataReplaceQualifiedFlowRole(names, role.FlowID(), role.Pin(), "parent connect output producer")
+			eventMetadataAddFlowRole(names, endpoint.FlowID, endpoint.Pin, "parent connect output producer")
+			eventMetadataReplaceQualifiedFlowRole(names, endpoint.FlowID, endpoint.Pin, "parent connect output producer")
 		case runtimepinrouting.ConnectEndpointRoleConsumer:
-			eventMetadataAddFlowRole(names, role.FlowID(), role.Pin(), "parent connect input consumer")
-			eventMetadataReplaceQualifiedFlowRole(names, role.FlowID(), role.Pin(), "parent connect input consumer")
+			eventMetadataAddFlowRole(names, endpoint.FlowID, endpoint.Pin, "parent connect input consumer")
+			eventMetadataReplaceQualifiedFlowRole(names, endpoint.FlowID, endpoint.Pin, "parent connect input consumer")
 		}
 	}
 }
@@ -202,14 +204,15 @@ func eventMetadataRoleNames(source semanticview.Source, decl deadEventDeclaratio
 		}
 	}
 	for _, role := range runtimepinrouting.CompileConnectGraph(source).EndpointRoles() {
-		if eventidentity.Normalize(string(role.Event())) != eventidentity.Normalize(decl.Canonical) {
+		if !role.Matches(decl.FlowID, events.EventType(eventidentity.Normalize(decl.Canonical))) {
 			continue
 		}
+		endpoint := role.Readback()
 		switch role.Kind() {
 		case runtimepinrouting.ConnectEndpointRoleProducer:
-			eventMetadataReplaceQualifiedFlowRole(producers, role.FlowID(), role.Pin(), "parent connect output producer")
+			eventMetadataReplaceQualifiedFlowRole(producers, endpoint.FlowID, endpoint.Pin, "parent connect output producer")
 		case runtimepinrouting.ConnectEndpointRoleConsumer:
-			eventMetadataReplaceQualifiedFlowRole(consumers, role.FlowID(), role.Pin(), "parent connect input consumer")
+			eventMetadataReplaceQualifiedFlowRole(consumers, endpoint.FlowID, endpoint.Pin, "parent connect input consumer")
 		}
 	}
 	return producers, consumers

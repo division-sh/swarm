@@ -68,20 +68,22 @@ func TestTemplateFlowPilotConformance_CoversInstanceCenteredAuthoringOwners(t *t
 		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one template route plan", plans)
 	}
 	plan := plans[0]
-	if plan.ResolutionKind != runtimepinrouting.ConnectResolutionInstanceKey || !plan.RequiresRuntimeResolution {
-		t.Fatalf("route plan resolution = %s runtime=%v, want select-or-create runtime resolution", plan.ResolutionKind.Code(), plan.RequiresRuntimeResolution)
+	sourceEndpoint := plan.SourceEndpoint().Readback()
+	receiverEndpoint := plan.ReceiverEndpoint().Readback()
+	if plan.ResolutionKind() != runtimepinrouting.ConnectResolutionInstanceKey || !plan.RequiresRuntimeResolution() {
+		t.Fatalf("route plan resolution = %s runtime=%v, want select-or-create runtime resolution", plan.ResolutionKind().Code(), plan.RequiresRuntimeResolution())
 	}
-	if plan.Source.FlowIDCode() != "producer" || plan.Source.PinCode() != "account_ready" {
-		t.Fatalf("route plan source = %#v, want producer.account_ready", plan.Source)
+	if sourceEndpoint.FlowID != "producer" || sourceEndpoint.Pin != "account_ready" {
+		t.Fatalf("route plan source = %#v, want producer.account_ready", sourceEndpoint)
 	}
-	if plan.Receiver.FlowIDCode() != "account" || plan.Receiver.PinCode() != "account_ready" || !plan.Receiver.IsTemplate() {
-		t.Fatalf("route plan receiver = %#v, want template account.account_ready", plan.Receiver)
+	if receiverEndpoint.FlowID != "account" || receiverEndpoint.Pin != "account_ready" || !plan.ReceiverEndpoint().IsTemplate() {
+		t.Fatalf("route plan receiver = %#v, want template account.account_ready", receiverEndpoint)
 	}
-	if plan.InstanceKey == nil || plan.InstanceKey.Mode != runtimecontracts.FlowInputResolutionModeSelectOrCreate || plan.InstanceKey.Field.Path() != "account_id" {
-		t.Fatalf("route plan instance key = %#v, want select-or-create/account_id", plan.InstanceKey)
+	if plan.InstanceKey() == nil || plan.InstanceKey().Mode() != runtimecontracts.FlowInputResolutionModeSelectOrCreate || plan.InstanceKey().Field().Path() != "account_id" {
+		t.Fatalf("route plan instance key = %#v, want select-or-create/account_id", plan.InstanceKey())
 	}
-	if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || plan.InstanceKey.Source.Path != "payload.account_id" {
-		t.Fatalf("route plan instance source = %#v, want payload.account_id", plan.InstanceKey.Source)
+	if key := plan.InstanceKey().Readback(); key.SourceKind != string(runtimecontracts.FlowInputInstanceSourcePayload) || key.SourcePath != "payload.account_id" {
+		t.Fatalf("route plan instance source = %#v, want payload.account_id", key)
 	}
 }
 
@@ -146,39 +148,41 @@ func TestTemplateSelectExistingConformance_CoversResolutionSelectOwner(t *testin
 	}
 	var plan runtimepinrouting.ConnectRoutePlan
 	for _, candidate := range plans {
-		if candidate.InstanceKey != nil && candidate.InstanceKey.Mode == runtimecontracts.FlowInputResolutionModeSelect {
+		if candidate.InstanceKey() != nil && candidate.InstanceKey().Mode() == runtimecontracts.FlowInputResolutionModeSelect {
 			plan = candidate
 		}
 	}
-	if plan.InstanceKey == nil {
+	if plan.InstanceKey() == nil {
 		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want select route plan", plans)
 	}
-	if plan.Source.FlowIDCode() != templateselectexisting.ProducerFlowID || plan.Source.PinCode() != templateselectexisting.ProducerOutputPin {
-		t.Fatalf("route plan source = %#v, want %s.%s", plan.Source, templateselectexisting.ProducerFlowID, templateselectexisting.ProducerOutputPin)
+	sourceEndpoint := plan.SourceEndpoint().Readback()
+	receiverEndpoint := plan.ReceiverEndpoint().Readback()
+	if sourceEndpoint.FlowID != templateselectexisting.ProducerFlowID || sourceEndpoint.Pin != templateselectexisting.ProducerOutputPin {
+		t.Fatalf("route plan source = %#v, want %s.%s", sourceEndpoint, templateselectexisting.ProducerFlowID, templateselectexisting.ProducerOutputPin)
 	}
-	if plan.Receiver.FlowIDCode() != templateselectexisting.TemplateFlowID || plan.Receiver.PinCode() != templateselectexisting.TemplateInputPin || !plan.Receiver.IsTemplate() {
-		t.Fatalf("route plan receiver = %#v, want template %s.%s", plan.Receiver, templateselectexisting.TemplateFlowID, templateselectexisting.TemplateInputPin)
+	if receiverEndpoint.FlowID != templateselectexisting.TemplateFlowID || receiverEndpoint.Pin != templateselectexisting.TemplateInputPin || !plan.ReceiverEndpoint().IsTemplate() {
+		t.Fatalf("route plan receiver = %#v, want template %s.%s", receiverEndpoint, templateselectexisting.TemplateFlowID, templateselectexisting.TemplateInputPin)
 	}
-	if plan.ResolutionKind != runtimepinrouting.ConnectResolutionInstanceKey || !plan.RequiresRuntimeResolution {
-		t.Fatalf("route plan resolution = %s runtime=%v, want runtime instance-key select", plan.ResolutionKind.Code(), plan.RequiresRuntimeResolution)
+	if plan.ResolutionKind() != runtimepinrouting.ConnectResolutionInstanceKey || !plan.RequiresRuntimeResolution() {
+		t.Fatalf("route plan resolution = %s runtime=%v, want runtime instance-key select", plan.ResolutionKind().Code(), plan.RequiresRuntimeResolution())
 	}
-	if plan.InstanceKey == nil || plan.InstanceKey.Mode != runtimecontracts.FlowInputResolutionModeSelect || plan.InstanceKey.Field.Path() != templateselectexisting.TemplateInstanceBy {
-		t.Fatalf("route plan instance key = %#v, want select/account_id", plan.InstanceKey)
+	if plan.InstanceKey() == nil || plan.InstanceKey().Mode() != runtimecontracts.FlowInputResolutionModeSelect || plan.InstanceKey().Field().Path() != templateselectexisting.TemplateInstanceBy {
+		t.Fatalf("route plan instance key = %#v, want select/account_id", plan.InstanceKey())
 	}
-	if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || plan.InstanceKey.Source.Path != "payload."+templateselectexisting.TemplateInstanceBy {
-		t.Fatalf("route plan source = %#v, want payload.%s", plan.InstanceKey.Source, templateselectexisting.TemplateInstanceBy)
+	if key := plan.InstanceKey().Readback(); key.SourceKind != string(runtimecontracts.FlowInputInstanceSourcePayload) || key.SourcePath != "payload."+templateselectexisting.TemplateInstanceBy {
+		t.Fatalf("route plan source = %#v, want payload.%s", key, templateselectexisting.TemplateInstanceBy)
 	}
 
 	materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{
-		MatchValues: map[string]string{"payload.account_id": "acct-1"},
+		MatchValues: runtimepinrouting.AdmitConnectRouteMatchValues(map[string]string{"payload.account_id": "acct-1"}),
 		Descriptors: []runtimepinrouting.Descriptor{{
 			EntityID:      "ent-1",
 			FlowInstance:  "account/one",
 			AddressFields: map[string]string{"entity.account_id": "acct-1"},
 		}},
 	})
-	if materialized.Failure != "" {
-		t.Fatalf("MaterializeConnectRoutePlan failure = %q, want none", materialized.Failure)
+	if !materialized.Failure.Empty() {
+		t.Fatalf("MaterializeConnectRoutePlan failure = %q, want none", materialized.Failure.Code())
 	}
 	if materialized.Target.FlowInstance != "account/one" || materialized.Target.EntityID != "ent-1" {
 		t.Fatalf("materialized target = %#v, want account/one ent-1", materialized.Target)
@@ -200,32 +204,34 @@ func TestTemplateSelectOrCreateConformance_CoversResolutionSelectOrCreateOwner(t
 		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one select-or-create route plan", plans)
 	}
 	plan := plans[0]
-	if plan.Source.FlowIDCode() != templateselectorcreate.ProducerFlowID || plan.Source.PinCode() != templateselectorcreate.ProducerOutputPin {
-		t.Fatalf("route plan source = %#v, want %s.%s", plan.Source, templateselectorcreate.ProducerFlowID, templateselectorcreate.ProducerOutputPin)
+	sourceEndpoint := plan.SourceEndpoint().Readback()
+	receiverEndpoint := plan.ReceiverEndpoint().Readback()
+	if sourceEndpoint.FlowID != templateselectorcreate.ProducerFlowID || sourceEndpoint.Pin != templateselectorcreate.ProducerOutputPin {
+		t.Fatalf("route plan source = %#v, want %s.%s", sourceEndpoint, templateselectorcreate.ProducerFlowID, templateselectorcreate.ProducerOutputPin)
 	}
-	if plan.Receiver.FlowIDCode() != templateselectorcreate.TemplateFlowID || plan.Receiver.PinCode() != templateselectorcreate.TemplateInputPin || !plan.Receiver.IsTemplate() {
-		t.Fatalf("route plan receiver = %#v, want template %s.%s", plan.Receiver, templateselectorcreate.TemplateFlowID, templateselectorcreate.TemplateInputPin)
+	if receiverEndpoint.FlowID != templateselectorcreate.TemplateFlowID || receiverEndpoint.Pin != templateselectorcreate.TemplateInputPin || !plan.ReceiverEndpoint().IsTemplate() {
+		t.Fatalf("route plan receiver = %#v, want template %s.%s", receiverEndpoint, templateselectorcreate.TemplateFlowID, templateselectorcreate.TemplateInputPin)
 	}
-	if plan.ResolutionKind != runtimepinrouting.ConnectResolutionInstanceKey || !plan.RequiresRuntimeResolution {
-		t.Fatalf("route plan resolution = %s runtime=%v, want runtime instance-key select-or-create", plan.ResolutionKind.Code(), plan.RequiresRuntimeResolution)
+	if plan.ResolutionKind() != runtimepinrouting.ConnectResolutionInstanceKey || !plan.RequiresRuntimeResolution() {
+		t.Fatalf("route plan resolution = %s runtime=%v, want runtime instance-key select-or-create", plan.ResolutionKind().Code(), plan.RequiresRuntimeResolution())
 	}
-	if plan.InstanceKey == nil || plan.InstanceKey.Mode != runtimecontracts.FlowInputResolutionModeSelectOrCreate || plan.InstanceKey.Field.Path() != templateselectorcreate.TemplateInstanceBy {
-		t.Fatalf("route plan instance key = %#v, want select-or-create/account_id", plan.InstanceKey)
+	if plan.InstanceKey() == nil || plan.InstanceKey().Mode() != runtimecontracts.FlowInputResolutionModeSelectOrCreate || plan.InstanceKey().Field().Path() != templateselectorcreate.TemplateInstanceBy {
+		t.Fatalf("route plan instance key = %#v, want select-or-create/account_id", plan.InstanceKey())
 	}
-	if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || plan.InstanceKey.Source.Path != "payload."+templateselectorcreate.TemplateInstanceBy {
-		t.Fatalf("route plan source = %#v, want payload.%s", plan.InstanceKey.Source, templateselectorcreate.TemplateInstanceBy)
+	if key := plan.InstanceKey().Readback(); key.SourceKind != string(runtimecontracts.FlowInputInstanceSourcePayload) || key.SourcePath != "payload."+templateselectorcreate.TemplateInstanceBy {
+		t.Fatalf("route plan source = %#v, want payload.%s", key, templateselectorcreate.TemplateInstanceBy)
 	}
 
 	materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{
-		MatchValues: map[string]string{"payload.account_id": "acct-1"},
+		MatchValues: runtimepinrouting.AdmitConnectRouteMatchValues(map[string]string{"payload.account_id": "acct-1"}),
 		Descriptors: []runtimepinrouting.Descriptor{{
 			EntityID:      "ent-1",
 			FlowInstance:  "account/one",
 			AddressFields: map[string]string{"entity.account_id": "acct-1"},
 		}},
 	})
-	if materialized.Failure != "" {
-		t.Fatalf("MaterializeConnectRoutePlan failure = %q, want none", materialized.Failure)
+	if !materialized.Failure.Empty() {
+		t.Fatalf("MaterializeConnectRoutePlan failure = %q, want none", materialized.Failure.Code())
 	}
 	if materialized.Target.FlowInstance != "account/one" || materialized.Target.EntityID != "ent-1" {
 		t.Fatalf("materialized target = %#v, want account/one ent-1", materialized.Target)
@@ -250,18 +256,21 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	}
 	var plan runtimepinrouting.ConnectRoutePlan
 	for _, candidate := range plans {
-		if candidate.Source.FlowIDCode() == notifyallchildren.OwnerFlowID && candidate.Source.PinCode() == notifyallchildren.OwnerOutputPin {
+		sourceEndpoint := candidate.SourceEndpoint().Readback()
+		if sourceEndpoint.FlowID == notifyallchildren.OwnerFlowID && sourceEndpoint.Pin == notifyallchildren.OwnerOutputPin {
 			plan = candidate
 		}
 	}
-	if plan.Source.FlowIDCode() != notifyallchildren.OwnerFlowID || plan.Source.PinCode() != notifyallchildren.OwnerOutputPin || plan.Source.KeyCode() != "account_id" {
-		t.Fatalf("route plan source = %#v, want portfolio.account_notify_requested keyed by account_id", plan.Source)
+	sourceEndpoint := plan.SourceEndpoint().Readback()
+	receiverEndpoint := plan.ReceiverEndpoint().Readback()
+	if sourceEndpoint.FlowID != notifyallchildren.OwnerFlowID || sourceEndpoint.Pin != notifyallchildren.OwnerOutputPin || sourceEndpoint.Key != "account_id" {
+		t.Fatalf("route plan source = %#v, want portfolio.account_notify_requested keyed by account_id", sourceEndpoint)
 	}
-	if plan.Receiver.FlowIDCode() != notifyallchildren.ChildFlowID || plan.Receiver.PinCode() != notifyallchildren.ChildInputPin || !plan.Receiver.IsTemplate() {
-		t.Fatalf("route plan receiver = %#v, want account.account_notify_requested template", plan.Receiver)
+	if receiverEndpoint.FlowID != notifyallchildren.ChildFlowID || receiverEndpoint.Pin != notifyallchildren.ChildInputPin || !plan.ReceiverEndpoint().IsTemplate() {
+		t.Fatalf("route plan receiver = %#v, want account.account_notify_requested template", receiverEndpoint)
 	}
-	if plan.InstanceKey == nil || plan.InstanceKey.Mode != runtimecontracts.FlowInputResolutionModeSelect || plan.InstanceKey.Field.Path() != "account_id" {
-		t.Fatalf("route plan instance key = %#v, want select/account_id", plan.InstanceKey)
+	if plan.InstanceKey() == nil || plan.InstanceKey().Mode() != runtimecontracts.FlowInputResolutionModeSelect || plan.InstanceKey().Field().Path() != "account_id" {
+		t.Fatalf("route plan instance key = %#v, want select/account_id", plan.InstanceKey())
 	}
 
 	handler, ok := source.NodeEventHandler("portfolio-coordinator", notifyallchildren.OwnerTriggerEvent)
@@ -439,7 +448,7 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 		{
 			name:        "missing account key",
 			payload:     json.RawMessage(`{"portfolio_id":"portfolio","command":"refresh"}`),
-			wantFailure: string(runtimepinrouting.ConnectFailureInstanceSourceValueMissing),
+			wantFailure: runtimepinrouting.ConnectFailureInstanceSourceValueMissing.Code(),
 		},
 		{
 			name:    "ambiguous account key",
@@ -448,7 +457,7 @@ func TestNotifyAllChildrenConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
 				{InstanceID: "acct-a-one", EntityID: runtimeflowidentity.EntityID("ent-a1"), FlowInstance: "account/acct-a-one", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
 				{InstanceID: "acct-a-two", EntityID: runtimeflowidentity.EntityID("ent-a2"), FlowInstance: "account/acct-a-two", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
 			},
-			wantFailure: string(runtimepinrouting.ConnectFailureTargetAmbiguous),
+			wantFailure: runtimepinrouting.ConnectFailureTargetAmbiguous.Code(),
 		},
 	}
 	for _, tc := range tests {

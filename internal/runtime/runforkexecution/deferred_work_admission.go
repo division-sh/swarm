@@ -129,7 +129,7 @@ func selectedContractSourceCanCreateDynamicFlow(source semanticview.Source) bool
 				continue
 			}
 			for _, edge := range graph.Edges() {
-				if edge.Consumer().FlowID() == strings.TrimSpace(flowID) && edge.Consumer().Pin() == strings.TrimSpace(pin.PinName()) {
+				if edge.Consumer().MatchesInputPin(strings.TrimSpace(flowID), pin) {
 					return true
 				}
 			}

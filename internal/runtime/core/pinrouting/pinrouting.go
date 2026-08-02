@@ -85,7 +85,9 @@ func ClassifyOutputConsumer(source semanticview.Source, flowID, eventType string
 	if source == nil {
 		return classification
 	}
-	for _, pin := range outputPinsForEvent(source, flowID, eventType) {
+	outputPins := outputPinsForEvent(source, flowID, eventType)
+	graph := CompileConnectGraph(source)
+	for _, pin := range outputPins {
 		if !pin.Sink.Valid() {
 			classification.invalidSink = true
 			continue
@@ -93,6 +95,7 @@ func ClassifyOutputConsumer(source semanticview.Source, flowID, eventType string
 		if pin.Sink == runtimecontracts.FlowOutputSinkHarness {
 			classification.classes[OutputConsumerHarness] = struct{}{}
 		}
+		classification.connects = append(classification.connects, graph.PlansFromOutputPin(flowID, pin)...)
 	}
 	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).MatchingConsumers(flowID, eventType) {
 		if endpoint.Kind != semanticview.EventEndpointExternal {
@@ -100,7 +103,6 @@ func ClassifyOutputConsumer(source semanticview.Source, flowID, eventType string
 			break
 		}
 	}
-	classification.connects = compositionConnectRoutePlansFromOutputEvent(source, flowID, eventType)
 	if len(classification.connects) > 0 {
 		classification.classes[OutputConsumerConnect] = struct{}{}
 	}
@@ -152,27 +154,6 @@ func PinDeclaredOutput(source semanticview.Source, flowID, eventType string) boo
 		}
 	}
 	return false
-}
-
-func compositionConnectRoutePlansFromOutputEvent(source semanticview.Source, flowID, eventType string) []ConnectRoutePlan {
-	if source == nil {
-		return nil
-	}
-	flowID = strings.TrimSpace(flowID)
-	eventType = eventidentity.Normalize(eventType)
-	if eventType == "" {
-		return nil
-	}
-	out := make([]ConnectRoutePlan, 0)
-	for _, plan := range CompileConnectGraph(source).plans {
-		if strings.TrimSpace(plan.Source.flowID) != flowID {
-			continue
-		}
-		if eventReferencesOverlap(source, flowID, []string{eventType}, flowID, []string{plan.Source.event, plan.Source.resolvedEvent}) {
-			out = append(out, plan)
-		}
-	}
-	return out
 }
 
 func outputPinsForEvent(source semanticview.Source, flowID, eventType string) []runtimecontracts.FlowOutputEventPin {
@@ -328,7 +309,7 @@ func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resol
 
 func connectPlansContainRootReceiver(plans []ConnectRoutePlan) bool {
 	for _, plan := range plans {
-		if plan.Receiver.IsRoot() {
+		if plan.receiver.IsRoot() {
 			return true
 		}
 	}
