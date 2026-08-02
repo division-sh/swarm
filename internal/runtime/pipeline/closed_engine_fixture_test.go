@@ -37,6 +37,10 @@ func (p pipelineTestCommittedPublication) CommittedDurablePublicationEventID() s
 	return strings.TrimSpace(p.eventID)
 }
 
+func (p pipelineTestCommittedPublication) CommittedDurablePublicationIntent() runtimeengine.EmitIntent {
+	return p.intent
+}
+
 func (p pipelineTestCommittedPublication) ValidateCommittedDurablePublication() error {
 	if p.CommittedDurablePublicationEventID() == "" {
 		return fmt.Errorf("pipeline test committed publication requires event identity")

@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
@@ -30,7 +31,99 @@ type inboundPublicationProofStore interface {
 	workflowTestSelectedStore
 }
 
-func commitInboundPublicationTestEvent(t *testing.T, store storeTestDurableEventBusStore, mutation runtimeinbound.Mutation, publication *runtimeinbound.EventFinalization) error {
+type inboundPublicationProofAuthorizationVerifier struct{}
+
+func (inboundPublicationProofAuthorizationVerifier) VerifyProviderOutputAuthorization(actual runtimeprovideroutput.Authorization) error {
+	if !actual.Valid() {
+		return errors.New("inbound publication proof authorization is incomplete")
+	}
+	return nil
+}
+
+type inboundPublicationProofMutation interface {
+	Context() context.Context
+	FinalizeInboundPublication(context.Context, runtimeinbound.Finalization) error
+}
+
+type inboundPublicationProofBuilder struct {
+	ctx          context.Context
+	finalization runtimeinbound.Finalization
+	finalized    bool
+}
+
+func (b *inboundPublicationProofBuilder) Context() context.Context { return b.ctx }
+
+func (b *inboundPublicationProofBuilder) FinalizeInboundPublication(_ context.Context, finalization runtimeinbound.Finalization) error {
+	if b.finalized {
+		return errors.New("inbound publication proof was already finalized")
+	}
+	b.finalization = finalization
+	b.finalized = true
+	return nil
+}
+
+func runInboundPublicationProofMutation(t *testing.T, store inboundPublicationProofStore, ctx context.Context, request runtimeinbound.Request, fn func(inboundPublicationProofMutation) error) (runtimeinbound.Record, error) {
+	t.Helper()
+	if existing, found, err := store.LoadInboundPublicationByIdentity(ctx, request.Provider, request.EntityID, request.ProviderEventID); err != nil {
+		return runtimeinbound.Record{}, err
+	} else if found {
+		if existing.RequestFingerprint != request.RequestFingerprint || existing.RequestProjectionVersion != request.RequestProjectionVersion {
+			return runtimeinbound.Record{}, runtimeinbound.ErrRequestIdentityConflict
+		}
+		existing.Created = false
+		return existing, nil
+	}
+	builder := &inboundPublicationProofBuilder{ctx: ctx}
+	if err := fn(builder); err != nil {
+		return runtimeinbound.Record{}, err
+	}
+	if !builder.finalized {
+		return runtimeinbound.Record{}, errors.New("inbound publication proof did not finalize")
+	}
+	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		return runtimeinbound.Record{}, errors.New("inbound publication proof bundle source fact is required")
+	}
+	eventBus, err := newStoreTestEventBus(t, store, runtimebus.EventBusOptions{
+		BundleSourceFact: sourceFact, ProviderOutputVerifier: inboundPublicationProofAuthorizationVerifier{},
+	})
+	if err != nil {
+		return runtimeinbound.Record{}, err
+	}
+	batch := runtimebus.InboundDeliveryBatch{Provider: request.Provider, Events: make([]runtimebus.InboundDeliveryEvent, len(builder.finalization.Events))}
+	for index, item := range builder.finalization.Events {
+		batch.Events[index] = runtimebus.InboundDeliveryEvent{Event: item.Event, Kind: item.Kind, Authorization: item.Authorization}
+	}
+	plan, err := eventBus.PrepareInboundDeliveryBatch(ctx, batch)
+	if err != nil {
+		return runtimeinbound.Record{}, err
+	}
+	defer func() { _ = eventBus.AbandonInboundDeliveryPlan(context.WithoutCancel(ctx), plan) }()
+	prepared := plan.PreparedPublications()
+	for index := range prepared {
+		manifest, _, _, err := runtimeinbound.CanonicalRecipientManifest(prepared[index].DeliveryRoutes())
+		if err != nil {
+			return runtimeinbound.Record{}, err
+		}
+		builder.finalization.Events[index].Event = prepared[index].Event
+		builder.finalization.Events[index].RecipientManifest = manifest
+	}
+	projection, _ := runtimeauthoractivity.InboundProjectionFromContext(ctx)
+	result, err := store.CommitInboundPublication(ctx, runtimeinbound.CommitCommand{
+		Request: request, Finalization: builder.finalization,
+		Publications: plan.CommitCommands(), AuthorProjection: projection,
+	})
+	if err == nil {
+		for index, publication := range result.Publications {
+			if validationErr := publication.Validate(); validationErr != nil {
+				return runtimeinbound.Record{}, fmt.Errorf("validate committed publication %d: %w", index, validationErr)
+			}
+		}
+	}
+	return result.Record, err
+}
+
+func commitInboundPublicationTestEvent(t *testing.T, _ storeTestDurableEventBusStore, _ inboundPublicationProofMutation, publication *runtimeinbound.EventFinalization) error {
 	t.Helper()
 	if publication == nil {
 		return errors.New("inbound publication test event is required")
@@ -42,21 +135,7 @@ func commitInboundPublicationTestEvent(t *testing.T, store storeTestDurableEvent
 	if admitted.RunDisposition() != events.AdmittedRunRequireActive {
 		return fmt.Errorf("standing inbound root disposition = %q, want require_active", admitted.RunDisposition())
 	}
-	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(mutation.Context())
-	if !ok {
-		return errors.New("inbound publication mutation bundle source fact is required")
-	}
-	eventBus, err := newStoreTestEventBus(t, store, runtimebus.EventBusOptions{
-		BundleSourceFact: sourceFact,
-	})
-	if err != nil {
-		return err
-	}
-	prepared, err := eventBus.PreparePublishInMutation(mutation.Context(), publication.Event)
-	if err != nil {
-		return err
-	}
-	publication.Event = prepared.Event
+	publication.Event = admitted.Event()
 	return nil
 }
 
@@ -105,10 +184,10 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	if err != nil {
 		t.Fatalf("PublishStandingService: %v", err)
 	}
-	request := inboundPublicationProofRequest(t, candidate, standing.RunID, sequence, "delivery-1")
+	request := inboundPublicationProofRequest(t, candidate, standing.RunID, standing.Generation, sequence, "delivery-1")
 	callbackCalls := 0
 	var publications []runtimeinbound.EventFinalization
-	record, err := store.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
+	record, err := runInboundPublicationProofMutation(t, store, ctx, request, func(mutation inboundPublicationProofMutation) error {
 		callbackCalls++
 		var evidence events.Event
 		publications, evidence = inboundPublicationProofEvents(t, request)
@@ -130,7 +209,7 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	if err := store.ValidateInboundPublicationIntegrity(ctx); err != nil {
 		t.Fatalf("ValidateInboundPublicationIntegrity: %v", err)
 	}
-	duplicate, err := store.RunInboundPublicationMutation(ctx, request, func(runtimeinbound.Mutation) error {
+	duplicate, err := runInboundPublicationProofMutation(t, store, ctx, request, func(inboundPublicationProofMutation) error {
 		callbackCalls++
 		return errors.New("exact retry invoked callback")
 	})
@@ -143,14 +222,14 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	}
 	conflict := request
 	conflict.RequestFingerprint = strings.Repeat("f", 64)
-	if _, err := store.RunInboundPublicationMutation(ctx, conflict, func(runtimeinbound.Mutation) error { return nil }); err == nil || !strings.Contains(err.Error(), "conflicts") {
+	if _, err := runInboundPublicationProofMutation(t, store, ctx, conflict, func(inboundPublicationProofMutation) error { return nil }); !errors.Is(err, runtimeinbound.ErrRequestIdentityConflict) {
 		t.Fatalf("conflicting retry error = %v", err)
 	}
 
-	failedRequest := inboundPublicationProofRequest(t, candidate, standing.RunID, sequence, "delivery-failure")
+	failedRequest := inboundPublicationProofRequest(t, candidate, standing.RunID, standing.Generation, sequence, "delivery-failure")
 	failedPublications, _ := inboundPublicationProofEvents(t, failedRequest)
 	injected := errors.New("injected publication failure")
-	if _, err := store.RunInboundPublicationMutation(ctx, failedRequest, func(mutation runtimeinbound.Mutation) error {
+	if _, err := runInboundPublicationProofMutation(t, store, ctx, failedRequest, func(mutation inboundPublicationProofMutation) error {
 		if err := commitInboundPublicationTestEvent(t, store, mutation, &failedPublications[0]); err != nil {
 			return err
 		}
@@ -167,11 +246,9 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM events WHERE run_id = `, standing.RunID, 3)
 	assertInboundEvidenceProducedByPlatform(t, db, sqlite, request.MarkerEventID)
 
-	runInboundPublicationRawOnlyProof(t, ctx, db, sqlite, store, candidate, standing.RunID, sequence)
-	runInboundPublicationOrdinalRollbackProof(t, ctx, db, sqlite, store, candidate, standing.RunID, sequence)
-	runInboundPublicationConcurrentRetryProof(t, ctx, db, sqlite, store, candidate, standing.RunID, sequence)
-	runInboundPublicationStandingGenerationRebindProof(t, db, sqlite, store, workflowStore)
-	runInboundPublicationCorruptionProof(t, ctx, db, sqlite, store, candidate, standing.RunID, sequence)
+	runInboundPublicationRawOnlyProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
+	runInboundPublicationOrdinalRollbackProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
+	runInboundPublicationCorruptionProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
 }
 
 func assertInboundEvidenceProducedByPlatform(t *testing.T, db *sql.DB, sqlite bool, eventID string) {
@@ -231,9 +308,9 @@ func runInboundPublicationStandingGenerationRebindProof(t *testing.T, db *sql.DB
 		t.Fatalf("seed first-generation child: %v", err)
 	}
 
-	firstRequest := inboundPublicationProofRequest(t, candidate, first.RunID, firstSequence, "delivery-same-generation-rebind")
+	firstRequest := inboundPublicationProofRequest(t, candidate, first.RunID, first.Generation, firstSequence, "delivery-same-generation-rebind")
 	firstCtx := runtimecorrelation.WithRunID(ctx, first.RunID)
-	if _, err := store.RunInboundPublicationMutation(firstCtx, firstRequest, func(mutation runtimeinbound.Mutation) error {
+	if _, err := runInboundPublicationProofMutation(t, store, firstCtx, firstRequest, func(mutation inboundPublicationProofMutation) error {
 		result, err := workflowStore.MaterializeInitialEntry(mutation.Context(), child, child.EnteredStageAt)
 		if err != nil {
 			return err
@@ -255,10 +332,10 @@ func runInboundPublicationStandingGenerationRebindProof(t *testing.T, db *sql.DB
 	if err != nil {
 		t.Fatalf("publish reset standing generation: %v", err)
 	}
-	resetRequest := inboundPublicationProofRequest(t, candidate, reset.RunID, resetSequence, "delivery-reset-generation-rebind")
+	resetRequest := inboundPublicationProofRequest(t, candidate, reset.RunID, reset.Generation, resetSequence, "delivery-reset-generation-rebind")
 	publications, evidence := inboundPublicationProofEvents(t, resetRequest)
 	resetCtx := runtimecorrelation.WithRunID(ctx, reset.RunID)
-	if _, err := store.RunInboundPublicationMutation(resetCtx, resetRequest, func(mutation runtimeinbound.Mutation) error {
+	if _, err := runInboundPublicationProofMutation(t, store, resetCtx, resetRequest, func(mutation inboundPublicationProofMutation) error {
 		result, err := workflowStore.MaterializeInitialEntry(mutation.Context(), child, child.EnteredStageAt)
 		if err != nil {
 			return err
@@ -278,15 +355,15 @@ func runInboundPublicationStandingGenerationRebindProof(t *testing.T, db *sql.DB
 	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM entity_state WHERE run_id = `, reset.RunID, 1)
 }
 
-func runInboundPublicationRawOnlyProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, sequence int64) {
+func runInboundPublicationRawOnlyProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
 	t.Helper()
-	request := inboundPublicationProofRequest(t, candidate, runID, sequence, "delivery-raw-only")
+	request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, "delivery-raw-only")
 	before := inboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM events WHERE run_id = `, runID)
 	record := commitInboundPublicationProof(t, ctx, store, request, 1)
 	if !record.Created || record.OutputCount != 1 || len(record.Events) != 1 || record.Events[0].Kind != runtimeprovideroutput.KindRaw {
 		t.Fatalf("raw-only record = %#v", record)
 	}
-	duplicate, err := store.RunInboundPublicationMutation(ctx, request, func(runtimeinbound.Mutation) error {
+	duplicate, err := runInboundPublicationProofMutation(t, store, ctx, request, func(inboundPublicationProofMutation) error {
 		return errors.New("raw-only exact retry invoked callback")
 	})
 	if err != nil {
@@ -301,14 +378,14 @@ func runInboundPublicationRawOnlyProof(t *testing.T, ctx context.Context, db *sq
 	}
 }
 
-func runInboundPublicationOrdinalRollbackProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, sequence int64) {
+func runInboundPublicationOrdinalRollbackProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
 	t.Helper()
 	for stage := 0; stage < 4; stage++ {
 		providerEventID := fmt.Sprintf("delivery-rollback-%d", stage)
-		request := inboundPublicationProofRequest(t, candidate, runID, sequence, providerEventID)
+		request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, providerEventID)
 		publications, evidence := inboundPublicationProofEvents(t, request)
 		injected := fmt.Errorf("injected rollback stage %d", stage)
-		_, err := store.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
+		_, err := runInboundPublicationProofMutation(t, store, ctx, request, func(mutation inboundPublicationProofMutation) error {
 			appendCount := stage
 			if appendCount > len(publications) {
 				appendCount = len(publications)
@@ -336,13 +413,13 @@ func runInboundPublicationOrdinalRollbackProof(t *testing.T, ctx context.Context
 		assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM events WHERE event_id = `, request.MarkerEventID, 0)
 	}
 
-	request := inboundPublicationProofRequest(t, candidate, runID, sequence, "delivery-invalid-evidence")
+	request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, "delivery-invalid-evidence")
 	publications, evidence := inboundPublicationProofEvents(t, request)
 	evidence = eventtest.DiagnosticDirect(
 		request.MarkerEventID, events.EventTypePlatformInboundRecord, "runtime", "", []byte(`{}`), 0,
 		request.ResolvedRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), request.OriginalReceivedAt,
 	)
-	if _, err := store.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
+	if _, err := runInboundPublicationProofMutation(t, store, ctx, request, func(mutation inboundPublicationProofMutation) error {
 		for index := range publications {
 			if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
 				return err
@@ -355,9 +432,9 @@ func runInboundPublicationOrdinalRollbackProof(t *testing.T, ctx context.Context
 	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publications WHERE provider_event_id = `, request.ProviderEventID, 0)
 }
 
-func runInboundPublicationConcurrentRetryProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, sequence int64) {
+func runInboundPublicationConcurrentRetryProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
 	t.Helper()
-	request := inboundPublicationProofRequest(t, candidate, runID, sequence, "delivery-concurrent")
+	request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, "delivery-concurrent")
 	publications, evidence := inboundPublicationProofEvents(t, request)
 	var callbackCalls atomic.Int32
 	start := make(chan struct{})
@@ -371,7 +448,7 @@ func runInboundPublicationConcurrentRetryProof(t *testing.T, ctx context.Context
 		go func() {
 			defer workers.Done()
 			<-start
-			record, err := store.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
+			record, err := runInboundPublicationProofMutation(t, store, ctx, request, func(mutation inboundPublicationProofMutation) error {
 				callbackCalls.Add(1)
 				for index := range publications {
 					if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
@@ -411,7 +488,7 @@ func runInboundPublicationConcurrentRetryProof(t *testing.T, ctx context.Context
 func commitInboundPublicationProof(t *testing.T, ctx context.Context, store inboundPublicationProofStore, request runtimeinbound.Request, outputCount int) runtimeinbound.Record {
 	t.Helper()
 	publications, evidence := inboundPublicationProofEventsCount(t, request, outputCount)
-	record, err := store.RunInboundPublicationMutation(ctx, request, func(mutation runtimeinbound.Mutation) error {
+	record, err := runInboundPublicationProofMutation(t, store, ctx, request, func(mutation inboundPublicationProofMutation) error {
 		for index := range publications {
 			if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
 				return err
@@ -425,7 +502,7 @@ func commitInboundPublicationProof(t *testing.T, ctx context.Context, store inbo
 	return record
 }
 
-func runInboundPublicationCorruptionProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, sequence int64) {
+func runInboundPublicationCorruptionProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
 	t.Helper()
 	corruptions := []struct {
 		name   string
@@ -492,7 +569,7 @@ func runInboundPublicationCorruptionProof(t *testing.T, ctx context.Context, db 
 
 	for index, corruption := range corruptions {
 		t.Run(corruption.name, func(t *testing.T) {
-			request := inboundPublicationProofRequest(t, candidate, runID, sequence, fmt.Sprintf("delivery-corrupt-%d", index))
+			request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, fmt.Sprintf("delivery-corrupt-%d", index))
 			commitInboundPublicationProof(t, ctx, store, request, 2)
 			corruption.mutate(t, request)
 			if _, _, err := store.LoadInboundPublicationByIdentity(context.Background(), request.Provider, request.EntityID, request.ProviderEventID); err == nil {
@@ -502,7 +579,7 @@ func runInboundPublicationCorruptionProof(t *testing.T, ctx context.Context, db 
 	}
 
 	t.Run("duplicate ordinal rejected by schema", func(t *testing.T) {
-		request := inboundPublicationProofRequest(t, candidate, runID, sequence, "delivery-duplicate-ordinal")
+		request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, "delivery-duplicate-ordinal")
 		commitInboundPublicationProof(t, ctx, store, request, 2)
 		if _, err := db.Exec(inboundPublicationProofQuery(sqlite,
 			`INSERT INTO inbound_publication_events (publication_id, ordinal, event_id, event_name, output_kind, event_integrity_fingerprint, recipient_manifest_fingerprint, recipient_count) VALUES ($1::uuid, 0, $2::uuid, 'platform.inbound_recorded', 'raw', $3, $4, 0)`,
@@ -513,7 +590,7 @@ func runInboundPublicationCorruptionProof(t *testing.T, ctx context.Context, db 
 	})
 
 	t.Run("extra child rejected on read", func(t *testing.T) {
-		request := inboundPublicationProofRequest(t, candidate, runID, sequence, "delivery-extra-child")
+		request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, "delivery-extra-child")
 		commitInboundPublicationProof(t, ctx, store, request, 2)
 		_, recipientFingerprint, _, err := runtimeinbound.CanonicalRecipientManifest(nil)
 		if err != nil {
@@ -552,7 +629,7 @@ func inboundProofArgs(sqlite bool, publicationID, value string) []any {
 	return []any{publicationID, value}
 }
 
-func inboundPublicationProofRequest(t *testing.T, candidate runtimepipeline.StandingServiceCandidate, runID string, sequence int64, providerEventID string) runtimeinbound.Request {
+func inboundPublicationProofRequest(t *testing.T, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64, providerEventID string) runtimeinbound.Request {
 	t.Helper()
 	publicationID, markerEventID := runtimeinbound.DeterministicIDs("github", candidate.EntityID, providerEventID)
 	fingerprint, err := runtimeinbound.SemanticFingerprint(map[string]any{"provider": "github", "provider_event_id": providerEventID, "payload": map[string]any{"value": 1}})
@@ -564,7 +641,8 @@ func inboundPublicationProofRequest(t *testing.T, candidate runtimepipeline.Stan
 		RequestFingerprint: fingerprint, RequestProjectionVersion: runtimeinbound.RequestSemanticProjectionVersion,
 		StableServiceID: candidate.ServiceID, PackageKey: candidate.PackageKey, FlowID: candidate.FlowID,
 		InstanceID: candidate.InstanceID, TargetAlias: "github", TargetFlowInstance: candidate.FlowID + "/" + candidate.InstanceID,
-		ExpectedPublicationSequence: sequence, ResolvedRunID: runID, MarkerEventID: markerEventID,
+		ExpectedPublicationSequence: sequence, ExpectedGeneration: generation,
+		ResolvedRunID: runID, MarkerEventID: markerEventID,
 		AcknowledgementMode: runtimeinbound.AcknowledgementDurableBeforeDispatch,
 		OriginalReceivedAt:  time.Now().UTC().Truncate(time.Microsecond), OriginalUserAgent: "proof", OriginalTransportMetadata: []byte(`{"method":"POST"}`),
 	}

@@ -15,20 +15,25 @@ import (
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
 
+type publicationCommitOptions struct {
+	allowStandingGenerationRebind bool
+}
+
 func commitFlowInstanceActivations(
 	ctx context.Context,
 	tx *sql.Tx,
 	story *privateauthoractivity.Mutation,
 	postgres bool,
 	plans []runtimepipeline.FlowInstanceActivationPlan,
-) ([]runtimebus.CommittedFlowInstanceActivation, error) {
+	options publicationCommitOptions,
+) ([]runtimepipeline.CommittedFlowInstanceActivation, error) {
 	if len(plans) == 0 {
 		return nil, nil
 	}
 	if tx == nil || story == nil {
 		return nil, fmt.Errorf("flow instance activation commit requires private transaction and story owners")
 	}
-	committed := make([]runtimebus.CommittedFlowInstanceActivation, 0, len(plans))
+	committed := make([]runtimepipeline.CommittedFlowInstanceActivation, 0, len(plans))
 	seen := make(map[string]struct{}, len(plans))
 	for index, plan := range plans {
 		record, err := plan.PersistenceRecord()
@@ -40,14 +45,57 @@ func commitFlowInstanceActivations(
 			return nil, fmt.Errorf("flow activation %d repeats route %q", index, record.Route.InstancePath)
 		}
 		seen[key] = struct{}{}
-		created, err := commitFlowInstanceActivation(ctx, tx, story, postgres, record)
+		created, err := commitFlowInstanceActivation(ctx, tx, story, postgres, record, options)
 		if err != nil {
 			return nil, fmt.Errorf("commit flow activation %s: %w", record.Route.InstancePath, err)
 		}
-		committed = append(committed, runtimebus.CommittedFlowInstanceActivation{Plan: plan, Created: created})
+		committed = append(committed, runtimepipeline.CommittedFlowInstanceActivation{Plan: plan, Created: created})
 	}
 	return committed, nil
 }
+
+func commitOneFlowInstanceActivation(
+	ctx context.Context,
+	command runtimebus.FlowInstanceActivationCommand,
+	postgres bool,
+	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
+) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	if err := command.Validate(); err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	var result runtimepipeline.CommittedFlowInstanceActivation
+	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		committed, err := commitFlowInstanceActivations(txctx, tx, story, postgres, []runtimepipeline.FlowInstanceActivationPlan{command.Plan}, publicationCommitOptions{})
+		if err != nil {
+			return err
+		}
+		if len(committed) != 1 {
+			return fmt.Errorf("flow instance activation commit returned %d results", len(committed))
+		}
+		result = committed[0]
+		_, err = replaceFlowInstanceRouteTopologyTx(txctx, tx, postgres, command.RouteTopology)
+		return err
+	})
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	return result, result.Validate()
+}
+
+func (s *PostgresStore) CommitFlowInstanceActivation(ctx context.Context, command runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	return commitOneFlowInstanceActivation(ctx, command, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		return s.runPrivateAuthorActivityMutation(ctx, fn)
+	})
+}
+
+func (s *SQLiteRuntimeStore) CommitFlowInstanceActivation(ctx context.Context, command runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	return commitOneFlowInstanceActivation(ctx, command, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		return s.runPrivateAuthorActivityMutation(ctx, "sqlite commit flow instance activation", fn)
+	})
+}
+
+var _ runtimebus.FlowInstanceActivationCommitOwner = (*PostgresStore)(nil)
+var _ runtimebus.FlowInstanceActivationCommitOwner = (*SQLiteRuntimeStore)(nil)
 
 func commitFlowInstanceActivation(
 	ctx context.Context,
@@ -55,6 +103,7 @@ func commitFlowInstanceActivation(
 	story *privateauthoractivity.Mutation,
 	postgres bool,
 	record runtimepipeline.FlowInstanceActivationRecord,
+	options publicationCommitOptions,
 ) (bool, error) {
 	if err := record.Validate(); err != nil {
 		return false, err
@@ -63,14 +112,15 @@ func commitFlowInstanceActivation(
 		if err := requirePostgresRunActive(ctx, tx, record.RunID); err != nil {
 			return false, err
 		}
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, record.RunID+"\x00"+record.Route.InstancePath); err != nil {
+		lockIdentity := fmt.Sprintf("%d:%s%s", len(record.RunID), record.RunID, record.Route.InstancePath)
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockIdentity); err != nil {
 			return false, fmt.Errorf("lock flow activation route: %w", err)
 		}
 	} else if err := requireSQLiteRunActive(ctx, tx, record.RunID); err != nil {
 		return false, err
 	}
 
-	equal, found, err := loadFlowInstanceActivationEqual(ctx, tx, postgres, record)
+	equal, found, err := loadFlowInstanceActivationEqual(ctx, tx, postgres, record, options)
 	if err != nil {
 		return false, err
 	}
@@ -86,7 +136,7 @@ func commitFlowInstanceActivation(
 		}
 		return false, nil
 	}
-	if err := insertFlowInstanceActivation(ctx, tx, story, postgres, record); err != nil {
+	if err := insertFlowInstanceActivation(ctx, tx, story, postgres, record, options); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -97,6 +147,7 @@ func loadFlowInstanceActivationEqual(
 	tx *sql.Tx,
 	postgres bool,
 	want runtimepipeline.FlowInstanceActivationRecord,
+	options publicationCommitOptions,
 ) (bool, bool, error) {
 	query := `
 		SELECT
@@ -171,7 +222,7 @@ func loadFlowInstanceActivationEqual(
 	}
 	err := tx.QueryRowContext(ctx, query, want.RunID, want.EntityID, want.Route.InstancePath).Scan(destinations...)
 	if err == sql.ErrNoRows {
-		occupied, occupiedErr := flowInstanceActivationIdentityOccupied(ctx, tx, postgres, want)
+		occupied, occupiedErr := flowInstanceActivationIdentityOccupied(ctx, tx, postgres, want, options)
 		return false, occupied, occupiedErr
 	}
 	if err != nil {
@@ -229,9 +280,10 @@ func loadFlowInstanceActivationEqual(
 	return equal, true, nil
 }
 
-func flowInstanceActivationIdentityOccupied(ctx context.Context, tx *sql.Tx, postgres bool, record runtimepipeline.FlowInstanceActivationRecord) (bool, error) {
+func flowInstanceActivationIdentityOccupied(ctx context.Context, tx *sql.Tx, postgres bool, record runtimepipeline.FlowInstanceActivationRecord, options publicationCommitOptions) (bool, error) {
 	query := `
 		SELECT EXISTS (SELECT 1 FROM flow_instances WHERE instance_id = $1),
+		       COALESCE((SELECT flow_template FROM flow_instances WHERE instance_id = $1), ''),
 		       EXISTS (SELECT 1 FROM entity_state WHERE run_id = $2::uuid AND entity_id = $3::uuid),
 		       EXISTS (SELECT 1 FROM workflow_instance_initial_materializations WHERE run_id = $2::uuid AND entity_id = $3::uuid),
 		       EXISTS (SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id = $2::uuid AND instance_id = $1)
@@ -239,24 +291,36 @@ func flowInstanceActivationIdentityOccupied(ctx context.Context, tx *sql.Tx, pos
 	if !postgres {
 		query = `
 			SELECT EXISTS (SELECT 1 FROM flow_instances WHERE instance_id = ?),
+			       COALESCE((SELECT flow_template FROM flow_instances WHERE instance_id = ?), ''),
 			       EXISTS (SELECT 1 FROM entity_state WHERE run_id = ? AND entity_id = ?),
 			       EXISTS (SELECT 1 FROM workflow_instance_initial_materializations WHERE run_id = ? AND entity_id = ?),
 			       EXISTS (SELECT 1 FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_id = ?)
 		`
 	}
 	var flow, entity, initial, readiness bool
+	var flowTemplate string
 	var err error
 	if postgres {
-		err = tx.QueryRowContext(ctx, query, record.Route.InstancePath, record.RunID, record.EntityID).Scan(&flow, &entity, &initial, &readiness)
+		err = tx.QueryRowContext(ctx, query, record.Route.InstancePath, record.RunID, record.EntityID).Scan(&flow, &flowTemplate, &entity, &initial, &readiness)
 	} else {
 		err = tx.QueryRowContext(ctx, query,
+			record.Route.InstancePath,
 			record.Route.InstancePath,
 			record.RunID, record.EntityID,
 			record.RunID, record.EntityID,
 			record.RunID, record.Route.InstancePath,
-		).Scan(&flow, &entity, &initial, &readiness)
+		).Scan(&flow, &flowTemplate, &entity, &initial, &readiness)
 	}
-	return flow || entity || initial || readiness, err
+	if err != nil {
+		return false, err
+	}
+	if entity || initial || readiness {
+		return true, nil
+	}
+	if flow && options.allowStandingGenerationRebind && strings.TrimSpace(flowTemplate) == strings.TrimSpace(record.WorkflowName) {
+		return false, nil
+	}
+	return flow, nil
 }
 
 func insertFlowInstanceActivation(
@@ -265,12 +329,24 @@ func insertFlowInstanceActivation(
 	story *privateauthoractivity.Mutation,
 	postgres bool,
 	record runtimepipeline.FlowInstanceActivationRecord,
+	options publicationCommitOptions,
 ) error {
 	if postgres {
-		if _, err := tx.ExecContext(ctx, `
+		flowInsert := `
 			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 			VALUES ($1, $2, $3, $4::jsonb, 'active', $5)
-		`, record.Route.InstancePath, record.WorkflowName, record.Mode, record.Config, record.CreatedAt); err != nil {
+		`
+		if options.allowStandingGenerationRebind {
+			flowInsert += `
+				ON CONFLICT (instance_id) DO UPDATE SET
+					flow_template = EXCLUDED.flow_template,
+					mode = EXCLUDED.mode,
+					config = EXCLUDED.config,
+					status = 'active',
+					terminated_at = NULL
+			`
+		}
+		if _, err := tx.ExecContext(ctx, flowInsert, record.Route.InstancePath, record.WorkflowName, record.Mode, record.Config, record.CreatedAt); err != nil {
 			return fmt.Errorf("insert flow instance: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -302,10 +378,21 @@ func insertFlowInstanceActivation(
 		}
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, `
+	flowInsert := `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES (?, ?, ?, ?, 'active', ?)
-	`, record.Route.InstancePath, record.WorkflowName, record.Mode, record.Config, record.CreatedAt); err != nil {
+	`
+	if options.allowStandingGenerationRebind {
+		flowInsert += `
+			ON CONFLICT(instance_id) DO UPDATE SET
+				flow_template = excluded.flow_template,
+				mode = excluded.mode,
+				config = excluded.config,
+				status = 'active',
+				terminated_at = NULL
+		`
+	}
+	if _, err := tx.ExecContext(ctx, flowInsert, record.Route.InstancePath, record.WorkflowName, record.Mode, record.Config, record.CreatedAt); err != nil {
 		return fmt.Errorf("insert sqlite flow instance: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `

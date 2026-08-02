@@ -62,11 +62,12 @@ type dynamicFlowRuntimeReadinessSource struct {
 }
 
 type dynamicFlowRuntimeReadinessAdmission struct {
-	ctx            context.Context
-	key            dynamicFlowRuntimeReadinessKey
-	plan           runtimepipeline.DynamicFlowRuntimeReadinessPlan
-	planCoordinate string
-	source         dynamicFlowRuntimeReadinessSource
+	ctx             context.Context
+	key             dynamicFlowRuntimeReadinessKey
+	plan            runtimepipeline.DynamicFlowRuntimeReadinessPlan
+	planCoordinate  string
+	source          dynamicFlowRuntimeReadinessSource
+	topologyDurable bool
 }
 
 var errDynamicFlowRuntimeReadinessPlanStale = errors.New(
@@ -236,9 +237,6 @@ func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 	if observedAt.IsZero() {
 		return fmt.Errorf("dynamic flow runtime readiness reconciliation requires exact occurrence time")
 	}
-	if _, transactional := runtimepipeline.PipelineSQLTxFromContext(ctx); !transactional {
-		return fmt.Errorf("run-scoped dynamic flow runtime readiness reconciliation requires selected mutation")
-	}
 	bundleHash, bundleSource := admittedSource.fact.StorageValues()
 	items, err := am.workflowInstances.ListDynamicFlowRuntimeReadiness(ctx)
 	if err != nil {
@@ -309,16 +307,9 @@ func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 		if !changed {
 			continue
 		}
-		reconcile := func(actionCtx context.Context) {
-			postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(
-				runtimepipeline.WithoutPipelineSQLTxContext(actionCtx),
-			)
-			if err := am.reconcileDynamicFlowRuntimeReadinessPlan(postCommitCtx, expected, source); err != nil {
-				am.signalDynamicFlowRuntimeReadiness()
-			}
-		}
-		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, reconcile) {
-			return fmt.Errorf("dynamic flow runtime readiness %s requires post-commit reconciliation owner", item.InstancePath)
+		if err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, source); err != nil {
+			am.signalDynamicFlowRuntimeReadiness()
+			return err
 		}
 	}
 	return nil
@@ -438,6 +429,36 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessPlan(
 	}
 	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(dynamicFlowRuntimeReadinessAdmission{
 		ctx: ctx, key: key, plan: normalized, planCoordinate: planCoordinate, source: admittedSource,
+	})
+}
+
+func (am *AgentManager) reconcileCommittedDynamicFlowRuntimeReadinessPlan(
+	ctx context.Context,
+	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
+	source semanticview.Source,
+) error {
+	normalized, err := plan.Normalized()
+	if err != nil {
+		return err
+	}
+	admittedSource, err := am.dynamicFlowRuntimeReadinessSource(ctx, source)
+	if err != nil {
+		return err
+	}
+	if err := validateDynamicFlowRuntimeReadinessCallbackSource(normalized, admittedSource); err != nil {
+		return err
+	}
+	key, err := newDynamicFlowRuntimeReadinessKey(normalized.RunID, normalized.Identity.InstancePath)
+	if err != nil {
+		return err
+	}
+	planCoordinate, err := dynamicFlowRuntimeReadinessPlanCoordinate(normalized)
+	if err != nil {
+		return err
+	}
+	return am.reconcileDeclaredDynamicFlowRuntimeReadiness(dynamicFlowRuntimeReadinessAdmission{
+		ctx: ctx, key: key, plan: normalized, planCoordinate: planCoordinate, source: admittedSource,
+		topologyDurable: true,
 	})
 }
 
@@ -730,8 +751,10 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	} else if !eligible {
 		return nil
 	}
-	if err := am.installFlowInstanceRoute(ctx, req); err != nil {
-		return fmt.Errorf("persist dynamic flow route %s: %w", readiness.InstancePath, err)
+	if !admission.topologyDurable {
+		if err := am.installFlowInstanceRoute(ctx, req); err != nil {
+			return fmt.Errorf("persist dynamic flow route %s: %w", readiness.InstancePath, err)
+		}
 	}
 	if eligible, err := am.dynamicFlowRuntimeReadinessStillEligible(ctx, key, plan); err != nil {
 		return err

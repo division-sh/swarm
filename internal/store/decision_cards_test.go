@@ -21,7 +21,6 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
@@ -1059,18 +1058,11 @@ func decisionCardStoreDB(t *testing.T, cards decisioncard.Store) (*sql.DB, bool)
 
 func runDecisionCardTestPipelineMutation(t *testing.T, ctx context.Context, cards decisioncard.Store, fn func(context.Context, *sql.Tx) error) error {
 	t.Helper()
-	run := func(txctx context.Context) error {
-		tx, ok := runtimepipeline.PipelineSQLTxFromContext(txctx)
-		if !ok || tx == nil {
-			return fmt.Errorf("selected-store test mutation did not provide a transaction")
-		}
-		return fn(txctx, tx)
-	}
 	switch selected := cards.(type) {
 	case *PostgresStore:
-		return selected.RunRuntimeMutationContext(ctx, run)
+		return selected.runEventTransaction(ctx, fn)
 	case *SQLiteRuntimeStore:
-		return selected.RunRuntimeMutationContext(ctx, run)
+		return selected.runEventTransaction(ctx, fn)
 	default:
 		return fmt.Errorf("unexpected decision card store %T", cards)
 	}

@@ -489,6 +489,13 @@ func (startupRecoveryMinimalEventStore) RegisterAuthorActivityEventCatalog(scope
 	return runtimeauthoractivity.NewEventCatalogRegistry().Register(scope, descriptors)
 }
 
+func (startupRecoveryMinimalEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
+}
+
 func (startupRecoveryMinimalEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	return runtimebustest.CommitPublishNoop(ctx, plan)
 }
@@ -515,6 +522,13 @@ func (s *startupRecoveryEventStore) PipelineObligations() runtimepipelineobligat
 
 func (startupRecoveryEventStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {
 	return runtimeauthoractivity.NewEventCatalogRegistry().Register(scope, descriptors)
+}
+
+func (startupRecoveryEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
 }
 
 func (startupRecoveryEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {

@@ -146,7 +146,7 @@ func commitDiagnosticRuntimeLogFixture(ctx context.Context, store diagnosticRunt
 	return err
 }
 
-func commitDiagnosticRuntimeLogFixtureTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, event events.Event) error {
+func commitDiagnosticRuntimeLogFixtureTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, story *privateauthoractivity.Mutation, event events.Event) error {
 	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return err
@@ -154,7 +154,7 @@ func commitDiagnosticRuntimeLogFixtureTx(ctx context.Context, store eventCommitT
 	if admitted.Class() != events.EventAdmissionDiagnosticDirect || admitted.Event().Type() != events.EventTypePlatformRuntimeLog {
 		return fmt.Errorf("runtime-log fixture requires a diagnostic_direct platform.runtime_log event")
 	}
-	outcome, err := store.appendAdmittedEventTxOutcome(ctx, tx, nil, admitted)
+	outcome, err := store.appendAdmittedEventTxOutcome(ctx, tx, runtimeAuthorActivityMutation(story), admitted)
 	if err != nil {
 		return err
 	}
@@ -229,7 +229,11 @@ func commitDeliveryReplayEventFixture(
 	}
 	defer release()
 	return store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		outcome, err := store.appendAdmittedEventTxOutcome(txctx, tx, nil, replayed)
+		story, err := eventFixtureStory(txctx)
+		if err != nil {
+			return err
+		}
+		outcome, err := store.appendAdmittedEventTxOutcome(txctx, tx, story, replayed)
 		if err != nil {
 			return err
 		}

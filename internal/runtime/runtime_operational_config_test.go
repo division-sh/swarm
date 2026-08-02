@@ -54,6 +54,13 @@ type recoveryGuardEventLease struct{}
 
 func (recoveryGuardEventLease) Release(context.Context) error { return nil }
 
+func (*recoveryGuardEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
+}
+
 func (*recoveryGuardEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	return runtimebustest.CommitPublishNoop(ctx, plan)
 }
@@ -88,6 +95,13 @@ func (s *recoveryGuardEventStore) ReconcileDirectiveOperations(context.Context, 
 }
 
 type minimalRuntimeEventStore struct{}
+
+func (*minimalRuntimeEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
+}
 
 func (*minimalRuntimeEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	return runtimebustest.CommitPublishNoop(ctx, plan)

@@ -193,6 +193,16 @@ func (s *recordingEventStore) CommitPublish(ctx context.Context, plan runtimebus
 	}})
 }
 
+func (s *recordingEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	s.mu.Lock()
+	s.events = append(s.events, command.Commit.Event.Event())
+	s.mu.Unlock()
+	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
+}
+
 func (*recordingEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return []string{}, nil
 }
@@ -231,6 +241,48 @@ func (s *directRecipientTransactionalStore) CommitPublish(ctx context.Context, p
 		begin:    s.beginPreparedPublish,
 		finalize: s.finalizePreparedPublish,
 	})
+}
+
+func (s *directRecipientTransactionalStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	outcome, err := s.beginPreparedPublish(ctx, command.Commit.Event)
+	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
+		return runtimebus.CommittedPublication{AppendOutcome: outcome}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	eventID := command.Commit.Event.ID()
+	if command.Commit.DeadLetter != nil && s.deadLetterErr != nil {
+		return runtimebus.CommittedPublication{}, s.deadLetterErr
+	}
+	if s.routes == nil {
+		s.routes = map[string][]events.DeliveryRoute{}
+	}
+	if s.deliveries == nil {
+		s.deliveries = map[string][]string{}
+	}
+	if s.scopes == nil {
+		s.scopes = map[string]runtimepipelineobligation.CommittedScope{}
+	}
+	if s.receipts == nil {
+		s.receipts = map[string]runtimepipelineobligation.DispositionKind{}
+	}
+	s.routes[eventID] = events.NormalizeDeliveryRoutes(command.Commit.DeliveryRoutes)
+	s.scopes[eventID] = command.Commit.ReplayScope
+	if command.Commit.Disposition != nil {
+		s.receipts[eventID] = command.Commit.Disposition.Kind()
+	}
+	for _, route := range s.routes[eventID] {
+		if route.SubscriberType == "agent" {
+			s.deliveries[eventID] = append(s.deliveries[eventID], route.SubscriberID)
+		}
+	}
+	if len(s.active) > 0 {
+		s.active = s.active[:len(s.active)-1]
+	}
+	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
 }
 
 func (s *directRecipientTransactionalStore) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {

@@ -44,6 +44,10 @@ type FlowInstanceRouteContextInstaller interface {
 	StageFlowInstanceRouteContext(context.Context, runtimebus.FlowInstanceRouteMaterializationRequest) error
 }
 
+type FlowInstanceActivationCommitter interface {
+	CommitFlowInstanceActivation(context.Context, runtimepipeline.FlowInstanceActivationPlan) (runtimepipeline.CommittedFlowInstanceActivation, error)
+}
+
 type FlowInstanceRouteContextVerifier interface {
 	HasFlowInstanceRoute(runtimeflowidentity.Route) bool
 	VerifyFlowInstanceRoute(context.Context, runtimeflowidentity.Route) error
@@ -95,34 +99,20 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	req = preparedRequest
 	ctx = events.WithDeliveryContext(ctx, req.Context)
 	flowPath := plan.Identity.InstancePath
-	readinessPlan := plan.Readiness
-	materialization, err := am.workflowInstances.MaterializeInitialEntry(ctx, plan.Instance, plan.OccurredAt)
+	committer := am.roles.FlowActivation
+	if committer == nil {
+		return fmt.Errorf("flow instance activation requires the selected commit owner")
+	}
+	committed, err := committer.CommitFlowInstanceActivation(ctx, plan)
 	if err != nil {
 		return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
 	}
-	switch materialization {
-	case runtimepipeline.WorkflowInitialMaterializationCreated:
-	case runtimepipeline.WorkflowInitialMaterializationAlreadyExists:
-	default:
-		return fmt.Errorf("persist flow instance %s: unknown initial materialization result %d", flowPath, materialization)
+	if committed.Plan.Identity.Route() != plan.Identity.Route() {
+		return fmt.Errorf("committed flow instance activation identity does not match plan")
 	}
-	if _, transactional := runtimepipeline.PipelineSQLTxFromContext(ctx); transactional {
-		if err := am.installFlowInstanceRoute(ctx, req); err != nil {
-			return fmt.Errorf("stage dynamic flow route %s: %w", flowPath, err)
-		}
-	}
-	finalizeAfterCommit := runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
-		postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
-		if err := am.reconcileDynamicFlowRuntimeReadinessPlan(postCommitCtx, readinessPlan, req.ContractBundle); err != nil {
-			am.logFlowInstanceActivationSideEffectFailure(req, "runtime_readiness_failed", "finalize_runtime_readiness", err)
-			am.signalDynamicFlowRuntimeReadiness()
-		}
-	})
-	if !finalizeAfterCommit {
-		if err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, readinessPlan, req.ContractBundle); err != nil {
-			am.signalDynamicFlowRuntimeReadiness()
-			return err
-		}
+	if err := am.FinalizeCommittedFlowInstanceActivation(ctx, committed.Plan); err != nil {
+		am.signalDynamicFlowRuntimeReadiness()
+		return err
 	}
 	return nil
 }
@@ -149,7 +139,7 @@ func (am *AgentManager) FinalizeCommittedFlowInstanceActivation(
 	if err := plan.Validate(); err != nil {
 		return err
 	}
-	err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, plan.Readiness, am.semanticReadinessSource.source)
+	err := am.reconcileCommittedDynamicFlowRuntimeReadinessPlan(ctx, plan.Readiness, am.semanticReadinessSource.source)
 	if err != nil {
 		am.signalDynamicFlowRuntimeReadiness()
 	}
@@ -305,21 +295,6 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 	readinessPlan, err := am.reconcileEnsuredDynamicFlowRuntimeReadinessPlan(ctx, req, runID)
 	if err != nil {
 		return false, err
-	}
-	if _, transactional := runtimepipeline.PipelineSQLTxFromContext(ctx); transactional {
-		if err := am.installFlowInstanceRoute(ctx, req); err != nil {
-			return false, fmt.Errorf("stage dynamic flow route %s: %w", instance.InstancePath, err)
-		}
-		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
-			postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
-			if err := am.reconcileDynamicFlowRuntimeReadinessPlan(postCommitCtx, readinessPlan, req.ContractBundle); err != nil {
-				am.logFlowInstanceActivationSideEffectFailure(req, "runtime_readiness_failed", "finalize_runtime_readiness", err)
-				am.signalDynamicFlowRuntimeReadiness()
-			}
-		}) {
-			return false, fmt.Errorf("dynamic flow runtime readiness %s requires post-commit finalization owner", instance.InstancePath)
-		}
-		return false, nil
 	}
 	if err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, readinessPlan, req.ContractBundle); err != nil {
 		am.signalDynamicFlowRuntimeReadiness()
@@ -787,16 +762,6 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 	plan, err := am.terminalFlowInstanceSideEffectPlan(ctx, req, termination)
 	if err != nil {
 		return err
-	}
-	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); active {
-		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
-			if err := am.applyTerminalFlowInstanceSideEffects(actionCtx, plan); err != nil {
-				am.logTerminalFlowInstanceSideEffectFailure(plan, err)
-			}
-		}) {
-			return fmt.Errorf("terminal flow-instance side effects require selected mutation post-commit ownership")
-		}
-		return nil
 	}
 	return am.applyTerminalFlowInstanceSideEffects(ctx, plan)
 }

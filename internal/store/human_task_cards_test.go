@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/google/uuid"
 )
 
@@ -424,12 +426,25 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 func expireHumanTaskCardsInTestMutation(t *testing.T, ctx context.Context, cardStore decisioncard.Store, expiryStore decisioncard.HumanTaskExpiryStore, at time.Time, limit int) []events.Event {
 	t.Helper()
 	var eventsOut []events.Event
-	if err := runDecisionCardTestPipelineMutation(t, ctx, cardStore, func(txctx context.Context, _ *sql.Tx) error {
-		var err error
-		eventsOut, err = expiryStore.ExpireHumanTaskCardsInMutation(txctx, at, limit)
-		return err
-	}); err != nil {
-		t.Fatalf("ExpireHumanTaskCardsInMutation: %v", err)
+	var mutationErr error
+	switch selected := cardStore.(type) {
+	case *PostgresStore:
+		mutationErr = selected.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			var err error
+			eventsOut, err = expireHumanTaskCards(txctx, runtimeAuthorActivityMutation(story), tx, at, limit, true)
+			return err
+		})
+	case *SQLiteRuntimeStore:
+		mutationErr = selected.runPrivateAuthorActivityMutation(ctx, "sqlite human-task expiry fixture", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			var err error
+			eventsOut, err = expireHumanTaskCards(txctx, runtimeAuthorActivityMutation(story), tx, at, limit, false)
+			return err
+		})
+	default:
+		mutationErr = fmt.Errorf("unexpected human-task expiry store %T", expiryStore)
+	}
+	if mutationErr != nil {
+		t.Fatalf("ExpireHumanTaskCardsInMutation: %v", mutationErr)
 	}
 	return eventsOut
 }

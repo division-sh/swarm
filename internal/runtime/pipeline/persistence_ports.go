@@ -62,9 +62,7 @@ func (pc *PipelineCoordinator) CommitDynamicFlowRuntimeReadinessReconciliation(
 	if owner == nil {
 		return fmt.Errorf("dynamic flow readiness reconciliation requires flow instance owner")
 	}
-	return pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-		return owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(txctx, observedAt)
-	})
+	return owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(ctx, observedAt)
 }
 
 func (pc *PipelineCoordinator) CommitStandingTargets(ctx context.Context, req StandingTargetMutationRequest, owner StandingFlowInstanceOwner) ([]StandingTargetMutationResult, error) {
@@ -78,54 +76,51 @@ func (pc *PipelineCoordinator) CommitStandingTargets(ctx context.Context, req St
 	if observedAt.IsZero() {
 		return nil, fmt.Errorf("standing target mutation requires observed_at")
 	}
-	results := make([]StandingTargetMutationResult, 0, len(req.Targets))
-	err := pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-		if req.Replace {
-			candidates := make([]StandingServiceCandidate, 0, len(req.Targets))
-			for _, target := range req.Targets {
-				candidates = append(candidates, target.Candidate)
-			}
-			if _, err := pc.workflowStore.ReconcileStandingServiceReplacement(txctx, req.Previous, candidates); err != nil {
-				return err
-			}
-		}
+	if req.Replace {
+		candidates := make([]StandingServiceCandidate, 0, len(req.Targets))
 		for _, target := range req.Targets {
-			reconciliation, found, err := pc.workflowStore.LoadReconciledStandingService(txctx, target.Candidate)
-			if err != nil {
-				return err
-			}
-			if !found {
-				reconciliation, err = pc.workflowStore.ReconcileStandingService(txctx, target.Candidate)
-				if err != nil {
-					return err
-				}
-			}
-			result := StandingTargetMutationResult{Reconciliation: reconciliation, PublicationSequence: reconciliation.PublicationSequence}
-			if reconciliation.EffectiveState == "active" {
-				operationCtx := runtimecorrelation.WithRunID(txctx, reconciliation.RunID)
-				operationCtx = runtimecorrelation.WithBundleSourceFact(operationCtx, target.Candidate.Source)
-				operationCtx = runtimeeffects.WithExecutionMode(operationCtx, executionmode.Live)
-				if reconciliation.Generation > 1 {
-					operationCtx = WithStandingGenerationRebind(operationCtx)
-				}
-				if err := owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(operationCtx, observedAt); err != nil {
-					return err
-				}
-				created, err := owner.EnsureFlowInstance(operationCtx, target.Activation)
-				if err != nil {
-					return err
-				}
-				result.Created = created
-				result.PublicationSequence, err = pc.workflowStore.PublishStandingService(operationCtx, reconciliation.ServiceID, reconciliation.RunID, reconciliation.Generation)
-				if err != nil {
-					return err
-				}
-			}
-			results = append(results, result)
+			candidates = append(candidates, target.Candidate)
 		}
-		return nil
-	})
-	return results, err
+		if _, err := pc.workflowStore.ReconcileStandingServiceReplacement(ctx, req.Previous, candidates); err != nil {
+			return nil, err
+		}
+	}
+	results := make([]StandingTargetMutationResult, 0, len(req.Targets))
+	for _, target := range req.Targets {
+		reconciliation, found, err := pc.workflowStore.LoadReconciledStandingService(ctx, target.Candidate)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			reconciliation, err = pc.workflowStore.ReconcileStandingService(ctx, target.Candidate)
+			if err != nil {
+				return nil, err
+			}
+		}
+		result := StandingTargetMutationResult{Reconciliation: reconciliation, PublicationSequence: reconciliation.PublicationSequence}
+		if reconciliation.EffectiveState == "active" {
+			operationCtx := runtimecorrelation.WithRunID(ctx, reconciliation.RunID)
+			operationCtx = runtimecorrelation.WithBundleSourceFact(operationCtx, target.Candidate.Source)
+			operationCtx = runtimeeffects.WithExecutionMode(operationCtx, executionmode.Live)
+			if reconciliation.Generation > 1 {
+				operationCtx = WithStandingGenerationRebind(operationCtx)
+			}
+			if err := owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(operationCtx, observedAt); err != nil {
+				return nil, err
+			}
+			created, err := owner.EnsureFlowInstance(operationCtx, target.Activation)
+			if err != nil {
+				return nil, err
+			}
+			result.Created = created
+			result.PublicationSequence, err = pc.workflowStore.PublishStandingService(operationCtx, reconciliation.ServiceID, reconciliation.RunID, reconciliation.Generation)
+			if err != nil {
+				return nil, err
+			}
+		}
+		results = append(results, result)
+	}
+	return results, nil
 }
 
 func (pc *PipelineCoordinator) CommitFlowInstanceTermination(ctx context.Context, req FlowInstanceTerminationRequest) (FlowInstanceTermination, error) {

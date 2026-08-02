@@ -26,6 +26,11 @@ func (s *publishAndWaitCommitSpy) CommitPublish(ctx context.Context, plan Commit
 	return s.InMemoryEventStore.CommitPublish(ctx, plan)
 }
 
+func (s *publishAndWaitCommitSpy) CommitPublication(ctx context.Context, command PublicationCommand) (CommittedPublication, error) {
+	s.commitCalls++
+	return s.InMemoryEventStore.CommitPublication(ctx, command)
+}
+
 func TestEventBusBundleSourceAdmissionRejectsConflictingOwnersBeforeCommit(t *testing.T) {
 	const ownedHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	owned, err := runtimecorrelation.NewPersistedBundleSourceFact(ownedHash)

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1237,7 +1238,7 @@ func requireStandingLifecycleTelegramCall(t testing.TB, calls <-chan struct{}, b
 	}
 }
 
-func sendStandingTelegramUpdate(t testing.TB, baseURL string, updateID, chatID int) string {
+func sendStandingTelegramUpdate(t testing.TB, baseURL string, updateID, chatID int, diagnostics ...func() string) string {
 	t.Helper()
 	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":%d},"chat":{"id":%d,"type":"private"},"text":"hello %d"}}`, updateID, updateID, chatID, chatID, updateID))
 	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/chat/telegram", bytes.NewReader(body))
@@ -1251,14 +1252,25 @@ func sendStandingTelegramUpdate(t testing.TB, baseURL string, updateID, chatID i
 		t.Fatalf("send webhook: %v", err)
 	}
 	defer resp.Body.Close()
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read webhook response status=%d: %v", resp.StatusCode, err)
+	}
 	var payload map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode webhook response status=%d: %v", resp.StatusCode, err)
+	if err := json.Unmarshal(responseBody, &payload); err != nil {
+		t.Fatalf("decode webhook response status=%d body=%q: %v%s", resp.StatusCode, strings.TrimSpace(string(responseBody)), err, standingWebhookDiagnostics(diagnostics))
 	}
 	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("webhook status=%d payload=%v", resp.StatusCode, payload)
+		t.Fatalf("webhook status=%d payload=%v%s", resp.StatusCode, payload, standingWebhookDiagnostics(diagnostics))
 	}
 	return strings.TrimSpace(fmt.Sprint(payload["entity_id"]))
+}
+
+func standingWebhookDiagnostics(diagnostics []func() string) string {
+	if len(diagnostics) == 0 || diagnostics[0] == nil {
+		return ""
+	}
+	return "\nserve output:\n" + diagnostics[0]()
 }
 
 func requireStandingTelegramCalls(t testing.TB, calls <-chan map[string]any, sqlitePath string, chatIDs ...int) {

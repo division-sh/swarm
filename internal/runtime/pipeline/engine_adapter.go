@@ -171,9 +171,23 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 		if err := o.state.coordinator.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle); err != nil {
 			return runtimeengine.CommittedEngineMutation{}, err
 		}
+		if len(committed.Publications) < len(mutation.EmitIntents) {
+			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("committed engine publications = %d, want at least %d emitted events", len(committed.Publications), len(mutation.EmitIntents))
+		}
+		committedIntents := make([]runtimeengine.EmitIntent, 0, len(mutation.EmitIntents))
+		for index, publication := range committed.Publications[:len(mutation.EmitIntents)] {
+			if publication == nil {
+				return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("committed engine publication %d is required", index)
+			}
+			intent := publication.CommittedDurablePublicationIntent()
+			if strings.TrimSpace(intent.Event.ID()) != strings.TrimSpace(publication.CommittedDurablePublicationEventID()) {
+				return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("committed engine publication %d intent identity is inconsistent", index)
+			}
+			committedIntents = append(committedIntents, intent)
+		}
 		return runtimeengine.CommittedEngineMutation{
 			ActivityIntents: append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...),
-			EmitIntents:     append([]runtimeengine.EmitIntent(nil), mutation.EmitIntents...),
+			EmitIntents:     committedIntents,
 		}, nil
 	}
 	commit := func(txctx context.Context) error {

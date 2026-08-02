@@ -1,8 +1,6 @@
 package store
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -347,7 +345,7 @@ func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T)
 	}
 }
 
-func TestPostgresRuntimeLogPersistenceReusesAmbientEventTransaction(t *testing.T) {
+func TestPostgresRuntimeLogPersistenceUsesClosedNamedCommits(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
@@ -357,18 +355,17 @@ func TestPostgresRuntimeLogPersistenceReusesAmbientEventTransaction(t *testing.T
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	logger := runtimepkg.NewRuntimeLogger(pg)
 
-	if err := pg.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := commitSemanticEventFixtureTx(txctx, pg, tx, eventtest.RunCreatingRootIngress(
-			subjectEventID, events.EventType("validation/validation.package_ready"),
-			"agent-1", "", json.RawMessage(`{"ready":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
-			return err
-		}
-		return logger.Log(txctx, runtimepkg.RuntimeLogEntry{
-			Level: "warn", Message: "transactional diagnostic", Component: "eventbus",
-			Action: "ambient_transaction", EventID: subjectEventID, EventType: "validation/validation.package_ready",
-		})
+	subject := eventtest.RunCreatingRootIngress(
+		subjectEventID, events.EventType("validation/validation.package_ready"),
+		"agent-1", "", json.RawMessage(`{"ready":true}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+	if err := commitSemanticEventFixtureWithAgents(ctx, pg, subject, nil); err != nil {
+		t.Fatalf("commit subject event: %v", err)
+	}
+	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
+		Level: "warn", Message: "closed diagnostic", Component: "eventbus",
+		Action: "closed_named_commit", EventID: subjectEventID, EventType: "validation/validation.package_ready",
 	}); err != nil {
-		t.Fatalf("RunEventTransaction: %v", err)
+		t.Fatalf("persist runtime log: %v", err)
 	}
 
 	var sourceEventID string

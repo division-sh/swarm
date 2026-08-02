@@ -80,6 +80,10 @@ func (p CommittedEnginePublication) CommittedDurablePublicationEventID() string 
 	return p.plan.DurablePublicationEventID()
 }
 
+func (p CommittedEnginePublication) CommittedDurablePublicationIntent() runtimeengine.EmitIntent {
+	return p.plan.intent
+}
+
 func (p CommittedEnginePublication) ValidateCommittedDurablePublication() error {
 	if err := p.plan.ValidateDurablePublicationPlan(); err != nil {
 		return err
@@ -126,6 +130,9 @@ func (eb *EventBus) PrepareEnginePublications(ctx context.Context, intents []run
 			release()
 			return nil, err
 		}
+		// Post-commit dispatch must consume the same canonical route facts that
+		// the selected store committed, not the pre-projection engine event.
+		intent.Event = prepared.Event
 		plan := EnginePublicationPlan{prepared: prepared, command: command, intent: intent}
 		if err := plan.ValidateDurablePublicationPlan(); err != nil {
 			_ = prepared.publicationClaim.Release(context.WithoutCancel(preparedCtx))
@@ -166,7 +173,9 @@ func (eb *EventBus) FinalizeEnginePublications(ctx context.Context, evidence []r
 			return err
 		}
 		prepared.committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed.committed.DeliveryHandoffs...)
-		eb.finalizeCommittedFlowInstanceActivations(ctx, prepared.Event, committed.committed.Activations)
+		if err := eb.finalizeCommittedFlowInstanceActivations(ctx, committed.committed.Activations); err != nil {
+			return err
+		}
 		if eb.testLifecycleProbe != nil && !prepared.exactDuplicate {
 			eb.notifyTestPublishPersisted(ctx, prepared.Event, prepared.plan)
 		}

@@ -84,6 +84,10 @@ type connectRoutePlanStaleSnapshotStore struct {
 	mutations int
 }
 
+func (s *connectRoutePlanDescriptorStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []FlowInstanceRouteRecordSet) error {
+	return validateFlowInstanceRouteTopology(sets)
+}
+
 type connectRoutePlanNodeInterceptor struct {
 	mu    sync.Mutex
 	count int
@@ -561,10 +565,10 @@ func (s *connectRoutePlanStaleSnapshotStore) ListActiveFlowInstanceDescriptors(c
 
 func (s *connectRoutePlanConcurrentLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for _, descriptor := range s.flowInstances {
 		descriptor = descriptor.Normalized()
 		if descriptor.InstanceID == req.Instance.InstanceID || descriptor.FlowInstance == req.Instance.InstancePath {
+			s.mu.Unlock()
 			return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "connect-route-plan-test", "activate", map[string]any{"flow_instance": req.Instance.InstancePath})
 		}
 	}
@@ -577,6 +581,7 @@ func (s *connectRoutePlanConcurrentLifecycleStore) Activate(ctx context.Context,
 		AddressFields: connectRoutePlanActivationAddressFields(req.Metadata),
 	})
 	bus := s.bus
+	s.mu.Unlock()
 	if bus == nil {
 		return nil
 	}
@@ -1477,6 +1482,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "drift")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
 	}
+	store.flowInstanceDescriptorCalls = 0
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
 	}, nil); err != nil {
@@ -2026,6 +2032,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 				InstanceID:    "one",
 				EntityID:      eventtest.UUID("ent-1"),
 				FlowInstance:  "account/one",
+				FlowTemplate:  "account",
 				AddressFields: map[string]string{"entity.account_id": "acct-1"},
 			}},
 		},
@@ -2082,6 +2089,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("account", "drift")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
 	}
+	store.flowInstanceDescriptorCalls = 0
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
 	}, nil); err != nil {
@@ -2213,6 +2221,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 				InstanceID:    "one",
 				EntityID:      eventtest.UUID("ent-1"),
 				FlowInstance:  "account/one",
+				FlowTemplate:  "account",
 				AddressFields: map[string]string{"entity.account_id": "acct-1"},
 			}},
 		},
@@ -2316,6 +2325,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("account", "drift")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
 	}
+	store.flowInstanceDescriptorCalls = 0
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: missing, Scope: runtimepipelineobligation.ScopeSubscribed,
 	}, nil); err != nil {
@@ -2367,8 +2377,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionDoesNotReuseUnr
 	if routes := eb.RouteTable().MaterializedRoutes(store.activations[0].Instance.Route()); len(routes) != 0 {
 		t.Fatalf("materialized routes after failed activation = %#v, want none", routes)
 	}
-	if routes := store.routes[eventID]; len(routes) != 0 {
-		t.Fatalf("persisted delivery routes = %#v, want none when activation failure is preserved", routes)
+	if routes := store.routes[eventID]; len(routes) != 1 {
+		t.Fatalf("persisted delivery routes = %#v, want the durable route to survive process-local activation failure", routes)
 	}
 }
 

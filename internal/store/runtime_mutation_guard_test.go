@@ -280,8 +280,8 @@ func TestSelectedRuntimeConstructionUsesOpaqueWorkflowPersistence(t *testing.T) 
 		t.Fatalf("read internal/runtime/bus/eventbus_publish.go: %v", err)
 	}
 	publishText := string(publishData)
-	if !strings.Contains(publishText, ".CommitPublish(") {
-		t.Fatal("event publish must consume the closed CommitPublish operation")
+	if !strings.Contains(publishText, ".CommitPublication(") {
+		t.Fatal("event publish must consume the closed CommitPublication operation")
 	}
 	if strings.Contains(publishText, "EventMutation") || strings.Contains(publishText, "RunEventMutation") {
 		t.Fatal("event publish retains the removed generic event-mutation callback")
@@ -408,7 +408,7 @@ func collectRuntimeWriterCallSitesFromSource(path, src string) ([]runtimeWriterC
 				return true
 			}
 			switch primitive {
-			case "RunRuntimeMutation", "RunRuntimeMutationContext", "runAuthorActivityMutation", "runDecisionCardMutation":
+			case "RunRuntimeMutation", "RunRuntimeMutationContext", "runAuthorActivityMutation", "runPrivateAuthorActivityMutation", "runDecisionCardMutation":
 				info.callsRuntimeMutation = true
 			case "runRuntimeMutation":
 				info.callsRuntimeMutation = true
@@ -503,7 +503,7 @@ func runtimeWriterPrimitive(call *ast.CallExpr) (string, runtimeWriterPrimitiveK
 		return name, primitiveWrite, true
 	case "Query", "QueryContext", "QueryRow", "QueryRowContext", "Prepare", "PrepareContext":
 		return name, primitiveRead, true
-	case "runInPipelineTransaction", "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation", "runEventTransaction", "RunEventPublication", "PipelineSQLTxFromContext", "sqlTxFromContext":
+	case "runInPipelineTransaction", "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runPrivateAuthorActivityMutation", "runDecisionCardMutation", "runEventTransaction", "RunEventPublication", "PipelineSQLTxFromContext", "sqlTxFromContext":
 		return name, primitiveBoundary, true
 	default:
 		return "", "", false
@@ -523,7 +523,7 @@ func collectRuntimeWriterBoundaryCallbackScopes(body ast.Node) []runtimeWriterBo
 		}
 		scope := runtimeWriterBoundaryCallbackScope{}
 		switch primitive {
-		case "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation":
+		case "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runPrivateAuthorActivityMutation", "runDecisionCardMutation":
 			scope.runtime = true
 		case "runEventTransaction", "RunEventPublication":
 			scope.event = true
@@ -699,7 +699,7 @@ func classifyRuntimeWriterCallSite(site runtimeWriterCallSite) (runtimeWriterCla
 	}
 	if site.Kind == primitiveBoundary {
 		switch site.Primitive {
-		case "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation", "runEventTransaction", "RunEventPublication":
+		case "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runPrivateAuthorActivityMutation", "runDecisionCardMutation", "runEventTransaction", "RunEventPublication":
 			return classConsumesCanonical, "canonical runtime mutation/event transaction boundary", true
 		case "runInPipelineTransaction":
 			return classConsumesCanonical, "private workflow persistence transaction owner delegates SQLite writes to RunRuntimeMutationContext", true
@@ -836,7 +836,7 @@ func classifySQLiteRuntimeStoreCallSite(site runtimeWriterCallSite) (runtimeWrit
 		}
 	}
 	switch site.Function {
-	case "RunRuntimeMutation", "RunRuntimeMutationContext", "runEventTransaction", "RunEventPublication", "runRuntimeMutation", "runAuthorActivityMutation", "runDecisionCardMutation", "runRuntimeMutationOnce", "runRuntimeMutationOnceLocked":
+	case "RunRuntimeMutation", "RunRuntimeMutationContext", "runEventTransaction", "RunEventPublication", "runRuntimeMutation", "runAuthorActivityMutation", "runPrivateAuthorActivityMutation", "runDecisionCardMutation", "runRuntimeMutationOnce", "runRuntimeMutationOnceLocked":
 		return classConsumesCanonical, "canonical SQLite runtime mutation owner", true
 	case "CompleteDecisionRouteObligation", "QuarantineDecisionRouteObligation":
 		return classConsumesCanonical, "decision-card obligation completion consumes the serialized decision-card mutation owner", true
@@ -909,6 +909,46 @@ func sqliteActiveTxHelper(site runtimeWriterCallSite) bool {
 
 func runtimeWriterRules() []runtimeWriterRule {
 	return []runtimeWriterRule{
+		{
+			name:           "closed selected runtime named mutations",
+			path:           rx(`^internal/store/(agent_directive_operations|completion_settlement|runtime_external_effects|scenario_setup|sqlite_runtime_llm|tool_persistence)\.go$`),
+			function:       rx(`^(ReserveDirectiveOperation|FinalizeDirectiveSuccess|finalizeSQLiteDirectiveFailure|SettleCompletion|MarkExternalAttemptLaunched|SetupScenarioEntities|AppendAgentTurn|SaveEntityField|CreateEntity)$`),
+			kinds:          kinds(primitiveRead, primitiveWrite),
+			classification: classConsumesCanonical,
+			reason:         "closed named selected-store operations own their complete private transaction boundary",
+		},
+		{
+			name:           "private author activity transaction owner",
+			path:           rx(`^internal/store/author_activity_store\.go$`),
+			function:       rx(`^runPrivateAuthorActivityMutation$`),
+			kinds:          kinds(primitiveBegin),
+			classification: classConsumesCanonical,
+			reason:         "the private author-activity owner opens and finalizes the selected-store story transaction",
+		},
+		{
+			name:           "private author activity mutation adapter",
+			path:           rx(`^internal/store/internal/authoractivity/mutation\.go$`),
+			function:       rx(`^(lock|updateLast|insert)$`),
+			kinds:          kinds(primitiveRead, primitiveWrite),
+			classification: classActiveTxHelper,
+			reason:         "private author-activity SQL executes only under its explicit mutation owner",
+		},
+		{
+			name:           "private decision-card insert helper",
+			path:           rx(`^internal/store/decision_cards\.go$`),
+			function:       rx(`^insertDecisionCardWithStory$`),
+			kinds:          kinds(primitiveWrite),
+			classification: classActiveTxHelper,
+			reason:         "decision-card insertion receives the explicit private story and transaction from its named owner",
+		},
+		{
+			name:           "test delivery story adapter",
+			path:           rx(`^internal/store/testutil/deliveryfixture/adapter\.go$`),
+			function:       rx(`^withStory$`),
+			kinds:          kinds(primitiveBegin),
+			classification: classDifferentConcept,
+			reason:         "test-only delivery fixture owns its isolated private story transaction",
+		},
 		{
 			name:           "canonical executable delivery adapter",
 			path:           rx(`^internal/store/internal/delivery/adapter\.go$`),

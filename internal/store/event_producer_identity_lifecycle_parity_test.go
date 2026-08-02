@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/delivery"
 	"github.com/google/uuid"
 )
@@ -337,10 +338,11 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 		t.Fatalf("begin historical replay transaction: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	txctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
 	if err != nil {
 		t.Fatalf("begin author activity transaction: %v", err)
 	}
+	txctx := ctx
 	loaded, err := loadRunForkReplaySourceEvent(txctx, tx, sourceRunID, sourceEventID)
 	if err != nil {
 		t.Fatalf("loadRunForkReplaySourceEvent: %v", err)
@@ -354,7 +356,7 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 		t.Fatalf("projectRunForkReplayEvent: %v", err)
 	}
 	pg := fixture.store.(*PostgresStore)
-	outcome, err := pg.appendEventSpec(txctx, tx, nil, replayedProjection)
+	outcome, err := pg.appendEventSpec(txctx, tx, runtimeAuthorActivityMutation(story), replayedProjection)
 	if err != nil {
 		t.Fatalf("append replay event: %v", err)
 	}
@@ -390,6 +392,9 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 		)
 	`, uuid.NewString(), forkRunID, sourceRunID, sourceEventID, sourceDeliveryID, replayedEventID, forkDeliveryID, runfork.RunForkDeliveryEventReplayOwner, createdAt.Add(2*time.Minute)); err != nil {
 		t.Fatalf("insert replay lineage fixture: %v", err)
+	}
+	if err := story.Finalize(txctx); err != nil {
+		t.Fatalf("finalize historical replay story: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit historical replay transaction: %v", err)

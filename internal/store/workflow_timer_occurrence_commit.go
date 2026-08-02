@@ -62,7 +62,7 @@ func commitWorkflowTimerOccurrence(
 			return err
 		}
 
-		committed, err := commitPublicationTx(txctx, tx, story, store, postgres, plan.PublicationCommand())
+		committed, err := commitPublicationTx(txctx, tx, story, store, postgres, plan.PublicationCommand(), publicationCommitOptions{})
 		if err != nil {
 			return fmt.Errorf("commit workflow timer publication: %w", err)
 		}

@@ -16,6 +16,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -1127,26 +1128,27 @@ func commitReviewClosureEvent(
 		return err
 	}
 	defer release()
-	commit := func(txctx context.Context, tx *sql.Tx, store eventCommitTxStore) error {
-		outcome, err := store.appendAdmittedEventTxOutcome(txctx, tx, nil, admitted)
+	commit := func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, store eventCommitTxStore) error {
+		mutation := runtimeAuthorActivityMutation(story)
+		outcome, err := store.appendAdmittedEventTxOutcome(txctx, tx, mutation, admitted)
 		if err != nil {
 			return err
 		}
 		if outcome != runtimebus.EventAppendInserted {
 			return fmt.Errorf("append outcome = %v", outcome)
 		}
-		return (sqlPublishCommitter{tx: tx, store: store}).commitInitialSideEffects(txctx, runtimebus.CommitPublishRequest{
+		return (sqlPublishCommitter{tx: tx, store: store, story: mutation}).commitInitialSideEffects(txctx, runtimebus.CommitPublishRequest{
 			Event: admitted, ReplayScope: runtimepipelineobligation.ScopeDirect, PipelineClaim: claim,
 		}, true)
 	}
 	switch store := selected.(type) {
 	case *PostgresStore:
-		return store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			return commit(txctx, tx, store)
+		return store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			return commit(txctx, tx, story, store)
 		})
 	case *SQLiteRuntimeStore:
-		return store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			return commit(txctx, tx, store)
+		return store.runPrivateAuthorActivityMutation(ctx, "sqlite review closure event", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			return commit(txctx, tx, story, store)
 		})
 	default:
 		return fmt.Errorf("unsupported review closure store %T", selected)

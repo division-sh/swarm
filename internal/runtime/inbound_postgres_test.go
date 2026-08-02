@@ -1094,6 +1094,9 @@ func seedPostgresInboundGatewayRuntime(
 		RunID:  runID,
 	})
 	configBytes, err := json.Marshal(map[string]any{
+		"flow_path":   flowInstance,
+		"instance_id": flowInstance,
+		"storage_ref": flowInstance,
 		"secrets": map[string]any{
 			"webhook_signing": map[string]string{
 				provider: webhookSecret,
@@ -1201,6 +1204,9 @@ func seedSQLiteInboundGatewayRuntime(
 		StartedAt: now,
 	})
 	configBytes, err := json.Marshal(map[string]any{
+		"flow_path":   flowInstance,
+		"instance_id": flowInstance,
+		"storage_ref": flowInstance,
 		"secrets": map[string]any{
 			"webhook_signing": map[string]string{
 				provider: webhookSecret,

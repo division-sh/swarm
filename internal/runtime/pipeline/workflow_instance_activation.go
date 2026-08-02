@@ -38,6 +38,18 @@ type FlowInstanceActivationPlan struct {
 	OccurredAt          time.Time
 }
 
+// CommittedFlowInstanceActivation is exact selected-store evidence that the
+// planned activation is durable. Process-local topology and readiness may be
+// published only after this value is returned.
+type CommittedFlowInstanceActivation struct {
+	Plan    FlowInstanceActivationPlan
+	Created bool
+}
+
+func (a CommittedFlowInstanceActivation) Validate() error {
+	return a.Plan.Validate()
+}
+
 // FlowInstanceActivationRecord is the exact immutable persistence projection
 // for one planned activation. Runtime derives semantic facts; selected-store
 // adapters decide only how those facts are represented by their backend.
@@ -214,6 +226,15 @@ type FlowInstanceActivationPlanner interface {
 // persistence remains entirely inside the selected-store operation.
 type CommittedFlowInstanceActivationFinalizer interface {
 	FinalizeCommittedFlowInstanceActivation(context.Context, FlowInstanceActivationPlan) error
+}
+
+type CommittedFlowInstanceActivationFinalizerFunc func(context.Context, FlowInstanceActivationPlan) error
+
+func (fn CommittedFlowInstanceActivationFinalizerFunc) FinalizeCommittedFlowInstanceActivation(ctx context.Context, plan FlowInstanceActivationPlan) error {
+	if fn == nil {
+		return fmt.Errorf("committed flow instance activation finalizer is required")
+	}
+	return fn(ctx, plan)
 }
 
 type FlowInstanceActivationPlannerFunc func(context.Context, FlowInstanceActivationRequest) (FlowInstanceActivationPlan, error)

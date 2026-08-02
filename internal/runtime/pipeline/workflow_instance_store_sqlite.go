@@ -426,6 +426,7 @@ func (s *workflowInstanceStore) scanSQLiteWorkflowInstances(ctx context.Context,
 	for rows.Next() {
 		var (
 			item            WorkflowInstance
+			entityID        string
 			gatesRaw        any
 			fieldsRaw       any
 			configRaw       any
@@ -441,7 +442,7 @@ func (s *workflowInstanceStore) scanSQLiteWorkflowInstances(ctx context.Context,
 			updatedAtRaw    any
 		)
 		if err := rows.Scan(
-			&item.InstanceID,
+			&entityID,
 			&item.WorkflowName,
 			&item.WorkflowVersion,
 			&status,
@@ -483,6 +484,7 @@ func (s *workflowInstanceStore) scanSQLiteWorkflowInstances(ctx context.Context,
 		item.Status = strings.TrimSpace(status.String)
 		projection, err := decodeWorkflowInstancePersistedProjection(sqliteWorkflowJSONBytes(fieldsRaw), sqliteWorkflowJSONBytes(gatesRaw), sqliteWorkflowJSONBytes(accRaw), sqliteWorkflowJSONBytes(configRaw), workflowInstancePersistedControl{
 			StorageRef: strings.TrimSpace(flowInstance),
+			EntityID:   strings.TrimSpace(entityID),
 			Slug:       slug.String,
 			Name:       name.String,
 			EntityType: entityType,

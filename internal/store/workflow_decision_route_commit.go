@@ -36,7 +36,7 @@ func commitProposedEffectRoute(
 
 	var result runtimepipeline.CommittedProposedEffectRoute
 	err = run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		committed, err := commitPublicationTx(txctx, tx, story, store, postgres, plan.PublicationCommand())
+		committed, err := commitPublicationTx(txctx, tx, story, store, postgres, plan.PublicationCommand(), publicationCommitOptions{})
 		if err != nil {
 			return fmt.Errorf("commit proposed-effect route publication: %w", err)
 		}

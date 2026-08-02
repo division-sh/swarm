@@ -4,12 +4,15 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"sync"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -23,6 +26,9 @@ var authorActivityTestBundleSourceFact = mustAuthorActivityTestBundleSourceFact(
 func exactAuthorActivityFlowInstanceDescriptors(in []ActiveFlowInstanceDescriptor, workflowVersion string) []ActiveFlowInstanceDescriptor {
 	out := append([]ActiveFlowInstanceDescriptor(nil), in...)
 	for idx := range out {
+		if strings.TrimSpace(out[idx].FlowTemplate) == "" {
+			out[idx].FlowTemplate = runtimeflowidentity.RouteForInstancePath(out[idx].FlowInstance).ScopeKey
+		}
 		if strings.TrimSpace(out[idx].BundleHash) == "" {
 			out[idx].BundleHash = authorActivityTestBundleHash
 		}
@@ -69,6 +75,73 @@ type authorActivityTestCatalogRegistrar interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
 
+type testFlowInstanceActivationOwner struct {
+	mu       sync.Mutex
+	activate runtimepipeline.FlowInstanceActivator
+	pending  map[runtimeflowidentity.Route]runtimepipeline.FlowInstanceActivationRequest
+}
+
+func newTestFlowInstanceActivationOwner(activate runtimepipeline.FlowInstanceActivator) *testFlowInstanceActivationOwner {
+	return &testFlowInstanceActivationOwner{
+		activate: activate,
+		pending:  make(map[runtimeflowidentity.Route]runtimepipeline.FlowInstanceActivationRequest),
+	}
+}
+
+func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(_ context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+	if req.OccurredAt.IsZero() {
+		req.OccurredAt = req.TriggerEvent.CreatedAt()
+	}
+	if strings.TrimSpace(req.InitialState) == "" {
+		if schema, ok := req.ContractBundle.FlowSchemaByID(req.Instance.TemplateID); ok {
+			req.InitialState = schema.InitialState
+		}
+	}
+	readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+		Identity:        req.Instance,
+		RunID:           req.TriggerEvent.RunID(),
+		BundleHash:      authorActivityTestBundleHash,
+		BundleSource:    authorActivityTestBundleSource,
+		WorkflowVersion: req.ContractBundle.WorkflowVersion(),
+	}
+	instance := runtimepipeline.WorkflowInstance{
+		InstanceID:       req.Instance.InstanceID,
+		StorageRef:       req.Instance.InstancePath,
+		WorkflowName:     req.Instance.TemplateID,
+		WorkflowVersion:  req.ContractBundle.WorkflowVersion(),
+		CurrentState:     req.InitialState,
+		Config:           req.Config,
+		Metadata:         req.Metadata,
+		EnteredStageAt:   req.OccurredAt,
+		CreatedAt:        req.OccurredAt,
+		RuntimeReadiness: &readiness,
+	}
+	plan := runtimepipeline.FlowInstanceActivationPlan{
+		Instance: instance, Identity: req.Instance, Readiness: readiness,
+		OccurredAt: req.OccurredAt,
+	}
+	if err := plan.Validate(); err != nil {
+		return runtimepipeline.FlowInstanceActivationPlan{}, err
+	}
+	o.mu.Lock()
+	o.pending[req.Instance.Route()] = req
+	o.mu.Unlock()
+	return plan, nil
+}
+
+func (o *testFlowInstanceActivationOwner) FinalizeCommittedFlowInstanceActivation(ctx context.Context, plan runtimepipeline.FlowInstanceActivationPlan) error {
+	o.mu.Lock()
+	req, ok := o.pending[plan.Identity.Route()]
+	if ok {
+		delete(o.pending, plan.Identity.Route())
+	}
+	o.mu.Unlock()
+	if !ok || o.activate == nil {
+		return nil
+	}
+	return o.activate(ctx, req)
+}
+
 func testAuthorActivityContext(ctx context.Context) context.Context {
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
@@ -96,6 +169,14 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 	}
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
+	}
+	if opts.TemplateInstanceActivator != nil && opts.TemplateInstancePlanner == nil {
+		owner := newTestFlowInstanceActivationOwner(opts.TemplateInstanceActivator)
+		opts.TemplateInstancePlanner = owner
+		opts.FlowActivationFinalizer = owner
+	}
+	if opts.FlowActivationFinalizer == nil {
+		opts.FlowActivationFinalizer, _ = opts.TemplateInstancePlanner.(runtimepipeline.CommittedFlowInstanceActivationFinalizer)
 	}
 	if strings.TrimSpace(opts.BundleSourceFact.BundleHash()) == "" {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact

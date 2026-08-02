@@ -86,7 +86,11 @@ func commitNamedDiagnosticContractEvent(ctx context.Context, fixture authorActiv
 	}
 	commit := func(store eventCommitTxStore, run func(context.Context, func(context.Context, *sql.Tx) error) error) error {
 		return run(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			_, err := (sqlPublishCommitter{tx: tx, store: store}).commitNamedEvent(
+			story, err := eventFixtureStory(txctx)
+			if err != nil {
+				return err
+			}
+			_, err = (sqlPublishCommitter{tx: tx, store: store, story: story}).commitNamedEvent(
 				txctx, "diagnostic subtype contract proof", events.EventAdmissionDiagnosticDirect, expectedType,
 				runtimebus.CommitPublishRequest{Event: admitted, ReplayScope: runtimepipelineobligation.ScopeDirect},
 			)

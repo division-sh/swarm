@@ -14,6 +14,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
 
 type flowInstanceDescriptorQueryer interface {
@@ -316,17 +317,9 @@ func (s *PostgresStore) ReplaceFlowInstanceRouteTopology(
 	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required for flow-instance route topology")
 	}
-	sets, err := normalizeFlowInstanceRouteTopology(sets)
-	if err != nil {
+	return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
+		_, err := replaceFlowInstanceRouteTopologyTx(txctx, tx, true, sets)
 		return err
-	}
-	return s.runAuthorActivityMutation(ctx, "postgres flow-instance route topology replacement", func(txctx context.Context, _ *sql.Tx) error {
-		for _, set := range sets {
-			if err := s.ReplaceFlowInstanceRouteRecords(txctx, set.Identity, set.Routes); err != nil {
-				return err
-			}
-		}
-		return nil
 	})
 }
 
@@ -337,18 +330,73 @@ func (s *SQLiteRuntimeStore) ReplaceFlowInstanceRouteTopology(
 	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("sqlite runtime store is required for flow-instance route topology")
 	}
-	sets, err := normalizeFlowInstanceRouteTopology(sets)
-	if err != nil {
+	return s.runPrivateAuthorActivityMutation(ctx, "sqlite flow-instance route topology replacement", func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
+		_, err := replaceFlowInstanceRouteTopologyTx(txctx, tx, false, sets)
 		return err
+	})
+}
+
+func replaceFlowInstanceRouteTopologyTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	postgres bool,
+	sets []runtimebus.FlowInstanceRouteRecordSet,
+) ([]runtimebus.FlowInstanceRouteRecordSet, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("flow-instance route topology replacement requires private transaction ownership")
 	}
-	return s.runAuthorActivityMutation(ctx, "sqlite flow-instance route topology replacement", func(txctx context.Context, _ *sql.Tx) error {
-		for _, set := range sets {
-			if err := s.ReplaceFlowInstanceRouteRecords(txctx, set.Identity, set.Routes); err != nil {
-				return err
+	normalized, err := normalizeFlowInstanceRouteTopology(sets)
+	if err != nil {
+		return nil, err
+	}
+	if len(normalized) == 0 {
+		return nil, nil
+	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if postgres {
+		if err := requirePostgresRunActive(ctx, tx, runID); err != nil {
+			return nil, err
+		}
+	} else if err := requireSQLiteRunActive(ctx, tx, runID); err != nil {
+		return nil, err
+	}
+	for _, set := range normalized {
+		if postgres {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE routing_rules
+				SET status = 'inactive'
+				WHERE flow_instance = $1
+				  AND is_materialized = true
+				  AND status = 'active'
+			`, set.Identity.InstancePath); err != nil {
+				return nil, fmt.Errorf("inactivate postgres flow-instance route owner %s: %w", set.Identity.InstancePath, err)
+			}
+			for _, route := range set.Routes {
+				if err := upsertPostgresFlowInstanceRoute(ctx, tx, route); err != nil {
+					return nil, err
+				}
+			}
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE routing_rules
+			SET status = 'inactive'
+			WHERE flow_instance = ?
+			  AND is_materialized = TRUE
+			  AND status = 'active'
+		`, set.Identity.InstancePath); err != nil {
+			return nil, fmt.Errorf("inactivate sqlite flow-instance route owner %s: %w", set.Identity.InstancePath, err)
+		}
+		for _, route := range set.Routes {
+			if err := upsertSQLiteFlowInstanceRoute(ctx, tx, route); err != nil {
+				return nil, err
 			}
 		}
-		return nil
-	})
+	}
+	return normalized, nil
 }
 
 func normalizeFlowInstanceRouteTopology(sets []runtimebus.FlowInstanceRouteRecordSet) ([]runtimebus.FlowInstanceRouteRecordSet, error) {

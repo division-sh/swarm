@@ -457,8 +457,14 @@ func (s *SQLiteRuntimeStore) DecideDecisionCard(ctx context.Context, req decisio
 }
 
 func decideDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.DecideRequest, postgres bool) (decisioncard.DecisionOutcome, error) {
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return decisioncard.DecisionOutcome{}, err
+	return decideDecisionCardWithStory(ctx, nil, tx, req, postgres)
+}
+
+func decideDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, req decisioncard.DecideRequest, postgres bool) (decisioncard.DecisionOutcome, error) {
+	if story == nil {
+		if err := runtimeauthoractivity.Require(ctx); err != nil {
+			return decisioncard.DecisionOutcome{}, err
+		}
 	}
 	now := decisioncard.CanonicalTimestamp(req.Now)
 	if now.IsZero() {
@@ -500,7 +506,7 @@ func decideDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.Decide
 			}
 			card.DeferredUntil = continuation.DeferredUntil
 			card.UpdatedAt = now
-			changeID, err := appendDecisionCardChangeDTO(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeDeferred, map[string]any{
+			changeID, err := appendDecisionCardChangeDTOWithStory(ctx, story, tx, card.RunID, card.CardID, decisioncard.ChangeDeferred, map[string]any{
 				"until": continuation.DeferredUntil.UTC().Format(time.RFC3339Nano), "cause": "weekly_budget_exhausted",
 			}, now, postgres)
 			if err != nil {
@@ -527,7 +533,7 @@ func decideDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.Decide
 		if err := updateDecisionCardDraftStatus(ctx, tx, draft.InputDraftID, decisioncard.DraftStatusConsumed, now, postgres); err != nil {
 			return decisioncard.DecisionOutcome{}, err
 		}
-		if _, err := appendDecisionCardChangeDTO(ctx, tx, draft.RunID, draft.CardID, decisioncard.ChangeDraftConsumed, map[string]any{"input_draft_id": draft.InputDraftID}, now, postgres); err != nil {
+		if _, err := appendDecisionCardChangeDTOWithStory(ctx, story, tx, draft.RunID, draft.CardID, decisioncard.ChangeDraftConsumed, map[string]any{"input_draft_id": draft.InputDraftID}, now, postgres); err != nil {
 			return decisioncard.DecisionOutcome{}, err
 		}
 	}
@@ -563,7 +569,7 @@ func decideDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.Decide
 	card.DeliveryReceiptID = strings.TrimSpace(req.DeliveryReceiptID)
 	card.DeliveryRenderHash = strings.TrimSpace(req.DeliveryRenderHash)
 	card.UpdatedAt = now
-	changeID, err := appendDecisionCardChangeDTO(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeDecided, map[string]any{
+	changeID, err := appendDecisionCardChangeDTOWithStory(ctx, story, tx, card.RunID, card.CardID, decisioncard.ChangeDecided, map[string]any{
 		"verdict": card.Verdict, "decision_event_id": card.DecisionEventID,
 	}, now, postgres)
 	if err != nil {
@@ -602,8 +608,14 @@ func (s *SQLiteRuntimeStore) DeferDecisionCard(ctx context.Context, req decision
 }
 
 func deferDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.DeferRequest, postgres bool) (decisioncard.DecisionOutcome, error) {
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return decisioncard.DecisionOutcome{}, err
+	return deferDecisionCardWithStory(ctx, nil, tx, req, postgres)
+}
+
+func deferDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, req decisioncard.DeferRequest, postgres bool) (decisioncard.DecisionOutcome, error) {
+	if story == nil {
+		if err := runtimeauthoractivity.Require(ctx); err != nil {
+			return decisioncard.DecisionOutcome{}, err
+		}
 	}
 	now := decisioncard.CanonicalTimestamp(req.Now)
 	if now.IsZero() {
@@ -637,7 +649,7 @@ func deferDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.DeferRe
 	}
 	card.DeferredUntil = until
 	card.UpdatedAt = now
-	changeID, err := appendDecisionCardChangeDTO(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeDeferred, map[string]any{"until": card.DeferredUntil}, now, postgres)
+	changeID, err := appendDecisionCardChangeDTOWithStory(ctx, story, tx, card.RunID, card.CardID, decisioncard.ChangeDeferred, map[string]any{"until": card.DeferredUntil}, now, postgres)
 	return decisioncard.DecisionOutcome{Card: card, ChangeID: changeID}, err
 }
 

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -198,10 +197,7 @@ func (b *proposedEffectRouteProofBus) FinalizeEnginePublications(ctx context.Con
 		if !ok || !committed.NewlyInserted() {
 			continue
 		}
-		intent, ok := b.prepared[item.CommittedDurablePublicationEventID()]
-		if !ok {
-			return fmt.Errorf("proposed-effect proof is missing prepared intent %s", item.CommittedDurablePublicationEventID())
-		}
+		intent := item.CommittedDurablePublicationIntent()
 		if intent.Event.Type() == events.EventType("platform.activity_requested") {
 			b.outbox = append(b.outbox, intent)
 		} else {

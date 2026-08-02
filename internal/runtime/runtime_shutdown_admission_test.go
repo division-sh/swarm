@@ -317,13 +317,13 @@ func (s *cancellationBlockingInboundStore) bindTestInboundEventStore(store runti
 	s.store = store
 }
 
-func (s *cancellationBlockingInboundStore) RunInboundPublicationMutation(ctx context.Context, _ runtimeinbound.Request, _ func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
+func (s *cancellationBlockingInboundStore) CommitInboundPublication(ctx context.Context, _ runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
 	select {
 	case s.entered <- struct{}{}:
 	default:
 	}
 	<-ctx.Done()
-	return runtimeinbound.Record{}, ctx.Err()
+	return runtimeinbound.CommitResult{}, ctx.Err()
 }
 
 func (*cancellationBlockingInboundStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
@@ -338,9 +338,9 @@ func (s *runtimeShutdownInboundStore) bindTestInboundEventStore(store runtimebus
 	s.store = store
 }
 
-func (s *runtimeShutdownInboundStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
+func (s *runtimeShutdownInboundStore) CommitInboundPublication(_ context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
 	s.recorded = true
-	return runTestInboundPublication(ctx, s.store, request, true, fn)
+	return runTestInboundPublication(command, true)
 }
 
 func (s *runtimeShutdownInboundStore) ResolveInboundTarget(context.Context, string, string) (InboundTarget, error) {

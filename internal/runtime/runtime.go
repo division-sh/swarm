@@ -1063,6 +1063,11 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			return runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow instance activation planner is required")
 		}
 		return managerRef.PrepareFlowInstanceActivation(ctx, req)
+	}), runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, plan runtimepipeline.FlowInstanceActivationPlan) error {
+		if managerRef == nil {
+			return fmt.Errorf("flow instance activation finalizer is required")
+		}
+		return managerRef.FinalizeCommittedFlowInstanceActivation(ctx, plan)
 	}), opts.ProviderTriggerCatalog, opts.TestLifecycleProbe)
 	if err != nil {
 		return nil, fmt.Errorf("build event bus: %w", err)
@@ -1316,6 +1321,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		PersistenceRoles: func() runtimemanager.PersistenceRoles {
 			roles := runtimeDeps.ManagerPersistenceRoles
 			roles.AgentRoutes = rt.Bus
+			roles.FlowActivation = rt.Bus
 			roles.RouteInstaller = rt.Bus
 			roles.RouteVerifier = rt.Bus
 			roles.RouteRestorer = rt.Bus

@@ -665,9 +665,6 @@ func syntheticDeliveryPayloadProjection(plan runtimepinrouting.ConnectRoutePlan,
 
 func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) []Subscriber {
 	tables := []*RouteTable{r.routeTable}
-	if staged := transactionRouteTableFromContext(ctx); staged != nil && staged != r.routeTable {
-		tables = append(tables, staged)
-	}
 	if ctx != nil {
 		if preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); preview != nil && preview.table != nil {
 			tables = append(tables, preview.table)

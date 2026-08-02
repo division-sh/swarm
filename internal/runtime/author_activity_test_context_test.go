@@ -138,7 +138,7 @@ func runtimeTestManagerBusRoles(bus *runtimebus.EventBus) runtimemanager.Persist
 	return runtimemanager.PersistenceRoles{
 		AgentRoutes: bus, RouteInstaller: bus, RouteVerifier: bus,
 		RouteRestorer: bus, RouteRetirer: bus, RouteRemover: bus,
-		CreationPublisher: bus, DeliveryRuntime: bus,
+		FlowActivation: bus, CreationPublisher: bus, DeliveryRuntime: bus,
 	}
 }
 

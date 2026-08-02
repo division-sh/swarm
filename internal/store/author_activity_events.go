@@ -150,11 +150,10 @@ func authoredEventSummary(payload []byte, field string) (string, error) {
 	}
 }
 
-func recordInboundAuthorActivity(ctx context.Context, story runtimeauthoractivity.Mutation, evt events.Event, provider string) error {
+func recordInboundAuthorActivity(ctx context.Context, story runtimeauthoractivity.Mutation, evt events.Event, provider string, projection runtimeauthoractivity.InboundProjection) error {
 	if story == nil {
 		return fmt.Errorf("inbound author activity mutation is required")
 	}
-	projection, _ := runtimeauthoractivity.InboundProjectionFromContext(ctx)
 	draft := runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindInboundReceived, Transition: "received",
 		SourceOwner: "events", SourceIdentity: evt.ID(), DedupKey: "inbound:" + evt.ID(),

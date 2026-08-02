@@ -154,6 +154,40 @@ func (s *targetRouteMemoryStore) CommitPublish(ctx context.Context, plan CommitP
 	return commitPublishInMemory(ctx, plan, &targetRouteMemoryPublishTransaction{store: s})
 }
 
+func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command PublicationCommand) (CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return CommittedPublication{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	event := command.Commit.Event.Event()
+	if _, exists := s.events[event.ID()]; exists {
+		result := CommittedPublication{AppendOutcome: EventAppendExactDuplicate}
+		for _, plan := range command.Activations {
+			result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan})
+		}
+		return result, result.Validate()
+	}
+	s.events[event.ID()] = event
+	s.routes[event.ID()] = events.NormalizeDeliveryRoutes(command.Commit.DeliveryRoutes)
+	s.scopes[event.ID()] = command.Commit.ReplayScope
+	if command.Commit.Disposition != nil {
+		if s.receipts == nil {
+			s.receipts = map[string]string{}
+		}
+		if s.receiptErrs == nil {
+			s.receiptErrs = map[string]*runtimefailures.Envelope{}
+		}
+		s.receipts[event.ID()] = string(command.Commit.Disposition.Kind())
+		s.receiptErrs[event.ID()] = command.Commit.Disposition.Failure()
+	}
+	result := CommittedPublication{AppendOutcome: EventAppendInserted}
+	for _, plan := range command.Activations {
+		result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan, Created: true})
+	}
+	return result, result.Validate()
+}
+
 func (t *targetRouteMemoryPublishTransaction) BeginPreparedPublish(ctx context.Context, prepared PreparedPublishEvent) (EventAppendOutcome, error) {
 	return t.store.BeginPreparedPublish(ctx, prepared)
 }
@@ -2209,6 +2243,13 @@ func TestEventBusPublish_NodeRouteFailsClosedWithoutRouteSetPersistence(t *testi
 }
 
 type rejectingDeliveryRouteStore struct{}
+
+func (rejectingDeliveryRouteStore) CommitPublication(_ context.Context, command PublicationCommand) (CommittedPublication, error) {
+	if len(command.Commit.DeliveryRoutes) > 0 {
+		return CommittedPublication{}, errors.New("typed delivery route persistence is unavailable")
+	}
+	return CommittedPublication{AppendOutcome: EventAppendInserted}, nil
+}
 
 func (s rejectingDeliveryRouteStore) CommitPublish(ctx context.Context, plan CommitPublishPlan) (PreparedPublish, error) {
 	return commitPublishInMemory(ctx, plan, s)

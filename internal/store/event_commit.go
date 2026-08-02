@@ -278,7 +278,7 @@ func commitPublication(
 	result := runtimebus.CommittedPublication{}
 	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
-		result, err = commitPublicationTx(txctx, tx, story, store, postgres, command)
+		result, err = commitPublicationTx(txctx, tx, story, store, postgres, command, publicationCommitOptions{})
 		return err
 	})
 	if err != nil {
@@ -297,6 +297,7 @@ func commitPublicationTx(
 	store eventCommitTxStore,
 	postgres bool,
 	command runtimebus.PublicationCommand,
+	options publicationCommitOptions,
 ) (runtimebus.CommittedPublication, error) {
 	if tx == nil || story == nil {
 		return runtimebus.CommittedPublication{}, fmt.Errorf("publication commit requires private transaction and story owners")
@@ -339,6 +340,14 @@ func commitPublicationTx(
 		if command.DynamicFlowCreation != nil && !creationAlreadyCommitted {
 			return runtimebus.CommittedPublication{}, fmt.Errorf("dynamic flow creation event exists before readiness completion")
 		}
+		result.Activations, err = commitFlowInstanceActivations(ctx, tx, story, postgres, command.Activations, options)
+		if err != nil {
+			return runtimebus.CommittedPublication{}, err
+		}
+		result.RouteTopology, err = replaceFlowInstanceRouteTopologyTx(ctx, tx, postgres, command.RouteTopology)
+		if err != nil {
+			return runtimebus.CommittedPublication{}, err
+		}
 		return result, nil
 	}
 	if outcome != runtimebus.EventAppendInserted {
@@ -347,7 +356,11 @@ func commitPublicationTx(
 	if command.DynamicFlowCreation != nil && creationAlreadyCommitted {
 		return runtimebus.CommittedPublication{}, fmt.Errorf("dynamic flow readiness is complete without its creation event")
 	}
-	result.Activations, err = commitFlowInstanceActivations(ctx, tx, story, postgres, command.Activations)
+	result.Activations, err = commitFlowInstanceActivations(ctx, tx, story, postgres, command.Activations, options)
+	if err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	result.RouteTopology, err = replaceFlowInstanceRouteTopologyTx(ctx, tx, postgres, command.RouteTopology)
 	if err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}

@@ -24,7 +24,6 @@ import (
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -413,30 +412,6 @@ func (am *AgentManager) spawnAgentInternalForSourceWithTopology(
 
 	if _, exists := am.lifecycle.executionSnapshotByIdentity(identity); exists {
 		return fmt.Errorf("%w: %s", ErrAgentAlreadyExists, a.ID())
-	}
-	if persist {
-		if _, txActive := runtimepipeline.PipelineSQLTxFromContext(ctx); txActive {
-			if am.lifecycle == nil || am.lifecycle.store == nil {
-				return fmt.Errorf("transactional agent registration requires lifecycle persistence")
-			}
-			result, err := am.lifecycle.persistRegistrationWithTopology(ctx, rec, topology)
-			if err != nil {
-				return err
-			}
-			if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
-				postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
-				if err := am.publishCommittedAgent(postCommitCtx, rec, a, subscriptionAdmission, result); err != nil && am.bus != nil {
-					_ = am.bus.LogRuntime(postCommitCtx, runtimepipeline.RuntimeLogEntry{
-						Level: "error", Message: "Post-commit agent publication failed",
-						Component: "flow_activation", Action: "agent_post_commit_publish_failed",
-						Detail: map[string]any{"agent_id": a.ID()}, Failure: failureEnvelope(err, "flow_activation", "publish_agent"),
-					})
-				}
-			}) {
-				return fmt.Errorf("transactional agent registration requires post-commit publication owner")
-			}
-			return nil
-		}
 	}
 	if err := am.lifecycle.registerExecutionWithTopology(ctx, rec, persist, a, subscriptionAdmission, topology); err != nil {
 		return err

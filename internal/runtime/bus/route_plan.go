@@ -273,6 +273,9 @@ func (p RoutePlan) Normalized() RoutePlan {
 		p.DeliveryIntents = nil
 		p.RoutedRecipients = nil
 		p.SubscribedRecipients = nil
+		p.ActivationPlans = nil
+		p.ReplyCreations = nil
+		p.ReplyClaims = nil
 	}
 	return p
 }

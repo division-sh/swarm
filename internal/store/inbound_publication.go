@@ -12,7 +12,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
@@ -24,123 +23,76 @@ type inboundPublicationTransactionStore interface {
 	finalizeInboundPublicationTx(context.Context, *sql.Tx, runtimeinbound.Request, int) (runtimeinbound.Record, error)
 }
 
-type sqlInboundPublicationMutation struct {
-	ctx        context.Context
-	tx         *sql.Tx
-	store      inboundPublicationTransactionStore
-	eventStore eventCommitTxStore
-	story      *privateauthoractivity.Mutation
-	request    runtimeinbound.Request
-	finalized  bool
-	record     runtimeinbound.Record
-}
-
-func newSQLInboundPublicationMutation(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, eventStore eventCommitTxStore, store inboundPublicationTransactionStore) *sqlInboundPublicationMutation {
-	committer := &sqlPublishCommitter{tx: tx, store: eventStore, story: story}
-	ctx = runtimebus.WithCommitPublishTransaction(ctx, committer)
-	return &sqlInboundPublicationMutation{ctx: ctx, tx: tx, story: story, store: store, eventStore: eventStore}
-}
-
-func (m *sqlInboundPublicationMutation) Context() context.Context {
-	if m == nil || m.ctx == nil {
-		return context.Background()
+func commitInboundPublicationTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	story *privateauthoractivity.Mutation,
+	eventStore eventCommitTxStore,
+	publicationStore inboundPublicationTransactionStore,
+	postgres bool,
+	command runtimeinbound.CommitCommand,
+	allowStandingGenerationRebind bool,
+) (runtimeinbound.CommitResult, error) {
+	if tx == nil || story == nil {
+		return runtimeinbound.CommitResult{}, fmt.Errorf("inbound publication requires private transaction and story owners")
 	}
-	return m.ctx
-}
-
-func (m *sqlInboundPublicationMutation) FinalizeInboundPublication(ctx context.Context, finalization runtimeinbound.Finalization) error {
-	if m == nil || m.store == nil || m.tx == nil {
-		return fmt.Errorf("inbound publication mutation is required")
+	if err := command.Validate(); err != nil {
+		return runtimeinbound.CommitResult{}, err
 	}
-	if m.finalized {
-		return fmt.Errorf("inbound publication mutation is already finalized")
-	}
-	if len(finalization.Events) < 1 || len(finalization.Events) > 2 {
-		return fmt.Errorf("inbound publication requires raw plus zero or one normalized event")
-	}
-	children := make([]runtimeinbound.EventRecord, len(finalization.Events))
-	eventIDs := make([]string, len(finalization.Events))
-	eventNames := make([]string, len(finalization.Events))
-	for index, item := range finalization.Events {
-		if item.Ordinal != index {
-			return fmt.Errorf("inbound publication child ordinal %d is not contiguous at index %d", item.Ordinal, index)
-		}
-		expectedID, err := runtimeinbound.DeterministicEventID(m.request.PublicationID, index)
+	request := command.Request.Normalized()
+	committed := make([]runtimebus.CommittedPublication, len(command.Publications))
+	children := make([]runtimeinbound.EventRecord, len(command.Finalization.Events))
+	for index, publication := range command.Publications {
+		var err error
+		committed[index], err = commitPublicationTx(ctx, tx, story, eventStore, postgres, publication, publicationCommitOptions{
+			allowStandingGenerationRebind: allowStandingGenerationRebind,
+		})
 		if err != nil {
-			return err
+			return runtimeinbound.CommitResult{}, fmt.Errorf("commit inbound publication event %d: %w", index, err)
 		}
-		if item.Event.ID() != expectedID {
-			return fmt.Errorf("inbound publication child ordinal %d does not use its reserved event_id", index)
-		}
-		if item.Event.RunID() != m.request.ResolvedRunID {
-			return fmt.Errorf("inbound publication child ordinal %d must use the admitted resolved_run_id", index)
-		}
-		authorization := item.Authorization
-		switch item.Kind {
-		case runtimeprovideroutput.KindRaw:
-			if index != 0 || !authorization.Empty() {
-				return fmt.Errorf("inbound raw output must be ordinal 0 and carry no normalized authorization")
-			}
-		case runtimeprovideroutput.KindNormalized:
-			if index != 1 || !authorization.Valid() || authorization.Provider() != m.request.Provider || authorization.Event() != string(item.Event.Type()) {
-				return fmt.Errorf("inbound normalized output must be ordinal 1 with matching complete authorization")
-			}
-		default:
-			return fmt.Errorf("inbound publication child ordinal %d has unsupported output kind %q", index, item.Kind)
-		}
+		item := command.Finalization.Events[index]
 		_, recipientFingerprint, recipientCount, err := canonicalInboundRecipientManifest(item.RecipientManifest)
 		if err != nil {
-			return err
+			return runtimeinbound.CommitResult{}, err
 		}
-		eventFingerprint, err := runtimeinbound.EventIntegrityFingerprint(item.Event, item.Kind, authorization)
+		eventFingerprint, err := runtimeinbound.EventIntegrityFingerprint(item.Event, item.Kind, item.Authorization)
 		if err != nil {
-			return err
+			return runtimeinbound.CommitResult{}, err
 		}
 		children[index] = runtimeinbound.EventRecord{
 			Ordinal: index, EventID: item.Event.ID(), EventName: string(item.Event.Type()), Kind: item.Kind,
-			Authorization: authorization, EventIntegrityFingerprint: eventFingerprint,
+			Authorization: item.Authorization, EventIntegrityFingerprint: eventFingerprint,
 			RecipientManifestFingerprint: recipientFingerprint, RecipientCount: recipientCount, Event: item.Event,
 		}
-		eventIDs[index] = item.Event.ID()
-		eventNames[index] = string(item.Event.Type())
-	}
-	if err := runtimeinbound.ValidateEvidenceEvent(m.request, finalization.EvidenceEvent, eventIDs, eventNames); err != nil {
-		return err
-	}
-	for index := range children {
-		if err := m.store.linkInboundPublicationEventTx(ctx, m.tx, m.request, children[index]); err != nil {
-			return err
+		if err := publicationStore.linkInboundPublicationEventTx(ctx, tx, request, children[index]); err != nil {
+			return runtimeinbound.CommitResult{}, err
 		}
 	}
-	evidence, err := events.AdmitForPersistence(finalization.EvidenceEvent, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	evidence, err := events.AdmitForPersistence(command.Finalization.EvidenceEvent, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
-		return fmt.Errorf("admit inbound evidence: %w", err)
+		return runtimeinbound.CommitResult{}, fmt.Errorf("admit inbound evidence: %w", err)
 	}
-	committer := sqlPublishCommitter{tx: m.tx, store: m.eventStore, story: m.story}
+	committer := sqlPublishCommitter{tx: tx, store: eventStore, story: runtimeAuthorActivityMutation(story)}
 	if _, err := committer.commitNamedEvent(ctx, "finalize inbound publication evidence", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformInboundRecord, runtimebus.CommitPublishRequest{Event: evidence, ReplayScope: runtimepipelineobligation.ScopeDirect}); err != nil {
-		return fmt.Errorf("commit inbound evidence: %w", err)
+		return runtimeinbound.CommitResult{}, fmt.Errorf("commit inbound evidence: %w", err)
 	}
-	if err := recordInboundAuthorActivity(ctx, m.story, finalization.EvidenceEvent, m.request.Provider); err != nil {
-		return fmt.Errorf("record inbound author activity: %w", err)
+	if err := recordInboundAuthorActivity(ctx, story, command.Finalization.EvidenceEvent, request.Provider, command.AuthorProjection); err != nil {
+		return runtimeinbound.CommitResult{}, fmt.Errorf("record inbound author activity: %w", err)
 	}
-	record, err := m.store.finalizeInboundPublicationTx(ctx, m.tx, m.request, len(finalization.Events))
+	record, err := publicationStore.finalizeInboundPublicationTx(ctx, tx, request, len(command.Finalization.Events))
 	if err != nil {
-		return err
+		return runtimeinbound.CommitResult{}, err
 	}
-	m.finalized = true
-	m.record = record
-	return nil
+	record.Created = true
+	return runtimeinbound.CommitResult{Record: record, Publications: committed}, nil
 }
 
-func (s *PostgresStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
-	request = request.Normalized()
-	if err := request.Validate(); err != nil {
-		return runtimeinbound.Record{}, err
+func (s *PostgresStore) CommitInboundPublication(ctx context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
+	if err := command.Validate(); err != nil {
+		return runtimeinbound.CommitResult{}, err
 	}
-	if fn == nil {
-		return runtimeinbound.Record{}, fmt.Errorf("inbound publication mutation callback is required")
-	}
-	var result runtimeinbound.Record
+	request := command.Request.Normalized()
+	var result runtimeinbound.CommitResult
 	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		identityKey := inboundEventIdempotencyKey(request.ProviderEventID, request.EntityID, request.Provider)
 		if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, identityKey); err != nil {
@@ -157,33 +109,20 @@ func (s *PostgresStore) RunInboundPublicationMutation(ctx context.Context, reque
 			if err := validatePostgresInboundPublicationIntegrityTx(txctx, tx, &existing); err != nil {
 				return err
 			}
-			result = existing
+			result.Record = existing
 			return nil
 		}
-		allowGenerationRebind, err := admitPostgresInboundStandingTargetTx(txctx, s, tx, request)
-		if err != nil {
+		if err := admitPostgresInboundStandingTargetTx(txctx, s, tx, request); err != nil {
 			return err
-		}
-		if allowGenerationRebind {
-			txctx = runtimepipeline.WithStandingGenerationRebind(txctx)
 		}
 		if err := insertPostgresInboundPublicationPreparedTx(txctx, tx, request); err != nil {
 			return err
 		}
-		mutation := newSQLInboundPublicationMutation(txctx, tx, story, s, s)
-		mutation.request = request
-		if err := fn(mutation); err != nil {
-			return err
-		}
-		if !mutation.finalized {
-			return fmt.Errorf("inbound publication callback returned without finalizing the operation")
-		}
-		result = mutation.record
-		result.Created = true
-		return nil
+		result, err = commitInboundPublicationTx(txctx, tx, story, s, s, true, command, request.ExpectedGeneration > 1)
+		return err
 	})
 	if err != nil {
-		return runtimeinbound.Record{}, err
+		return runtimeinbound.CommitResult{}, err
 	}
 	return result, nil
 }
@@ -273,7 +212,7 @@ const postgresInboundPublicationSelect = `
 	SELECT p.publication_id::text, p.provider, p.entity_id::text, p.provider_event_id,
 	       p.request_fingerprint, p.request_projection_version,
 	       p.stable_service_id::text, p.package_key, p.flow_id, p.instance_id,
-	       p.target_alias, p.target_flow_instance, p.expected_publication_sequence,
+	       p.target_alias, p.target_flow_instance, p.expected_generation, p.expected_publication_sequence,
 	       p.resolved_run_id::text, COALESCE(p.marker_event_id::text, ''), p.acknowledgement_mode,
 	       p.output_count, p.original_received_at, p.original_user_agent, p.original_transport_metadata,
 	       p.state, p.created_at, p.committed_at
@@ -288,7 +227,7 @@ func scanPostgresInboundPublication(row inboundPublicationRowScanner) (runtimein
 		&record.PublicationID, &record.Provider, &record.EntityID, &record.ProviderEventID,
 		&record.RequestFingerprint, &record.RequestProjectionVersion,
 		&record.StableServiceID, &record.PackageKey, &record.FlowID, &record.InstanceID,
-		&record.TargetAlias, &record.TargetFlowInstance, &record.ExpectedPublicationSequence,
+		&record.TargetAlias, &record.TargetFlowInstance, &record.ExpectedGeneration, &record.ExpectedPublicationSequence,
 		&record.ResolvedRunID, &record.MarkerEventID, &ackMode, &record.OutputCount,
 		&record.OriginalReceivedAt, &record.OriginalUserAgent, &record.OriginalTransportMetadata,
 		&record.State, &record.CreatedAt, &committedAt,
@@ -348,7 +287,7 @@ func loadPostgresInboundPublicationChildren(ctx context.Context, db inboundPubli
 	return children, nil
 }
 
-func admitPostgresInboundStandingTargetTx(ctx context.Context, s *PostgresStore, tx *sql.Tx, request runtimeinbound.Request) (bool, error) {
+func admitPostgresInboundStandingTargetTx(ctx context.Context, s *PostgresStore, tx *sql.Tx, request runtimeinbound.Request) error {
 	var packageKey, flowID, instanceID, entityID, runID, effectiveState, publicationState string
 	var generation, publicationSequence int64
 	err := tx.QueryRowContext(ctx, `
@@ -357,28 +296,28 @@ func admitPostgresInboundStandingTargetTx(ctx context.Context, s *PostgresStore,
 		FROM standing_services WHERE service_id = $1::uuid FOR UPDATE
 	`, request.StableServiceID).Scan(&packageKey, &flowID, &instanceID, &entityID, &runID, &generation, &publicationSequence, &effectiveState, &publicationState)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, fmt.Errorf("standing service %s is not admitted", request.StableServiceID)
+		return fmt.Errorf("standing service %s is not admitted", request.StableServiceID)
 	}
 	if err != nil {
-		return false, fmt.Errorf("lock inbound standing service: %w", err)
+		return fmt.Errorf("lock inbound standing service: %w", err)
 	}
-	if packageKey != request.PackageKey || flowID != request.FlowID || instanceID != request.InstanceID || entityID != request.EntityID || runID != request.ResolvedRunID || publicationSequence != request.ExpectedPublicationSequence {
-		return false, fmt.Errorf("stale or conflicting inbound standing target")
+	if packageKey != request.PackageKey || flowID != request.FlowID || instanceID != request.InstanceID || entityID != request.EntityID || runID != request.ResolvedRunID || generation != request.ExpectedGeneration || publicationSequence != request.ExpectedPublicationSequence {
+		return fmt.Errorf("stale or conflicting inbound standing target")
 	}
 	if effectiveState != "active" || publicationState != "published" {
-		return false, fmt.Errorf("standing service %s is %s/%s and cannot accept inbound publication", request.StableServiceID, effectiveState, publicationState)
+		return fmt.Errorf("standing service %s is %s/%s and cannot accept inbound publication", request.StableServiceID, effectiveState, publicationState)
 	}
 	if err := (postgresRunLifecycleMutation{store: s, tx: tx}).RequireActive(ctx, request.ResolvedRunID); err != nil {
-		return false, fmt.Errorf("admit inbound target run lifecycle: %w", err)
+		return fmt.Errorf("admit inbound target run lifecycle: %w", err)
 	}
 	var generationRunID string
 	if err := tx.QueryRowContext(ctx, `SELECT run_id::text FROM standing_service_generations WHERE service_id = $1::uuid AND generation = $2 AND retired_at IS NULL FOR UPDATE`, request.StableServiceID, generation).Scan(&generationRunID); err != nil {
-		return false, fmt.Errorf("lock inbound standing generation: %w", err)
+		return fmt.Errorf("lock inbound standing generation: %w", err)
 	}
 	if generationRunID != request.ResolvedRunID {
-		return false, fmt.Errorf("standing generation run changed during inbound admission")
+		return fmt.Errorf("standing generation run changed during inbound admission")
 	}
-	return generation > 1, nil
+	return nil
 }
 
 func insertPostgresInboundPublicationPreparedTx(ctx context.Context, tx *sql.Tx, request runtimeinbound.Request) error {
@@ -386,12 +325,12 @@ func insertPostgresInboundPublicationPreparedTx(ctx context.Context, tx *sql.Tx,
 		INSERT INTO inbound_publications (
 			publication_id, provider, entity_id, provider_event_id, request_fingerprint, request_projection_version,
 			stable_service_id, package_key, flow_id, instance_id, target_alias, target_flow_instance,
-			expected_publication_sequence, resolved_run_id, acknowledgement_mode,
+			expected_generation, expected_publication_sequence, resolved_run_id, acknowledgement_mode,
 			original_received_at, original_user_agent, original_transport_metadata, state, created_at
-		) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7::uuid, $8, $9, $10, $11, $12, $13, $14::uuid, $15, $16, $17, $18::jsonb, 'prepared', now())
+		) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7::uuid, $8, $9, $10, $11, $12, $13, $14, $15::uuid, $16, $17, $18, $19::jsonb, 'prepared', now())
 	`, request.PublicationID, request.Provider, request.EntityID, request.ProviderEventID, request.RequestFingerprint, request.RequestProjectionVersion,
 		request.StableServiceID, request.PackageKey, request.FlowID, request.InstanceID, request.TargetAlias, request.TargetFlowInstance,
-		request.ExpectedPublicationSequence, request.ResolvedRunID, string(request.AcknowledgementMode), request.OriginalReceivedAt, request.OriginalUserAgent, string(request.OriginalTransportMetadata))
+		request.ExpectedGeneration, request.ExpectedPublicationSequence, request.ResolvedRunID, string(request.AcknowledgementMode), request.OriginalReceivedAt, request.OriginalUserAgent, string(request.OriginalTransportMetadata))
 	if err != nil {
 		return fmt.Errorf("insert prepared inbound publication: %w", err)
 	}

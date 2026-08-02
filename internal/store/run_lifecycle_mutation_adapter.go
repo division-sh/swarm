@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
 
 type postgresRunLifecycleMutation struct {
@@ -101,6 +102,22 @@ func (s *SQLiteRuntimeStore) RequireActiveRun(ctx context.Context, runID string)
 		return err
 	}
 	return (sqliteRunLifecycleMutation{store: s, tx: tx}).RequireActive(ctx, runID)
+}
+
+// RequirePublicationRunActive performs the closed preflight used before route
+// planning. The event commit repeats this check in its own transaction; this
+// operation only guarantees that terminal-run refusal cannot be shadowed by a
+// later route-planning error.
+func (s *PostgresStore) RequirePublicationRunActive(ctx context.Context, runID string) error {
+	return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
+		return (postgresRunLifecycleMutation{store: s, tx: tx}).RequireActive(txctx, runID)
+	})
+}
+
+func (s *SQLiteRuntimeStore) RequirePublicationRunActive(ctx context.Context, runID string) error {
+	return s.runPrivateAuthorActivityMutation(ctx, "sqlite publication run preflight", func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
+		return (sqliteRunLifecycleMutation{store: s, tx: tx}).RequireActive(txctx, runID)
+	})
 }
 
 func (s *PostgresStore) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {

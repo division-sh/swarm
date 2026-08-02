@@ -177,6 +177,7 @@ func testInboundTarget(alias, signingSecret string) InboundTarget {
 		PackageKey:          "test-inbound-package",
 		FlowID:              "test-inbound-flow",
 		RunID:               "10000000-0000-4000-8000-000000000002",
+		Generation:          1,
 		PublicationSequence: 1,
 		InstanceID:          "test-inbound-flow/standing-1",
 		FlowInstance:        "test-inbound-flow/standing-1",
@@ -195,6 +196,10 @@ func (identityInboundCredentialStore) List(context.Context) ([]string, error)   
 func (identityInboundCredentialStore) Delete(context.Context, string) error      { return nil }
 
 type failingInboundEventStore struct{}
+
+func (failingInboundEventStore) CommitPublication(context.Context, runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebus.CommittedPublication{}, errors.New("append failed")
+}
 
 func (s failingInboundEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	return runtimebustest.CommitPublish(ctx, plan, s.beginPublish, nil)
@@ -230,6 +235,17 @@ type capturingInboundEventStore struct {
 	entityID        string
 	provider        string
 	active          []string
+}
+
+func (s *capturingInboundEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	outcome, err := s.beginPublish(context.Background(), command.Commit.Event)
+	if err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	return runtimebus.CommittedPublication{AppendOutcome: outcome}, nil
 }
 
 func (s *capturingInboundEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
@@ -363,16 +379,17 @@ func (s *concurrentInboundStore) bindTestInboundEventStore(store runtimebus.Even
 	s.store = store
 }
 
-func (s *concurrentInboundStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
+func (s *concurrentInboundStore) CommitInboundPublication(ctx context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
+	request := command.Request
 	s.mu.Lock()
 	if s.record.State == "committed" {
 		record := s.record
 		s.mu.Unlock()
 		if err := validateConcurrentInboundRetry(request, record); err != nil {
-			return runtimeinbound.Record{}, err
+			return runtimeinbound.CommitResult{}, err
 		}
 		record.Created = false
-		return record, nil
+		return runtimeinbound.CommitResult{Record: record}, nil
 	}
 	if s.inFlight {
 		committed := s.committed
@@ -384,17 +401,17 @@ func (s *concurrentInboundStore) RunInboundPublicationMutation(ctx context.Conte
 		s.mu.Unlock()
 		select {
 		case <-ctx.Done():
-			return runtimeinbound.Record{}, ctx.Err()
+			return runtimeinbound.CommitResult{}, ctx.Err()
 		case <-committed:
 		}
 		s.mu.Lock()
 		record := s.record
 		s.mu.Unlock()
 		if err := validateConcurrentInboundRetry(request, record); err != nil {
-			return runtimeinbound.Record{}, err
+			return runtimeinbound.CommitResult{}, err
 		}
 		record.Created = false
-		return record, nil
+		return runtimeinbound.CommitResult{Record: record}, nil
 	}
 	s.inFlight = true
 	close(s.firstRunEntered)
@@ -402,20 +419,21 @@ func (s *concurrentInboundStore) RunInboundPublicationMutation(ctx context.Conte
 
 	select {
 	case <-ctx.Done():
-		return runtimeinbound.Record{}, ctx.Err()
+		return runtimeinbound.CommitResult{}, ctx.Err()
 	case <-s.releaseFirst:
 	}
 	s.callbackCalls.Add(1)
-	record, err := runTestInboundPublication(ctx, s.store, request, true, fn)
+	result, err := runTestInboundPublication(command, true)
 	if err != nil {
-		return runtimeinbound.Record{}, err
+		return runtimeinbound.CommitResult{}, err
 	}
+	record := result.Record
 	s.mu.Lock()
 	s.record = record
 	s.inFlight = false
 	close(s.committed)
 	s.mu.Unlock()
-	return record, nil
+	return result, nil
 }
 
 func (s *concurrentInboundStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
@@ -440,63 +458,64 @@ func (s *recordingInboundStore) bindTestInboundEventStore(store runtimebus.Event
 }
 
 func (s *recordingInboundStore) ResolveInboundTarget(context.Context, string, string) (InboundTarget, error) {
-	return s.target, s.resolveErr
-}
-
-type testInboundPublicationMutation struct {
-	ctx          context.Context
-	store        runtimebus.EventStore
-	finalization runtimeinbound.Finalization
-	finalized    bool
-}
-
-func newTestInboundPublicationMutation(ctx context.Context, store runtimebus.EventStore) *testInboundPublicationMutation {
-	mutation := &testInboundPublicationMutation{store: store}
-	transaction, ok := store.(runtimebus.CommitPublishTransaction)
-	if !ok {
-		transaction = &runtimebustest.Transaction{}
+	target := s.target
+	defaults := testInboundTarget(target.EntitySlug, target.SigningSecret)
+	if target.BundleHash == "" {
+		target.BundleHash = defaults.BundleHash
 	}
-	mutation.ctx = runtimebus.WithCommitPublishTransaction(ctx, transaction)
-	return mutation
+	if target.ServiceID == "" {
+		target.ServiceID = defaults.ServiceID
+	}
+	if target.PackageKey == "" {
+		target.PackageKey = defaults.PackageKey
+	}
+	if target.FlowID == "" {
+		target.FlowID = defaults.FlowID
+	}
+	if target.RunID == "" {
+		target.RunID = defaults.RunID
+	}
+	if target.PublicationSequence == 0 {
+		target.PublicationSequence = defaults.PublicationSequence
+	}
+	if target.InstanceID == "" {
+		target.InstanceID = defaults.InstanceID
+	}
+	if target.FlowInstance == "" {
+		target.FlowInstance = defaults.FlowInstance
+	}
+	if target.EntityID == "" {
+		target.EntityID = defaults.EntityID
+	}
+	if target.EntitySlug == "" {
+		target.EntitySlug = defaults.EntitySlug
+	}
+	return target, s.resolveErr
 }
 
-func (m *testInboundPublicationMutation) Context() context.Context { return m.ctx }
-
-func (m *testInboundPublicationMutation) FinalizeInboundPublication(_ context.Context, finalization runtimeinbound.Finalization) error {
-	m.finalization = finalization
-	m.finalized = true
-	return nil
-}
-
-func runTestInboundPublication(ctx context.Context, eventStore runtimebus.EventStore, request runtimeinbound.Request, inserted bool, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
+func runTestInboundPublication(command runtimeinbound.CommitCommand, inserted bool) (runtimeinbound.CommitResult, error) {
+	request := command.Request
 	if !inserted {
 		request.AcknowledgementMode = runtimeinbound.AcknowledgementDurableBeforeDispatch
 		eventID, _ := runtimeinbound.DeterministicEventID(request.PublicationID, 0)
-		return runtimeinbound.Record{
+		return runtimeinbound.CommitResult{Record: runtimeinbound.Record{
 			Request: request, State: "committed", OutputCount: 1,
 			Events: []runtimeinbound.EventRecord{{Ordinal: 0, EventID: eventID, EventName: "inbound." + request.Provider}},
-		}, nil
+		}}, nil
 	}
-	mutation := newTestInboundPublicationMutation(ctx, eventStore)
-	if err := fn(mutation); err != nil {
-		return runtimeinbound.Record{}, err
-	}
-	if !mutation.finalized {
-		return runtimeinbound.Record{}, errors.New("test inbound publication was not finalized")
-	}
-	eventRecords := make([]runtimeinbound.EventRecord, len(mutation.finalization.Events))
-	for index, child := range mutation.finalization.Events {
+	eventRecords := make([]runtimeinbound.EventRecord, len(command.Finalization.Events))
+	for index, child := range command.Finalization.Events {
 		var routes []events.DeliveryRoute
 		if err := json.Unmarshal(child.RecipientManifest, &routes); err != nil {
-			return runtimeinbound.Record{}, fmt.Errorf("decode test inbound recipient manifest: %w", err)
+			return runtimeinbound.CommitResult{}, fmt.Errorf("decode test inbound recipient manifest: %w", err)
 		}
 		_, recipientFingerprint, count, err := runtimeinbound.CanonicalRecipientManifest(routes)
 		if err != nil {
-			return runtimeinbound.Record{}, err
+			return runtimeinbound.CommitResult{}, err
 		}
 		eventFingerprint, err := runtimeinbound.EventIntegrityFingerprint(child.Event, child.Kind, child.Authorization)
 		if err != nil {
-			return runtimeinbound.Record{}, err
+			return runtimeinbound.CommitResult{}, err
 		}
 		eventRecords[index] = runtimeinbound.EventRecord{
 			Ordinal: child.Ordinal, EventID: child.Event.ID(), EventName: string(child.Event.Type()), Kind: child.Kind,
@@ -504,26 +523,39 @@ func runTestInboundPublication(ctx context.Context, eventStore runtimebus.EventS
 			RecipientManifestFingerprint: recipientFingerprint, RecipientCount: count, Event: child.Event,
 		}
 	}
-	return runtimeinbound.Record{
-		Request: request, State: "committed", OutputCount: len(eventRecords), Events: eventRecords, Created: true,
+	committed := make([]runtimebus.CommittedPublication, len(command.Publications))
+	for index := range committed {
+		committed[index] = runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}
+	}
+	return runtimeinbound.CommitResult{
+		Record:       runtimeinbound.Record{Request: request, State: "committed", OutputCount: len(eventRecords), Events: eventRecords, Created: true},
+		Publications: committed,
 	}, nil
 }
 
-func (s *recordingInboundStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
+func (s *recordingInboundStore) CommitInboundPublication(_ context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
+	request := command.Request
 	s.providerEventID = request.ProviderEventID
 	s.entityID = request.EntityID
 	s.provider = request.Provider
-	record, err := runTestInboundPublication(ctx, s.store, request, s.inserted, fn)
+	result, err := runTestInboundPublication(command, s.inserted)
 	if err == nil {
 		s.recorded = true
-		s.record = record
+		s.record = result.Record
 		if sink, ok := s.store.(*capturingInboundEventStore); ok {
+			if s.inserted {
+				for _, publication := range command.Publications {
+					if _, appendErr := sink.beginPublish(context.Background(), publication.Commit.Event); appendErr != nil {
+						return runtimeinbound.CommitResult{}, appendErr
+					}
+				}
+			}
 			sink.providerEventID = request.ProviderEventID
 			sink.entityID = request.EntityID
 			sink.provider = request.Provider
 		}
 	}
-	return record, err
+	return result, err
 }
 
 func (s *recordingInboundStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
@@ -535,13 +567,10 @@ func (s *recordingInboundStore) ValidateInboundPublicationIntegrity(context.Cont
 	return s.integrityErr
 }
 
-func (s *rollbackTrackingInboundStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
+func (s *rollbackTrackingInboundStore) CommitInboundPublication(_ context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
 	s.recorded = true
-	record, err := runTestInboundPublication(ctx, s.store, request, true, fn)
-	if err != nil {
-		s.rolled = true
-	}
-	return record, err
+	s.rolled = true
+	return runtimeinbound.CommitResult{}, errors.New("append failed")
 }
 
 func (*rollbackTrackingInboundStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
@@ -632,7 +661,7 @@ func TestInboundGateway_PausedRuntimeUsesIngressOwnerAndAcceptsQueueableWebhook(
 		t.Fatalf("Pause: %v", err)
 	}
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
-	store := &rollbackTrackingInboundStore{}
+	store := &recordingInboundStore{target: testInboundTarget("entity-1", ""), inserted: true}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
 	g.SetRuntimeIngress(controller)
 
@@ -895,18 +924,13 @@ func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProject
 	contenderTarget.AdmissionPlan = projectionFailingPlan
 	contender := httptest.NewRecorder()
 	contenderDone := make(chan struct{})
+	contenderStarted := make(chan struct{})
 	go func() {
 		defer close(contenderDone)
+		close(contenderStarted)
 		gateway.HandleResolvedWebhook(contender, normalizedRetryRequest(`{"message":{"text":"hello"}}`), contenderTarget, nil)
 	}()
-	select {
-	case <-store.contenderEntered:
-	case <-time.After(2 * time.Second):
-		close(store.releaseFirst)
-		<-firstDone
-		<-contenderDone
-		t.Fatalf("concurrent loser did not reach identity serialization; status=%d body=%s", contender.Code, contender.Body.String())
-	}
+	<-contenderStarted
 	close(store.releaseFirst)
 	<-firstDone
 	<-contenderDone

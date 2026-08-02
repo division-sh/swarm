@@ -108,6 +108,7 @@ type workflowInstancePersistedProjection struct {
 
 type workflowInstancePersistedControl struct {
 	StorageRef         string                     `json:"storage_ref"`
+	EntityID           string                     `json:"entity_id"`
 	Slug               string                     `json:"slug"`
 	Name               string                     `json:"name"`
 	EntityType         string                     `json:"entity_type"`
@@ -140,6 +141,7 @@ type workflowInstanceStore struct {
 	lifecycleOwner   workflowInstanceLifecycleOwner
 	runLifecycle     runtimerunlifecycle.OperationOwner
 	engineMutations  WorkflowEngineMutationOwner
+	cardMutations    DecisionCardMutationOwner
 	timerOccurrences WorkflowTimerOccurrenceOwner
 	decisionRoutes   WorkflowDecisionRouteOwner
 	deliverySignalMu sync.RWMutex
@@ -221,9 +223,10 @@ func NewPostgresWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) Wo
 	gateRoutes, _ := runner.(GateRouteAdmissionReader)
 	timerObligations, _ := runner.(runtimetimerobligation.Reader)
 	engineMutations, _ := runner.(WorkflowEngineMutationOwner)
+	cardMutations, _ := runner.(DecisionCardMutationOwner)
 	timerOccurrences, _ := runner.(WorkflowTimerOccurrenceOwner)
 	decisionRoutes, _ := runner.(WorkflowDecisionRouteOwner)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations, timerOccurrences: timerOccurrences, decisionRoutes: decisionRoutes}}
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations, cardMutations: cardMutations, timerOccurrences: timerOccurrences, decisionRoutes: decisionRoutes}}
 }
 
 func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) WorkflowPersistence {
@@ -234,9 +237,10 @@ func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) Work
 	gateRoutes, _ := runner.(GateRouteAdmissionReader)
 	timerObligations, _ := runner.(runtimetimerobligation.Reader)
 	engineMutations, _ := runner.(WorkflowEngineMutationOwner)
+	cardMutations, _ := runner.(DecisionCardMutationOwner)
 	timerOccurrences, _ := runner.(WorkflowTimerOccurrenceOwner)
 	decisionRoutes, _ := runner.(WorkflowDecisionRouteOwner)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations, timerOccurrences: timerOccurrences, decisionRoutes: decisionRoutes}}
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations, cardMutations: cardMutations, timerOccurrences: timerOccurrences, decisionRoutes: decisionRoutes}}
 }
 
 func (p WorkflowPersistence) empty() bool {
@@ -881,6 +885,7 @@ func (s *workflowInstanceStore) loadSpec(ctx context.Context, instancePath strin
 	}
 	var (
 		item         WorkflowInstance
+		entityID     string
 		gatesRaw     []byte
 		fieldsRaw    []byte
 		configRaw    []byte
@@ -923,7 +928,7 @@ func (s *workflowInstanceStore) loadSpec(ctx context.Context, instancePath strin
 		query += ` FOR UPDATE OF es`
 	}
 	err = dbQueryRowContext(ctx, s.db, query, strings.Trim(strings.TrimSpace(instancePath), "/"), runID).Scan(
-		&item.InstanceID,
+		&entityID,
 		&item.WorkflowName,
 		&item.WorkflowVersion,
 		&status,
@@ -954,6 +959,7 @@ func (s *workflowInstanceStore) loadSpec(ctx context.Context, instancePath strin
 	}
 	projection, err := decodeWorkflowInstancePersistedProjection(fieldsRaw, gatesRaw, accRaw, configRaw, workflowInstancePersistedControl{
 		StorageRef: strings.TrimSpace(flowInstance),
+		EntityID:   strings.TrimSpace(entityID),
 		Slug:       slug.String,
 		Name:       name.String,
 		EntityType: entityType,
@@ -1089,6 +1095,7 @@ func (s *workflowInstanceStore) querySpec(ctx context.Context, runID, where stri
 	for rows.Next() {
 		var (
 			item         WorkflowInstance
+			entityID     string
 			gatesRaw     []byte
 			fieldsRaw    []byte
 			configRaw    []byte
@@ -1101,7 +1108,7 @@ func (s *workflowInstanceStore) querySpec(ctx context.Context, runID, where stri
 			terminatedAt sql.NullTime
 		)
 		if err := rows.Scan(
-			&item.InstanceID,
+			&entityID,
 			&item.WorkflowName,
 			&item.WorkflowVersion,
 			&status,
@@ -1128,6 +1135,7 @@ func (s *workflowInstanceStore) querySpec(ctx context.Context, runID, where stri
 		}
 		projection, err := decodeWorkflowInstancePersistedProjection(fieldsRaw, gatesRaw, accRaw, configRaw, workflowInstancePersistedControl{
 			StorageRef: strings.TrimSpace(flowInstance),
+			EntityID:   strings.TrimSpace(entityID),
 			Slug:       slug.String,
 			Name:       name.String,
 			EntityType: entityType,
@@ -1645,6 +1653,7 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 	}
 	control := workflowInstancePersistedControl{
 		StorageRef:         strings.TrimSpace(persistedIdentity.StorageRef),
+		EntityID:           strings.TrimSpace(persistedIdentity.EntityID),
 		Slug:               strings.TrimSpace(asString(instance.Metadata["slug"])),
 		Name:               strings.TrimSpace(asString(instance.Metadata["name"])),
 		EntityType:         strings.TrimSpace(asString(instance.Metadata["entity_type"])),
@@ -1662,7 +1671,7 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 		control.FlowPath = strings.TrimSpace(persistedIdentity.InstancePath)
 	}
 	for _, key := range []string{
-		"slug", "name", "entity_type", "parent_flow_id", "parent_flow_instance", "parent_entity_id",
+		"slug", "name", "entity_type", "entity_id", "parent_flow_id", "parent_flow_instance", "parent_entity_id",
 		"instance_id", "storage_ref", "flow_path", "instance_kind",
 		"template_version", "workflow_version", "transition_history",
 	} {
@@ -1693,6 +1702,9 @@ func (p workflowInstancePersistedProjection) Metadata() map[string]any {
 	}
 	if strings.TrimSpace(p.Control.EntityType) != "" {
 		metadata["entity_type"] = strings.TrimSpace(p.Control.EntityType)
+	}
+	if strings.TrimSpace(p.Control.EntityID) != "" {
+		metadata["entity_id"] = strings.TrimSpace(p.Control.EntityID)
 	}
 	if strings.TrimSpace(p.Control.StorageRef) != "" {
 		metadata["storage_ref"] = strings.TrimSpace(p.Control.StorageRef)

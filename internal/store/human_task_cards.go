@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -212,7 +213,7 @@ func (s *PostgresStore) ExpireHumanTaskCardsInMutation(ctx context.Context, now 
 	if !ok || tx == nil {
 		return nil, fmt.Errorf("human-task expiry requires an active pipeline transaction")
 	}
-	return expireHumanTaskCards(ctx, tx, now, limit, true)
+	return expireHumanTaskCards(ctx, nil, tx, now, limit, true)
 }
 
 func (s *SQLiteRuntimeStore) ExpireHumanTaskCardsInMutation(ctx context.Context, now time.Time, limit int) ([]events.Event, error) {
@@ -220,10 +221,10 @@ func (s *SQLiteRuntimeStore) ExpireHumanTaskCardsInMutation(ctx context.Context,
 	if !ok || tx == nil {
 		return nil, fmt.Errorf("human-task expiry requires an active pipeline transaction")
 	}
-	return expireHumanTaskCards(ctx, tx, now, limit, false)
+	return expireHumanTaskCards(ctx, nil, tx, now, limit, false)
 }
 
-func expireHumanTaskCards(ctx context.Context, tx *sql.Tx, now time.Time, limit int, postgres bool) ([]events.Event, error) {
+func expireHumanTaskCards(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, now time.Time, limit int, postgres bool) ([]events.Event, error) {
 	now = decisioncard.CanonicalTimestamp(now)
 	if now.IsZero() {
 		return nil, fmt.Errorf("human-task expiry requires an authoritative timestamp")
@@ -292,7 +293,7 @@ func expireHumanTaskCards(ctx context.Context, tx *sql.Tx, now time.Time, limit 
 		} else if affected, _ := result.RowsAffected(); affected != 1 {
 			return nil, fmt.Errorf("human-task card expiry lost continuation authority")
 		}
-		if _, err := appendDecisionCardChangeDTO(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeExpired, map[string]any{
+		if _, err := appendDecisionCardChangeDTOWithStory(ctx, story, tx, card.RunID, card.CardID, decisioncard.ChangeExpired, map[string]any{
 			"cause": "deadline_elapsed", "deadline_at": continuation.DeadlineAt.UTC().Format(time.RFC3339Nano),
 		}, now, postgres); err != nil {
 			return nil, err

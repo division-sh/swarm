@@ -27,7 +27,6 @@ var (
 )
 
 type EventStore interface {
-	CommitPublishOwner
 	ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error)
 }
 
@@ -42,12 +41,35 @@ type CommitPublicationOwner interface {
 	CommitPublication(context.Context, PublicationCommand) (CommittedPublication, error)
 }
 
+type FlowInstanceActivationCommand struct {
+	Plan          runtimepipeline.FlowInstanceActivationPlan
+	RouteTopology []FlowInstanceRouteRecordSet
+}
+
+func (c FlowInstanceActivationCommand) Validate() error {
+	if err := c.Plan.Validate(); err != nil {
+		return err
+	}
+	if err := validateFlowInstanceRouteTopology(c.RouteTopology); err != nil {
+		return err
+	}
+	if len(c.RouteTopology) == 0 {
+		return errors.New("flow instance activation requires exact route topology")
+	}
+	return nil
+}
+
+type FlowInstanceActivationCommitOwner interface {
+	CommitFlowInstanceActivation(context.Context, FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error)
+}
+
 // PublicationCommand is the complete durable publication command after event
 // admission and route planning. Activation plans are semantic facts derived by
 // the runtime; selected-store adapters persist them atomically with the event.
 type PublicationCommand struct {
 	Commit              CommitPublishRequest
 	Activations         []runtimepipeline.FlowInstanceActivationPlan
+	RouteTopology       []FlowInstanceRouteRecordSet
 	DynamicFlowCreation *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
 	AuthorScope         runtimeauthoractivity.Scope
 	HasAuthorScope      bool
@@ -82,6 +104,12 @@ func (c PublicationCommand) Validate() error {
 			return fmt.Errorf("publication activation %d: %w", index, err)
 		}
 	}
+	if err := validateFlowInstanceRouteTopology(c.RouteTopology); err != nil {
+		return fmt.Errorf("publication route topology: %w", err)
+	}
+	if len(c.RouteTopology) > 0 && len(c.Activations) == 0 {
+		return fmt.Errorf("publication route topology requires a flow activation")
+	}
 	if c.DynamicFlowCreation != nil {
 		if err := c.DynamicFlowCreation.Validate(); err != nil {
 			return err
@@ -103,6 +131,7 @@ type CommittedPublication struct {
 	AppendOutcome    EventAppendOutcome
 	DeliveryHandoffs []runtimedelivery.DurableHandoffProof
 	Activations      []CommittedFlowInstanceActivation
+	RouteTopology    []FlowInstanceRouteRecordSet
 }
 
 func (r CommittedPublication) Validate() error {
@@ -119,23 +148,13 @@ func (r CommittedPublication) Validate() error {
 			return fmt.Errorf("committed flow activation %d: %w", index, err)
 		}
 	}
-	return nil
-}
-
-// CommittedFlowInstanceActivation is immutable post-commit evidence that the
-// exact activation plan is durable. Runtime may install process-local topology
-// only after consuming this evidence.
-type CommittedFlowInstanceActivation struct {
-	Plan    runtimepipeline.FlowInstanceActivationPlan
-	Created bool
-}
-
-func (a CommittedFlowInstanceActivation) Validate() error {
-	if err := a.Plan.Validate(); err != nil {
-		return err
+	if err := validateFlowInstanceRouteTopology(r.RouteTopology); err != nil {
+		return fmt.Errorf("committed route topology: %w", err)
 	}
 	return nil
 }
+
+type CommittedFlowInstanceActivation = runtimepipeline.CommittedFlowInstanceActivation
 
 // PreparedPublishEventReader exposes canonical persisted event facts without
 // exposing a query handle. It exists so duplicate planning can reuse stamped
@@ -304,6 +323,27 @@ type FlowInstanceRouteRecordSet struct {
 	Routes   []FlowInstanceRouteRecord
 }
 
+func validateFlowInstanceRouteTopology(sets []FlowInstanceRouteRecordSet) error {
+	seen := make(map[runtimeflowidentity.Route]struct{}, len(sets))
+	for setIndex, set := range sets {
+		identity := runtimeflowidentity.StoredRoute(set.Identity.ScopeKey, set.Identity.InstanceID, set.Identity.InstancePath)
+		if !identity.Valid() || identity != set.Identity {
+			return fmt.Errorf("route set %d requires canonical exact identity", setIndex)
+		}
+		if _, exists := seen[identity]; exists {
+			return fmt.Errorf("route set %d repeats owner %s", setIndex, identity.InstancePath)
+		}
+		seen[identity] = struct{}{}
+		for routeIndex, route := range set.Routes {
+			if route.Identity != identity || strings.TrimSpace(route.EventPattern) == "" ||
+				strings.TrimSpace(route.SubscriberType) == "" || strings.TrimSpace(route.SubscriberID) == "" {
+				return fmt.Errorf("route set %d record %d requires exact owner, event pattern, and subscriber", setIndex, routeIndex)
+			}
+		}
+	}
+	return nil
+}
+
 // FlowInstanceRouteTopologyPersistence atomically replaces every affected
 // route owner in one closed selected-store operation.
 type FlowInstanceRouteTopologyPersistence interface {
@@ -468,6 +508,37 @@ type EventDeliveryRouteSetReader interface {
 }
 
 type InMemoryEventStore struct{}
+
+func (InMemoryEventStore) CommitPublication(_ context.Context, command PublicationCommand) (CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return CommittedPublication{}, err
+	}
+	if command.DynamicFlowCreation != nil {
+		return CommittedPublication{}, errors.New("dynamic flow creation requires a durable selected store")
+	}
+	result := CommittedPublication{
+		AppendOutcome: EventAppendInserted,
+		RouteTopology: cloneFlowInstanceRouteTopology(command.RouteTopology),
+	}
+	for _, plan := range command.Activations {
+		result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan, Created: true})
+	}
+	return result, result.Validate()
+}
+
+func cloneFlowInstanceRouteTopology(sets []FlowInstanceRouteRecordSet) []FlowInstanceRouteRecordSet {
+	if len(sets) == 0 {
+		return nil
+	}
+	out := make([]FlowInstanceRouteRecordSet, len(sets))
+	for index, set := range sets {
+		out[index] = FlowInstanceRouteRecordSet{
+			Identity: set.Identity,
+			Routes:   append([]FlowInstanceRouteRecord(nil), set.Routes...),
+		}
+	}
+	return out
+}
 
 func (s InMemoryEventStore) CommitPublish(ctx context.Context, plan CommitPublishPlan) (PreparedPublish, error) {
 	if plan == nil {

@@ -435,6 +435,35 @@ func (o flowActivationTestTerminationOwner) CommitFlowInstanceTermination(ctx co
 	return runtimepipeline.FlowInstanceTermination{Instance: instance, Route: canonicalRoute}, nil
 }
 
+type flowActivationTestCommitter struct {
+	instances flowInstancePersistence
+	routes    FlowInstanceRouteContextInstaller
+}
+
+func (o flowActivationTestCommitter) CommitFlowInstanceActivation(
+	ctx context.Context,
+	plan runtimepipeline.FlowInstanceActivationPlan,
+) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	if o.instances == nil || o.routes == nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, errors.New("test flow activation commit owners are required")
+	}
+	result, err := o.instances.MaterializeInitialEntry(ctx, plan.Instance, plan.OccurredAt)
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	if result != runtimepipeline.WorkflowInitialMaterializationCreated && result != runtimepipeline.WorkflowInitialMaterializationAlreadyExists {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, fmt.Errorf("unknown test flow activation result %d", result)
+	}
+	if err := o.routes.StageFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
+		Identity: plan.Identity.Route(), ActivationVariables: plan.ActivationVariables,
+	}); err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	return runtimepipeline.CommittedFlowInstanceActivation{
+		Plan: plan, Created: result == runtimepipeline.WorkflowInitialMaterializationCreated,
+	}, nil
+}
+
 func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersistence, stores ...ManagerPersistence) *AgentManager {
 	t.Helper()
 	if len(stores) == 0 {
@@ -458,13 +487,21 @@ func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersi
 			typed.flowActivationTestBus.creationStore = testInstances
 		}
 	}
+	routes, _ := bus.(FlowInstanceRouteContextInstaller)
+	activationOwner, _ := bus.(FlowInstanceActivationCommitter)
+	if activationOwner == nil {
+		activationOwner = flowActivationTestCommitter{instances: instances, routes: routes}
+	}
 	return newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
 		WorkflowInstances: instances,
 		LifecycleStore:    lifecycleStore,
 		WorkOwner:         newTestManagerWorkOwner(t),
 		BaseContext:       testAuthorActivityContext(context.Background()),
 		BundleSourceFact:  authorActivityTestBundleSourceFact,
-		PersistenceRoles:  PersistenceRoles{FlowTermination: terminalOwner},
+		PersistenceRoles: PersistenceRoles{
+			FlowActivation:  activationOwner,
+			FlowTermination: terminalOwner,
+		},
 	}, stores...)
 }
 
@@ -1521,7 +1558,7 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	}
 }
 
-func TestActivateFlowInstanceDefersAgentStartupUntilMutationCommit(t *testing.T) {
+func TestActivateFlowInstanceDoesNotConsumeAmbientTransactionAuthority(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("")
@@ -1532,22 +1569,14 @@ func TestActivateFlowInstanceDefersAgentStartupUntilMutationCommit(t *testing.T)
 	if err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if len(bus.addedPaths) != 0 {
-		t.Fatalf("transactional route materialized before commit: %#v", bus.addedPaths)
-	}
-	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
-		t.Fatal("flow agent started before the activation transaction committed")
-	}
-	if len(postCommit) != 1 {
-		t.Fatalf("post-commit actions = %d, want one keyed readiness reconciliation", len(postCommit))
-	}
-
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
 	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
-		t.Fatal("flow agent did not start after activation commit")
+		t.Fatal("flow agent did not start from the closed activation result")
 	}
 	if len(bus.addedPaths) != 1 || bus.addedPaths[0] != "review/inst-1" {
-		t.Fatalf("post-commit route materialization = %#v, want review/inst-1", bus.addedPaths)
+		t.Fatalf("committed route materialization = %#v, want review/inst-1", bus.addedPaths)
+	}
+	if len(postCommit) != 0 {
+		t.Fatalf("ambient post-commit actions = %d, want zero", len(postCommit))
 	}
 }
 

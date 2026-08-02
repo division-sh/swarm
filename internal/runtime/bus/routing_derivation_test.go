@@ -99,6 +99,16 @@ func (s *routePersistenceTestStore) CommitPublish(ctx context.Context, plan runt
 	}})
 }
 
+func (s *routePersistenceTestStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	if err := s.InsertEventDeliveryRoutes(ctx, command.Commit.Event.ID(), command.Commit.DeliveryRoutes); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
+}
+
 func (s *routePersistenceTestStore) InsertEventDeliveries(_ context.Context, eventID string, agentIDs []string) error {
 	if s.deliveries == nil {
 		s.deliveries = map[string][]string{}

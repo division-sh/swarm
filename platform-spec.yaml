@@ -12146,6 +12146,7 @@ platform_tables:
             instance_id                  TEXT NOT NULL,
             target_alias                 TEXT NOT NULL,
             target_flow_instance         TEXT NOT NULL,
+            expected_generation          BIGINT NOT NULL CHECK (expected_generation > 0),
             expected_publication_sequence BIGINT NOT NULL CHECK (expected_publication_sequence >= 0),
             resolved_run_id              UUID NOT NULL REFERENCES runs(run_id),
             marker_event_id              UUID UNIQUE REFERENCES events(event_id),

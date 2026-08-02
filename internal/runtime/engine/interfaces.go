@@ -87,6 +87,7 @@ type DurablePublicationPlan interface {
 // committed successfully.
 type CommittedDurablePublication interface {
 	CommittedDurablePublicationEventID() string
+	CommittedDurablePublicationIntent() EmitIntent
 	ValidateCommittedDurablePublication() error
 }
 

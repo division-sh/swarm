@@ -406,7 +406,20 @@ func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testi
 	}
 }
 
-func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *testing.T) {
+type sqliteFlowActivationCommitter struct {
+	store *SQLiteRuntimeStore
+}
+
+func (o sqliteFlowActivationCommitter) CommitFlowInstanceActivation(ctx context.Context, plan runtimepipeline.FlowInstanceActivationPlan) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	return o.store.CommitFlowInstanceActivation(ctx, runtimebus.FlowInstanceActivationCommand{
+		Plan: plan,
+		RouteTopology: []runtimebus.FlowInstanceRouteRecordSet{{
+			Identity: plan.Identity.Route(),
+		}},
+	})
+}
+
+func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *testing.T) {
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContext()), runID)
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
@@ -425,6 +438,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 		WorkOwner:         storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			AgentRoutes:    bus,
+			FlowActivation: sqliteFlowActivationCommitter{store: sqliteStore},
 			RouteInstaller: bus,
 			RouteVerifier:  bus,
 			RouteRestorer:  bus,
@@ -432,10 +446,8 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, sqliteStore))
 	req := sqliteFlowActivationRequest(bundle, "review", "inst-1", "parent-ent", "review/inst-1")
-	if err := sqliteStore.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		return manager.ActivateFlowInstance(txctx, req)
-	}); err != nil {
-		t.Fatalf("ActivateFlowInstance inside sqlite pipeline transaction: %v", err)
+	if err := manager.ActivateFlowInstance(ctx, req); err != nil {
+		t.Fatalf("ActivateFlowInstance through closed SQLite owner: %v", err)
 	}
 
 	loaded, ok, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath("review/inst-1"))
@@ -478,6 +490,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 		WorkOwner:         storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			AgentRoutes:    bus,
+			FlowActivation: sqliteFlowActivationCommitter{store: sqliteStore},
 			RouteInstaller: bus,
 			RouteVerifier:  bus,
 			RouteRestorer:  bus,
@@ -494,9 +507,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 			defer wg.Done()
 			<-start
 			req := sqliteFlowActivationRequest(bundle, "review", instanceID, "parent-ent", "review/"+instanceID)
-			errs <- sqliteStore.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-				return manager.ActivateFlowInstance(txctx, req)
-			})
+			errs <- manager.ActivateFlowInstance(ctx, req)
 		}()
 	}
 	close(start)
@@ -769,8 +780,8 @@ func (b *sqliteFlowActivationBus) routePaths() []string {
 func (b *sqliteFlowActivationBus) materializationRequests() []runtimebus.FlowInstanceRouteMaterializationRequest {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	out := make([]runtimebus.FlowInstanceRouteMaterializationRequest, len(b.stagedRequests))
-	copy(out, b.stagedRequests)
+	out := make([]runtimebus.FlowInstanceRouteMaterializationRequest, len(b.routeRequests))
+	copy(out, b.routeRequests)
 	return out
 }
 

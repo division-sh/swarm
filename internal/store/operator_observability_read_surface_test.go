@@ -10,9 +10,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -259,17 +259,21 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 		t.Fatalf("begin bulk runtime-log fixture: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	txctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
 	if err != nil {
 		t.Fatalf("begin bulk runtime-log author activity: %v", err)
 	}
+	txctx := ctx
 	for i := 1; i <= 1005; i++ {
 		event := eventtest.DiagnosticDirect(
 			uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", bulkPayload, 0, runID, "", events.EventEnvelope{}, base.Add(2*time.Minute+time.Duration(i)*time.Millisecond),
 		)
-		if err := commitDiagnosticRuntimeLogFixtureTx(txctx, pg, tx, event); err != nil {
+		if err := commitDiagnosticRuntimeLogFixtureTx(txctx, pg, tx, story, event); err != nil {
 			t.Fatalf("seed bulk runtime log %d: %v", i, err)
 		}
+	}
+	if err := story.Finalize(txctx); err != nil {
+		t.Fatalf("finalize bulk runtime-log story: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit bulk runtime-log fixture: %v", err)

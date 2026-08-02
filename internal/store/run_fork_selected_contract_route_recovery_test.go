@@ -448,6 +448,9 @@ func (s selectedRouteRecoveryStoreWrapper) AppendEvent(context.Context, events.E
 func (s selectedRouteRecoveryStoreWrapper) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	return runtimebustest.CommitPublishNoop(ctx, plan)
 }
+func (s selectedRouteRecoveryStoreWrapper) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebus.InMemoryEventStore{}.CommitPublication(ctx, command)
+}
 func (s selectedRouteRecoveryStoreWrapper) InsertEventDeliveries(context.Context, string, []string) error {
 	return nil
 }

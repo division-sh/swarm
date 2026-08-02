@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -23,6 +25,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -233,8 +236,8 @@ type eventBusCommitPublishPlan struct {
 }
 
 func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublishPlan) (PreparedPublish, error) {
-	owner := eb.store
-	if owner == nil {
+	owner, ok := eb.store.(CommitPublicationOwner)
+	if !ok || owner == nil {
 		return PreparedPublish{}, errors.New("selected store does not support the closed CommitPublish operation")
 	}
 	preparedCtx, admitted, err := eb.admitPublishEvent(ctx, plan.event)
@@ -243,56 +246,78 @@ func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublis
 	}
 	plan.event = admitted.Event()
 	plan.admitted = admitted
-	if _, active := runtimepipeline.PipelineSQLTxFromContext(preparedCtx); !active {
-		if closedOwner, ok := owner.(CommitPublicationOwner); ok {
-			prepared, command, err := eb.prepareClosedPublication(preparedCtx, plan)
-			if err != nil {
-				return PreparedPublish{}, err
-			}
-			committed, err := closedOwner.CommitPublication(preparedCtx, command)
-			if err != nil {
-				return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
-			}
-			prepared, err = prepared.WithCommitOutcome(committed.AppendOutcome)
-			if err != nil {
-				return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
-			}
-			prepared.committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed.DeliveryHandoffs...)
-			eb.finalizeCommittedFlowInstanceActivations(preparedCtx, prepared.Event, committed.Activations)
-			if eb.testLifecycleProbe != nil && !prepared.exactDuplicate {
-				eb.notifyTestPublishPersisted(preparedCtx, prepared.Event, prepared.plan)
-			}
-			return prepared, nil
-		}
+	if err := eb.requireExistingRunActive(preparedCtx, plan.event); err != nil {
+		return PreparedPublish{}, err
 	}
-	if plan.dynamicFlowCreation != nil {
-		return PreparedPublish{}, errors.New("dynamic flow creation occurrence requires the closed publication owner")
-	}
-	prepared, err := owner.CommitPublish(preparedCtx, plan)
+	prepared, command, err := eb.prepareClosedPublication(preparedCtx, plan)
 	if err != nil {
 		return PreparedPublish{}, err
+	}
+	committed, err := owner.CommitPublication(preparedCtx, command)
+	if err != nil {
+		return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
+	}
+	prepared, err = prepared.WithCommitOutcome(committed.AppendOutcome)
+	if err != nil {
+		return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
+	}
+	prepared.committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed.DeliveryHandoffs...)
+	if err := eb.finalizeCommittedFlowInstanceActivations(preparedCtx, committed.Activations); err != nil {
+		return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
+	}
+	if eb.testLifecycleProbe != nil && !prepared.exactDuplicate {
+		eb.notifyTestPublishPersisted(preparedCtx, prepared.Event, prepared.plan)
 	}
 	return prepared, nil
 }
 
-func (eb *EventBus) finalizeCommittedFlowInstanceActivations(
-	ctx context.Context,
-	evt events.Event,
-	activations []CommittedFlowInstanceActivation,
-) {
-	if len(activations) == 0 {
-		return
+func (eb *EventBus) requireExistingRunActive(ctx context.Context, event events.Event) error {
+	if eb == nil || eb.store == nil {
+		return nil
 	}
-	finalizer, ok := eb.templateInstancePlanner.(runtimepipeline.CommittedFlowInstanceActivationFinalizer)
-	if !ok || finalizer == nil {
-		eb.reportLocalDispatchFailure("flow_activation_finalize_failed", evt, errors.New("committed flow activation finalizer is unavailable"))
-		return
+	runID := strings.TrimSpace(event.RunID())
+	if runID == "" {
+		return nil
 	}
-	for _, activation := range activations {
-		if err := finalizer.FinalizeCommittedFlowInstanceActivation(ctx, activation.Plan); err != nil {
-			eb.reportLocalDispatchFailure("flow_activation_finalize_failed", evt, err)
+	if reader, ok := eb.store.(PreparedPublishEventReader); ok {
+		_, found, err := reader.LoadPreparedPublishEvent(ctx, event.ID())
+		if err != nil {
+			return fmt.Errorf("load publication event before run preflight: %w", err)
+		}
+		if found {
+			return nil
 		}
 	}
+	owner, ok := eb.store.(interface {
+		RequirePublicationRunActive(context.Context, string) error
+	})
+	if !ok {
+		return nil
+	}
+	err := owner.RequirePublicationRunActive(ctx, runID)
+	if errors.Is(err, runtimerunlifecycle.ErrRunNotFound) {
+		return nil
+	}
+	return err
+}
+
+func (eb *EventBus) finalizeCommittedFlowInstanceActivations(
+	ctx context.Context,
+	activations []CommittedFlowInstanceActivation,
+) error {
+	if len(activations) == 0 {
+		return nil
+	}
+	finalizer := eb.flowActivationFinalizer
+	if finalizer == nil {
+		return errors.New("committed flow activation finalizer is unavailable")
+	}
+	for index, activation := range activations {
+		if err := finalizer.FinalizeCommittedFlowInstanceActivation(ctx, activation.Plan); err != nil {
+			return fmt.Errorf("finalize committed flow activation %d for %s: %w", index, activation.Plan.Identity.Route().InstancePath, err)
+		}
+	}
+	return nil
 }
 
 func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication eventBusCommitPublishPlan) (PreparedPublish, PublicationCommand, error) {
@@ -416,15 +441,94 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	}
 	request := prepared.CommitRequest()
 	request.DeliveryReceipt = nil
+	routeTopology, err := eb.prepareFlowInstanceActivationRouteTopology(ctx, routePlan.ActivationPlans)
+	if err != nil {
+		return releaseFailure(err)
+	}
 	return prepared, PublicationCommand{
 		Commit:              request,
 		Activations:         append([]runtimepipeline.FlowInstanceActivationPlan(nil), routePlan.ActivationPlans...),
+		RouteTopology:       routeTopology,
 		DynamicFlowCreation: publication.dynamicFlowCreation,
 		AuthorScope:         authorScope,
 		HasAuthorScope:      hasAuthorScope,
 		AuthorDescriptor:    descriptor,
 		HasAuthorDescriptor: hasDescriptor,
 	}, nil
+}
+
+func (eb *EventBus) prepareFlowInstanceActivationRouteTopology(
+	ctx context.Context,
+	plans []runtimepipeline.FlowInstanceActivationPlan,
+) ([]FlowInstanceRouteRecordSet, error) {
+	if len(plans) == 0 {
+		return nil, nil
+	}
+	eb.mu.RLock()
+	table := eb.routeTable
+	lister := eb.durable.ActiveFlows
+	eb.mu.RUnlock()
+	if table == nil || lister == nil {
+		return nil, errors.New("flow activation publication requires route topology owners")
+	}
+	staged, identities, err := eb.deriveFlowInstanceRouteTopology(
+		ctx,
+		table,
+		lister,
+		nil,
+		runtimeflowidentity.Route{},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("derive active route topology before activation: %w", err)
+	}
+	byPath := make(map[string]runtimeflowidentity.Route, len(identities)+len(plans))
+	for _, identity := range identities {
+		byPath[identity.InstancePath] = identity
+	}
+	for index, plan := range plans {
+		request := FlowInstanceRouteMaterializationRequest{
+			Identity:            plan.Identity.Route(),
+			ActivationVariables: plan.ActivationVariables,
+		}
+		if err := staged.AddFlowInstanceRoute(request); err != nil {
+			return nil, fmt.Errorf("derive publication activation route %d: %w", index, err)
+		}
+		identity := request.Normalized().Identity
+		byPath[identity.InstancePath] = identity
+	}
+	identities = identities[:0]
+	for _, identity := range byPath {
+		identities = append(identities, identity)
+	}
+	sort.Slice(identities, func(i, j int) bool { return identities[i].InstancePath < identities[j].InstancePath })
+	return flowInstanceRouteTopologyRecordSets(staged, identities), nil
+}
+
+// CommitFlowInstanceActivation commits the exact instance record and the full
+// derived route topology before making either fact process-visible.
+func (eb *EventBus) CommitFlowInstanceActivation(
+	ctx context.Context,
+	plan runtimepipeline.FlowInstanceActivationPlan,
+) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	if eb == nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, errors.New("event bus is required")
+	}
+	owner, ok := eb.store.(FlowInstanceActivationCommitOwner)
+	if !ok || owner == nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, errors.New("selected store does not support the closed flow instance activation operation")
+	}
+	topology, err := eb.prepareFlowInstanceActivationRouteTopology(ctx, []runtimepipeline.FlowInstanceActivationPlan{plan})
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	committed, err := owner.CommitFlowInstanceActivation(ctx, FlowInstanceActivationCommand{Plan: plan, RouteTopology: topology})
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	if err := committed.Validate(); err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	return committed, nil
 }
 
 func publicationAuthorDescriptor(ctx context.Context, evt events.Event) (runtimeauthoractivity.EventDescriptor, bool, error) {
@@ -767,11 +871,6 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 			publicationClaim.Release(txctx),
 		)
 	}
-	txctx, err := eb.withTransactionRouteOverlay(txctx)
-	if err != nil {
-		return PreparedPublish{}, err
-	}
-	txctx = withConnectRoutePlanEvaluationMemo(txctx)
 	prepared := PreparedPublish{
 		Event:            evt,
 		admitted:         admitted,
@@ -779,6 +878,7 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 		publicationClaim: publicationClaim,
 		deliveryReceipt:  newDeliveryCommitReceipt(),
 	}
+	var err error
 	if replayScope == runtimepipelineobligation.ScopeSubscribed {
 		admitted, evt, err = eb.resolveCanonicalSubscribedEventBeforePersistence(txctx, transaction, admitted)
 		if err != nil {
