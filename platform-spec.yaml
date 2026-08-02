@@ -22577,12 +22577,12 @@ cli_specification:
           Cancellation closes the pending or active WebSocket and joins the child before command teardown.
         rendering: >
           One run-start-specific bounded rendering controller owns independent joined stdout trace and stderr detach-fact
-          workers. The authoritative lifecycle goroutine never writes optional observation output directly. It offers
-          trace rows to a one-row rendering lane without waiting; a full lane produces queue_overflow, stops and joins
-          observation, and uses the separately reserved one-fact lane to render the exact detach fact. A blocked trace
-          sink therefore cannot suppress the detach fact, status polling, start-mode run.stop, reattach-mode no-stop,
-          terminal selection, or observer settlement. Command teardown joins both rendering workers after canonical
-          control or terminal truth has been selected and before writing same-stream canonical lifecycle output.
+          workers. The stdout worker consumes the observer row stream directly; the existing 16-row subscription
+          transport remains the sole trace backpressure and queue_overflow owner. The authoritative lifecycle goroutine
+          never writes optional observation output directly. A blocked trace sink therefore cannot suppress the detach
+          fact, status polling, start-mode run.stop, reattach-mode no-stop, terminal selection, or observer settlement.
+          Command teardown joins both rendering workers after canonical control or terminal truth has been selected and
+          before writing same-stream canonical lifecycle output.
         failure_policy: >
           After successful run.start, or after active reattach proves the run exists, any trace attach failure,
           acquisition timeout, invalid subscription response, transport loss, invalid notification, subscription
@@ -22638,6 +22638,7 @@ cli_specification:
       - local start, connected start, and active reattach consume the same observer policy; terminal reattach opens no WebSocket; pre-start failures remain lethal
       - terminal success/failure and both start/reattach interrupt modes remain status/control-owned while pending and detached observers close and join without socket or goroutine leaks
       - blocked trace stdout and blocked detach-fact stderr cannot delay status/control decisions; start interruption still calls run.stop, active reattach still performs no stop, terminal polling still selects exact terminal truth, and observer plus renderer children settle after output is released
+      - a healthy trace sink renders a valid burst through the complete 16-row transport bound without detaching; queue_overflow is produced only by the canonical subscription transport owner
       - TTY and non-TTY render the same typed detach facts, including the exact connect-aware reattach command
       - a compiled public local foreground run exceeding the trace queue bound detaches observation loudly, reaches terminal completion, and exits 0 without premature runtime teardown
       - standalone `swarm run trace --follow`, dashboard SSE, API WebSocket subscriptions, event/log followers, and the serve story follower retain their separate non-cancelling lifecycle contracts

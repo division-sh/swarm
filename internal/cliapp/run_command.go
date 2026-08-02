@@ -140,7 +140,6 @@ type foregroundRunTraceObserver struct {
 }
 
 type foregroundRunTraceRenderer struct {
-	rows     chan diagnosticRunTraceRow
 	detached chan runTraceObserverDetachedFact
 	workers  sync.WaitGroup
 	stopOnce sync.Once
@@ -656,12 +655,11 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 		replaySince,
 		opts.apiOptions.runTraceAttachTimeout,
 	)
-	renderer := startForegroundRunTraceRenderer(out, errOut)
+	renderer := startForegroundRunTraceRenderer(out, errOut, observer.rows)
 	defer func() {
 		observer.stop()
 		renderer.stop()
 	}()
-	rows := observer.rows
 	detached := observer.detached
 	reportDetach := func(reason runTraceDetachReason) {
 		renderer.enqueueDetached(runTraceObserverDetachedFact{
@@ -672,7 +670,6 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 			RunContinues:    true,
 			ReattachCommand: runCommandReattachGuidance(runID, opts.connectURL),
 		})
-		rows = nil
 		detached = nil
 	}
 	settleObservation := func() {
@@ -709,15 +706,6 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 				fmt.Fprintln(errOut, "detached from run trace")
 			}
 			return commandExitError{code: 130}
-		case row, ok := <-rows:
-			if !ok {
-				rows = nil
-				continue
-			}
-			if !renderer.enqueueRow(row) {
-				observer.stop()
-				reportDetach(runTraceDetachQueueOverflow)
-			}
 		case reason := <-detached:
 			reportDetach(reason)
 		case <-ticker.C:
@@ -736,16 +724,15 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 	}
 }
 
-func startForegroundRunTraceRenderer(out, errOut io.Writer) *foregroundRunTraceRenderer {
+func startForegroundRunTraceRenderer(out, errOut io.Writer, rows <-chan diagnosticRunTraceRow) *foregroundRunTraceRenderer {
 	renderer := &foregroundRunTraceRenderer{
-		rows:     make(chan diagnosticRunTraceRow, 1),
 		detached: make(chan runTraceObserverDetachedFact, 1),
 	}
 	renderer.workers.Add(2)
 	go func() {
 		defer renderer.workers.Done()
 		writer := &runTraceRowLineWriter{}
-		for row := range renderer.rows {
+		for row := range rows {
 			writer.Write(out, row)
 		}
 	}()
@@ -756,15 +743,6 @@ func startForegroundRunTraceRenderer(out, errOut io.Writer) *foregroundRunTraceR
 		}
 	}()
 	return renderer
-}
-
-func (r *foregroundRunTraceRenderer) enqueueRow(row diagnosticRunTraceRow) bool {
-	select {
-	case r.rows <- row:
-		return true
-	default:
-		return false
-	}
 }
 
 func (r *foregroundRunTraceRenderer) enqueueDetached(fact runTraceObserverDetachedFact) {
@@ -780,7 +758,6 @@ func (r *foregroundRunTraceRenderer) stop() {
 		return
 	}
 	r.stopOnce.Do(func() {
-		close(r.rows)
 		close(r.detached)
 		r.workers.Wait()
 	})
