@@ -16,6 +16,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/google/uuid"
 )
 
@@ -34,7 +35,7 @@ func (s *PostgresStore) ReserveDirectiveOperation(ctx context.Context, req runti
 		return runtimeagentcontrol.DirectiveOperationReservation{}, err
 	}
 	var reservation runtimeagentcontrol.DirectiveOperationReservation
-	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err = s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if op.IdempotencyKey != "" {
 			if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, directiveOperationLockKey(op)); err != nil {
 				return fmt.Errorf("lock directive operation key: %w", err)
@@ -60,7 +61,7 @@ func (s *PostgresStore) ReserveDirectiveOperation(ctx context.Context, req runti
 				return fmt.Errorf("remove legacy directive idempotency projection: %w", err)
 			}
 		}
-		outcome, err := (sqlPublishCommitter{tx: tx, store: s}).commitNamedEvent(txctx, "reserve directive operation", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformAgentDirective, runtimebus.CommitPublishRequest{
+		outcome, err := (sqlPublishCommitter{tx: tx, store: s, story: story}).commitNamedEvent(txctx, "reserve directive operation", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformAgentDirective, runtimebus.CommitPublishRequest{
 			Event: req.Event, ReplayScope: runtimepipelineobligation.ScopeDirect,
 		})
 		if err != nil {
@@ -75,7 +76,7 @@ func (s *PostgresStore) ReserveDirectiveOperation(ctx context.Context, req runti
 		op.CreatedAt = req.Now
 		op.UpdatedAt = req.Now
 		reservation = runtimeagentcontrol.DirectiveOperationReservation{Operation: op, Created: true}
-		return recordDirectiveAuthorActivity(txctx, op, req.Now, nil)
+		return recordDirectiveAuthorActivity(txctx, story, op, req.Now, nil)
 	})
 	return reservation, err
 }
@@ -90,7 +91,7 @@ func (s *SQLiteRuntimeStore) ReserveDirectiveOperation(ctx context.Context, req 
 		return runtimeagentcontrol.DirectiveOperationReservation{}, err
 	}
 	var reservation runtimeagentcontrol.DirectiveOperationReservation
-	err = s.runAuthorActivityMutation(ctx, "sqlite reserve directive operation", func(txctx context.Context, tx *sql.Tx) error {
+	err = s.runPrivateAuthorActivityMutation(ctx, "sqlite reserve directive operation", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if err := purgeExpiredSQLiteDirectiveOperationsTx(txctx, tx, req.Now); err != nil {
 			return err
 		}
@@ -110,7 +111,7 @@ func (s *SQLiteRuntimeStore) ReserveDirectiveOperation(ctx context.Context, req 
 				return fmt.Errorf("remove legacy sqlite directive idempotency projection: %w", err)
 			}
 		}
-		outcome, err := (sqlPublishCommitter{tx: tx, store: s}).commitNamedEvent(txctx, "reserve directive operation", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformAgentDirective, runtimebus.CommitPublishRequest{
+		outcome, err := (sqlPublishCommitter{tx: tx, store: s, story: story}).commitNamedEvent(txctx, "reserve directive operation", events.EventAdmissionDiagnosticDirect, events.EventTypePlatformAgentDirective, runtimebus.CommitPublishRequest{
 			Event: req.Event, ReplayScope: runtimepipelineobligation.ScopeDirect,
 		})
 		if err != nil {
@@ -125,7 +126,7 @@ func (s *SQLiteRuntimeStore) ReserveDirectiveOperation(ctx context.Context, req 
 		op.CreatedAt = req.Now
 		op.UpdatedAt = req.Now
 		reservation = runtimeagentcontrol.DirectiveOperationReservation{Operation: op, Created: true}
-		return recordDirectiveAuthorActivity(txctx, op, req.Now, nil)
+		return recordDirectiveAuthorActivity(txctx, story, op, req.Now, nil)
 	})
 	return reservation, err
 }
@@ -335,7 +336,7 @@ func (s *SQLiteRuntimeStore) RecordDirectiveExecuted(ctx context.Context, operat
 
 func (s *PostgresStore) FinalizeDirectiveSuccess(ctx context.Context, operationID string, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
 	var out runtimeagentcontrol.DirectiveOperation
-	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		op, err := requireActivePostgresDirectiveOperation(txctx, tx, operationID)
 		if err != nil {
 			return err
@@ -359,14 +360,14 @@ func (s *PostgresStore) FinalizeDirectiveSuccess(ctx context.Context, operationI
 			op.ExpiresAt = now.Add(normalizeDirectiveTTL(ttl)).UTC()
 		}
 		out = op
-		return recordDirectiveAuthorActivity(txctx, op, op.UpdatedAt, nil)
+		return recordDirectiveAuthorActivity(txctx, story, op, op.UpdatedAt, nil)
 	})
 	return out, err
 }
 
 func (s *SQLiteRuntimeStore) FinalizeDirectiveSuccess(ctx context.Context, operationID string, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
 	var out runtimeagentcontrol.DirectiveOperation
-	err := s.runAuthorActivityMutation(ctx, "sqlite finalize directive success", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite finalize directive success", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		op, err := requireActiveSQLiteDirectiveOperation(txctx, tx, operationID)
 		if err != nil {
 			return err
@@ -390,7 +391,7 @@ func (s *SQLiteRuntimeStore) FinalizeDirectiveSuccess(ctx context.Context, opera
 			op.ExpiresAt = now.Add(normalizeDirectiveTTL(ttl)).UTC()
 		}
 		out = op
-		return recordDirectiveAuthorActivity(txctx, op, op.UpdatedAt, nil)
+		return recordDirectiveAuthorActivity(txctx, story, op, op.UpdatedAt, nil)
 	})
 	return out, err
 }
@@ -461,7 +462,7 @@ func (s *PostgresStore) finalizePostgresDirectiveFailure(ctx context.Context, op
 		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("validate directive operation failure: %w", err)
 	}
 	var out runtimeagentcontrol.DirectiveOperation
-	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err = s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		op, err := requireActivePostgresDirectiveOperation(txctx, tx, operationID)
 		if err != nil {
 			return err
@@ -490,7 +491,7 @@ func (s *PostgresStore) finalizePostgresDirectiveFailure(ctx context.Context, op
 			op.ExpiresAt = now.Add(normalizeDirectiveTTL(ttl)).UTC()
 		}
 		out = op
-		return recordDirectiveAuthorActivity(txctx, op, now, &failure)
+		return recordDirectiveAuthorActivity(txctx, story, op, now, &failure)
 	})
 	return out, err
 }
@@ -501,7 +502,7 @@ func (s *SQLiteRuntimeStore) finalizeSQLiteDirectiveFailure(ctx context.Context,
 		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("validate directive operation failure: %w", err)
 	}
 	var out runtimeagentcontrol.DirectiveOperation
-	err = s.runAuthorActivityMutation(ctx, "sqlite finalize directive failure", func(txctx context.Context, tx *sql.Tx) error {
+	err = s.runPrivateAuthorActivityMutation(ctx, "sqlite finalize directive failure", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		op, err := requireActiveSQLiteDirectiveOperation(txctx, tx, operationID)
 		if err != nil {
 			return err
@@ -530,7 +531,7 @@ func (s *SQLiteRuntimeStore) finalizeSQLiteDirectiveFailure(ctx context.Context,
 			op.ExpiresAt = now.Add(normalizeDirectiveTTL(ttl)).UTC()
 		}
 		out = op
-		return recordDirectiveAuthorActivity(txctx, op, now, &failure)
+		return recordDirectiveAuthorActivity(txctx, story, op, now, &failure)
 	})
 	return out, err
 }
@@ -568,7 +569,7 @@ func (s *SQLiteRuntimeStore) LoadDirectiveOperationByKey(ctx context.Context, me
 
 func (s *PostgresStore) transitionPostgresDirectiveOperation(ctx context.Context, operationID string, transition func(context.Context, *sql.Tx) error) (runtimeagentcontrol.DirectiveOperation, error) {
 	var out runtimeagentcontrol.DirectiveOperation
-	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if _, err := requireActivePostgresDirectiveOperation(txctx, tx, operationID); err != nil {
 			return err
 		}
@@ -593,14 +594,14 @@ func (s *PostgresStore) transitionPostgresDirectiveOperation(ctx context.Context
 		if err != nil {
 			return err
 		}
-		return recordDirectiveAuthorActivity(txctx, out, out.UpdatedAt, out.Failure)
+		return recordDirectiveAuthorActivity(txctx, story, out, out.UpdatedAt, out.Failure)
 	})
 	return out, err
 }
 
 func (s *SQLiteRuntimeStore) transitionSQLiteDirectiveOperation(ctx context.Context, operationID string, transition func(context.Context, *sql.Tx) error) (runtimeagentcontrol.DirectiveOperation, error) {
 	var out runtimeagentcontrol.DirectiveOperation
-	err := s.runAuthorActivityMutation(ctx, "sqlite transition directive operation", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite transition directive operation", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if _, err := requireActiveSQLiteDirectiveOperation(txctx, tx, operationID); err != nil {
 			return err
 		}
@@ -625,12 +626,15 @@ func (s *SQLiteRuntimeStore) transitionSQLiteDirectiveOperation(ctx context.Cont
 		if err != nil {
 			return err
 		}
-		return recordDirectiveAuthorActivity(txctx, out, out.UpdatedAt, out.Failure)
+		return recordDirectiveAuthorActivity(txctx, story, out, out.UpdatedAt, out.Failure)
 	})
 	return out, err
 }
 
-func recordDirectiveAuthorActivity(ctx context.Context, op runtimeagentcontrol.DirectiveOperation, occurredAt time.Time, failure *runtimefailures.Envelope) error {
+func recordDirectiveAuthorActivity(ctx context.Context, story *privateauthoractivity.Mutation, op runtimeagentcontrol.DirectiveOperation, occurredAt time.Time, failure *runtimefailures.Envelope) error {
+	if story == nil {
+		return fmt.Errorf("directive author activity mutation is required")
+	}
 	transition := ""
 	switch op.State {
 	case runtimeagentcontrol.DirectiveOperationPrepared:
@@ -651,7 +655,7 @@ func recordDirectiveAuthorActivity(ctx context.Context, op runtimeagentcontrol.D
 	if occurredAt.IsZero() {
 		occurredAt = time.Now().UTC()
 	}
-	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+	return story.Record(ctx, runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindDirectiveLifecycle, Transition: transition,
 		SourceOwner: "agent_directive_operations", SourceIdentity: op.OperationID + ":" + string(op.State),
 		DedupKey: "directive:" + op.OperationID + ":" + string(op.State), OccurredAt: occurredAt.UTC(),

@@ -293,7 +293,7 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, story r
 	var ensureErr error
 	switch admitted.RunDisposition() {
 	case events.AdmittedRunCreateAuthorized:
-		ensureErr = s.ensureRunRow(ctx, tx, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName)
+		ensureErr = s.ensureRunRow(ctx, tx, story, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName)
 	case events.AdmittedRunRequireActive:
 		ensureErr = requirePostgresRunActive(ctx, tx, wantIdentity.RunID)
 	case events.AdmittedRunRequirePresent:
@@ -513,7 +513,7 @@ func lookupEventRunID(ctx context.Context, q rowQueryer, eventID string) string 
 	return strings.TrimSpace(runID)
 }
 
-func (s *PostgresStore) ensureRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, triggerEventType string) error {
+func (s *PostgresStore) ensureRunRow(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID, triggerEventID, triggerEventType string) error {
 	runID = nullUUIDString(runID)
 	if runID == "" {
 		return nil
@@ -526,7 +526,7 @@ func (s *PostgresStore) ensureRunRow(ctx context.Context, tx *sql.Tx, runID, tri
 	if err != nil {
 		return fmt.Errorf("ensure run row origin: %w", err)
 	}
-	_, err = (postgresRunLifecycleMutation{store: s, tx: tx}).Create(ctx, runtimerunlifecycle.CreateRequest{
+	_, err = (postgresRunLifecycleMutation{store: s, tx: tx, story: story}).Create(ctx, runtimerunlifecycle.CreateRequest{
 		RunID: runID, Origin: origin, Source: fact, StartedAt: time.Now().UTC(),
 	})
 	return err

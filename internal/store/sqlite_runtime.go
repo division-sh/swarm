@@ -198,7 +198,7 @@ func (s *SQLiteRuntimeStore) appendAdmittedEventTxOutcome(ctx context.Context, t
 	var ensureErr error
 	switch admitted.RunDisposition() {
 	case events.AdmittedRunCreateAuthorized:
-		ensureErr = s.sqliteEnsureActiveRunRow(ctx, tx, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName, wantIdentity.CreatedAt)
+		ensureErr = s.sqliteEnsureActiveRunRow(ctx, tx, story, wantIdentity.RunID, wantIdentity.EventID, wantIdentity.EventName, wantIdentity.CreatedAt)
 	case events.AdmittedRunRequireActive:
 		ensureErr = requireSQLiteRunActive(ctx, tx, wantIdentity.RunID)
 	case events.AdmittedRunRequirePresent:
@@ -776,7 +776,7 @@ func sqliteLoadAPIIdempotency(ctx context.Context, q execQueryer, req APIIdempot
 	return record, true, nil
 }
 
-func (s *SQLiteRuntimeStore) sqliteEnsureActiveRunRow(ctx context.Context, tx *sql.Tx, runID, triggerEventID, triggerEventType string, now time.Time) error {
+func (s *SQLiteRuntimeStore) sqliteEnsureActiveRunRow(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID, triggerEventID, triggerEventType string, now time.Time) error {
 	fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
 	if !ok {
 		return fmt.Errorf("ensure active sqlite run row: executable bundle source fact is required")
@@ -785,7 +785,7 @@ func (s *SQLiteRuntimeStore) sqliteEnsureActiveRunRow(ctx context.Context, tx *s
 	if err != nil {
 		return fmt.Errorf("ensure active sqlite run row origin: %w", err)
 	}
-	_, err = (sqliteRunLifecycleMutation{store: s, tx: tx}).Create(ctx, runtimerunlifecycle.CreateRequest{
+	_, err = (sqliteRunLifecycleMutation{store: s, tx: tx, story: story}).Create(ctx, runtimerunlifecycle.CreateRequest{
 		RunID: runID, Origin: origin, Source: fact, StartedAt: normalizedRunLifecycleTime(now),
 	})
 	return err
