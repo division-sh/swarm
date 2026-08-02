@@ -116,11 +116,7 @@ func (s *PostgresStore) SaveEntityField(ctx context.Context, update runtimetools
 		return 0, err
 	}
 	var revision int
-	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, beginErr := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if beginErr != nil {
-			return beginErr
-		}
+	err = s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if err := requirePostgresRunActive(txctx, tx, runID); err != nil {
 			return err
 		}
@@ -157,7 +153,7 @@ func (s *PostgresStore) SaveEntityField(ctx context.Context, update runtimetools
 		}, mutationWriter(update.Writer)); err != nil {
 			return fmt.Errorf("record postgres entity mutation: %w", err)
 		}
-		return story.Finalize(txctx)
+		return nil
 	})
 	if err != nil {
 		return 0, err
@@ -174,11 +170,7 @@ func (s *SQLiteRuntimeStore) SaveEntityField(ctx context.Context, update runtime
 		return 0, err
 	}
 	var revision int
-	if err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, beginErr := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if beginErr != nil {
-			return beginErr
-		}
+	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite entity field update", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if err := requireSQLiteRunActive(txctx, tx, runID); err != nil {
 			return err
 		}
@@ -229,7 +221,7 @@ func (s *SQLiteRuntimeStore) SaveEntityField(ctx context.Context, update runtime
 		}, mutationWriter(update.Writer), now); err != nil {
 			return fmt.Errorf("record sqlite entity mutation: %w", err)
 		}
-		return story.Finalize(txctx)
+		return nil
 	}); err != nil {
 		return 0, err
 	}
@@ -244,11 +236,7 @@ func (s *PostgresStore) CreateEntity(ctx context.Context, rec runtimetools.Entit
 	if err != nil {
 		return err
 	}
-	return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, beginErr := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if beginErr != nil {
-			return beginErr
-		}
+	return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if err := requirePostgresRunActive(txctx, tx, rec.RunID); err != nil {
 			return err
 		}
@@ -272,7 +260,7 @@ func (s *PostgresStore) CreateEntity(ctx context.Context, rec runtimetools.Entit
 		}, mutationWriter(rec.Writer)); err != nil {
 			return fmt.Errorf("record postgres entity create mutation: %w", err)
 		}
-		return story.Finalize(txctx)
+		return nil
 	})
 }
 
@@ -284,11 +272,7 @@ func (s *SQLiteRuntimeStore) CreateEntity(ctx context.Context, rec runtimetools.
 	if err != nil {
 		return err
 	}
-	return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, beginErr := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if beginErr != nil {
-			return beginErr
-		}
+	return s.runPrivateAuthorActivityMutation(ctx, "sqlite entity create", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if err := requireSQLiteRunActive(txctx, tx, rec.RunID); err != nil {
 			return err
 		}
@@ -309,7 +293,7 @@ func (s *SQLiteRuntimeStore) CreateEntity(ctx context.Context, rec runtimetools.
 		}, mutationWriter(rec.Writer), rec.CreatedAt); err != nil {
 			return fmt.Errorf("record sqlite entity create mutation: %w", err)
 		}
-		return story.Finalize(txctx)
+		return nil
 	})
 }
 

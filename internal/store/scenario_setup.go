@@ -53,11 +53,7 @@ func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req ScenarioS
 		return ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
-	if err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
+	if err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		fact, ok := runtimecorrelation.BundleSourceFactFromContext(txctx)
 		if !ok {
 			return fmt.Errorf("postgres scenario setup requires executable bundle source fact")
@@ -107,7 +103,7 @@ func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req ScenarioS
 				return fmt.Errorf("record postgres scenario setup entity mutation %s: %w", entity.Alias, err)
 			}
 		}
-		return story.Finalize(txctx)
+		return nil
 	}); err != nil {
 		return ScenarioSetupResult{}, err
 	}
@@ -123,11 +119,7 @@ func (s *SQLiteRuntimeStore) SetupScenarioEntities(ctx context.Context, req Scen
 		return ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
-	if err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
+	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite scenario setup", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		fact, ok := runtimecorrelation.BundleSourceFactFromContext(txctx)
 		if !ok {
 			return fmt.Errorf("sqlite scenario setup requires executable bundle source fact")
@@ -174,7 +166,7 @@ func (s *SQLiteRuntimeStore) SetupScenarioEntities(ctx context.Context, req Scen
 				return fmt.Errorf("record sqlite scenario setup entity mutation %s: %w", entity.Alias, err)
 			}
 		}
-		return story.Finalize(txctx)
+		return nil
 	}); err != nil {
 		return ScenarioSetupResult{}, err
 	}
