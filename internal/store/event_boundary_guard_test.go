@@ -22,6 +22,7 @@ var admittedEventCallsites = map[eventBoundaryCallsite]int{
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "admitEventForPublish", name: "AdmitForPublish"}:                                          1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.publishClaimedPipeline", name: "RevalidatePersistedEvent"}:                      1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.PrepareSelectedForkPublish", name: "AdmitForPersistence"}:                       1,
+	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.prepareClosedPublication", name: "AdmitForPersistence"}:                         1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.resolveCanonicalSubscribedEventBeforePersistence", name: "AdmitForPersistence"}: 1,
 	{path: "internal/runtime/bus/eventbus_publish.go", scope: "reuseDurableSubscribedEventRouteFacts", name: "AdmitForPersistence"}:                     1,
 	{path: "internal/runtime/manager/runtime.go", scope: "AgentManager.SendDirective", name: "AdmitForPersistence"}:                                     1,

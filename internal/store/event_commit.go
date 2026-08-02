@@ -259,6 +259,9 @@ func commitPublication(
 	if err := command.Validate(); err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
+	if command.HasAuthorScope {
+		ctx = runtimeauthoractivity.WithScope(ctx, command.AuthorScope)
+	}
 	ctx = runtimeauthoractivity.WithoutResolvedEventDescriptor(ctx)
 	if command.HasAuthorDescriptor {
 		scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
@@ -300,6 +303,9 @@ func commitPublicationTx(
 	}
 	if err := command.Validate(); err != nil {
 		return runtimebus.CommittedPublication{}, err
+	}
+	if command.HasAuthorScope {
+		ctx = runtimeauthoractivity.WithScope(ctx, command.AuthorScope)
 	}
 	ctx = runtimeauthoractivity.WithoutResolvedEventDescriptor(ctx)
 	if command.HasAuthorDescriptor {

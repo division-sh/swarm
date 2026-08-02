@@ -13640,6 +13640,8 @@ platform_tables:
             forked_from_event_id   UUID REFERENCES events(event_id),
             reconstruction_owner  TEXT,
             entity_id             UUID,
+            flow_scope_key        TEXT,
+            flow_instance_id      TEXT,
             flow_instance         TEXT,
             fire_event            TEXT NOT NULL,
             fire_payload          JSONB NOT NULL DEFAULT '{}',
@@ -13661,7 +13663,7 @@ platform_tables:
             status                TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'fired', 'cancelled', 'expired')),
             fired_at              TIMESTAMPTZ,
             created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            CHECK (task_type <> 'workflow_timer' OR (run_id IS NOT NULL AND entity_id IS NOT NULL AND flow_instance = TRIM(flow_instance) AND NULLIF(flow_instance, '') IS NOT NULL)),
+            CHECK (task_type <> 'workflow_timer' OR (run_id IS NOT NULL AND entity_id IS NOT NULL AND flow_scope_key = TRIM(flow_scope_key) AND NULLIF(flow_scope_key, '') IS NOT NULL AND flow_instance_id = TRIM(flow_instance_id) AND NULLIF(flow_instance_id, '') IS NOT NULL AND flow_instance = TRIM(flow_instance) AND NULLIF(flow_instance, '') IS NOT NULL)),
             CHECK (task_type <> 'workflow_timer' OR (timer_name = TRIM(timer_name) AND NULLIF(timer_name, '') IS NOT NULL AND fire_event = TRIM(fire_event) AND NULLIF(fire_event, '') IS NOT NULL)),
             CHECK (task_type <> 'workflow_timer' OR (owner_node IS NULL AND owner_agent = TRIM(owner_agent) AND NULLIF(owner_agent, '') IS NOT NULL)),
             CHECK ((owner_kind = 'system' AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND agent_flow_scope_key IS NULL AND agent_flow_instance_id IS NULL) OR (owner_kind = 'agent' AND owner_node IS NULL AND owner_agent = TRIM(owner_agent) AND NULLIF(owner_agent, '') IS NOT NULL AND agent_name_owner = TRIM(agent_name_owner) AND NULLIF(agent_name_owner, '') IS NOT NULL AND agent_name_source IN ('declared', 'runtime_created') AND agent_route_presence IN ('present', 'root') AND ((agent_route_presence = 'root' AND agent_flow_scope_key IS NULL AND agent_flow_instance_id IS NULL AND flow_instance IS NULL) OR (agent_route_presence = 'present' AND agent_flow_scope_key = TRIM(agent_flow_scope_key) AND NULLIF(agent_flow_scope_key, '') IS NOT NULL AND agent_flow_instance_id = TRIM(agent_flow_instance_id) AND NULLIF(agent_flow_instance_id, '') IS NOT NULL AND flow_instance = TRIM(flow_instance) AND NULLIF(flow_instance, '') IS NOT NULL)))),
@@ -13689,7 +13691,8 @@ platform_tables:
           lifecycle.
         flow_scoped: entity_id NULL, flow_instance NOT NULL, run_id set for runtime-owned flow timers. Tied to flow instance
           inside run_id. Cancelled when flow instance terminates.
-        workflow_timer: task_type=workflow_timer with exact run_id, entity_id, flow_instance, activation serialization,
+        workflow_timer: task_type=workflow_timer with exact run_id, entity_id, typed flow route
+          `{flow_scope_key, flow_instance_id, flow_instance}`, activation serialization,
           owner_agent, event, due coordinate, recurrence facts, status facts, and complete-or-absent fork lineage.
     dead_letters:
       description: Failed events after a terminal delivery disposition. The canonical failure envelope is preserved verbatim from the triggering runtime failure; parent terminalization supplies its typed delivery_parent_terminalized lifecycle-conflict envelope. Lifecycle and retry counters remain dead-letter-owned facts. Every terminal executable delivery, including parent terminalization, carries the exact delivery_id and claim_version pair and is structurally coupled to the committed delivery outcome. Pre-delivery diagnostics leave both fields null.

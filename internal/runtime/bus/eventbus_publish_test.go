@@ -2290,7 +2290,7 @@ func seedReplayPoolEvent(t *testing.T, selected *store.PostgresStore, runID stri
 			t.Fatal(err)
 		}
 		anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-			FlowInstance: "launch/replay-pool", FlowID: "launch", EntityID: entityID,
+			Route: runtimeflowidentity.RouteForInstancePath("launch/replay-pool"), FlowID: "launch", EntityID: entityID,
 			Stage: "awaiting_review", StageActivationID: uuid.NewString(),
 			Source: eventtest.ConcreteTemplateRoutingSource("launch", "launch/replay-pool", entityID),
 		})

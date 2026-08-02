@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
@@ -40,7 +39,7 @@ func (s *workflowInstanceStore) commitGateDecision(ctx context.Context, card dec
 	if err != nil {
 		return err
 	}
-	return s.mutateE(ctx, runtimeflowidentity.RouteForInstancePath(anchor.FlowInstance), func(instance *WorkflowInstance) error {
+	return s.mutateE(ctx, anchor.Route, func(instance *WorkflowInstance) error {
 		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 		if err != nil {
 			return err

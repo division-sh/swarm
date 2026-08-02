@@ -41,7 +41,7 @@ func materializeRunForkDecisionCards(ctx context.Context, tx *sql.Tx, forkRunID,
 			return fmt.Errorf("construct fork stage_gate source: %w", err)
 		}
 		forkCard.Anchor, err = decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-			FlowInstance: sourceAnchor.FlowInstance, FlowID: sourceAnchor.FlowID,
+			Route: sourceAnchor.Route, FlowID: sourceAnchor.FlowID,
 			EntityID: strings.TrimSpace(entityID), Source: forkSource, Stage: sourceAnchor.Stage,
 			StageActivationID: binding.Fork.ActivationID,
 		})

@@ -1617,20 +1617,21 @@ node-a:
 		},
 	}
 	runHandler := func(entityID, requestID string) error {
+		event := handlerTestRootIngress(
+			uuid.NewString(),
+			events.EventType("request.received"),
+			"",
+			"",
+			mustJSON(map[string]any{"request_id": requestID}),
+			0,
+			testPipelineRunID,
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+			time.Time{},
+		)
+		seedPipelineEventRecord(t, ctx, db, event)
 		_, err := pc.executeNodeContractHandler(ctx, "node-a", handler, workflowTriggerContext{
-			Event: handlerTestRootIngress(
-				"evt-"+requestID,
-				events.EventType("request.received"),
-				"",
-				"",
-				mustJSON(map[string]any{"request_id": requestID}),
-				0,
-				testPipelineRunID,
-				"",
-				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-				time.Time{},
-			),
-
+			Event: event,
 			State: WorkflowState{EntityID: entityID, Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
 		}, false)
 		return err

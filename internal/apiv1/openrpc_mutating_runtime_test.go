@@ -23,6 +23,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -1718,7 +1719,7 @@ func newMutatingProbeDecisionCardStore(state *mutatingRuntimeProbeState) *mutati
 		"reject":  {AdvancesTo: "building", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}},
 	})
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		FlowInstance: "review/primary", FlowID: "review", EntityID: eventtest.UUID("entity-1"),
+		Route: runtimeflowidentity.RouteForInstancePath("review/primary"), FlowID: "review", EntityID: eventtest.UUID("entity-1"),
 		Stage: "awaiting_review", StageActivationID: "activation-1",
 		Source: eventtest.ConcreteTemplateRoutingSource("review", "review/primary", eventtest.UUID("entity-1")),
 	})

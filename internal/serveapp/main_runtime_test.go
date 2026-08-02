@@ -3400,7 +3400,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		t.Fatalf("admit decision card provenance: %v", err)
 	}
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		FlowInstance: "root", EntityID: entityID, Stage: activation.Stage,
+		Route: runtimeflowidentity.RouteForInstancePath("root"), EntityID: entityID, Stage: activation.Stage,
 		StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID),
 	})
 	if err != nil {
@@ -4622,7 +4622,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		t.Fatalf("admit %s run.stop decision-card provenance: %v", rt.Backend, err)
 	}
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		FlowInstance: "root", EntityID: entityID, Stage: activation.Stage,
+		Route: runtimeflowidentity.RouteForInstancePath("root"), EntityID: entityID, Stage: activation.Stage,
 		StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID),
 	})
 	if err != nil {

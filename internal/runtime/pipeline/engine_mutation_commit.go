@@ -11,7 +11,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
 
 // EnginePublicationPlanner converts engine emission intents into immutable
@@ -42,6 +41,7 @@ type WorkflowEngineStateRecord struct {
 	Gates            json.RawMessage
 	Accumulator      json.RawMessage
 	Config           json.RawMessage
+	InitialFields    json.RawMessage
 	EnteredStageAt   time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
@@ -62,7 +62,7 @@ func (r WorkflowEngineStateRecord) Validate() error {
 		return fmt.Errorf("workflow engine state record requires mode and status")
 	}
 	for name, raw := range map[string]json.RawMessage{
-		"fields": r.Fields, "gates": r.Gates, "accumulator": r.Accumulator, "config": r.Config,
+		"fields": r.Fields, "gates": r.Gates, "accumulator": r.Accumulator, "config": r.Config, "initial_fields": r.InitialFields,
 	} {
 		if len(raw) == 0 || !json.Valid(raw) {
 			return fmt.Errorf("workflow engine state record %s must be valid JSON", name)
@@ -72,7 +72,7 @@ func (r WorkflowEngineStateRecord) Validate() error {
 		return fmt.Errorf("workflow engine state record requires exact persisted times")
 	}
 	if r.UpdatedAt.Before(r.CreatedAt) {
-		return fmt.Errorf("workflow engine state record update time cannot precede creation")
+		return fmt.Errorf("workflow engine state record update time %s cannot precede creation %s", r.UpdatedAt.Format(time.RFC3339Nano), r.CreatedAt.Format(time.RFC3339Nano))
 	}
 	if r.Create {
 		if r.ExpectedRevision != 0 || strings.TrimSpace(r.ExpectedState) != "" {
@@ -85,11 +85,11 @@ func (r WorkflowEngineStateRecord) Validate() error {
 }
 
 type WorkflowEngineMutationCommand struct {
-	State            WorkflowEngineStateRecord
-	LifecycleEffects []runtimeworkflowlifecycle.Effect
-	LifecycleNoop    bool
-	ProposedEffects  []WorkflowEngineProposedEffect
-	Publications     []runtimeengine.DurablePublicationPlan
+	State                   WorkflowEngineStateRecord
+	GateRouteAdmissionRunID string
+	Lifecycle               WorkflowLifecycleMutationPlan
+	ProposedEffects         []WorkflowEngineProposedEffect
+	Publications            []runtimeengine.DurablePublicationPlan
 }
 
 type WorkflowEngineProposedEffect struct {
@@ -108,13 +108,11 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 	if err := c.State.Validate(); err != nil {
 		return err
 	}
-	for index, effect := range c.LifecycleEffects {
-		if !effect.Route().Valid() || strings.TrimSpace(effect.InstanceID()) == "" || effect.OccurredAt().IsZero() {
-			return fmt.Errorf("workflow engine lifecycle effect %d is incomplete", index)
-		}
+	if runID := strings.TrimSpace(c.GateRouteAdmissionRunID); runID != "" && runID != c.State.RunID {
+		return fmt.Errorf("workflow gate route admission run %s disagrees with engine state run %s", runID, c.State.RunID)
 	}
-	if c.LifecycleNoop && len(c.LifecycleEffects) == 0 {
-		return fmt.Errorf("workflow engine lifecycle no-op proof requires lifecycle effects")
+	if err := c.Lifecycle.Validate(c.State.RunID, c.State.Route, c.State.EntityID); err != nil {
+		return fmt.Errorf("workflow engine lifecycle plan: %w", err)
 	}
 	for index, effect := range c.ProposedEffects {
 		if err := effect.Validate(); err != nil {
@@ -178,6 +176,10 @@ func workflowEngineStateRecord(
 	if err != nil {
 		return WorkflowEngineStateRecord{}, err
 	}
+	initialFields, err := canonicaljson.Bytes(instance.InitialFieldValues)
+	if err != nil {
+		return WorkflowEngineStateRecord{}, err
+	}
 	status := strings.TrimSpace(instance.Status)
 	if status == "" {
 		status = "active"
@@ -187,7 +189,7 @@ func workflowEngineStateRecord(
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion,
 		Mode: workflowInstanceMode(instance), Status: status, CurrentState: instance.CurrentState,
 		EntityType: projection.Control.EntityType, Slug: projection.Control.Slug, Name: projection.Control.Name,
-		Fields: fields, Gates: gates, Accumulator: accumulator, Config: config,
+		Fields: fields, Gates: gates, Accumulator: accumulator, Config: config, InitialFields: initialFields,
 		EnteredStageAt: canonicalWorkflowInstancePersistedTime(instance.EnteredStageAt),
 		CreatedAt:      canonicalWorkflowInstancePersistedTime(instance.CreatedAt),
 		UpdatedAt:      canonicalWorkflowInstancePersistedTime(updatedAt),
@@ -201,6 +203,7 @@ func workflowEngineStateRecord(
 
 type CommittedWorkflowEngineMutation struct {
 	Publications []runtimeengine.CommittedDurablePublication
+	Lifecycle    CommittedWorkflowLifecycleMutation
 }
 
 func (r CommittedWorkflowEngineMutation) Validate() error {
@@ -211,6 +214,9 @@ func (r CommittedWorkflowEngineMutation) Validate() error {
 		if err := publication.ValidateCommittedDurablePublication(); err != nil {
 			return fmt.Errorf("committed workflow engine publication %d: %w", index, err)
 		}
+	}
+	if err := r.Lifecycle.Validate(); err != nil {
+		return fmt.Errorf("committed workflow engine lifecycle: %w", err)
 	}
 	return nil
 }

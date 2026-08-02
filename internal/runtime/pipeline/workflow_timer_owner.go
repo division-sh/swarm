@@ -19,8 +19,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -94,6 +94,8 @@ type WorkflowTimerLifecycle struct {
 	logger       systemNodeRuntimeLogger
 	workOwner    worklifetime.Occurrence
 	scheduler    *Scheduler
+	publication  EnginePublicationPlanner
+	dispatcher   runtimeengine.PostCommitDispatcher
 	recoveryCtx  context.Context
 	cancel       context.CancelFunc
 	projectionMu sync.Mutex
@@ -120,6 +122,12 @@ func newWorkflowTimerLifecycle(store *workflowInstanceStore, source semanticview
 		cancel:                cancel,
 		recovering:            make(map[string]chan struct{}),
 		wakeupCallbackTimeout: workflowTimerWakeupCallbackTimeout,
+	}
+	lifecycle.publication, _ = bus.(EnginePublicationPlanner)
+	if provider, ok := bus.(interface {
+		EngineDispatcher() runtimeengine.PostCommitDispatcher
+	}); ok {
+		lifecycle.dispatcher = provider.EngineDispatcher()
 	}
 	if scheduler != nil {
 		if err := lifecycle.bindScheduler(scheduler); err != nil {
@@ -247,7 +255,7 @@ func (l *WorkflowTimerLifecycle) reconcile(ctx context.Context, route runtimeflo
 			source,
 			runID,
 			entityID,
-			instance.StorageRef,
+			route,
 			declaration,
 			generation,
 			cause,
@@ -363,7 +371,7 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 				source,
 				runID,
 				entityID,
-				instance.StorageRef,
+				route,
 				declaration,
 				generation,
 				cause,
@@ -412,7 +420,7 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 					source,
 					runID,
 					entityID,
-					instance.StorageRef,
+					route,
 					declaration,
 					activation.Ref.Generation,
 					workflowTimerCause{
@@ -537,7 +545,8 @@ func workflowTimerGenerationKey(declaration string, generation attemptgeneration
 
 func workflowTimerActivationForCause(
 	source semanticview.Source,
-	runID, entityID, flowInstance string,
+	runID, entityID string,
+	route runtimeflowidentity.Route,
 	declaration runtimecontracts.WorkflowTimerContract,
 	generation attemptgeneration.Generation,
 	cause workflowTimerCause,
@@ -545,13 +554,17 @@ func workflowTimerActivationForCause(
 ) (WorkflowTimerActivation, error) {
 	cause = cause.normalized()
 	generation = generation.Normalize()
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	if !route.Valid() {
+		return WorkflowTimerActivation{}, fmt.Errorf("workflow timer activation requires an exact route")
+	}
 	declarationRevision, err := workflowTimerDeclarationRevision(source, declaration)
 	if err != nil {
 		return WorkflowTimerActivation{}, err
 	}
 	activationCause := timeridentity.WorkflowTimerActivationCause(strings.TrimSpace(string(cause.Kind)))
 	routingSource, admittedEvent, err := workflowTimerDeclarationSourceEvent(
-		source, entityID, flowInstance, declaration,
+		source, entityID, route.InstancePath, declaration,
 	)
 	if err != nil {
 		return WorkflowTimerActivation{}, err
@@ -559,7 +572,7 @@ func workflowTimerActivationForCause(
 	activationID := timeridentity.WorkflowTimerActivationID(
 		runID,
 		entityID,
-		flowInstance,
+		route.InstancePath,
 		declaration.ID,
 		declarationRevision,
 		string(activationCause),
@@ -580,7 +593,7 @@ func workflowTimerActivationForCause(
 		},
 		RunID:         strings.TrimSpace(runID),
 		EntityID:      strings.TrimSpace(entityID),
-		FlowInstance:  strings.Trim(strings.TrimSpace(flowInstance), "/"),
+		Route:         route,
 		RoutingSource: routingSource,
 		OwnerAgent:    strings.TrimSpace(declaration.Owner),
 		EventType:     string(admittedEvent),
@@ -825,6 +838,12 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 	if store == nil || !store.enabled() {
 		return WorkflowTimerFireTerminal, false, fmt.Errorf("workflow timer lifecycle store is unavailable")
 	}
+	if store.timerOccurrences == nil {
+		return WorkflowTimerFireTerminal, false, fmt.Errorf("workflow timer occurrence owner is unavailable")
+	}
+	if l.publication == nil || l.dispatcher == nil {
+		return WorkflowTimerFireTerminal, false, fmt.Errorf("workflow timer publication owners are unavailable")
+	}
 	if err := wakeup.validate(); err != nil {
 		return WorkflowTimerFireTerminal, false, err
 	}
@@ -834,6 +853,15 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 		return WorkflowTimerFireRetry, false, err
 	}
 	if !found {
+		return WorkflowTimerFireTerminal, false, nil
+	}
+	if hint.Status != workflowTimerStatusActive {
+		return WorkflowTimerFireTerminal, false, nil
+	}
+	if hint.Ref != occurrence.Activation {
+		return WorkflowTimerFireTerminal, false, fmt.Errorf("workflow timer wakeup does not match the persisted active coordinate")
+	}
+	if !hint.FireAt.Equal(occurrence.DueAt) {
 		return WorkflowTimerFireTerminal, false, nil
 	}
 	current, err := l.workflowTimerActivationDeclarationCurrent(ctx, hint)
@@ -847,83 +875,44 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 		return WorkflowTimerFireTerminal, false, nil
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, hint.RunID)
-	var (
-		activation  WorkflowTimerActivation
-		next        WorkflowTimerActivation
-		terminal    bool
-		terminalErr error
-	)
-	err = store.runPipelineMutation(ctx, func(txctx context.Context) error {
-		tx, ok := sqlTxFromContext(txctx)
-		if !ok || tx == nil {
-			return fmt.Errorf("workflow timer fire requires the selected transaction")
-		}
-		activeRunID, err := store.requireActiveWorkflowRun(txctx, tx)
-		if err != nil {
-			if errors.Is(err, runtimerunlifecycle.ErrRunNotActive) {
-				terminal = true
-				terminalErr = err
-				return nil
-			}
-			return err
-		}
-		if activeRunID != hint.RunID {
-			terminal = true
-			terminalErr = fmt.Errorf("workflow timer fire run mismatch")
-			return nil
-		}
-		loaded, found, err := store.loadWorkflowTimerActivation(txctx, occurrence.Activation.ActivationID, true)
-		if err != nil {
-			return err
-		}
-		if !found {
-			terminal = true
-			return nil
-		}
-		activation = loaded
-		if activation.Ref != occurrence.Activation {
-			terminal = true
-			terminalErr = fmt.Errorf("workflow timer callback activation mismatch")
-			return nil
-		}
-		if activation.Status != workflowTimerStatusActive || !activation.FireAt.Equal(occurrence.DueAt) {
-			terminal = true
-			return nil
-		}
-		if canonicalWorkflowTimerTime(time.Now()).Before(occurrence.DueAt) {
-			return fmt.Errorf(
-				"workflow timer wakeup for %s arrived before its due coordinate",
-				occurrence.Activation.ActivationID,
-			)
-		}
-		if l.publisher == nil {
-			return fmt.Errorf("workflow timer fire requires transactional event publication")
-		}
-		firedAt := canonicalWorkflowTimerTime(time.Now())
-		eventID := timeridentity.WorkflowTimerOccurrenceEventID(occurrence)
-		evt, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
-			Facts: events.EventFacts{
-				ID: eventID, Type: events.EventType(activation.EventType),
-				Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime.workflow_timer"},
-				TaskID:   occurrence.TaskID(), Payload: json.RawMessage(append([]byte(nil), activation.Payload...)),
-				Envelope:      events.EventEnvelope{EntityID: activation.EntityID, FlowInstance: activation.FlowInstance},
-				RoutingSource: activation.RoutingSource, CreatedAt: firedAt, ExecutionMode: executionmode.Live,
-			},
-			RunID: activation.RunID,
-		})
-		if err != nil {
-			return err
-		}
-		if err := l.publisher.PublishInMutation(txctx, evt); err != nil {
-			return err
-		}
-		next, err = store.completeWorkflowTimerOccurrence(txctx, activation, occurrence, firedAt)
-		if err != nil {
-			return err
-		}
-		return nil
+	firedAt := canonicalWorkflowTimerTime(time.Now())
+	if firedAt.Before(occurrence.DueAt) {
+		return WorkflowTimerFireRetry, false, fmt.Errorf(
+			"workflow timer wakeup for %s arrived before its due coordinate",
+			occurrence.Activation.ActivationID,
+		)
+	}
+	eventID := timeridentity.WorkflowTimerOccurrenceEventID(occurrence)
+	evt, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
+		Facts: events.EventFacts{
+			ID: eventID, Type: events.EventType(hint.EventType),
+			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime.workflow_timer"},
+			TaskID:   occurrence.TaskID(), Payload: json.RawMessage(append([]byte(nil), hint.Payload...)),
+			Envelope:      events.EventEnvelope{EntityID: hint.EntityID, FlowInstance: hint.Route.InstancePath},
+			RoutingSource: hint.RoutingSource, CreatedAt: firedAt, ExecutionMode: executionmode.Live,
+		},
+		RunID: hint.RunID,
 	})
 	if err != nil {
+		return WorkflowTimerFireRetry, false, err
+	}
+	intent := runtimeengine.EmitIntent{Event: evt}
+	plans, err := l.publication.PrepareEnginePublications(ctx, []runtimeengine.EmitIntent{intent})
+	if err != nil {
+		return WorkflowTimerFireRetry, false, err
+	}
+	if len(plans) != 1 {
+		releaseErr := l.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+		return WorkflowTimerFireRetry, false, errors.Join(fmt.Errorf("workflow timer publication planner returned %d plans", len(plans)), releaseErr)
+	}
+	committed, err := store.timerOccurrences.CommitWorkflowTimerOccurrence(ctx, WorkflowTimerOccurrenceCommand{
+		Activation:  hint,
+		Occurrence:  occurrence,
+		FiredAt:     firedAt,
+		Publication: plans[0],
+	})
+	if err != nil {
+		err = errors.Join(err, l.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
 		recoveryCtx := withoutSQLTxContext(ctx)
 		if registerErr := l.reconcileWakeupImmediately(recoveryCtx, occurrence.Activation); registerErr != nil {
 			l.logFailure(recoveryCtx, "workflow_timer_register_failed", occurrence.Activation, registerErr)
@@ -932,10 +921,19 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 		}
 		return WorkflowTimerFireRetry, false, err
 	}
-	if terminal {
-		return WorkflowTimerFireTerminal, false, terminalErr
+	if committed.Outcome == WorkflowTimerOccurrenceTerminal {
+		if err := l.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), plans); err != nil {
+			return WorkflowTimerFireRetry, false, err
+		}
+		return WorkflowTimerFireTerminal, false, nil
 	}
-	if next.Status != workflowTimerStatusActive {
+	if err := l.publication.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{committed.Publication}); err != nil {
+		return WorkflowTimerFireRetry, false, err
+	}
+	if err := l.dispatcher.DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+		return WorkflowTimerFireRetry, false, err
+	}
+	if committed.Next.Status != workflowTimerStatusActive {
 		return WorkflowTimerFireCommitted, false, nil
 	}
 	return WorkflowTimerFireCommitted, true, nil
@@ -970,24 +968,18 @@ func (l *WorkflowTimerLifecycle) AuthorizeAcceptedEvent(ctx context.Context, evt
 			"accepted workflow timer declaration revision is stale",
 		)
 	}
-	wantEventID := timeridentity.WorkflowTimerOccurrenceEventID(occurrence)
-	if evt.ID() != wantEventID {
-		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("accepted workflow timer event_id %q does not match canonical activation %q", evt.ID(), wantEventID)
-	}
-	if evt.RunID() != activation.RunID {
-		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("accepted workflow timer run_id %q does not match canonical activation %q", evt.RunID(), activation.RunID)
+	if evt.ID() != timeridentity.WorkflowTimerOccurrenceEventID(occurrence) ||
+		evt.RunID() != activation.RunID || workflowEventEntityID(evt) != activation.EntityID ||
+		strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != activation.Route.InstancePath ||
+		strings.TrimSpace(string(evt.Type())) != activation.EventType ||
+		!workflowTimerJSONEqual(evt.Payload(), activation.Payload) {
+		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("accepted workflow timer event does not match canonical activation")
 	}
 	if source := evt.RoutingSource(); source != activation.RoutingSource {
 		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf(
 			"accepted workflow timer routing source %s/%#v does not match canonical activation %s/%#v",
 			source.Kind().StorageCode(), source.Route(), activation.RoutingSource.Kind().StorageCode(), activation.RoutingSource.Route(),
 		)
-	}
-	if eventType := strings.TrimSpace(string(evt.Type())); eventType != activation.EventType {
-		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("accepted workflow timer event_type %q does not match canonical activation %q", eventType, activation.EventType)
-	}
-	if !workflowTimerJSONEqual(evt.Payload(), activation.Payload) {
-		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("accepted workflow timer payload does not match canonical activation")
 	}
 	if !workflowTimerOccurrenceAccepted(activation, occurrence) {
 		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("workflow timer occurrence was not durably accepted")
@@ -1011,7 +1003,7 @@ func (l *WorkflowTimerLifecycle) workflowTimerActivationDeclarationCurrent(
 		return false, nil
 	}
 	expectedSource, expectedEvent, err := workflowTimerDeclarationSourceEvent(
-		l.source, activation.EntityID, activation.FlowInstance, declaration,
+		l.source, activation.EntityID, activation.Route.InstancePath, declaration,
 	)
 	if err != nil {
 		return false, err
@@ -1069,12 +1061,11 @@ func (l *WorkflowTimerLifecycle) workflowTimerDeclarationForActivation(
 			"workflow timer declaration validation requires workflow store",
 		)
 	}
-	instanceID := strings.Trim(strings.TrimSpace(activation.FlowInstance), "/")
-	if instanceID == "" {
+	if !activation.Route.Valid() {
 		return runtimecontracts.WorkflowTimerContract{}, false, fmt.Errorf("workflow timer activation is missing its instance route")
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(activation.RunID))
-	instance, found, err := store.Load(ctx, runtimeflowidentity.RouteForInstancePath(instanceID))
+	instance, found, err := store.Load(ctx, activation.Route)
 	if err != nil || !found {
 		return runtimecontracts.WorkflowTimerContract{}, false, err
 	}

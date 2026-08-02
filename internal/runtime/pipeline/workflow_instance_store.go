@@ -140,6 +140,8 @@ type workflowInstanceStore struct {
 	lifecycleOwner   workflowInstanceLifecycleOwner
 	runLifecycle     runtimerunlifecycle.OperationOwner
 	engineMutations  WorkflowEngineMutationOwner
+	timerOccurrences WorkflowTimerOccurrenceOwner
+	decisionRoutes   WorkflowDecisionRouteOwner
 	deliverySignalMu sync.RWMutex
 	deliverySignals  map[runtimedelivery.ExecutionAuthority]func()
 }
@@ -219,7 +221,9 @@ func NewPostgresWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) Wo
 	gateRoutes, _ := runner.(GateRouteAdmissionReader)
 	timerObligations, _ := runner.(runtimetimerobligation.Reader)
 	engineMutations, _ := runner.(WorkflowEngineMutationOwner)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations}}
+	timerOccurrences, _ := runner.(WorkflowTimerOccurrenceOwner)
+	decisionRoutes, _ := runner.(WorkflowDecisionRouteOwner)
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations, timerOccurrences: timerOccurrences, decisionRoutes: decisionRoutes}}
 }
 
 func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) WorkflowPersistence {
@@ -230,7 +234,9 @@ func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) Work
 	gateRoutes, _ := runner.(GateRouteAdmissionReader)
 	timerObligations, _ := runner.(runtimetimerobligation.Reader)
 	engineMutations, _ := runner.(WorkflowEngineMutationOwner)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations}}
+	timerOccurrences, _ := runner.(WorkflowTimerOccurrenceOwner)
+	decisionRoutes, _ := runner.(WorkflowDecisionRouteOwner)
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations, timerOccurrences: timerOccurrences, decisionRoutes: decisionRoutes}}
 }
 
 func (p WorkflowPersistence) empty() bool {
@@ -247,7 +253,7 @@ func (p WorkflowPersistence) Configured() bool {
 // Valid reports whether the selected backend supplied complete workflow
 // persistence, including its private mutation executor.
 func (p WorkflowPersistence) Valid() bool {
-	return !p.empty() && p.store.runtimeMutation != nil && p.store.engineMutations != nil
+	return !p.empty() && p.store.runtimeMutation != nil
 }
 
 var errSQLiteWorkflowMutationOwnerRequired = errors.New("sqlite workflow persistence requires its selected mutation owner")

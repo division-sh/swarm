@@ -78,7 +78,7 @@ func TestWorkflowTimerLifecycleOneShotExactCompletionOnBothStores(t *testing.T) 
 
 			wrong := eventtest.RuntimeControl(
 				uuid.NewString(), fired.Type(), fired.SourceAgent(), fired.TaskID(), fired.Payload(), 0,
-				fired.RunID(), "", events.EventEnvelope{EntityID: entityID, FlowInstance: activation.FlowInstance}, fired.CreatedAt(),
+				fired.RunID(), "", events.EventEnvelope{EntityID: entityID, FlowInstance: activation.Route.InstancePath}, fired.CreatedAt(),
 			)
 			if _, _, recognized, err := pc.workflowTimers.AuthorizeAcceptedEvent(ctx, wrong); err == nil || !recognized {
 				t.Fatalf("wrong event id authorization recognized=%v err=%v, want recognized rejection", recognized, err)
@@ -200,7 +200,7 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 				0,
 				stale.RunID,
 				"",
-				events.EventEnvelope{EntityID: stale.EntityID, FlowInstance: stale.FlowInstance},
+				events.EventEnvelope{EntityID: stale.EntityID, FlowInstance: stale.Route.InstancePath},
 				stale.FireAt,
 			)
 			if _, _, recognized, err := pcB.workflowTimers.AuthorizeAcceptedEvent(ctx, staleEvent); err == nil || !recognized {
@@ -522,7 +522,7 @@ func TestAcceptedWorkflowTimerEventRoutingMatrixOnBothStores(t *testing.T) {
 					event: eventtest.RuntimeControl(
 						uuid.NewString(), canonical.Type(), "runtime.workflow_timer", "malformed",
 						canonical.Payload(), 0, canonical.RunID(), "", events.EventEnvelope{
-							EntityID: entityID, FlowInstance: activation.FlowInstance,
+							EntityID: entityID, FlowInstance: activation.Route.InstancePath,
 						}, canonical.CreatedAt(),
 					),
 					wantRecognized: true,
@@ -533,7 +533,7 @@ func TestAcceptedWorkflowTimerEventRoutingMatrixOnBothStores(t *testing.T) {
 					event: eventtest.RuntimeControl(
 						canonical.ID(), canonical.Type(), "runtime.scheduler", canonical.TaskID(),
 						canonical.Payload(), 0, canonical.RunID(), "", events.EventEnvelope{
-							EntityID: entityID, FlowInstance: activation.FlowInstance,
+							EntityID: entityID, FlowInstance: activation.Route.InstancePath,
 						}, canonical.CreatedAt(),
 					),
 				},
@@ -542,7 +542,7 @@ func TestAcceptedWorkflowTimerEventRoutingMatrixOnBothStores(t *testing.T) {
 					event: eventtest.RuntimeControl(
 						uuid.NewString(), canonical.Type(), "runtime", "ordinary-task",
 						canonical.Payload(), 0, canonical.RunID(), "", events.EventEnvelope{
-							EntityID: entityID, FlowInstance: activation.FlowInstance,
+							EntityID: entityID, FlowInstance: activation.Route.InstancePath,
 						}, canonical.CreatedAt(),
 					),
 				},
@@ -555,7 +555,7 @@ func TestAcceptedWorkflowTimerEventRoutingMatrixOnBothStores(t *testing.T) {
 							timeridentity.WorkflowTimerOccurrenceEventID(missing), canonical.Type(),
 							"runtime.workflow_timer", missing.TaskID(), canonical.Payload(), 0,
 							canonical.RunID(), "", events.EventEnvelope{
-								EntityID: entityID, FlowInstance: activation.FlowInstance,
+								EntityID: entityID, FlowInstance: activation.Route.InstancePath,
 							}, canonical.CreatedAt(),
 						)
 					}(),
@@ -1103,7 +1103,7 @@ func TestWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnBothStore
 			}
 			want, err := workflowTimerActivationForCause(
 				semanticview.Wrap(bundle),
-				runtimecorrelation.RunIDFromContext(ctx), entityID, entityID, bundle.Semantics.Timers[0],
+				runtimecorrelation.RunIDFromContext(ctx), entityID, testWorkflowInstanceRoute("workflow-timer-owner-test"), bundle.Semantics.Timers[0],
 				activations[0].Ref.Generation,
 				workflowTimerCause{Kind: workflowTimerCauseEvent, EventID: eventID, EventType: "work.created", OccurredAt: createdAt, FromState: "waiting", ToState: "waiting"},
 				time.Hour,
@@ -2124,6 +2124,13 @@ type failOnceWorkflowTimerBus struct {
 	err      error
 }
 
+func (b *failOnceWorkflowTimerBus) PrepareEnginePublications(ctx context.Context, intents []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
+	if b.failures.CompareAndSwap(1, 0) {
+		return nil, b.err
+	}
+	return b.recordingPipelineBus.PrepareEnginePublications(ctx, intents)
+}
+
 func (b *failOnceWorkflowTimerBus) PublishInMutation(ctx context.Context, evt events.Event) error {
 	if b.failures.CompareAndSwap(1, 0) {
 		return b.err
@@ -2131,7 +2138,7 @@ func (b *failOnceWorkflowTimerBus) PublishInMutation(ctx context.Context, evt ev
 	return b.recordingPipelineBus.PublishInMutation(ctx, evt)
 }
 
-func TestWorkflowTimerLifecyclePostgresFireRollsBackWithOuterMutation(t *testing.T) {
+func TestWorkflowTimerLifecyclePostgresFireRejectsOuterMutationAuthority(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		if tc.name != "postgres" {
 			continue
@@ -2154,8 +2161,8 @@ func TestWorkflowTimerLifecyclePostgresFireRollsBackWithOuterMutation(t *testing
 			t.Fatalf("begin author activity: %v", err)
 		}
 		outcome, err := fireWorkflowTimerTestWakeup(txctx, pc, activation)
-		if err != nil || outcome != WorkflowTimerFireCommitted {
-			t.Fatalf("FireWorkflowTimer outcome=%q err=%v", outcome, err)
+		if err == nil || outcome != WorkflowTimerFireRetry || !strings.Contains(err.Error(), "nested mutation belongs to a different transaction") {
+			t.Fatalf("FireWorkflowTimer outcome=%q err=%v, want closed-operation rejection", outcome, err)
 		}
 		if len(actions) != 0 {
 			t.Fatalf("post-commit actions = %d, want no generic claim release", len(actions))
@@ -2165,7 +2172,7 @@ func TestWorkflowTimerLifecyclePostgresFireRollsBackWithOuterMutation(t *testing
 		}
 		persisted := loadWorkflowTimerOwnerActivation(t, store, ctx, activation.Ref.ActivationID)
 		if persisted.Status != workflowTimerStatusActive {
-			t.Fatalf("rolled-back timer status = %q, want active", persisted.Status)
+			t.Fatalf("rejected outer-authority timer status = %q, want active", persisted.Status)
 		}
 	}
 }

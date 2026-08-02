@@ -350,7 +350,7 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, story r
 			return runtimebus.EventAppendOutcomeUnknown, err
 		}
 	}
-	if err := recordPersistedEventAuthorActivity(ctx, story, s, evt, wantIdentity.ProducedBy, string(wantIdentity.ProducedByType)); err != nil {
+	if err := recordPersistedEventAuthorActivity(ctx, story, s, admitted, wantIdentity.ProducedBy, string(wantIdentity.ProducedByType)); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	if admitted.RunDisposition() == events.AdmittedRunCreateAuthorized {

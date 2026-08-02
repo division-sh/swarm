@@ -17,6 +17,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
@@ -1310,7 +1311,7 @@ func newDecisionCardTestCard(t *testing.T, runID string, now time.Time) decision
 
 func newDecisionCardTestStageAnchor(flowInstance, flowID, entityID, stage, activationID string) decisioncard.Anchor {
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		FlowInstance: flowInstance, FlowID: flowID, EntityID: entityID,
+		Route: runtimeflowidentity.RouteForInstancePath(flowInstance), FlowID: flowID, EntityID: entityID,
 		Stage: stage, StageActivationID: activationID,
 		Source: eventtest.ConcreteTemplateRoutingSource(flowID, flowInstance, entityID),
 	})

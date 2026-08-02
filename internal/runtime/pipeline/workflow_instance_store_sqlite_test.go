@@ -361,10 +361,12 @@ func TestWorkflowInstanceStore_runPipelineMutationDoesNotRetryPostgresDialect(t 
 }
 
 type recordingRuntimeMutationRunner struct {
-	db      *sql.DB
-	dialect workflowStoreDialect
-	mu      sync.Mutex
-	calls   int32
+	db                             *sql.DB
+	dialect                        workflowStoreDialect
+	mu                             sync.Mutex
+	calls                          int32
+	committedScheduleUpserts       []Schedule
+	committedScheduleCancellations []Schedule
 }
 
 func (r *recordingRuntimeMutationRunner) lifecycleMutation(ctx context.Context) (testRunLifecycleMutation, error) {
@@ -611,6 +613,8 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			forked_from_event_id TEXT,
 			reconstruction_owner TEXT,
 			entity_id TEXT,
+			flow_scope_key TEXT,
+			flow_instance_id TEXT,
 			flow_instance TEXT,
 			fire_event TEXT,
 			fire_payload TEXT,

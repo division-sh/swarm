@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -15,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -29,7 +31,7 @@ import (
 func TestAuthorActivityDecisionCardAdapterCoversRegisteredAnchors(t *testing.T) {
 	stageEntityID := uuid.NewString()
 	stage, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		FlowInstance: "root/review", FlowID: "review", EntityID: stageEntityID, Stage: "pending", StageActivationID: uuid.NewString(),
+		Route: runtimeflowidentity.RouteForInstancePath("root/review"), FlowID: "review", EntityID: stageEntityID, Stage: "pending", StageActivationID: uuid.NewString(),
 		Source: eventtest.ConcreteTemplateRoutingSource("review", "root/review", stageEntityID),
 	})
 	if err != nil {
@@ -139,6 +141,20 @@ type dynamicAuthoredEventDescriptorResolver struct {
 	registry *runtimeauthoractivity.EventCatalogRegistry
 }
 
+type rejectedAuthorActivityMutation struct{}
+
+func (rejectedAuthorActivityMutation) Record(context.Context, runtimeauthoractivity.Draft) error {
+	return errors.New("unexpected author activity record")
+}
+
+func (rejectedAuthorActivityMutation) PersistedOccurredAt(context.Context, string) (time.Time, bool, error) {
+	return time.Time{}, false, nil
+}
+
+func (rejectedAuthorActivityMutation) PersistedAuthorSafeSummary(context.Context, string) (string, bool, error) {
+	return "", false, nil
+}
+
 func (r dynamicAuthoredEventDescriptorResolver) authorActivityEventDescriptor(scope runtimeauthoractivity.Scope, name string) (runtimeauthoractivity.EventDescriptor, bool) {
 	return r.registry.Resolve(scope, name)
 }
@@ -173,14 +189,18 @@ func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	story, err := runtimeauthoractivity.Begin(base, tx, runtimeauthoractivity.DialectSQLite)
+	story, err := privateauthoractivity.Begin(base, tx, privateauthoractivity.DialectSQLite)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := recordPersistedEventAuthorActivity(story, nil, resolver, event, "sender", "agent"); err != nil {
+	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runtimeauthoractivity.Finalize(story); err != nil {
+	if err := recordPersistedEventAuthorActivity(base, story, resolver, admitted, "sender", "agent"); err != nil {
+		t.Fatal(err)
+	}
+	if err := story.Finalize(base); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -199,7 +219,7 @@ func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	story, err = runtimeauthoractivity.Begin(base, tx, runtimeauthoractivity.DialectSQLite)
+	story, err = privateauthoractivity.Begin(base, tx, privateauthoractivity.DialectSQLite)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +227,11 @@ func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *test
 		uuid.NewString(), events.EventType(dynamic.EventType), "sender", "", []byte(`{"text":"stale"}`), 0,
 		uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 14, 12, 0, 1, 0, time.UTC),
 	)
-	if err := recordPersistedEventAuthorActivity(story, nil, resolver, stale, "sender", "agent"); err == nil || !strings.Contains(err.Error(), "no live registry lease") {
+	staleAdmitted, err := events.AdmitForPublish(stale, events.AdmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recordPersistedEventAuthorActivity(base, story, resolver, staleAdmitted, "sender", "agent"); err == nil || !strings.Contains(err.Error(), "no live registry lease") {
 		t.Fatalf("stale lease error = %v", err)
 	}
 	_ = tx.Rollback()
@@ -232,7 +256,11 @@ func TestDynamicAuthorActivityEventDescriptorRejectsStaticConflict(t *testing.T)
 		uuid.NewString(), events.EventType("message.sent"), "sender", "", []byte(`{"text":"hello"}`), 0,
 		uuid.NewString(), "", events.EventEnvelope{}, time.Now(),
 	)
-	if err := recordPersistedEventAuthorActivity(ctx, nil, dynamicAuthoredEventDescriptorResolver{registry: registry}, event, "sender", "agent"); err == nil || !strings.Contains(err.Error(), "conflicts") {
+	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recordPersistedEventAuthorActivity(ctx, rejectedAuthorActivityMutation{}, dynamicAuthoredEventDescriptorResolver{registry: registry}, admitted, "sender", "agent"); err == nil || !strings.Contains(err.Error(), "conflicts") {
 		t.Fatalf("descriptor conflict error = %v", err)
 	}
 }
@@ -258,7 +286,12 @@ func TestAuthorActivityEventAndEffectAdaptersRenderExactSubjects(t *testing.T) {
 		uuid.NewString(), events.EventType("phrase.completed"), "phrase-completer", "", []byte(`{}`), 0,
 		uuid.NewString(), "", events.EventEnvelope{}, now,
 	)
-	draft, ok, err := persistedEventAuthorActivityDraft(ctx, authoredEventOutputClassifier{}, event, "phrase-completer", "agent")
+	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{})
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	draft, ok, err := persistedEventAuthorActivityDraft(ctx, authoredEventOutputClassifier{}, admitted, "phrase-completer", "agent")
 	if err != nil {
 		_ = tx.Rollback()
 		t.Fatal(err)

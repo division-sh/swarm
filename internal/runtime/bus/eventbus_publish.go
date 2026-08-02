@@ -314,6 +314,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	if descriptorErr != nil {
 		return releaseFailure(descriptorErr)
 	}
+	authorScope, hasAuthorScope := runtimeauthoractivity.ScopeFromContext(ctx)
 	if reader, ok := eb.store.(PreparedPublishEventReader); ok {
 		durable, found, err := reader.LoadPreparedPublishEvent(ctx, admitted.ID())
 		if err != nil {
@@ -333,6 +334,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 			request.DeliveryReceipt = nil
 			return prepared, PublicationCommand{
 				Commit: request, DynamicFlowCreation: publication.dynamicFlowCreation,
+				AuthorScope: authorScope, HasAuthorScope: hasAuthorScope,
 				AuthorDescriptor: descriptor, HasAuthorDescriptor: hasDescriptor,
 			}, nil
 		}
@@ -418,6 +420,8 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		Commit:              request,
 		Activations:         append([]runtimepipeline.FlowInstanceActivationPlan(nil), routePlan.ActivationPlans...),
 		DynamicFlowCreation: publication.dynamicFlowCreation,
+		AuthorScope:         authorScope,
+		HasAuthorScope:      hasAuthorScope,
 		AuthorDescriptor:    descriptor,
 		HasAuthorDescriptor: hasDescriptor,
 	}, nil

@@ -732,8 +732,8 @@ func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutatio
 	at := time.Unix(1700002500, 0).UTC()
 	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, routing_source, fire_at, owner_agent, owner_kind, task_type, status, created_at)
-		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
+		INSERT INTO timers (timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id, flow_instance, fire_event, fire_payload, routing_source, fire_at, owner_agent, owner_kind, task_type, status, created_at)
+		VALUES ($1::uuid, $2::uuid, $3, $4::uuid, 'flow-a', '1', 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
 		        jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $4::text)),
 		        $5, 'agent-a', 'system', 'workflow_timer', 'active', $6)
 	`, sourceTimerID, sourceRunID, sourceRef.TaskID(), entityID, at.Add(time.Hour), at); err != nil {

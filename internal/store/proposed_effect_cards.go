@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -52,11 +53,15 @@ func (s *SQLiteRuntimeStore) CreateProposedEffectCard(ctx context.Context, card 
 }
 
 func insertProposedEffectCard(ctx context.Context, tx *sql.Tx, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation, postgres bool) error {
+	return insertProposedEffectCardWithStory(ctx, nil, tx, card, continuation, postgres)
+}
+
+func insertProposedEffectCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation, postgres bool) error {
 	continuation = continuation.Canonical()
 	if err := continuation.Validate(card); err != nil {
 		return err
 	}
-	if err := insertDecisionCard(ctx, tx, card, postgres); err != nil {
+	if err := insertDecisionCardWithStory(ctx, story, tx, card, postgres); err != nil {
 		return err
 	}
 	effect, err := continuation.EffectValue()

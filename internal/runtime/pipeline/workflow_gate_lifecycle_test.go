@@ -480,9 +480,6 @@ func TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBo
 				if bus.publishErr != nil {
 					return bus.publishErr
 				}
-				bus.mu.Lock()
-				bus.publishes = append(bus.publishes, evt)
-				bus.mu.Unlock()
 				return nil
 			}
 			bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -671,8 +668,8 @@ func TestWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStores
 				t.Fatalf("supersession entity identities = %#v, want canonical %s", cards.supersededFor, entityID)
 			}
 			cardAnchor := mustStageGateAnchor(t, cards.created[0])
-			if len(bus.publishes) != 1 || bus.publishes[0].FlowInstance() != cardAnchor.FlowInstance || bus.publishes[0].EntityID() != entityID {
-				t.Fatalf("terminated-flow supersession events = %#v, want card flow %q and entity %q", bus.publishes, cardAnchor.FlowInstance, entityID)
+			if len(bus.publishes) != 1 || bus.publishes[0].FlowInstance() != cardAnchor.Route.InstancePath || bus.publishes[0].EntityID() != entityID {
+				t.Fatalf("terminated-flow supersession events = %#v, want card flow %q and entity %q", bus.publishes, cardAnchor.Route.InstancePath, entityID)
 			}
 		})
 	}
@@ -709,8 +706,8 @@ func TestWorkflowGateOrdinaryExitSupersessionCarriesCardFlowIdentityOnBothStores
 				t.Fatalf("ordinary-exit supersession events = %#v cards = %#v", bus.publishes, cards.created)
 			}
 			cardAnchor := mustStageGateAnchor(t, cards.created[0])
-			if got := bus.publishes[0]; got.RunID() != runID || got.EntityID() != entityID || got.FlowInstance() != cardAnchor.FlowInstance {
-				t.Fatalf("ordinary-exit identity = run:%q entity:%q flow:%q, want %q/%q/%q", got.RunID(), got.EntityID(), got.FlowInstance(), runID, entityID, cardAnchor.FlowInstance)
+			if got := bus.publishes[0]; got.RunID() != runID || got.EntityID() != entityID || got.FlowInstance() != cardAnchor.Route.InstancePath {
+				t.Fatalf("ordinary-exit identity = run:%q entity:%q flow:%q, want %q/%q/%q", got.RunID(), got.EntityID(), got.FlowInstance(), runID, entityID, cardAnchor.Route.InstancePath)
 			}
 		})
 	}

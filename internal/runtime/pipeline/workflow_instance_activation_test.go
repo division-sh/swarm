@@ -439,6 +439,16 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if items[0].TopologyReadyAt.IsZero() || !items[0].CreationEventEmittedAt.IsZero() {
 				t.Fatalf("topology-only readiness = %#v", items[0])
 			}
+			if err := store.markDynamicFlowRuntimeReadiness(
+				ctx,
+				runID,
+				instance.StorageRef,
+				"creation_event_emitted_at",
+				nil,
+				readyAt.Add(time.Second),
+			); err != nil {
+				t.Fatalf("mark creation occurrence emitted: %v", err)
+			}
 			revisedSourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact(
 				"bundle-v1:sha256:" + strings.Repeat("c", 64),
 			)

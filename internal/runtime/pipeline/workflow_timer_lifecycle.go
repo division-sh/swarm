@@ -49,10 +49,28 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if err != nil {
 		return true, false, fmt.Errorf("workflow timer event route: %w", err)
 	}
+	nextStage := strings.TrimSpace(timer.AdvancesTo)
+	if nextStage == "" {
+		instance, found, err := pc.workflowStore.Load(ctx, route)
+		if err != nil {
+			return true, false, err
+		}
+		if !found || strings.TrimSpace(instance.CurrentState) != strings.TrimSpace(timer.Stage) {
+			return true, false, nil
+		}
+		current, err := workflowLoopGenerationCurrent(&instance, activation.Ref.Generation, timer.Stage)
+		if err != nil {
+			return true, false, err
+		}
+		if !current {
+			return true, false, nil
+		}
+		return true, true, nil
+	}
+
 	applied := false
 	err = pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
 		currentStage := ""
-		nextStage := strings.TrimSpace(timer.AdvancesTo)
 		if err := pc.workflowStore.mutateE(txctx, route, func(instance *WorkflowInstance) error {
 			currentStage = strings.TrimSpace(instance.CurrentState)
 			if currentStage != strings.TrimSpace(timer.Stage) {
@@ -95,7 +113,7 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 		}); err != nil {
 			return err
 		}
-		if !applied || nextStage == "" {
+		if !applied {
 			return nil
 		}
 		if err := pc.applyAcceptedWorkflowEvent(txctx, route, entityID, evt, currentStage, nextStage); err != nil {

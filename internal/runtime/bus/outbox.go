@@ -87,6 +87,13 @@ func (p CommittedEnginePublication) ValidateCommittedDurablePublication() error 
 	return p.committed.Validate()
 }
 
+// NewlyInserted reports whether this commit inserted the canonical occurrence.
+// Consumers use this typed evidence to avoid repeating post-commit projections
+// for exact duplicate replays.
+func (p CommittedEnginePublication) NewlyInserted() bool {
+	return p.committed.AppendOutcome == EventAppendInserted
+}
+
 // PrepareEnginePublications resolves exact route/delivery facts before the
 // engine mutation enters its selected-store transaction.
 func (eb *EventBus) PrepareEnginePublications(ctx context.Context, intents []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {

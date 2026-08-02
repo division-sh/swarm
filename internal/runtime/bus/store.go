@@ -49,6 +49,8 @@ type PublicationCommand struct {
 	Commit              CommitPublishRequest
 	Activations         []runtimepipeline.FlowInstanceActivationPlan
 	DynamicFlowCreation *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
+	AuthorScope         runtimeauthoractivity.Scope
+	HasAuthorScope      bool
 	AuthorDescriptor    runtimeauthoractivity.EventDescriptor
 	HasAuthorDescriptor bool
 }
@@ -57,7 +59,17 @@ func (c PublicationCommand) Validate() error {
 	if err := events.ValidatePersistentEvent(c.Commit.Event.Event()); err != nil {
 		return err
 	}
+	if c.HasAuthorScope {
+		if c.AuthorScope.Kind != runtimeauthoractivity.ScopeBundle || strings.TrimSpace(c.AuthorScope.RuntimeInstanceID) == "" || strings.TrimSpace(c.AuthorScope.BundleHash) == "" {
+			return fmt.Errorf("publication author scope requires exact runtime and bundle identity")
+		}
+	} else if c.AuthorScope.Kind != "" || strings.TrimSpace(c.AuthorScope.RuntimeInstanceID) != "" || strings.TrimSpace(c.AuthorScope.BundleHash) != "" {
+		return fmt.Errorf("publication author scope facts require explicit presence")
+	}
 	if c.HasAuthorDescriptor {
+		if !c.HasAuthorScope {
+			return fmt.Errorf("publication author descriptor requires exact author scope")
+		}
 		if strings.TrimSpace(c.AuthorDescriptor.EventType) != strings.TrimSpace(string(c.Commit.Event.Event().Type())) {
 			return fmt.Errorf("publication author descriptor does not match event type")
 		}

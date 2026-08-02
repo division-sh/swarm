@@ -648,8 +648,15 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			if instance.CurrentState != "ready" || len(instance.TransitionHistory) != 2 {
 				t.Fatalf("final lifecycle = state:%s history:%#v", instance.CurrentState, instance.TransitionHistory)
 			}
-			if schedules.cancelOwned != 1 || len(schedules.cancelTx) != 1 || !schedules.cancelTx[0] {
-				t.Fatalf("timeout cancellation = count:%d tx:%#v", schedules.cancelOwned, schedules.cancelTx)
+			runner := store.engineMutations.(*recordingRuntimeMutationRunner)
+			runner.mu.Lock()
+			cancellations := append([]Schedule(nil), runner.committedScheduleCancellations...)
+			runner.mu.Unlock()
+			if len(cancellations) != 1 || cancellations[0].EventType != joinTimeoutEvent {
+				t.Fatalf("closed-operation timeout cancellations = %#v", cancellations)
+			}
+			if schedules.cancelOwned != 0 || len(schedules.cancelTx) != 0 {
+				t.Fatalf("legacy schedule callback survived = count:%d tx:%#v", schedules.cancelOwned, schedules.cancelTx)
 			}
 		})
 	}
@@ -691,8 +698,15 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			if err != nil || !result.Handled || result.Outcome == nil || result.Outcome.FanOutCount != 0 {
 				t.Fatalf("empty fan_out = handled:%v outcome:%#v err:%v", result.Handled, result.Outcome, err)
 			}
-			if len(schedules.schedules) != 1 || schedules.schedules[0].EventType != joinCompleteEvent {
-				t.Fatalf("completion schedules = %#v", schedules.schedules)
+			runner := store.engineMutations.(*recordingRuntimeMutationRunner)
+			runner.mu.Lock()
+			committedSchedules := append([]Schedule(nil), runner.committedScheduleUpserts...)
+			runner.mu.Unlock()
+			if len(committedSchedules) != 1 || committedSchedules[0].EventType != joinCompleteEvent {
+				t.Fatalf("closed-operation completion schedules = %#v", committedSchedules)
+			}
+			if len(schedules.schedules) != 0 {
+				t.Fatalf("legacy schedule callback survived = %#v", schedules.schedules)
 			}
 			armed, ok, err := store.Load(ctx, testWorkflowInstanceRoute(path))
 			if err != nil || !ok {
@@ -708,7 +722,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			if schedules.cancelOwned != 0 {
 				t.Fatalf("pending expected-zero completion was canceled before fire: %#v", schedules.cancels)
 			}
-			schedule := schedules.schedules[0]
+			schedule := committedSchedules[0]
 			pc = newCoordinator()
 			fire := eventtest.RunCreatingRootIngress("join-zero-fire", events.EventType(schedule.EventType), "", schedule.TaskID, schedule.Payload, 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
 			result, err = pc.executeAuthoritativeNodeHandler(ctx, fire, workflowTriggerContext{Event: fire, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID)})
@@ -733,8 +747,14 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			if instance.CurrentState != "ready" || len(instance.TransitionHistory) != 2 {
 				t.Fatalf("zero completion lifecycle = state:%s history:%#v", instance.CurrentState, instance.TransitionHistory)
 			}
-			if schedules.cancelOwned != 1 {
-				t.Fatalf("fired expected-zero completion cancellation count = %d, want 1", schedules.cancelOwned)
+			runner.mu.Lock()
+			cancellations := append([]Schedule(nil), runner.committedScheduleCancellations...)
+			runner.mu.Unlock()
+			if len(cancellations) != 1 || cancellations[0].TaskID != schedule.TaskID {
+				t.Fatalf("closed-operation expected-zero cancellation = %#v", cancellations)
+			}
+			if schedules.cancelOwned != 0 {
+				t.Fatalf("legacy expected-zero cancellation callback survived: %d", schedules.cancelOwned)
 			}
 		})
 	}

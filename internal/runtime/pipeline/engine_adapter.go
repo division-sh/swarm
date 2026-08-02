@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -22,7 +23,6 @@ import (
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -97,12 +97,31 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 		if o.store.engineMutations == nil {
 			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("selected workflow engine mutation owner is required")
 		}
-		state, err := o.state.prepareMutation(ctx, mutation.Address, mutation.State)
+		preparedState, err := o.state.prepareMutation(ctx, mutation.Address, mutation.State)
+		if err != nil {
+			return runtimeengine.CommittedEngineMutation{}, err
+		}
+		lifecycle, err := o.state.coordinator.prepareWorkflowLifecycleMutation(
+			ctx,
+			&preparedState.instance,
+			mutation.LifecycleEffects,
+			len(mutation.LifecycleEffects) > 0,
+		)
+		if err != nil {
+			return runtimeengine.CommittedEngineMutation{}, err
+		}
+		state, err := preparedState.record()
 		if err != nil {
 			return runtimeengine.CommittedEngineMutation{}, err
 		}
 		var publications []runtimeengine.DurablePublicationPlan
 		emissionIntents := append([]runtimeengine.EmitIntent(nil), mutation.EmitIntents...)
+		emissionIntents = append(emissionIntents, lifecycle.Emissions...)
+		if len(emissionIntents) > 0 && len(mutation.EmitPrerequisites.Fields) > 0 {
+			if err := verifyPreparedWorkflowEmitPersistence(preparedState.instance, mutation.EmitPrerequisites); err != nil {
+				return runtimeengine.CommittedEngineMutation{}, err
+			}
+		}
 		proposedEffects := make([]WorkflowEngineProposedEffect, 0, len(mutation.ActivityIntents))
 		immediateActivities := make([]runtimeengine.ActivityIntent, 0, len(mutation.ActivityIntents))
 		for _, value := range mutation.ActivityIntents {
@@ -135,8 +154,7 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 			}
 		}
 		committed, err := o.store.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
-			State: state, LifecycleEffects: append([]runtimeworkflowlifecycle.Effect(nil), mutation.LifecycleEffects...),
-			LifecycleNoop:   o.lifecycleEffectsAreNoop(mutation.LifecycleEffects),
+			State: state, Lifecycle: lifecycle.Commit,
 			ProposedEffects: proposedEffects, Publications: publications,
 		})
 		if err != nil {
@@ -149,6 +167,9 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 			if err := o.publication.FinalizeEnginePublications(ctx, committed.Publications); err != nil {
 				return runtimeengine.CommittedEngineMutation{}, err
 			}
+		}
+		if err := o.state.coordinator.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle); err != nil {
+			return runtimeengine.CommittedEngineMutation{}, err
 		}
 		return runtimeengine.CommittedEngineMutation{
 			ActivityIntents: append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...),
@@ -202,12 +223,51 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 	}, nil
 }
 
-func (o pipelineEngineMutationOwner) lifecycleEffectsAreNoop(effects []runtimeworkflowlifecycle.Effect) bool {
-	if len(effects) == 0 || o.state.coordinator == nil {
-		return false
+func verifyPreparedWorkflowEmitPersistence(instance WorkflowInstance, prerequisites runtimeengine.EmitPersistencePrerequisites) error {
+	missingExpected := make([]string, 0, len(prerequisites.Fields))
+	missingPrepared := make([]string, 0, len(prerequisites.Fields))
+	mismatched := make([]string, 0, len(prerequisites.Fields))
+	metadata := workflowInstancePersistedProjectionMetadata(instance)
+	for _, prerequisite := range prerequisites.Fields {
+		field := strings.TrimSpace(prerequisite.Field)
+		if field == "" {
+			continue
+		}
+		if !prerequisite.HasExpected {
+			missingExpected = append(missingExpected, field)
+			continue
+		}
+		actual, ok := workflowMetadataValue(metadata, field)
+		if !ok {
+			missingPrepared = append(missingPrepared, field)
+			continue
+		}
+		if !workflowJSONValuesEqual(prerequisite.Expected, actual) {
+			mismatched = append(mismatched, field)
+		}
 	}
-	source := o.state.coordinator.SemanticSource()
-	return source != nil && len(source.WorkflowTimers()) == 0 && len(source.WorkflowJoins()) == 0 && len(source.WorkflowGates()) == 0 && len(semanticview.WorkflowLoops(source)) == 0
+	if len(missingExpected)+len(missingPrepared)+len(mismatched) == 0 {
+		return nil
+	}
+	details := make([]string, 0, 3)
+	if len(missingExpected) > 0 {
+		details = append(details, "missing handler writes="+strings.Join(missingExpected, ","))
+	}
+	if len(missingPrepared) > 0 {
+		details = append(details, "missing prepared fields="+strings.Join(missingPrepared, ","))
+	}
+	if len(mismatched) > 0 {
+		details = append(details, "mismatched prepared fields="+strings.Join(mismatched, ","))
+	}
+	return fmt.Errorf("%w: %s", runtimeengine.ErrEmitPersistencePrerequisite, strings.Join(details, "; "))
+}
+
+func workflowInstancePersistedProjectionMetadata(instance WorkflowInstance) map[string]any {
+	projection, err := workflowInstancePersistedProjectionFromInstance(instance, instance.StorageRef)
+	if err != nil {
+		return cloneStringAnyMap(instance.Metadata)
+	}
+	return projection.Metadata()
 }
 
 type pipelineEngineLocker struct {
@@ -246,28 +306,42 @@ func cloneWorkflowInstanceForEngineMutation(instance WorkflowInstance) WorkflowI
 	return instance
 }
 
+type preparedWorkflowEngineState struct {
+	runID            string
+	route            runtimeflowidentity.Route
+	instance         WorkflowInstance
+	expectedState    string
+	expectedRevision int64
+	create           bool
+	updatedAt        time.Time
+}
+
+func (p preparedWorkflowEngineState) record() (WorkflowEngineStateRecord, error) {
+	return workflowEngineStateRecord(p.runID, p.route, p.instance, p.expectedState, p.expectedRevision, p.create, p.updatedAt)
+}
+
 func (r pipelineEngineStateRepo) prepareMutation(
 	ctx context.Context,
 	address runtimeengine.StateAddress,
 	mutation runtimeengine.StateMutation,
-) (WorkflowEngineStateRecord, error) {
+) (preparedWorkflowEngineState, error) {
 	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.enabled() {
-		return WorkflowEngineStateRecord{}, fmt.Errorf("workflow engine mutation requires selected workflow persistence")
+		return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation requires selected workflow persistence")
 	}
 	entityID := identity.NormalizeEntityID(address.EntityID.String())
 	if entityID.IsZero() || !address.Route.Valid() {
-		return WorkflowEngineStateRecord{}, fmt.Errorf("workflow engine mutation requires exact entity and instance route")
+		return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation requires exact entity and instance route")
 	}
 	if err := r.ensureFlowOwnsEntity(ctx, address); err != nil {
-		return WorkflowEngineStateRecord{}, err
+		return preparedWorkflowEngineState{}, err
 	}
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
-		return WorkflowEngineStateRecord{}, err
+		return preparedWorkflowEngineState{}, err
 	}
 	current, found, err := r.coordinator.workflowStore.Load(ctx, address.Route)
 	if err != nil {
-		return WorkflowEngineStateRecord{}, err
+		return preparedWorkflowEngineState{}, err
 	}
 	create := !found
 	expectedState := ""
@@ -275,7 +349,7 @@ func (r pipelineEngineStateRepo) prepareMutation(
 	flowID := strings.TrimSpace(address.FlowID.String())
 	if create {
 		if mutation.TriggeredAt.IsZero() {
-			return WorkflowEngineStateRecord{}, fmt.Errorf("workflow initial materialization requires exact accepted event time")
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow initial materialization requires exact accepted event time")
 		}
 		initialMetadata := cloneStringAnyMap(mutation.StateCarrier.PersistedMetadata())
 		if initialMetadata == nil {
@@ -285,7 +359,7 @@ func (r pipelineEngineStateRepo) prepareMutation(
 			"flow_path": address.Route.InstancePath, "instance_id": address.Route.InstanceID, "entity_id": entityID.String(),
 		} {
 			if existing := strings.TrimSpace(asString(initialMetadata[key])); existing != "" && existing != exact {
-				return WorkflowEngineStateRecord{}, fmt.Errorf("engine state %s %q disagrees with exact value %q", key, existing, exact)
+				return preparedWorkflowEngineState{}, fmt.Errorf("engine state %s %q disagrees with exact value %q", key, existing, exact)
 			}
 			initialMetadata[key] = exact
 		}
@@ -309,18 +383,18 @@ func (r pipelineEngineStateRepo) prepareMutation(
 		expectedState = strings.TrimSpace(current.CurrentState)
 		expectedRevision = current.Revision
 		if expectedRevision <= 0 {
-			return WorkflowEngineStateRecord{}, fmt.Errorf("workflow engine mutation requires persisted revision")
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation requires persisted revision")
 		}
 	}
 
 	fromState := strings.TrimSpace(current.CurrentState)
 	if err := applyEngineStateMutation(&current, mutation, workflowEntitySchemaFields(r.coordinator.SemanticSource(), flowID), r.coordinator.SemanticSource(), flowID); err != nil {
-		return WorkflowEngineStateRecord{}, err
+		return preparedWorkflowEngineState{}, err
 	}
 	nextState := strings.TrimSpace(mutation.NextState)
 	if nextState != "" && nextState != fromState {
 		if strings.TrimSpace(mutation.TriggerEventID) == "" || strings.TrimSpace(mutation.TriggerEventType) == "" || mutation.TriggeredAt.IsZero() {
-			return WorkflowEngineStateRecord{}, fmt.Errorf("workflow state transition requires exact trigger event identity")
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow state transition requires exact trigger event identity")
 		}
 		current.CurrentState = nextState
 		current.EnteredStageAt = mutation.TriggeredAt.UTC()
@@ -330,9 +404,22 @@ func (r pipelineEngineStateRepo) prepareMutation(
 		))
 	}
 	if current.CreatedAt.IsZero() {
-		return WorkflowEngineStateRecord{}, fmt.Errorf("workflow engine mutation requires persisted creation time")
+		return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation requires persisted creation time")
 	}
-	return workflowEngineStateRecord(runID, address.Route, current, expectedState, expectedRevision, create, mutation.TriggeredAt)
+	updatedAt := mutation.TriggeredAt.UTC()
+	if !create {
+		// The trigger is a causal fact and may legitimately predate materialization
+		// during replay. The row revision time records this commit instead.
+		updatedAt = time.Now().UTC()
+		if updatedAt.Before(current.CreatedAt) {
+			updatedAt = current.CreatedAt
+		}
+	}
+	return preparedWorkflowEngineState{
+		runID: runID, route: address.Route, instance: current,
+		expectedState: expectedState, expectedRevision: expectedRevision,
+		create: create, updatedAt: updatedAt,
+	}, nil
 }
 
 func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {

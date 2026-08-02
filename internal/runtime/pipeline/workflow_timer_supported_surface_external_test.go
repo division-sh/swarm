@@ -493,6 +493,11 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			if err := coordinator.ArmInitialEntryTimers(ctx, testWorkflowInstanceRoute(runID)); err != nil {
 				t.Fatalf("arm initial workflow timers: %v", err)
 			}
+			armed, found, err := coordinator.Load(ctx, testWorkflowInstanceRoute(runID))
+			if err != nil || !found {
+				t.Fatalf("load workflow instance after timer activation: found=%v err=%v", found, err)
+			}
+			armedRevision := armed.Revision
 			waitWorkflowTimerEventCount(t, selected, fireErrors, runID, runtimecontracts.WorkflowStageTimerInternalEvent, 2)
 
 			scheduler.Stop()
@@ -514,6 +519,13 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 				t.Fatalf("RestoreWorkflowTimers: %v", err)
 			}
 			waitWorkflowTimerEventCount(t, selected, fireErrors, runID, runtimecontracts.WorkflowStageTimerInternalEvent, beforeRestart+1)
+			beforeCancel, found, err := coordinator.Load(ctx, testWorkflowInstanceRoute(runID))
+			if err != nil || !found {
+				t.Fatalf("load workflow instance before cancellation: found=%v err=%v", found, err)
+			}
+			if beforeCancel.Revision != armedRevision {
+				t.Fatalf("non-advancing recurring timers changed workflow revision from %d to %d", armedRevision, beforeCancel.Revision)
+			}
 
 			cancelEvent := eventtest.ExistingRunRootIngress(
 				uuid.NewString(), "timer.cancel", "operator", "", []byte(`{}`), 0, runID,

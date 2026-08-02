@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -138,6 +140,7 @@ type proposedEffectRouteProofBus struct {
 	outbox          []runtimeengine.EmitIntent
 	dispatched      []runtimeengine.EmitIntent
 	eventBus        *runtimebus.EventBus
+	prepared        map[string]runtimeengine.EmitIntent
 }
 
 type proposedEffectRouteProofOutbox struct{ bus *proposedEffectRouteProofBus }
@@ -166,6 +169,47 @@ func (b *proposedEffectRouteProofBus) EngineOutbox() runtimeengine.OutboxWriter 
 }
 func (b *proposedEffectRouteProofBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return proposedEffectRouteProofDispatcher{bus: b}
+}
+
+func (b *proposedEffectRouteProofBus) PrepareEnginePublications(ctx context.Context, intents []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
+	plans, err := b.eventBus.PrepareEnginePublications(ctx, intents)
+	if err != nil {
+		return nil, err
+	}
+	if b.prepared == nil {
+		b.prepared = make(map[string]runtimeengine.EmitIntent, len(intents))
+	}
+	for _, intent := range intents {
+		b.prepared[intent.Event.ID()] = intent
+	}
+	return plans, nil
+}
+
+func (b *proposedEffectRouteProofBus) ReleaseEnginePublications(ctx context.Context, plans []runtimeengine.DurablePublicationPlan) error {
+	return b.eventBus.ReleaseEnginePublications(ctx, plans)
+}
+
+func (b *proposedEffectRouteProofBus) FinalizeEnginePublications(ctx context.Context, evidence []runtimeengine.CommittedDurablePublication) error {
+	if err := b.eventBus.FinalizeEnginePublications(ctx, evidence); err != nil {
+		return err
+	}
+	for _, item := range evidence {
+		committed, ok := item.(runtimebus.CommittedEnginePublication)
+		if !ok || !committed.NewlyInserted() {
+			continue
+		}
+		intent, ok := b.prepared[item.CommittedDurablePublicationEventID()]
+		if !ok {
+			return fmt.Errorf("proposed-effect proof is missing prepared intent %s", item.CommittedDurablePublicationEventID())
+		}
+		if intent.Event.Type() == events.EventType("platform.activity_requested") {
+			b.outbox = append(b.outbox, intent)
+		} else {
+			b.published = append(b.published, events.NewContextDeliveryEvent(intent.Event, intent.Context).Event())
+			b.publishContexts = append(b.publishContexts, intent.Context)
+		}
+	}
+	return nil
 }
 func (b *proposedEffectRouteProofBus) PublishInMutation(ctx context.Context, evt events.Event) error {
 	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
@@ -1109,7 +1153,7 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 	}
 	payload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
 	evt := eventtest.RuntimeControl(eventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), recoveryStageAnchor(t, card).FlowInstance), at)
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), recoveryStageAnchor(t, card).Route.InstancePath), at)
 	return gateRecoveryForegroundFixture{event: evt, entityID: entityID, cardID: card.CardID, coordinator: setupCoordinator}
 }
 
@@ -1121,7 +1165,7 @@ func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, run
 	}
 	entityID := uuid.NewString()
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		FlowInstance: "launch/recovery", FlowID: "launch", EntityID: entityID,
+		Route: runtimeflowidentity.RouteForInstancePath("launch/recovery"), FlowID: "launch", EntityID: entityID,
 		Stage: "awaiting_review", StageActivationID: uuid.NewString(), Source: eventtest.ConcreteTemplateRoutingSource("launch", "launch/recovery", entityID),
 	})
 	if err != nil {
@@ -1146,7 +1190,7 @@ func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, run
 	payload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
 	stageAnchor := recoveryStageAnchor(t, card)
 	evt := eventtest.RuntimeControl(eventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, stageAnchor.EntityID), stageAnchor.FlowInstance), at)
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, stageAnchor.EntityID), stageAnchor.Route.InstancePath), at)
 	storetest.CommitSemanticEventWithRoutes(t, testAuthorActivityContext(t, context.Background()), tc.events, evt, nil, runtimepipelineobligation.ScopeSubscribed)
 	return eventID
 }
@@ -1235,7 +1279,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	bus.SetInterceptors(newCoordinator(otherGateBundle))
 	payload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
 	evt := eventtest.RuntimeControl(eventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), recoveryStageAnchor(t, card).FlowInstance), decidedAt)
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), recoveryStageAnchor(t, card).Route.InstancePath), decidedAt)
 	if err := bus.PublishAcknowledged(ctx, evt); err != nil {
 		t.Fatal(err)
 	}
@@ -1339,7 +1383,7 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	payload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
 	decisionEvent := eventtest.RuntimeControl(
 		decisionEventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), recoveryStageAnchor(t, card).FlowInstance), decidedAt,
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), recoveryStageAnchor(t, card).Route.InstancePath), decidedAt,
 	)
 	if err := bus.PublishAcknowledged(ctx, decisionEvent); err != nil {
 		t.Fatalf("PublishAcknowledged: %v", err)

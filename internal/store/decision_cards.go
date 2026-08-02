@@ -63,8 +63,14 @@ func (s *SQLiteRuntimeStore) CreateDecisionCard(ctx context.Context, card decisi
 }
 
 func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisioncard.Card, postgres bool) error {
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return err
+	return insertDecisionCardWithStory(ctx, nil, db, card, postgres)
+}
+
+func insertDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, db decisionCardSQL, card decisioncard.Card, postgres bool) error {
+	if story == nil {
+		if err := runtimeauthoractivity.Require(ctx); err != nil {
+			return err
+		}
 	}
 	card.CreatedAt = decisioncard.CanonicalTimestamp(card.CreatedAt)
 	card.UpdatedAt = decisioncard.CanonicalTimestamp(card.UpdatedAt)
@@ -122,7 +128,7 @@ func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisionca
 			"card_id": card.CardID, "anchor_kind": card.Anchor.Kind(),
 		})
 	}
-	_, err = appendDecisionCardChangeDTO(ctx, db, card.RunID, card.CardID, decisioncard.ChangeCreated, map[string]any{
+	_, err = appendDecisionCardChangeDTOWithStory(ctx, story, db, card.RunID, card.CardID, decisioncard.ChangeCreated, map[string]any{
 		"status": card.Status, "anchor_kind": card.Anchor.Kind(),
 	}, card.CreatedAt, postgres)
 	return err
@@ -935,8 +941,14 @@ func (s *SQLiteRuntimeStore) SupersedeDecisionCardsForStage(ctx context.Context,
 }
 
 func supersedeDecisionCardsForStage(ctx context.Context, tx *sql.Tx, runID, entityID, activationID, reason string, now time.Time, postgres bool) (bool, error) {
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return false, err
+	return supersedeDecisionCardsForStageWithStory(ctx, nil, tx, runID, entityID, activationID, reason, now, postgres)
+}
+
+func supersedeDecisionCardsForStageWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, runID, entityID, activationID, reason string, now time.Time, postgres bool) (bool, error) {
+	if story == nil {
+		if err := runtimeauthoractivity.Require(ctx); err != nil {
+			return false, err
+		}
 	}
 	now = decisioncard.CanonicalTimestamp(now)
 	if now.IsZero() {
@@ -965,7 +977,7 @@ func supersedeDecisionCardsForStage(ctx context.Context, tx *sql.Tx, runID, enti
 	if _, err := tx.ExecContext(ctx, query, decisioncard.StatusSuperseded, strings.TrimSpace(reason), now, card.CardID); err != nil {
 		return false, err
 	}
-	_, err = appendDecisionCardChangeDTO(ctx, tx, card.RunID, card.CardID, decisioncard.ChangeSuperseded, map[string]any{"reason": strings.TrimSpace(reason)}, now, postgres)
+	_, err = appendDecisionCardChangeDTOWithStory(ctx, story, tx, card.RunID, card.CardID, decisioncard.ChangeSuperseded, map[string]any{"reason": strings.TrimSpace(reason)}, now, postgres)
 	return err == nil, err
 }
 
@@ -1331,7 +1343,7 @@ func decisionCardAuthorActivityIdentity(anchor decisioncard.Anchor) (anchorID, e
 		if err != nil {
 			return "", "", "", err
 		}
-		return stage.StageActivationID, stage.EntityID, stage.FlowInstance, nil
+		return stage.StageActivationID, stage.EntityID, stage.Route.InstancePath, nil
 	case decisioncard.AnchorKindHumanTask:
 		task, err := anchor.HumanTask()
 		if err != nil {

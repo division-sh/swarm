@@ -55,21 +55,23 @@ type authoredEventCatalogLeaseResolver interface {
 	authorActivityEventCatalogRegistered(runtimeauthoractivity.Scope) bool
 }
 
-func recordPersistedEventAuthorActivity(ctx context.Context, story runtimeauthoractivity.Mutation, resolver authoredEventDescriptorResolver, evt events.Event, producedBy, producedByType string) error {
+func recordPersistedEventAuthorActivity(ctx context.Context, story runtimeauthoractivity.Mutation, resolver authoredEventDescriptorResolver, admitted events.AdmittedEvent, producedBy, producedByType string) error {
 	if story == nil {
 		return fmt.Errorf("persisted event author activity mutation is required")
 	}
+	evt := admitted.Event()
 	if platformEventRegistered(strings.TrimSpace(string(evt.Type()))) {
 		return recordPlatformSignalAuthorActivity(ctx, story, evt)
 	}
-	draft, ok, err := persistedEventAuthorActivityDraft(ctx, resolver, evt, producedBy, producedByType)
+	draft, ok, err := persistedEventAuthorActivityDraft(ctx, resolver, admitted, producedBy, producedByType)
 	if err != nil || !ok {
 		return err
 	}
 	return story.Record(ctx, draft)
 }
 
-func persistedEventAuthorActivityDraft(ctx context.Context, resolver authoredEventDescriptorResolver, evt events.Event, producedBy, producedByType string) (runtimeauthoractivity.Draft, bool, error) {
+func persistedEventAuthorActivityDraft(ctx context.Context, resolver authoredEventDescriptorResolver, admitted events.AdmittedEvent, producedBy, producedByType string) (runtimeauthoractivity.Draft, bool, error) {
+	evt := admitted.Event()
 	name := strings.TrimSpace(string(evt.Type()))
 	if name == "platform.inbound_recorded" || platformEventHandledElsewhere(name) || platformEventDifferentConcept(name) {
 		return runtimeauthoractivity.Draft{}, false, nil

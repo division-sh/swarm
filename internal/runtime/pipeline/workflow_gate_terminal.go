@@ -83,7 +83,7 @@ func (s *workflowInstanceStore) supersedeWorkflowInstanceGates(ctx context.Conte
 			Facts: events.EventFacts{
 				ID: uuid.NewString(), Type: events.EventType("mailbox.card_superseded"),
 				Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},
-				Payload:  payload, Envelope: events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, anchor.EntityID), anchor.FlowInstance),
+				Payload:  payload, Envelope: events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, anchor.EntityID), anchor.Route.InstancePath),
 				RoutingSource: routingSource, CreatedAt: now.UTC(), ExecutionMode: executionmode.Live,
 			},
 			RunID: runID,

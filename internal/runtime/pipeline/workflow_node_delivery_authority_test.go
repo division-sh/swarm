@@ -50,6 +50,13 @@ func (b *failOnceRetryPipelineBus) EngineOutbox() runtimeengine.OutboxWriter {
 	return b.outbox
 }
 
+func (b *failOnceRetryPipelineBus) PrepareEnginePublications(ctx context.Context, intents []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
+	if err := b.outbox.WriteOutbox(ctx, intents); err != nil {
+		return nil, err
+	}
+	return b.recordingPipelineBus.PrepareEnginePublications(ctx, intents)
+}
+
 func TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pc, bus := newDeliveryAuthorityCoordinator(t, db)
