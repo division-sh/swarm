@@ -53,18 +53,20 @@ type rootCommandOptions struct {
 	runReadyTimeout        time.Duration
 	runReadyPoll           time.Duration
 	runStatusPoll          time.Duration
+	runTraceAttachTimeout  time.Duration
 	now                    func() time.Time
 }
 
 func defaultRootCommandOptions() rootCommandOptions {
 	return rootCommandOptions{
-		httpClient:      &http.Client{Timeout: 30 * time.Second},
-		input:           os.Stdin,
-		stdinIsTerminal: processStdinIsTerminal,
-		runReadyTimeout: 30 * time.Second,
-		runReadyPoll:    250 * time.Millisecond,
-		runStatusPoll:   time.Second,
-		now:             time.Now,
+		httpClient:            &http.Client{Timeout: 30 * time.Second},
+		input:                 os.Stdin,
+		stdinIsTerminal:       processStdinIsTerminal,
+		runReadyTimeout:       30 * time.Second,
+		runReadyPoll:          250 * time.Millisecond,
+		runStatusPoll:         time.Second,
+		runTraceAttachTimeout: 5 * time.Second,
+		now:                   time.Now,
 	}
 }
 

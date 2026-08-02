@@ -342,7 +342,17 @@ func FromError(err error, component, operation string) *Error {
 		return nil
 	}
 	if existing, ok := asRaw(err); ok {
-		return validatedError(existing, component, operation)
+		validated := validatedError(existing, component, operation)
+		if validated == existing {
+			if err == existing {
+				return existing
+			}
+			return &Error{Failure: existing.Failure, cause: err}
+		}
+		return &Error{
+			Failure: validated.Failure,
+			cause:   errors.Join(err, validated.cause),
+		}
 	}
 	return Wrap(
 		ClassInternalFailure,

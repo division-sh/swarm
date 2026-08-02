@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -30,6 +31,23 @@ const (
 	runCommandStatusFailed         = "failed"
 	runCommandStatusCancelled      = "cancelled"
 	runCommandStatusForked         = "forked"
+	defaultRunTraceAttachTimeout   = 5 * time.Second
+	runTraceObserverDetachedType   = "run_trace_observer_detached"
+	runTraceObserverWarning        = "warning"
+)
+
+type runTraceDetachReason string
+
+const (
+	runTraceDetachAttachFailed                runTraceDetachReason = "attach_failed"
+	runTraceDetachAttachTimedOut              runTraceDetachReason = "attach_timed_out"
+	runTraceDetachSubscriptionResponseInvalid runTraceDetachReason = "subscription_response_invalid"
+	runTraceDetachTransportLost               runTraceDetachReason = "transport_lost"
+	runTraceDetachNotificationInvalid         runTraceDetachReason = "notification_invalid"
+	runTraceDetachSubscriptionMismatch        runTraceDetachReason = "subscription_mismatch"
+	runTraceDetachTraceRowInvalid             runTraceDetachReason = "trace_row_invalid"
+	runTraceDetachStreamClosed                runTraceDetachReason = "stream_closed"
+	runTraceDetachQueueOverflow               runTraceDetachReason = "queue_overflow"
 )
 
 type runCommandOptions struct {
@@ -81,6 +99,44 @@ type runTraceSubscription struct {
 	subscriptionID string
 	rows           chan diagnosticRunTraceRow
 	errs           chan error
+	done           chan struct{}
+	closeOnce      sync.Once
+}
+
+type runTraceObserverError struct {
+	reason runTraceDetachReason
+	err    error
+}
+
+func (e *runTraceObserverError) Error() string {
+	if e == nil || e.err == nil {
+		return ""
+	}
+	return e.err.Error()
+}
+
+func (e *runTraceObserverError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+type runTraceObserverDetachedFact struct {
+	Type            string               `json:"type"`
+	Severity        string               `json:"severity"`
+	ReasonCode      runTraceDetachReason `json:"reason_code"`
+	RunID           string               `json:"run_id"`
+	RunContinues    bool                 `json:"run_continues"`
+	ReattachCommand string               `json:"reattach_command"`
+}
+
+type foregroundRunTraceObserver struct {
+	rows     <-chan diagnosticRunTraceRow
+	detached <-chan runTraceDetachReason
+	cancel   context.CancelFunc
+	done     <-chan struct{}
+	stopOnce sync.Once
 }
 
 func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
@@ -579,21 +635,43 @@ func runReattachCommand(ctx context.Context, out, errOut io.Writer, opts runComm
 }
 
 func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, opts runCommandOptions, wsEndpoint, runID string, replaySince *time.Time, stopOnInterrupt bool) error {
-	sub, err := subscribeRunTrace(ctx, wsEndpoint, client.token, runID, replaySince, nil)
-	if err != nil {
-		writeCLIAPIError(errOut, err)
-		return commandExitError{code: runCommandErrorExitCode(err)}
-	}
-	defer sub.close()
-	rows := sub.rows
 	poll := opts.apiOptions.runStatusPoll
 	if poll <= 0 {
 		poll = time.Second
 	}
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
+	observer := startForegroundRunTraceObserver(
+		ctx,
+		wsEndpoint,
+		client.token,
+		runID,
+		replaySince,
+		opts.apiOptions.runTraceAttachTimeout,
+	)
+	defer observer.stop()
+	rows := observer.rows
+	detached := observer.detached
 	traceWriter := &runTraceRowLineWriter{}
+	reportDetach := func(reason runTraceDetachReason) {
+		writeRunTraceObserverDetached(errOut, runTraceObserverDetachedFact{
+			Type:            runTraceObserverDetachedType,
+			Severity:        runTraceObserverWarning,
+			ReasonCode:      reason,
+			RunID:           runID,
+			RunContinues:    true,
+			ReattachCommand: runCommandReattachGuidance(runID, opts.connectURL),
+		})
+		rows = nil
+		detached = nil
+	}
 	for {
+		select {
+		case reason := <-detached:
+			reportDetach(reason)
+			continue
+		default:
+		}
 		select {
 		case <-ctx.Done():
 			if stopOnInterrupt {
@@ -615,11 +693,8 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 				continue
 			}
 			traceWriter.Write(out, row)
-		case err := <-sub.errs:
-			if err != nil {
-				writeCLIAPIError(errOut, err)
-				return commandExitError{code: runCommandErrorExitCode(err)}
-			}
+		case reason := <-detached:
+			reportDetach(reason)
 		case <-ticker.C:
 			run, err := runCommandGet(ctx, client, runID)
 			if err != nil {
@@ -627,6 +702,12 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 				return commandExitError{code: runCommandErrorExitCode(err)}
 			}
 			if runCommandTerminalStatus(run.Status) {
+				observer.stop()
+				select {
+				case reason := <-detached:
+					reportDetach(reason)
+				default:
+				}
 				writeRunCommandTerminalSummary(out, run)
 				return runCommandTerminalExit(run.Status)
 			}
@@ -634,15 +715,139 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 	}
 }
 
+func startForegroundRunTraceObserver(ctx context.Context, wsEndpoint, token, runID string, replaySince *time.Time, attachTimeout time.Duration) *foregroundRunTraceObserver {
+	if attachTimeout <= 0 {
+		attachTimeout = defaultRunTraceAttachTimeout
+	}
+	observerCtx, cancel := context.WithCancel(ctx)
+	rows := make(chan diagnosticRunTraceRow)
+	detached := make(chan runTraceDetachReason, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer close(rows)
+
+		attachCtx, cancelAttach := context.WithTimeout(observerCtx, attachTimeout)
+		sub, err := subscribeRunTrace(attachCtx, wsEndpoint, token, runID, replaySince, nil)
+		attachTimedOut := errors.Is(attachCtx.Err(), context.DeadlineExceeded)
+		cancelAttach()
+		if err != nil {
+			if observerCtx.Err() != nil {
+				return
+			}
+			reason := runTraceDetachReasonForError(err, runTraceDetachAttachFailed)
+			if attachTimedOut {
+				reason = runTraceDetachAttachTimedOut
+			}
+			detached <- reason
+			return
+		}
+		defer sub.close()
+		if attachTimedOut {
+			detached <- runTraceDetachAttachTimedOut
+			return
+		}
+
+		for {
+			if reason, terminated := runTraceSubscriptionDetachReason(sub); terminated {
+				detached <- reason
+				return
+			}
+			select {
+			case <-observerCtx.Done():
+				publishRunTraceTerminationIfPresent(sub, detached)
+				return
+			case row, ok := <-sub.rows:
+				if !ok {
+					reason, terminated := runTraceSubscriptionDetachReason(sub)
+					if !terminated {
+						reason = runTraceDetachStreamClosed
+					}
+					detached <- reason
+					return
+				}
+				select {
+				case rows <- row:
+				case <-observerCtx.Done():
+					publishRunTraceTerminationIfPresent(sub, detached)
+					return
+				case err := <-sub.errs:
+					detached <- runTraceDetachReasonForError(err, runTraceDetachTransportLost)
+					return
+				case <-sub.done:
+					reason, _ := runTraceSubscriptionDetachReason(sub)
+					detached <- reason
+					return
+				}
+			case err := <-sub.errs:
+				if err != nil {
+					detached <- runTraceDetachReasonForError(err, runTraceDetachTransportLost)
+					return
+				}
+			}
+		}
+	}()
+	return &foregroundRunTraceObserver{rows: rows, detached: detached, cancel: cancel, done: done}
+}
+
+func publishRunTraceTerminationIfPresent(sub *runTraceSubscription, detached chan<- runTraceDetachReason) {
+	if reason, terminated := runTraceSubscriptionDetachReason(sub); terminated {
+		detached <- reason
+	}
+}
+
+func runTraceSubscriptionDetachReason(sub *runTraceSubscription) (runTraceDetachReason, bool) {
+	select {
+	case err := <-sub.errs:
+		return runTraceDetachReasonForError(err, runTraceDetachTransportLost), true
+	case <-sub.done:
+		select {
+		case err := <-sub.errs:
+			return runTraceDetachReasonForError(err, runTraceDetachTransportLost), true
+		default:
+			return runTraceDetachStreamClosed, true
+		}
+	default:
+		return "", false
+	}
+}
+
+func (o *foregroundRunTraceObserver) stop() {
+	if o == nil {
+		return
+	}
+	o.stopOnce.Do(func() {
+		o.cancel()
+		<-o.done
+	})
+}
+
+func runTraceDetachReasonForError(err error, fallback runTraceDetachReason) runTraceDetachReason {
+	var observerErr *runTraceObserverError
+	if errors.As(err, &observerErr) && observerErr != nil && observerErr.reason != "" {
+		return observerErr.reason
+	}
+	return fallback
+}
+
+func wrapRunTraceObserverError(reason runTraceDetachReason, err error) error {
+	if err == nil {
+		return nil
+	}
+	return &runTraceObserverError{reason: reason, err: err}
+}
+
 func subscribeRunTrace(ctx context.Context, wsEndpoint, token, runID string, replaySince *time.Time, extraParams map[string]any) (*runTraceSubscription, error) {
 	header := http.Header{"Authorization": []string{"Bearer " + token}}
 	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsEndpoint, header)
 	if err != nil {
 		if resp != nil {
-			return nil, cliAPIWebSocketHTTPError("runtime event stream", wsEndpoint, resp)
+			return nil, wrapRunTraceObserverError(runTraceDetachAttachFailed, cliAPIWebSocketHTTPError("runtime event stream", wsEndpoint, resp))
 		}
-		return nil, &cliAPITransportError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "dial", err: err}
+		return nil, wrapRunTraceObserverError(runTraceDetachAttachFailed, &cliAPITransportError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "dial", err: err})
 	}
+	stopCancellationCloser := closeRunTraceWebSocketOnContext(ctx, conn)
+	defer stopCancellationCloser()
 	requestID := "swarm-cli:" + runCommandMethodSubscribeTrace
 	params := map[string]any{"run_id": runID}
 	for name, value := range extraParams {
@@ -658,33 +863,37 @@ func subscribeRunTrace(ctx context.Context, wsEndpoint, token, runID string, rep
 		Params:  params,
 	}); err != nil {
 		conn.Close()
-		return nil, &cliAPITransportError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription request", err: err}
+		return nil, wrapRunTraceObserverError(runTraceDetachAttachFailed, &cliAPITransportError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription request", err: err})
 	}
 	var envelope jsonRPCResponse
 	if err := cliAPIReadWebSocketJSON(conn, "runtime event stream", wsEndpoint, "subscription response", &envelope); err != nil {
 		conn.Close()
-		return nil, err
+		var protocolErr *cliAPIProtocolError
+		if errors.As(err, &protocolErr) {
+			return nil, wrapRunTraceObserverError(runTraceDetachSubscriptionResponseInvalid, err)
+		}
+		return nil, wrapRunTraceObserverError(runTraceDetachAttachFailed, err)
 	}
 	if envelope.JSONRPC != "2.0" {
 		conn.Close()
-		return nil, &cliAPIProtocolError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription response", err: fmt.Errorf("jsonrpc=%q", envelope.JSONRPC)}
+		return nil, wrapRunTraceObserverError(runTraceDetachSubscriptionResponseInvalid, &cliAPIProtocolError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription response", err: fmt.Errorf("jsonrpc=%q", envelope.JSONRPC)})
 	}
 	if id, ok := envelope.ID.(string); !ok || id != requestID {
 		conn.Close()
-		return nil, &cliAPIProtocolError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription response", err: fmt.Errorf("id=%s, want %q", formatJSONRPCID(envelope.ID), requestID)}
+		return nil, wrapRunTraceObserverError(runTraceDetachSubscriptionResponseInvalid, &cliAPIProtocolError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription response", err: fmt.Errorf("id=%s, want %q", formatJSONRPCID(envelope.ID), requestID)})
 	}
 	if envelope.Error != nil {
 		conn.Close()
-		return nil, envelope.Error
+		return nil, wrapRunTraceObserverError(runTraceDetachSubscriptionResponseInvalid, envelope.Error)
 	}
 	var result runTraceSubscriptionResult
 	if err := json.Unmarshal(envelope.Result, &result); err != nil {
 		conn.Close()
-		return nil, &cliAPIProtocolError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription result", err: err}
+		return nil, wrapRunTraceObserverError(runTraceDetachSubscriptionResponseInvalid, &cliAPIProtocolError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription result", err: err})
 	}
 	if strings.TrimSpace(result.SubscriptionID) == "" {
 		conn.Close()
-		return nil, &cliAPIProtocolError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription result", err: fmt.Errorf("subscription_id is required")}
+		return nil, wrapRunTraceObserverError(runTraceDetachSubscriptionResponseInvalid, &cliAPIProtocolError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription result", err: fmt.Errorf("subscription_id is required")})
 	}
 	sub := &runTraceSubscription{
 		conn:           conn,
@@ -692,12 +901,14 @@ func subscribeRunTrace(ctx context.Context, wsEndpoint, token, runID string, rep
 		subscriptionID: result.SubscriptionID,
 		rows:           make(chan diagnosticRunTraceRow, 16),
 		errs:           make(chan error, 1),
+		done:           make(chan struct{}),
 	}
 	go sub.readLoop()
 	return sub, nil
 }
 
 func (s *runTraceSubscription) readLoop() {
+	defer close(s.done)
 	defer close(s.rows)
 	for {
 		var notification runTraceNotification
@@ -705,26 +916,31 @@ func (s *runTraceSubscription) readLoop() {
 			if cliAPIIsNormalWebSocketClose(err) {
 				return
 			}
-			s.reportError(err)
+			var protocolErr *cliAPIProtocolError
+			if errors.As(err, &protocolErr) {
+				s.reportError(wrapRunTraceObserverError(runTraceDetachNotificationInvalid, err))
+			} else {
+				s.reportError(wrapRunTraceObserverError(runTraceDetachTransportLost, err))
+			}
 			return
 		}
 		if notification.JSONRPC != "2.0" || notification.Method != "rpc.subscription" {
-			s.reportError(&cliAPIProtocolError{surface: "runtime event stream", endpoint: s.endpoint, operation: "notification", err: fmt.Errorf("malformed run.subscribe_trace notification")})
+			s.reportError(wrapRunTraceObserverError(runTraceDetachNotificationInvalid, &cliAPIProtocolError{surface: "runtime event stream", endpoint: s.endpoint, operation: "notification", err: fmt.Errorf("malformed run.subscribe_trace notification")}))
 			return
 		}
 		if notification.Params.Subscription != s.subscriptionID {
-			s.reportError(&cliAPIProtocolError{surface: "runtime event stream", endpoint: s.endpoint, operation: "notification", err: fmt.Errorf("subscription mismatch")})
+			s.reportError(wrapRunTraceObserverError(runTraceDetachSubscriptionMismatch, &cliAPIProtocolError{surface: "runtime event stream", endpoint: s.endpoint, operation: "notification", err: fmt.Errorf("subscription mismatch")}))
 			return
 		}
 		row := notification.Params.Result
 		if err := validateRunCommandTraceRow(row); err != nil {
-			s.reportError(&cliAPIProtocolError{surface: "runtime event stream", endpoint: s.endpoint, operation: "notification", err: err})
+			s.reportError(wrapRunTraceObserverError(runTraceDetachTraceRowInvalid, &cliAPIProtocolError{surface: "runtime event stream", endpoint: s.endpoint, operation: "notification", err: err}))
 			return
 		}
 		select {
 		case s.rows <- row:
 		default:
-			s.reportError(fmt.Errorf("run.subscribe_trace notification queue overflow"))
+			s.reportError(wrapRunTraceObserverError(runTraceDetachQueueOverflow, fmt.Errorf("run.subscribe_trace notification queue overflow")))
 			return
 		}
 	}
@@ -754,7 +970,30 @@ func (s *runTraceSubscription) close() {
 	if s == nil || s.conn == nil {
 		return
 	}
-	_ = s.conn.Close()
+	s.closeOnce.Do(func() {
+		_ = s.conn.Close()
+	})
+	if s.done != nil {
+		<-s.done
+	}
+}
+
+func closeRunTraceWebSocketOnContext(ctx context.Context, conn *websocket.Conn) func() {
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-stop:
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() { close(stop) })
+		<-done
+	}
 }
 
 func runCommandGet(ctx context.Context, client *cliAPIClient, runID string) (diagnosticRunHeader, error) {
@@ -827,12 +1066,38 @@ func writeRunCommandNoFollowGuidance(out io.Writer, runID, connectURL string) {
 	if out == nil {
 		return
 	}
-	connect := strings.TrimSpace(connectURL)
-	if connect != "" {
-		fmt.Fprintf(out, "reattach: swarm run start --connect %s --reattach %s\n", connect, runID)
+	fmt.Fprintf(out, "reattach: %s\n", runCommandReattachGuidance(runID, connectURL))
+}
+
+func runCommandReattachGuidance(runID, connectURL string) string {
+	if connect := strings.TrimSpace(connectURL); connect != "" {
+		return fmt.Sprintf("swarm run start --connect %s --reattach %s", connect, runID)
+	}
+	return fmt.Sprintf("swarm run start --reattach %s", runID)
+}
+
+func writeRunTraceObserverDetached(out io.Writer, fact runTraceObserverDetachedFact) {
+	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "reattach: swarm run start --reattach %s\n", runID)
+	writeRunTraceObserverDetachedWithMode(out, cliOutputIsTerminal(out), fact)
+}
+
+func writeRunTraceObserverDetachedWithMode(out io.Writer, terminal bool, fact runTraceObserverDetachedFact) {
+	if out == nil {
+		return
+	}
+	if terminal {
+		fmt.Fprintf(
+			out,
+			"WARNING: run trace observer detached for run %s (%s); the run continues. Reattach with `%s`.\n",
+			fact.RunID,
+			fact.ReasonCode,
+			fact.ReattachCommand,
+		)
+		return
+	}
+	_ = json.NewEncoder(out).Encode(fact)
 }
 
 func writeRunCommandReattached(out io.Writer, run diagnosticRunHeader) {

@@ -3,6 +3,8 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -123,5 +125,29 @@ func TestNormalizeFailureAndDisposition(t *testing.T) {
 				t.Fatalf("disposition = %s, want %s", got, test.disposition)
 			}
 		})
+	}
+}
+
+func TestNormalizeFailureRoutesTypedErrorsThroughCausePreservingOwner(t *testing.T) {
+	innerCause := errors.New("provider socket closed")
+	inner := failures.Wrap(
+		failures.ClassConnectorFailure,
+		"provider_rate_limited",
+		"provider",
+		"call",
+		map[string]any{"status": 429},
+		innerCause,
+	).(*failures.Error)
+	outer := fmt.Errorf("manager receipt: %w", inner)
+
+	normalized := NormalizeFailure(outer, "agent-manager", "process_event.on_event")
+	if normalized == inner {
+		t.Fatal("NormalizeFailure returned the extracted inner failure")
+	}
+	if !reflect.DeepEqual(normalized.Failure, inner.Failure) {
+		t.Fatalf("normalized envelope = %#v, want %#v", normalized.Failure, inner.Failure)
+	}
+	if !errors.Is(normalized, outer) || !errors.Is(normalized, inner) || !errors.Is(normalized, innerCause) {
+		t.Fatalf("normalized chain does not retain caller, typed, and root causes: %v", normalized)
 	}
 }

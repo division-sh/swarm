@@ -6823,6 +6823,13 @@ engine:
           same_process:
             status: authoritative
             requirement: The envelope is created by internal/runtime/failures; its registry owns class, detail validation, retryability, determinism, message, and remediation. Every typed-error extraction and authority ingress revalidates the current envelope contract. A malformed same-process typed error is canonicalized to platform.internal_failure/invalid_failure_construction or rejected before persistence, disposition, logging, or readback.
+            normalization: >
+              internal/runtime/failures.FromError is the canonical same-process error normalizer. When it extracts a
+              typed envelope from a wrapped caller error, it MUST preserve errors.Is/errors.As reachability through
+              the complete original in-process cause chain without mutating the inner typed error or creating an
+              unwrap cycle. Engine normalization consumes FromError rather than returning an independently extracted
+              typed error. Durable surfaces persist only the validated canonical envelope and MUST NOT serialize raw
+              Go cause text or the in-process unwrap chain.
           persisted_or_replayed:
             status: authoritative_after_current_version_validation
             requirement: The envelope is loaded through the hard-migrated local persistence, replay, or fork path and passes strict current-schema validation without prose reclassification.
@@ -22513,6 +22520,7 @@ cli_specification:
         status: /v1/rpc run.get
         cancellation: /v1/rpc run.stop
         follow: /v1/ws run.subscribe_trace
+        post_start_observation_policy: foreground run lifecycle composition in internal/cliapp
         local_startup: existing `swarm serve` startup owner
       flags:
       - --event <name>
@@ -22536,8 +22544,9 @@ cli_specification:
         foreground_local_start:
           invocation: swarm run start --event <name> --payload <file> [--config <path>] [--backend <profile>] --contracts <path> [--data <path>] --platform-spec <path>
           behavior: >
-            Start runtime/API/MCP through the existing serve startup owner, call health.check, call run.start, subscribe
-            with run.subscribe_trace, render composed trace rows and final summary until terminal. Local runtime config and
+            Start runtime/API/MCP through the existing serve startup owner, call health.check, call run.start, begin
+            authoritative run.get status/interrupt handling, and attempt optional bounded run.subscribe_trace observation.
+            Render available trace rows and the final status-owned summary until terminal. Local runtime config and
             backend selection consume the same shared resolver as `swarm serve`; local `/data` source selection consumes
             `workspace_model.data_source_authority` through the serve startup owner. When the caller does not pass
             `--bundle-hash`, run.start uses the active canonical bundle_hash
@@ -22546,7 +22555,7 @@ cli_specification:
           ctrl_c: 'First Ctrl-C calls run.stop after a run_id exists, shuts down the locally started runtime, and exits 130. A second interrupt may hard-exit.'
         foreground_connected_start:
           invocation: swarm run start --connect <url> --event <name> --payload <file>
-          behavior: 'Use an existing API server, call health.check, call run.start, subscribe with run.subscribe_trace, and render until terminal.'
+          behavior: 'Use an existing API server, call health.check, call run.start, begin authoritative run.get status/interrupt handling, attempt optional bounded run.subscribe_trace observation, and render until terminal.'
           ctrl_c: 'First Ctrl-C calls run.stop against the connected server and exits 130; it MUST NOT stop the server.'
         connected_no_follow:
           invocation: swarm run start --connect <url> --event <name> --payload <file> --no-follow
@@ -22554,15 +22563,58 @@ cli_specification:
           validation: '`--no-follow` requires `--connect` and is mutually exclusive with `--reattach`.'
         reattach_active:
           invocation: swarm run start --reattach <run-id> [--connect <url>]
-          behavior: 'Call run.get, then subscribe with run.subscribe_trace when the run is active.'
+          behavior: 'Call run.get, then begin authoritative status/interrupt handling and attempt optional bounded run.subscribe_trace observation when the run is active.'
           ctrl_c: 'Detach only, exit 130, and MUST NOT call run.stop.'
         reattach_terminal:
           invocation: swarm run start --reattach <run-id> [--connect <url>]
           behavior: 'Call run.get, render terminal summary, and exit according to terminal status without opening /v1/ws.'
+      post_start_trace_observation:
+        role: optional diagnostic observer; never workload lifecycle or normal exit authority
+        acquisition: >
+          Subscription acquisition and streaming run in one run-start-specific cancellable child. Acquisition has a
+          finite five-second default timeout owned by the run-start implementation. Status polling and interruption
+          handling begin as soon as workload existence is established and MUST NOT wait for subscription acquisition.
+          Cancellation closes the pending or active WebSocket and joins the child before command teardown.
+        failure_policy: >
+          After successful run.start, or after active reattach proves the run exists, any trace attach failure,
+          acquisition timeout, invalid subscription response, transport loss, invalid notification, subscription
+          mismatch, invalid trace row, clean premature close, or local queue overflow detaches observation exactly
+          once and continues authoritative run.get polling. There is no reconnect, replay, or queue-size fallback.
+        detach_fact:
+          type: run_trace_observer_detached
+          severity: warning
+          required_fields:
+          - type
+          - severity
+          - reason_code
+          - run_id
+          - run_continues
+          - reattach_command
+          fixed_values:
+            type: run_trace_observer_detached
+            severity: warning
+            run_continues: true
+          reason_codes:
+          - attach_failed
+          - attach_timed_out
+          - subscription_response_invalid
+          - transport_lost
+          - notification_invalid
+          - subscription_mismatch
+          - trace_row_invalid
+          - stream_closed
+          - queue_overflow
+          reattach_command: 'Exact `swarm run start --reattach <run-id>` command, with `--connect <url>` before `--reattach` when the current command targets an existing server.'
+          tty_rendering: 'One WARNING:-class human stderr line projected from the typed fact.'
+          non_tty_rendering: 'One compact JSON object on stderr. This does not make stdout or the complete command NDJSON and does not add a JSON output mode.'
+        exit_authority: >
+          run.get terminal status exclusively owns normal post-start exit. Observation failure cannot change a
+          successful terminal exit or hide workflow failure/cancellation. Explicit interruption remains authoritative:
+          start modes attempt run.stop and exit 130; active reattach detaches without run.stop and exits 130.
       exit_codes:
         success: 0
         cli_validation: 2
-        config_readiness_transport_or_malformed_api: 3
+        config_readiness_pre_start_transport_or_malformed_api_and_post_start_status_authority_failure: 3
         auth_failure: 4
         run_not_found: 5
         start_rejection_bundle_or_idempotency_conflict: 6
@@ -22571,7 +22623,13 @@ cli_specification:
       proof_expectations:
       - exact /v1/rpc calls for health.check, run.start, run.get, and run.stop; health.check exposes the active canonical bundle_hash and run.start carries explicit --bundle-hash or the health.check bundle_hash when create-new-work scope is required; missing create-new-work bundle scope maps server BUNDLE_SCOPE_REQUIRED and valid non-routable hashes map BUNDLE_UNAVAILABLE
       - connected start failures for EVENT_NOT_DECLARED, PAYLOAD_VALIDATION_FAILED, EVENT_PUBLISH_FAILED, bundle identity rejection, and IDEMPOTENCY_CONFLICT render canonical API codes on stderr, exit 6, and do not open /v1/ws or follow work after failed run.start
-      - exact /v1/ws subscription for run.subscribe_trace where follow is in scope
+      - exact /v1/ws subscription for run.subscribe_trace where observation is in scope, with finite acquisition timeout, cancellation close/join, and unchanged 16-row transport bound
+      - every post-start attach, timeout, protocol, transport, validation, mismatch, clean-close, and overflow manifestation emits exactly one typed detach fact and continues run.get polling
+      - local start, connected start, and active reattach consume the same observer policy; terminal reattach opens no WebSocket; pre-start failures remain lethal
+      - terminal success/failure and both start/reattach interrupt modes remain status/control-owned while pending and detached observers close and join without socket or goroutine leaks
+      - TTY and non-TTY render the same typed detach facts, including the exact connect-aware reattach command
+      - a compiled public local foreground run exceeding the trace queue bound detaches observation loudly, reaches terminal completion, and exits 0 without premature runtime teardown
+      - standalone `swarm run trace --follow`, dashboard SSE, API WebSocket subscriptions, event/log followers, and the serve story follower retain their separate non-cancelling lifecycle contracts
       - no direct DB/store/runtime/EventBus reads or writes
       - no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, or legacy token fallback
       - tests for every mode, invalid bundle_hash, retired flag rejection, invalid flag combination, Ctrl-C behavior, exit mapping, malformed RPC/WS response, and no-call invalid paths
