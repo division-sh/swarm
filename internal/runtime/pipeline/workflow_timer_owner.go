@@ -548,23 +548,11 @@ func workflowTimerActivationForCause(
 		return WorkflowTimerActivation{}, err
 	}
 	activationCause := timeridentity.WorkflowTimerActivationCause(strings.TrimSpace(string(cause.Kind)))
-	flowID := strings.TrimSpace(declaration.FlowID)
-	var routingSource events.RoutingSource
-	if flowID == "" {
-		routingSource, err = events.NewRootRoutingSource(entityID)
-	} else {
-		routingSource, err = events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
-			FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID,
-		})
-	}
-	if err != nil {
-		return WorkflowTimerActivation{}, fmt.Errorf("admit workflow timer owner source: %w", err)
-	}
-	admittedEvent, err := runtimepinrouting.AdmitRuntimeControlSourceEvent(
-		source, flowID, events.EventType(strings.TrimSpace(declaration.Event)), routingSource,
+	routingSource, admittedEvent, err := workflowTimerDeclarationSourceEvent(
+		source, entityID, flowInstance, declaration,
 	)
 	if err != nil {
-		return WorkflowTimerActivation{}, fmt.Errorf("admit workflow timer event identity: %w", err)
+		return WorkflowTimerActivation{}, err
 	}
 	activationID := timeridentity.WorkflowTimerActivationID(
 		runID,
@@ -1016,7 +1004,51 @@ func (l *WorkflowTimerLifecycle) workflowTimerActivationDeclarationCurrent(
 	if err != nil {
 		return false, err
 	}
-	return revision == activation.Ref.DeclarationRevision, nil
+	if revision != activation.Ref.DeclarationRevision {
+		return false, nil
+	}
+	expectedSource, expectedEvent, err := workflowTimerDeclarationSourceEvent(
+		l.source, activation.EntityID, activation.FlowInstance, declaration,
+	)
+	if err != nil {
+		return false, err
+	}
+	if activation.RoutingSource != expectedSource || activation.EventType != string(expectedEvent) {
+		return false, fmt.Errorf(
+			"workflow timer activation %s source/event does not match declaration %s",
+			activation.Ref.ActivationID, activation.Ref.Declaration,
+		)
+	}
+	return true, nil
+}
+
+func workflowTimerDeclarationSourceEvent(
+	source semanticview.Source,
+	entityID, flowInstance string,
+	declaration runtimecontracts.WorkflowTimerContract,
+) (events.RoutingSource, events.EventType, error) {
+	flowID := strings.TrimSpace(declaration.FlowID)
+	var (
+		routingSource events.RoutingSource
+		err           error
+	)
+	if flowID == "" {
+		routingSource, err = events.NewRootRoutingSource(entityID)
+	} else {
+		routingSource, err = events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+			FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID,
+		})
+	}
+	if err != nil {
+		return events.RoutingSource{}, "", fmt.Errorf("admit workflow timer owner source: %w", err)
+	}
+	admittedEvent, err := runtimepinrouting.AdmitRuntimeControlSourceEvent(
+		source, flowID, events.EventType(strings.TrimSpace(declaration.Event)), routingSource,
+	)
+	if err != nil {
+		return events.RoutingSource{}, "", fmt.Errorf("admit workflow timer event identity: %w", err)
+	}
+	return routingSource, admittedEvent, nil
 }
 
 func (l *WorkflowTimerLifecycle) workflowTimerDeclarationForActivation(

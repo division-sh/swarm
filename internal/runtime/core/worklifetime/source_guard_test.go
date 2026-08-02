@@ -65,7 +65,7 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"go|internal/runtime/mcp/client.go|stdioRPCClient.Call|497":                                                          {asyncSiteSynchronousJoin, "request cancellation notification is bounded by the call completion context"},
 	"go|internal/runtime/pipeline/scheduler.go|Scheduler.startTask|1023":                                                 {asyncSiteCanonicalOwner, "the scheduler task owns its full execution occurrence plus an exact parkable standing projection, aggregate target-key reservation, linearized fire state, and done channel"},
 	"go|internal/runtime/pipeline/scheduler.go|Scheduler.startTask|1031":                                                 {asyncSiteCanonicalOwner, "the cron scheduler task owns its full execution occurrence plus an exact parkable standing projection, aggregate target-key reservation, linearized fire state, and done channel"},
-	"go|internal/runtime/pipeline/workflow_timer_owner.go|WorkflowTimerLifecycle.startRecovery|1205":                     {asyncSiteCanonicalOwner, "timer recovery acquires its runtime occurrence before launch and settles on return"},
+	"go|internal/runtime/pipeline/workflow_timer_owner.go|WorkflowTimerLifecycle.startRecovery|1237":                     {asyncSiteCanonicalOwner, "timer recovery acquires its runtime occurrence before launch and settles on return"},
 	"go|internal/runtime/pythonmodule/runtime.go|newInterpreterModuleForContext|305":                                     {asyncSiteSynchronousJoin, "the interpreter stderr collector is joined when module startup completes"},
 	"go|internal/runtime/pythonmodule/runtime.go|runHarness|209":                                                         {asyncSiteSynchronousJoin, "the harness execution result is joined before the call returns"},
 	"go|internal/runtime/runlifecycle/executor.go|Executor.installReserved|258":                                          {asyncSiteCanonicalOwner, "the run-lifecycle executor owns each pre-admitted completion candidate until the exact lease settles"},
@@ -99,7 +99,7 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"owner_action|internal/runtime/pipeline/runtime_support.go|QueuePipelineAfterPublishAction|639":                      {asyncSiteCanonicalOwner, "the exported after-publish facade delegates to the canonical owner-bound queue"},
 	"owner_action|internal/runtime/pipeline/runtime_support.go|QueuePipelinePostCommitAction|438":                        {asyncSiteCanonicalOwner, "the exported post-commit facade delegates to the canonical owner-bound queue"},
 	"owner_action|internal/runtime/pipeline/runtime_support.go|QueuePipelineRollbackAction|592":                          {asyncSiteCanonicalOwner, "the exported rollback facade delegates to the canonical owner-bound queue"},
-	"owner_action|internal/runtime/pipeline/workflow_timer_owner.go|WorkflowTimerLifecycle.queueWakeupReconcile|820":     {asyncSiteCanonicalOwner, "timer registration and cancellation converge through one owner-bound post-commit action"},
+	"owner_action|internal/runtime/pipeline/workflow_timer_owner.go|WorkflowTimerLifecycle.queueWakeupReconcile|808":     {asyncSiteCanonicalOwner, "timer registration and cancellation converge through one owner-bound post-commit action"},
 }
 
 func init() {

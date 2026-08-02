@@ -1254,6 +1254,12 @@ func (sc Schedule) ValidateRoutingSource() error {
 		if route.FlowInstance != sc.FlowInstance || route.EntityID != sc.EntityID {
 			return errors.New("flow-owned schedule routing source does not match its persisted scope")
 		}
+		if sc.OwnerKind == ScheduleOwnerAgent {
+			flowScopeKey, _, _, present := sc.AgentIdentity.Route.Fields()
+			if !present || route.FlowID != flowScopeKey {
+				return errors.New("flow-owned schedule routing source does not match its concrete agent flow scope")
+			}
+		}
 	case events.RoutingSourcePlatformControl:
 		if sc.OwnerKind != ScheduleOwnerSystem || sc.EntityID != "" || sc.FlowInstance != "" {
 			return errors.New("platform-control schedule must be a closed system schedule without flow or entity scope")

@@ -79,6 +79,44 @@ func TestFlowOwnedScheduleEventSourceAdmissionRoundTripsOnBothStores(t *testing.
 	}
 }
 
+func TestAgentScheduleRestoreRejectsForeignRoutingSourceOnBothStores(t *testing.T) {
+	for _, tc := range selectedScheduleStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, db, ctx := tc.open(t)
+			schedule := testAgentOwnedSchedule(t, runtimepipeline.Schedule{
+				RunID: runtimecorrelation.RunIDFromContext(ctx), AgentID: "producer-agent",
+				EventType: "producer/work.ready", Mode: "once", At: time.Now().UTC().Add(time.Hour),
+				FlowInstance: "producer/instance-1", EntityID: uuid.NewString(), TaskID: "foreign-source-hostile",
+				Payload: json.RawMessage(`{"work_id":"selected-store"}`),
+			})
+			if err := selected.UpsertSchedule(ctx, schedule); err != nil {
+				t.Fatalf("persist admitted schedule: %v", err)
+			}
+			foreignSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+				FlowID: "foreign", FlowInstance: schedule.FlowInstance, EntityID: schedule.EntityID,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := json.Marshal(foreignSource)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := selected.(*SQLiteRuntimeStore); ok {
+				_, err = db.ExecContext(ctx, `UPDATE timers SET routing_source = ?, fire_event = ? WHERE run_id = ?`, raw, "foreign/work.ready", schedule.RunID)
+			} else {
+				_, err = db.ExecContext(ctx, `UPDATE timers SET routing_source = $1::jsonb, fire_event = $2 WHERE run_id = $3::uuid`, raw, "foreign/work.ready", schedule.RunID)
+			}
+			if err != nil {
+				t.Fatalf("install foreign routing source: %v", err)
+			}
+			if active, err := selected.LoadActiveSchedules(ctx); err == nil {
+				t.Fatalf("restored foreign schedule = %#v, want rejection", active)
+			}
+		})
+	}
+}
+
 func TestGenericScheduleAPIsCannotInterpretWorkflowTimerFamilyOnBothStores(t *testing.T) {
 	for _, tc := range selectedScheduleStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
