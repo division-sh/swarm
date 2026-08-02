@@ -21,6 +21,7 @@ type Provider interface {
 
 type graphMutableProvider interface {
 	UpsertManagedAgent(identity, parent agentidentity.Identity) error
+	ValidateManagedAgent(identity, parent agentidentity.Identity) error
 	RemoveManagedAgent(identity agentidentity.Identity) error
 	ManagedAgentParent(identity agentidentity.Identity) (agentidentity.Identity, bool, error)
 }
@@ -83,6 +84,17 @@ func SameAgent(actor, target models.AgentConfig) (bool, error) {
 func UpsertManagedAgent(provider Provider, identity, parent agentidentity.Identity) error {
 	if mutable, ok := ProviderOrNoop(provider).(graphMutableProvider); ok && mutable != nil {
 		return mutable.UpsertManagedAgent(identity, parent)
+	}
+	return nil
+}
+
+// ValidateManagedAgent checks a proposed projection without mutating the
+// process-local authority graph. Canonical lifecycle persistence remains the
+// mutation owner; callers use this only to reject structurally invalid work
+// before committing that lifecycle transition.
+func ValidateManagedAgent(provider Provider, identity, parent agentidentity.Identity) error {
+	if mutable, ok := ProviderOrNoop(provider).(graphMutableProvider); ok && mutable != nil {
+		return mutable.ValidateManagedAgent(identity, parent)
 	}
 	return nil
 }

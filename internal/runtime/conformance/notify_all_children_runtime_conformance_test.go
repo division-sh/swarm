@@ -431,12 +431,14 @@ func proveDynamicFlowSourceRevisionConvergence(
 		<-start
 		generic := v1Agents[readerID].Config
 		generic.Role = "generic-reconfigure"
-		genericMutationErrs <- runtimeV2.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, generic, nil)
+		_, err := runtimeV2.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, generic, nil)
+		genericMutationErrs <- err
 	}()
 	go func() {
 		defer mutations.Done()
 		<-start
-		genericMutationErrs <- runtimeV2.manager.TeardownAgentTarget(retiredID, descriptor.FlowInstance, nil, nil)
+		_, err := runtimeV2.manager.TeardownAgentTarget(retiredID, descriptor.FlowInstance, nil)
+		genericMutationErrs <- err
 	}()
 	go func() {
 		defer mutations.Done()
@@ -504,15 +506,17 @@ func proveDynamicFlowSourceRevisionConvergence(
 	assertNotifyAllChildrenReadinessOwnershipFailure(t, "generic hire", runtimeV2.manager.SpawnAgent(rogue))
 	genericReconfigure := reader.Config
 	genericReconfigure.Role = "generic-reconfigure"
+	_, genericReconfigureErr := runtimeV2.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, genericReconfigure, nil)
 	assertNotifyAllChildrenReadinessOwnershipFailure(
 		t,
 		"generic reconfigure",
-		runtimeV2.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, genericReconfigure, nil),
+		genericReconfigureErr,
 	)
+	_, genericTeardownErr := runtimeV2.manager.TeardownAgentTarget(writerID, descriptor.FlowInstance, nil)
 	assertNotifyAllChildrenReadinessOwnershipFailure(
 		t,
 		"generic teardown",
-		runtimeV2.manager.TeardownAgentTarget(writerID, descriptor.FlowInstance, nil, nil),
+		genericTeardownErr,
 	)
 	recordingStore, ok := selected.(lifecycleTransitionRecordingStore)
 	if !ok {
@@ -533,7 +537,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	} else {
 		assertNotifyAllChildrenReadinessOwnershipFailure(t, "unauthorized stored-result replay", err)
 	}
-	if err := runtimeV1.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, reader.Config, nil); err == nil {
+	if _, err := runtimeV1.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, reader.Config, nil); err == nil {
 		t.Fatal("stale predecessor manager republished canonical source-owned successor")
 	} else {
 		assertNotifyAllChildrenReadinessOwnershipFailure(t, "stale predecessor exact replay", err)
@@ -568,7 +572,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	}
 	staleMutation := v1Agents[readerID].Config
 	staleMutation.Role = "stale-predecessor-write"
-	if err := runtimeV1.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, staleMutation, nil); err == nil {
+	if _, err := runtimeV1.manager.ReconfigureAgentTarget(readerID, descriptor.FlowInstance, staleMutation, nil); err == nil {
 		t.Fatal("stale predecessor generation mutated after successor convergence")
 	}
 	terminated, found, err := selected.LoadAgentLifecycleState(ctx, v1Agents[retiredID].Config.Identity)

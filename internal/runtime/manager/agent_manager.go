@@ -622,11 +622,11 @@ func (am *AgentManager) applyContractPrompt(cfg models.AgentConfig) (models.Agen
 func (am *AgentManager) ReconfigureAgentTarget(
 	agentID, flowInstance string,
 	cfg models.AgentConfig,
-	onCommitted func(models.AgentConfig) error,
-) error {
+	expected *models.AgentConfig,
+) (models.AgentTargetMutationResult, error) {
 	identity, err := am.lifecycle.resolveAgentTarget(agentID, flowInstance, false)
 	if err != nil {
-		return err
+		return models.AgentTargetMutationResult{}, err
 	}
 	result, err := am.replaceExecutionIdentityConfigWithTopology(
 		am.runtimeContext(),
@@ -637,18 +637,22 @@ func (am *AgentManager) ReconfigureAgentTarget(
 		am.semanticSource,
 		false,
 		nil,
-		onCommitted,
+		expected,
 	)
 	if err != nil {
-		return err
+		return models.AgentTargetMutationResult{}, err
 	}
 	if result.transitioned && am.lifecycle.store == nil && am.store != nil {
 		rec := PersistedAgent{Config: result.config, Status: "active", HiredBy: "reconfigure"}
 		if err := am.store.UpsertAgent(am.runtimeContext(), rec); err != nil {
-			return fmt.Errorf("persist reconfigured agent %s: %w", identity.Description(), err)
+			return models.AgentTargetMutationResult{}, fmt.Errorf("persist reconfigured agent %s: %w", identity.Description(), err)
 		}
 	}
-	return nil
+	return models.AgentTargetMutationResult{
+		PreviousConfig: result.previous,
+		CurrentConfig:  result.config,
+		Transitioned:   result.transitioned,
+	}, nil
 }
 
 func (am *AgentManager) reconfigureAgentIdentityExactWithTopology(
@@ -698,12 +702,11 @@ func (am *AgentManager) teardownIdentityAfterTerminalEvent(
 	if err := identity.Validate(); err != nil {
 		return err
 	}
-	if err := am.lifecycle.terminateIdentityWithTopologyCommitHooks(
+	if _, err := am.lifecycle.terminateIdentityWithTopologyExpected(
 		ctx,
 		identity,
 		trigger,
 		AgentLifecycleTerminated,
-		nil,
 		nil,
 		nil,
 		deferRouteRetirement,
@@ -720,30 +723,8 @@ func (am *AgentManager) teardownIdentityWithTopology(
 	trigger string,
 	topology *DynamicAgentTopologyMutation,
 ) error {
-	return am.teardownIdentityWithTopologyCommitHooks(ctx, identity, trigger, topology, nil, nil)
-}
-
-func (am *AgentManager) teardownIdentityWithTopologyCommitHooks(
-	ctx context.Context,
-	identity runtimeagentidentity.Identity,
-	trigger string,
-	topology *DynamicAgentTopologyMutation,
-	beforeCommit func(models.AgentConfig) error,
-	restoreBeforeCommit func(models.AgentConfig) error,
-) error {
-	if err := identity.Validate(); err != nil {
-		return err
-	}
-	if err := am.lifecycle.terminateIdentityWithTopologyCommitHooks(
-		ctx,
-		identity,
-		trigger,
-		AgentLifecycleTerminated,
-		topology,
-		beforeCommit,
-		restoreBeforeCommit,
-		false,
-	); err != nil {
+	_, err := am.lifecycle.terminateIdentityWithTopology(ctx, identity, trigger, AgentLifecycleTerminated, topology)
+	if err != nil {
 		return err
 	}
 	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(ctx))
@@ -752,21 +733,26 @@ func (am *AgentManager) teardownIdentityWithTopologyCommitHooks(
 
 func (am *AgentManager) TeardownAgentTarget(
 	agentID, flowInstance string,
-	beforeCommit func(models.AgentConfig) error,
-	restoreBeforeCommit func(models.AgentConfig) error,
-) error {
+	expected *models.AgentConfig,
+) (models.AgentTargetMutationResult, error) {
 	identity, err := am.lifecycle.resolveAgentTarget(agentID, flowInstance, false)
 	if err != nil {
-		return err
+		return models.AgentTargetMutationResult{}, err
 	}
-	return am.teardownIdentityWithTopologyCommitHooks(
+	previous, err := am.lifecycle.terminateIdentityWithTopologyExpected(
 		am.runtimeContext(),
 		identity,
 		"teardown",
+		AgentLifecycleTerminated,
 		nil,
-		beforeCommit,
-		restoreBeforeCommit,
+		expected,
+		false,
 	)
+	if err != nil {
+		return models.AgentTargetMutationResult{}, err
+	}
+	_ = am.projectLifecycleDiagnostics(context.Background())
+	return models.AgentTargetMutationResult{PreviousConfig: previous, Transitioned: true}, nil
 }
 
 func reconfigureSessionMutationPlan(current, updated models.AgentConfig) sessions.LifecycleMutationPlan {

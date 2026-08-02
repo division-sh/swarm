@@ -90,7 +90,7 @@ func TestReconfigureAgentRejectsForeignSubscriptionWithoutReplacingCurrentAdmiss
 		t.Fatal("initial execution missing")
 	}
 
-	err = am.ReconfigureAgentTarget(initial.ID, initial.FlowPath, runtimeactors.AgentConfig{
+	_, err = am.ReconfigureAgentTarget(initial.ID, initial.FlowPath, runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		Subscriptions: []string{"foreign/**/task.ready"},
 	}, nil)

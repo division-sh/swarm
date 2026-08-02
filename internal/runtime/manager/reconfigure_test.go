@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -40,7 +41,7 @@ func acquireReconfigureMemory(t *testing.T, am *AgentManager, registry *sessions
 	return lease
 }
 
-func TestReconfigureAgent_AuthorityHandoffPrecedesSuccessorProjection(t *testing.T) {
+func TestReconfigureAgent_ReturnsExactCommittedTransitionEvidence(t *testing.T) {
 	bus := newProjectionTestBus()
 	am := newProjectionTestManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
@@ -66,36 +67,25 @@ func TestReconfigureAgent_AuthorityHandoffPrecedesSuccessorProjection(t *testing
 	if !ok {
 		t.Fatal("target route is absent before reconfigure")
 	}
+	expected, err := am.ResolveAgentConfig(target.ID, flowPath)
+	if err != nil {
+		t.Fatalf("resolve expected target: %v", err)
+	}
 
-	callbackCalled := false
-	err := am.ReconfigureAgentTarget(target.ID, flowPath, models.AgentConfig{
+	result, err := am.ReconfigureAgentTarget(target.ID, flowPath, models.AgentConfig{
 		ParentAgent: newParent.ID,
-	}, func(candidate models.AgentConfig) error {
-		callbackCalled = true
-		if candidate.ParentAgent != newParent.ID {
-			t.Fatalf("candidate parent = %q, want %q", candidate.ParentAgent, newParent.ID)
-		}
-		visible, err := am.ResolveAgentConfig(target.ID, flowPath)
-		if err != nil {
-			t.Fatalf("ResolveAgentConfig during authority handoff: %v", err)
-		}
-		if visible.ParentAgent != oldParent.ID {
-			t.Fatalf("visible parent during authority handoff = %q, want prior %q", visible.ParentAgent, oldParent.ID)
-		}
-		visibleRoute, ok := bus.current(target.ID)
-		if !ok || visibleRoute.token != oldRoute.token {
-			t.Fatalf("visible route during authority handoff = %+v, want prior %+v", visibleRoute.token, oldRoute.token)
-		}
-		if history := bus.routeHistory(target.ID); len(history) != 1 {
-			t.Fatalf("route history during authority handoff = %d, want only prior route", len(history))
-		}
-		return nil
-	})
+	}, &expected)
 	if err != nil {
 		t.Fatalf("ReconfigureAgentTarget: %v", err)
 	}
-	if !callbackCalled {
-		t.Fatal("authority handoff callback was not called")
+	if !result.Transitioned {
+		t.Fatal("reconfigure did not report a committed transition")
+	}
+	if result.PreviousConfig.ParentAgent != oldParent.ID {
+		t.Fatalf("previous parent = %q, want %q", result.PreviousConfig.ParentAgent, oldParent.ID)
+	}
+	if result.CurrentConfig.ParentAgent != newParent.ID {
+		t.Fatalf("current parent = %q, want %q", result.CurrentConfig.ParentAgent, newParent.ID)
 	}
 	visible, err := am.ResolveAgentConfig(target.ID, flowPath)
 	if err != nil {
@@ -110,7 +100,7 @@ func TestReconfigureAgent_AuthorityHandoffPrecedesSuccessorProjection(t *testing
 	}
 }
 
-func TestReconfigureAgent_AuthorityHandoffFailureLeavesProjectionUnchanged(t *testing.T) {
+func TestReconfigureAgent_ExpectedConfigDriftLeavesProjectionUnchanged(t *testing.T) {
 	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{})
@@ -124,20 +114,13 @@ func TestReconfigureAgent_AuthorityHandoffFailureLeavesProjectionUnchanged(t *te
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	beforeGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
-	handoffErr := errors.New("injected authority handoff failure")
-	var handedOffTools []string
-
-	err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{
+	stale := cfg
+	stale.Tools = []string{"tool-stale"}
+	_, err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{
 		Tools: []string{"tool-new"},
-	}, func(candidate models.AgentConfig) error {
-		handedOffTools = append(handedOffTools, candidate.Tools...)
-		if reflect.DeepEqual(candidate.Tools, []string{"tool-new"}) {
-			return handoffErr
-		}
-		return nil
-	})
-	if !errors.Is(err, handoffErr) {
-		t.Fatalf("ReconfigureAgentTarget error = %v, want %v", err, handoffErr)
+	}, &stale)
+	if err == nil || !strings.Contains(err.Error(), "agent_config_changed") {
+		t.Fatalf("ReconfigureAgentTarget error = %v, want agent_config_changed", err)
 	}
 	visible, err := am.ResolveAgentConfig(cfg.ID, cfg.FlowPath)
 	if err != nil {
@@ -149,12 +132,9 @@ func TestReconfigureAgent_AuthorityHandoffFailureLeavesProjectionUnchanged(t *te
 	if got := lifecycleGenerationForTest(t, am, cfg.ID); got != beforeGeneration {
 		t.Fatalf("generation after rejected handoff = %d, want %d", got, beforeGeneration)
 	}
-	if !reflect.DeepEqual(handedOffTools, []string{"tool-new", "tool-old"}) {
-		t.Fatalf("authority handoff sequence = %v, want candidate then prior projection", handedOffTools)
-	}
 }
 
-func TestReconfigureAgent_PersistenceFailureRestoresPriorAuthorityAndProjection(t *testing.T) {
+func TestReconfigureAgent_PersistenceFailureLeavesPriorProjection(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
 	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
@@ -169,18 +149,17 @@ func TestReconfigureAgent_PersistenceFailureRestoresPriorAuthorityAndProjection(
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	beforeGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
+	expected, err := am.ResolveAgentConfig(cfg.ID, cfg.FlowPath)
+	if err != nil {
+		t.Fatalf("resolve expected target: %v", err)
+	}
 	persistenceErr := errors.New("injected reconfigure persistence failure")
 	probe.mu.Lock()
 	probe.failNext = persistenceErr
 	probe.mu.Unlock()
-	var handedOffTools []string
-
-	err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{
+	_, err = am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{
 		Tools: []string{"tool-new"},
-	}, func(candidate models.AgentConfig) error {
-		handedOffTools = append(handedOffTools, candidate.Tools...)
-		return nil
-	})
+	}, &expected)
 	if !errors.Is(err, persistenceErr) {
 		t.Fatalf("ReconfigureAgentTarget error = %v, want %v", err, persistenceErr)
 	}
@@ -193,9 +172,6 @@ func TestReconfigureAgent_PersistenceFailureRestoresPriorAuthorityAndProjection(
 	}
 	if got := lifecycleGenerationForTest(t, am, cfg.ID); got != beforeGeneration {
 		t.Fatalf("generation after persistence failure = %d, want %d", got, beforeGeneration)
-	}
-	if !reflect.DeepEqual(handedOffTools, []string{"tool-new", "tool-old"}) {
-		t.Fatalf("authority handoff sequence = %v, want candidate then prior projection", handedOffTools)
 	}
 }
 
@@ -228,7 +204,7 @@ func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInv
 	}
 	beforeGeneration := lifecycleGenerationForTest(t, am, cfg.ID)
 
-	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}, nil); err != nil {
+	if _, err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}, nil); err != nil {
 		t.Fatalf("ReconfigureAgent(same current): %v", err)
 	}
 
@@ -259,7 +235,7 @@ func TestReconfigureAgent_MemoryEnabledConfigChangeRotatesExactIdentity(t *testi
 	}
 	lease := acquireReconfigureMemory(t, am, registry, cfg)
 
-	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"agent_message"}}, nil); err != nil {
+	if _, err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"agent_message"}}, nil); err != nil {
 		t.Fatalf("ReconfigureAgent: %v", err)
 	}
 	rec, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))
@@ -282,7 +258,7 @@ func TestReconfigureAgent_ExplicitFalseTerminatesReusableMemory(t *testing.T) {
 	}
 	lease := acquireReconfigureMemory(t, am, registry, cfg)
 
-	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(false)}, nil); err != nil {
+	if _, err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(false)}, nil); err != nil {
 		t.Fatalf("ReconfigureAgent(memory false): %v", err)
 	}
 	if _, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath)); ok {
@@ -307,14 +283,14 @@ func TestReconfigureAgent_ExplicitTrueStartsFreshAndOmissionRetains(t *testing.T
 	if err := am.SpawnAgent(cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(true)}, nil); err != nil {
+	if _, err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(true)}, nil); err != nil {
 		t.Fatalf("ReconfigureAgent(memory true): %v", err)
 	}
 	if _, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath)); ok || len(registry.History(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))) != 0 {
 		t.Fatal("enabling memory revived or synthesized prior state")
 	}
 	lease := acquireReconfigureMemory(t, am, registry, models.AgentConfig{ExecutionMode: "live", ID: cfg.ID, FlowPath: cfg.FlowPath})
-	if err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}, nil); err != nil {
+	if _, err := am.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-a"}}, nil); err != nil {
 		t.Fatalf("ReconfigureAgent(omitted memory): %v", err)
 	}
 	got, _ := testAgentConfig(t, am, cfg.ID, cfg.FlowPath)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"sort"
 	"sync"
 	"testing"
@@ -43,7 +42,7 @@ func replaceCoordinatorLoop(
 		return nil, runtimeeffects.LifecycleToken{}, nil, err
 	}
 	defer cell.opMu.Unlock()
-	return coordinator.replaceLoopLocked(ctx, identity.AgentID(), trigger, operationID, replacement, subordinate, nil, cell, runtimeeffects.LifecycleToken{}, nil, nil)
+	return coordinator.replaceLoopLocked(ctx, identity.AgentID(), trigger, operationID, replacement, subordinate, nil, cell, runtimeeffects.LifecycleToken{})
 }
 
 func beginCoordinatorRun(t *testing.T, coordinator *agentLifecycleCoordinator, ctx context.Context, mode AgentRunMode) context.Context {
@@ -424,33 +423,16 @@ func TestLifecycleCoordinatorTeardownPersistenceFailureLeavesLoopOwned(t *testin
 	probe.mu.Lock()
 	probe.failNext = fmt.Errorf("injected teardown persistence failure")
 	probe.mu.Unlock()
-	var hookSequence []string
-	if err := coordinator.terminateIdentityWithTopologyCommitHooks(
+	if _, err := coordinator.terminateIdentityWithTopologyExpected(
 		testAuthorActivityContext(context.Background()),
 		rec.Config.Identity,
 		"teardown",
 		AgentLifecycleTerminated,
 		nil,
-		func(current runtimeactors.AgentConfig) error {
-			hookSequence = append(hookSequence, "before")
-			if current.Identity != rec.Config.Identity {
-				t.Fatalf("teardown commit identity = %#v, want %#v", current.Identity, rec.Config.Identity)
-			}
-			return nil
-		},
-		func(current runtimeactors.AgentConfig) error {
-			hookSequence = append(hookSequence, "restore")
-			if current.Identity != rec.Config.Identity {
-				t.Fatalf("teardown restore identity = %#v, want %#v", current.Identity, rec.Config.Identity)
-			}
-			return nil
-		},
+		&rec.Config,
 		false,
 	); err == nil {
 		t.Fatal("teardown succeeded despite persistence failure")
-	}
-	if !reflect.DeepEqual(hookSequence, []string{"before", "restore"}) {
-		t.Fatalf("teardown hook sequence = %v, want [before restore]", hookSequence)
 	}
 	select {
 	case <-loopCtx.Done():
@@ -500,7 +482,7 @@ func TestLifecycleCoordinatorRestartVersusTeardownNeverResurrectsLoop(t *testing
 	go func() {
 		defer wg.Done()
 		<-start
-		_ = coordinator.terminateIdentityWithTopology(testAuthorActivityContext(context.Background()), rec.Config.Identity, "teardown", AgentLifecycleTerminated, nil)
+		_, _ = coordinator.terminateIdentityWithTopology(testAuthorActivityContext(context.Background()), rec.Config.Identity, "teardown", AgentLifecycleTerminated, nil)
 	}()
 	close(start)
 	wg.Wait()

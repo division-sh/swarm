@@ -341,7 +341,8 @@ func TestExecutionProjectionReconfigureSerializesRestartSelection(t *testing.T) 
 
 	reconfigureDone := make(chan error, 1)
 	go func() {
-		reconfigureDone <- am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}}, nil)
+		_, err := am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}}, nil)
+		reconfigureDone <- err
 	}()
 	<-factory.secondStarted
 	restartDone := make(chan error, 1)
@@ -396,7 +397,8 @@ func TestExecutionProjectionReconfigureSerializesBothRunModes(t *testing.T) {
 			}
 			reconfigureDone := make(chan error, 1)
 			go func() {
-				reconfigureDone <- am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}}, nil)
+				_, err := am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}}, nil)
+				reconfigureDone <- err
 			}()
 			<-factory.secondStarted
 			runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
@@ -608,7 +610,8 @@ func TestExecutionProjectionDirectiveLeaseFencesReplacement(t *testing.T) {
 	}
 	reconfigureDone := make(chan error, 1)
 	go func() {
-		reconfigureDone <- am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}}, nil)
+		_, err := am.ReconfigureAgentTarget(agentID, "", models.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-new"}, Subscriptions: []string{"test.new"}}, nil)
+		reconfigureDone <- err
 	}()
 	select {
 	case <-runCtx.Done():
@@ -696,7 +699,7 @@ func TestExecutionProjectionTeardownRemovesExactRoute(t *testing.T) {
 	if !ok {
 		t.Fatal("run did not install route")
 	}
-	if err := am.TeardownAgentTarget(agentID, "", nil, nil); err != nil {
+	if _, err := am.TeardownAgentTarget(agentID, "", nil); err != nil {
 		t.Fatalf("TeardownAgent: %v", err)
 	}
 	if _, live := bus.current(agentID); live {

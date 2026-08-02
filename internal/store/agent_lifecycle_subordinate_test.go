@@ -123,7 +123,8 @@ func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOcc
 
 	firstErr := make(chan error, 1)
 	go func() {
-		firstErr <- manager.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, runtimeactors.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(false)}, nil)
+		_, err := manager.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, runtimeactors.AgentConfig{ExecutionMode: "live", Memory: agentmemory.Authored(false)}, nil)
+		firstErr <- err
 	}()
 	select {
 	case <-firstBuildEntered:
@@ -136,7 +137,8 @@ func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOcc
 	secondErr := make(chan error, 1)
 	go func() {
 		close(secondStarted)
-		secondErr <- manager.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, runtimeactors.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-b"}}, nil)
+		_, err := manager.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, runtimeactors.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-b"}}, nil)
+		secondErr <- err
 	}()
 	<-secondStarted
 	secondBuiltBeforeFirstCommit := false
@@ -305,7 +307,7 @@ func proveLifecycleReconfigureOccurrenceIdentity(t *testing.T, store lifecycleOc
 	}
 	initialGeneration := agents[0].LifecycleGeneration
 	for i, tool := range []string{"tool-a", "tool-b", "tool-a", "tool-b"} {
-		if err := manager.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, runtimeactors.AgentConfig{ExecutionMode: "live", Tools: []string{tool}}, nil); err != nil {
+		if _, err := manager.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, runtimeactors.AgentConfig{ExecutionMode: "live", Tools: []string{tool}}, nil); err != nil {
 			t.Fatalf("reconfigure occurrence %d (%s): %v", i+1, tool, err)
 		}
 		agents, err = store.LoadAgents(testAuthorActivityContext())
@@ -318,7 +320,7 @@ func proveLifecycleReconfigureOccurrenceIdentity(t *testing.T, store lifecycleOc
 	}
 	assertLifecycleReconfigureOperationCount(t, db, sqlite, cfg.ID, 4)
 
-	if err := manager.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, runtimeactors.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-b"}}, nil); err != nil {
+	if _, err := manager.ReconfigureAgentTarget(cfg.ID, cfg.FlowPath, runtimeactors.AgentConfig{ExecutionMode: "live", Tools: []string{"tool-b"}}, nil); err != nil {
 		t.Fatalf("same-current reconfigure: %v", err)
 	}
 	assertLifecycleReconfigureOperationCount(t, db, sqlite, cfg.ID, 4)

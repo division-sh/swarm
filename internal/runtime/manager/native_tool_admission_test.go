@@ -47,7 +47,7 @@ func TestAgentManagerReconfigureConsumesNativeToolAdmissionValidator(t *testing.
 		t.Fatalf("SpawnAgent setup: %v", err)
 	}
 
-	err := am.ReconfigureAgentTarget("worker-1", "", models.AgentConfig{
+	_, err := am.ReconfigureAgentTarget("worker-1", "", models.AgentConfig{
 		ExecutionMode: "live",
 		NativeTools:   models.NativeToolConfig{FileIO: true},
 	}, nil)
