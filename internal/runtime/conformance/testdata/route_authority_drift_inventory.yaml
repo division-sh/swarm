@@ -67,9 +67,7 @@ search_dimensions:
       - internal/runtime/core/pinrouting/pinrouting.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
-      - internal/runtime/bus/routing_derivation_test.go
       - internal/runtime/bus/route_plan.go
-      - internal/runtime/runforkadmission/selected_route_history.go
       - internal/apispec/platform_spec_composition_routing_test.go
     canonical_layer: route_plan_authority
     classified_paths_required: true
@@ -80,7 +78,6 @@ search_dimensions:
       - platform-spec.yaml
       - internal/runtime/contracts/workflow_contract_yaml_wave1.go
       - internal/runtime/semanticview/import_boundary_aliases.go
-      - internal/runtime/bootverify/workflow_composition_connect_checks.go
       - internal/runtime/semanticview/import_boundary_aliases_test.go
     canonical_layer: invalid_old_authority
     classified_paths_required: true
@@ -449,6 +446,7 @@ seam_families:
       - internal/runtime/core/pinrouting/connect_route_plan_test.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/bus/compiled_connect_external_test_helpers_test.go
       - internal/runtime/pipeline/workflow_nodes.go
       - internal/runtime/pipeline/workflow_nodes_test.go
       - internal/runtime/engine/executor.go
@@ -461,6 +459,7 @@ seam_families:
       - internal/runtime/runforkadmission/selected_route_history.go
       - internal/runtime/runforkadmission/revision_source_route_test.go
       - internal/runtime/conformance/fan_in_stream_conformance_test.go
+      - internal/runtime/conformance/compiled_connect_test_helpers_test.go
       - internal/runtime/conformance/reply_resolution_conformance_test.go
       - internal/runtime/conformance/notify_all_children_runtime_conformance_test.go
     search_dimensions: [connect_route_plan, route_event_key_derivation]
@@ -578,6 +577,7 @@ seam_families:
     paths:
       - internal/runtime/contracts/workflow_contract_yaml_wave1.go
       - internal/runtime/contracts/workflow_contract_yaml_test.go
+      - internal/runtime/core/pinrouting/connect_route_plan.go
       - internal/runtime/semanticview/import_boundary_aliases.go
       - internal/runtime/semanticview/import_boundary_aliases_test.go
       - internal/runtime/bootverify/workflow_composition_connect_checks.go
@@ -614,6 +614,25 @@ seam_families:
       #2085 must delete both alias route engines together; direction is not an
       owner boundary. Old bind-only delivery is unsupported and receives no
       compatibility route, migration reader, or dual-write period.
+
+  - id: compiled_connect_execution_claim
+    layer: durable_delivery_authority
+    classification: canonical_owner
+    paths:
+      - internal/events/types.go
+      - internal/runtime/deliverylifecycle/adapter.go
+      - internal/runtime/deliverylifecycle/model.go
+      - internal/runtime/pipeline/workflow_nodes.go
+      - internal/store/event_record_contract_test.go
+    search_dimensions: [connect_route_plan, delivery_route_model]
+    invalid_authority:
+      - recovery rematching current connect topology
+      - handler selection from event names without a stamped edge and receiver-pin claim
+      - diagnostic serialization reentering execution authority
+    notes: >
+      The existing delivery row persists one opaque connect execution claim after
+      whole-set admission. Recovery, replay, fork projection, and workflow-node
+      execution consume that claim and never reinterpret current authored topology.
   - id: live_agent_cross_flow_subscription_routes
     layer: invalid_old_authority
     classification: invalid_old_authority_path

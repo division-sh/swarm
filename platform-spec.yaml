@@ -1198,7 +1198,7 @@ contract_formats:
         Explicit scoped subscriptions (e.g., scoring/vertical.shortlisted) remain an escape hatch for
         cases outside the pin/connect interface.'
       input_source_resolution:
-        canonical_owner: internal/runtime/semanticview.ResolveFlowInputProducer
+        canonical_owner: internal/runtime/core/pinrouting.ResolveFlowInputProducer
         rule: |
           Flow input producer proof is resolved once through a typed source taxonomy and consumed by boot verification,
           RouteTable derivation, and workflow-node subscription projection. The accepted proof classes are boundary external
@@ -1240,6 +1240,25 @@ contract_formats:
           descriptor lookup, live carriers, and interceptors consume or observe
           RoutePlan results; they MUST NOT create, replace, or repair missing
           route authority.
+        compiled_connect_evaluation:
+          status: merge_bearing_runtime_behavior
+          canonical_code_owner: internal/runtime/core/pinrouting.CompiledConnectGraph plus the EventBus generation-bound admitted evaluator
+          rule: |
+            Authored FlowPackageConnect rows are compiler input only. One immutable compiled graph owns endpoint identity,
+            source matching, receiver resolution, static verification projections, and deterministic edge identity. Runtime
+            events carry one exhaustive RoutingSource variant admitted at construction and hydrated exactly; target routes,
+            event-name shape, empty fields, UUID shape, flow-instance paths, and diagnostic strings cannot reconstruct source.
+            For each publish, the evaluator reads one immutable graph/descriptor/route snapshot and produces a complete typed
+            result before lifecycle, reply-context, route-table, delivery, or event persistence mutation. Application is once
+            against the same snapshot generation. A stale generation rejects before mutation and requires a fresh evaluation.
+            Replay, duplicate recovery, settlement, handler execution, and selected-fork execution consume the persisted
+            connect execution claim and MUST NOT rematch current connect topology.
+          no_delivery_postcondition: |
+            Every matched admitted connect evaluation produces at least one durable delivery intent or one typed fail-closed
+            no-delivery disposition. A matched event cannot settle with both zero delivery intents and no disposition.
+          string_boundary: |
+            Routing semantic values do not implement fmt.Stringer. Explicit persistence codecs and diagnostic projections are
+            one-way boundaries and cannot re-enter graph compilation or evaluation.
         decision_state:
           status: merge_bearing_runtime_behavior
           implementation_slice: '#1482'
@@ -7502,7 +7521,7 @@ engine:
       severity: warning
       scope: per-flow
       trigger: 'A flow''s required input event pin (from schema.yaml pins.inputs.events) has no satisfiable authored producer
-        source on the static verify surface. The warning consumes internal/runtime/semanticview.ResolveFlowInputProducer
+        source on the static verify surface. The warning consumes internal/runtime/core/pinrouting.ResolveFlowInputProducer
         evidence: boundary external ingress, intrinsic input-pin source:external, parent connect, validation-only input-pin
         source:harness,
         platform source, and internal topology producer. It does not use unique same-name sibling output-pin inference as
@@ -11177,7 +11196,7 @@ flow_model:
           - typed root ConnectRoutePlan producer endpoints
           - typed root ConnectRoutePlan receiver endpoints
           proof_obligations:
-          - semanticview exposes package-aware root connect facts through ResolvedCompositionConnectsFrom, and runtime delivery consumes the same endpoints through lowered ConnectRoutePlan authority
+          - the confined compiled-connect owner resolves package-aware root endpoints once, and static verification plus runtime delivery consume its typed graph projections
           - bootverify accepts root outputs with canonical root connect authority
           - strict loading rejects retired producer target/broadcast before bootverify
           - EventBus persists delivery rows and subscribed replay scope from lowered root ConnectRoutePlan authority
@@ -11906,7 +11925,7 @@ platform_tables:
             produced_by_type            TEXT NOT NULL CHECK (produced_by_type IN ('node', 'agent', 'platform', 'external')),
             source_event_id             UUID,
             created_at                  TIMESTAMPTZ NOT NULL,
-            routing_source_kind         TEXT NOT NULL CHECK (routing_source_kind IN ('', 'declared_ingress', 'runtime_instance')),
+            routing_source_kind         TEXT NOT NULL CHECK (routing_source_kind IN ('absent', 'external_ingress', 'root', 'static_flow', 'concrete_template_instance', 'flow_owned_control', 'platform_control')),
             routing_source_authority    TEXT CHECK (routing_source_authority IS NULL OR routing_source_authority = TRIM(routing_source_authority)),
             source_route                JSONB NOT NULL,
             target_route                JSONB NOT NULL,
@@ -11923,7 +11942,8 @@ platform_tables:
             CHECK (event_name <> 'platform.runtime_log' OR produced_by = 'runtime'),
             CHECK (event_name NOT IN ('platform.inbound_recorded', 'platform.agent_directive') OR run_id IS NOT NULL),
             CHECK ((event_name = 'platform.runtime_log' AND scope = 'global') OR (event_name = 'platform.inbound_recorded' AND scope IN ('entity', 'global')) OR (event_name = 'platform.agent_directive' AND scope = 'global') OR event_name NOT IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive')),
-            CHECK ((routing_source_kind = '' AND source_route = '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL) OR (routing_source_kind = 'declared_ingress' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NOT NULL) OR (routing_source_kind = 'runtime_instance' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL)),
+            CHECK ((routing_source_kind IN ('absent', 'platform_control') AND source_route = '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL) OR (routing_source_kind = 'external_ingress' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NOT NULL) OR (routing_source_kind IN ('root', 'static_flow', 'concrete_template_instance', 'flow_owned_control') AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL)),
+            CHECK ((event_class = 'runtime_control' AND routing_source_kind IN ('flow_owned_control', 'platform_control')) OR (event_class IN ('runtime_diagnostic', 'diagnostic_direct') AND routing_source_kind = 'absent') OR event_class NOT IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
             UNIQUE (event_id, run_id),
             INDEX idx_events_run (run_id, created_at) WHERE run_id IS NOT NULL,
             INDEX idx_events_entity (entity_id, created_at) WHERE entity_id IS NOT NULL,
@@ -12562,6 +12582,7 @@ platform_tables:
             delivery_target_route JSONB NOT NULL,
             delivery_context JSONB NOT NULL,
             delivery_payload_projection JSONB NOT NULL,
+            connect_execution_claim JSONB NOT NULL,
             execution_authority_kind TEXT NOT NULL CHECK (execution_authority_kind IN ('normal_runtime', 'selected_contract_fork')),
             authority_bundle_hash TEXT NOT NULL CHECK (authority_bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),
             authority_bundle_source TEXT NOT NULL CHECK (authority_bundle_source IN ('persisted', 'ephemeral')),
@@ -13506,7 +13527,10 @@ platform_tables:
         For run/entity-scoped workflow timers, task_type=workflow_timer is the sole row-family discriminator. Within that
         selected family, timer_name carries the strict version-2 WorkflowTimerLifecycle activation serialization, including
         one typed activation cause and canonical declaration revision, and
-        timer_id is that activation ID. fire_payload carries business input only; it must not carry workflow
+        timer_id is that activation ID. routing_source carries the immutable typed control owner stamped at registration:
+        root for a root entity schedule, flow_owned_control for a declared flow execution, or platform_control for a closed
+        global system schedule;
+        firing and recovery copy it without deriving ownership from flow_instance or other row shape. fire_payload carries business input only; it must not carry workflow
         activation, occurrence, generation, status, or reconstruction authority. fire_at is the current persisted occurrence
         coordinate. One-shot completion changes status to fired; recurring completion keeps status active and advances fire_at
         atomically. Generic schedule readers must exclude typed workflow activation rows. reply_context_id separately carries
@@ -13531,6 +13555,7 @@ platform_tables:
             flow_instance         TEXT,
             fire_event            TEXT NOT NULL,
             fire_payload          JSONB NOT NULL DEFAULT '{}',
+            routing_source        JSONB NOT NULL,
             fire_at               TIMESTAMPTZ NOT NULL,
             recurring             BOOLEAN NOT NULL DEFAULT FALSE,
             recurrence_cron       TEXT,
@@ -13553,6 +13578,7 @@ platform_tables:
             CHECK (task_type <> 'workflow_timer' OR (owner_node IS NULL AND owner_agent = TRIM(owner_agent) AND NULLIF(owner_agent, '') IS NOT NULL)),
             CHECK ((owner_kind = 'system' AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND agent_flow_scope_key IS NULL AND agent_flow_instance_id IS NULL) OR (owner_kind = 'agent' AND owner_node IS NULL AND owner_agent = TRIM(owner_agent) AND NULLIF(owner_agent, '') IS NOT NULL AND agent_name_owner = TRIM(agent_name_owner) AND NULLIF(agent_name_owner, '') IS NOT NULL AND agent_name_source IN ('declared', 'runtime_created') AND agent_route_presence IN ('present', 'root') AND ((agent_route_presence = 'root' AND agent_flow_scope_key IS NULL AND agent_flow_instance_id IS NULL AND flow_instance IS NULL) OR (agent_route_presence = 'present' AND agent_flow_scope_key = TRIM(agent_flow_scope_key) AND NULLIF(agent_flow_scope_key, '') IS NOT NULL AND agent_flow_instance_id = TRIM(agent_flow_instance_id) AND NULLIF(agent_flow_instance_id, '') IS NOT NULL AND flow_instance = TRIM(flow_instance) AND NULLIF(flow_instance, '') IS NOT NULL)))),
             CHECK (task_type <> 'workflow_timer' OR (recurrence_cron IS NULL AND reply_context_id IS NULL)),
+            CHECK ((routing_source->>'kind') IN ('root', 'flow_owned_control', 'platform_control')),
             CHECK (task_type <> 'workflow_timer' OR (SUBSTR(CAST(fire_payload AS TEXT), 1, 1) = '{' AND SUBSTR(CAST(fire_payload AS TEXT), LENGTH(CAST(fire_payload AS TEXT)), 1) = '}')),
             CHECK (task_type <> 'workflow_timer' OR fire_at >= created_at),
             CHECK (task_type <> 'workflow_timer' OR ((source_timer_id IS NULL AND forked_from_run_id IS NULL AND forked_from_event_id IS NULL AND reconstruction_owner IS NULL) OR (source_timer_id IS NOT NULL AND forked_from_run_id IS NOT NULL AND forked_from_event_id IS NOT NULL AND reconstruction_owner = TRIM(reconstruction_owner) AND NULLIF(reconstruction_owner, '') IS NOT NULL))),
@@ -13566,8 +13592,9 @@ platform_tables:
             INDEX idx_timers_global (task_type, status) WHERE entity_id IS NULL
         );
       scope_rules:
-        entity_scoped: entity_id NOT NULL, flow_instance NOT NULL, run_id set for runtime-owned entity timers. Tied to entity
-          lifecycle inside run_id. Cancelled when entity reaches terminal state.
+        entity_scoped: entity_id NOT NULL and run_id set for runtime-owned entity timers. Root-owned timers have a root
+          routing_source and no flow_instance; declared-flow timers have flow_instance NOT NULL and a flow_owned_control
+          routing_source. Tied to entity lifecycle inside run_id. Cancelled when entity reaches terminal state.
         global: entity_id NULL, flow_instance NULL, run_id NULL. Platform-level. Not tied to any entity. Survives entity
           lifecycle.
         flow_scoped: entity_id NULL, flow_instance NOT NULL, run_id set for runtime-owned flow timers. Tied to flow instance
@@ -26253,34 +26280,51 @@ api_specification:
         - $ref: '#/components/schemas/StageGateDecisionCardAnchor'
         - $ref: '#/components/schemas/HumanTaskDecisionCardAnchor'
         - $ref: '#/components/schemas/ProposedEffectDecisionCardAnchor'
+      DecisionCardRoutingSourceRoute:
+        type: object
+        additionalProperties: false
+        properties:
+          flow_instance: {type: string}
+          entity_id: {$ref: '#/components/schemas/OpaqueId'}
+          flow_id: {type: string}
+      DecisionCardRoutingSource:
+        type: object
+        additionalProperties: false
+        required: [kind, route]
+        properties:
+          kind: {type: string, enum: [root, static_flow, concrete_template_instance]}
+          route: {$ref: '#/components/schemas/DecisionCardRoutingSourceRoute'}
       StageGateDecisionCardAnchor:
         type: object
         additionalProperties: false
-        required: [flow_instance, entity_id, stage, stage_activation_id]
+        required: [flow_instance, entity_id, routing_source, stage, stage_activation_id]
         properties:
           flow_instance: {type: string}
           flow_id: {type: string}
           entity_id: {$ref: '#/components/schemas/OpaqueId'}
+          routing_source: {$ref: '#/components/schemas/DecisionCardRoutingSource'}
           stage: {type: string}
           stage_activation_id: {$ref: '#/components/schemas/OpaqueId'}
       HumanTaskDecisionCardAnchor:
         type: object
         additionalProperties: false
-        required: [requester_agent_id, operation_id, category, scope]
+        required: [requester_agent_id, operation_id, category, scope, routing_source]
         properties:
           requester_agent_id: {type: string}
           operation_id: {$ref: '#/components/schemas/OpaqueId'}
           category: {type: string}
           scope: {$ref: '#/components/schemas/DecisionCardScope'}
+          routing_source: {$ref: '#/components/schemas/DecisionCardRoutingSource'}
       ProposedEffectDecisionCardAnchor:
         type: object
         additionalProperties: false
-        required: [request_event_id, activity_id, decision, scope]
+        required: [request_event_id, activity_id, decision, scope, routing_source]
         properties:
           request_event_id: {$ref: '#/components/schemas/OpaqueId'}
           activity_id: {type: string}
           decision: {type: string}
           scope: {$ref: '#/components/schemas/DecisionCardScope'}
+          routing_source: {$ref: '#/components/schemas/DecisionCardRoutingSource'}
       ProposedEffectState:
         type: object
         additionalProperties: false

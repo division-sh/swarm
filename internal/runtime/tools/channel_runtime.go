@@ -12,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -98,6 +99,10 @@ func (e *Executor) execChannelOperation(ctx context.Context, actor models.AgentC
 		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "channel_operation_plan_invalid", "channel-runtime", "build_activity", map[string]any{"tool": strings.TrimSpace(toolID)}, err)
 	}
 	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(effectClass)
+	routingSource, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor.Identity, entityID)
+	if err != nil {
+		return nil, fmt.Errorf("admit channel activity producer source: %w", err)
+	}
 	intent := runtimeengine.ActivityIntent{
 		Context:          events.DeliveryContextFromContext(ctx),
 		ActivityID:       activityID,
@@ -124,6 +129,7 @@ func (e *Executor) execChannelOperation(ctx context.Context, actor models.AgentC
 		ChainDepth:       inbound.ChainDepth(),
 		Attempt:          1,
 		ExecutionMode:    actor.ExecutionMode,
+		RoutingSource:    routingSource,
 	}.Normalized()
 	record, err := e.activityExecutor.ExecuteDurableActivity(ctx, intent)
 	if err != nil {

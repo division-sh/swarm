@@ -1312,6 +1312,7 @@ func newDecisionCardTestStageAnchor(flowInstance, flowID, entityID, stage, activ
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
 		FlowInstance: flowInstance, FlowID: flowID, EntityID: entityID,
 		Stage: stage, StageActivationID: activationID,
+		Source: eventtest.ConcreteTemplateRoutingSource(flowID, flowInstance, entityID),
 	})
 	if err != nil {
 		panic(err)

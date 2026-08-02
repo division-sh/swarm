@@ -578,6 +578,7 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 	if err != nil {
 		return PreparedPublish{}, err
 	}
+	txctx = withConnectRoutePlanEvaluationMemo(txctx)
 	prepared := PreparedPublish{
 		Event:            evt,
 		admitted:         admitted,

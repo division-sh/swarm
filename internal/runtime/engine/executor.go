@@ -2308,6 +2308,7 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 	}
 	intent := ActivityIntent{
 		ActivityID:       resultEvents.ActivityID,
+		RoutingSource:    frame.req.ProducerSource,
 		Tool:             toolID,
 		Input:            semanticInput,
 		EffectClass:      effectClass,
@@ -3163,9 +3164,9 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 	if err != nil {
 		return EmitIntent{}, err
 	}
-	routingSource, err := events.RuntimeRoutingSourceFromRoute(sourceRoute)
-	if err != nil {
-		return EmitIntent{}, fmt.Errorf("construct emit routing source %+v: %w", sourceRoute, err)
+	routingSource := frame.req.ProducerSource
+	if routingSource.Empty() {
+		return EmitIntent{}, fmt.Errorf("construct emitted event: execution is missing admitted producer source")
 	}
 	if !routingSource.Empty() {
 		resolution.Envelope = events.EnvelopeForSourceRoute(resolution.Envelope, routingSource.Route())
@@ -3244,22 +3245,7 @@ func emitSourceRoute(frame *executionFrame) events.RouteIdentity {
 	if frame == nil {
 		return events.RouteIdentity{}
 	}
-	if admitted := frame.req.ProducerRoute.Normalized(); !admitted.Empty() {
-		return admitted
-	}
-	flowInstance := firstNonEmpty(
-		normalizedFlowInstanceCandidate(asString(frame.req.State.StateCarrier.Metadata["flow_path"])),
-		normalizedFlowInstanceCandidate(frame.req.Event.FlowInstance()),
-	)
-	return events.RouteIdentity{
-		FlowID:       strings.TrimSpace(frame.req.FlowID.String()),
-		FlowInstance: flowInstance,
-		EntityID:     strings.TrimSpace(frame.req.EntityID.String()),
-	}.Normalized()
-}
-
-func normalizedFlowInstanceCandidate(value string) string {
-	return strings.Trim(strings.TrimSpace(value), "/")
+	return frame.req.ProducerSource.Route()
 }
 
 func (e *Executor) queueEmitIntent(frame *executionFrame, eventType string, payload map[string]any) (bool, error) {

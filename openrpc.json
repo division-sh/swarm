@@ -11053,6 +11053,42 @@
         ],
         "type": "object"
       },
+      "DecisionCardRoutingSource": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "root",
+              "static_flow",
+              "concrete_template_instance"
+            ],
+            "type": "string"
+          },
+          "route": {
+            "$ref": "#/components/schemas/DecisionCardRoutingSourceRoute"
+          }
+        },
+        "required": [
+          "kind",
+          "route"
+        ],
+        "type": "object"
+      },
+      "DecisionCardRoutingSourceRoute": {
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "flow_id": {
+            "type": "string"
+          },
+          "flow_instance": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "DecisionCardScope": {
         "additionalProperties": false,
         "properties": {
@@ -11806,6 +11842,9 @@
           "requester_agent_id": {
             "type": "string"
           },
+          "routing_source": {
+            "$ref": "#/components/schemas/DecisionCardRoutingSource"
+          },
           "scope": {
             "$ref": "#/components/schemas/DecisionCardScope"
           }
@@ -11814,7 +11853,8 @@
           "requester_agent_id",
           "operation_id",
           "category",
-          "scope"
+          "scope",
+          "routing_source"
         ],
         "type": "object"
       },
@@ -12277,6 +12317,9 @@
           "request_event_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
+          "routing_source": {
+            "$ref": "#/components/schemas/DecisionCardRoutingSource"
+          },
           "scope": {
             "$ref": "#/components/schemas/DecisionCardScope"
           }
@@ -12285,7 +12328,8 @@
           "request_event_id",
           "activity_id",
           "decision",
-          "scope"
+          "scope",
+          "routing_source"
         ],
         "type": "object"
       },
@@ -13094,6 +13138,9 @@
           "flow_instance": {
             "type": "string"
           },
+          "routing_source": {
+            "$ref": "#/components/schemas/DecisionCardRoutingSource"
+          },
           "stage": {
             "type": "string"
           },
@@ -13104,6 +13151,7 @@
         "required": [
           "flow_instance",
           "entity_id",
+          "routing_source",
           "stage",
           "stage_activation_id"
         ],

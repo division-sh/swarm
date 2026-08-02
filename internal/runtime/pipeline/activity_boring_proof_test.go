@@ -579,9 +579,11 @@ func activityBoringFullFlowBundle(serverURL string) *runtimecontracts.WorkflowCo
 			ID:         "research",
 			PackageKey: "activity-boring-proof",
 			Dir:        "flows/research",
+			Mode:       runtimecontracts.FlowModeTemplate,
 		},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Name:         "research",
+			Mode:         runtimecontracts.FlowModeTemplate,
 			InitialState: "pending",
 			States:       []string{"pending"},
 		},
@@ -654,6 +656,7 @@ func newActivityBoringSourceEvent(entityID, runID, inputURL string) events.Event
 
 func activityBoringExpectedIntentForSourceEvent(evt events.Event, inputURL string) runtimeengine.ActivityIntent {
 	flowInstance := "research/" + evt.EntityID()
+	routingSource := mustActivityBoringRoutingSource(evt.EntityID())
 	site := runtimecontracts.ActivitySite{
 		FlowID:          "research",
 		NodeID:          "scanner",
@@ -669,6 +672,7 @@ func activityBoringExpectedIntentForSourceEvent(evt events.Event, inputURL strin
 	resultEvents := runtimecontracts.ActivityResultEventsForSite(site)
 	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(runtimecontracts.ActivityEffectClassReadOnly)
 	return runtimeengine.ActivityIntent{
+		RoutingSource:    routingSource,
 		ActivityID:       resultEvents.ActivityID,
 		Tool:             "source_scrape",
 		Input:            mustActivityInput(map[string]any{"url": inputURL}),
@@ -699,6 +703,7 @@ func newActivityBoringIntent(inputURL, runID string) runtimeengine.ActivityInten
 	}
 	entityID := uuid.NewString()
 	return runtimeengine.ActivityIntent{
+		RoutingSource:    mustActivityBoringRoutingSource(entityID),
 		ActivityID:       "scanner_source_scrape",
 		Tool:             "source_scrape",
 		Input:            mustActivityInput(map[string]any{"url": inputURL}),
@@ -720,6 +725,16 @@ func newActivityBoringIntent(inputURL, runID string) runtimeengine.ActivityInten
 		Attempt:          1,
 		ExecutionMode:    executionmode.Live,
 	}.Normalized()
+}
+
+func mustActivityBoringRoutingSource(entityID string) events.RoutingSource {
+	source, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
+		FlowID: "research", FlowInstance: "research/" + strings.TrimSpace(entityID), EntityID: strings.TrimSpace(entityID),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return source
 }
 
 type persistingActivityBoringBus struct {
@@ -910,7 +925,9 @@ func activityBoringNodeRoute(evt events.Event, nodeID string) events.DeliveryRou
 	return events.DeliveryRoute{
 		SubscriberType: "node",
 		SubscriberID:   strings.TrimSpace(nodeID),
-		Target:         events.RouteIdentity{EntityID: strings.TrimSpace(evt.EntityID())},
+		Target: events.RouteIdentity{
+			FlowID: "research", FlowInstance: "research/" + strings.TrimSpace(evt.EntityID()), EntityID: strings.TrimSpace(evt.EntityID()),
+		},
 	}
 }
 

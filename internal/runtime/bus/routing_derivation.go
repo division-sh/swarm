@@ -26,6 +26,7 @@ type Subscriber struct {
 
 type RouteTable struct {
 	mu                sync.RWMutex
+	generation        uint64
 	source            semanticview.Source
 	routes            map[string][]Subscriber
 	rootInputRoutes   map[string][]Subscriber
@@ -319,6 +320,7 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 			}
 		}
 		rt.rebuildLocked()
+		rt.generation++
 		return nil
 	}
 
@@ -346,6 +348,7 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 		}
 	}
 	rt.rebuildLocked()
+	rt.generation++
 	return nil
 }
 
@@ -436,6 +439,7 @@ func (rt *RouteTable) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route
 		rt.templateObservers[sourceTemplatePath] = filteredObservers
 	}
 	rt.rebuildLocked()
+	rt.generation++
 	return nil
 }
 
@@ -494,6 +498,7 @@ func (rt *RouteTable) MaterializedRoutes(identity runtimeflowidentity.Route) []F
 
 func newRouteTable(source semanticview.Source) *RouteTable {
 	return &RouteTable{
+		generation:        1,
 		source:            source,
 		routes:            make(map[string][]Subscriber),
 		rootInputRoutes:   make(map[string][]Subscriber),
@@ -505,6 +510,28 @@ func newRouteTable(source semanticview.Source) *RouteTable {
 		instanceEventPath: make(map[string][]string),
 		templateObservers: make(map[string][]routeTemplateSourceObserver),
 	}
+}
+
+type routeTableSnapshotGeneration struct {
+	value uint64
+}
+
+func (rt *RouteTable) snapshotGeneration() routeTableSnapshotGeneration {
+	if rt == nil {
+		return routeTableSnapshotGeneration{}
+	}
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	return routeTableSnapshotGeneration{value: rt.generation}
+}
+
+func (rt *RouteTable) snapshotGenerationCurrent(snapshot routeTableSnapshotGeneration) bool {
+	if rt == nil {
+		return snapshot.value == 0
+	}
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	return snapshot.value != 0 && rt.generation == snapshot.value
 }
 
 func (rt *RouteTable) addTopLevelRootInputNodeRoutesLocked(source semanticview.Source) {
@@ -1037,7 +1064,7 @@ func routeFlowInputHasExternalProducer(source semanticview.Source, flowID, event
 	if source == nil {
 		return false
 	}
-	resolution := semanticview.ResolveFlowInputProducer(source, flowID, eventType)
+	resolution := runtimepinrouting.ResolveFlowInputProducer(source, flowID, eventType)
 	switch {
 	case resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress):
 		return true
@@ -1062,12 +1089,11 @@ func routeFlowInputHasLoweredConnectReceiver(source semanticview.Source, flowID,
 	if eventType == "" {
 		return false
 	}
-	plans, _ := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
-	for _, plan := range plans {
-		if strings.TrimSpace(plan.Receiver.FlowID) != strings.TrimSpace(flowID) {
+	for _, plan := range runtimepinrouting.CompileConnectGraph(source).Plans() {
+		if strings.TrimSpace(plan.Receiver.FlowIDCode()) != strings.TrimSpace(flowID) {
 			continue
 		}
-		if eventidentity.Normalize(plan.Receiver.Event) == eventType {
+		if eventidentity.Normalize(plan.Receiver.LocalEventCode()) == eventType {
 			return true
 		}
 	}
@@ -1194,7 +1220,7 @@ func routeResolveSubscriberPatterns(source semanticview.Source, packageKey, flow
 		return nil
 	}
 	if flowID != "" && source != nil && source.FlowHasInputEvent(flowID, raw) {
-		patterns := routeInputProducerPatterns(source.ResolveFlowInputAutoWire(flowID, raw))
+		patterns := routeInputProducerPatterns(runtimepinrouting.ResolveFlowInputProducer(source, flowID, raw).AutoWireResolution())
 		if len(patterns) > 0 {
 			return patterns
 		}

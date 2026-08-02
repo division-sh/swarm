@@ -123,7 +123,7 @@ func TestHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStores(t *
 				decisionEventID := uuid.NewString()
 				anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
 					RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
-					Scope: scopeCase.scope,
+					Scope: scopeCase.scope, Source: eventtest.RootRoutingSource("requester-entity"),
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -220,7 +220,7 @@ func TestHumanTaskDeferredAndExpiredOutcomesUseRequesterRouteOnBothStores(t *tes
 				lifecycleEventID := uuid.NewString()
 				anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
 					RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
-					Scope: decisioncard.Scope{Kind: decisioncard.ScopeGlobal},
+					Scope: decisioncard.Scope{Kind: decisioncard.ScopeGlobal}, Source: eventtest.RootRoutingSource("requester-entity"),
 				})
 				if err != nil {
 					t.Fatal(err)

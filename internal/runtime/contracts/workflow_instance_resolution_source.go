@@ -69,14 +69,14 @@ func (b *WorkflowContractBundle) ResolveFlowInputInstanceSourceType(eventCatalog
 	if instance.Field.Empty() {
 		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("receiver flow %s must declare instance: <field>", strings.TrimSpace(flowID))
 	}
-	field := instance.Field.String()
+	field := instance.Field.Path()
 	carry, ok := pin.Carries[field]
 	if !ok {
 		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("flow %s is one instance per %s; input pin %s must declare a carry named %s (add carries: %s: {from: payload.<field>})", strings.TrimSpace(flowID), field, pin.PinName(), field, field)
 	}
 	source, err := ResolveFlowInputInstanceSource(pin.Resolution.Mode, carry.From)
 	if err != nil {
-		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("carry %s source %q is invalid for resolution mode %s: %w", field, strings.TrimSpace(carry.From), pin.Resolution.Mode.String(), err)
+		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("carry %s source %q is invalid for resolution mode %s: %w", field, strings.TrimSpace(carry.From), FlowInputResolutionModeCode(pin.Resolution.Mode), err)
 	}
 
 	receiverDecl, ok := instance.PrimaryEntity.Contract.Fields[field]

@@ -63,10 +63,11 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 	}
 	for i := range intents {
 		intent := &intents[i]
+		intentCtx := withConnectRoutePlanEvaluationMemo(ctx)
 		if strings.TrimSpace(string(intent.Event.Type())) == "" {
 			continue
 		}
-		intentCtx := events.WithDeliveryContext(ctx, intent.Context)
+		intentCtx = events.WithDeliveryContext(intentCtx, intent.Context)
 		var err error
 		_, admitted, err := admitEventForPublish(intentCtx, intent.Event, time.Now().UTC())
 		if err != nil {

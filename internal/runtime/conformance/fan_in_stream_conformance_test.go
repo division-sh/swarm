@@ -337,7 +337,7 @@ func fanInStreamPublishAndExecute(
 		Event:           delivered,
 		HandlerEventKey: templatefanin.ReceiverEvent,
 		Handler:         handler,
-		ProducerRoute:   target,
+		ProducerSource:  evt.RoutingSource(),
 		State:           executionState,
 		MaxDepth:        10,
 		ChainDepth:      0,

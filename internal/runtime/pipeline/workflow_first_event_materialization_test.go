@@ -14,6 +14,9 @@ import (
 
 func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"acceptor": {ID: "acceptor", ExecutionType: "system_node"},
+		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:         "first-event-transition",
 			Version:      "1",

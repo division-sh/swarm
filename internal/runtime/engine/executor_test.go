@@ -4595,7 +4595,7 @@ func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *te
 	}
 }
 
-func TestExecutor_EmitIntentUsesAdmittedProducerRouteBeforeStateMetadata(t *testing.T) {
+func TestExecutor_EmitIntentUsesAdmittedProducerSourceBeforeStateMetadata(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSource(),
 		StateRepo:  stubStateRepo{},
@@ -4613,11 +4613,15 @@ func TestExecutor_EmitIntentUsesAdmittedProducerRouteBeforeStateMetadata(t *test
 		FlowInstance: "validation",
 		EntityID:     "validation-entity",
 	}
+	producerSource, err := events.NewStaticFlowRoutingSource(admitted)
+	if err != nil {
+		t.Fatalf("NewStaticFlowRoutingSource: %v", err)
+	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID:      identity.NormalizeEntityID(admitted.EntityID),
-		NodeID:        "validation-router",
-		FlowID:        "validation",
-		ProducerRoute: admitted,
+		EntityID:       identity.NormalizeEntityID(admitted.EntityID),
+		NodeID:         "validation-router",
+		FlowID:         "validation",
+		ProducerSource: producerSource,
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			"validation.started",
@@ -4648,7 +4652,7 @@ func TestExecutor_EmitIntentUsesAdmittedProducerRouteBeforeStateMetadata(t *test
 	}
 }
 
-func TestExecutor_EmitIntentUsesExplicitProducerRouteWhenStateFlowPathNormalizesEmpty(t *testing.T) {
+func TestExecutor_EmitIntentUsesExplicitProducerSourceWhenStateFlowPathNormalizesEmpty(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSource(),
 		StateRepo:  stubStateRepo{},
@@ -4661,13 +4665,17 @@ func TestExecutor_EmitIntentUsesExplicitProducerRouteWhenStateFlowPathNormalizes
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 
+	producerSource, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
+		FlowID: "root", FlowInstance: "source/inst-1", EntityID: "entity-1",
+	})
+	if err != nil {
+		t.Fatalf("NewConcreteTemplateInstanceRoutingSource: %v", err)
+	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
-		EntityID: "entity-1",
-		NodeID:   "node-1",
-		FlowID:   "root",
-		ProducerRoute: events.RouteIdentity{
-			FlowID: "root", FlowInstance: "source/inst-1", EntityID: "entity-1",
-		},
+		EntityID:       "entity-1",
+		NodeID:         "node-1",
+		FlowID:         "root",
+		ProducerSource: producerSource,
 		Event: eventtest.RunCreatingRootIngress(
 			"evt-1",
 			"root.started",

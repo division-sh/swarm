@@ -666,7 +666,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				}
 				anchor, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
 					RequestEventID: requestEventID, ActivityID: continuation.ActivityID, Decision: "support_reply",
-					Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: "root", EntityID: entityID},
+					Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: "root", EntityID: entityID}, Source: eventtest.RootRoutingSource(entityID),
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -1115,9 +1115,10 @@ func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, run
 	if err != nil {
 		t.Fatal(err)
 	}
+	entityID := uuid.NewString()
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		FlowInstance: "launch/recovery", FlowID: "launch", EntityID: uuid.NewString(),
-		Stage: "awaiting_review", StageActivationID: uuid.NewString(),
+		FlowInstance: "launch/recovery", FlowID: "launch", EntityID: entityID,
+		Stage: "awaiting_review", StageActivationID: uuid.NewString(), Source: eventtest.ConcreteTemplateRoutingSource("launch", "launch/recovery", entityID),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1555,19 +1556,16 @@ func proposedEffectProofFailure(t *testing.T, selected gateRecoveryStoreCase, ev
 
 func loadProposedEffectProofRequest(t *testing.T, selected gateRecoveryStoreCase, runID string) events.Event {
 	t.Helper()
-	query := `SELECT event_id, event_name, payload, chain_depth, COALESCE(source_event_id, ''), COALESCE(entity_id, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = ? AND event_name = 'platform.activity_requested'`
+	query := `SELECT event_id FROM events WHERE run_id = ? AND event_name = 'platform.activity_requested'`
 	if selected.postgres {
-		query = `SELECT event_id::text, event_name, payload, chain_depth, COALESCE(source_event_id::text, ''), COALESCE(entity_id::text, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = $1::uuid AND event_name = 'platform.activity_requested'`
+		query = `SELECT event_id::text FROM events WHERE run_id = $1::uuid AND event_name = 'platform.activity_requested'`
 	}
-	var eventID, eventType, parentID, entityID, flowInstance string
-	var payload []byte
-	var depth int
-	if err := selected.db.QueryRowContext(testAuthorActivityContext(t, context.Background()), query, runID).Scan(&eventID, &eventType, &payload, &depth, &parentID, &entityID, &flowInstance); err != nil {
+	var eventID string
+	ctx := testAuthorActivityContext(t, context.Background())
+	if err := selected.db.QueryRowContext(ctx, query, runID).Scan(&eventID); err != nil {
 		t.Fatal(err)
 	}
-	envelope := events.EnvelopeForEntityID(events.EventEnvelope{}, entityID)
-	envelope = events.EnvelopeForFlowInstance(envelope, flowInstance)
-	return eventtest.PersistedProjection(eventID, events.EventType(eventType), "workflow-runtime", "", payload, depth, runID, parentID, envelope, time.Now().UTC())
+	return storetest.LoadCanonicalEventRecord(t, ctx, selected.events, eventID)
 }
 
 func gateRecoveryContractBundle() *runtimecontracts.WorkflowContractBundle {

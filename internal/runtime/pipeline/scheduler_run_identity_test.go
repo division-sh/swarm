@@ -25,6 +25,7 @@ func TestSchedulerKeysSchedulesByRunID(t *testing.T) {
 		FlowInstance: "flow-a/1",
 		TaskID:       "task-a",
 	}
+	base.RoutingSource = mustFlowOwnedScheduleSource(t, base.FlowInstance, base.EntityID)
 	scA := base
 	scA.RunID = runA
 	scB := base
@@ -68,7 +69,7 @@ func TestSchedulerBindsTaskToContextualStandingOccurrence(t *testing.T) {
 	}
 	scheduler := NewSchedulerWithWorkOwner(runtimeOwner)
 	requestCtx, cancelRequest := context.WithCancel(worklifetime.WithOccurrence(context.Background(), standing))
-	schedule := Schedule{AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.fire", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "standing-owner"}
+	schedule := Schedule{AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.fire", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "standing-owner", RoutingSource: events.NewPlatformControlRoutingSource()}
 	if err := scheduler.Register(requestCtx, schedule); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -143,8 +144,8 @@ func TestSchedulerParksDirectAndManagerComposedStandingSchedules(t *testing.T) {
 			}
 			scheduler := NewSchedulerWithWorkOwner(runtimeOwner)
 			schedules := []Schedule{
-				{RunID: uuid.NewString(), AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: uuid.NewString()},
-				{RunID: uuid.NewString(), AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: uuid.NewString()},
+				{RunID: uuid.NewString(), AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: uuid.NewString(), RoutingSource: events.NewPlatformControlRoutingSource()},
+				{RunID: uuid.NewString(), AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: uuid.NewString(), RoutingSource: events.NewPlatformControlRoutingSource()},
 			}
 			ctx := worklifetime.WithOccurrence(context.Background(), owner)
 			registered := make([]*scheduledTask, 0, len(schedules))
@@ -300,7 +301,7 @@ func TestSchedulerParkRestoreLinearizesFiringOnceAndCron(t *testing.T) {
 				})
 				schedule := Schedule{
 					RunID: uuid.NewString(), AgentID: "agent-a", EventType: "timer." + mode,
-					OwnerKind: ScheduleOwnerSystem, Mode: mode, TaskID: uuid.NewString(),
+					OwnerKind: ScheduleOwnerSystem, Mode: mode, TaskID: uuid.NewString(), RoutingSource: events.NewPlatformControlRoutingSource(),
 				}
 				if mode == "once" {
 					schedule.At = time.Now()
@@ -414,6 +415,7 @@ func TestSchedulerPrunesCompletedOneShotHistory(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		if err := scheduler.Register(context.Background(), Schedule{
 			AgentID: "agent-a", OwnerKind: ScheduleOwnerSystem, EventType: "timer.fire", Mode: "once", At: time.Now(), TaskID: uuid.NewString(),
+			RoutingSource: events.NewPlatformControlRoutingSource(),
 		}); err != nil {
 			t.Fatalf("Register(%d): %v", i, err)
 		}
@@ -436,13 +438,14 @@ func TestSchedulerOneShotPreservesReplyContextToFire(t *testing.T) {
 	t.Cleanup(scheduler.Stop)
 	want := "reply-v1:one-shot-fire"
 	if err := scheduler.Register(context.Background(), Schedule{
-		Context:   events.DeliveryContext{Reply: &events.ReplyContextRef{ID: want}},
-		AgentID:   "provider-agent",
-		OwnerKind: ScheduleOwnerSystem,
-		EventType: "provider.resume",
-		Mode:      "once",
-		At:        time.Now().Add(10 * time.Millisecond),
-		TaskID:    "reply-resume",
+		Context:       events.DeliveryContext{Reply: &events.ReplyContextRef{ID: want}},
+		AgentID:       "provider-agent",
+		OwnerKind:     ScheduleOwnerSystem,
+		EventType:     "provider.resume",
+		Mode:          "once",
+		At:            time.Now().Add(10 * time.Millisecond),
+		TaskID:        "reply-resume",
+		RoutingSource: events.NewPlatformControlRoutingSource(),
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -454,4 +457,38 @@ func TestSchedulerOneShotPreservesReplyContextToFire(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("one-shot schedule did not fire")
 	}
+}
+
+func TestScheduleRootRoutingSourceRequiresExactEntityScope(t *testing.T) {
+	source, err := events.NewRootRoutingSource("entity-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schedule := Schedule{
+		AgentID: "runtime-workflow", OwnerKind: ScheduleOwnerSystem, EntityID: "entity-root", RoutingSource: source,
+	}
+	if err := schedule.ValidateRoutingSource(); err != nil {
+		t.Fatalf("exact root source: %v", err)
+	}
+
+	schedule.EntityID = "entity-other"
+	if err := schedule.ValidateRoutingSource(); err == nil {
+		t.Fatal("root source accepted a different persisted entity")
+	}
+	schedule.EntityID = "entity-root"
+	schedule.FlowInstance = "flow/instance"
+	if err := schedule.ValidateRoutingSource(); err == nil {
+		t.Fatal("root source accepted a flow-scoped schedule")
+	}
+}
+
+func mustFlowOwnedScheduleSource(t testing.TB, flowInstance, entityID string) events.RoutingSource {
+	t.Helper()
+	source, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+		FlowID: "test-flow", FlowInstance: flowInstance, EntityID: entityID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source
 }

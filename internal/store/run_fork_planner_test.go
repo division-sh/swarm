@@ -472,9 +472,11 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
-			run_id, timer_name, entity_id, flow_instance, fire_event, fire_at, owner_node, owner_kind, task_type, status, created_at
+			run_id, timer_name, entity_id, flow_instance, fire_event, routing_source, fire_at, owner_node, owner_kind, task_type, status, created_at
 		)
-		VALUES ($1::uuid, 'unrelated', $2::uuid, 'flow-other/1', 'timer.fire', $3, 'other-node', 'system', 'timer', 'active', $4)
+		VALUES ($1::uuid, 'unrelated', $2::uuid, 'flow-other/1', 'timer.fire',
+		        jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-other', 'flow_instance', 'flow-other/1', 'entity_id', $2::text)),
+		        $3, 'other-node', 'system', 'timer', 'active', $4)
 	`, runID, uuid.NewString(), at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed unrelated timer: %v", err)
 	}
@@ -566,9 +568,11 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
-			run_id, timer_name, entity_id, flow_instance, fire_event, fire_at, owner_node, owner_kind, task_type, status, created_at
+			run_id, timer_name, entity_id, flow_instance, fire_event, routing_source, fire_at, owner_node, owner_kind, task_type, status, created_at
 		)
-		VALUES ($1::uuid, 'relevant', $2::uuid, 'flow-a/1', 'timer.fire', $3, 'node-a', 'system', 'timer', 'active', $4)
+		VALUES ($1::uuid, 'relevant', $2::uuid, 'flow-a/1', 'timer.fire',
+		        jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $2::text)),
+		        $3, 'node-a', 'system', 'timer', 'active', $4)
 	`, runID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed relevant timer: %v", err)
 	}

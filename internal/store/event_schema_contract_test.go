@@ -60,7 +60,9 @@ func TestFreshEventDDLRejectsMalformedStructuralFactsParity(t *testing.T) {
 		{"runtime_source_without_route", "check", validUnsafeRuntimeSourceEventRow, func(row *unsafeEventRow) { row.sourceRoute = `{}` }},
 		{"declared_source_without_authority", "check", validUnsafeDeclaredSourceEventRow, func(row *unsafeEventRow) { row.routingSourceAuthority = nil }},
 		{"noncanonical_source_authority", "check", validUnsafeDeclaredSourceEventRow, func(row *unsafeEventRow) { row.routingSourceAuthority = " schema-proof " }},
-		{"absent_source_with_route", "check", validUnsafeEventRow, func(row *unsafeEventRow) { row.sourceRoute = `{"flow_id":"flow-a"}` }},
+		{"absent_source_with_route", "check", validUnsafeRuntimeLogEventRow, func(row *unsafeEventRow) { row.sourceRoute = `{"flow_id":"flow-a"}` }},
+		{"runtime_control_with_absent_source", "check", validUnsafeRuntimeControlEventRow, func(row *unsafeEventRow) { row.routingSourceKind = "absent" }},
+		{"diagnostic_with_platform_control_source", "check", validUnsafeRuntimeLogEventRow, func(row *unsafeEventRow) { row.routingSourceKind = "platform_control" }},
 	}
 	for _, eventType := range []string{"platform.runtime_log", "platform.inbound_recorded", "platform.agent_directive"} {
 		baseline := validUnsafeRuntimeLogEventRow
@@ -147,7 +149,8 @@ func validUnsafeEventRow() unsafeEventRow {
 		class: "root_ingress", eventID: uuid.NewString(), runID: uuid.NewString(), eventName: "schema.contract",
 		taskID: "task", scope: string(events.EventScopeGlobal), payload: `{}`, executionMode: "live", chainDepth: 0,
 		producedBy: "schema-proof", producedByType: "external", createdAt: time.Date(2026, 7, 18, 20, 0, 0, 0, time.UTC),
-		routingSourceKind: "", sourceRoute: `{}`, targetRoute: `{}`, targetSet: `[]`,
+		routingSourceKind: "external_ingress", routingSourceAuthority: "provider_admission_plan",
+		sourceRoute: `{"flow_id":"flow-a","entity_id":"` + uuid.NewString() + `"}`, targetRoute: `{}`, targetSet: `[]`,
 	}
 }
 
@@ -195,6 +198,9 @@ func validUnsafeRuntimeControlEventRow() unsafeEventRow {
 	row.eventName = "platform.boot"
 	row.producedBy = "runtime"
 	row.producedByType = "platform"
+	row.routingSourceKind = "platform_control"
+	row.routingSourceAuthority = nil
+	row.sourceRoute = `{}`
 	return row
 }
 
@@ -211,6 +217,9 @@ func validUnsafeRuntimeLogEventRow() unsafeEventRow {
 	row.producedBy = "runtime"
 	row.producedByType = "platform"
 	row.runID = nil
+	row.routingSourceKind = "absent"
+	row.routingSourceAuthority = nil
+	row.sourceRoute = `{}`
 	return row
 }
 
@@ -226,6 +235,9 @@ func validUnsafeInboundRecordedEventRow() unsafeEventRow {
 	row.eventName = "platform.inbound_recorded"
 	row.producedBy = "runtime"
 	row.producedByType = "platform"
+	row.routingSourceKind = "absent"
+	row.routingSourceAuthority = nil
+	row.sourceRoute = `{}`
 	return row
 }
 
@@ -242,21 +254,25 @@ func validUnsafeAgentDirectiveEventRow() unsafeEventRow {
 	row.eventName = "platform.agent_directive"
 	row.producedBy = "runtime"
 	row.producedByType = "platform"
+	row.routingSourceKind = "absent"
+	row.routingSourceAuthority = nil
+	row.sourceRoute = `{}`
 	return row
 }
 
 func validUnsafeRuntimeSourceEventRow() unsafeEventRow {
 	row := validUnsafeEventRow()
-	row.routingSourceKind = "runtime_instance"
-	row.sourceRoute = `{"flow_id":"flow-a","flow_instance":"flow-a/1"}`
+	row.routingSourceKind = "concrete_template_instance"
+	row.routingSourceAuthority = nil
+	row.sourceRoute = `{"flow_id":"flow-a","flow_instance":"flow-a/1","entity_id":"` + uuid.NewString() + `"}`
 	return row
 }
 
 func validUnsafeDeclaredSourceEventRow() unsafeEventRow {
 	row := validUnsafeEventRow()
-	row.routingSourceKind = "declared_ingress"
-	row.routingSourceAuthority = "schema-proof"
-	row.sourceRoute = `{"flow_id":"flow-a","flow_instance":"flow-a/1"}`
+	row.routingSourceKind = "external_ingress"
+	row.routingSourceAuthority = "provider_admission_plan"
+	row.sourceRoute = `{"flow_id":"flow-a","entity_id":"` + uuid.NewString() + `"}`
 	return row
 }
 

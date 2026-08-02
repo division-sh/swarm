@@ -209,9 +209,9 @@ type ExecutionRequest struct {
 	NodeID      identity.NodeID
 	FlowID      identity.FlowID
 	Event       events.Event
-	// ProducerRoute is the admitted handler/action route that owns runtime
-	// action result events emitted during this execution.
-	ProducerRoute events.RouteIdentity
+	// ProducerSource is admitted once at the handler boundary and copied by
+	// every runtime event produced by this execution.
+	ProducerSource events.RoutingSource
 	// HandlerEventKey is the matched authored handler event key selected by
 	// runtime dispatch. Concrete Event.Type remains event provenance.
 	HandlerEventKey string
@@ -308,6 +308,7 @@ type EmitIntent struct {
 
 type ActivityIntent struct {
 	Context          events.DeliveryContext
+	RoutingSource    events.RoutingSource
 	ActivityID       string
 	Tool             string
 	PlanGeneration   plangeneration.Generation

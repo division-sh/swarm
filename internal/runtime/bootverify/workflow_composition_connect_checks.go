@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -18,8 +18,17 @@ func checkCompositionConnectValidation(c *checkerContext) []Finding {
 	}
 	var findings []Finding
 	findings = append(findings, validateInputPinResolutions(c.source)...)
-	for _, connect := range c.source.CompositionConnects() {
-		findings = append(findings, validateCompositionConnect(c.source, connect)...)
+	for _, issue := range runtimepinrouting.CompileConnectGraph(c.source).Issues() {
+		context := issue.DiagnosticContext()
+		if context != "" {
+			context += ": "
+		}
+		findings = append(findings, Finding{
+			CheckID: "composition_connect_validation", Severity: "error",
+			Location: strings.TrimSpace(issue.AuthoredLocation),
+			Message:  fmt.Sprintf("%scompiled connect is invalid: %s: %s", context, issue.Failure, strings.TrimSpace(issue.Detail)),
+			Evidence: []string{"classification: " + string(issue.Failure)},
+		})
 	}
 	for _, issue := range routingtopology.Build(c.source).Issues {
 		if strings.TrimSpace(issue.Failure) != routingtopology.FailureConnectReceiverPinCollision {
@@ -39,209 +48,6 @@ func checkCompositionConnectValidation(c *checkerContext) []Finding {
 		})
 	}
 	return findings
-}
-
-func validateCompositionConnect(source semanticview.Source, connect runtimecontracts.FlowPackageConnect) []Finding {
-	var findings []Finding
-	from, fromErr := connect.FromRef()
-	to, toErr := connect.ToRef()
-	if fromErr != nil {
-		findings = append(findings, compositionConnectFinding(connect, "producer_reference_invalid", fromErr.Error(), ""))
-	}
-	if toErr != nil {
-		findings = append(findings, compositionConnectFinding(connect, "receiver_reference_invalid", toErr.Error(), ""))
-	}
-	if fromErr != nil || toErr != nil {
-		return findings
-	}
-	if from.Root {
-		flowID, ok := semanticview.PackageRootFlowID(source, connect.PackageKey)
-		if !ok {
-			findings = append(findings, compositionConnectFinding(connect, "producer_flow_missing", fmt.Sprintf("package %s has no owning flow for root output pin %s", connect.PackageKey, from.Pin), connect.PackageKey))
-			return findings
-		}
-		from.FlowID, from.Root = flowID, flowID == ""
-	}
-	if to.Root {
-		flowID, ok := semanticview.PackageRootFlowID(source, connect.PackageKey)
-		if !ok {
-			findings = append(findings, compositionConnectFinding(connect, "receiver_flow_missing", fmt.Sprintf("package %s has no owning flow for root input pin %s", connect.PackageKey, to.Pin), connect.PackageKey))
-			return findings
-		}
-		to.FlowID, to.Root = flowID, flowID == ""
-	}
-
-	if !from.Root {
-		if _, ok := source.FlowSchemaByID(from.FlowID); !ok {
-			findings = append(findings, compositionConnectFinding(connect, "producer_flow_missing", fmt.Sprintf("producer flow %s does not exist", from.FlowID), from.FlowID))
-			return findings
-		}
-	}
-	receiverSchema := runtimecontracts.FlowSchemaDocument{}
-	if !to.Root {
-		var ok bool
-		receiverSchema, ok = source.FlowSchemaByID(to.FlowID)
-		if !ok {
-			findings = append(findings, compositionConnectFinding(connect, "receiver_flow_missing", fmt.Sprintf("receiver flow %s does not exist", to.FlowID), to.FlowID))
-			return findings
-		}
-	}
-
-	outputPin, ok := source.FlowOutputEventPin(from.FlowID, from.Pin)
-	if !ok {
-		location := from.FlowID
-		producerLabel := fmt.Sprintf("producer flow %s", from.FlowID)
-		if from.Root {
-			location = "root"
-			producerLabel = "root schema"
-		}
-		findings = append(findings, compositionConnectFinding(connect, "producer_output_pin_missing", fmt.Sprintf("%s does not declare output pin %s", producerLabel, from.Pin), location))
-		return findings
-	}
-	inputPin, ok := source.FlowInputEventPin(to.FlowID, to.Pin)
-	if !ok {
-		receiverLabel := fmt.Sprintf("receiver flow %s", to.FlowID)
-		location := to.FlowID
-		if to.Root {
-			receiverLabel = "root schema"
-			location = "root"
-		}
-		findings = append(findings, compositionConnectFinding(connect, "receiver_input_pin_missing", fmt.Sprintf("%s does not declare input pin %s", receiverLabel, to.Pin), location))
-		return findings
-	}
-
-	if !compositionConnectEventCompatible(source, connect, from, to, outputPin, inputPin) {
-		findings = append(findings, compositionConnectFinding(
-			connect,
-			"event_alias_or_adapter_invalid",
-			fmt.Sprintf("producer output event %s and receiver input event %s differ without an explicit adapter or import-boundary alias", outputPin.EventType(), inputPin.EventType()),
-			to.FlowID,
-		))
-	}
-	findings = append(findings, validateCompositionConnectSyntheticCarryCollisions(source, connect, from, outputPin, inputPin)...)
-	if to.Root {
-		if !inputPin.Resolution.Empty() {
-			findings = append(findings, compositionConnectFinding(connect, "root_receiver_resolution_invalid", "root input pins are static receivers and cannot declare instance resolution", "root"))
-		}
-		return findings
-	}
-	if compositionReceiverResolutionRequired(receiverSchema) && inputPin.Resolution.Empty() {
-		findings = append(findings, compositionConnectFinding(connect, "receiver_resolution_missing", fmt.Sprintf("receiver flow %s is a template and requires receiver-owned resolution.mode plus a same-named instance carry", to.FlowID), to.FlowID))
-	}
-	return findings
-}
-
-func validateCompositionConnectSyntheticCarryCollisions(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, from runtimecontracts.FlowPackagePinRef, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin) []Finding {
-	if from.Root || inputPin.Resolution.Mode != runtimecontracts.FlowInputResolutionModeCreate {
-		return nil
-	}
-	syntheticFields := map[string]string{}
-	for field, carry := range inputPin.Carries {
-		field = strings.TrimSpace(field)
-		sourceField := strings.TrimSpace(carry.From)
-		sourceOwner, err := runtimecontracts.ResolveFlowInputInstanceSource(inputPin.Resolution.Mode, sourceField)
-		if field == "" || err != nil || !sourceOwner.RequiresDeliveryProjection() {
-			continue
-		}
-		syntheticFields[field] = sourceField
-	}
-	if len(syntheticFields) == 0 {
-		return nil
-	}
-	wantEvent := eventidentity.Normalize(source.ResolveFlowEventReference(from.FlowID, outputPin.EventType()))
-	var findings []Finding
-	for _, site := range semanticview.AuthoredEmitSites(source) {
-		if strings.TrimSpace(site.FlowID) != strings.TrimSpace(from.FlowID) {
-			continue
-		}
-		siteEvent := eventidentity.Normalize(source.ResolveFlowEventReference(site.FlowID, site.Spec.EventType()))
-		if siteEvent == "" || siteEvent != wantEvent {
-			continue
-		}
-		for field, carrySource := range syntheticFields {
-			if _, authored := site.Spec.Fields[field]; !authored {
-				continue
-			}
-			producer := strings.TrimSpace(site.NodeID)
-			if producer == "" {
-				producer = strings.TrimSpace(site.SiteKey)
-			}
-			findings = append(findings, compositionConnectFinding(
-				connect,
-				"synthetic_carry_payload_collision",
-				fmt.Sprintf("producer %s emit field %s conflicts with receiver-owned carry %s -> payload.%s; remove or rename the producer field, or choose a different carry as field", producer, field, carrySource, field),
-				from.FlowID,
-			))
-		}
-	}
-	return findings
-}
-
-func compositionConnectFinding(connect runtimecontracts.FlowPackageConnect, reason, detail, location string) Finding {
-	if strings.TrimSpace(location) == "" {
-		if to, err := connect.ToRef(); err == nil {
-			location = strings.TrimSpace(to.FlowID)
-		}
-	}
-	if strings.TrimSpace(location) == "" {
-		location = "package.yaml"
-	}
-	return Finding{
-		CheckID:  "composition_connect_validation",
-		Severity: "error",
-		Message:  fmt.Sprintf("connect %s -> %s is invalid: %s: %s", strings.TrimSpace(connect.From), strings.TrimSpace(connect.To), reason, detail),
-		Location: location,
-	}
-}
-
-func compositionConnectEventCompatible(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, from, to runtimecontracts.FlowPackagePinRef, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin) bool {
-	outputEvent := eventidentity.Normalize(outputPin.EventType())
-	inputEvent := eventidentity.Normalize(inputPin.EventType())
-	if outputEvent == "" || inputEvent == "" || outputEvent == inputEvent {
-		return true
-	}
-	if strings.TrimSpace(connect.Adapter) != "" {
-		return true
-	}
-	candidates := map[string]struct{}{
-		outputEvent: {},
-		eventidentity.Normalize(source.ResolveFlowEventReference(from.FlowID, outputPin.EventType())): {},
-	}
-	candidateEvents := make([]string, 0, len(candidates))
-	for candidate := range candidates {
-		candidateEvents = append(candidateEvents, candidate)
-	}
-	for _, candidate := range candidateEvents {
-		for _, parentEvent := range semanticview.ImportBoundaryOutputParentEventsForEvent(source, connect.PackageKey, "", candidate) {
-			if parentEvent = eventidentity.Normalize(parentEvent); parentEvent != "" {
-				candidates[parentEvent] = struct{}{}
-			}
-		}
-	}
-	if _, ok := candidates[inputEvent]; ok {
-		return true
-	}
-	for _, alias := range semanticview.ImportBoundaryInputAliases(source, to.FlowID, inputPin.PinName()) {
-		if _, ok := candidates[eventidentity.Normalize(alias.ParentEvent)]; ok {
-			return true
-		}
-		if _, ok := candidates[eventidentity.Normalize(alias.EventPattern)]; ok {
-			return true
-		}
-	}
-	for _, alias := range semanticview.ImportBoundaryInputAliases(source, to.FlowID, inputPin.EventType()) {
-		if _, ok := candidates[eventidentity.Normalize(alias.ParentEvent)]; ok {
-			return true
-		}
-		if _, ok := candidates[eventidentity.Normalize(alias.EventPattern)]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func compositionReceiverResolutionRequired(schema runtimecontracts.FlowSchemaDocument) bool {
-	return strings.EqualFold(strings.TrimSpace(schema.Mode), "template")
 }
 
 func validateInputPinResolutions(source semanticview.Source) []Finding {
@@ -291,11 +97,11 @@ func validateInputPinResolution(source semanticview.Source, flowID string, pin r
 	case runtimecontracts.FlowInputResolutionModeReply:
 		return validateReplyInputPinResolution(source, flowID, pin)
 	case runtimecontracts.FlowInputResolutionModeFanOut:
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_unimplemented", fmt.Sprintf("resolution mode %q is design-locked but not runnable in this slice", resolution.Mode.String()), location))
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_unimplemented", fmt.Sprintf("resolution mode %q is design-locked but not runnable in this slice", runtimecontracts.FlowInputResolutionModeCode(resolution.Mode)), location))
 	case runtimecontracts.FlowInputResolutionModeNone:
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution.mode is required", location))
 	default:
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %q is not supported", resolution.Mode.String()), location))
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %q is not supported", runtimecontracts.FlowInputResolutionModeCode(resolution.Mode)), location))
 	}
 	return findings
 }
@@ -319,19 +125,28 @@ func validateReplyInputPinResolution(source semanticview.Source, flowID string, 
 	if correlationKey != "" && !containsTrimmedString(requestPin.Carries, correlationKey) {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply correlation_key %q must name a carry declared by output pin %s", correlationKey, requestPinName), location))
 	}
-	requestConnects := semanticview.ResolvedCompositionConnectsFrom(source, flowID, requestPinName)
+	graph := runtimepinrouting.CompileConnectGraph(source)
+	requestConnects := make([]runtimepinrouting.ConnectRoutePlan, 0, 1)
+	replyConnects := make([]runtimepinrouting.ConnectRoutePlan, 0, 1)
+	for _, plan := range graph.Plans() {
+		if strings.TrimSpace(plan.Source.FlowIDCode()) == strings.TrimSpace(flowID) && strings.TrimSpace(plan.Source.PinCode()) == requestPinName {
+			requestConnects = append(requestConnects, plan)
+		}
+		if strings.TrimSpace(plan.Receiver.FlowIDCode()) == strings.TrimSpace(flowID) && strings.TrimSpace(plan.Receiver.PinCode()) == strings.TrimSpace(pin.PinName()) {
+			replyConnects = append(replyConnects, plan)
+		}
+	}
 	if len(requestConnects) != 1 {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply request pin %s.%s must have exactly one connected counterpart, got %d", flowID, requestPinName, len(requestConnects)), location))
 		return findings
 	}
-	replyConnects := semanticview.ResolvedCompositionConnectsTo(source, flowID, pin.PinName())
 	if len(replyConnects) != 1 {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply input pin %s.%s must have exactly one connected provider output, got %d", flowID, pin.PinName(), len(replyConnects)), location))
 		return findings
 	}
-	requestTarget := requestConnects[0].To
-	replySource := replyConnects[0].From
-	if requestTarget.Root || replySource.Root || strings.TrimSpace(requestTarget.FlowID) != strings.TrimSpace(replySource.FlowID) {
+	requestTarget := requestConnects[0].Receiver
+	replySource := replyConnects[0].Source
+	if requestTarget.IsRoot() || replySource.IsRoot() || strings.TrimSpace(requestTarget.FlowIDCode()) != strings.TrimSpace(replySource.FlowIDCode()) {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", "resolution mode reply request and reply edges must connect the same provider flow", location))
 	}
 	return findings
@@ -433,38 +248,35 @@ func validateFanInBarrierJoinConsistency(source semanticview.Source, flowID stri
 	census := semanticview.BuildAuthoredEventEndpointCensus(source)
 	candidates := make([]string, 0, 2)
 	findings := make([]Finding, 0)
-	for _, endpoint := range census.MatchingConsumers(flowID, pin.EventType()) {
-		if endpoint.Kind != semanticview.EventEndpointNodeHandler || strings.TrimSpace(endpoint.NodeID) == "" {
+	for _, plan := range source.WorkflowJoins() {
+		if strings.TrimSpace(plan.FlowID) != strings.TrimSpace(flowID) {
 			continue
 		}
-		association := census.ResolveFanInInputForHandler(flowID, endpoint.NodeID, endpoint.HandlerEvent)
+		association := census.ResolveFanInInputForHandler(flowID, plan.NodeID, plan.HandlerEvent)
 		matchedPin, ok := association.Endpoint()
 		if !ok || strings.TrimSpace(matchedPin.PinName) != strings.TrimSpace(pin.PinName()) {
 			continue
 		}
-		handler, ok := source.NodeEventHandler(endpoint.NodeID, endpoint.HandlerEvent)
-		if !ok {
+		candidates = append(candidates, plan.NodeID+"."+plan.HandlerEvent+" join "+plan.Spec.EffectiveID())
+		handler, ok := source.NodeEventHandler(plan.NodeID, plan.HandlerEvent)
+		if !ok || handler.Join == nil {
 			continue
 		}
 		if handler.Accumulate != nil {
-			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s declares accumulate for a barrier fan-in; use handler.join as the sole finite-barrier owner", endpoint.NodeID, endpoint.HandlerEvent), flowID))
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s declares accumulate for a barrier fan-in; use handler.join as the sole finite-barrier owner", plan.NodeID, plan.HandlerEvent), flowID))
 		}
-		if handler.Join == nil {
-			continue
-		}
-		candidates = append(candidates, endpoint.NodeID+"."+endpoint.HandlerEvent+" join "+handler.Join.EffectiveID())
 		if authored := strings.TrimSpace(handler.Join.Members.By); authored != "" {
-			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.members.by derives from resolution.dedup_by (%s); remove authored by: %s", endpoint.NodeID, endpoint.HandlerEvent, strings.Join(pin.Resolution.DedupBy, ", "), authored), flowID))
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.members.by derives from resolution.dedup_by (%s); remove authored by: %s", plan.NodeID, plan.HandlerEvent, strings.Join(pin.Resolution.DedupBy, ", "), authored), flowID))
 		}
 		window := strings.TrimSpace(pin.Resolution.Window)
 		if window == "" && handler.Join.Window != nil {
-			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.window requires resolution.window on the barrier input pin; declare the payload window once on the pin or remove join.window", endpoint.NodeID, endpoint.HandlerEvent), flowID))
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.window requires resolution.window on the barrier input pin; declare the payload window once on the pin or remove join.window", plan.NodeID, plan.HandlerEvent), flowID))
 		}
 		if window != "" {
 			if handler.Join.Window == nil || strings.TrimSpace(handler.Join.Window.From) == "" {
-				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s requires join.window.from to snapshot the lifecycle window paired with resolution.window %s", endpoint.NodeID, endpoint.HandlerEvent, window), flowID))
+				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s requires join.window.from to snapshot the lifecycle window paired with resolution.window %s", plan.NodeID, plan.HandlerEvent, window), flowID))
 			} else if authored := strings.TrimSpace(handler.Join.Window.By); authored != "" {
-				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.window.by derives from resolution.window (%s); remove authored by: %s", endpoint.NodeID, endpoint.HandlerEvent, window, authored), flowID))
+				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.window.by derives from resolution.window (%s); remove authored by: %s", plan.NodeID, plan.HandlerEvent, window, authored), flowID))
 			}
 		}
 	}
@@ -553,7 +365,7 @@ func validateCanonicalInstanceInputPinResolution(source semanticview.Source, flo
 	var findings []Finding
 	resolution := pin.Resolution
 	mode := resolution.Mode
-	modeText := mode.String()
+	modeText := runtimecontracts.FlowInputResolutionModeCode(mode)
 	location := flowID
 	if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" || resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %s may only declare mode and carries", modeText), location))
@@ -620,25 +432,6 @@ func compositionConnectTypeFamily(raw string) string {
 	default:
 		return raw
 	}
-}
-
-func compositionConnectsFromOutputEvent(source semanticview.Source, flowID, eventType string) bool {
-	if source == nil {
-		return false
-	}
-	eventType = eventidentity.Normalize(eventType)
-	if eventType == "" {
-		return false
-	}
-	for _, edge := range routingtopology.Build(source).Edges {
-		if edge.Scope != routingtopology.DeliveryScopeInterFlowConnect || strings.TrimSpace(edge.Producer.FlowID) != strings.TrimSpace(flowID) {
-			continue
-		}
-		if eventidentity.Normalize(edge.Producer.Event.Authored) == eventType || eventidentity.Normalize(edge.Producer.Event.Local) == eventType || eventidentity.Normalize(edge.Producer.Event.Canonical) == eventType {
-			return true
-		}
-	}
-	return false
 }
 
 func stringSliceContains(values []string, needle string) bool {

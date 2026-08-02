@@ -75,8 +75,8 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 		t.Fatalf("pending work = %#v, want pending and completed revision rows", plan.PendingWork)
 	}
 	for _, item := range plan.PendingWork {
-		if item.SourceRoute != sourceRoute || item.FlowInstance != targetRoute.FlowInstance {
-			t.Fatalf("revision projection = source:%#v receiver:%q, want source %#v and receiver %q", item.SourceRoute, item.FlowInstance, sourceRoute, targetRoute.FlowInstance)
+		if item.RoutingSource.Route() != sourceRoute || item.FlowInstance != targetRoute.FlowInstance {
+			t.Fatalf("revision projection = source:%#v receiver:%q, want source %#v and receiver %q", item.RoutingSource.Route(), item.FlowInstance, sourceRoute, targetRoute.FlowInstance)
 		}
 	}
 
@@ -236,7 +236,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			if plan.ForkPoint.EventID != eventID || plan.ForkPoint.Input != selector {
 				t.Fatalf("fork point = %#v, want event %s selector %q", plan.ForkPoint, eventID, selector)
 			}
-			if got, want := plan.ForkPoint.SourceRoute, tc.sourceRoute.Normalized(); got != want {
+			if got, want := plan.ForkPoint.RoutingSource.Route(), tc.sourceRoute.Normalized(); got != want {
 				t.Fatalf("fork point source route = %#v, want normalized %#v", got, want)
 			}
 

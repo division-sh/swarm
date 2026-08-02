@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -173,12 +174,16 @@ func (pc *PipelineCoordinator) publishWorkflowGateSuperseded(ctx context.Context
 	if err != nil {
 		return err
 	}
+	routingSource, err := card.Anchor.ControlRoutingSource()
+	if err != nil {
+		return err
+	}
 	evt, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
 		Facts: events.EventFacts{
 			ID: uuid.NewString(), Type: events.EventType("mailbox.card_superseded"),
 			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},
 			Payload:  payload, Envelope: events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, anchor.EntityID), anchor.FlowInstance),
-			CreatedAt: now.UTC(), ExecutionMode: executionmode.Live,
+			RoutingSource: routingSource, CreatedAt: now.UTC(), ExecutionMode: executionmode.Live,
 		},
 		RunID: card.RunID,
 	})
@@ -242,9 +247,20 @@ func (pc *PipelineCoordinator) buildWorkflowDecisionCard(ctx context.Context, en
 	if err != nil {
 		return decisioncard.Card{}, fmt.Errorf("admit decision card provenance: %w", err)
 	}
+	anchorFlowID := strings.TrimSpace(plan.FlowID)
+	anchorFlowInstance := strings.Trim(firstNonEmptyString(flowInstance, instance.WorkflowName, "root"), "/")
+	anchorRoute := events.RouteIdentity{EntityID: strings.TrimSpace(entityID)}
+	if anchorFlowID != "" {
+		anchorRoute.FlowID = anchorFlowID
+		anchorRoute.FlowInstance = anchorFlowInstance
+	}
+	anchorSource, err := runtimepinrouting.AdmitFlowExecutionRoutingSource(pc.SemanticSource(), anchorFlowID, anchorRoute)
+	if err != nil {
+		return decisioncard.Card{}, fmt.Errorf("admit stage-gate owner source: %w", err)
+	}
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		FlowInstance: strings.Trim(firstNonEmptyString(flowInstance, instance.WorkflowName, "root"), "/"),
-		FlowID:       plan.FlowID, EntityID: strings.TrimSpace(entityID), Stage: plan.Stage,
+		FlowInstance: anchorFlowInstance,
+		FlowID:       anchorFlowID, EntityID: strings.TrimSpace(entityID), Source: anchorSource, Stage: plan.Stage,
 		StageActivationID: activation.ActivationID,
 	})
 	if err != nil {

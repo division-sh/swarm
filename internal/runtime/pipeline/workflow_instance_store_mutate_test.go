@@ -286,11 +286,12 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 	if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `
 		INSERT INTO timers (
 			timer_name, entity_id, flow_instance, fire_event, fire_payload,
-			fire_at, recurring, recurrence_cron, recurrence_interval,
+			routing_source, fire_at, recurring, recurrence_cron, recurrence_interval,
 			owner_node, owner_agent, owner_kind, task_type, status
 		)
 		VALUES (
 			$1, $2::uuid, $3, $4, '{}'::jsonb,
+			jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'mutation-flow', 'flow_instance', $3::text, 'entity_id', $2::text)),
 			$5, false, NULL, NULL,
 			NULL, $6, 'system', 'timer', 'active'
 		)

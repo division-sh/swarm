@@ -55,7 +55,7 @@ func checkTemplateInstanceValidation(c *checkerContext) []Finding {
 			})
 			continue
 		}
-		field := resolved.Field.String()
+		field := resolved.Field.Path()
 		if _, err := entityruntime.ResolveLeafField(entityContract, field); err != nil {
 			findings = append(findings, Finding{
 				CheckID:  "template_instance_validation",

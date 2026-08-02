@@ -327,7 +327,7 @@ func decodeFlowOutputPinEventNode(node *yaml.Node) (FlowOutputEventPin, error) {
 			}
 		case "sink":
 			if value.Kind != yaml.ScalarNode || strings.EqualFold(strings.TrimSpace(value.Tag), "!!null") {
-				return FlowOutputEventPin{}, fmt.Errorf("output event pin sink must be %q", FlowOutputSinkHarness)
+				return FlowOutputEventPin{}, fmt.Errorf("output event pin sink must be %q", FlowOutputSinkCode(FlowOutputSinkHarness))
 			}
 			var err error
 			out.Sink, err = ParseFlowOutputSink(value.Value)

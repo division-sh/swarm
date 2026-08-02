@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -314,7 +315,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			bundle := workflowTimerServedLifecycleBundle(true)
 			bundle.Semantics.Timers[0].AdvancesTo = ""
 			cancelHandler := runtimecontracts.SystemNodeEventHandler{AdvancesTo: "done"}
-			bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+			flowNodes := map[string]runtimecontracts.SystemNodeContract{
 				"controller": {
 					ID: "controller", ExecutionType: runtimecontracts.SystemNodeExecutionType,
 					SubscribesTo: []string{"timer.cancel"},
@@ -334,14 +335,21 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 				},
 			}
 			flow := runtimecontracts.FlowContractView{
-				Path: "timer-proof", Paths: runtimecontracts.FlowContractPaths{ID: "timer-proof", Flow: "timer-proof"},
-				Nodes: bundle.Nodes, Events: map[string]runtimecontracts.EventCatalogEntry{"timer.cancel": {}},
+				Path: "timer-proof",
+				Paths: runtimecontracts.FlowContractPaths{
+					ID: "timer-proof", Flow: "timer-proof", Mode: runtimecontracts.FlowModeStatic,
+				},
+				Schema: runtimecontracts.FlowSchemaDocument{Name: "timer-proof", Mode: runtimecontracts.FlowModeStatic},
+				Nodes:  flowNodes, Events: map[string]runtimecontracts.EventCatalogEntry{"timer.cancel": {}},
 			}
 			bundle.FlowTree = runtimecontracts.FlowTree{
 				Root: &flow, ByID: map[string]*runtimecontracts.FlowContractView{"timer-proof": &flow},
 			}
-			bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{"timer-proof": {}}
+			bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{
+				"timer-proof": {Mode: runtimecontracts.FlowModeStatic},
+			}
 			source := semanticview.Wrap(bundle)
+			lifecycleProbe := runtimelifecycleprobe.New()
 			module := proposedEffectProofModule{
 				source: source,
 				workflow: runtimepipeline.NewWorkflowDefinition("timer-proof", []runtimepipeline.WorkflowStage{
@@ -360,7 +368,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 				}},
 			}
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator,
+				ContractBundle: source, PayloadValidator: strictWorkflowTimerPayloadValidator, TestLifecycleProbe: lifecycleProbe,
 			}, runtimecontracts.WorkflowStageTimerInternalEvent)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -379,6 +387,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			coordinator = newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 				Module: module, Persistence: selected.persistence,
 				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore, WorkOwner: pipelineExternalTestWorkOwner(t),
+				TestLifecycleProbe: lifecycleProbe,
 			})
 			bus.SetInterceptors(coordinator)
 
@@ -407,6 +416,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			coordinator = newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 				Module: module, Persistence: selected.persistence,
 				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore, WorkOwner: pipelineExternalTestWorkOwner(t),
+				TestLifecycleProbe: lifecycleProbe,
 			})
 			bus.SetInterceptors(coordinator)
 			if err := coordinator.RestoreWorkflowTimers(ctx); err != nil {
@@ -415,11 +425,45 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			waitWorkflowTimerEventCount(t, selected, fireErrors, runID, runtimecontracts.WorkflowStageTimerInternalEvent, beforeRestart+1)
 
 			cancelEvent := eventtest.ExistingRunRootIngress(
-				uuid.NewString(), "timer-proof/timer.cancel", "operator", "", []byte(`{}`), 0, runID,
+				uuid.NewString(), "timer.cancel", "operator", "", []byte(`{}`), 0, runID,
 				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "timer-proof"), time.Now().UTC(),
 			)
+			plan, err := bus.CheckPublishRecipientPlan(ctx, cancelEvent)
+			if err != nil {
+				t.Fatalf("plan timer cancellation transition: %v", err)
+			}
+			if got := plan.DeliveryRoutes; len(got) != 1 || got[0].SubscriberType != "node" || got[0].SubscriberID != "controller" {
+				t.Fatalf("timer cancellation delivery routes = %#v, want exact controller node route", got)
+			}
 			if err := bus.Publish(ctx, cancelEvent); err != nil {
 				t.Fatalf("publish timer cancellation transition: %v", err)
+			}
+			probeCtx, cancelProbe := context.WithTimeout(ctx, 2*time.Second)
+			defer cancelProbe()
+			if _, err := lifecycleProbe.WaitForPostCommitDispatchCompleted(probeCtx, cancelEvent.ID()); err != nil {
+				t.Fatalf("wait for timer cancellation post-commit dispatch: %v", err)
+			}
+			if _, err := lifecycleProbe.WaitForDeliveryStatus(probeCtx, cancelEvent.ID(), "node", "controller", "in_progress"); err != nil {
+				t.Fatalf("wait for timer cancellation delivery claim: %v", err)
+			}
+			if _, err := lifecycleProbe.WaitForHandlerStarted(probeCtx, cancelEvent.ID(), "controller"); err != nil {
+				t.Fatalf("wait for timer cancellation handler start: %v", err)
+			}
+			handlerCompletion, err := lifecycleProbe.WaitForHandlerCompleted(probeCtx, cancelEvent.ID(), "controller")
+			if err != nil {
+				t.Fatalf("wait for timer cancellation handler completion: %v", err)
+			}
+			if handlerCompletion.Status != "completed" {
+				query := `SELECT status, COALESCE(failure, '{}') FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = 'controller'`
+				if selected.postgres {
+					query = `SELECT status, COALESCE(failure, '{}'::jsonb) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = 'controller'`
+				}
+				var deliveryStatus string
+				var failure []byte
+				if err := selected.db.QueryRowContext(ctx, query, cancelEvent.ID()).Scan(&deliveryStatus, &failure); err != nil {
+					t.Fatalf("timer cancellation handler status = %q and delivery failure readback failed: %v", handlerCompletion.Status, err)
+				}
+				t.Fatalf("timer cancellation handler status = %q, delivery status = %q failure = %s; want completed", handlerCompletion.Status, deliveryStatus, failure)
 			}
 			cancelled := false
 			deadline := time.Now().Add(5 * time.Second)

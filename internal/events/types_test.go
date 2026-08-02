@@ -10,9 +10,9 @@ import (
 )
 
 func TestConstructedEventClonePreservesAllOwnedFacts(t *testing.T) {
-	source, err := NewRuntimeRoutingSource("source", "source/one", "entity-source")
+	source, err := NewConcreteTemplateInstanceRoutingSource(RouteIdentity{FlowID: "source", FlowInstance: "source/one", EntityID: "entity-source"})
 	if err != nil {
-		t.Fatalf("NewRuntimeRoutingSource: %v", err)
+		t.Fatalf("NewConcreteTemplateInstanceRoutingSource: %v", err)
 	}
 	envelope := EnvelopeForTargetSet(EventEnvelope{Source: source.Route()}, []RouteIdentity{
 		{FlowID: "target", FlowInstance: "target/one", EntityID: "entity-one"},
@@ -47,7 +47,7 @@ func TestConstructedEventClonePreservesAllOwnedFacts(t *testing.T) {
 }
 
 func TestResolvedEnvelopeCannotRewriteRoutingSource(t *testing.T) {
-	source, err := NewRuntimeRoutingSource("producer", "producer/one", "entity-one")
+	source, err := NewConcreteTemplateInstanceRoutingSource(RouteIdentity{FlowID: "producer", FlowInstance: "producer/one", EntityID: "entity-one"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestResolvedEnvelopeCannotRewriteRoutingSource(t *testing.T) {
 }
 
 func TestDeclaredIngressRoutingSourceRemainsOpaqueToEnvelopeRouting(t *testing.T) {
-	source, err := NewDeclaredIngressRoutingSource("telegram-ingress", "", "entity-one", "provider_admission_plan")
+	source, err := NewExternalIngressRoutingSource("telegram-ingress", "entity-one", RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,27 +97,26 @@ func TestDeclaredIngressRoutingSourceRemainsOpaqueToEnvelopeRouting(t *testing.T
 	}
 }
 
-func TestRuntimeRoutingSourceFromRouteRequiresExactClaim(t *testing.T) {
+func TestRoutingSourceVariantsRequireExactClaims(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		route     RouteIdentity
-		wantEmpty bool
 		wantError bool
 	}{
-		{name: "absent", wantEmpty: true},
-		{name: "flow context only", route: RouteIdentity{FlowID: "root"}, wantEmpty: true},
-		{name: "entity fact only", route: RouteIdentity{EntityID: "entity-1"}, wantEmpty: true},
+		{name: "absent", wantError: true},
+		{name: "flow context only", route: RouteIdentity{FlowID: "root"}, wantError: true},
+		{name: "entity fact only", route: RouteIdentity{EntityID: "entity-1"}, wantError: true},
 		{name: "flow and entity without instance", route: RouteIdentity{FlowID: "root", EntityID: "entity-1"}, wantError: true},
-		{name: "instance without entity", route: RouteIdentity{FlowID: "root", FlowInstance: "root/one"}, wantEmpty: true},
+		{name: "instance without entity", route: RouteIdentity{FlowID: "root", FlowInstance: "root/one"}, wantError: true},
 		{name: "exact instance", route: RouteIdentity{FlowID: "root", FlowInstance: "root/one", EntityID: "entity-1"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source, err := RuntimeRoutingSourceFromRoute(tc.route)
+			source, err := NewConcreteTemplateInstanceRoutingSource(tc.route)
 			if (err != nil) != tc.wantError {
 				t.Fatalf("error = %v, wantError %t", err, tc.wantError)
 			}
-			if err == nil && source.Empty() != tc.wantEmpty {
-				t.Fatalf("source empty = %t, want %t", source.Empty(), tc.wantEmpty)
+			if err == nil && source.Empty() {
+				t.Fatal("complete concrete-template source is empty")
 			}
 		})
 	}

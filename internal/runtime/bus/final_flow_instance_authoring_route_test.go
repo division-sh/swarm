@@ -200,17 +200,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
-				events.EventType("producer/account.ready"),
-				"",
-				"",
-				tc.payload,
-				0,
-				"",
-				"",
-				events.EventEnvelope{},
-				time.Now().UTC(),
-			)
+			evt := finalFlowInstanceAuthoringEvent(uuid.NewString(), tc.payload)
 
 			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
 			if err != nil {
@@ -235,16 +225,29 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_FailsClosedForMissingAndAmbig
 }
 
 func finalFlowInstanceAuthoringAccountReadyEvent(eventID, accountID string) events.Event {
-	return eventtest.RunCreatingRootIngress(
+	return finalFlowInstanceAuthoringEvent(eventID, json.RawMessage(`{"account_id":"`+accountID+`","score":"91","decision":"approved"}`))
+}
+
+func finalFlowInstanceAuthoringEvent(eventID string, payload json.RawMessage) events.Event {
+	source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
+		FlowID:       "producer",
+		FlowInstance: "producer",
+		EntityID:     eventtest.UUID("producer:" + eventID),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return eventtest.RunCreatingRootIngressWithRoutingSource(
 		eventID,
 		events.EventType("producer/account.ready"),
 		"",
 		"",
-		json.RawMessage(`{"account_id":"`+accountID+`","score":"91","decision":"approved"}`),
+		payload,
 		0,
 		eventtest.UUID("run:"+eventID),
 		"",
 		events.EventEnvelope{},
+		source,
 		time.Now().UTC(),
 	)
 }

@@ -109,7 +109,7 @@ func TestPipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAu
 	assertDeliveryAuthorityOutcomeCount(t, db, evt.ID(), route.SubscriberID, 1)
 }
 
-func TestPipelineCoordinatorInterceptDeliveryRouteRejectsAmbiguousConnectedInputReplayWithoutReceiptOrHandler(t *testing.T) {
+func TestPipelineCoordinatorInterceptDeliveryRouteRejectsConnectedInputReplayWithoutStampedClaim(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	source := testWorkflowNodeConnectedInputCollisionSource()
 	bundle, ok := semanticview.Bundle(source)
@@ -149,8 +149,8 @@ func TestPipelineCoordinatorInterceptDeliveryRouteRejectsAmbiguousConnectedInput
 
 	for attempt := 1; attempt <= 2; attempt++ {
 		passthrough, deferred, _, err := pc.InterceptDeliveryRoute(ctx, delivery, route)
-		if err == nil || !strings.Contains(err.Error(), "multiple connected input events") {
-			t.Fatalf("attempt %d InterceptDeliveryRoute error = %v, want explicit receiver-pin ambiguity", attempt, err)
+		if err == nil || !strings.Contains(err.Error(), "stamped connect claim") {
+			t.Fatalf("attempt %d InterceptDeliveryRoute error = %v, want missing stamped-claim failure", attempt, err)
 		}
 		if passthrough {
 			t.Fatalf("attempt %d passthrough = true, want fail-closed interception", attempt)
@@ -245,6 +245,9 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			bus := &failOnceRetryPipelineBus{recordingPipelineBus: baseBus}
 			bus.outbox = &failOnceRetryOutbox{inner: baseBus.EngineOutbox()}
 			bundle := &runtimecontracts.WorkflowContractBundle{
+				Nodes: map[string]runtimecontracts.SystemNodeContract{
+					"node-a": {ID: "node-a", ExecutionType: "system_node"},
+				},
 				Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 					"handler_retry_base_seconds": {Value: 1},
 				}},
@@ -391,6 +394,9 @@ func newDeliveryAuthorityCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordin
 	t.Helper()
 	bus := &recordingPipelineBus{}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"node-a": {ID: "node-a", ExecutionType: "system_node"},
+		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"node-a": {

@@ -208,7 +208,7 @@ func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, inte
 	continuation.EffectContentHash = effectHash
 	anchor, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
 		RequestEventID: requestEventID, ActivityID: intent.ActivityID, Decision: intent.ApprovalDecision,
-		Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: flowInstance, EntityID: intent.EntityID.String()},
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: flowInstance, EntityID: intent.EntityID.String()}, Source: intent.RoutingSource,
 	})
 	if err != nil {
 		return decisioncard.Card{}, decisioncard.ProposedEffectContinuation{}, err
@@ -748,7 +748,7 @@ func activityRequestEmitIntents(intents []runtimeengine.ActivityIntent) ([]runti
 	}
 	out := make([]runtimeengine.EmitIntent, 0, len(intents))
 	for _, intent := range intents {
-		request, err := activityRequestEmitIntent(intent)
+		request, err := activityRequestEmitIntentFromAdmittedSource(intent)
 		if err != nil {
 			return nil, err
 		}
@@ -772,7 +772,7 @@ func (pc *PipelineCoordinator) ExecuteDurableActivity(ctx context.Context, inten
 		)
 	}
 	intent = intent.Normalized()
-	request, err := activityRequestEmitIntent(intent)
+	request, err := activityRequestEmitIntentFromAdmittedSource(intent)
 	if err != nil {
 		return ActivityAttemptRecord{}, err
 	}
@@ -818,7 +818,7 @@ func (pc *PipelineCoordinator) ExecuteDurableActivity(ctx context.Context, inten
 	}
 }
 
-func activityRequestEmitIntent(intent runtimeengine.ActivityIntent) (runtimeengine.EmitIntent, error) {
+func activityRequestEmitIntentFromAdmittedSource(intent runtimeengine.ActivityIntent) (runtimeengine.EmitIntent, error) {
 	intent = intent.Normalized()
 	if !intent.ExecutionMode.Valid() {
 		return runtimeengine.EmitIntent{}, fmt.Errorf("activity %s requires typed causal execution mode", intent.ActivityID)
@@ -836,9 +836,9 @@ func activityRequestEmitIntent(intent runtimeengine.ActivityIntent) (runtimeengi
 	if err != nil {
 		return runtimeengine.EmitIntent{}, err
 	}
-	routingSource, err := events.NewRuntimeRoutingSource(intent.FlowID.String(), intent.FlowInstance, intent.EntityID.String())
-	if err != nil {
-		return runtimeengine.EmitIntent{}, fmt.Errorf("activity request routing source: %w", err)
+	routingSource := intent.RoutingSource
+	if routingSource.Empty() {
+		return runtimeengine.EmitIntent{}, fmt.Errorf("activity request requires admitted producer source")
 	}
 	evt, err := events.NewChildEvent(events.ChildEventInput{
 		Facts: events.EventFacts{
@@ -991,6 +991,7 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 	}
 	intent := runtimeengine.ActivityIntent{
 		Context:          evt.DeliveryContext(),
+		RoutingSource:    evt.RoutingSource(),
 		ActivityID:       payload.ActivityID,
 		Tool:             payload.Tool,
 		PlanGeneration:   planGeneration,
@@ -1506,9 +1507,9 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 	if err != nil {
 		return err
 	}
-	routingSource, err := events.NewRuntimeRoutingSource(intent.FlowID.String(), intent.FlowInstance, intent.EntityID.String())
-	if err != nil {
-		return fmt.Errorf("activity result routing source: %w", err)
+	routingSource := intent.RoutingSource
+	if routingSource.Empty() {
+		return fmt.Errorf("activity result requires admitted producer source")
 	}
 	evt, err := events.NewChildEvent(events.ChildEventInput{
 		Facts: events.EventFacts{

@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -170,7 +170,8 @@ func TestProviderTriggerNormalizedEventLowersThroughExactExternalInputPin(t *tes
 	if len(authorized) == 0 {
 		t.Fatal("provider trigger source does not expose its target-free event authority")
 	}
-	plans, issues := runtimepinrouting.LowerTargetFreeInputRoutePlans(wrapped, authorized)
+	graph := runtimepinrouting.CompileConnectGraph(wrapped)
+	plans, issues := graph.Plans(), graph.Issues()
 	if len(issues) != 0 {
 		t.Fatalf("target-free route plan issues = %#v", issues)
 	}
@@ -178,17 +179,20 @@ func TestProviderTriggerNormalizedEventLowersThroughExactExternalInputPin(t *tes
 		t.Fatalf("target-free route plans = %#v, want one normalized input plan", plans)
 	}
 	plan := plans[0]
-	if plan.Source.ResolvedEvent != "inbound.telegram.text_message" || plan.Receiver.FlowID != "coordinator" || plan.Receiver.Pin == "" {
+	if plan.Source.ResolvedEventCode() != "inbound.telegram.text_message" || plan.Receiver.FlowIDCode() != "coordinator" || plan.Receiver.PinCode() == "" {
 		t.Fatalf("target-free normalized route plan = %#v", plan)
 	}
 
-	rawAuthorization := runtimeprovideroutput.MustAuthorization(
-		"telegram", "inbound.telegram", "provider.telegram", "1.0.0",
-		"sha256:"+strings.Repeat("a", 64), catalog.Generation(),
-	)
-	rawPlans, rawIssues := runtimepinrouting.LowerTargetFreeInputRoutePlans(wrapped, []runtimeprovideroutput.Authorization{rawAuthorization})
-	if len(rawIssues) != 0 || len(rawPlans) != 0 {
-		t.Fatalf("raw standing event acquired target-free route plans=%#v issues=%#v", rawPlans, rawIssues)
+	routingSource, err := events.NewExternalIngressRoutingSource("coordinator", "provider-event", events.RoutingSourceAuthorityProviderAdmissionPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawEvent, err := runtimepinrouting.AdmitSourceEvent("inbound.telegram", routingSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rawPlans := graph.MatchingSourceEvent(rawEvent); len(rawPlans) != 0 {
+		t.Fatalf("raw standing event acquired target-free route plans=%#v", rawPlans)
 	}
 }
 

@@ -59,6 +59,9 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 	if err := sc.NormalizeOwner(); err != nil {
 		return err
 	}
+	if err := sc.ValidateRoutingSource(); err != nil {
+		return err
+	}
 
 	return s.upsertScheduleSpec(ctx, sc)
 }
@@ -77,6 +80,9 @@ func (s *PostgresStore) CancelScheduleExact(ctx context.Context, sc runtimepipel
 	flowInstance := sc.EffectiveFlowInstance()
 	sc.FlowInstance = flowInstance
 	if err := sc.NormalizeOwner(); err != nil {
+		return err
+	}
+	if err := sc.ValidateRoutingSource(); err != nil {
 		return err
 	}
 	return s.cancelScheduleExactSpec(ctx, sc)
@@ -103,6 +109,9 @@ func (s *PostgresStore) MarkScheduleFiredExact(ctx context.Context, sc runtimepi
 	flowInstance := sc.EffectiveFlowInstance()
 	sc.FlowInstance = flowInstance
 	if err := sc.NormalizeOwner(); err != nil {
+		return err
+	}
+	if err := sc.ValidateRoutingSource(); err != nil {
 		return err
 	}
 	return s.markScheduleFiredExactSpec(ctx, sc)
@@ -137,6 +146,17 @@ func persistedSchedulePayload(sc runtimepipeline.Schedule) []byte {
 		return payload
 	}
 	return encoded
+}
+
+func persistedScheduleRoutingSource(sc runtimepipeline.Schedule) ([]byte, error) {
+	if err := sc.ValidateRoutingSource(); err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(sc.RoutingSource)
+	if err != nil {
+		return nil, fmt.Errorf("encode schedule routing source: %w", err)
+	}
+	return raw, nil
 }
 
 func exactScheduleTaskIDSQL() string {
@@ -210,22 +230,26 @@ func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeli
 		if err != nil {
 			return err
 		}
+		routingSource, err := persistedScheduleRoutingSource(sc)
+		if err != nil {
+			return err
+		}
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO timers (
-			run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+			run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, routing_source,
 			fire_at, recurring, recurrence_cron, recurrence_interval,
 			owner_node, owner_agent, owner_kind, agent_name_owner, agent_name_source,
 			agent_route_presence, agent_flow_scope_key, agent_flow_instance_id,
 			reply_context_id, task_type, status
 		)
 		VALUES (
-			NULLIF($1,'')::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb,
-			$7, $8, NULLIF($9,''), NULL,
-			NULL, $10, $11, NULLIF($12, ''), NULLIF($13, ''),
-			NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''),
-			NULLIF($17, ''), $18, 'active'
+			NULLIF($1,'')::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb, $7::jsonb,
+			$8, $9, NULLIF($10,''), NULL,
+			NULL, $11, $12, NULLIF($13, ''), NULLIF($14, ''),
+			NULLIF($15, ''), NULLIF($16, ''), NULLIF($17, ''),
+			NULLIF($18, ''), $19, 'active'
 		)
-		`, sc.RunID, timerName, sc.EntityID, sc.FlowInstance, sc.EventType, string(payload), fireAt, recurring, sc.Cron, sc.AgentID,
+		`, sc.RunID, timerName, sc.EntityID, sc.FlowInstance, sc.EventType, string(payload), string(routingSource), fireAt, recurring, sc.Cron, sc.AgentID,
 			sc.OwnerKind, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence, identityFields.FlowScopeKey,
 			identityFields.FlowInstanceID, sc.Context.ReplyContextID(), taskType)
 		if err != nil {
@@ -288,6 +312,7 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 			COALESCE(t.entity_id::text, ''),
 			COALESCE(t.flow_instance, ''),
 			t.fire_payload,
+			t.routing_source,
 			COALESCE(t.reply_context_id, '')
 		FROM timers t
 		LEFT JOIN runs run ON run.run_id = t.run_id
@@ -311,6 +336,7 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 			recurrenceInterval string
 			fireAt             time.Time
 			payload            []byte
+			routingSourceRaw   []byte
 			replyContextID     string
 			nameOwner          string
 			nameSource         string
@@ -335,11 +361,15 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 			&sc.EntityID,
 			&sc.FlowInstance,
 			&payload,
+			&routingSourceRaw,
 			&replyContextID,
 		); err != nil {
 			return nil, fmt.Errorf("scan active timer: %w", err)
 		}
 		sc.At = fireAt
+		if err := json.Unmarshal(routingSourceRaw, &sc.RoutingSource); err != nil {
+			return nil, fmt.Errorf("load schedule routing source: %w", err)
+		}
 		sc.TaskID, sc.Payload = extractPersistedScheduleTaskID(payload)
 		sc.Mode, sc.Cron, err = persistedScheduleMode(recurring, recurrenceCron, recurrenceInterval)
 		if err != nil {

@@ -26,7 +26,7 @@ type runForkRevisionEvent struct {
 	EventName      string               `json:"event_name"`
 	EntityID       string               `json:"entity_id"`
 	FlowInstance   string               `json:"flow_instance"`
-	SourceRoute    events.RouteIdentity `json:"source_route"`
+	RoutingSource  events.RoutingSource `json:"routing_source"`
 	TargetRoute    json.RawMessage      `json:"target_route"`
 	TargetSet      json.RawMessage      `json:"target_set"`
 	Scope          string               `json:"scope"`

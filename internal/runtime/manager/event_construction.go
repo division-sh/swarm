@@ -12,19 +12,19 @@ import (
 )
 
 func newPlatformCausalRuntimeControlEvent(lineage events.EventLineage, eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
-	return events.NewCausalRuntimeControlEvent(events.CausalRuntimeEventInput{Facts: platformRuntimeEventFacts(lineage.ExecutionMode, eventType, payload, envelope, createdAt), Lineage: lineage})
+	return events.NewCausalRuntimeControlEvent(events.CausalRuntimeEventInput{Facts: platformRuntimeControlEventFacts(lineage.ExecutionMode, eventType, payload, envelope, createdAt), Lineage: lineage})
 }
 
 func newPlatformCausalRuntimeDiagnosticEvent(lineage events.EventLineage, eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
-	return events.NewCausalRuntimeDiagnosticEvent(events.CausalRuntimeEventInput{Facts: platformRuntimeEventFacts(lineage.ExecutionMode, eventType, payload, envelope, createdAt), Lineage: lineage})
+	return events.NewCausalRuntimeDiagnosticEvent(events.CausalRuntimeEventInput{Facts: platformRuntimeDiagnosticEventFacts(lineage.ExecutionMode, eventType, payload, envelope, createdAt), Lineage: lineage})
 }
 
 func newPlatformStandaloneRuntimeControlEvent(eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
-	return events.NewStandaloneRuntimeControlEvent(events.StandaloneRuntimeEventInput{Facts: platformRuntimeEventFacts(executionmode.Live, eventType, payload, envelope, createdAt)})
+	return events.NewStandaloneRuntimeControlEvent(events.StandaloneRuntimeEventInput{Facts: platformRuntimeControlEventFacts(executionmode.Live, eventType, payload, envelope, createdAt)})
 }
 
 func newPlatformStandaloneRuntimeDiagnosticEvent(mode executionmode.Mode, eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
-	return events.NewStandaloneRuntimeDiagnosticEvent(events.StandaloneRuntimeEventInput{Facts: platformRuntimeEventFacts(mode, eventType, payload, envelope, createdAt)})
+	return events.NewStandaloneRuntimeDiagnosticEvent(events.StandaloneRuntimeEventInput{Facts: platformRuntimeDiagnosticEventFacts(mode, eventType, payload, envelope, createdAt)})
 }
 
 func newPlatformContextualRuntimeDiagnosticEvent(ctx context.Context, eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
@@ -38,9 +38,16 @@ func newPlatformContextualRuntimeDiagnosticEvent(ctx context.Context, eventType 
 	return newPlatformStandaloneRuntimeDiagnosticEvent(mode, eventType, payload, envelope, createdAt)
 }
 
-func platformRuntimeEventFacts(mode executionmode.Mode, eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) events.EventFacts {
+func platformRuntimeControlEventFacts(mode executionmode.Mode, eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) events.EventFacts {
 	return events.EventFacts{
 		Type: eventType, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
-		Payload: payload, Envelope: envelope, CreatedAt: createdAt, ExecutionMode: mode,
+		Payload: payload, Envelope: envelope, RoutingSource: events.NewPlatformControlRoutingSource(), CreatedAt: createdAt, ExecutionMode: mode,
+	}
+}
+
+func platformRuntimeDiagnosticEventFacts(mode executionmode.Mode, eventType events.EventType, payload json.RawMessage, envelope events.EventEnvelope, createdAt time.Time) events.EventFacts {
+	return events.EventFacts{
+		Type: eventType, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
+		Payload: payload, Envelope: envelope, RoutingSource: events.NoRoutingSource(), CreatedAt: createdAt, ExecutionMode: mode,
 	}
 }

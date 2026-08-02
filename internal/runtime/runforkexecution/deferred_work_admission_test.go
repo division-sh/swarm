@@ -145,7 +145,7 @@ func TestSelectedContractFlowInputResolutionDynamicFlowOwnerMatrix(t *testing.T)
 		{mode: runtimecontracts.FlowInputResolutionModeNone, want: false},
 		{mode: runtimecontracts.FlowInputResolutionMode(255), want: true},
 	} {
-		t.Run(strings.ReplaceAll(tc.mode.String(), "-", "_"), func(t *testing.T) {
+		t.Run(strings.ReplaceAll(runtimecontracts.FlowInputResolutionModeCode(tc.mode), "-", "_"), func(t *testing.T) {
 			if got := selectedContractFlowInputResolutionRequiresDynamicFlowOwner(tc.mode); got != tc.want {
 				t.Fatalf("selectedContractFlowInputResolutionRequiresDynamicFlowOwner(%q) = %t, want %t", tc.mode, got, tc.want)
 			}

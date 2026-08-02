@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -159,8 +160,12 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 		deadline = decisioncard.CanonicalTimestamp(now.Add(time.Duration(hours) * time.Hour))
 	}
 
+	source, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor.Identity, requesterEntityID)
+	if err != nil {
+		return nil, fmt.Errorf("admit human-task requester source: %w", err)
+	}
 	anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
-		RequesterAgentID: actor.ID, OperationID: operationID, Category: in.Category, Scope: scope,
+		RequesterAgentID: actor.ID, OperationID: operationID, Category: in.Category, Scope: scope, Source: source,
 	})
 	if err != nil {
 		return nil, err

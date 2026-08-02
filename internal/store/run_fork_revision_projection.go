@@ -37,7 +37,8 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]ru
 			EventID:         strings.TrimSpace(durable.EventID),
 			EventName:       strings.TrimSpace(event.EventName),
 			FlowInstance:    strings.TrimSpace(event.FlowInstance),
-			SourceRoute:     event.SourceRoute.Normalized(),
+			RoutingSource:   event.RoutingSource,
+			DeliveryRoute:   durable.Route,
 			DeliveryID:      strings.TrimSpace(durable.DeliveryID),
 			SubscriberType:  string(durable.SubscriberClass),
 			SubscriberID:    strings.TrimSpace(durable.SubscriberID),
@@ -70,7 +71,7 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]ru
 			EventID:        strings.TrimSpace(receipt.EventID),
 			EventName:      strings.TrimSpace(event.EventName),
 			FlowInstance:   strings.TrimSpace(event.FlowInstance),
-			SourceRoute:    event.SourceRoute.Normalized(),
+			RoutingSource:  event.RoutingSource,
 			SubscriberType: strings.TrimSpace(receipt.SubscriberType),
 			SubscriberID:   strings.TrimSpace(receipt.SubscriberID),
 			ReasonCode:     strings.TrimSpace(receipt.ReasonCode),
@@ -182,7 +183,7 @@ func loadRunForkSourceFactsFromRevision(snapshot *runForkRevisionSnapshot, entit
 			if flowInstance := strings.TrimSpace(event.FlowInstance); flowInstance != "" {
 				flowSet[flowInstance] = struct{}{}
 			}
-			sourceRoute := event.SourceRoute.Normalized()
+			sourceRoute := event.RoutingSource.Route()
 			sourceFlow := strings.Trim(strings.TrimSpace(sourceRoute.FlowID), "/")
 			if sourceFlow == "" {
 				sourceFlow = runtimeflowidentity.SemanticScope(sourceRoute.FlowInstance)

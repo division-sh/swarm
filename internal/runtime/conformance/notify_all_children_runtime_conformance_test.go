@@ -1025,6 +1025,11 @@ func TestNotifyAllChildrenFixedSlugAgentsCompleteIndependentlyOnBothBackends(t *
 					time.Now,
 					notifyAllChildrenRuntimeOptions{realMockAgents: true, agentGate: gate},
 				)
+				t.Cleanup(func() {
+					if t.Failed() {
+						t.Logf("notify-all-children runtime diagnostics: %#v", runtime.diagnostics.snapshot())
+					}
+				})
 				if err := runtime.manager.Run(managedConformanceExecutionContext(t, ctx, "notify-all-children-fixed-slug")); err != nil {
 					t.Fatalf("run manager: %v", err)
 				}

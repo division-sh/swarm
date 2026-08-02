@@ -259,17 +259,17 @@ func (pc *PipelineCoordinator) queueArtifactRepoResultEvent(ctx context.Context,
 	if chainDepth <= 0 {
 		chainDepth = 1
 	}
-	sourceRoute := pc.artifactRepoResultProducerRoute(execCtx)
+	routingSource := execCtx.Request.ProducerSource
+	if routingSource.Empty() {
+		return false, fmt.Errorf("artifact result requires admitted execution producer source")
+	}
+	sourceRoute := routingSource.Route()
 	eventType = actionResultEventType(pc.SemanticSource(), execCtx.Request.FlowID.String(), eventType, sourceRoute)
 	entityID := sourceRoute.EntityID
 	flowInstance := sourceRoute.FlowInstance
 	envelope := events.EventEnvelope{
 		EntityID:     entityID,
 		FlowInstance: flowInstance,
-	}
-	routingSource, err := events.RuntimeRoutingSourceFromRoute(sourceRoute)
-	if err != nil {
-		return false, fmt.Errorf("artifact result routing source: %w", err)
 	}
 	if !routingSource.Empty() {
 		envelope = events.EnvelopeForSourceRoute(envelope, routingSource.Route())
@@ -291,17 +291,6 @@ func (pc *PipelineCoordinator) queueArtifactRepoResultEvent(ctx context.Context,
 		ChainDepth:    chainDepth,
 		ParentEventID: evt.ParentEventID(),
 	}), nil
-}
-
-func (pc *PipelineCoordinator) artifactRepoResultProducerRoute(execCtx runtimeengine.ExecutionContext) events.RouteIdentity {
-	return actionResultProducerRoute(
-		pc.SemanticSource(),
-		execCtx.Request.FlowID.String(),
-		execCtx.Request.EntityID.String(),
-		execCtx.Request.Event,
-		execCtx.Request.State,
-		execCtx.Request.ProducerRoute,
-	)
 }
 
 func (pc *PipelineCoordinator) artifactRepoRoot() (string, error) {

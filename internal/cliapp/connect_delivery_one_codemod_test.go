@@ -43,15 +43,16 @@ func TestMigrateConnectDeliveryOneCommandRewritesLoadableEquivalentEdge(t *testi
 	if err != nil {
 		t.Fatalf("load rewritten bundle: %v", err)
 	}
-	connects := semanticview.Wrap(bundle).CompositionConnects()
+	connects := bundle.CompositionConnects()
 	if len(connects) != 1 || connects[0].From != "producer.work_ready" || connects[0].To != "consumer.work_ready" {
 		t.Fatalf("rewritten connects = %#v, want unchanged producer.work_ready -> consumer.work_ready edge", connects)
 	}
-	plans, issues := pinrouting.LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
+	graph := pinrouting.CompileConnectGraph(semanticview.Wrap(bundle))
+	plans, issues := graph.Plans(), graph.Issues()
 	if len(issues) != 0 || len(plans) != 1 {
 		t.Fatalf("lower rewritten bundle plans/issues = %#v/%#v, want one valid edge plan", plans, issues)
 	}
-	if plans[0].Source.FlowID != "producer" || plans[0].Receiver.FlowID != "consumer" || plans[0].Target.FlowID != "consumer" {
+	if plans[0].Source.FlowIDCode() != "producer" || plans[0].Receiver.FlowIDCode() != "consumer" || plans[0].Target.FlowID != "consumer" {
 		t.Fatalf("rewritten route plan = %#v, want unchanged producer-to-consumer semantics", plans[0])
 	}
 

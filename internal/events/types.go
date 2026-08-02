@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
@@ -147,81 +148,187 @@ type RouteIdentity struct {
 	FlowID       string `json:"flow_id,omitempty"`
 }
 
-type RoutingSourceKind string
+type RoutingSourceKind struct {
+	code string
+}
 
-const (
-	RoutingSourceAbsent          RoutingSourceKind = ""
-	RoutingSourceDeclaredIngress RoutingSourceKind = "declared_ingress"
-	RoutingSourceRuntimeInstance RoutingSourceKind = "runtime_instance"
+var (
+	RoutingSourceAbsent                   = RoutingSourceKind{}
+	RoutingSourceExternalIngress          = RoutingSourceKind{code: "external_ingress"}
+	RoutingSourceRoot                     = RoutingSourceKind{code: "root"}
+	RoutingSourceStaticFlow               = RoutingSourceKind{code: "static_flow"}
+	RoutingSourceConcreteTemplateInstance = RoutingSourceKind{code: "concrete_template_instance"}
+	RoutingSourceFlowOwnedControl         = RoutingSourceKind{code: "flow_owned_control"}
+	RoutingSourcePlatformControl          = RoutingSourceKind{code: "platform_control"}
 )
+
+type RoutingSourceAuthority struct {
+	code string
+}
+
+var RoutingSourceAuthorityProviderAdmissionPlan = RoutingSourceAuthority{code: "provider_admission_plan"}
 
 // RoutingSource is the opaque event-owned source fact. It records exact source
 // identity only; connect-policy interpretation belongs to the routing owner.
 type RoutingSource struct {
 	kind      RoutingSourceKind
 	route     RouteIdentity
-	authority string
+	authority RoutingSourceAuthority
 }
 
-func NoRoutingSource() RoutingSource { return RoutingSource{} }
+func NoRoutingSource() RoutingSource { return RoutingSource{kind: RoutingSourceAbsent} }
 
-func NewDeclaredIngressRoutingSource(flowID, flowInstance, entityID, authority string) (RoutingSource, error) {
+func NewExternalIngressRoutingSource(flowID, entityID string, authority RoutingSourceAuthority) (RoutingSource, error) {
 	source := RoutingSource{
-		kind:      RoutingSourceDeclaredIngress,
-		route:     RouteIdentity{FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID}.Normalized(),
-		authority: strings.TrimSpace(authority),
+		kind:      RoutingSourceExternalIngress,
+		route:     RouteIdentity{FlowID: flowID, EntityID: entityID}.Normalized(),
+		authority: authority,
 	}
-	if source.route.FlowID == "" || source.route.EntityID == "" || source.authority == "" {
-		return RoutingSource{}, fmt.Errorf("declared ingress routing source requires flow_id, entity_id, and resolution authority")
+	if source.route.FlowID == "" || source.route.EntityID == "" || !source.authority.valid() {
+		return RoutingSource{}, fmt.Errorf("external ingress routing source requires flow_id, entity_id, and accepted authority")
 	}
 	return source, nil
 }
 
-func NewRuntimeRoutingSource(flowID, flowInstance, entityID string) (RoutingSource, error) {
-	source := RoutingSource{
-		kind:  RoutingSourceRuntimeInstance,
-		route: RouteIdentity{FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID}.Normalized(),
-	}
-	if source.route.FlowID == "" || source.route.FlowInstance == "" || source.route.EntityID == "" {
-		return RoutingSource{}, fmt.Errorf("runtime routing source requires flow_id, flow_instance, and entity_id")
-	}
-	return source, nil
+func NewRootRoutingSource(entityID string) (RoutingSource, error) {
+	return newRoutingSource(RoutingSourceRoot, RouteIdentity{EntityID: entityID})
 }
 
-// RuntimeRoutingSourceFromRoute records a runtime source only when the caller
-// claims complete flow/instance/entity identity. Flow scope and entity identity
-// remain useful event context, but neither is a routing address on its own.
-func RuntimeRoutingSourceFromRoute(route RouteIdentity) (RoutingSource, error) {
+func NewStaticFlowRoutingSource(route RouteIdentity) (RoutingSource, error) {
+	return newRoutingSource(RoutingSourceStaticFlow, route)
+}
+
+func NewConcreteTemplateInstanceRoutingSource(route RouteIdentity) (RoutingSource, error) {
+	return newRoutingSource(RoutingSourceConcreteTemplateInstance, route)
+}
+
+func NewFlowOwnedControlRoutingSource(route RouteIdentity) (RoutingSource, error) {
+	return newRoutingSource(RoutingSourceFlowOwnedControl, route)
+}
+
+func NewPlatformControlRoutingSource() RoutingSource {
+	return RoutingSource{kind: RoutingSourcePlatformControl}
+}
+
+func newRoutingSource(kind RoutingSourceKind, route RouteIdentity) (RoutingSource, error) {
 	route = route.Normalized()
-	if route.FlowID == "" || route.EntityID == "" {
-		return NoRoutingSource(), nil
+	switch kind {
+	case RoutingSourceRoot:
+		if route.EntityID == "" || route.FlowID != "" || route.FlowInstance != "" {
+			return RoutingSource{}, fmt.Errorf("root routing source requires entity_id and forbids flow identity")
+		}
+	case RoutingSourceStaticFlow, RoutingSourceConcreteTemplateInstance, RoutingSourceFlowOwnedControl:
+		if route.FlowID == "" || route.FlowInstance == "" || route.EntityID == "" {
+			return RoutingSource{}, fmt.Errorf("%s routing source requires flow_id, flow_instance, and entity_id", kind.code)
+		}
+	default:
+		return RoutingSource{}, fmt.Errorf("routing source kind %q cannot carry a flow route", kind.code)
 	}
-	return NewRuntimeRoutingSource(route.FlowID, route.FlowInstance, route.EntityID)
+	return RoutingSource{kind: kind, route: route}, nil
 }
 
-func RestoreRoutingSource(kind RoutingSourceKind, route RouteIdentity, authority string) (RoutingSource, error) {
-	switch RoutingSourceKind(strings.TrimSpace(string(kind))) {
+func RestoreRoutingSource(kindCode string, route RouteIdentity, authorityCode string) (RoutingSource, error) {
+	kind, ok := routingSourceKindFromCode(kindCode)
+	if !ok {
+		return RoutingSource{}, fmt.Errorf("routing source kind %q is invalid", kindCode)
+	}
+	switch kind {
 	case RoutingSourceAbsent:
-		if !route.Normalized().Empty() || strings.TrimSpace(authority) != "" {
+		if !route.Normalized().Empty() || strings.TrimSpace(authorityCode) != "" {
 			return RoutingSource{}, fmt.Errorf("absent routing source cannot carry route or authority")
 		}
-		return RoutingSource{}, nil
-	case RoutingSourceDeclaredIngress:
-		return NewDeclaredIngressRoutingSource(route.FlowID, route.FlowInstance, route.EntityID, authority)
-	case RoutingSourceRuntimeInstance:
-		if strings.TrimSpace(authority) != "" {
-			return RoutingSource{}, fmt.Errorf("runtime routing source cannot carry ingress authority")
+		return NoRoutingSource(), nil
+	case RoutingSourceExternalIngress:
+		authority, ok := routingSourceAuthorityFromCode(authorityCode)
+		if !ok {
+			return RoutingSource{}, fmt.Errorf("external ingress routing source authority %q is invalid", authorityCode)
 		}
-		return NewRuntimeRoutingSource(route.FlowID, route.FlowInstance, route.EntityID)
-	default:
-		return RoutingSource{}, fmt.Errorf("routing source kind %q is invalid", kind)
+		return NewExternalIngressRoutingSource(route.FlowID, route.EntityID, authority)
+	case RoutingSourceRoot:
+		return NewRootRoutingSource(route.EntityID)
+	case RoutingSourceStaticFlow:
+		return NewStaticFlowRoutingSource(route)
+	case RoutingSourceConcreteTemplateInstance:
+		return NewConcreteTemplateInstanceRoutingSource(route)
+	case RoutingSourceFlowOwnedControl:
+		return NewFlowOwnedControlRoutingSource(route)
+	case RoutingSourcePlatformControl:
+		if !route.Normalized().Empty() || strings.TrimSpace(authorityCode) != "" {
+			return RoutingSource{}, fmt.Errorf("platform control routing source cannot carry route or authority")
+		}
+		return NewPlatformControlRoutingSource(), nil
 	}
+	return RoutingSource{}, fmt.Errorf("routing source kind %q is invalid", kindCode)
 }
 
-func (s RoutingSource) Kind() RoutingSourceKind { return s.kind }
-func (s RoutingSource) Route() RouteIdentity    { return s.route.Normalized() }
-func (s RoutingSource) Authority() string       { return strings.TrimSpace(s.authority) }
-func (s RoutingSource) Empty() bool             { return s.kind == RoutingSourceAbsent }
+func (s RoutingSource) Kind() RoutingSourceKind           { return s.kind }
+func (s RoutingSource) Route() RouteIdentity              { return s.route.Normalized() }
+func (s RoutingSource) Authority() RoutingSourceAuthority { return s.authority }
+func (s RoutingSource) Empty() bool                       { return s.kind == RoutingSourceAbsent }
+
+func (s RoutingSource) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind      string        `json:"kind"`
+		Route     RouteIdentity `json:"route"`
+		Authority string        `json:"authority,omitempty"`
+	}{
+		Kind: s.kind.StorageCode(), Route: s.Route(), Authority: s.authority.StorageCode(),
+	})
+}
+
+func (s *RoutingSource) UnmarshalJSON(raw []byte) error {
+	if s == nil {
+		return fmt.Errorf("routing source target is nil")
+	}
+	var encoded struct {
+		Kind      string        `json:"kind"`
+		Route     RouteIdentity `json:"route"`
+		Authority string        `json:"authority"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&encoded); err != nil {
+		return fmt.Errorf("decode routing source: %w", err)
+	}
+	restored, err := RestoreRoutingSource(encoded.Kind, encoded.Route, encoded.Authority)
+	if err != nil {
+		return err
+	}
+	*s = restored
+	return nil
+}
+
+func (k RoutingSourceKind) StorageCode() string {
+	if k == RoutingSourceAbsent {
+		return "absent"
+	}
+	return k.code
+}
+func (a RoutingSourceAuthority) StorageCode() string { return a.code }
+func (a RoutingSourceAuthority) valid() bool         { return a == RoutingSourceAuthorityProviderAdmissionPlan }
+
+func routingSourceKindFromCode(raw string) (RoutingSourceKind, bool) {
+	raw = strings.TrimSpace(raw)
+	for _, kind := range []RoutingSourceKind{
+		RoutingSourceAbsent,
+		RoutingSourceExternalIngress,
+		RoutingSourceRoot,
+		RoutingSourceStaticFlow,
+		RoutingSourceConcreteTemplateInstance,
+		RoutingSourceFlowOwnedControl,
+		RoutingSourcePlatformControl,
+	} {
+		if raw == kind.StorageCode() {
+			return kind, true
+		}
+	}
+	return RoutingSourceKind{}, false
+}
+
+func routingSourceAuthorityFromCode(raw string) (RoutingSourceAuthority, bool) {
+	authority := RoutingSourceAuthority{code: strings.TrimSpace(raw)}
+	return authority, authority.valid()
+}
 
 type OperatorReferenceProvenance struct {
 	referencedEventID string
@@ -420,6 +527,135 @@ type DeliveryRoute struct {
 	Target            RouteIdentity             `json:"delivery_target_route,omitempty"`
 	Context           DeliveryContext           `json:"delivery_context,omitempty"`
 	PayloadProjection DeliveryPayloadProjection `json:"delivery_payload_projection,omitempty"`
+	ConnectClaim      ConnectExecutionClaim     `json:"connect_execution_claim,omitempty"`
+}
+
+// ConnectExecutionClaim is the opaque proof that one delivery was admitted
+// through one exact compiled connect edge. Direct deliveries carry no claim.
+type ConnectExecutionClaim struct {
+	digest            [sha256.Size]byte
+	receiverPinDigest [sha256.Size]byte
+	recipientKind     deliveryRecipientKind
+	recipientID       string
+	handlerEvent      string
+	present           bool
+}
+
+type deliveryRecipientKind struct {
+	code string
+}
+
+var (
+	deliveryRecipientNode  = deliveryRecipientKind{code: "node"}
+	deliveryRecipientAgent = deliveryRecipientKind{code: "agent"}
+)
+
+// AdmitConnectExecutionClaim accepts a digest produced by the compiled
+// connect owner. Raw edge, pin, handler, and recipient strings never cross
+// this boundary.
+func AdmitConnectExecutionClaim(digest, receiverPinDigest [sha256.Size]byte, route DeliveryRoute, handlerEvent EventType) (ConnectExecutionClaim, error) {
+	route = route.Normalized()
+	kind, ok := deliveryRecipientKindFromCode(route.SubscriberType)
+	if !ok || route.SubscriberID == "" {
+		return ConnectExecutionClaim{}, fmt.Errorf("connect execution claim requires an admitted node or agent recipient")
+	}
+	handler := eventidentity.Normalize(string(handlerEvent))
+	if handler == "" || handler != string(handlerEvent) {
+		return ConnectExecutionClaim{}, fmt.Errorf("connect execution claim requires a canonical handler event")
+	}
+	return ConnectExecutionClaim{
+		digest: digest, receiverPinDigest: receiverPinDigest,
+		recipientKind: kind, recipientID: route.SubscriberID, handlerEvent: handler, present: true,
+	}, nil
+}
+
+func (c ConnectExecutionClaim) Empty() bool { return !c.present }
+
+func (c ConnectExecutionClaim) Equal(other ConnectExecutionClaim) bool {
+	return c.present == other.present && (!c.present ||
+		(c.digest == other.digest && c.receiverPinDigest == other.receiverPinDigest &&
+			c.recipientKind == other.recipientKind && c.recipientID == other.recipientID && c.handlerEvent == other.handlerEvent))
+}
+
+func (c ConnectExecutionClaim) NodeHandlerEvent(nodeID string) (EventType, bool) {
+	if !c.present || c.recipientKind != deliveryRecipientNode || c.recipientID != strings.TrimSpace(nodeID) {
+		return "", false
+	}
+	return EventType(c.handlerEvent), c.handlerEvent != ""
+}
+
+func (c ConnectExecutionClaim) MarshalJSON() ([]byte, error) {
+	if c.Empty() {
+		return []byte(`{}`), nil
+	}
+	return json.Marshal(struct {
+		Digest            string `json:"sha256"`
+		ReceiverPinDigest string `json:"receiver_pin_sha256"`
+		RecipientKind     string `json:"recipient_kind"`
+		RecipientID       string `json:"recipient_id"`
+		HandlerEvent      string `json:"handler_event"`
+	}{
+		Digest: hex.EncodeToString(c.digest[:]), ReceiverPinDigest: hex.EncodeToString(c.receiverPinDigest[:]),
+		RecipientKind: c.recipientKind.code, RecipientID: c.recipientID, HandlerEvent: c.handlerEvent,
+	})
+}
+
+func (c *ConnectExecutionClaim) UnmarshalJSON(raw []byte) error {
+	if c == nil {
+		return fmt.Errorf("connect execution claim destination is nil")
+	}
+	var encoded struct {
+		Digest            string `json:"sha256"`
+		ReceiverPinDigest string `json:"receiver_pin_sha256"`
+		RecipientKind     string `json:"recipient_kind"`
+		RecipientID       string `json:"recipient_id"`
+		HandlerEvent      string `json:"handler_event"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&encoded); err != nil {
+		return fmt.Errorf("decode connect execution claim: %w", err)
+	}
+	if encoded.Digest == "" {
+		*c = ConnectExecutionClaim{}
+		return nil
+	}
+	if len(encoded.Digest) != sha256.Size*2 || encoded.Digest != strings.ToLower(encoded.Digest) ||
+		len(encoded.ReceiverPinDigest) != sha256.Size*2 || encoded.ReceiverPinDigest != strings.ToLower(encoded.ReceiverPinDigest) {
+		return fmt.Errorf("connect execution claim digest is invalid")
+	}
+	decoded, err := hex.DecodeString(encoded.Digest)
+	if err != nil || len(decoded) != sha256.Size {
+		return fmt.Errorf("connect execution claim digest is invalid")
+	}
+	var digest [sha256.Size]byte
+	copy(digest[:], decoded)
+	pinDecoded, err := hex.DecodeString(encoded.ReceiverPinDigest)
+	if err != nil || len(pinDecoded) != sha256.Size {
+		return fmt.Errorf("connect execution claim receiver pin digest is invalid")
+	}
+	var pinDigest [sha256.Size]byte
+	copy(pinDigest[:], pinDecoded)
+	kind, ok := deliveryRecipientKindFromCode(encoded.RecipientKind)
+	if !ok || strings.TrimSpace(encoded.RecipientID) == "" || eventidentity.Normalize(encoded.HandlerEvent) != encoded.HandlerEvent || encoded.HandlerEvent == "" {
+		return fmt.Errorf("connect execution claim recipient or handler event is invalid")
+	}
+	*c = ConnectExecutionClaim{
+		digest: digest, receiverPinDigest: pinDigest, recipientKind: kind,
+		recipientID: strings.TrimSpace(encoded.RecipientID), handlerEvent: encoded.HandlerEvent, present: true,
+	}
+	return nil
+}
+
+func deliveryRecipientKindFromCode(raw string) (deliveryRecipientKind, bool) {
+	switch strings.TrimSpace(raw) {
+	case deliveryRecipientNode.code:
+		return deliveryRecipientNode, true
+	case deliveryRecipientAgent.code:
+		return deliveryRecipientAgent, true
+	default:
+		return deliveryRecipientKind{}, false
+	}
 }
 
 // DeliveryRouteIdentity is the opaque, canonical identity of one normalized
@@ -431,7 +667,7 @@ type DeliveryRouteIdentity struct {
 
 const deliveryRouteIdentityPrefix = "delivery-route-v2:sha256:"
 
-func (i DeliveryRouteIdentity) String() string { return i.value }
+func EncodeDeliveryRouteIdentity(i DeliveryRouteIdentity) string { return i.value }
 
 func (i DeliveryRouteIdentity) Valid() bool {
 	if !strings.HasPrefix(i.value, deliveryRouteIdentityPrefix) {
@@ -482,6 +718,11 @@ func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
 	if err != nil {
 		return DeliveryRouteIdentity{}, fmt.Errorf("delivery route payload projection: %w", err)
 	}
+	var connectClaim *ConnectExecutionClaim
+	if !r.ConnectClaim.Empty() {
+		claim := r.ConnectClaim
+		connectClaim = &claim
+	}
 	canonical, err := json.Marshal(struct {
 		SubscriberType string                 `json:"subscriber_type"`
 		SubscriberID   string                 `json:"subscriber_id"`
@@ -489,6 +730,7 @@ func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
 		Target         RouteIdentity          `json:"target"`
 		Context        DeliveryContext        `json:"context"`
 		Projection     map[string]string      `json:"projection"`
+		ConnectClaim   *ConnectExecutionClaim `json:"connect_claim,omitempty"`
 	}{
 		SubscriberType: r.SubscriberType,
 		SubscriberID:   r.SubscriberID,
@@ -496,6 +738,7 @@ func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
 		Target:         r.Target,
 		Context:        r.Context,
 		Projection:     projection.Fields(),
+		ConnectClaim:   connectClaim,
 	})
 	if err != nil {
 		return DeliveryRouteIdentity{}, fmt.Errorf("encode delivery route identity: %w", err)
@@ -885,17 +1128,27 @@ func newSemanticEvent(class EventAdmissionClass, rootIntent rootIngressRunIntent
 		if !envelope.Source.Normalized().Empty() {
 			return Event{}, fmt.Errorf("event envelope source requires a typed routing source")
 		}
-	case RoutingSourceDeclaredIngress:
+	case RoutingSourceExternalIngress, RoutingSourcePlatformControl:
 		if !envelope.Source.Normalized().Empty() {
-			return Event{}, fmt.Errorf("declared ingress routing source is opaque and cannot become envelope source evidence")
+			return Event{}, fmt.Errorf("opaque routing source cannot become envelope source evidence")
 		}
-	case RoutingSourceRuntimeInstance:
+	case RoutingSourceRoot, RoutingSourceStaticFlow, RoutingSourceConcreteTemplateInstance, RoutingSourceFlowOwnedControl:
 		if declared := envelope.Source.Normalized(); !declared.Empty() && declared != sourceRoute {
 			return Event{}, fmt.Errorf("event envelope source does not match typed routing source")
 		}
 		envelope.Source = sourceRoute
 	default:
 		return Event{}, fmt.Errorf("event routing source kind %q is invalid", facts.RoutingSource.Kind())
+	}
+	switch class {
+	case EventAdmissionRuntimeControl:
+		if facts.RoutingSource.Kind() != RoutingSourceFlowOwnedControl && facts.RoutingSource.Kind() != RoutingSourcePlatformControl {
+			return Event{}, fmt.Errorf("runtime control requires flow-owned or platform-control routing source")
+		}
+	case EventAdmissionRuntimeDiagnostic, EventAdmissionDiagnosticDirect:
+		if !facts.RoutingSource.Empty() {
+			return Event{}, fmt.Errorf("runtime diagnostic must carry explicit absent routing source")
+		}
 	}
 	if err := validateEnvelopeClaim(envelope, false); err != nil {
 		return Event{}, fmt.Errorf("event envelope: %w", err)
@@ -1345,6 +1598,7 @@ func (r DeliveryRoute) Normalized() DeliveryRoute {
 		Target:            r.Target.Normalized(),
 		Context:           r.Context.Normalized(),
 		PayloadProjection: r.PayloadProjection.Normalized(),
+		ConnectClaim:      r.ConnectClaim,
 	}
 }
 
@@ -1353,7 +1607,7 @@ func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
 		return nil
 	}
 	out := make([]DeliveryRoute, 0, len(in))
-	seen := map[string]struct{}{}
+	seen := map[DeliveryRouteIdentity]struct{}{}
 	for _, route := range in {
 		route = route.Normalized()
 		if route.SubscriberType == "" || route.SubscriberID == "" {
@@ -1365,11 +1619,10 @@ func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
 			out = append(out, route)
 			continue
 		}
-		key := identity.String()
-		if _, ok := seen[key]; ok {
+		if _, ok := seen[identity]; ok {
 			continue
 		}
-		seen[key] = struct{}{}
+		seen[identity] = struct{}{}
 		out = append(out, route)
 	}
 	return out
@@ -1405,6 +1658,16 @@ func SameDeliveryRouteIdentity(left, right DeliveryRoute) bool {
 	leftIdentity, leftErr := left.Identity()
 	rightIdentity, rightErr := right.Identity()
 	return leftErr == nil && rightErr == nil && leftIdentity == rightIdentity
+}
+
+// SameDeliveryRecipientIdentity compares the concrete recipient projection
+// while deliberately excluding the compiled connect claim. It is used only
+// while admitting a complete connect evaluation to detect two distinct edges
+// that would otherwise collapse onto one recipient.
+func SameDeliveryRecipientIdentity(left, right DeliveryRoute) bool {
+	left.ConnectClaim = ConnectExecutionClaim{}
+	right.ConnectClaim = ConnectExecutionClaim{}
+	return SameDeliveryRouteIdentity(left, right)
 }
 
 func ValidateDeliveryRouteProjections(in []DeliveryRoute) error {

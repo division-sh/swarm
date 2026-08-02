@@ -835,8 +835,7 @@ func TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog(t *tes
 		t.Fatal(err)
 	}
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC())
-	seedExactOnceEventDelivery(t, store, ctx, evt, "join-node")
-	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "join-node"}
+	route := seedExactOnceEventDelivery(t, pc, ctx, evt, "join-node")
 	if resolved := workflowNodeEventHandlerResolutionForDelivery(pc.SemanticSource(), "join-node", evt); !resolved.Matched {
 		t.Fatalf("join handler did not resolve: %#v", resolved)
 	}
@@ -875,6 +874,12 @@ func TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog(t *tes
 }
 
 func workflowJoinLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
+	orders := runtimecontracts.FlowContractView{
+		Path:   "orders",
+		Paths:  runtimecontracts.FlowContractPaths{ID: "orders", Flow: "orders"},
+		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{orders}}
 	resultType := runtimecontracts.CatalogTypeReference{Type: "jsonb"}
 	spec := runtimecontracts.JoinSpec{
 		ID: "awaiting", Stage: "awaiting",
@@ -892,17 +897,26 @@ func workflowJoinLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
 	dispatcher := runtimecontracts.SystemNodeContract{EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 		"order.accepted": {FanOut: &fanOut, AdvancesTo: "awaiting"},
 	}}
+	eventCatalog := map[string]runtimecontracts.EventCatalogEntry{
+		"item.completed":      {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"member_id": {Type: "text"}, "result": {Type: "jsonb"}}}},
+		"order.accepted":      {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"line_items": {Type: "list<jsonb>"}}}},
+		"line_item.requested": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"line_item_id": {Type: "text"}}}},
+	}
+	root.Events = eventCatalog
 	return &runtimecontracts.WorkflowContractBundle{
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{"orders": &root.Children[0]},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"orders": orders.Schema,
+		},
 		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "dispatching", Initial: true}, {ID: "awaiting"}, {ID: "ready", Terminal: true}, {ID: "attention", Terminal: true}}}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"join-node":  joinNode,
 			"dispatcher": dispatcher,
 		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"item.completed":      {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"member_id": {Type: "text"}, "result": {Type: "jsonb"}}}},
-			"order.accepted":      {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"line_items": {Type: "list<jsonb>"}}}},
-			"line_item.requested": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"line_item_id": {Type: "text"}}}},
-		},
+		Events: eventCatalog,
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "orders", Version: "1.0.0", InitialStage: "dispatching", Stages: []runtimecontracts.WorkflowStageContract{{ID: "dispatching"}, {ID: "awaiting"}, {ID: "ready"}, {ID: "attention"}}, TerminalStages: []string{"ready", "attention"},
 			Joins: []runtimecontracts.WorkflowJoinPlan{{FlowID: "", NodeID: "join-node", HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},

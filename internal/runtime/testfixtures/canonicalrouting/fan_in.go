@@ -75,7 +75,7 @@ func ApplyFanInNegativeMutation(t testing.TB, root string, mutation FanInNegativ
 			"    operating.reported:\n      join:\n        stage: awaiting\n        members:\n          from: entity.expected_operating_ids\n        window:\n          from: entity.period_id\n        output: payload.revenue\n        on_complete:\n          advances_to: complete\n        timeout:\n          after: 5m\n          advances_to: failed\n",
 			"    operating.reported:\n      advances_to: awaiting\n")
 	case FanInMultipleJoinRows:
-		t.Fatal("FanInMultipleJoinRows is a post-load semantic mutation; use ApplyFanInMultipleJoinRows")
+		t.Fatal("FanInMultipleJoinRows is a post-load semantic mutation")
 	case FanInBarrierNoWindow:
 		applyClosedReplacement(t, receiverSchema, "          window: payload.period_id\n", "")
 		applyClosedReplacement(t, receiverNodes, "        window:\n          from: entity.period_id\n", "")

@@ -75,7 +75,7 @@ type Record struct {
 	ProducedByType             events.EventProducerType
 	SourceEventID              string
 	CreatedAt                  time.Time
-	RoutingSourceKind          events.RoutingSourceKind
+	RoutingSourceKind          string
 	RoutingSourceAuthority     string
 	SourceRoute                []byte
 	TargetRoute                []byte
@@ -109,8 +109,8 @@ func FromAdmitted(admitted events.AdmittedEvent) (Record, error) {
 		ProducedByType:         event.Producer().Type(),
 		SourceEventID:          event.ParentEventID(),
 		CreatedAt:              event.CreatedAt().UTC().Truncate(time.Microsecond),
-		RoutingSourceKind:      event.RoutingSource().Kind(),
-		RoutingSourceAuthority: event.RoutingSource().Authority(),
+		RoutingSourceKind:      event.RoutingSource().Kind().StorageCode(),
+		RoutingSourceAuthority: event.RoutingSource().Authority().StorageCode(),
 		SourceRoute:            marshalRoute(event.RoutingSource().Route()),
 		TargetRoute:            marshalRoute(envelope.Target),
 		TargetSet:              marshalRouteSet(envelope.TargetSet),
@@ -143,7 +143,7 @@ func (r Record) Validate() error {
 		"event_class": string(r.Class), "event_id": r.EventID, "run_id": r.RunID, "event_name": r.EventName,
 		"task_id": r.TaskID, "entity_id": r.EntityID, "produced_by": r.ProducedBy,
 		"produced_by_type": string(r.ProducedByType), "source_event_id": r.SourceEventID,
-		"routing_source_kind": string(r.RoutingSourceKind), "routing_source_authority": r.RoutingSourceAuthority,
+		"routing_source_kind": r.RoutingSourceKind, "routing_source_authority": r.RoutingSourceAuthority,
 		"operator_reference_event_id":   r.OperatorReferencedEventID,
 		"selected_fork_source_run_id":   r.SelectedForkSourceRunID,
 		"selected_fork_source_event_id": r.SelectedForkSourceEventID,
@@ -366,7 +366,7 @@ func (r Record) decodeEnvelope() (events.EventEnvelope, error) {
 	if err != nil {
 		return events.EventEnvelope{}, err
 	}
-	if r.RoutingSourceKind == events.RoutingSourceDeclaredIngress {
+	if r.RoutingSourceKind == events.RoutingSourceExternalIngress.StorageCode() {
 		source = events.RouteIdentity{}
 	}
 	target, err := unmarshalRoute("target_route", r.TargetRoute)

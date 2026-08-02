@@ -405,7 +405,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
 		LifecycleStore:    pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
-	evt := eventtest.ExistingRunRootIngress(
+	evt := eventtest.ExistingRunRootIngressWithRoutingSource(
 		"99999999-9999-4999-8999-999999999940",
 		events.EventType("producer/deploy.done"),
 		"producer",
@@ -414,6 +414,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		0,
 		templateInstanceDeliveryRunID,
 		events.EventEnvelope{},
+		eventtest.StaticFlowRoutingSource("producer", "producer", eventtest.UUID("template-connect-rollback-producer")),
 		time.Now().UTC(),
 	)
 
@@ -940,7 +941,8 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 			t.Run(backend.name+"/"+checkpoint.name, func(t *testing.T) {
 				ctx, db, eventStore := backend.setup(t, checkpoint.mutation)
 				source := providerRollbackSemanticSource(t, !checkpoint.withoutCarrier)
-				plans, issues := runtimepinrouting.LowerTargetFreeInputRoutePlans(source, []runtimeprovideroutput.Authorization{providerRollbackAuthorization()})
+				graph := runtimepinrouting.CompileConnectGraph(source)
+				plans, issues := graph.Plans(), graph.Issues()
 				if len(issues) != 0 || len(plans) != 1 {
 					t.Fatalf("target-free rollback fixture plans=%#v issues=%#v, want one plan", plans, issues)
 				}
@@ -1408,6 +1410,10 @@ func providerRollbackRequest(t *testing.T, candidate runtimepipeline.StandingSer
 func providerRollbackInboundBatch(t *testing.T, request runtimeinbound.Request) runtimebus.InboundDeliveryBatch {
 	t.Helper()
 	now := time.Now().UTC()
+	routingSource, err := events.NewExternalIngressRoutingSource(request.FlowID, request.EntityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
 	rawID, err := runtimeinbound.DeterministicEventID(request.PublicationID, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -1419,13 +1425,13 @@ func providerRollbackInboundBatch(t *testing.T, request runtimeinbound.Request) 
 	return runtimebus.InboundDeliveryBatch{
 		Provider: "telegram",
 		Events: []runtimebus.InboundDeliveryEvent{
-			{Event: eventtest.ExistingRunRootIngress(
+			{Event: eventtest.ExistingRunRootIngressWithRoutingSource(
 				rawID, "inbound.telegram", "inbound-gateway", "", []byte(`{"raw":true}`), 0,
-				request.ResolvedRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), now,
+				request.ResolvedRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), routingSource, now,
 			), Kind: runtimeprovideroutput.KindRaw},
-			{Event: eventtest.ExistingRunRootIngress(
+			{Event: eventtest.ExistingRunRootIngressWithRoutingSource(
 				normalizedID, "inbound.telegram.text_message", "inbound-gateway", "", []byte(`{"chat_id":"42"}`), 0,
-				request.ResolvedRunID, events.EventEnvelope{}, now,
+				request.ResolvedRunID, events.EventEnvelope{}, routingSource, now,
 			), Kind: runtimeprovideroutput.KindNormalized, Authorization: providerRollbackAuthorization()},
 		},
 	}

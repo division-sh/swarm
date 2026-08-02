@@ -75,6 +75,10 @@ func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Cont
 	if continuation.DecisionEventID != evt.ID() || continuation.Verdict != card.Verdict {
 		return nil, runtimepipelineobligation.Continue(), fmt.Errorf("mailbox.card_decided does not match the authoritative proposed-effect continuation")
 	}
+	executionSource, err := card.Anchor.ExecutionRoutingSource()
+	if err != nil {
+		return nil, runtimepipelineobligation.Continue(), fmt.Errorf("load proposed-effect execution source: %w", err)
+	}
 	if current := workflowGateBundleHash(ctx, pc); current == "" || current != card.BundleHash {
 		failure := runtimefailures.Normalize(runtimefailures.New(
 			runtimefailures.ClassDependencyUnavailable,
@@ -100,7 +104,7 @@ func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Cont
 		}
 		switch card.Verdict {
 		case "approve":
-			request, err := activityRequestEmitIntent(activityIntentFromProposedEffect(continuation))
+			request, err := activityRequestEmitIntentFromAdmittedSource(activityIntentFromProposedEffect(continuation, executionSource))
 			if err != nil {
 				return err
 			}
@@ -147,7 +151,7 @@ func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Cont
 	return nil, runtimepipelineobligation.Continue(), nil
 }
 
-func activityIntentFromProposedEffect(continuation decisioncard.ProposedEffectContinuation) runtimeengine.ActivityIntent {
+func activityIntentFromProposedEffect(continuation decisioncard.ProposedEffectContinuation, source events.RoutingSource) runtimeengine.ActivityIntent {
 	continuation = continuation.Canonical()
 	intent := runtimeengine.ActivityIntent{
 		Context: events.DeliveryContext{}, ActivityID: continuation.ActivityID, Tool: continuation.Tool,
@@ -158,6 +162,7 @@ func activityIntentFromProposedEffect(continuation decisioncard.ProposedEffectCo
 		RetryMaxAttempts: continuation.RetryMaxAttempts, RetryBackoff: continuation.RetryBackoff, ForkPolicy: continuation.ForkPolicy,
 		EntityID: identity.NormalizeEntityID(continuation.EntityID), NodeID: identity.NormalizeNodeID(continuation.NodeID),
 		FlowID: identity.NormalizeFlowID(continuation.FlowID), FlowInstance: continuation.FlowInstance,
+		RoutingSource:   source,
 		HandlerEventKey: continuation.HandlerEventKey, SourceEventID: continuation.SourceEventID,
 		SourceRunID: continuation.SourceRunID, SourceTaskID: continuation.SourceTaskID,
 		ParentEventID: continuation.ParentEventID, ChainDepth: continuation.ChainDepth,
@@ -203,7 +208,11 @@ func proposedEffectOutcomeEvent(card decisioncard.Card, parent events.Event, con
 	}
 	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, continuation.EntityID), continuation.FlowInstance)
 	eventID := decisioncard.ProposedEffectOutcomeEventID(card.CardID, parent.ID(), card.Verdict)
-	return newWorkflowChildEvent(eventID, events.EventType(eventType), continuation.SourceTaskID, raw, parent.ChainDepth()+1, parent, envelope, card.DecidedAt.UTC())
+	source, err := card.Anchor.ExecutionRoutingSource()
+	if err != nil {
+		return noEvent, err
+	}
+	return newWorkflowChildEvent(eventID, events.EventType(eventType), continuation.SourceTaskID, raw, parent.ChainDepth()+1, source, parent, envelope, card.DecidedAt.UTC())
 }
 
 func (pc *PipelineCoordinator) handleDecisionCardDeferredEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
@@ -247,7 +256,7 @@ func (pc *PipelineCoordinator) handleDecisionCardDeferredEvent(ctx context.Conte
 		return nil, err
 	}
 	productID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.human-task.deferred.v1\x00"+card.CardID+"\x00"+evt.ID())).String()
-	product, err := newWorkflowChildEvent(productID, "human_task.deferred", "", payload, evt.ChainDepth()+1, evt,
+	product, err := newWorkflowChildEvent(productID, "human_task.deferred", "", payload, evt.ChainDepth()+1, anchor.Source, evt,
 		humanTaskRequesterOutcomeEnvelope(continuation), evt.CreatedAt().UTC())
 	if err != nil {
 		return nil, err
@@ -303,7 +312,7 @@ func (pc *PipelineCoordinator) handleDecisionCardExpiredEvent(ctx context.Contex
 		return nil, err
 	}
 	productID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.human-task.expiry-outcome.v1\x00"+card.CardID+"\x00"+evt.ID())).String()
-	product, err := newWorkflowChildEvent(productID, "human_task.expired", "", payload, evt.ChainDepth()+1, evt,
+	product, err := newWorkflowChildEvent(productID, "human_task.expired", "", payload, evt.ChainDepth()+1, anchor.Source, evt,
 		humanTaskRequesterOutcomeEnvelope(continuation), card.DecidedAt.UTC())
 	if err != nil {
 		return nil, err
@@ -432,7 +441,7 @@ func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, 
 			return err
 		}
 		productEventID := decisioncard.HumanTaskOutcomeEventID(card.CardID, evt.ID())
-		product, err := newWorkflowChildEvent(productEventID, eventType, "", payload, evt.ChainDepth()+1, evt,
+		product, err := newWorkflowChildEvent(productEventID, eventType, "", payload, evt.ChainDepth()+1, anchor.Source, evt,
 			humanTaskRequesterOutcomeEnvelope(continuation), card.DecidedAt.UTC())
 		if err != nil {
 			return err
@@ -545,19 +554,19 @@ func workflowGateOutcomeEvent(card decisioncard.Card, parent events.Event, route
 	if createdAt.IsZero() {
 		createdAt = parent.CreatedAt()
 	}
-	produced, err := newWorkflowChildEvent(uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.gate.outcome.v1\x00"+identity)).String(), events.EventType(eventType), "", raw, parent.ChainDepth()+1, parent, envelope, createdAt.UTC())
+	produced, err := newWorkflowChildEvent(uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.gate.outcome.v1\x00"+identity)).String(), events.EventType(eventType), "", raw, parent.ChainDepth()+1, anchor.Source, parent, envelope, createdAt.UTC())
 	if err != nil {
 		return nil, err
 	}
 	return &produced, nil
 }
 
-func newWorkflowChildEvent(id string, eventType events.EventType, taskID string, payload []byte, chainDepth int, parent events.Event, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
+func newWorkflowChildEvent(id string, eventType events.EventType, taskID string, payload []byte, chainDepth int, source events.RoutingSource, parent events.Event, envelope events.EventEnvelope, createdAt time.Time) (events.Event, error) {
 	return events.NewChildEvent(events.ChildEventInput{
 		Facts: events.EventFacts{
 			ID: id, Type: eventType,
 			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: runtimeWorkflowID},
-			TaskID:   taskID, Payload: payload, ChainDepth: chainDepth,
+			TaskID:   taskID, Payload: payload, ChainDepth: chainDepth, RoutingSource: source,
 			Envelope: envelope, CreatedAt: createdAt,
 		},
 		Lineage: events.LineageFromEvent(parent),

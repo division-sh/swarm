@@ -146,11 +146,12 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 				if _, err := db.ExecContext(ctx, `
 					INSERT INTO timers (
 						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event,
-						fire_payload, fire_at, owner_agent, owner_kind, task_type, status, created_at
+						fire_payload, routing_source, fire_at, owner_agent, owner_kind, task_type, status, created_at
 					)
 					VALUES (
 						$1::uuid, $2::uuid, $3, $4::uuid, 'flow-a/1', 'timer.check',
-						'{}'::jsonb, $5, 'test-node', 'system', 'workflow_timer', 'active', $6
+						'{}'::jsonb, jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $4::text)),
+						$5, 'test-node', 'system', 'workflow_timer', 'active', $6
 					)
 				`, sourceTimerID, sourceRunID, ref.TaskID(), entityID, at.Add(time.Hour), at); err != nil {
 					t.Fatalf("seed source workflow timer: %v", err)
@@ -4439,8 +4440,9 @@ func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
 		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), Source: sourceFact,
 	})
-	event := eventtest.ExistingRunRootIngress(sourceEventID, events.EventType(eventName), "source-runtime", "", payload, 0, sourceRunID,
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at)
+	routingSource := eventtest.ConcreteTemplateRoutingSource("flow_a", "flow-a/1", entityID)
+	event := eventtest.ExistingRunRootIngressWithRoutingSource(sourceEventID, events.EventType(eventName), "source-runtime", "", payload, 0, sourceRunID,
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), routingSource, at)
 	routes := append([]events.DeliveryRoute{primaryRoute}, extraRoutes...)
 	commitRunForkTestEvent(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), event, routes)
 	if _, err := db.ExecContext(ctx, `

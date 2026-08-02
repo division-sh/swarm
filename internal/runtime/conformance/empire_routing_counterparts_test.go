@@ -27,7 +27,7 @@ func TestEmpireValidationCreateMintedKeyCounterpart(t *testing.T) {
 	plan := requireCounterpartPlan(t, plans, func(plan runtimepinrouting.ConnectRoutePlan) bool {
 		return plan.InstanceKey != nil && plan.InstanceKey.Mode == runtimecontracts.FlowInputResolutionModeCreate
 	})
-	if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourceGeneratedUUID || plan.InstanceKey.Source.Path != runtimecontracts.FlowInputCarrySourceGeneratedUUID || plan.InstanceKey.Field.String() != "validation_case_id" {
+	if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourceGeneratedUUID || plan.InstanceKey.Source.Path != runtimecontracts.FlowInputCarrySourceGeneratedUUID || plan.InstanceKey.Field.Path() != "validation_case_id" {
 		t.Fatalf("%s counterpart = %#v, want UUID-minted validation_case_id", empireValidationNodes, plan.InstanceKey)
 	}
 }
@@ -36,11 +36,11 @@ func TestEmpireTreasuryPortfolioFanInCounterpart(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.FanInStream, canonicalrouting.FanInBarrier)
 	_, streamPlans := canonicalCounterpartPlans(t, canonicalrouting.FanInStream)
 	stream := requireCounterpartPlan(t, streamPlans, func(plan runtimepinrouting.ConnectRoutePlan) bool {
-		return plan.FanIn != nil && plan.FanIn.Aggregation == "stream"
+		return plan.FanIn != nil && plan.FanIn.Aggregation == runtimepinrouting.ConnectFanInStream
 	})
 	_, barrierPlans := canonicalCounterpartPlans(t, canonicalrouting.FanInBarrier)
 	barrier := requireCounterpartPlan(t, barrierPlans, func(plan runtimepinrouting.ConnectRoutePlan) bool {
-		return plan.FanIn != nil && plan.FanIn.Aggregation == "barrier"
+		return plan.FanIn != nil && plan.FanIn.Aggregation == runtimepinrouting.ConnectFanInBarrier
 	})
 	if stream.FanIn.Singleton != "portfolio" || barrier.FanIn.Singleton != "portfolio" {
 		t.Fatalf("%s/%s counterparts do not resolve to the portfolio singleton: stream=%#v barrier=%#v", empireTreasuryNodes, empireOperatingNodes, stream.FanIn, barrier.FanIn)
@@ -116,7 +116,7 @@ func TestEmpireResolutionCounterpartsRequireNoSeventhModeOrMultiPrimaryInstance(
 			}
 		}
 		if !matched {
-			t.Fatalf("%s intent does not map to canonical mode %s in %s", item.path, item.mode, item.artifact)
+			t.Fatalf("%s intent does not map to canonical mode %s in %s", item.path, runtimecontracts.FlowInputResolutionModeCode(item.mode), item.artifact)
 		}
 		// Strict bundle loading resolves one primary entity contract per flow.
 		// The named key remains routing identity inside that single-entity model.
@@ -125,9 +125,9 @@ func TestEmpireResolutionCounterpartsRequireNoSeventhModeOrMultiPrimaryInstance(
 				if plan.InstanceKey == nil || plan.InstanceKey.Mode != item.mode {
 					continue
 				}
-				primary, err := bundle.ResolveFlowPrimaryEntity(plan.Receiver.FlowID)
+				primary, err := bundle.ResolveFlowPrimaryEntity(plan.Receiver.FlowIDCode())
 				if err != nil || primary.EntityType == "" {
-					t.Fatalf("%s receiver %s lacks one primary entity contract: primary=%#v err=%v", item.path, plan.Receiver.FlowID, primary, err)
+					t.Fatalf("%s receiver %s lacks one primary entity contract: primary=%#v err=%v", item.path, plan.Receiver.FlowIDCode(), primary, err)
 				}
 				if item.key == "" {
 					t.Fatalf("%s counterpart key is empty", item.path)
@@ -148,7 +148,7 @@ func canonicalCounterpartPlans(t *testing.T, artifact canonicalrouting.ArtifactI
 	if err != nil {
 		t.Fatalf("load canonical counterpart %s: %v", artifact, err)
 	}
-	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
+	plans, issues := compiledConnectPlans(semanticview.Wrap(bundle))
 	if len(issues) != 0 {
 		t.Fatalf("lower canonical counterpart %s issues = %#v", artifact, issues)
 	}

@@ -28,6 +28,18 @@ func RunCreatingRootIngress(id string, eventType events.EventType, sourceAgent, 
 	return RunCreatingRootIngressWithMode(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt, executionmode.Live)
 }
 
+// RunCreatingRootIngressWithRoutingSource builds a fixture with an explicit
+// admitted producer-source fact. Routing tests use this instead of inferring
+// source authority from event or envelope shape.
+func RunCreatingRootIngressWithRoutingSource(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time) events.Event {
+	if strings.TrimSpace(parentEventID) != "" {
+		panic("root-ingress fixture cannot carry a causal parent")
+	}
+	facts := fixtureFacts(id, eventType, events.EventProducerExternal, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
+	facts.RoutingSource = source
+	return mustEvent(events.NewRunCreatingRootIngressEvent(events.RunCreatingRootIngressEventInput{Facts: facts, RunID: runID}))
+}
+
 // RunCreatingRootIngressWithMode builds a run-creating root fixture with an
 // explicit execution mode for exact persistence and duplicate tests.
 func RunCreatingRootIngressWithMode(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time, mode executionmode.Mode) events.Event {
@@ -43,6 +55,14 @@ func ExistingRunRootIngress(id string, eventType events.EventType, sourceAgent, 
 	return mustEvent(events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: fixtureFacts(id, eventType, events.EventProducerExternal, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live), RunID: runID}))
 }
 
+// ExistingRunRootIngressWithRoutingSource builds an existing-run fixture with
+// an explicit admitted producer-source fact for routing and replay tests.
+func ExistingRunRootIngressWithRoutingSource(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID string, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time) events.Event {
+	facts := fixtureFacts(id, eventType, events.EventProducerExternal, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
+	facts.RoutingSource = source
+	return mustEvent(events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: facts, RunID: runID}))
+}
+
 // OperatorInjected builds a root operator event with optional typed reference provenance.
 func OperatorInjected(id string, eventType events.EventType, producerID, taskID string, payload json.RawMessage, chainDepth int, runID string, provenance *events.OperatorReferenceProvenance, envelope events.EventEnvelope, createdAt time.Time) events.Event {
 	facts := fixtureFacts(id, eventType, events.EventProducerExternal, producerID, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
@@ -52,12 +72,23 @@ func OperatorInjected(id string, eventType events.EventType, producerID, taskID 
 // RuntimeControl builds a test fixture for a runtime control event.
 func RuntimeControl(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
 	facts := fixtureFacts(id, eventType, events.EventProducerPlatform, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
+	if route := facts.RoutingSource.Route(); !route.Empty() {
+		var err error
+		facts.RoutingSource, err = events.NewFlowOwnedControlRoutingSource(route)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		facts.RoutingSource = events.NewPlatformControlRoutingSource()
+	}
 	return mustEvent(runtimeControlFixture(facts, runID, parentEventID))
 }
 
 // RuntimeDiagnostic builds a test fixture for a runtime diagnostic event.
 func RuntimeDiagnostic(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
 	facts := fixtureFacts(id, eventType, events.EventProducerPlatform, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
+	facts.Envelope.Source = events.RouteIdentity{}
+	facts.RoutingSource = events.NoRoutingSource()
 	return mustEvent(runtimeDiagnosticFixture(facts, runID, parentEventID))
 }
 
@@ -83,6 +114,15 @@ func Child(id string, eventType events.EventType, sourceAgent, taskID string, pa
 // parent carrier is not available in the fixture.
 func ChildWithLineage(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, lineage events.EventLineage, envelope events.EventEnvelope, createdAt time.Time) events.Event {
 	return mustEvent(events.NewChildEvent(events.ChildEventInput{Facts: fixtureFacts(id, eventType, events.EventProducerAgent, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, lineage.ExecutionMode), Lineage: lineage}))
+}
+
+// ChildWithLineageAndRoutingSource builds a child fixture with an exact
+// admitted producer-source fact. Connect tests use it instead of deriving
+// source authority from envelope or event-name shape.
+func ChildWithLineageAndRoutingSource(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, lineage events.EventLineage, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time) events.Event {
+	facts := fixtureFacts(id, eventType, events.EventProducerAgent, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, lineage.ExecutionMode)
+	facts.RoutingSource = source
+	return mustEvent(events.NewChildEvent(events.ChildEventInput{Facts: facts, Lineage: lineage}))
 }
 
 // Replay builds a test fixture for replaying an already-recorded event.
@@ -114,6 +154,31 @@ func PersistedProjection(id string, eventType events.EventType, sourceAgent, tas
 		producerType = events.EventProducerAgent
 	}
 	return persistedFixture(id, eventType, events.ProducerClaim{Type: producerType, ID: fixtureProducerID(sourceAgent, "eventtest-producer")}, taskID, payload, chainDepth, runID, parentEventID, envelope, createdAt)
+}
+
+// PersistedProjectionWithRoutingSource builds a persisted readback fixture
+// from the exact routing-source fact stored with the event. Readback tests use
+// this helper rather than reconstructing source authority from route shape.
+func PersistedProjectionWithRoutingSource(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time) events.Event {
+	producerType := events.EventProducerExternal
+	if strings.TrimSpace(parentEventID) != "" {
+		producerType = events.EventProducerAgent
+	}
+	facts := events.EventFacts{
+		ID: id, Type: eventType,
+		Producer: events.ProducerClaim{Type: producerType, ID: fixtureProducerID(sourceAgent, "eventtest-producer")},
+		TaskID:   taskID, Payload: payload, ChainDepth: chainDepth, Envelope: envelope,
+		RoutingSource: source, CreatedAt: createdAt, ExecutionMode: executionmode.Live,
+	}
+	if source.Kind() == events.RoutingSourceExternalIngress {
+		facts.Envelope.Source = events.RouteIdentity{}
+	}
+	if strings.TrimSpace(parentEventID) != "" {
+		return mustEvent(events.NewChildEvent(events.ChildEventInput{Facts: facts, Lineage: events.EventLineage{
+			RunID: runID, ParentEventID: parentEventID, TaskID: taskID, ExecutionMode: executionmode.Live,
+		}}))
+	}
+	return mustEvent(events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: facts, RunID: runID}))
 }
 
 func fixtureProducerID(candidate, fallback string) string {
@@ -149,6 +214,7 @@ func PersistedChildForProducer(id string, eventType events.EventType, producer e
 // readback fixture.
 func PersistedRuntimeControlForProducer(id string, eventType events.EventType, producer events.ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
 	facts := fixtureFacts(id, eventType, producer.Type(), producer.ID(), taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
+	facts.RoutingSource = runtimeControlRoutingSource(envelope)
 	return mustEvent(runtimeControlFixture(facts, runID, parentEventID))
 }
 
@@ -203,7 +269,7 @@ func WithEnvelope(evt events.Event, envelope events.EventEnvelope) events.Event 
 
 func rebuild(evt events.Event, taskID string, mode executionmode.Mode, envelope events.EventEnvelope) events.Event {
 	facts := fixtureFacts(evt.ID(), evt.Type(), evt.ProducerType(), evt.SourceAgent(), taskID, evt.Payload(), evt.ChainDepth(), envelope, evt.CreatedAt(), mode)
-	facts.RoutingSource = fixtureRoutingSource(envelope)
+	facts.RoutingSource = evt.RoutingSource()
 	switch evt.AdmissionClass() {
 	case events.EventAdmissionRootIngress:
 		panic("root-ingress fixture mutation requires an explicit run-creating or existing-run helper")
@@ -241,7 +307,7 @@ func rebuild(evt events.Event, taskID string, mode executionmode.Mode, envelope 
 func fixtureFacts(id string, eventType events.EventType, producerType events.EventProducerType, producerID, taskID string, payload json.RawMessage, chainDepth int, envelope events.EventEnvelope, createdAt time.Time, mode executionmode.Mode) events.EventFacts {
 	producerID = fixtureProducerID(producerID, "eventtest-producer")
 	routingSource := fixtureRoutingSource(envelope)
-	if routingSource.Kind() == events.RoutingSourceDeclaredIngress {
+	if routingSource.Kind() == events.RoutingSourceExternalIngress {
 		envelope.Source = events.RouteIdentity{}
 	}
 	return events.EventFacts{
@@ -257,17 +323,53 @@ func fixtureRoutingSource(envelope events.EventEnvelope) events.RoutingSource {
 		return events.NoRoutingSource()
 	}
 	if source.FlowInstance != "" {
-		routingSource, err := events.NewRuntimeRoutingSource(source.FlowID, source.FlowInstance, source.EntityID)
+		var (
+			routingSource events.RoutingSource
+			err           error
+		)
+		if source.FlowInstance == source.FlowID {
+			routingSource, err = events.NewStaticFlowRoutingSource(source)
+		} else {
+			routingSource, err = events.NewConcreteTemplateInstanceRoutingSource(source)
+		}
 		if err != nil {
 			panic(err)
 		}
 		return routingSource
 	}
-	routingSource, err := events.NewDeclaredIngressRoutingSource(source.FlowID, source.FlowInstance, source.EntityID, "eventtest")
+	routingSource, err := events.NewExternalIngressRoutingSource(source.FlowID, source.EntityID, events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		panic(err)
 	}
 	return routingSource
+}
+
+func RootRoutingSource(entityID string) events.RoutingSource {
+	source, err := events.NewRootRoutingSource(entityID)
+	if err != nil {
+		panic(err)
+	}
+	return source
+}
+
+func StaticFlowRoutingSource(flowID, flowInstance, entityID string) events.RoutingSource {
+	source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
+		FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return source
+}
+
+func ConcreteTemplateRoutingSource(flowID, flowInstance, entityID string) events.RoutingSource {
+	source, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
+		FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID,
+	})
+	if err != nil {
+		panic(err)
+	}
+	return source
 }
 
 func persistedFixture(id string, eventType events.EventType, producer events.ProducerClaim, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, createdAt time.Time) events.Event {
@@ -276,9 +378,22 @@ func persistedFixture(id string, eventType events.EventType, producer events.Pro
 		return mustEvent(events.NewChildEvent(events.ChildEventInput{Facts: facts, Lineage: events.EventLineage{RunID: runID, ParentEventID: parentEventID, TaskID: taskID, ExecutionMode: executionmode.Live}}))
 	}
 	if producer.Type == events.EventProducerPlatform {
+		facts.RoutingSource = runtimeControlRoutingSource(envelope)
 		return mustEvent(runtimeControlFixture(facts, runID, ""))
 	}
 	return mustEvent(events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: facts, RunID: runID}))
+}
+
+func runtimeControlRoutingSource(envelope events.EventEnvelope) events.RoutingSource {
+	route := envelope.Source.Normalized()
+	if route.Empty() {
+		return events.NewPlatformControlRoutingSource()
+	}
+	routingSource, err := events.NewFlowOwnedControlRoutingSource(route)
+	if err != nil {
+		panic(err)
+	}
+	return routingSource
 }
 
 func runtimeControlFixture(facts events.EventFacts, runID, parentEventID string) (events.Event, error) {

@@ -92,12 +92,13 @@ func TestScheduleEventPayloadPreservesJoinTimeoutHandle(t *testing.T) {
 
 func TestScheduledEventUsesTypedScheduleEnvelope(t *testing.T) {
 	evt, err := scheduledEvent(runtimepipeline.Schedule{
-		RunID:        "11111111-1111-1111-1111-111111111111",
-		AgentID:      "runtime",
-		EventType:    "timer.check",
-		EntityID:     "ent-001",
-		FlowInstance: "review/inst-1",
-		Payload:      []byte(`{"entity_id":"payload-entity","flow_instance":"payload-flow"}`),
+		RunID:         "11111111-1111-1111-1111-111111111111",
+		AgentID:       "runtime",
+		EventType:     "timer.check",
+		EntityID:      "ent-001",
+		FlowInstance:  "review/inst-1",
+		Payload:       []byte(`{"entity_id":"payload-entity","flow_instance":"payload-flow"}`),
+		RoutingSource: mustRuntimeFlowOwnedScheduleSource(t, "review", "review/inst-1", "ent-001"),
 	})
 	if err != nil {
 		t.Fatalf("scheduledEvent: %v", err)
@@ -569,13 +570,14 @@ func TestNewRuntime_SchedulerMarksSchedulesFiredThroughCanonicalTerminalHelper(t
 	t.Cleanup(rt.Scheduler.Stop)
 
 	sc := runtimepipeline.Schedule{
-		AgentID:   "runtime",
-		OwnerKind: runtimepipeline.ScheduleOwnerSystem,
-		EventType: "timer.check",
-		Mode:      "once",
-		TaskID:    "check_timer",
-		At:        time.Now().Add(10 * time.Millisecond),
-		EntityID:  "ent-001",
+		AgentID:       "runtime",
+		OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+		EventType:     "timer.check",
+		Mode:          "once",
+		TaskID:        "check_timer",
+		At:            time.Now().Add(10 * time.Millisecond),
+		EntityID:      "ent-001",
+		RoutingSource: mustRuntimeRootScheduleSource(t, "ent-001"),
 	}
 	if err := rt.Scheduler.Register(context.Background(), sc); err != nil {
 		t.Fatalf("Register(schedule): %v", err)
@@ -605,26 +607,28 @@ func TestRuntime_StartRestoresExactSchedulesDistinctByFlowInstance(t *testing.T)
 	store := &recordingRuntimeScheduleStore{
 		active: []runtimepipeline.Schedule{
 			{
-				AgentID:      "runtime",
-				OwnerKind:    runtimepipeline.ScheduleOwnerSystem,
-				EventType:    "timer.check",
-				Mode:         "once",
-				At:           time.Now().Add(25 * time.Millisecond),
-				EntityID:     "ent-001",
-				FlowInstance: "review/inst-1",
-				TaskID:       "check_timer",
-				Payload:      []byte(`{"timer_id":"check_timer"}`),
+				AgentID:       "runtime",
+				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+				EventType:     "timer.check",
+				Mode:          "once",
+				At:            time.Now().Add(25 * time.Millisecond),
+				EntityID:      "ent-001",
+				FlowInstance:  "review/inst-1",
+				TaskID:        "check_timer",
+				Payload:       []byte(`{"timer_id":"check_timer"}`),
+				RoutingSource: mustRuntimeFlowOwnedScheduleSource(t, "review", "review/inst-1", "ent-001"),
 			},
 			{
-				AgentID:      "runtime",
-				OwnerKind:    runtimepipeline.ScheduleOwnerSystem,
-				EventType:    "timer.check",
-				Mode:         "once",
-				At:           time.Now().Add(50 * time.Millisecond),
-				EntityID:     "ent-001",
-				FlowInstance: "review/inst-2",
-				TaskID:       "check_timer",
-				Payload:      []byte(`{"timer_id":"check_timer"}`),
+				AgentID:       "runtime",
+				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+				EventType:     "timer.check",
+				Mode:          "once",
+				At:            time.Now().Add(50 * time.Millisecond),
+				EntityID:      "ent-001",
+				FlowInstance:  "review/inst-2",
+				TaskID:        "check_timer",
+				Payload:       []byte(`{"timer_id":"check_timer"}`),
+				RoutingSource: mustRuntimeFlowOwnedScheduleSource(t, "review", "review/inst-2", "ent-001"),
 			},
 		},
 		fired: make(chan runtimepipeline.Schedule, 2),
@@ -668,4 +672,24 @@ func TestRuntime_StartRestoresExactSchedulesDistinctByFlowInstance(t *testing.T)
 	if got := store.firedOwned.Load(); got != 2 {
 		t.Fatalf("CompleteScheduleFireExact calls = %d, want 2 for distinct restored flow instances", got)
 	}
+}
+
+func mustRuntimeRootScheduleSource(t testing.TB, entityID string) events.RoutingSource {
+	t.Helper()
+	source, err := events.NewRootRoutingSource(entityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source
+}
+
+func mustRuntimeFlowOwnedScheduleSource(t testing.TB, flowID, flowInstance, entityID string) events.RoutingSource {
+	t.Helper()
+	source, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+		FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source
 }

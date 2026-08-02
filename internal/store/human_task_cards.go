@@ -302,12 +302,16 @@ func expireHumanTaskCards(ctx context.Context, tx *sql.Tx, now time.Time, limit 
 		if err != nil {
 			return nil, err
 		}
+		routingSource, err := card.Anchor.ControlRoutingSource()
+		if err != nil {
+			return nil, err
+		}
 		evt, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
 			Facts: events.EventFacts{
 				ID: eventID, Type: events.EventType("mailbox.card_expired"),
 				Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},
 				Payload:  payload, Envelope: events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance),
-				CreatedAt: now, ExecutionMode: executionmode.Live,
+				RoutingSource: routingSource, CreatedAt: now, ExecutionMode: executionmode.Live,
 			},
 			RunID: card.RunID,
 		})

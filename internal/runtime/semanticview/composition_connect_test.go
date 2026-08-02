@@ -53,7 +53,7 @@ func TestCompositionConnectFactsExposeCanonicalReceiverResolution(t *testing.T) 
 		t.Fatalf("output pin key/carries = %q/%#v, want no receiver authority", outputPin.Key, outputPin.Carries)
 	}
 
-	connects := source.CompositionConnects()
+	connects := bundle.CompositionConnects()
 	if len(connects) != 2 {
 		t.Fatalf("CompositionConnects = %#v, want two", connects)
 	}
@@ -63,12 +63,6 @@ func TestCompositionConnectFactsExposeCanonicalReceiverResolution(t *testing.T) 
 	}
 	if got, want := connect.To, "account.account_ready"; got != want {
 		t.Fatalf("connect to = %q, want %q", got, want)
-	}
-	if got := ResolvedCompositionConnectsFrom(source, "producer", "account_ready"); len(got) != 1 || got[0].Connect.From != connect.From {
-		t.Fatalf("ResolvedCompositionConnectsFrom = %#v, want %#v", got, connect)
-	}
-	if got := ResolvedCompositionConnectsTo(source, "account", "account_ready"); len(got) != 1 || got[0].Connect.To != connect.To {
-		t.Fatalf("ResolvedCompositionConnectsTo = %#v, want %#v", got, connect)
 	}
 }
 
@@ -93,7 +87,7 @@ func TestCompositionConnectFactsExposeRootProducerEndpoint(t *testing.T) {
 		t.Fatalf("root output pin name = %q, want %q", got, want)
 	}
 
-	connects := source.CompositionConnects()
+	connects := bundle.CompositionConnects()
 	if len(connects) != 1 {
 		t.Fatalf("CompositionConnects = %#v, want one", connects)
 	}
@@ -103,9 +97,6 @@ func TestCompositionConnectFactsExposeRootProducerEndpoint(t *testing.T) {
 	}
 	if !from.Root || from.FlowID != "" || from.Pin != "root_ready" {
 		t.Fatalf("FromRef = %#v, want root root_ready", from)
-	}
-	if got := ResolvedCompositionConnectsFrom(source, "", "root_ready"); len(got) != 1 || got[0].Connect.From != connects[0].From {
-		t.Fatalf("ResolvedCompositionConnectsFrom root = %#v, want %#v", got, connects)
 	}
 }
 

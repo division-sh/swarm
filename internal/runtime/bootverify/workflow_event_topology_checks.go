@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -51,6 +52,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 	c.eventWarningLoaded = true
 	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
 	topology := routingtopology.Build(c.source)
+	connectGraph := runtimepinrouting.CompileConnectGraph(c.source)
 	rejectedProducers := map[string]struct{}{}
 	for _, issue := range topology.Issues {
 		if strings.TrimSpace(issue.Failure) != semanticview.TypedPubSubFailureAuthorizationAmbiguous {
@@ -111,7 +113,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 		if runtimepinrouting.OutputHarnessSink(c.source, ref.FlowID, ref.Authored) {
 			continue
 		}
-		if topologyRoutesProducer(topology, entry.ID) || eventHasExternalConsumerLocal(ref.Entry) {
+		if topologyRoutesProducer(topology, connectGraph, entry) || eventHasExternalConsumerLocal(ref.Entry) {
 			continue
 		}
 		if legacy := legacyQualifiedConsumersForEvent(census, ref.Canonical); len(legacy) > 0 {
@@ -138,7 +140,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 		if !ref.HasSchema {
 			continue
 		}
-		if len(census.MatchingProducers(ref.FlowID, ref.Authored)) > 0 || topologyRoutesConsumer(topology, entry.ID) {
+		if len(census.MatchingProducers(ref.FlowID, ref.Authored)) > 0 || topologyRoutesConsumer(topology, connectGraph, entry) {
 			continue
 		}
 		if runtimecontracts.PlatformEventCatalogContains(c.source.PlatformSpec(), ref.Canonical) {
@@ -232,40 +234,44 @@ func topologyWarningEndpoints(endpoints []semanticview.AuthoredEventEndpoint, pr
 	return out
 }
 
-func topologyRoutesProducer(topology routingtopology.Topology, endpointID string) bool {
+func topologyRoutesProducer(topology routingtopology.Topology, graph runtimepinrouting.CompiledConnectGraph, endpoint semanticview.AuthoredEventEndpoint) bool {
+	if graph.HasProducer(endpoint.FlowID, events.EventType(endpoint.Event.Authored)) || graph.HasProducer(endpoint.FlowID, events.EventType(endpoint.Event.Canonical)) {
+		return true
+	}
 	for _, edge := range topology.Edges {
-		if edge.Producer.ID == endpointID {
+		if edge.Scope == routingtopology.DeliveryScopeTypedPubSub && edge.Producer.ID == endpoint.ID {
 			return true
 		}
 	}
 	for _, exposure := range topology.BoundaryExposures {
-		if exposure.Producer.ID != endpointID {
+		if exposure.Producer.ID != endpoint.ID {
 			continue
 		}
 		if strings.TrimSpace(exposure.Output.FlowID) == "" {
 			return true
 		}
-		for _, edge := range topology.Edges {
-			if edge.Scope == routingtopology.DeliveryScopeInterFlowConnect && edge.Producer.ID == exposure.Output.ID {
-				return true
-			}
+		if graph.HasProducer(exposure.Output.FlowID, events.EventType(exposure.Output.Event.Authored)) ||
+			graph.HasProducer(exposure.Output.FlowID, events.EventType(exposure.Output.Event.Canonical)) {
+			return true
 		}
 	}
 	return false
 }
 
-func topologyRoutesConsumer(topology routingtopology.Topology, endpointID string) bool {
+func topologyRoutesConsumer(topology routingtopology.Topology, graph runtimepinrouting.CompiledConnectGraph, endpoint semanticview.AuthoredEventEndpoint) bool {
+	if graph.HasConsumer(endpoint.FlowID, events.EventType(endpoint.Event.Authored)) || graph.HasConsumer(endpoint.FlowID, events.EventType(endpoint.Event.Canonical)) {
+		return true
+	}
 	for _, edge := range topology.Edges {
-		if edge.Consumer.ID == endpointID && edge.Scope == routingtopology.DeliveryScopeInterFlowConnect {
-			return true
-		}
-		if edge.Consumer.ID != endpointID || edge.Scope != routingtopology.DeliveryScopeTypedPubSub || edge.Producer.Direction != semanticview.EventEndpointInputPin {
+		if edge.Consumer.ID != endpoint.ID || edge.Scope != routingtopology.DeliveryScopeTypedPubSub {
 			continue
 		}
-		for _, upstream := range topology.Edges {
-			if upstream.Scope == routingtopology.DeliveryScopeInterFlowConnect && upstream.Consumer.ID == edge.Producer.ID {
-				return true
-			}
+		if edge.Producer.Direction != semanticview.EventEndpointInputPin {
+			return true
+		}
+		if graph.HasConsumer(edge.Producer.FlowID, events.EventType(edge.Producer.Event.Authored)) ||
+			graph.HasConsumer(edge.Producer.FlowID, events.EventType(edge.Producer.Event.Canonical)) {
+			return true
 		}
 	}
 	return false

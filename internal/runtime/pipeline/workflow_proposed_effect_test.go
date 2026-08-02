@@ -24,6 +24,18 @@ func TestProposedEffectOutcomeEventRoutesExactTypedVerdicts(t *testing.T) {
 		ExecutionMode: parent.ExecutionMode(),
 		RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
 	}
+	routingSource, err := events.NewRootRoutingSource(parent.EntityID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchor, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
+		RequestEventID: parent.ID(), ActivityID: continuation.ActivityID, Decision: "approve_send",
+		Scope:  decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: continuation.FlowInstance, EntityID: continuation.EntityID},
+		Source: routingSource,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name      string
 		verdict   string
@@ -44,7 +56,7 @@ func TestProposedEffectOutcomeEventRoutesExactTypedVerdicts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			card := decisioncard.Card{
 				CardID: uuid.NewString(), Verdict: tc.verdict, Fields: tc.fields,
-				DecidedBy: "operator", DecidedAt: now,
+				DecidedBy: "operator", DecidedAt: now, Anchor: anchor,
 			}
 			got, err := proposedEffectOutcomeEvent(card, parent, continuation)
 			if err != nil {

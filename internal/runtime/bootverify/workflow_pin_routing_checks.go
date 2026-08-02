@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -239,9 +239,9 @@ func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eve
 	producers := 0
 	targeted := 0
 	census := semanticview.BuildAuthoredEventEndpointCensus(source)
-	topology := routingtopology.Build(source)
+	graph := runtimepinrouting.CompileConnectGraph(source)
 	sites := pinRoutingEmitSites(source)
-	for _, endpoint := range pinRoutingKnownProducers(census, topology, flowID, eventType) {
+	for _, endpoint := range pinRoutingKnownProducers(census, graph, flowID, eventType) {
 		if endpoint.Kind != semanticview.EventEndpointNodeHandler {
 			continue
 		}
@@ -253,7 +253,7 @@ func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eve
 			continue
 		}
 		producers++
-		connectedToReceiver := topologyConnectsProducerToReceiver(topology, endpoint.ID, flowID)
+		connectedToReceiver := compiledConnectsProducerToReceiver(graph, endpoint, flowID)
 		consumer := runtimepinrouting.ClassifyOutputConsumer(source, site.FlowID, site.Spec.EventType())
 		if connectedToReceiver || consumer.Has(runtimepinrouting.OutputConsumerStructuralParent) {
 			targeted++
@@ -262,27 +262,23 @@ func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eve
 	return producers > 0 && targeted == producers
 }
 
-func pinRoutingKnownProducers(census semanticview.AuthoredEventEndpointCensus, topology routingtopology.Topology, flowID, eventType string) []semanticview.AuthoredEventEndpoint {
+func pinRoutingKnownProducers(census semanticview.AuthoredEventEndpointCensus, graph runtimepinrouting.CompiledConnectGraph, flowID, eventType string) []semanticview.AuthoredEventEndpoint {
 	byID := map[string]semanticview.AuthoredEventEndpoint{}
 	for _, endpoint := range census.MatchingProducersAcrossFlows(flowID, eventType) {
 		byID[endpoint.ID] = endpoint
 	}
-	input, ok := census.ResolveDeclaredInputEndpoint(flowID, eventType).Endpoint()
-	if ok {
-		for _, edge := range topology.Edges {
-			if edge.Scope != routingtopology.DeliveryScopeInterFlowConnect || edge.Consumer.ID != input.ID {
-				continue
-			}
-			if endpoint, exists := census.Endpoint(edge.Producer.ID); exists && endpoint.Direction == semanticview.EventEndpointProducer {
-				byID[endpoint.ID] = endpoint
-			}
-			for _, exposure := range topology.BoundaryExposures {
-				if exposure.Output.ID != edge.Producer.ID {
+	for _, edge := range graph.Edges() {
+		if !edge.Consumer().Matches(flowID, events.EventType(eventType)) {
+			continue
+		}
+		producer := edge.Producer()
+		for _, producerEvent := range []events.EventType{producer.LocalEvent(), producer.Event()} {
+			for _, endpoint := range census.MatchingProducersAcrossFlows(producer.FlowID(), string(producerEvent)) {
+				if !producer.Matches(endpoint.FlowID, events.EventType(endpoint.Event.Authored)) &&
+					!producer.Matches(endpoint.FlowID, events.EventType(endpoint.Event.Canonical)) {
 					continue
 				}
-				if endpoint, exists := census.Endpoint(exposure.Producer.ID); exists {
-					byID[endpoint.ID] = endpoint
-				}
+				byID[endpoint.ID] = endpoint
 			}
 		}
 	}
@@ -303,18 +299,14 @@ func pinRoutingEmitSiteForEndpoint(sites []semanticview.AuthoredEmitSite, endpoi
 	return semanticview.AuthoredEmitSite{}, false
 }
 
-func topologyConnectsProducerToReceiver(topology routingtopology.Topology, producerID, receiverFlowID string) bool {
-	for _, edge := range topology.Edges {
-		if edge.Scope != routingtopology.DeliveryScopeInterFlowConnect || strings.TrimSpace(edge.Consumer.FlowID) != strings.TrimSpace(receiverFlowID) {
+func compiledConnectsProducerToReceiver(graph runtimepinrouting.CompiledConnectGraph, producer semanticview.AuthoredEventEndpoint, receiverFlowID string) bool {
+	for _, edge := range graph.Edges() {
+		if edge.Consumer().FlowID() != strings.TrimSpace(receiverFlowID) {
 			continue
 		}
-		if edge.Producer.ID == producerID {
+		if edge.Producer().Matches(producer.FlowID, events.EventType(producer.Event.Authored)) ||
+			edge.Producer().Matches(producer.FlowID, events.EventType(producer.Event.Canonical)) {
 			return true
-		}
-		for _, exposure := range topology.BoundaryExposures {
-			if exposure.Producer.ID == producerID && exposure.Output.ID == edge.Producer.ID {
-				return true
-			}
 		}
 	}
 	return false

@@ -175,7 +175,7 @@ func MustConnectorImportSource(value string) ConnectorImportSource {
 	return source
 }
 
-func (s ConnectorImportSource) String() string { return s.value }
+func (s ConnectorImportSource) URI() string { return s.value }
 
 type providerTriggerCapabilities struct {
 	base       Source

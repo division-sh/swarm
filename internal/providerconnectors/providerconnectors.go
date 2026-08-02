@@ -321,7 +321,7 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 	sourcePath := ""
 	if importSource, exists := capabilities.ConnectorImportSource(toolID); exists {
 		sourceKind = "connector_pack_import"
-		sourcePath = importSource.String()
+		sourcePath = importSource.URI()
 		if loaded, found := opts.Registry.Lookup(provider, toolID); found {
 			provenance = strings.TrimSpace(loaded.Envelope.Provenance.Source)
 		}

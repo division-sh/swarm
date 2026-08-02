@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/store"
@@ -244,7 +245,7 @@ func TestMailboxWebSocketSubscriptionPreservesHumanTaskAnchorKind(t *testing.T) 
 	cards := newMutatingProbeDecisionCardStore(state)
 	anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
 		RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
-		Scope: decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: "provider/instance-a"},
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: "provider/instance-a"}, Source: eventtest.RootRoutingSource("requester-entity"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -278,7 +279,7 @@ func TestMailboxWebSocketSubscriptionProjectsProposedEffectDispatchState(t *test
 	cards := newMutatingProbeDecisionCardStore(state)
 	anchor, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
 		RequestEventID: "00000000-0000-0000-0000-000000000303", ActivityID: "send_support_reply", Decision: "support_reply",
-		Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: "root", EntityID: "entity-1"},
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: "root", EntityID: "entity-1"}, Source: eventtest.RootRoutingSource("entity-1"),
 	})
 	if err != nil {
 		t.Fatal(err)

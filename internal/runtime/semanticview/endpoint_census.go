@@ -37,26 +37,26 @@ const (
 )
 
 type AuthoredEventEndpoint struct {
-	ID             string                 `json:"id"`
-	Direction      EventEndpointDirection `json:"direction"`
-	Kind           EventEndpointKind      `json:"kind"`
-	FlowID         string                 `json:"flow_id,omitempty"`
-	FlowPath       string                 `json:"flow_path,omitempty"`
-	PackageKey     string                 `json:"package_key,omitempty"`
-	Event          FlowEventProof         `json:"event"`
-	Pattern        bool                   `json:"pattern,omitempty"`
-	NodeID         string                 `json:"node_id,omitempty"`
-	HandlerEvent   string                 `json:"handler_event,omitempty"`
-	AgentID        string                 `json:"agent_id,omitempty"`
-	Role           string                 `json:"role,omitempty"`
-	TimerID        string                 `json:"timer_id,omitempty"`
-	PinName        string                 `json:"pin_name,omitempty"`
-	Site           string                 `json:"site,omitempty"`
-	SourceFile     string                 `json:"source_file,omitempty"`
-	SourceLine     int                    `json:"source_line,omitempty"`
-	SourceLocation string                 `json:"source_location,omitempty"`
-	ResolutionMode string                 `json:"resolution_mode,omitempty"`
-	Sink           string                 `json:"sink,omitempty"`
+	ID             string                                   `json:"id"`
+	Direction      EventEndpointDirection                   `json:"direction"`
+	Kind           EventEndpointKind                        `json:"kind"`
+	FlowID         string                                   `json:"flow_id,omitempty"`
+	FlowPath       string                                   `json:"flow_path,omitempty"`
+	PackageKey     string                                   `json:"package_key,omitempty"`
+	Event          FlowEventProof                           `json:"event"`
+	Pattern        bool                                     `json:"pattern,omitempty"`
+	NodeID         string                                   `json:"node_id,omitempty"`
+	HandlerEvent   string                                   `json:"handler_event,omitempty"`
+	AgentID        string                                   `json:"agent_id,omitempty"`
+	Role           string                                   `json:"role,omitempty"`
+	TimerID        string                                   `json:"timer_id,omitempty"`
+	PinName        string                                   `json:"pin_name,omitempty"`
+	Site           string                                   `json:"site,omitempty"`
+	SourceFile     string                                   `json:"source_file,omitempty"`
+	SourceLine     int                                      `json:"source_line,omitempty"`
+	SourceLocation string                                   `json:"source_location,omitempty"`
+	ResolutionMode runtimecontracts.FlowInputResolutionMode `json:"-"`
+	Sink           string                                   `json:"sink,omitempty"`
 }
 
 type TypedPubSubMatchKind string
@@ -742,7 +742,7 @@ func (c AuthoredEventEndpointCensus) ResolveFanInInputForHandler(flowID, nodeID,
 	handlerEvent = eventidentity.Normalize(handlerEvent)
 	candidates := make([]AuthoredEventEndpoint, 0)
 	for _, endpoint := range c.inputPins {
-		if strings.TrimSpace(endpoint.FlowID) != flowID || !strings.EqualFold(strings.TrimSpace(endpoint.ResolutionMode), "fan-in") {
+		if strings.TrimSpace(endpoint.FlowID) != flowID || endpoint.ResolutionMode != runtimecontracts.FlowInputResolutionModeFanIn {
 			continue
 		}
 		if fanInInputMatchesHandler(c.source, endpoint, handlerEvent) {
@@ -997,14 +997,14 @@ func (b *endpointCensusBuilder) addPinEndpoints() {
 			endpoint := b.endpoint(EventEndpointInputPin, EventEndpointFlowInputPin, flowID, pin.EventType())
 			endpoint.PinName = strings.TrimSpace(pin.PinName())
 			endpoint.SourceLocation = "pins.inputs.events." + endpoint.PinName
-			endpoint.ResolutionMode = pin.Resolution.Mode.String()
+			endpoint.ResolutionMode = pin.Resolution.Mode
 			b.add(endpoint)
 		}
 		for _, pin := range sortedOutputPins(b.source.FlowOutputEventPins(flowID)) {
 			endpoint := b.endpoint(EventEndpointOutputPin, EventEndpointFlowOutputPin, flowID, pin.EventType())
 			endpoint.PinName = strings.TrimSpace(pin.PinName())
 			endpoint.SourceLocation = "pins.outputs.events." + endpoint.PinName
-			endpoint.Sink = pin.Sink.String()
+			endpoint.Sink = runtimecontracts.FlowOutputSinkCode(pin.Sink)
 			b.add(endpoint)
 		}
 	}
@@ -1024,7 +1024,7 @@ func (b *endpointCensusBuilder) addMetadataBoundaryEndpoints() {
 		}
 		if boundary := entry.AcceptedConsumerBoundary(); boundary != runtimecontracts.EventConsumerBoundaryNone {
 			endpoint := b.endpoint(EventEndpointConsumer, EventEndpointExternal, "", eventType)
-			endpoint.Role = boundary.String()
+			endpoint.Role = runtimecontracts.EventConsumerBoundaryCode(boundary)
 			endpoint.SourceLocation = "swarm.consumer"
 			b.add(endpoint)
 		}

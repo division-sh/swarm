@@ -287,13 +287,17 @@ func decisionCardRuntimeControlEvent(eventID, eventName string, card decisioncar
 	if err != nil {
 		return noEvent, err
 	}
+	routingSource, err := card.Anchor.ControlRoutingSource()
+	if err != nil {
+		return noEvent, err
+	}
 	return events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
 		Facts: events.EventFacts{
 			ID: eventID, Type: events.EventType(eventName),
-			Producer:  events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},
-			Payload:   payload,
-			Envelope:  events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance),
-			CreatedAt: createdAt.UTC(), ExecutionMode: card.ExecutionMode,
+			Producer:      events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},
+			Payload:       payload,
+			Envelope:      events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance),
+			RoutingSource: routingSource, CreatedAt: createdAt.UTC(), ExecutionMode: card.ExecutionMode,
 		},
 		RunID: card.RunID,
 	})

@@ -324,7 +324,7 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 				"runtime/contracts effective required-agent facts",
 				"runtime/contracts primary entity/template/singleton accessors",
 				"runtime/semanticview.BuildAuthoredEventEndpointCensus",
-				"runtime/core/pinrouting.LowerCompositionConnectRoutePlans",
+				"runtime/core/pinrouting.CompileConnectGraph",
 				"runtime/routingtopology.Build",
 				"runtime/entityruntime.ResolveContainedOperationTarget",
 				"runtime/bootverify.Report",
@@ -464,7 +464,7 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 		if strings.TrimSpace(schema.Mode) == runtimecontracts.FlowModeTemplate || !schema.Instance.Empty() {
 			if instance, err := bundle.ResolveFlowTemplateInstance(flowID); err == nil {
 				item.TemplateInstance = &TemplateInstanceView{
-					Field:         instance.Field.String(),
+					Field:         instance.Field.Path(),
 					PrimaryEntity: strings.TrimSpace(instance.PrimaryEntity.EntityType),
 					SourceFile:    strings.TrimSpace(flow.Paths.SchemaFile),
 				}
@@ -1028,7 +1028,7 @@ func inputPinViews(source semanticview.Source, flowID string, pins []runtimecont
 			Event:          strings.TrimSpace(pin.EventType()),
 			ResolvedEvent:  strings.TrimSpace(source.ResolveFlowEventReference(flowID, pin.EventType())),
 			Source:         strings.TrimSpace(pin.Source),
-			ResolutionMode: pin.Resolution.Mode.String(),
+			ResolutionMode: runtimecontracts.FlowInputResolutionModeCode(pin.Resolution.Mode),
 		}
 		if len(pin.Carries) > 0 {
 			item.Carries = make(map[string]InputPinCarryView, len(pin.Carries))
@@ -1053,7 +1053,7 @@ func outputPinViews(source semanticview.Source, flowID string, pins []runtimecon
 			Name:          strings.TrimSpace(pin.PinName()),
 			Event:         strings.TrimSpace(pin.EventType()),
 			ResolvedEvent: strings.TrimSpace(source.ResolveFlowEventReference(flowID, pin.EventType())),
-			Sink:          pin.Sink.String(),
+			Sink:          runtimecontracts.FlowOutputSinkCode(pin.Sink),
 			Key:           strings.TrimSpace(pin.Key),
 			Carries:       normalizedStrings(pin.Carries),
 		})

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/events"
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -159,17 +160,24 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 				},
 				DueAt: time.Now().UTC().Add(50 * time.Millisecond).Truncate(time.Microsecond),
 			}.Normalize()
+			routingSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+				FlowID: "root", FlowInstance: "root", EntityID: entityID,
+			})
+			if err != nil {
+				t.Fatalf("build generic schedule routing source: %v", err)
+			}
 			schedule := runtimepipeline.Schedule{
-				RunID:        runID,
-				AgentID:      "runtime",
-				OwnerKind:    runtimepipeline.ScheduleOwnerSystem,
-				EventType:    "generic.tick",
-				Mode:         "once",
-				At:           occurrence.DueAt,
-				EntityID:     entityID,
-				FlowInstance: "root",
-				TaskID:       occurrence.TaskID(),
-				Payload:      []byte(`{}`),
+				RunID:         runID,
+				AgentID:       "runtime",
+				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+				EventType:     "generic.tick",
+				Mode:          "once",
+				At:            occurrence.DueAt,
+				EntityID:      entityID,
+				FlowInstance:  "root",
+				TaskID:        occurrence.TaskID(),
+				Payload:       []byte(`{}`),
+				RoutingSource: routingSource,
 			}
 			if err := selected.UpsertSchedule(ctx, schedule); err != nil {
 				t.Fatalf("persist generic occurrence-shaped schedule: %v", err)

@@ -264,7 +264,7 @@ type RunForkPoint struct {
 	SourceEventID  string               `json:"source_event_id,omitempty"`
 	ProducedBy     string               `json:"produced_by,omitempty"`
 	ProducedByType string               `json:"produced_by_type,omitempty"`
-	SourceRoute    events.RouteIdentity `json:"source_route,omitempty"`
+	RoutingSource  events.RoutingSource `json:"routing_source"`
 	Timestamp      time.Time            `json:"timestamp"`
 	Revision       int64                `json:"revision"`
 }
@@ -292,7 +292,8 @@ type RunForkPendingWork struct {
 	EventID         string               `json:"event_id"`
 	EventName       string               `json:"event_name"`
 	FlowInstance    string               `json:"flow_instance,omitempty"`
-	SourceRoute     events.RouteIdentity `json:"source_route,omitempty"`
+	RoutingSource   events.RoutingSource `json:"routing_source"`
+	DeliveryRoute   events.DeliveryRoute `json:"delivery_route,omitempty"`
 	DeliveryID      string               `json:"delivery_id,omitempty"`
 	SubscriberType  string               `json:"subscriber_type,omitempty"`
 	SubscriberID    string               `json:"subscriber_id,omitempty"`
@@ -900,16 +901,14 @@ type RunForkSelectedContractExecutionActivateRequest struct {
 }
 
 type RunForkSelectedContractSourceEvent struct {
-	SourceEventID      string             `json:"source_event_id"`
-	EventName          string             `json:"event_name"`
-	ExecutionMode      executionmode.Mode `json:"execution_mode"`
-	EntityID           string             `json:"entity_id,omitempty"`
-	FlowInstance       string             `json:"flow_instance,omitempty"`
-	Scope              string             `json:"scope,omitempty"`
-	SourceFlowID       string             `json:"source_flow_id,omitempty"`
-	SourceFlowInstance string             `json:"source_flow_instance,omitempty"`
-	SourceEntityID     string             `json:"source_entity_id,omitempty"`
-	Payload            json.RawMessage    `json:"payload,omitempty"`
+	SourceEventID string               `json:"source_event_id"`
+	EventName     string               `json:"event_name"`
+	ExecutionMode executionmode.Mode   `json:"execution_mode"`
+	EntityID      string               `json:"entity_id,omitempty"`
+	FlowInstance  string               `json:"flow_instance,omitempty"`
+	Scope         string               `json:"scope,omitempty"`
+	RoutingSource events.RoutingSource `json:"routing_source"`
+	Payload       json.RawMessage      `json:"payload,omitempty"`
 }
 
 type RunForkSelectedContractExecutionLineage struct {

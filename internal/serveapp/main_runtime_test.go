@@ -3396,7 +3396,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	}
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
 		FlowInstance: "root", EntityID: entityID, Stage: activation.Stage,
-		StageActivationID: activation.ActivationID,
+		StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID),
 	})
 	if err != nil {
 		t.Fatalf("new decision card anchor: %v", err)
@@ -4618,7 +4618,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	}
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
 		FlowInstance: "root", EntityID: entityID, Stage: activation.Stage,
-		StageActivationID: activation.ActivationID,
+		StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID),
 	})
 	if err != nil {
 		t.Fatalf("new %s run.stop decision-card anchor: %v", rt.Backend, err)
@@ -7666,8 +7666,8 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 		t.Fatalf("bind delivery session %s: %v", source, err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, timer_name, run_id, owner_kind, fire_event, fire_at, status)
-		VALUES ($1::uuid, $2, $3::uuid, 'system', 'timer.fired', now() + interval '1 hour', 'active')
+		INSERT INTO timers (timer_id, timer_name, run_id, owner_kind, fire_event, routing_source, fire_at, status)
+		VALUES ($1::uuid, $2, $3::uuid, 'system', 'timer.fired', '{"kind":"platform_control","route":{}}'::jsonb, now() + interval '1 hour', 'active')
 	`, timerID, "timer-"+source, runID); err != nil {
 		t.Fatalf("seed timer %s: %v", source, err)
 	}

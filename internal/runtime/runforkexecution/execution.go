@@ -340,17 +340,8 @@ func selectedContractForkEvent(sourceRunID, forkRunID, forkEventID string, sourc
 		FlowInstance: strings.Trim(strings.TrimSpace(sourceEvent.FlowInstance), "/"),
 		Scope:        events.EventScope(strings.TrimSpace(sourceEvent.Scope)),
 	}
-	routingSource := events.NoRoutingSource()
-	sourceRoute := events.RouteIdentity{
-		FlowID: strings.TrimSpace(sourceEvent.SourceFlowID), FlowInstance: strings.Trim(strings.TrimSpace(sourceEvent.SourceFlowInstance), "/"), EntityID: strings.TrimSpace(sourceEvent.SourceEntityID),
-	}.Normalized()
-	if !sourceRoute.Empty() {
-		candidate, sourceErr := events.NewRuntimeRoutingSource(sourceRoute.FlowID, sourceRoute.FlowInstance, sourceRoute.EntityID)
-		if sourceErr != nil {
-			var event events.Event
-			return event, fmt.Errorf("selected-fork source routing: %w", sourceErr)
-		}
-		routingSource = candidate
+	routingSource := sourceEvent.RoutingSource
+	if sourceRoute := routingSource.Route(); !sourceRoute.Empty() && routingSource.Kind() != events.RoutingSourceExternalIngress {
 		envelope = events.EnvelopeForSourceRoute(envelope, sourceRoute)
 	}
 	lineage, err := events.NewSelectedForkLineage(forkRunID, sourceRunID, sourceEvent.SourceEventID, producerID, "", sourceEvent.ExecutionMode)

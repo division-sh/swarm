@@ -471,6 +471,7 @@ func sqliteRenderPredicate(raw string) (string, error) {
 	)
 	predicate = strings.ReplaceAll(predicate, "source_route <> '{}'::jsonb", "source_route <> '{}'")
 	predicate = strings.ReplaceAll(predicate, "target_route <> '{}'::jsonb", "target_route <> '{}'")
+	predicate = strings.ReplaceAll(predicate, "routing_source->>'kind'", "json_extract(routing_source, '$.kind')")
 	if err := rejectSQLiteUnsupportedConstructs(predicate); err != nil {
 		return "", err
 	}

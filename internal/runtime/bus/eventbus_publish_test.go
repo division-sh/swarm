@@ -663,7 +663,8 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	}
 	defer runtimebustest.Unsubscribe(eb, agentID)
 
-	evt := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("producer/account.ready"), "producer", "", json.RawMessage(`{"account_id":"acct-agent"}`), 0, eventBusTestRunID, events.EventEnvelope{}, time.Now().UTC())
+	producerSource := eventtest.StaticFlowRoutingSource("producer", "producer", eventtest.UUID("producer-entity"))
+	evt := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType("producer/account.ready"), "producer", "", json.RawMessage(`{"account_id":"acct-agent"}`), 0, eventBusTestRunID, events.EventEnvelope{}, producerSource, time.Now().UTC())
 	plan, err := eb.CheckPublishRecipientPlan(ctx, evt)
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
@@ -2299,6 +2300,7 @@ func seedReplayPoolEvent(t *testing.T, selected *store.PostgresStore, runID stri
 		anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
 			FlowInstance: "launch/replay-pool", FlowID: "launch", EntityID: entityID,
 			Stage: "awaiting_review", StageActivationID: uuid.NewString(),
+			Source: eventtest.ConcreteTemplateRoutingSource("launch", "launch/replay-pool", entityID),
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -3293,7 +3295,8 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		}
 	}
 
-	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngress(
+	grandchildSource := eventtest.StaticFlowRoutingSource("grandchild", "child/grandchild", grandchildEntityID)
+	if err := eb.Publish(ctx, eventtest.ExistingRunRootIngressWithRoutingSource(
 		"11111111-2222-3333-4444-555555555555",
 		events.EventType("child/grandchild/micro.done"),
 		"cataloge2e",
@@ -3302,6 +3305,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		0,
 		eventBusTestRunID,
 		events.EnvelopeForEntityID(events.EventEnvelope{}, grandchildEntityID),
+		grandchildSource,
 		time.Now().UTC(),
 	)); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -3473,8 +3477,9 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		}},
 	}
 	child := runtimecontracts.FlowContractView{
-		Path:  "child",
-		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Path:   "child",
+		Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"child.start": {},
 		},
@@ -3506,6 +3511,9 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		Children: []runtimecontracts.FlowContractView{child},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"project-observer": root.Nodes["project-observer"],
+		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:    "mixed-route",
 			Version: "v-test",
@@ -3531,7 +3539,7 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"mixed-route": {},
-			"child":       {},
+			"child":       child.Schema,
 		},
 	}
 	source := semanticview.Wrap(bundle)
@@ -3684,7 +3692,8 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 			t.Fatalf("seed workflow instance %q: %v", instance.InstanceID, err)
 		}
 	}
-	rootConnectProbe := eventtest.ExistingRunRootIngress(
+	rootSource := eventtest.RootRoutingSource(rootEntityID)
+	rootConnectProbe := eventtest.ExistingRunRootIngressWithRoutingSource(
 		"bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
 		events.EventType("step.begin"),
 		"cataloge2e",
@@ -3693,6 +3702,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		0,
 		eventBusTestRunID,
 		events.EnvelopeForEntityID(events.EnvelopeForFlowInstance(events.EventEnvelope{}, rootEntityID), rootEntityID),
+		rootSource,
 		time.Now().UTC(),
 	)
 	rootConnectPlan, err := eb.CheckPublishRecipientPlan(ctx, rootConnectProbe)
@@ -3708,15 +3718,17 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	childTarget := rootConnectPlan.DeliveryRoutes[0].Target.Normalized()
 	previewEnvelope := events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID)
 	previewEnvelope = events.EnvelopeForTargetRoute(previewEnvelope, childTarget)
-	previewEvent := eventtest.ExistingRunRootIngress(rootConnectProbe.ID(), events.EventType("step.begin"), "cataloge2e", "", []byte(`{"entity_id":"`+rootEntityID+`"}`), 0,
-		eventBusTestRunID, previewEnvelope, time.Now().UTC())
-	if _, err := runtimepipeline.PreviewContractHandlerExecution(ctx, bundle, "child-relay", previewEvent, runtimepipeline.WorkflowState{
+	previewEvent := eventtest.ExistingRunRootIngressWithRoutingSource(rootConnectProbe.ID(), events.EventType("step.begin"), "cataloge2e", "", []byte(`{"entity_id":"`+rootEntityID+`"}`), 0,
+		eventBusTestRunID, previewEnvelope, rootSource, time.Now().UTC())
+	childPreviewCtx := runtimedelivery.WithRoute(ctx, rootConnectPlan.DeliveryRoutes[0])
+	if _, err := runtimepipeline.PreviewContractHandlerExecution(childPreviewCtx, bundle, "child-relay", previewEvent, runtimepipeline.WorkflowState{
 		EntityID: childTarget.EntityID,
 		Stage:    "waiting",
 	}, nil); err != nil {
 		t.Fatalf("preview child connect delivery: %v", err)
 	}
-	grandchildConnectProbe := eventtest.ExistingRunRootIngress(
+	childSource := eventtest.StaticFlowRoutingSource("child", childTarget.FlowInstance, childTarget.EntityID)
+	grandchildConnectProbe := eventtest.ExistingRunRootIngressWithRoutingSource(
 		"cccccccc-dddd-eeee-ffff-000000000000",
 		events.EventType("child/micro.start"),
 		"child-relay",
@@ -3725,6 +3737,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		0,
 		eventBusTestRunID,
 		events.EnvelopeForSourceRoute(events.EventEnvelope{}, childTarget),
+		childSource,
 		time.Now().UTC(),
 	)
 	grandchildConnectPlan, err := eb.CheckPublishRecipientPlan(ctx, grandchildConnectProbe)
@@ -3747,9 +3760,10 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("grandchild stored identity = %#v, want child/grandchild scope; instance=%#v", storedGrandchildIdentity, storedGrandchild)
 	}
 	grandchildPreviewEnvelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, grandchildTarget)
-	grandchildPreviewEvent := eventtest.ExistingRunRootIngress(grandchildConnectProbe.ID(), events.EventType("micro.start"), "child-relay", "", nil, 0,
-		eventBusTestRunID, grandchildPreviewEnvelope, time.Now().UTC())
-	if _, err := runtimepipeline.PreviewContractHandlerExecution(ctx, bundle, "grandchild-worker", grandchildPreviewEvent, runtimepipeline.WorkflowState{
+	grandchildPreviewEvent := eventtest.ExistingRunRootIngressWithRoutingSource(grandchildConnectProbe.ID(), events.EventType("micro.start"), "child-relay", "", nil, 0,
+		eventBusTestRunID, grandchildPreviewEnvelope, childSource, time.Now().UTC())
+	grandchildPreviewCtx := runtimedelivery.WithRoute(ctx, grandchildConnectPlan.DeliveryRoutes[0])
+	if _, err := runtimepipeline.PreviewContractHandlerExecution(grandchildPreviewCtx, bundle, "grandchild-worker", grandchildPreviewEvent, runtimepipeline.WorkflowState{
 		EntityID: grandchildTarget.EntityID,
 		Stage:    "ready",
 	}, nil); err != nil {
@@ -3759,7 +3773,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	rootReturnEnvelope = events.EnvelopeForTargetRoute(rootReturnEnvelope, events.RouteIdentity{
 		EntityID: rootEntityID,
 	})
-	rootReturnProbe := eventtest.ExistingRunRootIngress(
+	rootReturnProbe := eventtest.ExistingRunRootIngressWithRoutingSource(
 		"dddddddd-eeee-ffff-0000-111111111111",
 		events.EventType("child/micro.relayed"),
 		"child-relay",
@@ -3768,6 +3782,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		0,
 		eventBusTestRunID,
 		rootReturnEnvelope,
+		childSource,
 		time.Now().UTC(),
 	)
 	rootReturnPlan, err := eb.CheckPublishRecipientPlan(ctx, rootReturnProbe)
@@ -4042,7 +4057,13 @@ func TestEventBusPublish_RecordsNestedPackageConnectLocalizedEvent(t *testing.T)
 	defer runtimebustest.Unsubscribe(eb, "child-aggregator")
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
-	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress("", "child/grandchild/micro.done", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-grandchild")), time.Time{})); err != nil {
+	routingSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
+		FlowID: "grandchild", FlowInstance: "child/grandchild", EntityID: eventtest.UUID("ent-grandchild"),
+	})
+	if err != nil {
+		t.Fatalf("build nested source: %v", err)
+	}
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngressWithRoutingSource("", "child/grandchild/micro.done", "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-grandchild")), routingSource, time.Time{})); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	diags := recorder.SnapshotPublishes()

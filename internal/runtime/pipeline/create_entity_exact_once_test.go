@@ -144,7 +144,7 @@ func TestDispatchWorkflowNodeEventSkipsAlreadyProcessedCreateEntityHandler(t *te
 			evt := eventtest.RunCreatingRootIngress(eventID,
 				events.EventType("thing.created"), "", "", mustJSON(map[string]any{"amount": 250, "who": "alice"}), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EventEnvelope{}, time.Now().UTC())
 
-			route := seedExactOnceEventDelivery(t, pc.workflowStore, ctx, evt, "w-node")
+			route := seedExactOnceEventDelivery(t, pc, ctx, evt, "w-node")
 			deliveryCtx := withWorkflowNodeDeliveryRoute(ctx, route)
 
 			handled, err := pc.dispatchWorkflowNodeEventResult(deliveryCtx, evt)
@@ -261,15 +261,23 @@ func sqliteExactOnceRunContext(t *testing.T, db *sql.DB) context.Context {
 	return ctx
 }
 
-func seedExactOnceEventDelivery(t *testing.T, store *workflowInstanceStore, ctx context.Context, evt events.Event, nodeID string) events.DeliveryRoute {
+func seedExactOnceEventDelivery(t *testing.T, pc *PipelineCoordinator, ctx context.Context, evt events.Event, nodeID string) events.DeliveryRoute {
 	t.Helper()
+	store := pc.workflowStore
 	seedExactOnceEvent(t, store, ctx, evt)
 	owner, ok := store.deliveryStore.(*pipelineTestDeliveryOwner)
 	if !ok {
 		owner = newPipelineTestDeliveryOwner(t, store.db, store.isSQLite())
 		store.deliveryStore = owner
 	}
-	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID}
+	flowID := workflowNodeFlowID(pc.SemanticSource(), nodeID)
+	route := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   nodeID,
+		Target: events.RouteIdentity{
+			FlowID: flowID, FlowInstance: pc.SemanticSource().FlowPath(flowID), EntityID: evt.EntityID(),
+		},
+	}
 	if err := owner.commitInitial(ctx, evt, route); err != nil {
 		t.Fatalf("seed exact node delivery: %v", err)
 	}

@@ -754,7 +754,7 @@ func TestBuildShowsFinalFlowInstanceAuthoringFixture(t *testing.T) {
 	if !view.Equivalence.ProjectionOnly {
 		t.Fatalf("equivalence projection_only = false, want true")
 	}
-	if !containsString(view.Equivalence.CanonicalOwners, "runtime/core/pinrouting.LowerCompositionConnectRoutePlans") {
+	if !containsString(view.Equivalence.CanonicalOwners, "runtime/core/pinrouting.CompileConnectGraph") {
 		t.Fatalf("canonical owners = %#v, want pinrouting owner", view.Equivalence.CanonicalOwners)
 	}
 	if !containsString(view.Equivalence.CanonicalOwners, "runtime/semanticview.BuildAuthoredEventEndpointCensus") || !containsString(view.Equivalence.CanonicalOwners, "runtime/routingtopology.Build") {

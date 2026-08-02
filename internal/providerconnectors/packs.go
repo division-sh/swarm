@@ -444,7 +444,7 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 			return nil, fmt.Errorf("provider connector tool %q collision between connector pack import %s and %s; remove one, or rename the flow-local tool", item.toolID, item.source, strings.Join(existingSources, ", "))
 		}
 		if prior, exists := importSources[item.toolID]; exists {
-			return nil, fmt.Errorf("provider connector tool %q collision between connector pack imports %s and %s; remove one import", item.toolID, prior.String(), item.source)
+			return nil, fmt.Errorf("provider connector tool %q collision between connector pack imports %s and %s; remove one import", item.toolID, prior.URI(), item.source)
 		}
 		tool := pack.Manifest.Tools[item.toolID]
 		importedTools[item.toolID] = tool

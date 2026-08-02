@@ -1635,11 +1635,12 @@ func TestSchedules_LoadActiveSchedulesIgnoresWorkflowSidecarRows(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
 			run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-			fire_at, recurring, recurrence_cron, recurrence_interval,
+			routing_source, fire_at, recurring, recurrence_cron, recurrence_interval,
 			owner_node, owner_agent, owner_kind, task_type, status
 		)
 		VALUES (
 			$1::uuid, 'workflow-sidecar', $2::uuid, 'review/inst-1', 'timer.workflow', '{}'::jsonb,
+			jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'review', 'flow_instance', 'review/inst-1', 'entity_id', $2::text)),
 			$3, false, NULL, NULL,
 			'workflow_instance_store', NULL, 'system', 'timer', 'active'
 		)
@@ -1665,11 +1666,12 @@ func TestSchedules_LoadActiveSchedulesDoesNotReconstructTaskIDFromTimerName(t *t
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_name, entity_id, flow_instance, fire_event, fire_payload,
-			fire_at, recurring, recurrence_cron, recurrence_interval,
+			routing_source, fire_at, recurring, recurrence_cron, recurrence_interval,
 			owner_node, owner_agent, owner_kind, task_type, status
 		)
 		VALUES (
 			$1, $2::uuid, $3, $4, $5::jsonb,
+			jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'review', 'flow_instance', $3::text, 'entity_id', $2::text)),
 			$6, false, NULL, NULL,
 			NULL, $7, 'system', 'timer', 'active'
 		)
@@ -2062,14 +2064,13 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 		t.Fatalf("expected lifecycle transition fields required")
 	}
 
-	if err := pg.CancelScheduleExact(ctx, runtimepipeline.Schedule{
-		AgentID:       "sub",
-		OwnerKind:     runtimepipeline.ScheduleOwnerAgent,
-		AgentIdentity: testAgentIdentity(t, "sub", ""),
-		EventType:     "timer.recurring_digest",
-		Mode:          "cron",
-		Cron:          "0 9 * * *",
-	}); err != nil {
+	cancelSchedule := testAgentOwnedSchedule(t, runtimepipeline.Schedule{
+		AgentID:   "sub",
+		EventType: "timer.recurring_digest",
+		Mode:      "cron",
+		Cron:      "0 9 * * *",
+	})
+	if err := pg.CancelScheduleExact(ctx, cancelSchedule); err != nil {
 		t.Fatalf("CancelSchedule: %v", err)
 	}
 	_ = time.Second
@@ -3684,6 +3685,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		Cron:          "0 9 * * *",
 		Payload:       []byte(`{"x":1}`),
 	}
+	sc = testAgentOwnedSchedule(t, sc)
 	if err := pg.UpsertSchedule(ctx, sc); err != nil {
 		t.Fatalf("UpsertSchedule: %v", err)
 	}

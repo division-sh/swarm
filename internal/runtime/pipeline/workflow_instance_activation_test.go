@@ -1308,7 +1308,7 @@ pins:
 	}
 }
 
-func TestTemplateInstanceSystemNodeDeliveryLocalizesConcreteEventToHandlerKey(t *testing.T) {
+func TestTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKey(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml": `name: test
 version: 1.0.0
@@ -1341,7 +1341,7 @@ opco.ceo_ready:
 	})
 	evt := handlerTestRootIngress(
 		uuid.NewString(),
-		events.EventType("operating/inst-1/opco.product_initialization_requested"),
+		events.EventType("opco.product_initialization_requested"),
 		"",
 		"",
 		[]byte(`{"entity_id":"ent-operating"}`),
@@ -1351,13 +1351,11 @@ opco.ceo_ready:
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-operating"), "operating/inst-1"),
 		time.Time{},
 	)
+	evt = eventtest.TargetRouted(evt, events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: "ent-operating"})
 
-	if _, ok := source.NodeEventHandler("lifecycle-orchestrator", string(evt.Type())); ok {
-		t.Fatal("raw bundle handler lookup unexpectedly matched concrete instance event without delivery localization")
-	}
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "lifecycle-orchestrator", evt)
 	if !resolved.Matched {
-		t.Fatal("expected concrete instance event to resolve to local lifecycle-orchestrator handler")
+		t.Fatal("expected exact local event to resolve to lifecycle-orchestrator handler")
 	}
 	if got := resolved.HandlerEventKey; got != "opco.product_initialization_requested" {
 		t.Fatalf("handler event key = %q, want opco.product_initialization_requested", got)
@@ -1390,7 +1388,7 @@ opco.ceo_ready:
 	}
 }
 
-func TestTemplateInstanceRecordEvidenceUsesLocalizedHandlerEvidenceTarget(t *testing.T) {
+func TestTemplateInstanceRecordEvidenceUsesExactLocalHandlerEvidenceTarget(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml": `name: test
 version: 1.0.0
@@ -1421,7 +1419,7 @@ states: [initializing, ready]
 	const entityID = "11111111-1111-1111-1111-111111111111"
 	evt := handlerTestRootIngress(
 		uuid.NewString(),
-		events.EventType("operating/inst-1/build_progress"),
+		events.EventType("build_progress"),
 		"",
 		"",
 		mustJSON(map[string]any{"entity_id": entityID, "summary": "compile complete"}),
@@ -1431,13 +1429,11 @@ states: [initializing, ready]
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "operating/inst-1"),
 		time.Time{},
 	)
+	evt = eventtest.TargetRouted(evt, events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: entityID})
 
-	if _, ok := source.NodeEventHandler("build-orchestrator", string(evt.Type())); ok {
-		t.Fatal("raw bundle handler lookup unexpectedly matched concrete instance event without delivery localization")
-	}
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "build-orchestrator", evt)
 	if !resolved.Matched {
-		t.Fatal("expected concrete instance event to resolve to local build-orchestrator handler")
+		t.Fatal("expected exact local event to resolve to build-orchestrator handler")
 	}
 	if got := resolved.HandlerEventKey; got != "build_progress" {
 		t.Fatalf("handler event key = %q, want build_progress", got)

@@ -234,8 +234,8 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 			}
 			ownerCtx := managerWork.Context()
 			replacementSchedules := []runtimepipeline.Schedule{
-				runtimeContextAgentSchedule(t, runtimepipeline.Schedule{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"}),
-				runtimeContextAgentSchedule(t, runtimepipeline.Schedule{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"}),
+				runtimeContextSystemSchedule(runtimepipeline.Schedule{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"}),
+				runtimeContextSystemSchedule(runtimepipeline.Schedule{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"}),
 			}
 			for _, schedule := range replacementSchedules {
 				if err := predecessor.Runtime.Scheduler.Register(ownerCtx, schedule); err != nil {
@@ -396,7 +396,7 @@ func TestRuntimeContextReplacementAggregateFailureLeavesNoPartialCandidateAndRet
 		owner := manager.contexts[runtimeContextTestHashA].standing[target.ServiceID]
 		if err := predecessor.Runtime.Scheduler.Register(
 			worklifetime.WithOccurrence(context.Background(), owner),
-			runtimeContextAgentSchedule(t, runtimepipeline.Schedule{
+			runtimeContextSystemSchedule(runtimepipeline.Schedule{
 				RunID: target.RunID, AgentID: "timer-agent", EventType: "timer.once", Mode: "once",
 				At: time.Now().Add(time.Hour), TaskID: target.ServiceID,
 			}),
@@ -500,7 +500,7 @@ func TestStandingServiceTransitionRollbackRestoresExactOwnerSchedulesBeforeAdmis
 		{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"},
 		{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"},
 	} {
-		schedule = runtimeContextAgentSchedule(t, schedule)
+		schedule = runtimeContextSystemSchedule(schedule)
 		if err := contextDef.Runtime.Scheduler.Register(ownerCtx, schedule); err != nil {
 			t.Fatalf("register %s schedule: %v", schedule.Mode, err)
 		}
@@ -561,7 +561,7 @@ func TestStandingServiceTransitionRollbackFailsClosedWhenOriginalManagerRetires(
 	if err != nil {
 		t.Fatalf("begin rollback Manager work: %v", err)
 	}
-	if err := contextDef.Runtime.Scheduler.Register(managerWork.Context(), runtimeContextAgentSchedule(t, runtimepipeline.Schedule{
+	if err := contextDef.Runtime.Scheduler.Register(managerWork.Context(), runtimeContextSystemSchedule(runtimepipeline.Schedule{
 		RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "retired-manager-cron",
 	})); err != nil {
 		t.Fatalf("register Manager-composed schedule: %v", err)
@@ -626,7 +626,7 @@ func TestPreparedStandingSuccessorOwnsSchedulesBeforePublication(t *testing.T) {
 		{RunID: successorRunID, AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"},
 		{RunID: successorRunID, AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"},
 	} {
-		schedule = runtimeContextAgentSchedule(t, schedule)
+		schedule = runtimeContextSystemSchedule(schedule)
 		if err := contextDef.Runtime.Scheduler.Register(prepared.WorkContext(context.Background()), schedule); err != nil {
 			t.Fatalf("register prepared %s schedule: %v", schedule.Mode, err)
 		}
@@ -652,10 +652,9 @@ func TestPreparedStandingSuccessorOwnsSchedulesBeforePublication(t *testing.T) {
 	}
 }
 
-func runtimeContextAgentSchedule(t testing.TB, schedule runtimepipeline.Schedule) runtimepipeline.Schedule {
-	t.Helper()
-	schedule.OwnerKind = runtimepipeline.ScheduleOwnerAgent
-	schedule.AgentIdentity = agentidentitytest.RootRuntime(t, schedule.AgentID, "runtime-context-test")
+func runtimeContextSystemSchedule(schedule runtimepipeline.Schedule) runtimepipeline.Schedule {
+	schedule.OwnerKind = runtimepipeline.ScheduleOwnerSystem
+	schedule.RoutingSource = events.NewPlatformControlRoutingSource()
 	return schedule
 }
 

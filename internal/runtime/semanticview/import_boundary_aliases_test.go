@@ -11,7 +11,7 @@ import (
 func TestImportBoundaryPinAliasesDescribeBindingsWithoutCreatingInputProducerAuthority(t *testing.T) {
 	source := loadImportBoundaryAliasFixture(t, importBoundaryAliasFixtureOptions{})
 
-	resolution := source.ResolveFlowInputAutoWire("worker", "work.requested")
+	resolution := ResolveFlowInputAutoWire(source, "worker", "work.requested")
 	if len(resolution.Patterns) != 0 {
 		t.Fatalf("ResolveFlowInputAutoWire patterns = %#v, want no bind-only route", resolution.Patterns)
 	}
@@ -53,7 +53,7 @@ func TestImportBoundaryInputAliasDoesNotRouteSameNameProducerWithoutConnect(t *t
 		producerOutput: "work.requested",
 	})
 
-	resolution := source.ResolveFlowInputAutoWire("worker", "work.requested")
+	resolution := ResolveFlowInputAutoWire(source, "worker", "work.requested")
 	if len(resolution.Patterns) != 0 {
 		t.Fatalf("ResolveFlowInputAutoWire patterns = %#v, want no bind-only or same-name route", resolution.Patterns)
 	}

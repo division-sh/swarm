@@ -165,7 +165,7 @@ func ValidatePersistentEvent(event Event) error {
 	if err := validateEnvelopeClaim(event.envelopeClaimForAdmission(), true); err != nil {
 		return fmt.Errorf("event envelope: %w", err)
 	}
-	if source := event.RoutingSource(); !source.Empty() {
+	if source := event.RoutingSource(); !source.Route().Empty() {
 		if err := validateRequiredUUID("routing_source.entity_id", source.Route().EntityID); err != nil {
 			return err
 		}
@@ -335,9 +335,9 @@ func IntegrityProjection(event Event) (any, error) {
 			TargetSet    []routeProjection `json:"target_set"`
 		} `json:"envelope"`
 		RoutingSource struct {
-			Kind      RoutingSourceKind `json:"kind"`
-			Route     routeProjection   `json:"route"`
-			Authority string            `json:"authority"`
+			Kind      string          `json:"kind"`
+			Route     routeProjection `json:"route"`
+			Authority string          `json:"authority"`
 		} `json:"routing_source"`
 		OperatorReferenceEventID string `json:"operator_reference_event_id"`
 		SelectedFork             *struct {
@@ -361,9 +361,9 @@ func IntegrityProjection(event Event) (any, error) {
 	projection.Envelope.Target = projectRoute(envelope.Target)
 	projection.Envelope.TargetSet = targetSet
 	source := event.RoutingSource()
-	projection.RoutingSource.Kind = source.Kind()
+	projection.RoutingSource.Kind = source.Kind().StorageCode()
 	projection.RoutingSource.Route = projectRoute(source.Route())
-	projection.RoutingSource.Authority = source.Authority()
+	projection.RoutingSource.Authority = source.Authority().StorageCode()
 	if reference, ok := event.OperatorReference(); ok {
 		projection.OperatorReferenceEventID = reference.ReferencedEventID()
 	}

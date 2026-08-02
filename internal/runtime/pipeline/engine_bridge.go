@@ -73,7 +73,7 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 		matched         bool
 	)
 	for _, owner := range owners {
-		resolved := workflowNodeEventHandlerResolutionForDelivery(source, owner, evt)
+		resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, owner, evt)
 		if resolved.Failure != "" {
 			return contractHandlerExecutionResult{}, fmt.Errorf("resolve workflow handler for node %s: %s", strings.TrimSpace(owner), resolved.Failure)
 		}
@@ -208,7 +208,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	handlerEventKey := strings.TrimSpace(triggerCtx.HandlerEventKey)
 	if handlerEventKey == "" {
-		handlerEventKey = workflowNodeHandlerEventKeyForExecution(source, nodeID, triggerCtx.Event)
+		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, source, nodeID, triggerCtx.Event)
 	}
 	deps := coordinatorEngineDependencies(pc)
 	if collectLocally {
@@ -226,20 +226,16 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
-	producerRoute := actionResultProducerRoute(
-		source,
-		flowID,
-		entityID,
-		triggerCtx.Event,
-		stateSnapshot,
-		workflowNodeProducerRoute(source, nodeID, flowID, entityID, stateSnapshot),
-	)
+	producerSource, err := workflowNodeProducerSource(ctx, source, nodeID, flowID, entityID, triggerCtx.Event.RoutingSource())
+	if err != nil {
+		return contractHandlerExecutionResult{}, fmt.Errorf("admit workflow node producer source: %w", err)
+	}
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
 		EntityID:        identity.NormalizeEntityID(entityID),
 		NodeID:          identity.NormalizeNodeID(nodeID),
 		FlowID:          identity.NormalizeFlowID(flowID),
 		Event:           triggerCtx.Event,
-		ProducerRoute:   producerRoute,
+		ProducerSource:  producerSource,
 		HandlerEventKey: handlerEventKey,
 		ChainDepth:      triggerCtx.Event.ChainDepth(),
 		Handler:         handler,

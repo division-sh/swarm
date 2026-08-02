@@ -236,7 +236,7 @@ func validateTemplateInstanceField(flowID string, field TemplateInstanceField, p
 	if field.Empty() {
 		return TemplateInstanceField{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance: <field> is required", defaultPrimaryEntityFlowLabel(flowID))
 	}
-	name := field.String()
+	name := field.Path()
 	decl, ok := primary.Contract.Fields[name]
 	if !ok {
 		return TemplateInstanceField{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance field %q is not declared on primary entity %s", flowID, name, primary.EntityType)

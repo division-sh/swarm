@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
@@ -475,7 +476,7 @@ func baseTestDecisionCard(outcomes map[string]runtimecontracts.WorkflowGateOutco
 func testStageAnchor() Anchor {
 	anchor, err := NewStageGateAnchor(StageGateAnchor{
 		FlowInstance: "root", EntityID: "entity-1", Stage: "awaiting_review",
-		StageActivationID: uuid.NewString(),
+		StageActivationID: uuid.NewString(), Source: testRootRoutingSource("entity-1"),
 	})
 	if err != nil {
 		panic(err)
@@ -501,22 +502,23 @@ func semanticObject(values map[string]any) semanticvalue.Value {
 }
 
 func TestRegisteredAnchorKindsAreClosedAndProjectScope(t *testing.T) {
+	source := testRootRoutingSource("entity-1")
 	stage, err := NewStageGateAnchor(StageGateAnchor{
-		FlowInstance: "root", EntityID: "entity-1", Stage: "review", StageActivationID: "activation-1",
+		FlowInstance: "root", EntityID: "entity-1", Source: source, Stage: "review", StageActivationID: "activation-1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	human, err := NewHumanTaskAnchor(HumanTaskAnchor{
 		RequesterAgentID: "agent-a", OperationID: "operation-1", Category: "review",
-		Scope: Scope{Kind: ScopeFlow, FlowInstance: "root"},
+		Scope: Scope{Kind: ScopeFlow, FlowInstance: "root"}, Source: source,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	proposed, err := NewProposedEffectAnchor(ProposedEffectAnchor{
 		RequestEventID: "request-1", ActivityID: "send", Decision: "send_review",
-		Scope: Scope{Kind: ScopeGlobal},
+		Scope: Scope{Kind: ScopeGlobal}, Source: source,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -551,6 +553,14 @@ func TestRegisteredAnchorKindsAreClosedAndProjectScope(t *testing.T) {
 	if _, err := DecodeAnchor("unknown", []byte(`{}`)); err == nil {
 		t.Fatal("unknown anchor kind was accepted")
 	}
+}
+
+func testRootRoutingSource(entityID string) events.RoutingSource {
+	source, err := events.NewRootRoutingSource(entityID)
+	if err != nil {
+		panic(err)
+	}
+	return source
 }
 
 func textEventSchema(properties map[string]map[string]any, required []string) map[string]any {

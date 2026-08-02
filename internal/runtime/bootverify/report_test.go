@@ -15,6 +15,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -6108,9 +6109,14 @@ func TestRun_DoesNotReportCrossFlowPinAmbiguityForSiblingOutputs(t *testing.T) {
 func TestRun_ReportsCrossFlowPinAmbiguityForOverlappingBoundarySources(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	markFlowInputPinSource(t, bundle, "child", "task.feedback", "external")
+	if bundle.RootSchema == nil {
+		bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{}
+	}
+	bundle.RootSchema.Pins.Outputs.EventPins = append(bundle.RootSchema.Pins.Outputs.EventPins, runtimecontracts.FlowOutputEventPin{
+		Name: "task.feedback", Event: "task.feedback",
+	})
 	bundle.Semantics.CompositionConnects = append(bundle.Semantics.CompositionConnects, runtimecontracts.FlowPackageConnect{
-		From: ".task.feedback",
-		To:   "child.task.feedback",
+		From: ".task.feedback", To: "child.task.feedback", SourceFile: "package.yaml", SourceLine: 1,
 	})
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -6516,7 +6522,7 @@ func TestRun_HarnessInputSatisfiesTimerTriggerProducerProofOnly(t *testing.T) {
 	if reportContains(report.Errors(), "timer_validation", "start_on event support/ticket.closed has no producer path") {
 		t.Fatalf("harness input did not satisfy timer producer proof: %#v", report.Errors())
 	}
-	resolution := semanticview.ResolveFlowInputProducer(semanticview.Wrap(bundle), "support", "ticket.closed")
+	resolution := runtimepinrouting.ResolveFlowInputProducer(semanticview.Wrap(bundle), "support", "ticket.closed")
 	if len(resolution.ProducerPatterns()) != 0 || len(resolution.ProducerFlows()) != 0 {
 		t.Fatalf("harness timer proof created delivery authority: %#v", resolution)
 	}

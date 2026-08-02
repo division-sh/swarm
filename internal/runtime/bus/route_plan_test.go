@@ -50,7 +50,7 @@ func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
 	}
 	intent := intents[0]
 	if intent.Producer != routeIntentProducerConnectRoutePlan {
-		t.Fatalf("intent producer = %s, want %s", intent.Producer, routeIntentProducerConnectRoutePlan)
+		t.Fatalf("intent producer = %q, want %q", routeIntentProducerCode(intent.Producer), routeIntentProducerCode(routeIntentProducerConnectRoutePlan))
 	}
 	if intent.Producer.Source() != routePlanSourceConnectRoutePlan || intent.Producer.Reason() != routePlanReasonLoweredConnectRoutePlan {
 		t.Fatalf("intent producer source/reason = %s/%s, want connect route plan/lowered connect", intent.Producer.Source(), intent.Producer.Reason())

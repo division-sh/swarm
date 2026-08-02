@@ -547,6 +547,16 @@ func workflowTimerActivationForCause(
 		return WorkflowTimerActivation{}, err
 	}
 	activationCause := timeridentity.WorkflowTimerActivationCause(strings.TrimSpace(string(cause.Kind)))
+	flowID := strings.TrimSpace(declaration.FlowID)
+	if flowID == "" {
+		flowID = strings.TrimSpace(source.WorkflowName())
+	}
+	routingSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+		FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID,
+	})
+	if err != nil {
+		return WorkflowTimerActivation{}, fmt.Errorf("admit workflow timer owner source: %w", err)
+	}
 	activationID := timeridentity.WorkflowTimerActivationID(
 		runID,
 		entityID,
@@ -569,14 +579,15 @@ func workflowTimerActivationForCause(
 			Cause:               activationCause,
 			Generation:          generation,
 		},
-		RunID:        strings.TrimSpace(runID),
-		EntityID:     strings.TrimSpace(entityID),
-		FlowInstance: strings.Trim(strings.TrimSpace(flowInstance), "/"),
-		OwnerAgent:   strings.TrimSpace(declaration.Owner),
-		EventType:    strings.TrimSpace(declaration.Event),
-		Payload:      []byte("{}"),
-		FireAt:       canonicalWorkflowTimerTime(cause.OccurredAt.Add(interval)),
-		Recurring:    declaration.Recurring,
+		RunID:         strings.TrimSpace(runID),
+		EntityID:      strings.TrimSpace(entityID),
+		FlowInstance:  strings.Trim(strings.TrimSpace(flowInstance), "/"),
+		RoutingSource: routingSource,
+		OwnerAgent:    strings.TrimSpace(declaration.Owner),
+		EventType:     strings.TrimSpace(declaration.Event),
+		Payload:       []byte("{}"),
+		FireAt:        canonicalWorkflowTimerTime(cause.OccurredAt.Add(interval)),
+		Recurring:     declaration.Recurring,
 		RecurrenceInterval: func() time.Duration {
 			if declaration.Recurring {
 				return interval
@@ -895,8 +906,8 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 				ID: eventID, Type: events.EventType(activation.EventType),
 				Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime.workflow_timer"},
 				TaskID:   occurrence.TaskID(), Payload: json.RawMessage(append([]byte(nil), activation.Payload...)),
-				Envelope:  events.EventEnvelope{EntityID: activation.EntityID, FlowInstance: activation.FlowInstance},
-				CreatedAt: firedAt, ExecutionMode: executionmode.Live,
+				Envelope:      events.EventEnvelope{EntityID: activation.EntityID, FlowInstance: activation.FlowInstance},
+				RoutingSource: activation.RoutingSource, CreatedAt: firedAt, ExecutionMode: executionmode.Live,
 			},
 			RunID: activation.RunID,
 		})

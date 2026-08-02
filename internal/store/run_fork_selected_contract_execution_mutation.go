@@ -714,12 +714,11 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 		if event.RunID() != sourceRunID {
 			return nil, fmt.Errorf("selected-contract source event %s does not belong to source run %s", event.ID(), sourceRunID)
 		}
-		sourceRoute := event.SourceRoute()
 		out = append(out, runfork.RunForkSelectedContractSourceEvent{
 			SourceEventID: event.ID(), EventName: string(event.Type()), ExecutionMode: event.ExecutionMode(),
 			EntityID: event.EntityID(), FlowInstance: event.FlowInstance(), Scope: string(event.Scope()),
-			SourceFlowID: sourceRoute.FlowID, SourceFlowInstance: sourceRoute.FlowInstance, SourceEntityID: sourceRoute.EntityID,
-			Payload: event.Payload(),
+			RoutingSource: event.RoutingSource(),
+			Payload:       event.Payload(),
 		})
 	}
 	for idx := range out {

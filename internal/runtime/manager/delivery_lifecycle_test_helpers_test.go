@@ -80,6 +80,7 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 			agent_flow_instance_path TEXT NOT NULL,
 			delivery_target_route TEXT NOT NULL,
 			delivery_context TEXT NOT NULL,
+			connect_execution_claim TEXT NOT NULL,
 			delivery_payload_projection TEXT NOT NULL,
 			execution_authority_kind TEXT NOT NULL,
 			authority_bundle_hash TEXT NOT NULL,
@@ -514,7 +515,7 @@ func (s *managerDeliveryTestStore) makeDeliveryDueNow(t *testing.T, evt events.E
 	}
 	if _, err := s.db.Exec(
 		`UPDATE event_deliveries SET next_eligible_at = ? WHERE event_id = ? AND route_identity = ? AND status = 'failed'`,
-		time.Now().Add(-time.Minute), evt.ID(), identity.String(),
+		time.Now().Add(-time.Minute), evt.ID(), events.EncodeDeliveryRouteIdentity(identity),
 	); err != nil {
 		t.Fatalf("make manager delivery fixture retry eligible: %v", err)
 	}

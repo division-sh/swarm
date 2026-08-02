@@ -12,9 +12,13 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/eventrecord/sqlite"
@@ -26,6 +30,10 @@ type eventRecordContractStore interface {
 	semanticEventFixtureStore
 	diagnosticRuntimeLogFixtureStore
 	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.EventAppendOutcome, error)
+}
+
+type eventDeliveryRouteReadbackStore interface {
+	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 }
 
 func TestEventRecordExactPersistenceParity(t *testing.T) {
@@ -107,6 +115,135 @@ func TestEventRecordExactPersistenceParity(t *testing.T) {
 	}
 }
 
+func TestEventRoutingSourceRoundTripParity(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			store := fixture.store.(eventRecordContractStore)
+			ctx := testAuthorActivityContext()
+			now := time.Date(2026, 7, 18, 16, 30, 0, 0, time.UTC)
+			for _, source := range routingSourceRoundTripFixtures(t) {
+				t.Run(source.Kind().StorageCode(), func(t *testing.T) {
+					event := eventtest.RunCreatingRootIngressWithRoutingSource(
+						uuid.NewString(), events.EventType("routing.source."+source.Kind().StorageCode()), "gateway", "", []byte(`{}`), 0,
+						uuid.NewString(), "", events.EventEnvelope{}, source, now,
+					)
+					if err := commitSemanticEventFixture(ctx, store, event); err != nil {
+						t.Fatalf("commit event: %v", err)
+					}
+					record, found, err := loadEventProducerIdentityRecord(ctx, fixture, event.ID())
+					if err != nil || !found {
+						t.Fatalf("load event record: found=%v err=%v", found, err)
+					}
+					admitted, err := record.Decode()
+					if err != nil {
+						t.Fatalf("decode event record: %v", err)
+					}
+					got := admitted.Event().RoutingSource()
+					if got.Kind() != source.Kind() || got.Route() != source.Route() || got.Authority() != source.Authority() {
+						t.Fatalf("routing source = %#v/%#v/%#v, want %#v/%#v/%#v",
+							got.Kind(), got.Route(), got.Authority(), source.Kind(), source.Route(), source.Authority())
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestConnectExecutionClaimRoundTripAndGraphMutationParity(t *testing.T) {
+	original := compiledConnectClaimFixture(t, canonicalrouting.TemplateInstanceRouteSelect, canonicalrouting.TemplateInstanceNoSecondPin, "deploy_completed")
+	changed := compiledConnectClaimFixture(t, canonicalrouting.TemplateInstanceRouteSelect, canonicalrouting.TemplateInstanceSecondPinDistinctEvent, "deploy_audited")
+	if original.ConnectClaim.Equal(changed.ConnectClaim) {
+		t.Fatal("fixture mutation did not change the compiled connect claim")
+	}
+
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			ctx := testAuthorActivityContext()
+			event := eventtest.RunCreatingRootIngress(
+				uuid.NewString(), "routing.claim.roundtrip", "gateway", "", []byte(`{}`), 0,
+				uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 18, 16, 45, 0, 0, time.UTC),
+			)
+			if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, []events.DeliveryRoute{original}); err != nil {
+				t.Fatalf("commit event and route: %v", err)
+			}
+			routes, err := fixture.store.(eventDeliveryRouteReadbackStore).ListEventDeliveryRoutes(ctx, event.ID())
+			if err != nil {
+				t.Fatalf("list event delivery routes: %v", err)
+			}
+			if len(routes) != 1 || !routes[0].ConnectClaim.Equal(original.ConnectClaim) {
+				t.Fatalf("restored routes = %#v, want original stamped claim", routes)
+			}
+			if routes[0].ConnectClaim.Equal(changed.ConnectClaim) {
+				t.Fatal("restored claim was rematched against the changed graph")
+			}
+			want, err := original.ConnectClaim.MarshalJSON()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := routes[0].ConnectClaim.MarshalJSON()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != string(want) {
+				t.Fatalf("restored claim bytes = %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+func routingSourceRoundTripFixtures(t testing.TB) []events.RoutingSource {
+	t.Helper()
+	must := func(source events.RoutingSource, err error) events.RoutingSource {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return source
+	}
+	return []events.RoutingSource{
+		events.NoRoutingSource(),
+		must(events.NewExternalIngressRoutingSource("gateway", uuid.NewString(), events.RoutingSourceAuthorityProviderAdmissionPlan)),
+		must(events.NewRootRoutingSource(uuid.NewString())),
+		must(events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: "static", FlowInstance: "static", EntityID: uuid.NewString()})),
+		must(events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{FlowID: "template", FlowInstance: "template/one", EntityID: uuid.NewString()})),
+		must(events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{FlowID: "control", FlowInstance: "control/one", EntityID: uuid.NewString()})),
+		events.NewPlatformControlRoutingSource(),
+	}
+}
+
+func compiledConnectClaimFixture(t testing.TB, mode canonicalrouting.TemplateInstanceRouteMode, secondPin canonicalrouting.TemplateInstanceSecondPin, receiverPin string) events.DeliveryRoute {
+	t.Helper()
+	root := canonicalrouting.CopyTemplateInstanceRoute(t, canonicalrouting.TemplateInstanceRouteOptions{
+		Mode: mode, SecondPin: secondPin,
+	})
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load canonical connect fixture: %v", err)
+	}
+	var selected runtimepinrouting.ConnectRoutePlan
+	for _, plan := range runtimepinrouting.CompileConnectGraph(semanticview.Wrap(bundle)).Plans() {
+		if plan.Receiver.PinCode() == receiverPin {
+			selected = plan
+			break
+		}
+	}
+	if selected.Receiver.PinCode() == "" {
+		t.Fatalf("compiled connect graph has no receiver pin %q", receiverPin)
+	}
+	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "claim-node"}
+	claim, err := runtimepinrouting.ConnectExecutionClaim(selected, route)
+	if err != nil {
+		t.Fatalf("mint connect execution claim: %v", err)
+	}
+	route.ConnectClaim = claim
+	return route
+}
+
 func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 	baseEvent := eventtest.RunCreatingRootIngress(uuid.NewString(), "duplicate.base", "gateway", "task", []byte(`{"value":1}`), 2, uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 18, 17, 0, 0, 0, time.UTC))
 	admitted, err := events.AdmitForPersistence(baseEvent, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
@@ -135,7 +272,7 @@ func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 		{"produced_by_type", func(r *persistedEventIdentity) { r.ProducedByType = events.EventProducerAgent }},
 		{"source_event_id", func(r *persistedEventIdentity) { r.SourceEventID = uuid.NewString() }},
 		{"created_at", func(r *persistedEventIdentity) { r.CreatedAt = r.CreatedAt.Add(time.Microsecond) }},
-		{"routing_source_kind", func(r *persistedEventIdentity) { r.RoutingSourceKind = events.RoutingSourceRuntimeInstance }},
+		{"routing_source_kind", func(r *persistedEventIdentity) { r.RoutingSourceKind = "concrete_template_instance" }},
 		{"routing_source_authority", func(r *persistedEventIdentity) { r.RoutingSourceAuthority = "changed" }},
 		{"source_route", func(r *persistedEventIdentity) { r.SourceRoute = []byte(`{"flow_id":"changed"}`) }},
 		{"target_route", func(r *persistedEventIdentity) { r.TargetRoute = []byte(`{"flow_id":"changed"}`) }},
@@ -381,7 +518,7 @@ func TestEventRecordDecoderRejectsMalformedDurableFactsParity(t *testing.T) {
 				{"missing_producer", func(record *persistedEventIdentity) { record.ProducedBy = "" }},
 				{"child_without_parent", func(record *persistedEventIdentity) { record.Class = events.EventAdmissionChild }},
 				{"root_with_operator_provenance", func(record *persistedEventIdentity) { record.OperatorReferencedEventID = uuid.NewString() }},
-				{"runtime_source_without_route", func(record *persistedEventIdentity) { record.RoutingSourceKind = events.RoutingSourceRuntimeInstance }},
+				{"runtime_source_without_route", func(record *persistedEventIdentity) { record.RoutingSourceKind = "concrete_template_instance" }},
 				{"selected_fork_without_lineage", func(record *persistedEventIdentity) { record.Class = events.EventAdmissionSelectedForkReplay }},
 			} {
 				t.Run(mutation.name, func(t *testing.T) {

@@ -283,7 +283,7 @@ func (c *Controller) publishTransitionEvent(ctx context.Context, target Status, 
 	eventID := uuid.NewString()
 	facts := events.EventFacts{
 		ID: eventID, Type: eventType, Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
-		Payload: raw, CreatedAt: now, ExecutionMode: executionmode.Live,
+		Payload: raw, RoutingSource: events.NewPlatformControlRoutingSource(), CreatedAt: now, ExecutionMode: executionmode.Live,
 	}
 	var evt events.Event
 	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {

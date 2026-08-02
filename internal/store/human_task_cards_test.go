@@ -377,9 +377,13 @@ func expireHumanTaskCardsInTestMutation(t *testing.T, ctx context.Context, cardS
 
 func newHumanTaskDecisionCardTestFixture(t *testing.T, runID, operationID string, createdAt time.Time, budgetLimit int, deadline time.Time) (decisioncard.Card, decisioncard.HumanTaskContinuation) {
 	t.Helper()
+	source, err := events.NewRootRoutingSource("requester-entity")
+	if err != nil {
+		t.Fatal(err)
+	}
 	anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
 		RequesterAgentID: "requester", OperationID: operationID, Category: "review",
-		Scope: decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: "provider/instance-a"},
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: "provider/instance-a"}, Source: source,
 	})
 	if err != nil {
 		t.Fatal(err)

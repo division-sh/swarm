@@ -147,8 +147,8 @@ func TestBuildProjectsSelectAndSelectOrCreateModes(t *testing.T) {
 		mode string
 		load func() Topology
 	}{
-		{name: "select", mode: runtimecontracts.FlowInputResolutionModeSelect.String(), load: func() Topology { return Build(templateselectexisting.LoadSource(t)) }},
-		{name: "select-or-create", mode: runtimecontracts.FlowInputResolutionModeSelectOrCreate.String(), load: func() Topology { return Build(templateselectorcreate.LoadSource(t)) }},
+		{name: "select", mode: runtimecontracts.FlowInputResolutionModeCode(runtimecontracts.FlowInputResolutionModeSelect), load: func() Topology { return Build(templateselectexisting.LoadSource(t)) }},
+		{name: "select-or-create", mode: runtimecontracts.FlowInputResolutionModeCode(runtimecontracts.FlowInputResolutionModeSelectOrCreate), load: func() Topology { return Build(templateselectorcreate.LoadSource(t)) }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -207,7 +207,7 @@ func TestBuildProjectsRunnableStaticConnect(t *testing.T) {
 		},
 	})
 	edge := firstInterFlowEdge(t, Build(source))
-	if edge.Resolution == nil || edge.Resolution.Mode != string(pinrouting.ConnectResolutionStatic) || edge.RequiresRuntimeResolution {
+	if edge.Resolution == nil || edge.Resolution.Mode != pinrouting.ConnectResolutionStatic.Code() || edge.RequiresRuntimeResolution {
 		t.Fatalf("static route = %#v, want complete runnable static resolution", edge)
 	}
 }
@@ -220,7 +220,7 @@ func TestBuildProjectsReplyAsPairedEdges(t *testing.T) {
 			roles[edge.Resolution.Reply.Role] = true
 		}
 	}
-	if !roles[pinrouting.ConnectReplyRoleRequest] || !roles[pinrouting.ConnectReplyRoleResponse] {
+	if !roles[pinrouting.ConnectReplyRoleRequest.Code()] || !roles[pinrouting.ConnectReplyRoleResponse.Code()] {
 		t.Fatalf("reply roles = %#v, want paired request/response edges", roles)
 	}
 }
@@ -231,7 +231,7 @@ func TestResolutionViewPreservesCreateAndStaticDeclarations(t *testing.T) {
 		plan pinrouting.ConnectRoutePlan
 		want string
 	}{
-		{name: "create", want: runtimecontracts.FlowInputResolutionModeCreate.String(), plan: pinrouting.ConnectRoutePlan{
+		{name: "create", want: runtimecontracts.FlowInputResolutionModeCode(runtimecontracts.FlowInputResolutionModeCreate), plan: pinrouting.ConnectRoutePlan{
 			ResolutionKind: pinrouting.ConnectResolutionInstanceKey,
 			InstanceKey: &pinrouting.ConnectRoutePlanInstanceKey{
 				Mode:   runtimecontracts.FlowInputResolutionModeCreate,
@@ -239,7 +239,7 @@ func TestResolutionViewPreservesCreateAndStaticDeclarations(t *testing.T) {
 				Source: runtimecontracts.FlowInputInstanceSource{Kind: runtimecontracts.FlowInputInstanceSourceGeneratedUUID, Path: runtimecontracts.FlowInputCarrySourceGeneratedUUID},
 			},
 		}},
-		{name: "static", want: string(pinrouting.ConnectResolutionStatic), plan: pinrouting.ConnectRoutePlan{ResolutionKind: pinrouting.ConnectResolutionStatic}},
+		{name: "static", want: pinrouting.ConnectResolutionStatic.Code(), plan: pinrouting.ConnectRoutePlan{ResolutionKind: pinrouting.ConnectResolutionStatic}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -525,7 +525,7 @@ func TestConnectReceiverPinCollisionIssuesRespectDurableDeliveryIdentity(t *test
 			Event:      EventIdentity{Canonical: "producer/work.ready"},
 			Consumer:   Endpoint{ID: inputID, Event: EventIdentity{Canonical: event}},
 			Boundary:   &Boundary{PackageKey: ".", From: "producer.work_ready", To: to, AuthoredLocation: location},
-			Resolution: &Resolution{Mode: string(pinrouting.ConnectResolutionStatic)},
+			Resolution: &Resolution{Mode: pinrouting.ConnectResolutionStatic.Code()},
 		}
 	}
 	consumer := func(inputID string, kind semanticview.EventEndpointKind, subscriberID, target string) Edge {
@@ -607,13 +607,13 @@ func TestConnectReceiverPinCollisionIssuesRespectDurableDeliveryIdentity(t *test
 				func() Edge {
 					edge := connect("input-a", "consumer.work_accepted", "consumer/work.accepted", "package.yaml:10")
 					edge.RequiresRuntimeResolution = true
-					edge.Resolution.Mode = runtimecontracts.FlowInputResolutionModeSelect.String()
+					edge.Resolution.Mode = runtimecontracts.FlowInputResolutionModeCode(runtimecontracts.FlowInputResolutionModeSelect)
 					return edge
 				}(),
 				func() Edge {
 					edge := connect("input-b", "consumer.work_audited", "consumer/work.audited", "package.yaml:12")
 					edge.RequiresRuntimeResolution = true
-					edge.Resolution.Mode = runtimecontracts.FlowInputResolutionModeSelect.String()
+					edge.Resolution.Mode = runtimecontracts.FlowInputResolutionModeCode(runtimecontracts.FlowInputResolutionModeSelect)
 					return edge
 				}(),
 				consumer("input-a", semanticview.EventEndpointNodeHandler, "consumer-node", "consumer"),

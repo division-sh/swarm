@@ -7,7 +7,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
-	"github.com/division-sh/swarm/internal/runtime/routingtopology"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -49,6 +49,19 @@ func (idx eventMetadataNameIndex) add(value, label string) {
 			continue
 		}
 		idx[key] = label
+	}
+}
+
+func (idx eventMetadataNameIndex) replace(value, label string) {
+	value = strings.TrimSpace(value)
+	label = strings.TrimSpace(label)
+	if value == "" || label == "" {
+		return
+	}
+	for _, key := range eventMetadataNameKeys(value) {
+		if key != "" {
+			idx[key] = label
+		}
 	}
 }
 
@@ -132,18 +145,33 @@ func eventMetadataAddGlobalFlowTopologyNames(source semanticview.Source, names e
 }
 
 func eventMetadataAddGlobalCompositionConnectNames(source semanticview.Source, names eventMetadataNameIndex) {
-	for _, connect := range source.CompositionConnects() {
-		if from, err := connect.FromRef(); err == nil {
-			if _, ok := source.FlowOutputEventPin(from.FlowID, from.Pin); ok {
-				eventMetadataAddFlowPinRefRole(names, from, connect.From, "parent connect output producer")
-			}
-		}
-		if to, err := connect.ToRef(); err == nil {
-			if _, ok := source.FlowInputEventPin(to.FlowID, to.Pin); ok {
-				eventMetadataAddFlowPinRefRole(names, to, connect.To, "parent connect input consumer")
-			}
+	for _, role := range runtimepinrouting.CompileConnectGraph(source).EndpointRoles() {
+		switch role.Kind() {
+		case runtimepinrouting.ConnectEndpointRoleProducer:
+			eventMetadataAddFlowRole(names, role.FlowID(), role.Pin(), "parent connect output producer")
+			eventMetadataReplaceQualifiedFlowRole(names, role.FlowID(), role.Pin(), "parent connect output producer")
+		case runtimepinrouting.ConnectEndpointRoleConsumer:
+			eventMetadataAddFlowRole(names, role.FlowID(), role.Pin(), "parent connect input consumer")
+			eventMetadataReplaceQualifiedFlowRole(names, role.FlowID(), role.Pin(), "parent connect input consumer")
 		}
 	}
+}
+
+func eventMetadataReplaceQualifiedFlowRole(names eventMetadataNameIndex, flowID, pinName, role string) {
+	flowID = strings.TrimSpace(flowID)
+	pinName = strings.TrimSpace(pinName)
+	if pinName == "" {
+		return
+	}
+	qualified := "." + pinName
+	if flowID != "" {
+		qualified = flowID + "." + pinName
+	}
+	label := eventMetadataFlowLabel(flowID)
+	if role = strings.TrimSpace(role); role != "" {
+		label += " " + role
+	}
+	names.replace(qualified, label)
 }
 
 func eventMetadataRoleNames(source semanticview.Source, decl deadEventDeclaration) (eventMetadataNameIndex, eventMetadataNameIndex) {
@@ -173,15 +201,15 @@ func eventMetadataRoleNames(source semanticview.Source, decl deadEventDeclaratio
 			eventMetadataAddFlowRole(consumers, endpoint.FlowID, endpoint.PinName, "input pin consumer")
 		}
 	}
-	for _, edge := range routingtopology.Build(source).Edges {
-		if edge.Scope != routingtopology.DeliveryScopeInterFlowConnect || edge.Boundary == nil {
+	for _, role := range runtimepinrouting.CompileConnectGraph(source).EndpointRoles() {
+		if eventidentity.Normalize(string(role.Event())) != eventidentity.Normalize(decl.Canonical) {
 			continue
 		}
-		if edge.Producer.Event.Canonical == decl.Canonical || edge.Producer.Event.Local == decl.Canonical {
-			producers.add(edge.Boundary.From, "parent connect output producer")
-		}
-		if edge.Consumer.Event.Canonical == decl.Canonical || edge.Consumer.Event.Local == decl.Canonical {
-			consumers.add(edge.Boundary.To, "parent connect input consumer")
+		switch role.Kind() {
+		case runtimepinrouting.ConnectEndpointRoleProducer:
+			eventMetadataReplaceQualifiedFlowRole(producers, role.FlowID(), role.Pin(), "parent connect output producer")
+		case runtimepinrouting.ConnectEndpointRoleConsumer:
+			eventMetadataReplaceQualifiedFlowRole(consumers, role.FlowID(), role.Pin(), "parent connect input consumer")
 		}
 	}
 	return producers, consumers
@@ -273,6 +301,11 @@ func eventMetadataAddFlowRole(names eventMetadataNameIndex, flowID, pinName, rol
 	names.add(flowID, label)
 	if pinName != "" {
 		names.add(pinName, label)
+		if flowID == "" {
+			names.add("."+pinName, label)
+		} else {
+			names.add(flowID+"."+pinName, label)
+		}
 	}
 }
 

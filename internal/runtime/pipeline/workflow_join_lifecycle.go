@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -57,7 +59,11 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, ent
 			if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 				return fmt.Errorf("close join %s on stage exit: %w", activation.Key(), err)
 			}
-			toCancel = append(toCancel, joinSchedule(entityID, *instance, activation, kind))
+			schedule, err := joinSchedule(pc.SemanticSource(), pipelineFlowScope(ctx), entityID, *instance, activation, kind)
+			if err != nil {
+				return err
+			}
+			toCancel = append(toCancel, schedule)
 		}
 
 		for _, plan := range workflowJoinPlansForStage(pc.SemanticSource(), instance.WorkflowName, nextStage) {
@@ -117,7 +123,11 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, ent
 			if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 				return fmt.Errorf("persist join %s: %w", activation.Key(), err)
 			}
-			toSchedule = append(toSchedule, joinSchedule(entityID, *instance, activation, kind))
+			schedule, err := joinSchedule(pc.SemanticSource(), plan.FlowID, entityID, *instance, activation, kind)
+			if err != nil {
+				return err
+			}
+			toSchedule = append(toSchedule, schedule)
 		}
 		instance.StateBuckets = carrier.PersistedStateBuckets()
 		return nil
@@ -159,7 +169,11 @@ func (pc *PipelineCoordinator) reconcileClosedJoinSchedules(ctx context.Context,
 		if activation.TimerEventType == joinCompleteEvent {
 			kind = timeridentity.TimerHandleJoinComplete
 		}
-		if err := pc.cancelGenericSchedule(ctx, joinSchedule(entityID, instance, activation, kind)); err != nil {
+		schedule, err := joinSchedule(pc.SemanticSource(), pipelineFlowScope(ctx), entityID, instance, activation, kind)
+		if err != nil {
+			return err
+		}
+		if err := pc.cancelGenericSchedule(ctx, schedule); err != nil {
 			return err
 		}
 		activation.TimerCancelled = true
@@ -243,7 +257,7 @@ func joinTopLevelField(path, root string) string {
 	return field
 }
 
-func joinSchedule(entityID string, instance WorkflowInstance, activation joinruntime.Activation, kind timeridentity.TimerHandleKind) Schedule {
+func joinSchedule(source semanticview.Source, flowID, entityID string, instance WorkflowInstance, activation joinruntime.Activation, kind timeridentity.TimerHandleKind) (Schedule, error) {
 	ref := timeridentity.NewJoinRefForGeneration(activation.NodeID, activation.HandlerEvent, activation.Stage, activation.JoinID, activation.Window, activation.Generation)
 	handle := timeridentity.JoinTimeoutHandle(ref)
 	eventType := joinTimeoutEvent
@@ -255,15 +269,35 @@ func joinSchedule(entityID string, instance WorkflowInstance, activation joinrun
 	if generation := activation.Generation.Normalize(); generation.Valid() {
 		payload[generation.RevisionField] = generation.RevisionID
 	}
-	return Schedule{
-		AgentID:      runtimeWorkflowID,
-		OwnerKind:    ScheduleOwnerSystem,
-		EventType:    eventType,
-		Mode:         "once",
-		At:           activation.FireAt,
-		EntityID:     strings.TrimSpace(entityID),
-		FlowInstance: strings.Trim(strings.TrimSpace(instance.StorageRef), "/"),
-		TaskID:       handle.TaskID(),
-		Payload:      mustJSON(payload),
+	flowID = strings.TrimSpace(flowID)
+	route := events.RouteIdentity{EntityID: entityID}
+	scheduleFlowInstance := ""
+	if flowID != "" {
+		route.FlowID = flowID
+		route.FlowInstance = instance.StorageRef
+		scheduleFlowInstance = instance.StorageRef
 	}
+	executionSource, err := runtimepinrouting.AdmitFlowExecutionRoutingSource(source, flowID, route)
+	if err != nil {
+		return Schedule{}, fmt.Errorf("admit join schedule source: %w", err)
+	}
+	routingSource := executionSource
+	if executionSource.Kind() != events.RoutingSourceRoot {
+		routingSource, err = events.NewFlowOwnedControlRoutingSource(executionSource.Route())
+		if err != nil {
+			return Schedule{}, fmt.Errorf("admit join schedule control source: %w", err)
+		}
+	}
+	return Schedule{
+		AgentID:       runtimeWorkflowID,
+		OwnerKind:     ScheduleOwnerSystem,
+		EventType:     eventType,
+		Mode:          "once",
+		At:            activation.FireAt,
+		EntityID:      strings.TrimSpace(entityID),
+		FlowInstance:  strings.Trim(strings.TrimSpace(scheduleFlowInstance), "/"),
+		TaskID:        handle.TaskID(),
+		Payload:       mustJSON(payload),
+		RoutingSource: routingSource,
+	}, nil
 }

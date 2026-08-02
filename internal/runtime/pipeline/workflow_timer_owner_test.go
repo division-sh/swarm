@@ -1188,9 +1188,11 @@ func TestWorkflowTimerLifecycleListsScopeWildcardsOnBothStores(t *testing.T) {
 				_, err := store.db.ExecContext(ctx, `
 					INSERT INTO timers (
 						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event,
-						fire_payload, fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
-					) VALUES (?, ?, ?, ?, 'generic', 'generic.tick', '{}', ?, false, 'generic', 'system', 'timer', 'active', ?)
-				`, lookalikeID, runID, lookalikeTaskID, entityID, activation.FireAt, activation.CreatedAt)
+						fire_payload, routing_source, fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
+					) VALUES (?, ?, ?, ?, 'generic', 'generic.tick', '{}',
+					          json_object('kind', 'flow_owned_control', 'route', json_object('flow_id', 'generic', 'flow_instance', 'generic', 'entity_id', ?)),
+					          ?, false, 'generic', 'system', 'timer', 'active', ?)
+				`, lookalikeID, runID, lookalikeTaskID, entityID, entityID, activation.FireAt, activation.CreatedAt)
 				if err != nil {
 					t.Fatalf("insert SQLite generic prefix lookalike: %v", err)
 				}
@@ -1198,10 +1200,11 @@ func TestWorkflowTimerLifecycleListsScopeWildcardsOnBothStores(t *testing.T) {
 				_, err := store.db.ExecContext(ctx, `
 					INSERT INTO timers (
 						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event,
-						fire_payload, fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
+						fire_payload, routing_source, fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
 					) VALUES (
 						$1::uuid, $2::uuid, $3, $4::uuid, 'generic', 'generic.tick',
-						'{}'::jsonb, $5, false, 'generic', 'system', 'timer', 'active', $6
+						'{}'::jsonb, jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'generic', 'flow_instance', 'generic', 'entity_id', $4::text)),
+						$5, false, 'generic', 'system', 'timer', 'active', $6
 					)
 				`, lookalikeID, runID, lookalikeTaskID, entityID, activation.FireAt, activation.CreatedAt)
 				if err != nil {
@@ -2370,7 +2373,9 @@ func workflowTimerFlowScopedBundle() *runtimecontracts.WorkflowContractBundle {
 }
 
 func workflowTimerEventOnlyStateTriggerBundle() *runtimecontracts.WorkflowContractBundle {
-	return &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+	return &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
+		"observer": {ID: "observer", ExecutionType: "system_node"},
+	}, Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "workflow-timer-owner-test", Version: "1.0.0", InitialStage: "waiting",
 		Timers: []runtimecontracts.WorkflowTimerContract{
 			{
@@ -2386,7 +2391,9 @@ func workflowTimerEventOnlyStateTriggerBundle() *runtimecontracts.WorkflowContra
 }
 
 func workflowTimerLoopEventBundle() *runtimecontracts.WorkflowContractBundle {
-	return &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+	return &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
+		"observer": {ID: "observer", ExecutionType: "system_node"},
+	}, Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "workflow-timer-owner-test", Version: "1.0.0", InitialStage: "waiting",
 		Stages: []runtimecontracts.WorkflowStageContract{{ID: "waiting"}, {ID: "escaped"}},
 		Loops: []runtimecontracts.WorkflowLoopPlan{{
@@ -2406,7 +2413,9 @@ func workflowTimerHandledOutcomeBundle() *runtimecontracts.WorkflowContractBundl
 			ID: id, Owner: "runtime", Event: "timer." + id, StartOn: startOn, CancelOn: cancelOn, Delay: "1h",
 		}
 	}
-	return &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+	return &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
+		"observer": {ID: "observer", ExecutionType: "system_node"},
+	}, Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "workflow-timer-owner-test", Version: "1.0.0", InitialStage: "waiting",
 		Timers: []runtimecontracts.WorkflowTimerContract{
 			timer("accepted", "event:accepted.start", "event:accepted.cancel"),

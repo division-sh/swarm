@@ -41,7 +41,7 @@ func TestReplyResolutionConformance_BootAndLoweringExposePairedLoop(t *testing.T
 	if got := report.HardInvalidities(); len(got) != 0 {
 		t.Fatalf("template reply hard invalidities = %#v, want none", got)
 	}
-	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
+	plans, issues := compiledConnectPlans(source)
 	if len(issues) != 0 {
 		t.Fatalf("reply lowering issues=%#v, want none", issues)
 	}
@@ -53,12 +53,12 @@ func TestReplyResolutionConformance_BootAndLoweringExposePairedLoop(t *testing.T
 		if plan.ReplyResolution.Role == runtimepinrouting.ConnectReplyRoleResponse && plan.ResolutionKind != runtimepinrouting.ConnectResolutionReply {
 			t.Fatalf("reply response plan resolution = %q, want reply", plan.ResolutionKind)
 		}
-		roles[plan.ReplyResolution.Role] = *plan.ReplyResolution
+		roles[plan.ReplyResolution.Role.Code()] = *plan.ReplyResolution
 	}
 	if len(roles) != 2 {
 		t.Fatalf("reply lowering plans=%#v, want exactly two paired reply roles", plans)
 	}
-	for _, role := range []string{runtimepinrouting.ConnectReplyRoleRequest, runtimepinrouting.ConnectReplyRoleResponse} {
+	for _, role := range []string{runtimepinrouting.ConnectReplyRoleRequest.Code(), runtimepinrouting.ConnectReplyRoleResponse.Code()} {
 		got, ok := roles[role]
 		if !ok {
 			t.Fatalf("reply role %q missing from %#v", role, roles)
@@ -664,11 +664,19 @@ type replyHumanTaskConformanceStore interface {
 func createReplyConformanceHumanTask(t *testing.T, ctx context.Context, cards replyHumanTaskConformanceStore, runID, sourceEventID string, deliveryContext events.DeliveryContext, suffix string) decisioncard.Card {
 	t.Helper()
 	now := time.Now().UTC()
+	source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
+		FlowID: templatereply.ProviderFlowID, FlowInstance: templatereply.ProviderFlowID,
+		EntityID: runtimeflowidentity.EntityID(templatereply.ProviderFlowID),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
 		RequesterAgentID: "provider-agent",
 		OperationID:      "provider-turn/" + suffix,
 		Category:         "approval",
 		Scope:            decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: templatereply.ProviderFlowID},
+		Source:           source,
 	})
 	if err != nil {
 		t.Fatal(err)

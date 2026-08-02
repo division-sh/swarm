@@ -24,20 +24,33 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 			req.Event.NormalizedEnvelope(), req.Event.CreatedAt(), req.Event.ExecutionMode(),
 		)
 	}
-	if req.ProducerRoute.Normalized().Empty() {
+	if req.ProducerSource.Empty() {
 		flowID := strings.TrimSpace(req.FlowID.String())
 		entityID := strings.TrimSpace(req.EntityID.String())
 		if entityID == "" {
 			entityID = strings.TrimSpace(req.State.EntityID.String())
 		}
-		flowInstance := strings.Trim(strings.TrimSpace(asString(req.State.StateCarrier.Metadata["flow_path"])), "/")
-		if flowInstance == "" {
-			flowInstance = flowID
+		if entityID == "" {
+			entityID = eventtest.UUID("engine-semantic-producer")
 		}
-		if flowID != "" && flowInstance != "" && entityID != "" {
-			req.ProducerRoute = events.RouteIdentity{
+		flowInstance := strings.Trim(strings.TrimSpace(asString(req.State.StateCarrier.Metadata["flow_path"])), "/")
+		if flowID == "" {
+			source, err := events.NewRootRoutingSource(entityID)
+			if err != nil {
+				return ExecutionResult{}, fmt.Errorf("complete engine root producer source fixture: %w", err)
+			}
+			req.ProducerSource = source
+		} else {
+			if flowInstance == "" {
+				flowInstance = flowID
+			}
+			source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
 				FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID,
-			}.Normalized()
+			})
+			if err != nil {
+				return ExecutionResult{}, fmt.Errorf("complete engine producer source fixture: %w", err)
+			}
+			req.ProducerSource = source
 		}
 	}
 	return e.Execute(ctx, req)

@@ -106,12 +106,11 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 			}
 			execCtx := runtimeengine.ExecutionContext{
 				Request: runtimeengine.ExecutionRequest{
-					EntityID:      identity.NormalizeEntityID(entityID),
-					FlowID:        identity.NormalizeFlowID("repo-scaffold"),
-					NodeID:        identity.NormalizeNodeID("repo-scaffold-node"),
-					Event:         parent,
-					ChainDepth:    4,
-					ProducerRoute: tc.producerRoute,
+					EntityID:   identity.NormalizeEntityID(entityID),
+					FlowID:     identity.NormalizeFlowID("repo-scaffold"),
+					NodeID:     identity.NormalizeNodeID("repo-scaffold-node"),
+					Event:      parent,
+					ChainDepth: 4,
 					State: runtimeengine.StateSnapshot{
 						EntityID:     identity.NormalizeEntityID(entityID),
 						StateCarrier: runtimeengine.NewStateCarrier(stateMetadata, nil, nil),
@@ -119,7 +118,16 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 				},
 			}
 
-			pc := &PipelineCoordinator{}
+			mode := "static"
+			if tc.wantFlowPath != "repo-scaffold" {
+				mode = "template"
+			}
+			producerRoute := tc.producerRoute.Normalized()
+			if producerRoute.Empty() {
+				producerRoute = events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: tc.wantFlowPath, EntityID: entityID}
+			}
+			execCtx.Request.ProducerSource = mustActionResultRoutingSource(t, mode, producerRoute)
+			pc := &PipelineCoordinator{module: staticSemanticWorkflowModule{source: actionResultRouteSource(t, mode)}}
 			var intents []runtimeengine.EmitIntent
 			ctx := runtimeengine.WithActionEmitIntentCollector(testAuthorActivityContext(t, context.Background()), &intents)
 			queued, err := pc.queueArtifactRepoResultEvent(ctx, execCtx, tc.eventType, map[string]any{"ok": true})
@@ -133,8 +141,9 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 				t.Fatalf("queued intents = %d, want 1", len(intents))
 			}
 			emitted := intents[0].Event
-			if got := string(emitted.Type()); got != tc.eventType {
-				t.Fatalf("event type = %q, want %q", got, tc.eventType)
+			wantEventType := tc.wantFlowPath + "/" + tc.eventType
+			if got := string(emitted.Type()); got != wantEventType {
+				t.Fatalf("event type = %q, want %q", got, wantEventType)
 			}
 			if got := emitted.EntityID(); got != entityID {
 				t.Fatalf("entity_id = %q, want %q", got, entityID)
@@ -164,98 +173,6 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 			}
 			if got := intents[0].ParentEventID; got != parent.ID() {
 				t.Fatalf("intent parent_event_id = %q, want %q", got, parent.ID())
-			}
-		})
-	}
-}
-
-func TestActionResultProducerRouteCoversCurrentRouteShapes(t *testing.T) {
-	staticSource := actionResultRouteSource(t, "static")
-	templateSource := actionResultRouteSource(t, "template")
-	cases := []struct {
-		name          string
-		source        semanticview.Source
-		stateFlowPath string
-		eventFlowPath string
-		targetSet     []events.RouteIdentity
-		wantFlowPath  string
-	}{
-		{
-			name:          "static service ignores child inbound without admitted route",
-			source:        staticSource,
-			eventFlowPath: "repo-scaffold/child-1",
-			wantFlowPath:  "repo-scaffold",
-		},
-		{
-			name:         "static root input with no route uses service owner",
-			source:       staticSource,
-			wantFlowPath: "repo-scaffold",
-		},
-		{
-			name:   "static target set receiver does not become producer route",
-			source: staticSource,
-			targetSet: []events.RouteIdentity{{
-				FlowID:       "repo-scaffold",
-				FlowInstance: "repo-scaffold/child-1",
-				EntityID:     "child-ent",
-			}},
-			wantFlowPath: "repo-scaffold",
-		},
-		{
-			name:          "template nested state route remains concrete producer",
-			source:        templateSource,
-			stateFlowPath: "repo-scaffold/parent/child",
-			wantFlowPath:  "repo-scaffold/parent/child",
-		},
-		{
-			name:          "template nested inbound fallback remains concrete producer",
-			source:        templateSource,
-			eventFlowPath: "repo-scaffold/parent/child",
-			wantFlowPath:  "repo-scaffold/parent/child",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			eventEnvelope := events.EventEnvelope{}
-			if tc.eventFlowPath != "" {
-				eventEnvelope = events.EnvelopeForFlowInstance(eventEnvelope, tc.eventFlowPath)
-			}
-			if len(tc.targetSet) > 0 {
-				eventEnvelope = events.EnvelopeForTargetSet(eventEnvelope, tc.targetSet)
-			}
-			evt := eventtest.RunCreatingRootIngress(
-				"evt-parent",
-				"repo_scaffold.repo_commit_requested",
-				"workflow-runtime",
-				"",
-				json.RawMessage(`{"request_id":"req-1"}`),
-				0,
-				"run-1",
-				"",
-				eventEnvelope,
-				time.Unix(1_700_000_000, 0).UTC())
-			stateMetadata := map[string]any{}
-			if tc.stateFlowPath != "" {
-				stateMetadata["flow_path"] = tc.stateFlowPath
-			}
-			route := actionResultProducerRoute(
-				tc.source,
-				"repo-scaffold",
-				"ent-repo",
-				evt,
-				runtimeengine.StateSnapshot{
-					EntityID:     identity.NormalizeEntityID("ent-repo"),
-					StateCarrier: runtimeengine.NewStateCarrier(stateMetadata, nil, nil),
-				},
-				events.RouteIdentity{},
-			)
-			wantRoute := events.RouteIdentity{
-				FlowID:       "repo-scaffold",
-				FlowInstance: tc.wantFlowPath,
-				EntityID:     "ent-repo",
-			}.Normalized()
-			if route != wantRoute {
-				t.Fatalf("producer route = %#v, want %#v", route, wantRoute)
 			}
 		})
 	}
@@ -346,6 +263,23 @@ repo_scaffold.repo_commit_succeeded: {}
 repo_scaffold.repo_commit_failed: {}
 `,
 	})
+}
+
+func mustActionResultRoutingSource(t testing.TB, mode string, route events.RouteIdentity) events.RoutingSource {
+	t.Helper()
+	var (
+		source events.RoutingSource
+		err    error
+	)
+	if mode == "template" {
+		source, err = events.NewConcreteTemplateInstanceRoutingSource(route)
+	} else {
+		source, err = events.NewStaticFlowRoutingSource(route)
+	}
+	if err != nil {
+		t.Fatalf("construct %s action-result routing source: %v", mode, err)
+	}
+	return source
 }
 
 func TestRuntimeActionResultEventProducerInventoryOnlyArtifactRepoQueuesResultEvents(t *testing.T) {

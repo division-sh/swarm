@@ -74,6 +74,7 @@ func CopyTemplateInstanceRoute(t testing.TB, opts TemplateInstanceRouteOptions) 
 		secondConnect = "  - from: producer.deploy_done\n    to: consumer.deploy_audited\n"
 		secondEvent := "deploy.done"
 		if opts.SecondPin == TemplateInstanceSecondPinDistinctEvent {
+			secondConnect += "    adapter: deploy_done_to_deploy_audited\n"
 			secondEvent = "deploy.audited"
 			secondEventSchema = "deploy.audited:\n  " + producerField + ": string\n"
 			secondHandler = "    " + secondEvent + ": {}\n"
