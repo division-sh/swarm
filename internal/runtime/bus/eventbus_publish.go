@@ -22,6 +22,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -361,6 +362,8 @@ func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 		DeliveryReceipt:   p.deliveryReceipt,
 		ReplayScope:       runtimepipelineobligation.ScopeSubscribed,
 		PipelineClaim:     p.publicationClaim.Claim(),
+		ReplyCreations:    append([]runtimereplycontext.Record(nil), p.plan.ReplyCreations...),
+		ReplyClaims:       append([]runtimereplycontext.ClaimCommand(nil), p.plan.ReplyClaims...),
 	}
 	if failure := p.plan.TargetFailure; !failure.Empty() {
 		disposition := runtimepipelineobligation.DeadLetter(failure.Code(), targetDeliveryFailureEnvelope(failure))
@@ -635,6 +638,8 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 		Event: admitted, DeliveryRoutes: routes, DeliveryAuthority: authority,
 		DeliveryReceipt: prepared.deliveryReceipt, ReplayScope: replayScope,
 		PipelineClaim: publicationClaim.Claim(), Disposition: initialDisposition, DeadLetter: initialDeadLetter,
+		ReplyCreations: append([]runtimereplycontext.Record(nil), inboundPlan.ReplyCreations...),
+		ReplyClaims:    append([]runtimereplycontext.ClaimCommand(nil), inboundPlan.ReplyClaims...),
 	}); err != nil {
 		return PreparedPublish{}, fmt.Errorf("finalize event publish: %w", err)
 	}

@@ -46,6 +46,7 @@ type templateInstanceLifecycleOwner struct {
 	routeTable      *RouteTable
 	loadDescriptors connectRoutePlanDescriptorLoader
 	activate        runtimepipeline.FlowInstanceActivator
+	plan            runtimepipeline.FlowInstanceActivationPlanner
 }
 
 type TemplateInstanceLifecycleDecision struct {
@@ -56,16 +57,18 @@ type TemplateInstanceLifecycleDecision struct {
 	KeyDigest     string
 	KeyMaterial   []runtimecontracts.TemplateInstanceKeyValue
 	SourceEventID string
+	Activation    *runtimepipeline.FlowInstanceActivationPlan
 	activation    *runtimepipeline.FlowInstanceActivationRequest
 	receiver      runtimepinrouting.ConnectRoutePlanEndpoint
 }
 
-func newTemplateInstanceLifecycleOwner(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader, activate runtimepipeline.FlowInstanceActivator) templateInstanceLifecycleOwner {
+func newTemplateInstanceLifecycleOwner(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader, activate runtimepipeline.FlowInstanceActivator, planner runtimepipeline.FlowInstanceActivationPlanner) templateInstanceLifecycleOwner {
 	return templateInstanceLifecycleOwner{
 		source:          source,
 		routeTable:      routeTable,
 		loadDescriptors: loadDescriptors,
 		activate:        activate,
+		plan:            planner,
 	}
 }
 
@@ -178,6 +181,23 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 	}
 	if o.activate == nil {
 		return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureLifecycleUnavailable}, TemplateInstanceLifecycleDecision{}, true, nil
+	}
+	if templateInstanceLifecyclePreview(ctx) {
+		req, decision, failure := o.activationRequest(evt, plan, instanceContract, keyMaterial)
+		if !failure.Empty() {
+			return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: failure}, TemplateInstanceLifecycleDecision{}, true, nil
+		}
+		if o.plan == nil {
+			return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureLifecycleUnavailable}, TemplateInstanceLifecycleDecision{}, true, nil
+		}
+		activation, err := o.plan.PrepareFlowInstanceActivation(ctx, req)
+		if err != nil {
+			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, fmt.Errorf("plan connect-time template instance %s: %w", req.Instance.InstancePath, err)
+		}
+		decision.Activation = &activation
+		decision.Action = templateInstanceLifecycleActionPreviewCreate
+		route := plan.ReceiverRoute(req.Instance.InstancePath, req.Instance.EntityID)
+		return templateInstanceLifecycleMaterialization(plan, []events.RouteIdentity{route}), decision, true, nil
 	}
 	req, decision, failure := o.activationRequest(evt, plan, instanceContract, keyMaterial)
 	if !failure.Empty() {

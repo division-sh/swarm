@@ -89,6 +89,10 @@ func createPostgresReplyContext(ctx context.Context, db *sql.Tx, record runtimer
 	return resolveReplyContextCreateConflict(record, existing, loadErr)
 }
 
+func (s *PostgresStore) createReplyContextTx(ctx context.Context, tx *sql.Tx, record runtimereplycontext.Record) error {
+	return createPostgresReplyContext(ctx, tx, record)
+}
+
 func (s *SQLiteRuntimeStore) CreateReplyContext(ctx context.Context, record runtimereplycontext.Record) error {
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		return createSQLiteReplyContextTx(ctx, tx, record)
@@ -136,6 +140,10 @@ func createSQLiteReplyContextTx(ctx context.Context, db *sql.Tx, record runtimer
 	}
 	existing, loadErr := loadSQLiteReplyContext(ctx, db, record.ID)
 	return resolveReplyContextCreateConflict(record, existing, loadErr)
+}
+
+func (s *SQLiteRuntimeStore) createReplyContextTx(ctx context.Context, tx *sql.Tx, record runtimereplycontext.Record) error {
+	return createSQLiteReplyContextTx(ctx, tx, record)
 }
 
 func resolveReplyContextCreateConflict(record, existing runtimereplycontext.Record, loadErr error) error {
@@ -284,6 +292,50 @@ func claimLoadedReplyContextTx(ctx context.Context, db *sql.Tx, record runtimere
 	record.TerminalAt = &now
 	record.UpdatedAt = now
 	return record.Normalized(), runtimereplycontext.ClaimAccepted, nil
+}
+
+func (s *PostgresStore) claimReplyContextTx(ctx context.Context, tx *sql.Tx, command runtimereplycontext.ClaimCommand) error {
+	command = command.Normalized()
+	if err := command.Validate(); err != nil {
+		return err
+	}
+	loaded, err := loadPostgresReplyContext(ctx, tx, command.Expected.ID, true)
+	if err != nil {
+		return err
+	}
+	return commitExpectedReplyContextClaim(ctx, tx, loaded, command, true)
+}
+
+func (s *SQLiteRuntimeStore) claimReplyContextTx(ctx context.Context, tx *sql.Tx, command runtimereplycontext.ClaimCommand) error {
+	command = command.Normalized()
+	if err := command.Validate(); err != nil {
+		return err
+	}
+	loaded, err := loadSQLiteReplyContext(ctx, tx, command.Expected.ID)
+	if err != nil {
+		return err
+	}
+	return commitExpectedReplyContextClaim(ctx, tx, loaded, command, false)
+}
+
+func commitExpectedReplyContextClaim(ctx context.Context, tx *sql.Tx, loaded runtimereplycontext.Record, command runtimereplycontext.ClaimCommand, postgres bool) error {
+	expected := command.Expected.Normalized()
+	loaded = loaded.Normalized()
+	if !loaded.SameIdentity(expected) || loaded.State != expected.State || loaded.AcceptedReplyEventID != expected.AcceptedReplyEventID {
+		return fmt.Errorf("reply context %s changed after publication planning", expected.ID)
+	}
+	_, outcome, err := claimLoadedReplyContextTx(ctx, tx, loaded, command.ReplyEventID, postgres)
+	if err != nil {
+		return err
+	}
+	switch outcome {
+	case runtimereplycontext.ClaimAccepted, runtimereplycontext.ClaimIdempotent:
+		return nil
+	case runtimereplycontext.ClaimTerminal:
+		return fmt.Errorf("reply context %s was already claimed by event %s", expected.ID, loaded.AcceptedReplyEventID)
+	default:
+		return fmt.Errorf("reply context %s returned invalid claim outcome %q", expected.ID, outcome)
+	}
 }
 
 const postgresReplyContextSelect = `

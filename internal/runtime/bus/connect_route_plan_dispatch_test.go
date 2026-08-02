@@ -356,7 +356,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsBeforeReplyContextMutation(t *
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	replyStore := &connectRoutePlanReplyMutationStore{}
-	resolver := newConnectRoutePlanResolver(source, routeTable, nil, nil, replyStore)
+	resolver := newConnectRoutePlanResolver(source, routeTable, nil, nil, nil, replyStore)
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(), "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
 		Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-entity")},
 	}, time.Now().UTC())
@@ -1528,109 +1528,6 @@ func TestCompiledConnectEvaluationStaleSnapshotReevaluatesBeforeMutation(t *test
 	}
 }
 
-func TestCompiledConnectEvaluationPostCheckGenerationMutationCannotInterleaveLifecycleOrReply(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		staged bool
-	}{
-		{name: "base route table"},
-		{name: "transaction-staged route table", staged: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, false)
-			routeTable, err := DeriveRouteTable(source)
-			if err != nil {
-				t.Fatalf("derive base route table: %v", err)
-			}
-			ctx := context.Background()
-			generationOwner := routeTable
-			if tc.staged {
-				staged, err := DeriveRouteTable(source)
-				if err != nil {
-					t.Fatalf("derive transaction-staged route table: %v", err)
-				}
-				ctx = context.WithValue(ctx, transactionRouteOverlayKey{}, &transactionRouteOverlay{table: staged})
-				generationOwner = staged
-			}
-
-			replyStore := &connectRoutePlanReplyMutationStore{}
-			activationEntered := make(chan struct{})
-			releaseActivation := make(chan struct{})
-			var activations atomic.Int32
-			resolver := connectRoutePlanResolver{
-				source:     source,
-				routeTable: routeTable,
-				lifecycle: newTemplateInstanceLifecycleOwner(source, routeTable, nil, func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
-					close(activationEntered)
-					<-releaseActivation
-					activations.Add(1)
-					return nil
-				}),
-				replyStore: replyStore,
-			}
-			activation := runtimepipeline.FlowInstanceActivationRequest{}
-			evaluated := connectRoutePlanDispatch{
-				lifecycleApplications: []connectLifecycleApplication{{
-					decision: TemplateInstanceLifecycleDecision{
-						Action:     templateInstanceLifecycleActionPreviewCreate,
-						activation: &activation,
-					},
-				}},
-				replyApplications: []connectReplyApplication{{
-					kind:   connectReplyApplicationCreate,
-					record: runtimereplycontext.Record{ID: "generation-linearization"},
-				}},
-			}
-
-			staleSnapshot := resolver.captureSnapshot(ctx)
-			if err := generationOwner.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
-				Identity: runtimeflowidentity.DeriveRoute("consumer", "before-apply"),
-			}); err != nil {
-				t.Fatalf("advance route generation before apply: %v", err)
-			}
-			if err := resolver.applyEvaluationAtSnapshot(ctx, staleSnapshot, events.Event{}, evaluated); !errors.As(err, new(staleConnectRoutePlanSnapshotError)) {
-				t.Fatalf("stale apply error = %v, want typed stale snapshot", err)
-			}
-			if activations.Load() != 0 || replyStore.creates != 0 {
-				t.Fatalf("stale apply effects = activations:%d replies:%d, want none", activations.Load(), replyStore.creates)
-			}
-
-			currentSnapshot := resolver.captureSnapshot(ctx)
-			applyDone := make(chan error, 1)
-			go func() {
-				applyDone <- resolver.applyEvaluationAtSnapshot(ctx, currentSnapshot, events.Event{}, evaluated)
-			}()
-			<-activationEntered
-
-			mutationStarted := make(chan struct{})
-			mutationDone := make(chan error, 1)
-			go func() {
-				close(mutationStarted)
-				mutationDone <- generationOwner.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
-					Identity: runtimeflowidentity.DeriveRoute("consumer", "during-apply"),
-				})
-			}()
-			<-mutationStarted
-			select {
-			case err := <-mutationDone:
-				t.Fatalf("route generation mutation interleaved before lifecycle/reply completion: %v", err)
-			case <-time.After(50 * time.Millisecond):
-			}
-
-			close(releaseActivation)
-			if err := <-applyDone; err != nil {
-				t.Fatalf("generation-linearized apply: %v", err)
-			}
-			if err := <-mutationDone; err != nil {
-				t.Fatalf("route generation mutation after apply: %v", err)
-			}
-			if activations.Load() != 1 || replyStore.creates != 1 {
-				t.Fatalf("linearized apply effects = activations:%d replies:%d, want one each", activations.Load(), replyStore.creates)
-			}
-		})
-	}
-}
-
 func TestCompiledConnectEvaluationStaleSnapshotFailureLeavesLifecycleUnchanged(t *testing.T) {
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, false)
 	store := &connectRoutePlanStaleSnapshotStore{
@@ -1951,7 +1848,7 @@ func TestTemplateInstanceLifecycleUsesResolutionModeWithoutContractPolicyFallbac
 				source = connectRoutePlanCarriedKeyResolutionSource(t, tc.mode)
 			}
 			plan := mustInstanceKeyConnectRoutePlan(t, source)
-			owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil)
+			owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil, nil)
 			materialization, decision, handled, err := owner.Materialize(context.Background(), evt, plan, values, descriptors)
 			if err != nil {
 				t.Fatalf("Materialize: %v", err)
@@ -1982,7 +1879,7 @@ func TestTemplateInstanceLifecycleDecisionAndActivationConfigContainNoPolicyFact
 	}
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil)
+	owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil, nil)
 	request, decision, failure := owner.activationRequest(evt, plan, instanceContract, []runtimecontracts.TemplateInstanceKeyValue{{
 		Field: plan.InstanceKey().Field(),
 		Value: "acct-1",
@@ -3549,7 +3446,7 @@ func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventN
 		}}, nil)),
 		generation: generation, authorizations: []runtimeprovideroutput.Authorization{authorization},
 	}
-	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil)
+	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil, nil)
 	externalSource, err := events.NewExternalIngressRoutingSource("consumer", eventtest.UUID("provider-ingress"), events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatalf("external routing source: %v", err)

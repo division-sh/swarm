@@ -12,6 +12,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/google/uuid"
 )
 
@@ -198,6 +200,9 @@ func routePlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRout
 	routePlan.RoutedRecipients = dedupeSubscribers(connectPlan.RoutedRecipients)
 	routePlan.ExtraDetail = cloneAnyMap(connectPlan.ExtraDetail)
 	routePlan.ReplyContextConsumed = connectPlan.ReplyContextConsumed
+	routePlan.ActivationPlans = append([]runtimepipeline.FlowInstanceActivationPlan(nil), connectPlan.ActivationPlans...)
+	routePlan.ReplyCreations = append([]runtimereplycontext.Record(nil), connectPlan.ReplyCreations...)
+	routePlan.ReplyClaims = append([]runtimereplycontext.ClaimCommand(nil), connectPlan.ReplyClaims...)
 	return routePlan.Normalized()
 }
 

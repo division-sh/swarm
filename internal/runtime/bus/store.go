@@ -15,6 +15,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -60,6 +61,8 @@ type CommitPublishRequest struct {
 	PipelineClaim     runtimepipelineobligation.Claim
 	Disposition       *runtimepipelineobligation.Disposition
 	DeadLetter        *runtimedeadletters.Record
+	ReplyCreations    []runtimereplycontext.Record
+	ReplyClaims       []runtimereplycontext.ClaimCommand
 }
 
 type CommitSelectedForkEventRequest struct {

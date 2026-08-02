@@ -25,7 +25,75 @@ type FlowInstanceActivationRequest struct {
 	OccurredAt     time.Time
 }
 
+// FlowInstanceActivationPlan is the exact durable command derived from one
+// admitted activation request. It contains semantic facts only: selected-store
+// adapters own persistence and return post-commit evidence separately.
+type FlowInstanceActivationPlan struct {
+	Instance            WorkflowInstance
+	Identity            runtimeflowidentity.Instance
+	Readiness           DynamicFlowRuntimeReadinessPlan
+	ActivationVariables map[string]string
+	OccurredAt          time.Time
+}
+
+func (p FlowInstanceActivationPlan) Normalized() (FlowInstanceActivationPlan, error) {
+	p.Instance.Config = cloneMap(p.Instance.Config)
+	p.Instance.Metadata = cloneMap(p.Instance.Metadata)
+	readiness, err := p.Readiness.Normalized()
+	if err != nil {
+		return FlowInstanceActivationPlan{}, fmt.Errorf("flow instance activation readiness: %w", err)
+	}
+	p.Readiness = readiness
+	p.Identity = readiness.Identity
+	p.Instance.RuntimeReadiness = &p.Readiness
+	p.ActivationVariables = cloneStringMap(p.ActivationVariables)
+	p.OccurredAt = p.OccurredAt.UTC()
+	return p, nil
+}
+
+func (p FlowInstanceActivationPlan) Validate() error {
+	var err error
+	p, err = p.Normalized()
+	if err != nil {
+		return err
+	}
+	if !p.Identity.Route().Valid() || p.Instance.StorageRef == "" || p.Instance.InstanceID == "" {
+		return fmt.Errorf("flow instance activation plan requires exact instance identity")
+	}
+	if p.Instance.StorageRef != p.Identity.InstancePath || p.Instance.InstanceID != p.Identity.InstanceID {
+		return fmt.Errorf("flow instance activation plan identity does not match workflow instance")
+	}
+	if p.OccurredAt.IsZero() {
+		return fmt.Errorf("flow instance activation plan requires exact occurrence time")
+	}
+	return nil
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
 type FlowInstanceActivator func(context.Context, FlowInstanceActivationRequest) error
+
+type FlowInstanceActivationPlanner interface {
+	PrepareFlowInstanceActivation(context.Context, FlowInstanceActivationRequest) (FlowInstanceActivationPlan, error)
+}
+
+type FlowInstanceActivationPlannerFunc func(context.Context, FlowInstanceActivationRequest) (FlowInstanceActivationPlan, error)
+
+func (fn FlowInstanceActivationPlannerFunc) PrepareFlowInstanceActivation(ctx context.Context, req FlowInstanceActivationRequest) (FlowInstanceActivationPlan, error) {
+	if fn == nil {
+		return FlowInstanceActivationPlan{}, fmt.Errorf("flow instance activation planner is required")
+	}
+	return fn(ctx, req)
+}
 
 type FlowInstanceDeactivationRequest struct {
 	ContractBundle semanticview.Source

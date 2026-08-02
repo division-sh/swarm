@@ -73,6 +73,7 @@ type EventBus struct {
 	logger                      LoggerHook
 	semanticSource              semanticview.Source
 	templateInstanceActivator   runtimepipeline.FlowInstanceActivator
+	templateInstancePlanner     runtimepipeline.FlowInstanceActivationPlanner
 	payloadValidator            PayloadValidator
 	recipientPlanAdmissionGuard PublishRecipientPlanAdmissionGuard
 	recipientPlanMaterializer   PublishRecipientPlanMaterializer
@@ -301,6 +302,7 @@ type EventBusOptions struct {
 	ContractBundle              semanticview.Source
 	RouteTable                  *RouteTable
 	TemplateInstanceActivator   runtimepipeline.FlowInstanceActivator
+	TemplateInstancePlanner     runtimepipeline.FlowInstanceActivationPlanner
 	PayloadValidator            PayloadValidator
 	RecipientPlanAdmissionGuard PublishRecipientPlanAdmissionGuard
 	RecipientPlanMaterializer   PublishRecipientPlanMaterializer
@@ -545,6 +547,7 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		interceptorProvider:         opts.InterceptorProvider,
 		semanticSource:              semanticSource,
 		templateInstanceActivator:   opts.TemplateInstanceActivator,
+		templateInstancePlanner:     opts.TemplateInstancePlanner,
 		payloadValidator:            opts.PayloadValidator,
 		recipientPlanAdmissionGuard: opts.RecipientPlanAdmissionGuard,
 		recipientPlanMaterializer:   opts.RecipientPlanMaterializer,
@@ -593,7 +596,7 @@ func (eb *EventBus) rebuildRoutePlanners() {
 	if eb == nil {
 		return
 	}
-	eb.connectRoutePlanner = newConnectRoutePlanResolver(eb.semanticSource, eb.routeTable, eb.PinRoutingDescriptors, eb.templateInstanceActivator, eb.durable.ReplyContext)
+	eb.connectRoutePlanner = newConnectRoutePlanResolver(eb.semanticSource, eb.routeTable, eb.PinRoutingDescriptors, eb.templateInstanceActivator, eb.templateInstancePlanner, eb.durable.ReplyContext)
 	eb.connectRoutePlanner.loadAgents = eb.activeAgentDescriptors
 	eb.deliveryPlanner = eb.newEventBusDeliveryPlanner()
 }

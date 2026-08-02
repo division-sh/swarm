@@ -96,20 +96,10 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "backend selection, selected-store construction, workspace lifecycle construction, and DB close plumbing are allowed construction/process boundaries",
 		},
-		"internal/serveapp/store_facade.go": {
-			Classification: rawSQLConstructionBoundary,
-			Issue:          1783,
-			Reason:         "selected facade owns only the exact construction-time process database close capability",
-		},
 		"internal/serveapp/store_roles.go": {
 			Classification: rawSQLConstructionBoundary,
 			Issue:          1783,
 			Reason:         "compile-time selected store role assertions are construction/model proof, not producer-side concrete store capability authority",
-		},
-		"internal/cliapp/workspace_lifecycle.go": {
-			Classification: rawSQLWorkspaceProcessBoundary,
-			Issue:          1783,
-			Reason:         "workspace lifecycle construction receives the selected SQL database as process infrastructure",
 		},
 		"internal/dashboard/server/conversations_sql.go": {
 			Classification: rawSQLDashboardDigestReadBoundary,
@@ -159,16 +149,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			SpecRef:        "platform-spec.yaml#engine.timer_model.dynamic_flow_runtime_readiness",
 			Reason:         "the run-scoped readiness owner observes transaction presence only to defer revised topology reconciliation until the selected source-revision mutation commits",
 		},
-		"internal/runtime/dbtx.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1783,
-			Reason:         "runtime DB/TX helpers are explicit runtime unit-of-work boundary primitives, not selected capability authority",
-		},
-		"internal/runtime/deadletters/record.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1783,
-			Reason:         "dead-letter persistence is an explicit runtime SQL owner used from event/runtime transaction boundaries",
-		},
 		"internal/runtime/mutationlog/mutationlog.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,
@@ -180,79 +160,10 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			SpecRef:        "platform-spec.yaml#platform_tables.author_activity_story",
 			Reason:         "author activity mutation is the canonical ordered story transaction owner for registered runtime producers",
 		},
-		"internal/runtime/authoractivity/read.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          2010,
-			SpecRef:        "platform-spec.yaml#platform_tables.author_activity_story",
-			Reason:         "author activity read is the canonical backend-neutral story occurrence reader",
-		},
 		"internal/runtime/pipeline/activity_engine.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,
 			Reason:         "pipeline activity engine reads through the existing pipeline SQL owner boundary",
-		},
-		"internal/runtime/pipeline/activity_journal.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1783,
-			Reason:         "pipeline activity journal writes through the existing pipeline transaction owner",
-		},
-		"internal/runtime/pipeline/author_activity.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          2010,
-			SpecRef:        "platform-spec.yaml#platform_tables.author_activity_story",
-			Reason:         "pipeline author activity bridges registered pipeline producers into the canonical ordered story owner",
-		},
-		"internal/runtime/pipeline/coordinator.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1783,
-			Reason:         "pipeline coordinator owns pipeline SQL dependency injection, not selected capability inference",
-		},
-		"internal/store/internal/delivery/adapter.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          2105,
-			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.selected_runtime_mutation_unit_of_work",
-			Reason:         "the private backend-neutral delivery adapter is the sole executable-delivery SQL owner below the typed lifecycle port",
-		},
-		"internal/store/internal/delivery/read_projections.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          2105,
-			SpecRef:        "platform-spec.yaml#platform_tables.event_deliveries",
-			Reason:         "the private backend-neutral delivery adapter owns bounded purpose-specific lifecycle read projections before canonical hydration",
-		},
-		"internal/runtime/decisioncard/run_summary_store.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          2111,
-			SpecRef:        "platform-spec.yaml#run_model.normal_completion",
-			Reason:         "the decision-card owner privately validates decision and gate evidence into the typed normal-completion summary",
-		},
-		"internal/runtime/effects/run_summary.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          2111,
-			SpecRef:        "platform-spec.yaml#run_model.normal_completion",
-			Reason:         "the external-effect owner privately validates operation, attempt, and reservation evidence into the typed normal-completion summary",
-		},
-		"internal/runtime/entityruntime/run_summary.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          2111,
-			SpecRef:        "platform-spec.yaml#run_model.normal_completion",
-			Reason:         "the entity-runtime owner privately validates terminal descriptors into the typed normal-completion summary",
-		},
-		"internal/runtime/sessions/run_summary.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          2111,
-			SpecRef:        "platform-spec.yaml#run_model.normal_completion",
-			Reason:         "the session owner privately validates complete lease shapes into the typed normal-completion summary",
-		},
-		"internal/runtime/pipeline/engine_adapter.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1783,
-			Reason:         "pipeline engine adapter uses selected mutation ownership and diagnostic SQL reads under the pipeline owner boundary",
-		},
-		"internal/runtime/runforkexecution/store_ports.go": {
-			Classification: rawSQLOptionalProductBoundary,
-			Issue:          2148,
-			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork",
-			Reason:         "the exact selected-fork execution dependency temporarily carries the Postgres runtime SQL mechanic assigned to #2148; execution consumers no longer inspect concrete store shape",
 		},
 		"internal/runtime/pipeline/runtime_support.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
@@ -264,20 +175,10 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          2007,
 			Reason:         "standing reconciliation, terminalization, and publication admission are the selected-store transaction owner for declaration-owned standing services",
 		},
-		"internal/runtime/pipeline/workflow_entity_type_repair.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1783,
-			Reason:         "workflow entity-type repair is an explicit pipeline repair SQL owner",
-		},
 		"internal/runtime/pipeline/workflow_instance_store.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,
 			Reason:         "workflow instance store is the explicit pipeline instance SQL owner for Postgres/default query forms",
-		},
-		"internal/runtime/pipeline/workflow_instance_route_recovery.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          2064,
-			Reason:         "workflow instance route recovery is the run-independent read projection over exact active flow_instances identity and config",
 		},
 		"internal/runtime/pipeline/workflow_instance_readiness.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
@@ -302,20 +203,10 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			SpecRef:        "platform-spec.yaml#engine.timer_model",
 			Reason:         "the closed workflow lifecycle effect applier requires the selected mutation context so timer, join, and gate reactions commit with the accepted event",
 		},
-		"internal/runtime/pipeline/workflow_gate_fence.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1986,
-			Reason:         "gate activation and card fencing are explicit selected-store transaction owners",
-		},
 		"internal/runtime/pipeline/workflow_gate_lifecycle.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1986,
 			Reason:         "gate stage entry and exit require the selected pipeline transaction owner so activation and card state cannot commit separately",
-		},
-		"internal/runtime/pipeline/workflow_nodes.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1783,
-			Reason:         "workflow node construction carries pipeline SQL dependency to explicit node/unit-of-work owners",
 		},
 		"internal/runtime/pipeline/workflow_timer_owner.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
@@ -328,27 +219,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          2094,
 			SpecRef:        "platform-spec.yaml#engine.timer_model",
 			Reason:         "the typed workflow-timer store implements exact selected SQLite/PostgreSQL row transitions inside the existing pipeline mutation boundary",
-		},
-		"internal/runtime/timerobligation/reader.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          2113,
-			SpecRef:        "platform-spec.yaml#engine.timer_model",
-			Reason:         "the private backend-neutral timer-obligation adapter owns the single observation-time active, due, and recoverable projection",
-		},
-		"internal/runtime/pipeline/workflow_transitions.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          1783,
-			Reason:         "workflow transition receipts are an explicit pipeline SQL read/write owner",
-		},
-		"internal/runtime/workspace/host_manager.go": {
-			Classification: rawSQLWorkspaceProcessBoundary,
-			Issue:          1783,
-			Reason:         "host workspace lifecycle persistence is an allowed workspace/process SQL boundary, not runtime selected-store authority",
-		},
-		"internal/runtime/workspace/manager.go": {
-			Classification: rawSQLWorkspaceProcessBoundary,
-			Issue:          1783,
-			Reason:         "Docker workspace lifecycle persistence is an allowed workspace/process SQL boundary, not runtime selected-store authority",
 		},
 		"internal/testutil/postgres.go": {
 			Classification: rawSQLTestSupportBoundary,

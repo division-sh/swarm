@@ -13,6 +13,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
@@ -24,6 +25,8 @@ type eventCommitTxStore interface {
 	commitInitialPipelineScopeTx(context.Context, *sql.Tx, string, runtimepipelineobligation.CommittedScope) error
 	commitInitialPipelineDispositionTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Claim, runtimepipelineobligation.Disposition) error
 	recordDeadLetterTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, runtimedeadletters.Record, bool) error
+	createReplyContextTx(context.Context, *sql.Tx, runtimereplycontext.Record) error
+	claimReplyContextTx(context.Context, *sql.Tx, runtimereplycontext.ClaimCommand) error
 }
 
 type sqlPublishCommitter struct {
@@ -113,6 +116,16 @@ func (c sqlPublishCommitter) commitNamedEvent(ctx context.Context, operation str
 }
 
 func (c sqlPublishCommitter) commitInitialSideEffects(ctx context.Context, req runtimebus.CommitPublishRequest, requirePublicationClaim bool) error {
+	for _, record := range req.ReplyCreations {
+		if err := c.store.createReplyContextTx(ctx, c.tx, record); err != nil {
+			return fmt.Errorf("commit reply context creation: %w", err)
+		}
+	}
+	for _, claim := range req.ReplyClaims {
+		if err := c.store.claimReplyContextTx(ctx, c.tx, claim); err != nil {
+			return fmt.Errorf("commit reply context claim: %w", err)
+		}
+	}
 	if requirePublicationClaim {
 		if err := c.store.requirePipelinePublicationClaimTx(ctx, c.tx, req.Event.ID(), req.PipelineClaim); err != nil {
 			return fmt.Errorf("executable event commit requires its current publication claim: %w", err)
@@ -215,7 +228,7 @@ func (s *PostgresStore) CommitSelectedForkEvent(ctx context.Context, req runtime
 		return runtimebus.EventAppendOutcomeUnknown, runtimepipelineobligation.ErrStaleClaim
 	}
 	return commitSelectedForkEvent(claimCtx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return fn(txctx, tx, nil) })
+		return s.runPrivateAuthorActivityMutation(ctx, fn)
 	}, insertPostgresSelectedForkExecutionLineageTx, req)
 }
 
@@ -226,7 +239,7 @@ func (s *SQLiteRuntimeStore) CommitSelectedForkEvent(ctx context.Context, req ru
 	}
 	defer state.operationMu.Unlock()
 	return commitSelectedForkEvent(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return fn(txctx, tx, nil) })
+		return s.runPrivateAuthorActivityMutation(ctx, "sqlite selected-fork event commit", fn)
 	}, insertSQLiteSelectedForkExecutionLineageTx, req)
 }
 
@@ -250,13 +263,13 @@ func commitPublish(ctx context.Context, store eventCommitTxStore, run func(conte
 
 func (s *PostgresStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	return commitPublish(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return fn(txctx, tx, nil) })
+		return s.runPrivateAuthorActivityMutation(ctx, fn)
 	}, plan)
 }
 
 func (s *SQLiteRuntimeStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
 	return commitPublish(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return fn(txctx, tx, nil) })
+		return s.runPrivateAuthorActivityMutation(ctx, "sqlite publication commit", fn)
 	}, plan)
 }
 
@@ -278,13 +291,13 @@ func commitRuntimeLogEvent(ctx context.Context, store eventCommitTxStore, run fu
 
 func (s *PostgresStore) commitRuntimeLogEvent(ctx context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
 	return commitRuntimeLogEvent(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return fn(txctx, tx, nil) })
+		return s.runPrivateAuthorActivityMutation(ctx, fn)
 	}, admitted)
 }
 
 func (s *SQLiteRuntimeStore) commitRuntimeLogEvent(ctx context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
 	return commitRuntimeLogEvent(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return fn(txctx, tx, nil) })
+		return s.runPrivateAuthorActivityMutation(ctx, "sqlite runtime-log event commit", fn)
 	}, admitted)
 }
 

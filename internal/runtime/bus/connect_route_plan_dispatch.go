@@ -73,38 +73,19 @@ type connectRoutePlanResolver struct {
 }
 
 type connectRoutePlanDispatch struct {
-	Matched               bool
-	Failure               runtimepinrouting.TargetFailure
-	LiveRecipients        []RoutePlanLiveRecipient
-	DeliveryIntents       []RoutePlanDeliveryIntent
-	RoutedRecipients      []Subscriber
-	ExtraDetail           map[string]any
-	ReplyContextConsumed  bool
-	lifecycleApplications []connectLifecycleApplication
-	replyApplications     []connectReplyApplication
+	Matched              bool
+	Failure              runtimepinrouting.TargetFailure
+	LiveRecipients       []RoutePlanLiveRecipient
+	DeliveryIntents      []RoutePlanDeliveryIntent
+	RoutedRecipients     []Subscriber
+	ExtraDetail          map[string]any
+	ReplyContextConsumed bool
+	ActivationPlans      []runtimepipeline.FlowInstanceActivationPlan
+	ReplyCreations       []runtimereplycontext.Record
+	ReplyClaims          []runtimereplycontext.ClaimCommand
 }
 
-type connectLifecycleApplication struct {
-	plan     runtimepinrouting.ConnectRoutePlan
-	decision TemplateInstanceLifecycleDecision
-}
-
-type connectReplyApplicationKind uint8
-
-const (
-	connectReplyApplicationCreate connectReplyApplicationKind = iota + 1
-	connectReplyApplicationClaim
-)
-
-type connectReplyApplication struct {
-	kind        connectReplyApplicationKind
-	record      runtimereplycontext.Record
-	contextID   string
-	eventID     string
-	wantOutcome runtimereplycontext.ClaimOutcome
-}
-
-func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader, activator runtimepipeline.FlowInstanceActivator, replyStore runtimereplycontext.Store) connectRoutePlanResolver {
+func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader, activator runtimepipeline.FlowInstanceActivator, planner runtimepipeline.FlowInstanceActivationPlanner, replyStore runtimereplycontext.Store) connectRoutePlanResolver {
 	if source == nil {
 		return connectRoutePlanResolver{routeTable: routeTable, loadDescriptors: loadDescriptors, replyStore: replyStore}
 	}
@@ -116,7 +97,7 @@ func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTa
 		graph:           graph,
 		issues:          append([]runtimepinrouting.ConnectRoutePlanIssue(nil), issues...),
 		loadDescriptors: loadDescriptors,
-		lifecycle:       newTemplateInstanceLifecycleOwner(source, routeTable, loadDescriptors, activator),
+		lifecycle:       newTemplateInstanceLifecycleOwner(source, routeTable, loadDescriptors, activator, planner),
 		replyStore:      replyStore,
 	}
 }
@@ -140,124 +121,28 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 
 	memo, _ := ctx.Value(connectRoutePlanEvaluationMemoKey{}).(*connectRoutePlanEvaluationMemo)
 	if memo != nil && memo.ready && memo.eventID == evt.ID() {
-		if templateInstanceLifecyclePreview(ctx) || memo.applied || !memo.dispatch.Failure.Empty() {
-			return memo.dispatch, nil
-		}
-		if err := r.applyEvaluationAtSnapshot(ctx, memo.snapshot, evt, memo.dispatch); err == nil {
-			memo.applied = true
-			return memo.dispatch, nil
-		} else {
-			var stale staleConnectRoutePlanSnapshotError
-			if !errors.As(err, &stale) {
-				return connectRoutePlanDispatch{}, err
-			}
-			memo.ready = false
-		}
+		return memo.dispatch, nil
 	}
 
 	matched := r.matchedPlans(ctx, evt)
 	if len(matched) == 0 {
 		return connectRoutePlanDispatch{}, nil
 	}
-	for attempt := 0; attempt < 3; attempt++ {
-		snapshot := r.captureSnapshot(ctx)
-		evaluationCtx := runtimecorrelation.WithInboundEvent(ctx, evt)
-		descriptors, err := r.descriptorsForPlans(evaluationCtx, matched)
-		if err != nil {
-			return connectRoutePlanDispatch{}, err
-		}
-		evaluationCtx = withTemplateInstanceLifecyclePreview(evaluationCtx)
-		evaluationCtx = context.WithValue(evaluationCtx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{})
-		evaluated, err := r.planMatched(evaluationCtx, evt, matched, descriptors, connectRoutePlanMatchValues(evt))
-		if err != nil {
-			return connectRoutePlanDispatch{}, err
-		}
-		if memo != nil {
-			memo.eventID, memo.dispatch, memo.snapshot, memo.ready, memo.applied = evt.ID(), evaluated, snapshot, true, false
-		}
-		if !evaluated.Failure.Empty() || templateInstanceLifecyclePreview(ctx) {
-			return evaluated, nil
-		}
-		if err := r.applyEvaluationAtSnapshot(ctx, snapshot, evt, evaluated); err != nil {
-			var stale staleConnectRoutePlanSnapshotError
-			if errors.As(err, &stale) {
-				if memo != nil {
-					memo.ready = false
-				}
-				continue
-			}
-			return connectRoutePlanDispatch{}, err
-		}
-		if memo != nil {
-			memo.applied = true
-		}
-		return evaluated, nil
+	evaluationCtx := runtimecorrelation.WithInboundEvent(ctx, evt)
+	descriptors, err := r.descriptorsForPlans(evaluationCtx, matched)
+	if err != nil {
+		return connectRoutePlanDispatch{}, err
 	}
-	return connectRoutePlanDispatch{}, staleConnectRoutePlanSnapshotError{}
-}
-
-func (r connectRoutePlanResolver) captureSnapshot(ctx context.Context) connectRoutePlanSnapshot {
-	snapshot := connectRoutePlanSnapshot{base: r.routeTable.snapshotGeneration()}
-	if staged := transactionRouteTableFromContext(ctx); staged != nil && staged != r.routeTable {
-		snapshot.staged = staged.snapshotGeneration()
-		snapshot.staging = true
+	evaluationCtx = withTemplateInstanceLifecyclePreview(evaluationCtx)
+	evaluationCtx = context.WithValue(evaluationCtx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{})
+	evaluated, err := r.planMatched(evaluationCtx, evt, matched, descriptors, connectRoutePlanMatchValues(evt))
+	if err != nil {
+		return connectRoutePlanDispatch{}, err
 	}
-	return snapshot
-}
-
-func (r connectRoutePlanResolver) applyEvaluationAtSnapshot(ctx context.Context, snapshot connectRoutePlanSnapshot, evt events.Event, evaluated connectRoutePlanDispatch) error {
-	current, err := r.routeTable.applyAtGeneration(ctx, snapshot.base, func(leaseCtx context.Context) error {
-		staged := transactionRouteTableFromContext(leaseCtx)
-		if snapshot.staging {
-			if staged == nil || staged == r.routeTable {
-				return staleConnectRoutePlanSnapshotError{}
-			}
-			stagedCurrent, stagedErr := staged.applyAtGeneration(leaseCtx, snapshot.staged, func(stagedLeaseCtx context.Context) error {
-				return r.applyEvaluation(stagedLeaseCtx, evt, evaluated)
-			})
-			if !stagedCurrent {
-				return staleConnectRoutePlanSnapshotError{}
-			}
-			return stagedErr
-		} else if staged != nil && staged != r.routeTable {
-			return staleConnectRoutePlanSnapshotError{}
-		}
-		return r.applyEvaluation(leaseCtx, evt, evaluated)
-	})
-	if !current {
-		return staleConnectRoutePlanSnapshotError{}
+	if memo != nil {
+		memo.eventID, memo.dispatch, memo.ready, memo.applied = evt.ID(), evaluated, true, false
 	}
-	return err
-}
-
-func (r connectRoutePlanResolver) applyEvaluation(ctx context.Context, evt events.Event, evaluated connectRoutePlanDispatch) error {
-	for _, application := range evaluated.lifecycleApplications {
-		if err := r.lifecycle.Apply(ctx, evt, application.plan, application.decision); err != nil {
-			return err
-		}
-	}
-	for _, application := range evaluated.replyApplications {
-		if r.replyStore == nil {
-			return fmt.Errorf("ReplyContextStore is required for resolution mode reply")
-		}
-		switch application.kind {
-		case connectReplyApplicationCreate:
-			if err := r.replyStore.CreateReplyContext(ctx, application.record); err != nil {
-				return err
-			}
-		case connectReplyApplicationClaim:
-			_, outcome, err := r.replyStore.ClaimReplyContext(ctx, application.contextID, application.eventID)
-			if err != nil {
-				return err
-			}
-			if outcome != application.wantOutcome {
-				return staleConnectRoutePlanSnapshotError{}
-			}
-		default:
-			return errors.New("connect evaluation contains an invalid reply application")
-		}
-	}
-	return nil
+	return evaluated, nil
 }
 
 func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Event, matched []runtimepinrouting.ConnectRoutePlan, descriptors []runtimepinrouting.Descriptor, values map[string]string) (connectRoutePlanDispatch, error) {
@@ -272,7 +157,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 	replyContextConsumed := false
 	for _, plan := range matched {
 		if plan.ReplyResolution() != nil && plan.ReplyResolution().Role() == runtimepinrouting.ConnectReplyRoleResponse {
-			routes, subscribers, failure, detail, application, err := r.materializeReplyResponse(ctx, evt, plan, values)
+			routes, subscribers, claim, failure, detail, err := r.materializeReplyResponse(ctx, evt, plan, values)
 			if err != nil {
 				return connectRoutePlanDispatch{}, err
 			}
@@ -297,8 +182,8 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 				return out, nil
 			}
 			replyContextConsumed = true
-			if application != nil {
-				out.replyApplications = append(out.replyApplications, *application)
+			if claim != nil {
+				out.ReplyClaims = append(out.ReplyClaims, *claim)
 			}
 			out.DeliveryIntents = append(out.DeliveryIntents, routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerConnectRoutePlan)...)
 			out.LiveRecipients = append(out.LiveRecipients, connectRoutePlanLiveRecipients(routes)...)
@@ -322,6 +207,9 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 		if !decision.Empty() {
 			out.ExtraDetail["connect_route_plan_template_instance_lifecycle"] = decision.Detail()
 		}
+		if decision.Activation != nil {
+			out.ActivationPlans = append(out.ActivationPlans, *decision.Activation)
+		}
 		if err := r.installTemplateInstanceLifecyclePreview(ctx, decision); err != nil {
 			return connectRoutePlanDispatch{}, err
 		}
@@ -332,7 +220,6 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			}
 		}
 		if action == templateInstanceLifecycleActionPreviewCreate {
-			out.lifecycleApplications = append(out.lifecycleApplications, connectLifecycleApplication{plan: plan, decision: decision})
 			descriptors = append(descriptors, runtimepinrouting.Descriptor{
 				ID:            strings.TrimSpace(decision.InstanceID),
 				EntityID:      strings.TrimSpace(decision.EntityID),
@@ -346,13 +233,13 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			return connectRoutePlanDispatch{}, err
 		}
 		if plan.ReplyResolution() != nil && plan.ReplyResolution().Role() == runtimepinrouting.ConnectReplyRoleRequest {
-			var application *connectReplyApplication
-			routes, application, err = r.materializeReplyRequest(ctx, evt, plan, routes, values)
+			var creation *runtimereplycontext.Record
+			routes, creation, err = r.materializeReplyRequest(ctx, evt, plan, routes, values)
 			if err != nil {
 				return connectRoutePlanDispatch{}, err
 			}
-			if application != nil {
-				out.replyApplications = append(out.replyApplications, *application)
+			if creation != nil {
+				out.ReplyCreations = append(out.ReplyCreations, *creation)
 			}
 		}
 		routes, err = stampConnectExecutionClaims(plan, routes)
@@ -416,7 +303,7 @@ func connectReceiverPinCollisionDetail(admission runtimepinrouting.ConnectReceiv
 	return collisions[0].ReceiverPinDiagnostics(), true
 }
 
-func (r connectRoutePlanResolver) materializeReplyRequest(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, routes []events.DeliveryRoute, values map[string]string) ([]events.DeliveryRoute, *connectReplyApplication, error) {
+func (r connectRoutePlanResolver) materializeReplyRequest(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, routes []events.DeliveryRoute, values map[string]string) ([]events.DeliveryRoute, *runtimereplycontext.Record, error) {
 	if plan.ReplyRole() != runtimepinrouting.ConnectReplyRoleRequest {
 		return routes, nil, nil
 	}
@@ -436,10 +323,10 @@ func (r connectRoutePlanResolver) materializeReplyRequest(ctx context.Context, e
 	for i := range routes {
 		routes[i].Context = deliveryContext
 	}
-	return events.NormalizeDeliveryRoutes(routes), &connectReplyApplication{kind: connectReplyApplicationCreate, record: record}, nil
+	return events.NormalizeDeliveryRoutes(routes), &record, nil
 }
 
-func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string) ([]events.DeliveryRoute, []Subscriber, runtimepinrouting.TargetFailure, map[string]any, *connectReplyApplication, error) {
+func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string) ([]events.DeliveryRoute, []Subscriber, *runtimereplycontext.ClaimCommand, runtimepinrouting.TargetFailure, map[string]any, error) {
 	reply := plan.ReplyResolution().Readback()
 	contextID := events.DeliveryContextFromContext(ctx).ReplyContextID()
 	detail := map[string]any{
@@ -449,19 +336,19 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 	}
 	if contextID == "" || r.replyStore == nil {
 		detail["connect_route_plan_failure"] = runtimepinrouting.FailureStaleArrival.Code()
-		return nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil, nil
+		return nil, nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil
 	}
 	record, err := r.replyStore.LoadReplyContext(ctx, contextID)
 	if err != nil {
 		if errors.Is(err, runtimereplycontext.ErrNotFound) {
 			detail["connect_route_plan_failure"] = runtimepinrouting.FailureStaleArrival.Code()
-			return nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil, nil
+			return nil, nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil
 		}
-		return nil, nil, 0, nil, nil, err
+		return nil, nil, nil, 0, nil, err
 	}
 	if !plan.MatchesReplyRecord(record) {
 		detail["connect_route_plan_failure"] = runtimepinrouting.FailureStaleArrival.Code()
-		return nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil, nil
+		return nil, nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil
 	}
 	if key := record.CorrelationKey; key != "" {
 		actual, present := plan.ReplyResponseCorrelation(runtimepinrouting.AdmitConnectRouteMatchValues(values))
@@ -473,7 +360,7 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 			if actual != "" {
 				detail["reply_correlation_id"] = actual
 			}
-			return nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil, nil
+			return nil, nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil
 		}
 	}
 	target := record.Origin.Normalized()
@@ -481,7 +368,7 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 	if target.Empty() || len(subscribers) == 0 {
 		detail["connect_route_plan_failure"] = runtimepinrouting.FailureStaleArrival.Code()
 		detail["reply_origin"] = target
-		return nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil, nil
+		return nil, nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil
 	}
 	claimed := record
 	outcome := runtimereplycontext.ClaimAccepted
@@ -497,13 +384,17 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 	if outcome == runtimereplycontext.ClaimTerminal {
 		detail["connect_route_plan_failure"] = runtimepinrouting.FailureReplyAlreadyTerminal.Code()
 		detail["accepted_reply_event_id"] = claimed.AcceptedReplyEventID
-		return nil, nil, runtimepinrouting.FailureReplyAlreadyTerminal, detail, nil, nil
+		return nil, nil, nil, runtimepinrouting.FailureReplyAlreadyTerminal, detail, nil
+	}
+	claim := runtimereplycontext.ClaimCommand{Expected: record, ReplyEventID: evt.ID()}.Normalized()
+	if err := claim.Validate(); err != nil {
+		return nil, nil, nil, 0, nil, err
 	}
 	routes := make([]events.DeliveryRoute, 0, len(subscribers))
 	for _, subscriber := range subscribers {
 		identity, _, err := r.resolveAgentCarrierIdentity(ctx, subscriber, target, TemplateInstanceLifecycleDecision{}, false)
 		if err != nil {
-			return nil, nil, 0, nil, nil, err
+			return nil, nil, nil, 0, nil, err
 		}
 		routes = append(routes, events.DeliveryRoute{
 			Recipient:     subscriber.Recipient,
@@ -515,10 +406,7 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 	detail["request_event_id"] = record.RequestEventID
 	detail["request_correlation_id"] = record.RequestCorrelationID
 	detail["reply_claim_outcome"] = outcome
-	application := &connectReplyApplication{
-		kind: connectReplyApplicationClaim, contextID: contextID, eventID: evt.ID(), wantOutcome: outcome,
-	}
-	return events.NormalizeDeliveryRoutes(routes), dedupeSubscribers(subscribers), 0, detail, application, nil
+	return events.NormalizeDeliveryRoutes(routes), dedupeSubscribers(subscribers), &claim, 0, detail, nil
 }
 
 func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, descriptors []runtimepinrouting.Descriptor) (runtimepinrouting.ConnectRoutePlanMaterialization, TemplateInstanceLifecycleDecision, error) {

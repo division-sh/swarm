@@ -1044,7 +1044,12 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			return fmt.Errorf("flow instance activator is required")
 		}
 		return managerRef.ActivateFlowInstance(ctx, req)
-	}, opts.ProviderTriggerCatalog, opts.TestLifecycleProbe)
+	}, runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+		if managerRef == nil {
+			return runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow instance activation planner is required")
+		}
+		return managerRef.PrepareFlowInstanceActivation(ctx, req)
+	}), opts.ProviderTriggerCatalog, opts.TestLifecycleProbe)
 	if err != nil {
 		return nil, fmt.Errorf("build event bus: %w", err)
 	}

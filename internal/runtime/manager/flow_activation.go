@@ -86,110 +86,18 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	}
 	defer func() { _ = lease.Done() }()
 	ctx = lease.Context()
-	if req.Context.Empty() {
-		req.Context = events.DeliveryContextFromContext(ctx)
-	}
-	ctx = events.WithDeliveryContext(ctx, req.Context)
-	if req.ContractBundle == nil {
-		return fmt.Errorf("contract bundle is required")
-	}
 	if am.workflowInstances == nil {
 		return fmt.Errorf("workflow instance store is required")
 	}
-	admittedSource, err := am.dynamicFlowRuntimeReadinessSource(ctx, req.ContractBundle)
+	preparedRequest, plan, err := am.prepareFlowInstanceActivation(ctx, req)
 	if err != nil {
 		return err
 	}
-	req.ContractBundle = admittedSource.source
-	instance := req.Instance
-	templateID := strings.TrimSpace(instance.TemplateID)
-	instanceID := strings.TrimSpace(instance.InstanceID)
-	flowEntityID := strings.TrimSpace(instance.EntityID)
-	flowPath := strings.TrimSpace(instance.InstancePath)
-	if templateID == "" || instanceID == "" || flowEntityID == "" || flowPath == "" {
-		return fmt.Errorf("template_id, instance_id, and entity_id are required")
-	}
-	scope, ok := semanticview.FlowScopeByID(req.ContractBundle, templateID)
-	if !ok {
-		return fmt.Errorf("flow contract view not found: %s", templateID)
-	}
-	schema, ok := req.ContractBundle.FlowSchemaByID(templateID)
-	if !ok {
-		return fmt.Errorf("flow schema not found: %s", templateID)
-	}
-	if flowEntityID == "" {
-		return fmt.Errorf("derive flow entity id for %s", flowPath)
-	}
-	parentEntityID := strings.TrimSpace(instance.ParentEntityID)
-	initialState := strings.TrimSpace(schema.LoweredInitialState())
-	if initialState == "" {
-		initialState = strings.TrimSpace(req.InitialState)
-	}
-	if initialState == "" {
-		initialState = "pending"
-	}
-	triggerEventID := strings.TrimSpace(req.TriggerEvent.ID())
-	contextRunID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	triggerRunID := strings.TrimSpace(req.TriggerEvent.RunID())
-	autoEmitRunID, err := exactFlowActivationRunID(ctx, req)
-	if err != nil {
-		if strings.TrimSpace(schema.AutoEmitOnCreate.Event) != "" &&
-			((contextRunID == "" && triggerRunID == "") || triggerEventID == "") {
-			return fmt.Errorf(
-				"auto-emit %s requires exact trigger run_id and parent_event_id",
-				strings.TrimSpace(schema.AutoEmitOnCreate.Event),
-			)
-		}
-		return err
-	}
-	autoEmitLineage := events.EventLineage{
-		RunID:         autoEmitRunID,
-		ParentEventID: triggerEventID,
-		ExecutionMode: req.TriggerEvent.ExecutionMode(),
-	}
-	if strings.TrimSpace(schema.AutoEmitOnCreate.Event) != "" &&
-		(strings.TrimSpace(autoEmitLineage.RunID) == "" || strings.TrimSpace(autoEmitLineage.ParentEventID) == "") {
-		return fmt.Errorf(
-			"auto-emit %s requires exact trigger run_id and parent_event_id",
-			strings.TrimSpace(schema.AutoEmitOnCreate.Event),
-		)
-	}
-	metadata := cloneFlowConfig(req.Metadata)
-	for key, value := range flowInstanceActivationMetadata(instance, flowEntityID, instanceID, flowPath, parentEntityID) {
-		metadata[key] = value
-	}
-	occurredAt := req.OccurredAt.UTC()
-	if !req.TriggerEvent.CreatedAt().IsZero() {
-		occurredAt = req.TriggerEvent.CreatedAt().UTC()
-	}
-	if occurredAt.IsZero() {
-		return fmt.Errorf("flow activation requires an exact occurrence time")
-	}
-	agentRecords, err := am.flowInstanceAgentRecords(req, schema, scope)
-	if err != nil {
-		return err
-	}
-	readinessPlan, err := am.buildDynamicFlowRuntimeReadinessPlan(
-		ctx,
-		req,
-		agentRecords,
-		schema,
-		autoEmitLineage,
-		occurredAt,
-	)
-	if err != nil {
-		return err
-	}
-	materialization, err := am.workflowInstances.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID:       instanceID,
-		StorageRef:       flowPath,
-		WorkflowName:     templateID,
-		WorkflowVersion:  strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
-		RuntimeReadiness: &readinessPlan,
-		CurrentState:     initialState,
-		Config:           cloneFlowConfig(req.Config),
-		Metadata:         metadata,
-	}, occurredAt)
+	req = preparedRequest
+	ctx = events.WithDeliveryContext(ctx, req.Context)
+	flowPath := plan.Identity.InstancePath
+	readinessPlan := plan.Readiness
+	materialization, err := am.workflowInstances.MaterializeInitialEntry(ctx, plan.Instance, plan.OccurredAt)
 	if err != nil {
 		return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
 	}
@@ -218,6 +126,131 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		}
 	}
 	return nil
+}
+
+// PrepareFlowInstanceActivation derives the complete durable activation
+// command without opening or joining a persistence transaction. Publication
+// planning uses this operation before handing the command to the selected
+// store's named commit owner.
+func (am *AgentManager) PrepareFlowInstanceActivation(
+	ctx context.Context,
+	req runtimepipeline.FlowInstanceActivationRequest,
+) (runtimepipeline.FlowInstanceActivationPlan, error) {
+	_, plan, err := am.prepareFlowInstanceActivation(ctx, req)
+	return plan, err
+}
+
+func (am *AgentManager) prepareFlowInstanceActivation(
+	ctx context.Context,
+	req runtimepipeline.FlowInstanceActivationRequest,
+) (runtimepipeline.FlowInstanceActivationRequest, runtimepipeline.FlowInstanceActivationPlan, error) {
+	if am == nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("agent manager is required")
+	}
+	if req.Context.Empty() {
+		req.Context = events.DeliveryContextFromContext(ctx)
+	}
+	ctx = events.WithDeliveryContext(ctx, req.Context)
+	if req.ContractBundle == nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("contract bundle is required")
+	}
+	admittedSource, err := am.dynamicFlowRuntimeReadinessSource(ctx, req.ContractBundle)
+	if err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+	}
+	req.ContractBundle = admittedSource.source
+	instance := req.Instance
+	templateID := strings.TrimSpace(instance.TemplateID)
+	instanceID := strings.TrimSpace(instance.InstanceID)
+	flowEntityID := strings.TrimSpace(instance.EntityID)
+	flowPath := strings.TrimSpace(instance.InstancePath)
+	if templateID == "" || instanceID == "" || flowEntityID == "" || flowPath == "" {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("template_id, instance_id, and entity_id are required")
+	}
+	scope, ok := semanticview.FlowScopeByID(req.ContractBundle, templateID)
+	if !ok {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow contract view not found: %s", templateID)
+	}
+	schema, ok := req.ContractBundle.FlowSchemaByID(templateID)
+	if !ok {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow schema not found: %s", templateID)
+	}
+	initialState := strings.TrimSpace(schema.LoweredInitialState())
+	if initialState == "" {
+		initialState = strings.TrimSpace(req.InitialState)
+	}
+	if initialState == "" {
+		initialState = "pending"
+	}
+	triggerEventID := strings.TrimSpace(req.TriggerEvent.ID())
+	contextRunID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	triggerRunID := strings.TrimSpace(req.TriggerEvent.RunID())
+	autoEmitRunID, err := exactFlowActivationRunID(ctx, req)
+	if err != nil {
+		if strings.TrimSpace(schema.AutoEmitOnCreate.Event) != "" &&
+			((contextRunID == "" && triggerRunID == "") || triggerEventID == "") {
+			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf(
+				"auto-emit %s requires exact trigger run_id and parent_event_id",
+				strings.TrimSpace(schema.AutoEmitOnCreate.Event),
+			)
+		}
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+	}
+	autoEmitLineage := events.EventLineage{
+		RunID:         autoEmitRunID,
+		ParentEventID: triggerEventID,
+		ExecutionMode: req.TriggerEvent.ExecutionMode(),
+	}
+	if strings.TrimSpace(schema.AutoEmitOnCreate.Event) != "" &&
+		(strings.TrimSpace(autoEmitLineage.RunID) == "" || strings.TrimSpace(autoEmitLineage.ParentEventID) == "") {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf(
+			"auto-emit %s requires exact trigger run_id and parent_event_id",
+			strings.TrimSpace(schema.AutoEmitOnCreate.Event),
+		)
+	}
+	metadata := cloneFlowConfig(req.Metadata)
+	for key, value := range flowInstanceActivationMetadata(instance, flowEntityID, instanceID, flowPath, strings.TrimSpace(instance.ParentEntityID)) {
+		metadata[key] = value
+	}
+	occurredAt := req.OccurredAt.UTC()
+	if !req.TriggerEvent.CreatedAt().IsZero() {
+		occurredAt = req.TriggerEvent.CreatedAt().UTC()
+	}
+	if occurredAt.IsZero() {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow activation requires an exact occurrence time")
+	}
+	agentRecords, err := am.flowInstanceAgentRecords(req, schema, scope)
+	if err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+	}
+	readinessPlan, err := am.buildDynamicFlowRuntimeReadinessPlan(ctx, req, agentRecords, schema, autoEmitLineage, occurredAt)
+	if err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+	}
+	plan := runtimepipeline.FlowInstanceActivationPlan{
+		Instance: runtimepipeline.WorkflowInstance{
+			InstanceID:       instanceID,
+			StorageRef:       flowPath,
+			WorkflowName:     templateID,
+			WorkflowVersion:  strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
+			RuntimeReadiness: &readinessPlan,
+			CurrentState:     initialState,
+			Config:           cloneFlowConfig(req.Config),
+			Metadata:         metadata,
+		},
+		Identity:            instance,
+		Readiness:           readinessPlan,
+		ActivationVariables: flowActivationVars(req),
+		OccurredAt:          occurredAt,
+	}
+	plan, err = plan.Normalized()
+	if err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+	}
+	if err := plan.Validate(); err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
+	}
+	return req, plan, nil
 }
 
 func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (bool, error) {
