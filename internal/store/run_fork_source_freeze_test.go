@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -19,6 +18,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -493,24 +493,24 @@ func commitRunForkSourceFreezeForTest(ctx context.Context, store *PostgresStore,
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
 	if err != nil {
 		return err
 	}
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
 	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 1)
-	storyctx = runtimepipeline.WithPipelinePostCommitActions(storyctx, &postCommit)
-	storyctx = runtimepipeline.WithPipelineRollbackActions(storyctx, &rollbackActions)
+	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
+	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollbackActions)
 	committed := false
 	defer func() {
 		if !committed {
 			runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
 		}
 	}()
-	if err := store.applyRunForkSourceFreeze(storyctx, tx, lineage, now, confirmed); err != nil {
+	if err := store.applyRunForkSourceFreeze(ctx, tx, story, lineage, now, confirmed); err != nil {
 		return err
 	}
-	if err := commitRunForkAuthorActivityTransaction(storyctx, tx); err != nil {
+	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story); err != nil {
 		return err
 	}
 	committed = true

@@ -54,7 +54,7 @@ type runForkActivityAttemptEvidence struct {
 	UpdatedAt       time.Time
 }
 
-func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, forkRunID string, event runfork.RunForkSelectedContractSourceEvent) (runfork.RunForkSelectedContractSourceEvent, error) {
+func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, forkRunID string, event runfork.RunForkSelectedContractSourceEvent) (runfork.RunForkSelectedContractSourceEvent, error) {
 	if tx == nil {
 		return event, fmt.Errorf("selected-contract fork source preparation requires transaction")
 	}
@@ -98,7 +98,7 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		if evidence.ExecutionMode != event.ExecutionMode {
 			return event, fmt.Errorf("approved proposed effect %s execution mode %q conflicts with source event mode %q", event.SourceEventID, evidence.ExecutionMode, event.ExecutionMode)
 		}
-		if err := copyRunForkActivityAttemptEvidence(ctx, tx, forkRunID, event.FlowInstance, request, generations, evidence); err != nil {
+		if err := copyRunForkActivityAttemptEvidence(ctx, tx, story, forkRunID, event.FlowInstance, request, generations, evidence); err != nil {
 			return event, err
 		}
 		return event, nil
@@ -123,7 +123,7 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if evidence.ExecutionMode != event.ExecutionMode {
 		return event, fmt.Errorf("activity request %s execution mode %q conflicts with source event mode %q", event.SourceEventID, evidence.ExecutionMode, event.ExecutionMode)
 	}
-	if err := copyRunForkActivityAttemptEvidence(ctx, tx, forkRunID, event.FlowInstance, request, generations, evidence); err != nil {
+	if err := copyRunForkActivityAttemptEvidence(ctx, tx, story, forkRunID, event.FlowInstance, request, generations, evidence); err != nil {
 		return event, err
 	}
 	return event, nil
@@ -261,9 +261,9 @@ func loadRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, request
 	return evidence, nil
 }
 
-func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, forkRunID, flowInstance string, request runForkActivityRequestPayload, generations []attemptgeneration.Generation, evidence runForkActivityAttemptEvidence) error {
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return err
+func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, forkRunID, flowInstance string, request runForkActivityRequestPayload, generations []attemptgeneration.Generation, evidence runForkActivityAttemptEvidence) error {
+	if story == nil {
+		return fmt.Errorf("run fork activity evidence requires private story ownership")
 	}
 	generation := request.Generation.Normalize()
 	for _, candidate := range generations {
@@ -348,7 +348,7 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, forkRun
 		canonicalFailure = &decoded
 	}
 	attempt := 1
-	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+	return story.Record(ctx, runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindActivityLifecycle, Transition: evidence.Status,
 		SourceOwner: "activity_attempts", SourceIdentity: requestEventID + ":" + evidence.Status,
 		DedupKey:   "activity:" + requestEventID + ":" + evidence.Status,

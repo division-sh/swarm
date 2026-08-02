@@ -13,6 +13,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -23,8 +24,8 @@ func TestRunLifecycleInsertForkRejectsMissingPersistedBundleBeforeMutation(t *te
 	forkRunID := uuid.NewString()
 	missingHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
 
-	err := pg.runAuthorActivityMutation(testAuthorActivityContext(), "reject missing persisted fork identity", func(txctx context.Context, tx *sql.Tx) error {
-		return insertRunForkRun(txctx, tx, forkRunID, uuid.NewString(), uuid.NewString(), 0, time.Now().UTC(),
+	err := pg.runPrivateAuthorActivityMutation(testAuthorActivityContext(), func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		return insertRunForkRun(txctx, tx, story, forkRunID, uuid.NewString(), uuid.NewString(), 0, time.Now().UTC(),
 			runForkBundleInsertIdentity{BundleSourceFact: mustStoreTestPersistedBundleSourceFact(missingHash)})
 	})
 	if !errors.Is(err, storerunlifecycle.ErrPersistedBundleUnavailable) {
@@ -98,8 +99,8 @@ func TestRunLifecycleInsertForkFailsAfterDeleteFirstSerializationWithoutMutation
 	forkRunID := uuid.NewString()
 	done := make(chan error, 1)
 	go func() {
-		done <- pg.runAuthorActivityMutation(ctx, "delete-first fork identity admission", func(txctx context.Context, tx *sql.Tx) error {
-			return insertRunForkRun(txctx, tx, forkRunID, uuid.NewString(), uuid.NewString(), 0, time.Now().UTC(),
+		done <- pg.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			return insertRunForkRun(txctx, tx, story, forkRunID, uuid.NewString(), uuid.NewString(), 0, time.Now().UTC(),
 				runForkBundleInsertIdentity{BundleSourceFact: mustStoreTestPersistedBundleSourceFact(targetHash)})
 		})
 	}()

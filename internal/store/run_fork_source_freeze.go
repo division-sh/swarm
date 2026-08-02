@@ -9,11 +9,12 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
 
 // applyRunForkSourceFreeze is the only writer of the terminal forked source
 // state. The caller owns the surrounding serializable transaction.
-func (s *PostgresStore) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage, now time.Time, confirmed bool) error {
+func (s *PostgresStore) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, lineage runForkActivationLineage, now time.Time, confirmed bool) error {
 	if tx == nil {
 		return fmt.Errorf("run fork source freeze transaction is required")
 	}
@@ -31,20 +32,20 @@ func (s *PostgresStore) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx
 	if err := requireRunForkSourceFreezeReady(ctx, tx, lineage.SourceRunID, now); err != nil {
 		return err
 	}
-	if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx}).ForkSource(ctx, runtimerunlifecycle.ForkSourceRequest{
+	if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story}).ForkSource(ctx, runtimerunlifecycle.ForkSourceRequest{
 		RunID:            lineage.SourceRunID,
 		ContinuedAsRunID: lineage.ForkRunID,
 		EndedAt:          now,
 	}); err != nil {
 		return fmt.Errorf("freeze source run lifecycle: %w", err)
 	}
-	if _, err := (postgresRunLifecycleMutation{store: s, tx: tx}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+	if _, err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
 		RunID: lineage.ForkRunID,
 		State: runtimerunlifecycle.StateRunning,
 	}); err != nil {
 		return fmt.Errorf("activate fork run lifecycle: %w", err)
 	}
-	if err := recordRunForkActivationAuthorActivity(ctx, lineage, now); err != nil {
+	if err := recordRunForkActivationAuthorActivity(ctx, story, lineage, now); err != nil {
 		return err
 	}
 	return nil

@@ -13,6 +13,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
 	"github.com/google/uuid"
 )
@@ -58,13 +59,12 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req runfork.RunFork
 			_ = tx.Rollback()
 		}
 	}()
-	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
 	if err != nil {
 		return runfork.RunForkActivation{}, err
 	}
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 2)
 	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 2)
-	ctx = storyctx
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
 	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollbackActions)
 	defer func() {
@@ -149,15 +149,15 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req runfork.RunFork
 		ForkRunID:   lineage.ForkRunID,
 	}
 	if historicalReplayExecution.DeliveryEventReplayReady {
-		replayResult, err = applyRunForkDeliveryEventReplay(ctx, tx, s, lineage, historicalReplayExecution, now)
+		replayResult, err = applyRunForkDeliveryEventReplay(ctx, tx, story, s, lineage, historicalReplayExecution, now)
 		if err != nil {
 			return result, err
 		}
 	}
-	if err := s.applyRunForkSourceFreeze(ctx, tx, lineage, now, req.ConfirmSourceFreeze); err != nil {
+	if err := s.applyRunForkSourceFreeze(ctx, tx, story, lineage, now, req.ConfirmSourceFreeze); err != nil {
 		return result, err
 	}
-	if err := commitRunForkAuthorActivityTransaction(ctx, tx); err != nil {
+	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story); err != nil {
 		return result, fmt.Errorf("commit fork activation: %w", err)
 	}
 	committed = true
@@ -174,13 +174,13 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req runfork.RunFork
 	return result, nil
 }
 
-func recordRunForkActivationAuthorActivity(ctx context.Context, lineage runForkActivationLineage, now time.Time) error {
+func recordRunForkActivationAuthorActivity(ctx context.Context, story runtimeauthoractivity.Mutation, lineage runForkActivationLineage, now time.Time) error {
 	occurrenceScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, lineage.ForkBundleHash)
 	if err != nil {
 		return fmt.Errorf("record run fork activation target scope: %w", err)
 	}
 	identity := lineage.ForkRunID + ":fork_started"
-	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+	return story.Record(ctx, runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindRunLifecycle, Transition: "fork_started",
 		SourceOwner: "runs", SourceIdentity: identity, DedupKey: "run-transition:" + identity,
 		OccurredAt: now.UTC(), RunID: lineage.ForkRunID, Scope: occurrenceScope,
@@ -191,11 +191,11 @@ func recordRunForkActivationAuthorActivity(ctx context.Context, lineage runForkA
 	})
 }
 
-func commitRunForkAuthorActivityTransaction(ctx context.Context, tx *sql.Tx) error {
+func commitRunForkAuthorActivityTransaction(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 	if _, err := privaterunforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
 		return err
 	}
-	if err := runtimeauthoractivity.Finalize(ctx); err != nil {
+	if err := story.Finalize(ctx); err != nil {
 		return err
 	}
 	return tx.Commit()

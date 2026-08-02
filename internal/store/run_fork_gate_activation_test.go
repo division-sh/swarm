@@ -14,6 +14,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -287,9 +288,9 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				t.Fatal(err)
 			}
 			var prepared runfork.RunForkSelectedContractSourceEvent
-			err = cards.runAuthorActivityMutation(ctx, "test prepare fork proposed-effect source event", func(txctx context.Context, tx *sql.Tx) error {
+			err = cards.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 				var inner error
-				prepared, inner = prepareRunForkSelectedContractSourceEvent(txctx, tx, forkRunID, runfork.RunForkSelectedContractSourceEvent{
+				prepared, inner = prepareRunForkSelectedContractSourceEvent(txctx, tx, story, forkRunID, runfork.RunForkSelectedContractSourceEvent{
 					SourceEventID: continuation.RequestEventID, EventName: runForkActivityRequestEvent,
 					ExecutionMode: continuation.ExecutionMode,
 					EntityID:      continuation.EntityID, FlowInstance: "root", Payload: payload,

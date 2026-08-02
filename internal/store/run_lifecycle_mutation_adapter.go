@@ -615,6 +615,7 @@ func (m sqliteRunLifecycleMutation) Create(
 func insertRunForkRun(
 	ctx context.Context,
 	tx *sql.Tx,
+	story runtimeauthoractivity.Mutation,
 	forkRunID, sourceRunID, forkEventID string,
 	entityCount int,
 	startedAt time.Time,
@@ -626,8 +627,8 @@ func insertRunForkRun(
 	if err := identity.BundleSourceFact.Validate(); err != nil {
 		return fmt.Errorf("fork run lifecycle creation requires canonical executable bundle identity: %w", err)
 	}
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return fmt.Errorf("fork run lifecycle creation requires author activity ownership: %w", err)
+	if story == nil {
+		return errors.New("fork run lifecycle creation requires private story ownership")
 	}
 	mutation := postgresRunLifecycleMutation{tx: tx}
 	if err := mutation.requirePersistedSourceForWrite(ctx, identity.BundleSourceFact); err != nil {
@@ -653,7 +654,7 @@ func insertRunForkRun(
 	if err != nil {
 		return err
 	}
-	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+	return story.Record(ctx, runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindRunLifecycle, Transition: "fork_prepared",
 		SourceOwner: "runs", SourceIdentity: forkRunID, DedupKey: "run-created:" + forkRunID,
 		OccurredAt: startedAt.UTC(), RunID: forkRunID, Scope: scope,

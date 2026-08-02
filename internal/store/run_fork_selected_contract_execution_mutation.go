@@ -15,6 +15,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
 	"github.com/google/uuid"
@@ -159,11 +160,10 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 			_ = tx.Rollback()
 		}
 	}()
-	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
-	ctx = storyctx
 	var sourceStatus string
 	if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid FOR UPDATE`, plan.SourceRunID).Scan(&sourceStatus); err != nil {
 		if err == sql.ErrNoRows {
@@ -229,13 +229,13 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 		return runfork.RunForkMaterialization{}, fmt.Errorf("resolve selected-contract fork author activity scope: %w", err)
 	}
 	ctx = runtimeauthoractivity.WithScope(ctx, forkScope)
-	if err := insertRunForkRun(ctx, tx, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity); err != nil {
+	if err := insertRunForkRun(ctx, tx, story, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity); err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("insert selected-contract fork run: %w", err)
 	}
 
 	forkCtx := runtimecorrelation.WithRunID(ctx, forkRunID)
 	for _, entity := range plan.Entities {
-		if err := materializeRunForkEntityState(forkCtx, tx, postgresActiveRunSourceOwner(s, tx), forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
+		if err := materializeRunForkEntityState(forkCtx, tx, story, postgresActiveRunSourceOwner(s, tx), forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
 			return runfork.RunForkMaterialization{}, err
 		}
 	}
@@ -253,7 +253,7 @@ func (s *PostgresStore) MaterializeRunForkForSelectedContractExecution(ctx conte
 			return runfork.RunForkMaterialization{}, err
 		}
 	}
-	if err := commitRunForkAuthorActivityTransaction(ctx, tx); err != nil {
+	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story); err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("commit selected-contract fork materialization: %w", err)
 	}
 	committed = true
@@ -298,13 +298,12 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 			_ = tx.Rollback()
 		}
 	}()
-	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
 	if err != nil {
 		return runfork.RunForkActivation{}, err
 	}
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 2)
 	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 2)
-	ctx = storyctx
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
 	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollbackActions)
 	defer func() {
@@ -409,7 +408,7 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 
 	now := time.Now().UTC()
 	if len(sourceAdvancedFacts) > 0 {
-		if _, err := (postgresRunLifecycleMutation{store: s, tx: tx}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+		if _, err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
 			RunID: lineage.ForkRunID,
 			State: runtimerunlifecycle.StateRunning,
 		}); err != nil {
@@ -430,10 +429,10 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		if err := insertRunForkSelectedContractBranchDivergence(ctx, tx, divergence); err != nil {
 			return result, err
 		}
-		if err := recordRunForkActivationAuthorActivity(ctx, lineage, now); err != nil {
+		if err := recordRunForkActivationAuthorActivity(ctx, story, lineage, now); err != nil {
 			return result, err
 		}
-		if err := commitRunForkAuthorActivityTransaction(ctx, tx); err != nil {
+		if err := commitRunForkAuthorActivityTransaction(ctx, tx, story); err != nil {
 			return result, fmt.Errorf("commit selected-contract branch activation: %w", err)
 		}
 		committed = true
@@ -446,10 +445,10 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		return result, nil
 	}
 
-	if err := s.applyRunForkSourceFreeze(ctx, tx, lineage, now, req.ConfirmSourceFreeze); err != nil {
+	if err := s.applyRunForkSourceFreeze(ctx, tx, story, lineage, now, req.ConfirmSourceFreeze); err != nil {
 		return result, err
 	}
-	if err := commitRunForkAuthorActivityTransaction(ctx, tx); err != nil {
+	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story); err != nil {
 		return result, fmt.Errorf("commit selected-contract fork activation: %w", err)
 	}
 	committed = true
@@ -485,11 +484,10 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 			_ = tx.Rollback()
 		}
 	}()
-	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
 	if err != nil {
 		return err
 	}
-	ctx = storyctx
 
 	snapshot, err := loadPostgresRunLifecycleSnapshot(ctx, tx, forkRunID, true)
 	if err != nil {
@@ -508,17 +506,17 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1::uuid)`, forkRunID).Scan(&preserveCompletionEvidence); err != nil {
 		return fmt.Errorf("check selected-contract completion evidence preservation: %w", err)
 	}
-	if _, err := s.terminalizeRunDeliveriesTx(storyctx, tx, nil, forkRunID, "fork_discarded"); err != nil {
+	if _, err := s.terminalizeRunDeliveriesTx(ctx, tx, story, forkRunID, "fork_discarded"); err != nil {
 		return fmt.Errorf("terminalize selected-contract fork deliveries before discard: %w", err)
 	}
 	if preserveCompletionEvidence {
-		if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
+		if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
 			RunID: forkRunID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
 		}); err != nil {
 			return fmt.Errorf("retain selected-contract completion run tombstone: %w", err)
 		}
 	}
-	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
+	if err := story.Finalize(ctx); err != nil {
 		return fmt.Errorf("finalize selected-contract fork terminalization activity: %w", err)
 	}
 
@@ -639,7 +637,7 @@ func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx con
 			return err
 		}
 	}
-	if err := commitPostgresRunForkRevisionTx(storyctx, tx); err != nil {
+	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
 		return fmt.Errorf("commit selected-contract fork discard: %w", err)
 	}
 	committed = true
@@ -672,12 +670,12 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 			_ = tx.Rollback()
 		}
 	}()
-	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
 	if err != nil {
 		return nil, err
 	}
 	var sourceStatus string
-	if err := tx.QueryRowContext(storyctx, `SELECT status FROM runs WHERE run_id = $1::uuid FOR SHARE`, sourceRunID).Scan(&sourceStatus); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid FOR SHARE`, sourceRunID).Scan(&sourceStatus); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, &runtimerunlifecycle.RunNotFoundError{RunID: sourceRunID}
 		}
@@ -690,10 +688,10 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 		}
 		return nil, fmt.Errorf("selected-contract source event preparation state %s is unsupported", state)
 	}
-	if err := requirePostgresRunActive(storyctx, tx, forkRunID); err != nil {
+	if err := requirePostgresRunActive(ctx, tx, forkRunID); err != nil {
 		return nil, fmt.Errorf("admit selected-contract source event preparation fork: %w", err)
 	}
-	records, err := loadPostgresEventIdentities(storyctx, tx, ids)
+	records, err := loadPostgresEventIdentities(ctx, tx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("load selected-contract source events: %w", err)
 	}
@@ -721,16 +719,16 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 		})
 	}
 	for idx := range out {
-		prepared, err := prepareRunForkSelectedContractSourceEvent(storyctx, tx, forkRunID, out[idx])
+		prepared, err := prepareRunForkSelectedContractSourceEvent(ctx, tx, story, forkRunID, out[idx])
 		if err != nil {
 			return nil, err
 		}
 		out[idx] = prepared
 	}
-	if _, err := runforkrevision.CaptureCurrentTransaction(storyctx, tx); err != nil {
+	if _, err := runforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
 		return nil, fmt.Errorf("capture selected-contract source event preparation revisions: %w", err)
 	}
-	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
+	if err := story.Finalize(ctx); err != nil {
 		return nil, fmt.Errorf("finalize selected-contract source event author activity: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

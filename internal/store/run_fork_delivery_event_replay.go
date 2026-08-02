@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/google/uuid"
 )
 
@@ -21,7 +21,7 @@ const (
 	runForkDeliveryEventReplayTable = "run_fork_delivery_event_replays"
 )
 
-func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *PostgresStore, lineage runForkActivationLineage, execution runfork.RunForkHistoricalReplayExecution, now time.Time) (runfork.RunForkDeliveryEventReplayResult, error) {
+func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, store *PostgresStore, lineage runForkActivationLineage, execution runfork.RunForkHistoricalReplayExecution, now time.Time) (runfork.RunForkDeliveryEventReplayResult, error) {
 	result := runfork.RunForkDeliveryEventReplayResult{
 		Owner:       runfork.RunForkDeliveryEventReplayOwner,
 		SourceRunID: lineage.SourceRunID,
@@ -34,8 +34,8 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *Pos
 		execution.EventDeliveriesAdmission.Admission != runfork.RunForkHistoricalReplayAdmissionExecutableForkWork {
 		return result, fmt.Errorf("store.run_fork.delivery_event_replay requires %s owner-authorized executable event_deliveries", runfork.RunForkHistoricalReplayExecutionOwner)
 	}
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return result, err
+	if story == nil {
+		return result, fmt.Errorf("run fork delivery/event replay requires private story ownership")
 	}
 	replayable := execution.DeliveryEventReplayWork
 	if len(replayable) == 0 {
@@ -79,7 +79,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, store *Pos
 			if err != nil {
 				return result, err
 			}
-			outcome, err := store.appendEventSpec(ctx, tx, nil, replayed)
+			outcome, err := store.appendEventSpec(ctx, tx, story, replayed)
 			if err != nil {
 				return result, err
 			}

@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/google/uuid"
 )
 
@@ -74,11 +75,10 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req runfork.RunF
 			_ = tx.Rollback()
 		}
 	}()
-	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
-	ctx = storyctx
 	if err := requirePostgresRunActive(ctx, tx, plan.SourceRunID); err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("admit fork materialization source: %w", err)
 	}
@@ -107,13 +107,13 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req runfork.RunF
 		return runfork.RunForkMaterialization{}, fmt.Errorf("resolve fork author activity scope: %w", err)
 	}
 	ctx = runtimeauthoractivity.WithScope(ctx, forkScope)
-	if err := insertRunForkRun(ctx, tx, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity); err != nil {
+	if err := insertRunForkRun(ctx, tx, story, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity); err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("insert fork run: %w", err)
 	}
 
 	forkCtx := runtimecorrelation.WithRunID(ctx, forkRunID)
 	for _, entity := range plan.Entities {
-		if err := materializeRunForkEntityState(forkCtx, tx, postgresActiveRunSourceOwner(s, tx), forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
+		if err := materializeRunForkEntityState(forkCtx, tx, story, postgresActiveRunSourceOwner(s, tx), forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
 			return runfork.RunForkMaterialization{}, err
 		}
 	}
@@ -130,7 +130,7 @@ func (s *PostgresStore) MaterializeRunFork(ctx context.Context, req runfork.RunF
 		}
 		selectedContractBinding = &binding
 	}
-	if err := commitRunForkAuthorActivityTransaction(ctx, tx); err != nil {
+	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story); err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("commit fork materialization: %w", err)
 	}
 	committed = true
@@ -369,7 +369,7 @@ func stringFieldValue(fields map[string]any, key string) string {
 	return ""
 }
 
-func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, runLifecycle mutationlog.ActiveRunSourceOwner, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time) error {
+func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runLifecycle mutationlog.ActiveRunSourceOwner, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time) error {
 	entityID := strings.TrimSpace(entity.EntityID)
 	currentState := strings.TrimSpace(entity.CurrentState)
 	if currentState == "" {
@@ -419,7 +419,7 @@ func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, runLifecycle
 	if err := materializeRunForkProposedEffectCards(ctx, tx, plan.SourceRunID, forkRunID, entityID, plan.ForkPoint, now); err != nil {
 		return err
 	}
-	return mutationlog.InsertEntityStateDiff(ctx, tx, runLifecycle, entityID, mutationlog.EntityStateProjection{}, mutationlog.EntityStateProjection{
+	return mutationlog.InsertEntityStateDiffWithStory(ctx, tx, runLifecycle, story, entityID, mutationlog.EntityStateProjection{}, mutationlog.EntityStateProjection{
 		CurrentState: currentState,
 		Fields:       entity.Fields,
 		Gates:        entity.Gates,
