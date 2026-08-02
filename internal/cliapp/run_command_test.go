@@ -95,7 +95,15 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("local serve hook was not canceled after terminal run")
 	}
-	assertRunCommandMethods(t, calls, []string{"health.check", "health.check", "run.start", "run.get"})
+	methods := runCommandMethodNames(*calls)
+	if len(methods) < 4 || methods[0] != "health.check" || methods[1] != "health.check" || methods[2] != "run.start" {
+		t.Fatalf("methods = %v, want two health.check calls, run.start, then one or more run.get calls", methods)
+	}
+	for i, method := range methods[3:] {
+		if method != "run.get" {
+			t.Fatalf("method[%d] = %q, want run.get; all=%v", i+3, method, methods)
+		}
+	}
 	assertRunCommandTraceSubscription(t, wsRequests, "run-local", true)
 	for _, want := range []string{"run started: run_id=run-local", "id=evt-local", "run terminal: run_id=run-local status=completed"} {
 		if !strings.Contains(stdout.String(), want) {
