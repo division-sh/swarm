@@ -24,6 +24,7 @@ import (
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/eventrecord/sqlite"
 	"github.com/google/uuid"
@@ -549,8 +550,11 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 		req.ControlledBy = "api.v1"
 	}
 	var state runtimeruncontrol.State
-	if err := s.runAuthorActivityMutation(ctx, "sqlite run control transition", func(txctx context.Context, tx *sql.Tx) error {
-		var err error
+	if err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
+		if err != nil {
+			return err
+		}
 		state, err = sqliteLoadRunControlState(txctx, tx, runID)
 		if err != nil {
 			return err
@@ -581,16 +585,18 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 				transition = "resumed"
 			}
 			transitionID := uuid.NewString()
-			return runtimeauthoractivity.Record(txctx, runtimeauthoractivity.Draft{
+			if err := story.Record(txctx, runtimeauthoractivity.Draft{
 				Kind: runtimeauthoractivity.KindRunLifecycle, Transition: transition,
 				SourceOwner: "runs", SourceIdentity: transitionID, DedupKey: "run-transition:" + transitionID,
 				OccurredAt: req.Now.UTC(), RunID: runID, Scope: occurrenceScope,
 				Projection: runtimeauthoractivity.Projection{
 					SubjectType: "run", SubjectID: runID, ControlReason: req.Reason, Source: req.ControlledBy,
 				},
-			})
+			}); err != nil {
+				return err
+			}
 		}
-		return nil
+		return story.Finalize(txctx)
 	}); err != nil {
 		return runtimeruncontrol.State{}, err
 	}

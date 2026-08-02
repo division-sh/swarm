@@ -11,6 +11,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/google/uuid"
 )
 
@@ -75,8 +76,11 @@ func (s *PostgresStore) runControlTransition(ctx context.Context, req runtimerun
 		return runtimeruncontrol.State{}, err
 	}
 	var state runtimeruncontrol.State
-	err := s.runAuthorActivityMutation(ctx, "postgres run control transition", func(txctx context.Context, tx *sql.Tx) error {
-		var err error
+	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
+		if err != nil {
+			return err
+		}
 		state, err = lockRunControlState(txctx, tx, runID)
 		if err != nil {
 			return err
@@ -107,16 +111,18 @@ func (s *PostgresStore) runControlTransition(ctx context.Context, req runtimerun
 				transition = "resumed"
 			}
 			transitionID := uuid.NewString()
-			return runtimeauthoractivity.Record(txctx, runtimeauthoractivity.Draft{
+			if err := story.Record(txctx, runtimeauthoractivity.Draft{
 				Kind: runtimeauthoractivity.KindRunLifecycle, Transition: transition,
 				SourceOwner: "runs", SourceIdentity: transitionID, DedupKey: "run-transition:" + transitionID,
 				OccurredAt: req.Now.UTC(), RunID: runID, Scope: occurrenceScope,
 				Projection: runtimeauthoractivity.Projection{
 					SubjectType: "run", SubjectID: runID, ControlReason: req.Reason, Source: req.ControlledBy,
 				},
-			})
+			}); err != nil {
+				return err
+			}
 		}
-		return nil
+		return story.Finalize(txctx)
 	})
 	return state, err
 }
