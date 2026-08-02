@@ -43,14 +43,6 @@ func (s *PostgresStore) RunRuntimeMutationContext(ctx context.Context, fn func(c
 	})
 }
 
-func (s *SQLiteRuntimeStore) runEventTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
-	return s.runAuthorActivityMutation(ctx, "sqlite event transaction", fn)
-}
-
-func (s *PostgresStore) runEventTransaction(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
-	return s.runAuthorActivityMutation(ctx, "postgres event transaction", fn)
-}
-
 func (s *PostgresStore) runPostgresRuntimeMutation(ctx context.Context, fn func(context.Context, *sql.Tx) error) (err error) {
 	if fn == nil {
 		return nil

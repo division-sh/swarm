@@ -15,6 +15,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
@@ -326,9 +327,10 @@ func commitAdmittedSemanticEventFixtureOutcome(
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	defer release()
-	commit := func(txctx context.Context, tx *sql.Tx, selected eventCommitTxStore) error {
+	commit := func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, selected eventCommitTxStore) error {
+		runtimeStory := runtimeAuthorActivityMutation(story)
 		var appendErr error
-		outcome, appendErr = selected.appendAdmittedEventTxOutcome(txctx, tx, nil, admitted)
+		outcome, appendErr = selected.appendAdmittedEventTxOutcome(txctx, tx, runtimeStory, admitted)
 		if appendErr != nil || outcome == runtimebus.EventAppendExactDuplicate {
 			return appendErr
 		}
@@ -343,13 +345,17 @@ func commitAdmittedSemanticEventFixtureOutcome(
 				return appendErr
 			}
 		}
-		return (sqlPublishCommitter{tx: tx, store: selected}).commitInitialSideEffects(txctx, req, true)
+		return (sqlPublishCommitter{tx: tx, store: selected, story: runtimeStory}).commitInitialSideEffects(txctx, req, true)
 	}
 	switch selected := store.(type) {
 	case *PostgresStore:
-		err = selected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return commit(txctx, tx, selected) })
+		err = selected.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			return commit(txctx, tx, story, selected)
+		})
 	case *SQLiteRuntimeStore:
-		err = selected.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error { return commit(txctx, tx, selected) })
+		err = selected.runPrivateAuthorActivityMutation(ctx, "sqlite semantic event fixture", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			return commit(txctx, tx, story, selected)
+		})
 	default:
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("semantic event fixture store %T is unsupported", store)
 	}

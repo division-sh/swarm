@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"os"
@@ -1092,20 +1091,18 @@ func TestSQLiteRuntimeStoreRunEventTransactionEnsuresFreshRunRow(t *testing.T) {
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	if err := store.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return commitSemanticEventFixtureTx(txctx, store, tx, eventtest.RunCreatingRootIngress(
-			eventID,
-			events.EventType("item.received"),
-			"api.v1",
-			"",
-			json.RawMessage(`{"entity_id":"33333333-3333-3333-3333-333333333333"}`),
-			0,
-			runID,
-			"",
-			events.EnvelopeForEntityID(events.EventEnvelope{}, "33333333-3333-3333-3333-333333333333"),
-			time.Now().UTC(),
-		))
-	}); err != nil {
+	if err := commitSemanticEventFixture(ctx, store, eventtest.RunCreatingRootIngress(
+		eventID,
+		events.EventType("item.received"),
+		"api.v1",
+		"",
+		json.RawMessage(`{"entity_id":"33333333-3333-3333-3333-333333333333"}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "33333333-3333-3333-3333-333333333333"),
+		time.Now().UTC(),
+	)); err != nil {
 		t.Fatalf("RunEventTransaction: %v", err)
 	}
 
