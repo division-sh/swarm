@@ -13645,9 +13645,11 @@ platform_tables:
             INDEX idx_timers_global (task_type, status) WHERE entity_id IS NULL
         );
       scope_rules:
-        entity_scoped: entity_id NOT NULL and run_id set for runtime-owned entity timers. Root-owned timers have a root
-          routing_source and no flow_instance; declared-flow timers have flow_instance NOT NULL and a flow_owned_control
-          routing_source. Tied to entity lifecycle inside run_id. Cancelled when entity reaches terminal state.
+        entity_scoped: entity_id NOT NULL and run_id set for runtime-owned entity timers. Generic root-owned schedules have
+          a root routing_source and no flow_instance; declared-flow generic schedules have flow_instance NOT NULL and a
+          flow_owned_control routing_source. Canonical task_type=workflow_timer rows always retain their exact nonempty
+          lifecycle flow_instance, including root-owned rows whose producer routing_source remains root. Tied to entity
+          lifecycle inside run_id. Cancelled when entity reaches terminal state.
         global: entity_id NULL, flow_instance NULL, run_id NULL. Platform-level. Not tied to any entity. Survives entity
           lifecycle.
         flow_scoped: entity_id NULL, flow_instance NOT NULL, run_id set for runtime-owned flow timers. Tied to flow instance
