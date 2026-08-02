@@ -25,6 +25,7 @@ func TestRunCommandPostStartObserverFailuresDetachAndUseTerminalTruth(t *testing
 		opts   runCommandServerOptions
 	}{
 		{name: "attach failure", reason: runTraceDetachAttachFailed, opts: runCommandServerOptions{wsHTTPStatus: http.StatusServiceUnavailable}},
+		{name: "subscription rejected", reason: runTraceDetachAttachFailed, opts: runCommandServerOptions{wsSubscriptionError: &jsonRPCError{Code: -32000, Message: "subscription rejected"}}},
 		{name: "invalid subscription response", reason: runTraceDetachSubscriptionResponseInvalid, opts: runCommandServerOptions{wsSubscriptionResult: map[string]any{}}},
 		{name: "transport loss", reason: runTraceDetachTransportLost, opts: runCommandServerOptions{wsAbruptClose: true}},
 		{name: "invalid notification", reason: runTraceDetachNotificationInvalid, opts: runCommandServerOptions{wsNotificationMethod: "wrong.method", wsRows: []map[string]any{validRunCommandTraceRow("evt-invalid-notification")}}},
@@ -415,6 +416,163 @@ func TestRunCommandInterruptAfterObserverDetachPreservesModeControl(t *testing.T
 	}
 }
 
+func TestRunCommandBlockedTraceRenderingDoesNotDelayInterruptControl(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	for _, test := range []struct {
+		name            string
+		args            func(string) []string
+		stopOnInterrupt bool
+		wantMethods     []string
+	}{
+		{
+			name: "connected start stops the run",
+			args: func(serverURL string) []string {
+				return []string{"run", "start", "--connect", serverURL, "--event", "scan.requested", "--payload", payloadPath}
+			},
+			stopOnInterrupt: true,
+			wantMethods:     []string{"health.check", "run.start", "run.stop"},
+		},
+		{
+			name: "active reattach leaves the run active",
+			args: func(serverURL string) []string {
+				return []string{"run", "start", "--connect", serverURL, "--reattach", "run-blocked-trace"}
+			},
+			wantMethods: []string{"run.get"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			wsClosed := make(chan struct{})
+			stopCalled := make(chan struct{})
+			server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
+				rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+					switch req.Method {
+					case "health.check":
+						return runCommandHealthResult()
+					case "run.start":
+						return map[string]any{"run_id": "run-blocked-trace", "status": "running"}
+					case "run.get":
+						return map[string]any{"run": validDiagnosticRunHeader("run-blocked-trace")}
+					case "run.stop":
+						if !test.stopOnInterrupt {
+							t.Fatal("reattach interrupt called run.stop")
+						}
+						close(stopCalled)
+						return map[string]any{"ok": true}
+					default:
+						t.Fatalf("unexpected method = %q", req.Method)
+					}
+					return nil
+				},
+				wsRows:   []map[string]any{validRunCommandTraceRow("evt-blocked-trace")},
+				wsClosed: wsClosed,
+			})
+			defer server.Close()
+
+			stdout := newBlockingRunWriter("trace +")
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan int, 1)
+			opts := testRunCommandOptions(server)
+			opts.runStatusPoll = time.Hour
+			go func() {
+				var stderr bytes.Buffer
+				done <- executeRootCommandWithOptions(ctx, t.TempDir(), test.args(server.URL), stdout, &stderr, opts)
+			}()
+			requireSignal(t, stdout.blocked, "blocked trace output")
+			cancel()
+			if test.stopOnInterrupt {
+				requireSignal(t, stopCalled, "run.stop while trace output is blocked")
+			}
+			requireSignal(t, wsClosed, "observer settlement while trace output is blocked")
+			select {
+			case code := <-done:
+				t.Fatalf("command returned before trace output release with code %d", code)
+			default:
+			}
+			close(stdout.release)
+			select {
+			case code := <-done:
+				if code != 130 {
+					t.Fatalf("code = %d, want 130; stdout=%s", code, stdout.String())
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("run command did not finish after trace output release")
+			}
+			assertRunCommandMethods(t, calls, test.wantMethods)
+		})
+	}
+}
+
+func TestRunCommandBlockedDetachRenderingDoesNotDelayTerminalSelection(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	stderr := newBlockingRunWriter(runTraceObserverDetachedType)
+	terminalSelected := make(chan struct{})
+	wsClosed := make(chan struct{})
+	var terminalOnce sync.Once
+	server, _, _ := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			switch req.Method {
+			case "health.check":
+				return runCommandHealthResult()
+			case "run.start":
+				return map[string]any{"run_id": "run-blocked-detach", "status": "running"}
+			case "run.get":
+				run := validDiagnosticRunHeader("run-blocked-detach")
+				select {
+				case <-stderr.blocked:
+					run["status"] = "completed"
+					run["ended_at"] = "2026-05-13T10:01:00Z"
+					terminalOnce.Do(func() { close(terminalSelected) })
+				default:
+				}
+				return map[string]any{"run": run}
+			default:
+				t.Fatalf("unexpected method = %q", req.Method)
+			}
+			return nil
+		},
+		wsAbruptClose: true,
+		wsClosed:      wsClosed,
+	})
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	done := make(chan int, 1)
+	go func() {
+		done <- executeRootCommandWithOptions(
+			context.Background(),
+			t.TempDir(),
+			[]string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath},
+			&stdout,
+			stderr,
+			testRunCommandOptions(server),
+		)
+	}()
+	requireSignal(t, stderr.blocked, "blocked detach output")
+	requireSignal(t, terminalSelected, "terminal status selection while detach output is blocked")
+	requireSignal(t, wsClosed, "observer transport settlement while detach output is blocked")
+	select {
+	case code := <-done:
+		t.Fatalf("command returned before detach output release with code %d", code)
+	default:
+	}
+	close(stderr.release)
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run command did not finish after detach output release")
+	}
+	fact := requireSingleRunTraceDetachFact(t, stderr.String())
+	assertRunTraceDetachFact(t, fact, runTraceDetachTransportLost, "run-blocked-detach", "swarm run start --connect "+server.URL+" --reattach run-blocked-detach")
+	if !strings.Contains(stdout.String(), "run terminal: run_id=run-blocked-detach status=completed") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
 func TestForegroundRunTraceObserverTimeoutInterruptsBlockedRequestWrite(t *testing.T) {
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	upgraded := make(chan struct{})
@@ -645,31 +803,43 @@ func requireSignal(t *testing.T, signal <-chan struct{}, name string) {
 	}
 }
 
-type blockingTraceWriter struct {
+type blockingRunWriter struct {
+	needle  string
 	mu      sync.Mutex
 	buf     bytes.Buffer
 	blocked chan struct{}
 	release chan struct{}
-	once    sync.Once
+	started bool
 }
 
-func newBlockingTraceWriter() *blockingTraceWriter {
-	return &blockingTraceWriter{blocked: make(chan struct{}), release: make(chan struct{})}
+func newBlockingRunWriter(needle string) *blockingRunWriter {
+	return &blockingRunWriter{needle: needle, blocked: make(chan struct{}), release: make(chan struct{})}
 }
 
-func (w *blockingTraceWriter) Write(p []byte) (int, error) {
-	if strings.Contains(string(p), "trace ") {
-		w.once.Do(func() {
+func newBlockingTraceWriter() *blockingRunWriter {
+	return newBlockingRunWriter("trace ")
+}
+
+func (w *blockingRunWriter) Write(p []byte) (int, error) {
+	shouldBlock := false
+	if strings.Contains(string(p), w.needle) {
+		w.mu.Lock()
+		if !w.started {
+			w.started = true
 			close(w.blocked)
-			<-w.release
-		})
+			shouldBlock = true
+		}
+		w.mu.Unlock()
+	}
+	if shouldBlock {
+		<-w.release
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.buf.Write(p)
 }
 
-func (w *blockingTraceWriter) String() string {
+func (w *blockingRunWriter) String() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.buf.String()

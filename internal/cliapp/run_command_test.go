@@ -913,6 +913,7 @@ type runCommandServerOptions struct {
 	wsRequestRead        chan struct{}
 	wsClosed             chan struct{}
 	wsSubscriptionResult map[string]any
+	wsSubscriptionError  *jsonRPCError
 	wsCloseAfterRows     bool
 	wsHoldResponse       bool
 	wsAbruptClose        bool
@@ -999,15 +1000,20 @@ func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.
 				_, _, _ = conn.ReadMessage()
 				return
 			}
-			result := opts.wsSubscriptionResult
-			if result == nil {
-				result = map[string]any{"subscription_id": "sub-run"}
-			}
-			if err := conn.WriteJSON(map[string]any{
+			response := map[string]any{
 				"jsonrpc": "2.0",
 				"id":      req.ID,
-				"result":  result,
-			}); err != nil {
+			}
+			if opts.wsSubscriptionError != nil {
+				response["error"] = opts.wsSubscriptionError
+			} else {
+				result := opts.wsSubscriptionResult
+				if result == nil {
+					result = map[string]any{"subscription_id": "sub-run"}
+				}
+				response["result"] = result
+			}
+			if err := conn.WriteJSON(response); err != nil {
 				t.Errorf("write ws subscription response: %v", err)
 				return
 			}
@@ -1042,7 +1048,7 @@ func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.
 				_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 				return
 			}
-			<-r.Context().Done()
+			_, _, _ = conn.ReadMessage()
 		default:
 			t.Errorf("path = %q, want /v1/rpc or /v1/ws", r.URL.Path)
 			http.NotFound(w, r)
