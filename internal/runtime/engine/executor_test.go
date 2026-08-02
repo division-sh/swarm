@@ -469,34 +469,34 @@ type eventErrPayloadShaper struct {
 	shaped    []string
 }
 
-func (stubStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapshot, bool, error) {
+func (stubStateRepo) LoadState(context.Context, StateAddress) (StateSnapshot, bool, error) {
 	return StateSnapshot{}, false, nil
 }
-func (stubStateRepo) SaveState(context.Context, identity.EntityID, StateMutation) error { return nil }
-func (r *recordingStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapshot, bool, error) {
+func (stubStateRepo) SaveState(context.Context, StateAddress, StateMutation) error { return nil }
+func (r *recordingStateRepo) LoadState(context.Context, StateAddress) (StateSnapshot, bool, error) {
 	return StateSnapshot{}, false, nil
 }
-func (r *recordingStateRepo) SaveState(context.Context, identity.EntityID, StateMutation) error {
+func (r *recordingStateRepo) SaveState(context.Context, StateAddress, StateMutation) error {
 	r.saves++
 	return nil
 }
-func (r actionMergeStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapshot, bool, error) {
+func (r actionMergeStateRepo) LoadState(context.Context, StateAddress) (StateSnapshot, bool, error) {
 	return r.snapshot, true, nil
 }
-func (actionMergeStateRepo) SaveState(context.Context, identity.EntityID, StateMutation) error {
+func (actionMergeStateRepo) SaveState(context.Context, StateAddress, StateMutation) error {
 	return nil
 }
 func (stubRunner) Run(ctx context.Context, fn func(Tx) error) error { return fn(stubTx{ctx: ctx}) }
 func (stubLocker) WithEntityLock(ctx context.Context, _ identity.EntityID, fn func(context.Context) error) error {
 	return fn(ctx)
 }
-func (r lockOrderStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapshot, bool, error) {
+func (r lockOrderStateRepo) LoadState(context.Context, StateAddress) (StateSnapshot, bool, error) {
 	if r.order != nil {
 		*r.order = append(*r.order, "load")
 	}
 	return testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}), true, nil
 }
-func (lockOrderStateRepo) SaveState(context.Context, identity.EntityID, StateMutation) error {
+func (lockOrderStateRepo) SaveState(context.Context, StateAddress, StateMutation) error {
 	return nil
 }
 func (l lockOrderLocker) WithEntityLock(ctx context.Context, _ identity.EntityID, fn func(context.Context) error) error {
@@ -545,9 +545,9 @@ func (r stubActionRegistry) Action(id identity.ActionKey) (runtimeregistry.Actio
 	entry, ok := r.entries[id]
 	return entry, ok
 }
-func (r *stubActionRunner) ExecuteAction(_ context.Context, action runtimecontracts.ActionSpec, _ runtimeregistry.ActionInstruction, _ ExecutionContext) (bool, error) {
+func (r *stubActionRunner) ExecuteAction(_ context.Context, action runtimecontracts.ActionSpec, _ runtimeregistry.ActionInstruction, _ ExecutionContext) (ActionExecution, error) {
 	r.called = append(r.called, action.ID)
-	return true, nil
+	return ActionExecution{Handled: true}, nil
 }
 func (stubPayloadShaper) ShapeEmitPayload(_ context.Context, _ ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error) {
 	out := cloneStringAnyMap(payload)
@@ -2700,11 +2700,11 @@ type orderedStateRepo struct {
 	mutation StateMutation
 }
 
-func (r *orderedStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapshot, bool, error) {
+func (r *orderedStateRepo) LoadState(context.Context, StateAddress) (StateSnapshot, bool, error) {
 	return testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}), true, nil
 }
 
-func (r *orderedStateRepo) SaveState(_ context.Context, _ identity.EntityID, mutation StateMutation) error {
+func (r *orderedStateRepo) SaveState(_ context.Context, _ StateAddress, mutation StateMutation) error {
 	*r.order = append(*r.order, "save")
 	r.mutation = mutation
 	return nil

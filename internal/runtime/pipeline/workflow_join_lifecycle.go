@@ -149,14 +149,13 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, rou
 	return nil
 }
 
-func (pc *PipelineCoordinator) reconcileClosedJoinSchedules(ctx context.Context, entityID string, carrier runtimeengine.StateCarrier) error {
+func (pc *PipelineCoordinator) reconcileClosedJoinSchedules(ctx context.Context, route runtimeflowidentity.Route, entityID string, carrier runtimeengine.StateCarrier) error {
 	activations, err := joinruntime.List(carrier.StateBuckets)
 	if err != nil {
 		return fmt.Errorf("list join activations: %w", err)
 	}
-	route, err := workflowInstanceRouteForContext(ctx, pc.SemanticSource(), "", "")
-	if err != nil {
-		return err
+	if !route.Valid() {
+		return fmt.Errorf("join schedule reconciliation requires an exact workflow instance route")
 	}
 	instance, ok, err := pc.workflowStore.Load(ctx, route)
 	if err != nil || !ok {

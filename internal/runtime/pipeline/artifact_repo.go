@@ -19,7 +19,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -37,8 +36,6 @@ const (
 	defaultRepoMaxBytes          = 50 << 20
 )
 
-var errArtifactRepoResultEmitCollectorMissing = errors.New("artifact_repo_commit result event requires transactional action emit collector")
-
 var invalidArtifactRootMounts = []string{"/workspace", "/data", "/opt/swarm/contracts"}
 
 type artifactRepoPreparedFile struct {
@@ -49,42 +46,42 @@ type artifactRepoPreparedFile struct {
 	Size        int
 }
 
-func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action runtimecontracts.ActionSpec, execCtx runtimeengine.ExecutionContext) error {
+func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action runtimecontracts.ActionSpec, execCtx runtimeengine.ExecutionContext) ([]runtimeengine.EmitIntent, error) {
 	if pc == nil {
-		return fmt.Errorf("artifact_repo_commit requires pipeline coordinator")
+		return nil, fmt.Errorf("artifact_repo_commit requires pipeline coordinator")
 	}
 	if pc.workflowStore == nil || !pc.workflowStore.enabled() {
-		return fmt.Errorf("artifact_repo_commit requires workflow instance store")
+		return nil, fmt.Errorf("artifact_repo_commit requires workflow instance store")
 	}
 	spec := action.ArtifactRepo
 	if spec == nil {
-		return fmt.Errorf("artifact_repo_commit requires artifact_repo declaration")
+		return nil, fmt.Errorf("artifact_repo_commit requires artifact_repo declaration")
 	}
 	if strings.TrimSpace(spec.Provider) != artifactRepoProviderLocalGit {
-		return fmt.Errorf("artifact_repo_commit provider %q is unsupported", strings.TrimSpace(spec.Provider))
+		return nil, fmt.Errorf("artifact_repo_commit provider %q is unsupported", strings.TrimSpace(spec.Provider))
 	}
 	sourceEventID := strings.TrimSpace(execCtx.Request.Event.ID())
 	if _, err := uuid.Parse(sourceEventID); err != nil {
-		return fmt.Errorf("artifact_repo_commit requires UUID source event id: %w", err)
+		return nil, fmt.Errorf("artifact_repo_commit requires UUID source event id: %w", err)
 	}
 	repoID, err := requiredArtifactUUID(execCtx.Base, spec.RepoID, "artifact_repo.repo_id")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	namespace, err := artifactNamespace(execCtx, spec)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	requestID, err := requiredArtifactUUID(execCtx.Base, spec.RequestID, "artifact_repo.request_id")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	partitionKey := ""
 	provenance := map[string]any{}
 	displaySlug := ""
-	fail := func(err error) error {
+	fail := func(err error) ([]runtimeengine.EmitIntent, error) {
 		if err == nil {
-			return nil
+			return nil, nil
 		}
 		return pc.persistAndPublishArtifactRepoFailure(ctx, execCtx, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, err)
 	}
@@ -101,7 +98,7 @@ func (pc *PipelineCoordinator) commitArtifactRepo(ctx context.Context, action ru
 		return fail(artifactRepoClassify(err, runtimefailures.ClassSchemaInvalid, "artifact_repo_provenance_invalid", "resolve_input"))
 	}
 	if previous := strings.TrimSpace(asString(execCtx.Request.State.StateCarrier.Metadata[spec.Output.LastSourceEventID])); previous == sourceEventID && artifactRepoOutputsComplete(execCtx.Request.State.StateCarrier.Metadata, spec) {
-		return nil
+		return nil, nil
 	}
 	files, treeHash, err := prepareArtifactRepoFiles(execCtx.Base, spec)
 	if err != nil {
@@ -184,11 +181,11 @@ func artifactRepoClassify(err error, class runtimefailures.Class, code, operatio
 	return runtimefailures.Wrap(class, code, "artifact-repo", operation, nil, err)
 }
 
-func (pc *PipelineCoordinator) persistAndPublishArtifactRepoFailure(ctx context.Context, execCtx runtimeengine.ExecutionContext, spec *runtimecontracts.ArtifactRepoSpec, repoID, namespace, partitionKey, displaySlug string, provenance map[string]any, requestID, sourceEventID string, cause error) error {
+func (pc *PipelineCoordinator) persistAndPublishArtifactRepoFailure(ctx context.Context, execCtx runtimeengine.ExecutionContext, spec *runtimecontracts.ArtifactRepoSpec, repoID, namespace, partitionKey, displaySlug string, provenance map[string]any, requestID, sourceEventID string, cause error) ([]runtimeengine.EmitIntent, error) {
 	failure := runtimefailures.Normalize(cause, "artifact-repo", "commit")
 	failureValue, err := runtimefailures.EnvelopeValue(failure)
 	if err != nil {
-		return errors.Join(cause, fmt.Errorf("artifact_repo_commit failed to encode canonical failure: %w", err))
+		return nil, errors.Join(cause, fmt.Errorf("artifact_repo_commit failed to encode canonical failure: %w", err))
 	}
 	fields := map[string]any{
 		spec.Output.Status:            "failed",
@@ -199,29 +196,28 @@ func (pc *PipelineCoordinator) persistAndPublishArtifactRepoFailure(ctx context.
 	failureEvent := strings.TrimSpace(spec.FailureEvent)
 	if failureEvent == "" {
 		if persistErr := pc.persistArtifactRepoResult(ctx, execCtx, spec, fields); persistErr != nil {
-			return errors.Join(cause, fmt.Errorf("artifact_repo_commit failed to persist failure state: %w", persistErr))
+			return nil, errors.Join(cause, fmt.Errorf("artifact_repo_commit failed to persist failure state: %w", persistErr))
 		}
-		return cause
+		return nil, cause
 	}
 	payload, payloadErr := artifactRepoFailurePayload(execCtx.Base, spec, repoID, namespace, partitionKey, displaySlug, provenance, requestID, sourceEventID, failureValue)
 	if payloadErr != nil {
-		return errors.Join(cause, payloadErr)
+		return nil, errors.Join(cause, payloadErr)
 	}
 	if validateErr := pc.validateArtifactRepoResultPayload(execCtx, failureEvent, payload); validateErr != nil {
-		return errors.Join(cause, validateErr)
+		return nil, errors.Join(cause, validateErr)
 	}
-	if queued, queueErr := pc.queueArtifactRepoResultEvent(ctx, execCtx, failureEvent, payload); queueErr != nil {
-		return errors.Join(cause, queueErr)
-	} else if queued {
-		if persistErr := pc.persistArtifactRepoResult(ctx, execCtx, spec, fields); persistErr != nil {
-			return errors.Join(cause, fmt.Errorf("artifact_repo_commit failed to persist failure state: %w", persistErr))
-		}
-		return nil
+	intent, queueErr := pc.artifactRepoResultEvent(execCtx, failureEvent, payload)
+	if queueErr != nil {
+		return nil, errors.Join(cause, queueErr)
 	}
-	return errors.Join(cause, errArtifactRepoResultEmitCollectorMissing)
+	if persistErr := pc.persistArtifactRepoResult(ctx, execCtx, spec, fields); persistErr != nil {
+		return nil, errors.Join(cause, fmt.Errorf("artifact_repo_commit failed to persist failure state: %w", persistErr))
+	}
+	return []runtimeengine.EmitIntent{intent}, nil
 }
 
-func (pc *PipelineCoordinator) persistAndPublishArtifactRepoSuccess(ctx context.Context, execCtx runtimeengine.ExecutionContext, spec *runtimecontracts.ArtifactRepoSpec, repoURL, ref string, manifest map[string]any, requestID, sourceEventID string, successPayload map[string]any) error {
+func (pc *PipelineCoordinator) persistAndPublishArtifactRepoSuccess(ctx context.Context, execCtx runtimeengine.ExecutionContext, spec *runtimecontracts.ArtifactRepoSpec, repoURL, ref string, manifest map[string]any, requestID, sourceEventID string, successPayload map[string]any) ([]runtimeengine.EmitIntent, error) {
 	fields := map[string]any{
 		spec.Output.RepoURL:       repoURL,
 		spec.Output.CurrentRef:    ref,
@@ -233,21 +229,23 @@ func (pc *PipelineCoordinator) persistAndPublishArtifactRepoSuccess(ctx context.
 	successEvent := strings.TrimSpace(spec.SuccessEvent)
 	if successEvent == "" {
 		fields[spec.Output.LastSourceEventID] = sourceEventID
-		return pc.persistArtifactRepoResult(ctx, execCtx, spec, fields)
+		return nil, pc.persistArtifactRepoResult(ctx, execCtx, spec, fields)
 	}
-	if queued, err := pc.queueArtifactRepoResultEvent(ctx, execCtx, successEvent, successPayload); err != nil {
-		return err
-	} else if queued {
-		fields[spec.Output.LastSourceEventID] = sourceEventID
-		return pc.persistArtifactRepoResult(ctx, execCtx, spec, fields)
+	intent, err := pc.artifactRepoResultEvent(execCtx, successEvent, successPayload)
+	if err != nil {
+		return nil, err
 	}
-	return errArtifactRepoResultEmitCollectorMissing
+	fields[spec.Output.LastSourceEventID] = sourceEventID
+	if err := pc.persistArtifactRepoResult(ctx, execCtx, spec, fields); err != nil {
+		return nil, err
+	}
+	return []runtimeengine.EmitIntent{intent}, nil
 }
 
-func (pc *PipelineCoordinator) queueArtifactRepoResultEvent(ctx context.Context, execCtx runtimeengine.ExecutionContext, eventType string, payload map[string]any) (bool, error) {
+func (pc *PipelineCoordinator) artifactRepoResultEvent(execCtx runtimeengine.ExecutionContext, eventType string, payload map[string]any) (runtimeengine.EmitIntent, error) {
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
-		return false, nil
+		return runtimeengine.EmitIntent{}, fmt.Errorf("artifact result event type is required")
 	}
 	if payload == nil {
 		payload = map[string]any{}
@@ -261,7 +259,7 @@ func (pc *PipelineCoordinator) queueArtifactRepoResultEvent(ctx context.Context,
 	}
 	routingSource := execCtx.Request.ProducerSource
 	if routingSource.Empty() {
-		return false, fmt.Errorf("artifact result requires admitted execution producer source")
+		return runtimeengine.EmitIntent{}, fmt.Errorf("artifact result requires admitted execution producer source")
 	}
 	sourceRoute := routingSource.Route()
 	eventType = actionResultEventType(pc.SemanticSource(), execCtx.Request.FlowID.String(), eventType, sourceRoute)
@@ -284,13 +282,13 @@ func (pc *PipelineCoordinator) queueArtifactRepoResultEvent(ctx context.Context,
 		Lineage: events.LineageFromEvent(execCtx.Request.Event),
 	})
 	if err != nil {
-		return false, fmt.Errorf("construct artifact result event: %w", err)
+		return runtimeengine.EmitIntent{}, fmt.Errorf("construct artifact result event: %w", err)
 	}
-	return runtimeengine.QueueActionEmitIntent(ctx, runtimeengine.EmitIntent{
+	return runtimeengine.EmitIntent{
 		Event:         evt,
 		ChainDepth:    chainDepth,
 		ParentEventID: evt.ParentEventID(),
-	}), nil
+	}, nil
 }
 
 func (pc *PipelineCoordinator) artifactRepoRoot() (string, error) {
@@ -1035,7 +1033,7 @@ func (pc *PipelineCoordinator) persistArtifactRepoResult(ctx context.Context, ex
 		TriggeredAt:      execCtx.Request.Event.CreatedAt(),
 	}
 	repo := pipelineEngineStateRepo{coordinator: pc}
-	return repo.SaveState(ctx, identity.NormalizeEntityID(execCtx.Request.EntityID.String()), mutation)
+	return repo.SaveState(ctx, execCtx.Request.StateAddress(), mutation)
 }
 
 type artifactRepoHistoryRecord struct {

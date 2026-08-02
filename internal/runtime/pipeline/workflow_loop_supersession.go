@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -50,13 +51,12 @@ func supersedePriorLoopGenerationArtifacts(instance *WorkflowInstance, previousB
 	return nil
 }
 
-func (pc *PipelineCoordinator) reconcileSupersededLoopSchedules(ctx context.Context, entityID string) error {
+func (pc *PipelineCoordinator) reconcileSupersededLoopSchedules(ctx context.Context, route runtimeflowidentity.Route, entityID string) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return nil
 	}
-	route, err := workflowInstanceRouteForContext(ctx, pc.SemanticSource(), "", "")
-	if err != nil {
-		return err
+	if !route.Valid() {
+		return fmt.Errorf("loop schedule reconciliation requires an exact workflow instance route")
 	}
 	instance, ok, err := pc.workflowStore.Load(ctx, route)
 	if err != nil || !ok {

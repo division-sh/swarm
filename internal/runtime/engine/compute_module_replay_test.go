@@ -270,11 +270,11 @@ func mustComputeModuleReplayJSON(t *testing.T, value any) []byte {
 
 type replayStateRepo struct{}
 
-func (replayStateRepo) LoadState(context.Context, identity.EntityID) (runtimeengine.StateSnapshot, bool, error) {
+func (replayStateRepo) LoadState(context.Context, runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
 	return runtimeengine.StateSnapshot{}, false, nil
 }
 
-func (replayStateRepo) SaveState(context.Context, identity.EntityID, runtimeengine.StateMutation) error {
+func (replayStateRepo) SaveState(context.Context, runtimeengine.StateAddress, runtimeengine.StateMutation) error {
 	return nil
 }
 

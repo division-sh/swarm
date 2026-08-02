@@ -653,7 +653,7 @@ func (l *WorkflowTimerLifecycle) CancelSupersededGenerations(ctx context.Context
 	}
 	route, err := workflowInstanceRouteForContext(ctx, l.source, "", "")
 	if err != nil {
-		return err
+		return fmt.Errorf("workflow timer owner route: %w", err)
 	}
 	instance, ok, err := store.Load(ctx, route)
 	if err != nil || !ok {

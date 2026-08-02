@@ -521,9 +521,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		}
 		req.State = loaded
 		return e.deps.TxRunner.Run(lockCtx, func(tx Tx) error {
-			actionIntents := []EmitIntent{}
-			txCtx := WithActionEmitIntentCollector(tx.Context(), &actionIntents)
-			frame, err := e.newExecutionFrame(contextTx{Tx: tx, ctx: txCtx}, req)
+			frame, err := e.newExecutionFrame(tx, req)
 			if err != nil {
 				SetExecutionFailure(&result, err, "runtime.engine", "base_context")
 				return err
@@ -546,9 +544,6 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 				result = frame.result
 				SetExecutionFailure(&result, err, "runtime.engine", "compute_replay_trace")
 				return err
-			}
-			if len(actionIntents) > 0 {
-				frame.result.EmitIntents = append(frame.result.EmitIntents, actionIntents...)
 			}
 			result = frame.result
 			if err := e.persist(frame.tx.Context(), frame); err != nil {
@@ -600,7 +595,7 @@ func (e *Executor) loadState(ctx context.Context, req ExecutionRequest) (StateSn
 	if req.EntityID.IsZero() {
 		return state, nil
 	}
-	loaded, ok, err := e.deps.StateRepo.LoadState(ctx, req.EntityID)
+	loaded, ok, err := e.deps.StateRepo.LoadState(ctx, req.StateAddress())
 	if err != nil {
 		return StateSnapshot{}, err
 	}
@@ -2230,14 +2225,17 @@ func (e *Executor) stepAction(frame *executionFrame) error {
 		}
 		if e.deps.ActionRunner != nil {
 			execCtx := e.executionContext(frame, StepAction)
-			handled, err := e.deps.ActionRunner.ExecuteAction(frame.tx.Context(), actionSpec, entry, execCtx)
+			execution, err := e.deps.ActionRunner.ExecuteAction(frame.tx.Context(), actionSpec, entry, execCtx)
 			if err != nil {
 				return err
 			}
-			if !handled && strings.TrimSpace(entry.Emits) == "" {
+			if !execution.Handled && strings.TrimSpace(entry.Emits) == "" {
 				return fmt.Errorf("action %q is not executable", actionKey.String())
 			}
-			if handled {
+			if len(execution.EmitIntents) > 0 {
+				frame.result.EmitIntents = append(frame.result.EmitIntents, execution.EmitIntents...)
+			}
+			if execution.Handled {
 				if err := e.mergePersistedActionState(frame, execCtx.Request.State); err != nil {
 					return err
 				}
@@ -2354,7 +2352,7 @@ func (e *Executor) mergePersistedActionState(frame *executionFrame, baseline Sta
 	if e == nil || e.deps.StateRepo == nil || frame == nil || frame.req.EntityID.IsZero() {
 		return nil
 	}
-	persisted, ok, err := e.deps.StateRepo.LoadState(frame.tx.Context(), frame.req.EntityID)
+	persisted, ok, err := e.deps.StateRepo.LoadState(frame.tx.Context(), frame.req.StateAddress())
 	if err != nil || !ok {
 		return err
 	}
@@ -2487,7 +2485,7 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) error {
 	if frame.result.StateMutation.StateCarrier.StateBuckets == nil {
 		frame.result.StateMutation.SetStateBuckets(frame.state.State.StateCarrier.StateBuckets)
 	}
-	if err := e.deps.StateRepo.SaveState(ctx, frame.req.EntityID, frame.result.StateMutation); err != nil {
+	if err := e.deps.StateRepo.SaveState(ctx, frame.req.StateAddress(), frame.result.StateMutation); err != nil {
 		return err
 	}
 	if hasLifecycleEffect {
@@ -2520,7 +2518,7 @@ func (e *Executor) verifyEmitPersistencePrerequisites(ctx context.Context, frame
 	if len(prerequisites.Fields) == 0 {
 		return nil
 	}
-	return e.deps.EmitVerifier.VerifyEmitPersistence(ctx, frame.req.EntityID, prerequisites)
+	return e.deps.EmitVerifier.VerifyEmitPersistence(ctx, frame.req.StateAddress(), prerequisites)
 }
 
 func (e *Executor) emitPersistencePrerequisites(frame executionFrame) EmitPersistencePrerequisites {

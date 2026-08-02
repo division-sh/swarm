@@ -34,7 +34,7 @@ func cloneBoolMap(in map[string]bool) map[string]bool {
 	return out
 }
 
-func (r *persistentStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapshot, bool, error) {
+func (r *persistentStateRepo) LoadState(context.Context, StateAddress) (StateSnapshot, bool, error) {
 	if !r.found {
 		return StateSnapshot{}, false, nil
 	}
@@ -49,7 +49,8 @@ func (r *persistentStateRepo) LoadState(context.Context, identity.EntityID) (Sta
 	}, true, nil
 }
 
-func (r *persistentStateRepo) SaveState(_ context.Context, entityID identity.EntityID, mutation StateMutation) error {
+func (r *persistentStateRepo) SaveState(_ context.Context, address StateAddress, mutation StateMutation) error {
+	entityID := address.EntityID
 	if !r.found {
 		r.found = true
 		r.snapshot = StateSnapshot{
@@ -318,7 +319,7 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 	if result.NextState != "passed" {
 		t.Fatalf("NextState = %q", result.NextState)
 	}
-	state, ok, err := repo.LoadState(context.Background(), "ent-1")
+	state, ok, err := repo.LoadState(context.Background(), StateAddress{EntityID: "ent-1"})
 	if err != nil || !ok {
 		t.Fatalf("LoadState = %v, ok=%v", err, ok)
 	}

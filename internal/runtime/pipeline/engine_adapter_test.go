@@ -30,6 +30,20 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
+type actionEmitIntentCollectorForTestKey struct{}
+
+func withActionEmitIntentCollectorForTest(ctx context.Context, intents *[]runtimeengine.EmitIntent) context.Context {
+	return context.WithValue(ctx, actionEmitIntentCollectorForTestKey{}, intents)
+}
+
+func (r pipelineEngineActionRunner) executeAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimeregistry.ActionInstruction, execCtx runtimeengine.ExecutionContext) (bool, error) {
+	result, err := r.ExecuteAction(ctx, action, entry, execCtx)
+	if collector, ok := ctx.Value(actionEmitIntentCollectorForTestKey{}).(*[]runtimeengine.EmitIntent); ok && collector != nil {
+		*collector = append(*collector, result.EmitIntents...)
+	}
+	return result.Handled, err
+}
+
 func testEngineStateMutation(metadata map[string]any, gates map[string]bool, buckets map[string]map[string]any) runtimeengine.StateMutation {
 	return runtimeengine.StateMutation{
 		StateCarrier: runtimeengine.NewStateCarrier(metadata, gates, buckets),
@@ -39,6 +53,14 @@ func testEngineStateMutation(metadata map[string]any, gates map[string]bool, buc
 func testEngineStateSnapshot(metadata map[string]any, gates map[string]bool, buckets map[string]map[string]any) runtimeengine.StateSnapshot {
 	return runtimeengine.StateSnapshot{
 		StateCarrier: runtimeengine.NewStateCarrier(metadata, gates, buckets),
+	}
+}
+
+func testEngineStateAddress(flowID, instancePath, entityID string) runtimeengine.StateAddress {
+	return runtimeengine.StateAddress{
+		FlowID:   identity.NormalizeFlowID(flowID),
+		Route:    runtimeflowidentity.RouteForInstancePath(instancePath),
+		EntityID: identity.NormalizeEntityID(entityID),
 	}
 }
 
@@ -411,7 +433,7 @@ func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testin
 		t.Fatalf("seed root instance: %v", err)
 	}
 
-	if err := pc.maybeDeactivateTerminalFlowInstance(testPipelineCoordinatorRunContext(t, pc), entityID, "done"); err != nil {
+	if err := pc.maybeDeactivateTerminalFlowInstance(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID), entityID, "done"); err != nil {
 		t.Fatalf("maybeDeactivateTerminalFlowInstance: %v", err)
 	}
 	if deactivated {
@@ -471,7 +493,7 @@ func TestMaybeDeactivateTerminalFlowInstance_PassesTerminalStateToTemplateDeacti
 		t.Fatalf("seed template instance: %v", err)
 	}
 
-	if err := pc.maybeDeactivateTerminalFlowInstance(testPipelineCoordinatorRunContext(t, pc), entityID, "completed"); err != nil {
+	if err := pc.maybeDeactivateTerminalFlowInstance(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(flowPath), entityID, "completed"); err != nil {
 		t.Fatalf("maybeDeactivateTerminalFlowInstance: %v", err)
 	}
 	if !called {
@@ -599,7 +621,7 @@ func TestPipelineEngineStateRepoSaveStateRejectsForeignFlowWrite(t *testing.T) {
 	entityID := "11111111-1111-1111-1111-111111111111"
 	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "flow-a",
 		WorkflowName:    "flow-a",
 		WorkflowVersion: "1.6.0",
 		CurrentState:    "pending",
@@ -624,7 +646,7 @@ func TestPipelineEngineStateRepoSaveStateRejectsForeignFlowWrite(t *testing.T) {
 		},
 	}
 	ctx := withPipelineFlowScope(testWorkflowStoreRunContext(t, store), "flow-b")
-	err := repo.SaveState(ctx, identity.NormalizeEntityID(entityID), testEngineStateMutation(map[string]any{"note": "bad write"}, nil, nil))
+	err := repo.SaveState(ctx, testEngineStateAddress("flow-b", "flow-a", entityID), testEngineStateMutation(map[string]any{"note": "bad write"}, nil, nil))
 	if err == nil || !strings.Contains(err.Error(), "cross_flow_write_forbidden") {
 		t.Fatalf("expected cross_flow_write_forbidden, got %v", err)
 	}
@@ -668,7 +690,7 @@ review_entity:
 		},
 	}
 
-	loaded, ok, err := repo.LoadState(withPipelineFlowScope(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), "review"), identity.NormalizeEntityID(FlowInstanceEntityID("review/inst-missing")))
+	loaded, ok, err := repo.LoadState(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), testEngineStateAddress("review", "review/inst-missing", FlowInstanceEntityID("review/inst-missing")))
 	if err != nil {
 		t.Fatalf("LoadState: %v", err)
 	}
@@ -690,7 +712,7 @@ func TestPipelineEngineStateRepoRoundTripsTypedCarrier(t *testing.T) {
 	entityID := identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111")
 	if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID.String(),
-		StorageRef:      entityID.String(),
+		StorageRef:      "root",
 		WorkflowName:    "root",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "pending",
@@ -705,10 +727,11 @@ func TestPipelineEngineStateRepoRoundTripsTypedCarrier(t *testing.T) {
 		map[string]map[string]any{"evidence": {"count": 2}},
 	)
 
-	if err := repo.SaveState(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), entityID, mutation); err != nil {
+	address := testEngineStateAddress("root", "root", entityID.String())
+	if err := repo.SaveState(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), address, mutation); err != nil {
 		t.Fatalf("SaveState: %v", err)
 	}
-	loaded, ok, err := repo.LoadState(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), entityID)
+	loaded, ok, err := repo.LoadState(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), address)
 	if err != nil {
 		t.Fatalf("LoadState: %v", err)
 	}
@@ -734,7 +757,7 @@ func TestPipelineEngineStateRepoLoadStateRejectsMalformedPersistedCarrier(t *tes
 		store := newPostgresWorkflowInstanceStoreForTest(db)
 		if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 			InstanceID:      "22222222-2222-2222-2222-222222222222",
-			StorageRef:      "22222222-2222-2222-2222-222222222222",
+			StorageRef:      "root",
 			WorkflowName:    "root",
 			WorkflowVersion: "1.0.0",
 			CurrentState:    "pending",
@@ -745,7 +768,7 @@ func TestPipelineEngineStateRepoLoadStateRejectsMalformedPersistedCarrier(t *tes
 			t.Fatalf("upsert malformed state bucket instance: %v", err)
 		}
 		repo := pipelineEngineStateRepo{coordinator: &PipelineCoordinator{workflowStore: store}}
-		_, _, err := repo.LoadState(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), identity.NormalizeEntityID("22222222-2222-2222-2222-222222222222"))
+		_, _, err := repo.LoadState(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), testEngineStateAddress("root", "root", "22222222-2222-2222-2222-222222222222"))
 		if err == nil || !strings.Contains(err.Error(), "invalid workflow state bucket") {
 			t.Fatalf("LoadState error = %v, want invalid workflow state bucket", err)
 		}
@@ -790,7 +813,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceReturnsMutationError(t *testin
 		},
 	}
 	runner := pipelineEngineActionRunner{coordinator: pc}
-	ok, err := runner.ExecuteAction(testAuthorActivityContext(t, context.Background()), runtimecontracts.ActionSpec{ID: "record_evidence"}, runtimeregistry.ActionInstruction{Builtin: "record_evidence"}, runtimeengine.ExecutionContext{
+	ok, err := runner.executeAction(testAuthorActivityContext(t, context.Background()), runtimecontracts.ActionSpec{ID: "record_evidence"}, runtimeregistry.ActionInstruction{Builtin: "record_evidence"}, runtimeengine.ExecutionContext{
 		Request: runtimeengine.ExecutionRequest{
 			EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
 			NodeID:   identity.NormalizeNodeID("node-a"),
@@ -885,7 +908,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTarg
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 
-			ok, err := runner.ExecuteAction(ctx, tt.action, runtimeregistry.ActionInstruction{Builtin: "record_evidence"}, runtimeengine.ExecutionContext{
+			ok, err := runner.executeAction(ctx, tt.action, runtimeregistry.ActionInstruction{Builtin: "record_evidence"}, runtimeengine.ExecutionContext{
 				Request: runtimeengine.ExecutionRequest{
 					EntityID: identity.NormalizeEntityID(tt.entityID),
 					NodeID:   identity.NormalizeNodeID("build-orchestrator"),
@@ -979,7 +1002,7 @@ func TestPipelineEngineActionRunner_CreateFlowInstanceUsesExecutionBaseContextFo
 		},
 	}
 
-	ok, err := runner.ExecuteAction(testAuthorActivityContext(t, context.Background()), action, runtimeregistry.ActionInstruction{Builtin: "create_flow_instance"}, runtimeengine.ExecutionContext{
+	ok, err := runner.executeAction(testAuthorActivityContext(t, context.Background()), action, runtimeregistry.ActionInstruction{Builtin: "create_flow_instance"}, runtimeengine.ExecutionContext{
 		Base: base,
 		Request: runtimeengine.ExecutionRequest{
 			EntityID: identity.NormalizeEntityID("ent-1"),
@@ -1062,7 +1085,7 @@ func TestPipelineEngineActionRunner_MailboxWriteMaterializesIdempotentRow(t *tes
 		},
 	}
 	for i := 0; i < 2; i++ {
-		ok, err := runner.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "mailbox_write"}, execCtx)
+		ok, err := runner.executeAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "mailbox_write"}, execCtx)
 		if err != nil {
 			t.Fatalf("ExecuteAction iteration %d: %v", i, err)
 		}
@@ -1116,7 +1139,7 @@ func TestPipelineEngineActionRunner_MailboxWriteFailsClosedOnMissingRequiredExpr
 	base.Event = values.Wrap(evt.ContextMap(""))
 	base.Payload = values.Wrap(parsePayloadMap(evt.Payload()))
 
-	ok, err := runner.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "mailbox_write"}, runtimeengine.ExecutionContext{
+	ok, err := runner.executeAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "mailbox_write"}, runtimeengine.ExecutionContext{
 		Base: base,
 		Request: runtimeengine.ExecutionRequest{
 			NodeID: identity.NormalizeNodeID("mailbox-node"),
@@ -1171,10 +1194,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: artifactRoot}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
-	initial := testArtifactRepoEntityFields()
+	initial := testArtifactRepoEntityFields(entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "artifact-repo",
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "working",
@@ -1184,7 +1207,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 	}
 
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\nrank: 2\n")
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.executeAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
 	if !ok {
 		t.Fatal("expected artifact_repo_commit action to be claimed")
 	}
@@ -1192,7 +1215,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 		t.Fatalf("ExecuteAction: %v", err)
 	}
 
-	instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+	instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil || !ok {
 		t.Fatalf("load workflow instance ok=%v err=%v", ok, err)
 	}
@@ -1242,11 +1265,11 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 
 	replayCtx := execCtx
 	replayCtx.Request.State.StateCarrier.Metadata = cloneStringAnyMap(instance.Metadata)
-	ok, err = pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, replayCtx)
+	ok, err = pipelineEngineActionRunner{coordinator: pc}.executeAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, replayCtx)
 	if !ok || err != nil {
 		t.Fatalf("replay ExecuteAction ok=%v err=%v", ok, err)
 	}
-	replayed, _, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+	replayed, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load replayed workflow instance: %v", err)
 	}
@@ -1261,7 +1284,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitMaterializesLocalGitRef(t 
 		t.Fatalf("write extra file: %v", err)
 	}
 	nextAction, nextCtx := testArtifactRepoActionAndContext(entityID, replayed.Metadata, "55555555-5555-5555-5555-555555555555", "66666666-6666-6666-6666-666666666666", "name: Demo\nrank: 3\n")
-	ok, err = pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx)
+	ok, err = pipelineEngineActionRunner{coordinator: pc}.executeAction(ctx, nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx)
 	if !ok || err != nil {
 		t.Fatalf("next ExecuteAction ok=%v err=%v", ok, err)
 	}
@@ -1304,13 +1327,13 @@ func TestPipelineEngineActionRunner_MockArtifactRepoCommitStopsBeforeActionLaunc
 			launches := 0
 			runner := pipelineEngineActionRunner{
 				coordinator: pc,
-				artifactRepoCommit: func(context.Context, runtimecontracts.ActionSpec, runtimeengine.ExecutionContext) error {
+				artifactRepoCommit: func(context.Context, runtimecontracts.ActionSpec, runtimeengine.ExecutionContext) ([]runtimeengine.EmitIntent, error) {
 					launches++
-					return nil
+					return nil, nil
 				},
 			}
 			ctx := runtimeeffects.WithExecutionMode(context.Background(), executionmode.Mock)
-			claimed, err := runner.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+			claimed, err := runner.executeAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
 			if !claimed || err == nil || !strings.Contains(err.Error(), "mock_artifact_repo_commit_forbidden") {
 				t.Fatalf("ExecuteAction claimed=%v err=%v", claimed, err)
 			}
@@ -1507,10 +1530,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifac
 	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: "/data/swarm/artifacts", bus: bus}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
-	initial := testArtifactRepoEntityFields()
+	initial := testArtifactRepoEntityFields(entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "artifact-repo",
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
@@ -1521,11 +1544,11 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifac
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
 
 	var intents []runtimeengine.EmitIntent
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(runtimeengine.WithActionEmitIntentCollector(ctx, &intents), action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.executeAction(withActionEmitIntentCollectorForTest(ctx, &intents), action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
 	if !ok || err != nil {
 		t.Fatalf("ExecuteAction ok=%v err=%v, want handled failure result", ok, err)
 	}
-	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -1580,10 +1603,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoo
 			pc := &PipelineCoordinator{workflowStore: store, artifactRoot: artifactRoot, bus: bus}
 			ctx := testWorkflowStoreRunContext(t, store)
 			entityID := "22222222-2222-2222-2222-222222222222"
-			initial := testArtifactRepoEntityFields()
+			initial := testArtifactRepoEntityFields(entityID)
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID:      entityID,
-				StorageRef:      entityID,
+				StorageRef:      "artifact-repo",
 				WorkflowName:    "artifact-repo",
 				WorkflowVersion: "1.0.0",
 				CurrentState:    "ready",
@@ -1594,11 +1617,11 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoo
 			action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
 
 			var intents []runtimeengine.EmitIntent
-			ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(runtimeengine.WithActionEmitIntentCollector(ctx, &intents), action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+			ok, err := pipelineEngineActionRunner{coordinator: pc}.executeAction(withActionEmitIntentCollectorForTest(ctx, &intents), action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
 			if !ok || err != nil {
 				t.Fatalf("ExecuteAction ok=%v err=%v, want handled failure result", ok, err)
 			}
-			instance, _, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+			instance, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 			if err != nil {
 				t.Fatalf("load workflow instance: %v", err)
 			}
@@ -1633,10 +1656,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t
 	}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
-	initial := testArtifactRepoEntityFields()
+	initial := testArtifactRepoEntityFields(entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "artifact-repo",
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
@@ -1651,8 +1674,8 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t
 	}
 
 	var intents []runtimeengine.EmitIntent
-	actionCtx := runtimeengine.WithActionEmitIntentCollector(ctx, &intents)
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(actionCtx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	actionCtx := withActionEmitIntentCollectorForTest(ctx, &intents)
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.executeAction(actionCtx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
 	if !ok || err != nil {
 		t.Fatalf("ExecuteAction ok=%v err=%v", ok, err)
 	}
@@ -1676,14 +1699,14 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t
 	if _, exists := payload["vertical_id"]; exists {
 		t.Fatalf("success payload contains product vertical_id: %#v", payload)
 	}
-	committed, _, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+	committed, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load committed workflow instance: %v", err)
 	}
 
 	replayCtx := execCtx
 	replayCtx.Request.State.StateCarrier.Metadata = cloneStringAnyMap(committed.Metadata)
-	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(actionCtx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, replayCtx); err != nil {
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).executeAction(actionCtx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, replayCtx); err != nil {
 		t.Fatalf("same-source replay ExecuteAction: %v", err)
 	}
 	if got := len(intents); got != 1 {
@@ -1692,7 +1715,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t
 
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "artifact-repo",
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
@@ -1703,7 +1726,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t
 	repairAction, repairCtx := testArtifactRepoActionAndContext(entityID, initial, "55555555-5555-5555-5555-555555555555", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
 	repairAction.ArtifactRepo.SuccessEvent = action.ArtifactRepo.SuccessEvent
 	repairAction.ArtifactRepo.SuccessPayload = action.ArtifactRepo.SuccessPayload
-	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(actionCtx, repairAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, repairCtx); err != nil {
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).executeAction(actionCtx, repairAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, repairCtx); err != nil {
 		t.Fatalf("history repair ExecuteAction: %v", err)
 	}
 	if got := len(intents); got != 2 {
@@ -1733,10 +1756,10 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughO
 	}
 	ctx := testWorkflowStoreRunContext(t, workflowStore)
 	entityID := "22222222-2222-2222-2222-222222222222"
-	initial := testArtifactRepoEntityFields()
+	initial := testArtifactRepoEntityFields(entityID)
 	if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "artifact-repo",
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
@@ -1773,7 +1796,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughO
 	if got := bus.publishedCount(); got != 1 {
 		t.Fatalf("post-commit published result event count = %d, want 1", got)
 	}
-	committed, _, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(entityID))
+	committed, _, err := workflowStore.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load committed workflow instance: %v", err)
 	}
@@ -1801,10 +1824,10 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 	}
 	ctx := testWorkflowStoreRunContext(t, workflowStore)
 	entityID := "22222222-2222-2222-2222-222222222222"
-	initial := testArtifactRepoEntityFields()
+	initial := testArtifactRepoEntityFields(entityID)
 	if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "artifact-repo",
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
@@ -1838,7 +1861,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 	if got := bus.publishedCount(); got != 1 {
 		t.Fatalf("post-commit published result event count = %d, want 1", got)
 	}
-	committed, _, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(entityID))
+	committed, _, err := workflowStore.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load committed workflow instance: %v", err)
 	}
@@ -1873,10 +1896,10 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureR
 	}
 	ctx := testWorkflowStoreRunContext(t, workflowStore)
 	entityID := "22222222-2222-2222-2222-222222222222"
-	initial := testArtifactRepoEntityFields()
+	initial := testArtifactRepoEntityFields(entityID)
 	if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "artifact-repo",
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
@@ -1904,7 +1927,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureR
 	if got := bus.publishedCount(); got != 0 {
 		t.Fatalf("post-commit published result event count = %d, want 0", got)
 	}
-	rolledBack, _, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(entityID))
+	rolledBack, _, err := workflowStore.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -1916,7 +1939,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureR
 	}
 }
 
-func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedWithoutResultEventCollector(t *testing.T) {
+func TestPipelineEngineActionRunner_ArtifactRepoCommitReturnsExplicitResultEvent(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	store := newPostgresWorkflowInstanceStoreForTest(db)
@@ -1934,10 +1957,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedWithoutResultEv
 	}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
-	initial := testArtifactRepoEntityFields()
+	initial := testArtifactRepoEntityFields(entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "artifact-repo",
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
@@ -1951,22 +1974,25 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedWithoutResultEv
 		"result_kind": runtimecontracts.LiteralExpression("ready"),
 	}
 
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
-	if !ok {
+	result, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	if !result.Handled {
 		t.Fatal("expected artifact_repo_commit action to be claimed")
 	}
-	if err == nil || !strings.Contains(err.Error(), errArtifactRepoResultEmitCollectorMissing.Error()) {
-		t.Fatalf("ExecuteAction error = %v, want missing result collector", err)
+	if err != nil {
+		t.Fatalf("ExecuteAction: %v", err)
 	}
-	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+	if len(result.EmitIntents) != 1 {
+		t.Fatalf("result emit intents = %d, want 1", len(result.EmitIntents))
+	}
+	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
-	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "" {
-		t.Fatalf("status = %q, want unchanged without result collector", got)
+	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "committed" {
+		t.Fatalf("status = %q, want committed", got)
 	}
-	if _, exists := instance.Metadata["current_ref"]; exists {
-		t.Fatalf("current_ref should not be persisted without result collector: %#v", instance.Metadata["current_ref"])
+	if _, exists := instance.Metadata["current_ref"]; !exists {
+		t.Fatal("current_ref was not persisted")
 	}
 	if got := bus.publishedCount(); got != 0 {
 		t.Fatalf("fallback published event count = %d, want 0", got)
@@ -1991,10 +2017,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSucces
 	}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
-	initial := testArtifactRepoEntityFields()
+	initial := testArtifactRepoEntityFields(entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "artifact-repo",
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
@@ -2006,11 +2032,11 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSucces
 	action.ArtifactRepo.SuccessEvent = "artifact_repo.commit_completed"
 
 	var intents []runtimeengine.EmitIntent
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(runtimeengine.WithActionEmitIntentCollector(ctx, &intents), action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.executeAction(withActionEmitIntentCollectorForTest(ctx, &intents), action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
 	if !ok || err != nil {
 		t.Fatalf("ExecuteAction ok=%v err=%v, want handled failure result", ok, err)
 	}
-	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -2035,10 +2061,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), bus: bus}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
-	initial := testArtifactRepoEntityFields()
+	initial := testArtifactRepoEntityFields(entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "artifact-repo",
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
@@ -2050,11 +2076,11 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 	action.ArtifactRepo.Files[0].Path = runtimecontracts.LiteralExpression("../escape.yaml")
 
 	var intents []runtimeengine.EmitIntent
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(runtimeengine.WithActionEmitIntentCollector(ctx, &intents), action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.executeAction(withActionEmitIntentCollectorForTest(ctx, &intents), action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
 	if !ok || err != nil {
 		t.Fatalf("ExecuteAction ok=%v err=%v, want handled failure result", ok, err)
 	}
-	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -2097,10 +2123,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMis
 	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), bus: bus}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
-	initial := testArtifactRepoEntityFields()
+	initial := testArtifactRepoEntityFields(entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "artifact-repo",
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
@@ -2111,11 +2137,11 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMis
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "rank: 2\n")
 
 	var intents []runtimeengine.EmitIntent
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(runtimeengine.WithActionEmitIntentCollector(ctx, &intents), action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.executeAction(withActionEmitIntentCollectorForTest(ctx, &intents), action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx)
 	if !ok || err != nil {
 		t.Fatalf("ExecuteAction ok=%v err=%v, want handled failure result", ok, err)
 	}
-	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -2136,10 +2162,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentCon
 	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir()}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
-	initial := testArtifactRepoEntityFields()
+	initial := testArtifactRepoEntityFields(entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "artifact-repo",
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
@@ -2148,19 +2174,19 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentCon
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
-	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx); err != nil {
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).executeAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx); err != nil {
 		t.Fatalf("initial ExecuteAction: %v", err)
 	}
-	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
 
 	nextAction, nextCtx := testArtifactRepoActionAndContext(entityID, instance.Metadata, "55555555-5555-5555-5555-555555555555", "66666666-6666-6666-6666-666666666666", "name: Next\n")
-	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx); err != nil {
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).executeAction(ctx, nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx); err != nil {
 		t.Fatalf("next ExecuteAction: %v", err)
 	}
-	afterNext, _, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+	afterNext, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load workflow instance after next request: %v", err)
 	}
@@ -2169,7 +2195,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsRequestIDContentCon
 
 	conflictAction, conflictCtx := testArtifactRepoActionAndContext(entityID, afterNext.Metadata, "77777777-7777-7777-7777-777777777777", "44444444-4444-4444-4444-444444444444", "name: Changed\n")
 	var conflictIntents []runtimeengine.EmitIntent
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(runtimeengine.WithActionEmitIntentCollector(ctx, &conflictIntents), conflictAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, conflictCtx)
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.executeAction(withActionEmitIntentCollectorForTest(ctx, &conflictIntents), conflictAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, conflictCtx)
 	if !ok || err != nil {
 		t.Fatalf("ExecuteAction ok=%v err=%v, want handled failure result", ok, err)
 	}
@@ -2184,10 +2210,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir(), bus: bus}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
-	initial := testArtifactRepoEntityFields()
+	initial := testArtifactRepoEntityFields(entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "artifact-repo",
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
@@ -2196,20 +2222,20 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
-	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx); err != nil {
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).executeAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx); err != nil {
 		t.Fatalf("initial ExecuteAction: %v", err)
 	}
-	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
 	initialRef := strings.TrimSpace(asString(instance.Metadata["current_ref"]))
 
 	sameAction, sameCtx := testArtifactRepoActionAndContext(entityID, instance.Metadata, "55555555-5555-5555-5555-555555555555", "66666666-6666-6666-6666-666666666666", "name: Demo\n")
-	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, sameAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, sameCtx); err != nil {
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).executeAction(ctx, sameAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, sameCtx); err != nil {
 		t.Fatalf("same-tree ExecuteAction: %v", err)
 	}
-	afterSame, _, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+	afterSame, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load workflow instance after same-tree request: %v", err)
 	}
@@ -2230,17 +2256,17 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRecordsNoDiffRequestHistor
 	}
 
 	nextAction, nextCtx := testArtifactRepoActionAndContext(entityID, afterSame.Metadata, "77777777-7777-7777-7777-777777777777", "88888888-8888-8888-8888-888888888888", "name: Next\n")
-	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx); err != nil {
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).executeAction(ctx, nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx); err != nil {
 		t.Fatalf("next ExecuteAction: %v", err)
 	}
-	afterNext, _, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+	afterNext, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load workflow instance after next request: %v", err)
 	}
 
 	conflictAction, conflictCtx := testArtifactRepoActionAndContext(entityID, afterNext.Metadata, "99999999-9999-9999-9999-999999999999", "66666666-6666-6666-6666-666666666666", "name: Changed\n")
 	var conflictIntents []runtimeengine.EmitIntent
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(runtimeengine.WithActionEmitIntentCollector(ctx, &conflictIntents), conflictAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, conflictCtx)
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.executeAction(withActionEmitIntentCollectorForTest(ctx, &conflictIntents), conflictAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, conflictCtx)
 	if !ok || err != nil {
 		t.Fatalf("ExecuteAction ok=%v err=%v, want handled failure result", ok, err)
 	}
@@ -2257,10 +2283,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHisto
 	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir()}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
-	initial := testArtifactRepoEntityFields()
+	initial := testArtifactRepoEntityFields(entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "artifact-repo",
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
@@ -2269,17 +2295,17 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHisto
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
-	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx); err != nil {
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).executeAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx); err != nil {
 		t.Fatalf("initial ExecuteAction: %v", err)
 	}
-	committed, _, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+	committed, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load committed workflow instance: %v", err)
 	}
 	ref := strings.TrimSpace(asString(committed.Metadata["current_ref"]))
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "artifact-repo",
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
@@ -2289,11 +2315,11 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRepairsDBStateFromGitHisto
 	}
 
 	repairAction, repairCtx := testArtifactRepoActionAndContext(entityID, initial, "55555555-5555-5555-5555-555555555555", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(ctx, repairAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, repairCtx)
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.executeAction(ctx, repairAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, repairCtx)
 	if !ok || err != nil {
 		t.Fatalf("repair ExecuteAction ok=%v err=%v", ok, err)
 	}
-	repaired, _, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+	repaired, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load repaired workflow instance: %v", err)
 	}
@@ -2312,10 +2338,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitEnforcesProjectedRepoSize(
 	pc := &PipelineCoordinator{workflowStore: store, artifactRoot: t.TempDir()}
 	ctx := testWorkflowStoreRunContext(t, store)
 	entityID := "22222222-2222-2222-2222-222222222222"
-	initial := testArtifactRepoEntityFields()
+	initial := testArtifactRepoEntityFields(entityID)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "artifact-repo",
 		WorkflowName:    "artifact-repo",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
@@ -2325,10 +2351,10 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitEnforcesProjectedRepoSize(
 	}
 	action, execCtx := testArtifactRepoActionAndContext(entityID, initial, "33333333-3333-3333-3333-333333333333", "44444444-4444-4444-4444-444444444444", "name: Demo\n")
 	action.ArtifactRepo.Limits.MaxRepoBytes = 1024
-	if _, err := (pipelineEngineActionRunner{coordinator: pc}).ExecuteAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx); err != nil {
+	if _, err := (pipelineEngineActionRunner{coordinator: pc}).executeAction(ctx, action, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, execCtx); err != nil {
 		t.Fatalf("initial ExecuteAction: %v", err)
 	}
-	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+	instance, _, err := store.Load(ctx, testWorkflowInstanceRoute("artifact-repo"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -2342,7 +2368,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitEnforcesProjectedRepoSize(
 	}}
 	nextAction.ArtifactRepo.Limits.MaxRepoBytes = 30
 	var intents []runtimeengine.EmitIntent
-	ok, err := pipelineEngineActionRunner{coordinator: pc}.ExecuteAction(runtimeengine.WithActionEmitIntentCollector(ctx, &intents), nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx)
+	ok, err := pipelineEngineActionRunner{coordinator: pc}.executeAction(withActionEmitIntentCollectorForTest(ctx, &intents), nextAction, runtimeregistry.ActionInstruction{Builtin: "artifact_repo_commit"}, nextCtx)
 	if !ok || err != nil {
 		t.Fatalf("ExecuteAction ok=%v err=%v, want handled failure result", ok, err)
 	}
@@ -2464,14 +2490,19 @@ artifact_repo.commit_failed:
 	})
 }
 
-func testArtifactRepoEntityFields() map[string]any {
-	return map[string]any{
+func testArtifactRepoEntityFields(entityIDs ...string) map[string]any {
+	fields := map[string]any{
 		"repo_id":          "11111111-1111-1111-1111-111111111111",
 		"namespace":        "tenant-alpha",
 		"partition_key":    "project-42",
 		"display_slug":     "Demo Artifact",
 		"source_record_id": "record-123",
 	}
+	if len(entityIDs) > 0 {
+		fields["entity_id"] = strings.TrimSpace(entityIDs[0])
+		fields["flow_path"] = "artifact-repo"
+	}
+	return fields
 }
 
 func requireArtifactRepoFailure(t testing.TB, value any, class runtimefailures.Class, code string) runtimefailures.Envelope {

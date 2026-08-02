@@ -22,7 +22,7 @@ func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, entityI
 	}
 	route, err := workflowInstanceRouteForContext(ctx, pc.SemanticSource(), pipelineFlowScope(ctx), "")
 	if err != nil {
-		return WorkflowState{}, err
+		return WorkflowState{}, fmt.Errorf("load current workflow state route: %w", err)
 	}
 	instance, ok, err := pc.workflowStore.Load(ctx, route)
 	if err != nil {
@@ -51,7 +51,7 @@ func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entit
 	}
 	route, err := workflowInstanceRouteForContext(ctx, pc.SemanticSource(), flowID, "")
 	if err != nil {
-		return err
+		return fmt.Errorf("record workflow evidence route: %w", err)
 	}
 	_, found, err := pc.workflowStore.Load(ctx, route)
 	if err != nil {

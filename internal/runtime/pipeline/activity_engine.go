@@ -449,7 +449,7 @@ func (d pipelineActivityDispatcher) admitReadOnlyActivityGeneration(ctx context.
 	defer unlock()
 	route, err := workflowInstanceRouteForContext(ctx, d.coordinator.SemanticSource(), intent.FlowID.String(), intent.FlowInstance)
 	if err != nil {
-		return err
+		return fmt.Errorf("activity state route: %w", err)
 	}
 	return d.coordinator.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
 		instance, ok, err := d.coordinator.workflowStore.Load(txctx, route)

@@ -47,7 +47,7 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	}
 	route, err := workflowInstanceRouteForContext(ctx, pc.SemanticSource(), "", evt.FlowInstance())
 	if err != nil {
-		return true, false, err
+		return true, false, fmt.Errorf("workflow timer event route: %w", err)
 	}
 	applied := false
 	err = pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
@@ -101,7 +101,7 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 		if err := pc.applyAcceptedWorkflowEvent(txctx, entityID, evt, currentStage, nextStage); err != nil {
 			return err
 		}
-		return pc.maybeDeactivateTerminalFlowInstance(txctx, entityID, nextStage)
+		return pc.maybeDeactivateTerminalFlowInstance(txctx, route, entityID, nextStage)
 	})
 	if err != nil {
 		return true, applied, err

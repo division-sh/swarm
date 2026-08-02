@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -39,9 +40,15 @@ type SemanticSourceProvider interface {
 	SemanticSource() semanticview.Source
 }
 
+type StateAddress struct {
+	FlowID   identity.FlowID
+	Route    runtimeflowidentity.Route
+	EntityID identity.EntityID
+}
+
 type StateRepository interface {
-	LoadState(ctx context.Context, entityID identity.EntityID) (StateSnapshot, bool, error)
-	SaveState(ctx context.Context, entityID identity.EntityID, mutation StateMutation) error
+	LoadState(ctx context.Context, address StateAddress) (StateSnapshot, bool, error)
+	SaveState(ctx context.Context, address StateAddress, mutation StateMutation) error
 }
 
 type EmitPersistenceFieldPrerequisite struct {
@@ -55,7 +62,7 @@ type EmitPersistencePrerequisites struct {
 }
 
 type EmitPersistenceVerifier interface {
-	VerifyEmitPersistence(ctx context.Context, entityID identity.EntityID, prerequisites EmitPersistencePrerequisites) error
+	VerifyEmitPersistence(ctx context.Context, address StateAddress, prerequisites EmitPersistencePrerequisites) error
 }
 
 type Tx interface {
@@ -107,8 +114,13 @@ type ActionRegistry interface {
 	Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool)
 }
 
+type ActionExecution struct {
+	Handled     bool
+	EmitIntents []EmitIntent
+}
+
 type ActionRunner interface {
-	ExecuteAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimeregistry.ActionInstruction, execCtx ExecutionContext) (bool, error)
+	ExecuteAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimeregistry.ActionInstruction, execCtx ExecutionContext) (ActionExecution, error)
 }
 
 type PayloadShaper interface {

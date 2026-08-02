@@ -702,7 +702,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := pc.reconcileClosedJoinSchedules(ctx, entityID, armedCarrier); err != nil {
+			if err := pc.reconcileClosedJoinSchedules(ctx, testWorkflowInstanceRoute(path), entityID, armedCarrier); err != nil {
 				t.Fatalf("reconcile pending zero join: %v", err)
 			}
 			if schedules.cancelOwned != 0 {

@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -226,6 +227,14 @@ type ExecutionRequest struct {
 	ChainDepth                  int
 	MaxDepth                    int
 	Preview                     bool
+}
+
+func (r ExecutionRequest) StateAddress() StateAddress {
+	return StateAddress{
+		FlowID:   identity.NormalizeFlowID(r.FlowID.String()),
+		Route:    runtimeflowidentity.RouteForInstancePath(r.ProducerRoute.FlowInstance),
+		EntityID: identity.NormalizeEntityID(r.EntityID.String()),
+	}
 }
 
 type ExecutionContext struct {

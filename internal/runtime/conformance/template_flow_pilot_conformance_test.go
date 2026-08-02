@@ -523,11 +523,11 @@ func templateFlowPilotConformanceFindingContains(findings []runtimebootverify.Fi
 
 type fanOutPinRouteStateRepo struct{}
 
-func (fanOutPinRouteStateRepo) LoadState(context.Context, runtimeidentity.EntityID) (runtimeengine.StateSnapshot, bool, error) {
+func (fanOutPinRouteStateRepo) LoadState(context.Context, runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
 	return runtimeengine.StateSnapshot{}, false, nil
 }
 
-func (fanOutPinRouteStateRepo) SaveState(context.Context, runtimeidentity.EntityID, runtimeengine.StateMutation) error {
+func (fanOutPinRouteStateRepo) SaveState(context.Context, runtimeengine.StateAddress, runtimeengine.StateMutation) error {
 	return nil
 }
 
