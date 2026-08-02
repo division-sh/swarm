@@ -17,11 +17,13 @@ import (
 type postgresRunLifecycleMutation struct {
 	store *PostgresStore
 	tx    *sql.Tx
+	story runtimeauthoractivity.Mutation
 }
 
 type sqliteRunLifecycleMutation struct {
 	store *SQLiteRuntimeStore
 	tx    *sql.Tx
+	story runtimeauthoractivity.Mutation
 }
 
 type activeRunSourceOwnerFunc func(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
@@ -553,7 +555,7 @@ func (m postgresRunLifecycleMutation) Create(
 	if !inserted {
 		return runtimerunlifecycle.MutationExactNoop, nil
 	}
-	if err := recordRunStarted(ctx, request); err != nil {
+	if err := m.recordRunStarted(ctx, request); err != nil {
 		return "", err
 	}
 	return runtimerunlifecycle.MutationApplied, nil
@@ -604,7 +606,7 @@ func (m sqliteRunLifecycleMutation) Create(
 	if rows == 0 {
 		return m.classifyCreateExisting(ctx, request)
 	}
-	if err := recordRunStarted(ctx, request); err != nil {
+	if err := m.recordRunStarted(ctx, request); err != nil {
 		return "", err
 	}
 	return runtimerunlifecycle.MutationApplied, nil
@@ -861,11 +863,23 @@ func (m postgresRunLifecycleMutation) requirePersistedSourceForWrite(
 }
 
 func recordRunStarted(ctx context.Context, request runtimerunlifecycle.CreateRequest) error {
+	return recordRunStartedWithStory(ctx, nil, request)
+}
+
+func (m postgresRunLifecycleMutation) recordRunStarted(ctx context.Context, request runtimerunlifecycle.CreateRequest) error {
+	return recordRunStartedWithStory(ctx, m.story, request)
+}
+
+func (m sqliteRunLifecycleMutation) recordRunStarted(ctx context.Context, request runtimerunlifecycle.CreateRequest) error {
+	return recordRunStartedWithStory(ctx, m.story, request)
+}
+
+func recordRunStartedWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, request runtimerunlifecycle.CreateRequest) error {
 	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, request.Source.BundleHash())
 	if err != nil {
 		return fmt.Errorf("record run lifecycle creation: %w", err)
 	}
-	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+	draft := runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindRunLifecycle, Transition: "started",
 		SourceOwner: "runs", SourceIdentity: request.RunID, DedupKey: "run-created:" + request.RunID,
 		OccurredAt: request.StartedAt.UTC(), RunID: request.RunID, Scope: scope,
@@ -873,7 +887,11 @@ func recordRunStarted(ctx context.Context, request runtimerunlifecycle.CreateReq
 			SubjectType: "run", SubjectID: request.RunID,
 			TriggerEventType: request.Origin.ActivityTriggerType(),
 		},
-	})
+	}
+	if story != nil {
+		return story.Record(ctx, draft)
+	}
+	return runtimeauthoractivity.Record(ctx, draft)
 }
 
 func (m postgresRunLifecycleMutation) ReviseSource(

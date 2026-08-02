@@ -12,6 +12,7 @@ import (
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
 
 type ScenarioSetupRequest struct {
@@ -52,12 +53,16 @@ func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req ScenarioS
 		return ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
-	if err := s.runAuthorActivityMutation(ctx, "postgres scenario setup", func(txctx context.Context, tx *sql.Tx) error {
+	if err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
+		if err != nil {
+			return err
+		}
 		fact, ok := runtimecorrelation.BundleSourceFactFromContext(txctx)
 		if !ok {
 			return fmt.Errorf("postgres scenario setup requires executable bundle source fact")
 		}
-		if _, err := (postgresRunLifecycleMutation{store: s, tx: tx}).Create(txctx, runtimerunlifecycle.CreateRequest{
+		if _, err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story}).Create(txctx, runtimerunlifecycle.CreateRequest{
 			RunID: req.RunID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
 			Source: fact, StartedAt: req.CreatedAt,
 		}); err != nil {
@@ -94,7 +99,7 @@ func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req ScenarioS
 				}
 				continue
 			}
-			if err := runtimemutationlog.InsertEntityStateDiff(txctx, tx, postgresActiveRunSourceOwner(s, tx), entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+			if err := runtimemutationlog.InsertEntityStateDiffWithStory(txctx, tx, postgresActiveRunSourceOwner(s, tx), story, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
 				CurrentState: entity.CurrentState,
 				Fields:       fieldsAny,
 				Gates:        gatesAny,
@@ -102,7 +107,7 @@ func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req ScenarioS
 				return fmt.Errorf("record postgres scenario setup entity mutation %s: %w", entity.Alias, err)
 			}
 		}
-		return nil
+		return story.Finalize(txctx)
 	}); err != nil {
 		return ScenarioSetupResult{}, err
 	}
@@ -118,12 +123,16 @@ func (s *SQLiteRuntimeStore) SetupScenarioEntities(ctx context.Context, req Scen
 		return ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
-	if err := s.runAuthorActivityMutation(ctx, "sqlite scenario setup", func(txctx context.Context, tx *sql.Tx) error {
+	if err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
+		if err != nil {
+			return err
+		}
 		fact, ok := runtimecorrelation.BundleSourceFactFromContext(txctx)
 		if !ok {
 			return fmt.Errorf("sqlite scenario setup requires executable bundle source fact")
 		}
-		if _, err := (sqliteRunLifecycleMutation{store: s, tx: tx}).Create(txctx, runtimerunlifecycle.CreateRequest{
+		if _, err := (sqliteRunLifecycleMutation{store: s, tx: tx, story: story}).Create(txctx, runtimerunlifecycle.CreateRequest{
 			RunID: req.RunID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
 			Source: fact, StartedAt: req.CreatedAt,
 		}); err != nil {
@@ -157,7 +166,7 @@ func (s *SQLiteRuntimeStore) SetupScenarioEntities(ctx context.Context, req Scen
 				}
 				continue
 			}
-			if err := insertSQLiteEntityStateDiff(txctx, tx, req.RunID, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+			if err := insertSQLiteEntityStateDiff(txctx, story, tx, req.RunID, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
 				CurrentState: entity.CurrentState,
 				Fields:       fieldsAny,
 				Gates:        gatesAny,
@@ -165,7 +174,7 @@ func (s *SQLiteRuntimeStore) SetupScenarioEntities(ctx context.Context, req Scen
 				return fmt.Errorf("record sqlite scenario setup entity mutation %s: %w", entity.Alias, err)
 			}
 		}
-		return nil
+		return story.Finalize(txctx)
 	}); err != nil {
 		return ScenarioSetupResult{}, err
 	}

@@ -57,11 +57,24 @@ type ActiveRunSourceOwner interface {
 }
 
 func Insert(ctx context.Context, db DBTX, runLifecycle ActiveRunSourceOwner, rec Record) error {
+	return insert(ctx, db, runLifecycle, nil, rec)
+}
+
+func InsertWithStory(ctx context.Context, db DBTX, runLifecycle ActiveRunSourceOwner, story runtimeauthoractivity.Mutation, rec Record) error {
+	if story == nil {
+		return ErrInvalidMutationLogWriter("author activity owner is required")
+	}
+	return insert(ctx, db, runLifecycle, story, rec)
+}
+
+func insert(ctx context.Context, db DBTX, runLifecycle ActiveRunSourceOwner, story runtimeauthoractivity.Mutation, rec Record) error {
 	if db == nil {
 		return ErrInvalidMutationLogWriter("mutation log DB is required")
 	}
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return ErrInvalidMutationLogWriter(err.Error())
+	if story == nil {
+		if err := runtimeauthoractivity.Require(ctx); err != nil {
+			return ErrInvalidMutationLogWriter(err.Error())
+		}
 	}
 	tx, ok := db.(*sql.Tx)
 	if !ok {
@@ -134,6 +147,9 @@ func Insert(ctx context.Context, db DBTX, runLifecycle ActiveRunSourceOwner, rec
 	}
 	if !admitted {
 		return nil
+	}
+	if story != nil {
+		return story.Record(ctx, draft)
 	}
 	return runtimeauthoractivity.Record(ctx, draft)
 }
@@ -225,12 +241,23 @@ func BuildEntityStateDiffRecords(entityID string, before, after EntityStateProje
 }
 
 func InsertEntityStateDiff(ctx context.Context, db DBTX, runLifecycle ActiveRunSourceOwner, entityID string, before, after EntityStateProjection, writer Writer) error {
+	return insertEntityStateDiff(ctx, db, runLifecycle, nil, entityID, before, after, writer)
+}
+
+func InsertEntityStateDiffWithStory(ctx context.Context, db DBTX, runLifecycle ActiveRunSourceOwner, story runtimeauthoractivity.Mutation, entityID string, before, after EntityStateProjection, writer Writer) error {
+	if story == nil {
+		return ErrInvalidMutationLogWriter("author activity owner is required")
+	}
+	return insertEntityStateDiff(ctx, db, runLifecycle, story, entityID, before, after, writer)
+}
+
+func insertEntityStateDiff(ctx context.Context, db DBTX, runLifecycle ActiveRunSourceOwner, story runtimeauthoractivity.Mutation, entityID string, before, after EntityStateProjection, writer Writer) error {
 	records, err := BuildEntityStateDiffRecords(entityID, before, after, writer)
 	if err != nil {
 		return err
 	}
 	for _, rec := range records {
-		if err := Insert(ctx, db, runLifecycle, rec); err != nil {
+		if err := insert(ctx, db, runLifecycle, story, rec); err != nil {
 			return err
 		}
 	}
