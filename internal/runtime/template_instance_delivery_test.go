@@ -17,6 +17,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
@@ -209,7 +210,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		WorkflowInstances: pc,
 		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
 		LifecycleStore:    pg,
-		DeliveryStore:     pg,
+		DeliveryStore:     pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 	bus.SetInterceptors(pc)
 
@@ -310,7 +311,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		WorkflowInstances: pc,
 		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
 		LifecycleStore:    pg,
-		DeliveryStore:     pg,
+		DeliveryStore:     pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg))
 	bus.SetInterceptors(pc)
 
@@ -402,7 +403,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		WorkOwner:         runtimeTestEventBusWorkOwner(t, bus),
 		WorkflowInstances: pc,
 		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
-		LifecycleStore:    pg,
+		LifecycleStore:    pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 	evt := eventtest.ExistingRunRootIngress(
 		"99999999-9999-4999-8999-999999999940",
@@ -487,7 +488,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		WorkflowInstances: pc,
 		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
 		LifecycleStore:    pg,
-		DeliveryStore:     pg,
+		DeliveryStore:     pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 
 	mailbox := eventtest.ExistingRunRootIngress(
@@ -605,7 +606,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		WorkflowInstances: pc,
 		PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
 		LifecycleStore:    pg,
-		DeliveryStore:     pg,
+		DeliveryStore:     pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 
 	mailbox := eventtest.ExistingRunRootIngress(
@@ -985,7 +986,7 @@ func TestProviderNormalizedLifecycleRollbackMatrix(t *testing.T) {
 					SemanticSource:    source,
 					WorkOwner:         workOwner,
 					WorkflowInstances: coordinator,
-					PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus),
+					PersistenceRoles:  externalRuntimeTestManagerBusRoles(bus), ReceiverExecution: eventreceiver.NormalExecution(),
 				}))
 
 				candidate := providerRollbackStandingCandidate(ctx)

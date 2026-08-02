@@ -12,6 +12,7 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -68,7 +69,7 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 			EventExistence:      pg,
 			DirectiveOperations: pg,
 			DirectiveTargets:    pg,
-		},
+		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg))
 	identity := agentidentitytest.RootRuntime(t, agent.id, "destructive-reset-integration")
 	rec := runtimemanager.PersistedAgent{

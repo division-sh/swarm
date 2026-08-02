@@ -62,9 +62,6 @@ func (v ExecutionVariant) Configured() bool {
 }
 
 func (v ExecutionVariant) Kind() ExecutionKind {
-	if v.kind == "" {
-		return ExecutionNormal
-	}
 	return v.kind
 }
 
@@ -82,6 +79,9 @@ func (v ExecutionVariant) WithSelectedAdmission(admission managedexecution.Admis
 }
 
 func (v ExecutionVariant) Validate() error {
+	if !v.Configured() {
+		return errors.New("receiver execution owner is not configured")
+	}
 	switch v.Kind() {
 	case ExecutionNormal:
 		if v.authority.Valid() || v.admission.Validate() == nil || v.controller != nil {

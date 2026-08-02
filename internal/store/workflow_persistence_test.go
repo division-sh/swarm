@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -101,6 +102,7 @@ func completeWorkflowTestCoordinatorOptions(
 ) runtimepipeline.PipelineCoordinatorOptions {
 	bus := workflowTestBus{}
 	return runtimepipeline.PipelineCoordinatorOptions{
+		ReceiverExecution:       eventreceiver.NormalExecution(),
 		Module:                  workflowTestModule{},
 		Persistence:             persistence,
 		RunLifecycle:            selected,

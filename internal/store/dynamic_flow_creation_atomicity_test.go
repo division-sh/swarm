@@ -17,6 +17,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -245,7 +246,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		HumanTaskExpiry:         selected,
 		GatePublisher:           eventBus,
 		DirectDecisionPublisher: eventBus,
-		DeliveryRuntime:         eventBus,
+		DeliveryRuntime:         eventBus, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
 	parent := eventtest.ExistingRunRootIngress(

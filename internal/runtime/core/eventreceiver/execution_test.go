@@ -60,6 +60,12 @@ func TestUnconfiguredExecutionCannotBindReceiver(t *testing.T) {
 	if variant.Configured() {
 		t.Fatal("zero receiver execution unexpectedly reports an owner")
 	}
+	if kind := variant.Kind(); kind != "" {
+		t.Fatalf("zero receiver execution kind = %q, want empty", kind)
+	}
+	if err := variant.Validate(); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("unconfigured receiver validation = %v", err)
+	}
 	if _, err := variant.Bind(context.Background(), executionmode.Live); err == nil || !strings.Contains(err.Error(), "not configured") {
 		t.Fatalf("unconfigured receiver bind = %v", err)
 	}

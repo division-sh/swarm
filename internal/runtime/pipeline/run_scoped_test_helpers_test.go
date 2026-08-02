@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -127,13 +128,22 @@ func testPipelineCoordinatorRunContext(t *testing.T, pc *PipelineCoordinator) co
 	if pc.workflowStore != nil && pc.workflowStore.db != nil {
 		configurePipelineTestDeliveryOwner(t, pc)
 	}
+	var ctx context.Context
 	if pc.db != nil {
-		return testPipelineRunContext(t, pc.db)
+		ctx = testPipelineRunContext(t, pc.db)
+	} else if pc.workflowStore != nil {
+		ctx = testWorkflowStoreRunContext(t, pc.workflowStore)
+	} else {
+		ctx = testPipelineRunContextNoSeed(t)
 	}
-	if pc.workflowStore != nil {
-		return testWorkflowStoreRunContext(t, pc.workflowStore)
+	if !pc.runtimeReceiver {
+		return ctx
 	}
-	return testPipelineRunContextNoSeed(t)
+	bound, err := pc.receiverExecution.Bind(ctx, executionmode.Live)
+	if err != nil {
+		t.Fatalf("bind test Pipeline receiver execution: %v", err)
+	}
+	return bound
 }
 
 func testWorkflowStateTransitionContext(ctx context.Context, entityID, eventType string) context.Context {

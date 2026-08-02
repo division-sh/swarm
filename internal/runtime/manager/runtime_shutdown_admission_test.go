@@ -11,6 +11,7 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 )
 
@@ -29,7 +30,7 @@ func (*shutdownAdmissionManagerStore) EnsureEntitySchema(context.Context, string
 }
 
 func TestRun_UsesRuntimeShutdownAdmissionOwner(t *testing.T) {
-	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := newTestManagerEventBus(t)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -110,7 +111,10 @@ func TestManagerReservedTransitionExecutorSurvivesOuterFenceBeforeRun(t *testing
 	if err != nil {
 		t.Fatalf("create runtime occurrence: %v", err)
 	}
-	manager := NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{WorkOwner: runtimeOwner})
+	manager := NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{
+		WorkOwner:         runtimeOwner,
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
 	work, err := manager.beginWork(context.Background(), "pre-start manager work")
 	if err != nil {
 		t.Fatalf("admit pre-start manager work: %v", err)
@@ -143,7 +147,10 @@ func TestIdleManagerConstructionOwnsNoRuntimeLease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create runtime occurrence: %v", err)
 	}
-	_ = NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{WorkOwner: runtimeOwner})
+	_ = NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{
+		WorkOwner:         runtimeOwner,
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if _, err := runtimeOwner.RetireAndWait(ctx); err != nil {
@@ -155,7 +162,10 @@ func TestIdleManagerConstructionOwnsNoRuntimeLease(t *testing.T) {
 }
 
 func TestRestartAgent_DeniesWhenRuntimeShutdownAdmissionClosed(t *testing.T) {
-	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
+		WorkOwner:         newTestManagerWorkOwner(t),
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -175,7 +185,7 @@ func TestRestartAgent_DeniesWhenRuntimeShutdownAdmissionClosed(t *testing.T) {
 }
 
 func TestResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalShutdown(t *testing.T) {
-	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := newTestManagerEventBus(t)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -245,7 +255,7 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 	runtimebus.ResumeRuntimeIngress()
 	defer runtimebus.ResumeRuntimeIngress()
 
-	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := newTestManagerEventBus(t)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

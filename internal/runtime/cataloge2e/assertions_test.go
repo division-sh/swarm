@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -270,7 +271,7 @@ func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 		HumanTaskExpiry:         pg,
 		GatePublisher:           bus,
 		DirectDecisionPublisher: bus,
-		DeliveryRuntime:         bus,
+		DeliveryRuntime:         bus, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
 	return &runtimeHarness{

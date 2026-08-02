@@ -115,13 +115,12 @@ func normalizeManagerLLMBackend(raw string) string {
 }
 
 func NewAgentManager(bus Bus, factory AgentFactory, stores ...ManagerPersistence) *AgentManager {
-	return NewAgentManagerWithOptions(bus, factory, AgentManagerOptions{}, stores...)
+	return NewAgentManagerWithOptions(bus, factory, AgentManagerOptions{
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	}, stores...)
 }
 
 func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManagerOptions, stores ...ManagerPersistence) *AgentManager {
-	if !opts.ReceiverExecution.Configured() {
-		opts.ReceiverExecution = eventreceiver.NormalExecution()
-	}
 	if err := opts.ReceiverExecution.Validate(); err != nil {
 		panic(fmt.Sprintf("agent manager receiver execution: %v", err))
 	}

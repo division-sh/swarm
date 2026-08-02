@@ -3,6 +3,7 @@ package apiv1
 import (
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -23,6 +24,9 @@ type apiTestDurableWorkflowRoles interface {
 
 func completeAPITestDurableWorkflowOptions(t testing.TB, selected any, bus any, opts runtimepipeline.PipelineCoordinatorOptions) runtimepipeline.PipelineCoordinatorOptions {
 	t.Helper()
+	if !opts.ReceiverExecution.Configured() {
+		opts.ReceiverExecution = eventreceiver.NormalExecution()
+	}
 	roles, ok := selected.(apiTestDurableWorkflowRoles)
 	if !ok {
 		t.Fatalf("selected API test store %T does not provide complete durable workflow roles", selected)

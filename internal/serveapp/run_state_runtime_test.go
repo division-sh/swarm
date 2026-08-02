@@ -16,6 +16,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -78,7 +79,7 @@ func newRunStatusEventBus(t *testing.T, pg *store.PostgresStore) (*runtimebus.Ev
 			FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteSets: pg, FlowRouteTopology: pg, FlowRouteRollback: pg,
 			ActiveAgents: pg, ActiveFlows: pg, DeliveryTargets: pg, DeliveryRouteSets: pg,
 			TargetFailureRecorder: pg, RunOrigins: pg,
-		},
+		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -251,7 +252,7 @@ func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) 
 		DeliveryStore:    pg,
 		SessionResetter:  pg,
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(pg, eb),
-		WorkOwner:        workOwner,
+		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
@@ -374,7 +375,7 @@ func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 		DeliveryStore:    pg,
 		SessionResetter:  pg,
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(pg, eb),
-		WorkOwner:        workOwner,
+		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{
 		ExecutionMode: "live",

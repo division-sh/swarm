@@ -17,6 +17,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -475,7 +476,7 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 			EventExistence:      faults,
 			DirectiveOperations: faults,
 			DirectiveTargets:    faults,
-		},
+		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, faults))
 	rec := runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{

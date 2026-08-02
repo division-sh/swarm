@@ -17,6 +17,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -392,7 +393,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
 		WorkOwner:                      workOwner,
 		DeliveryStore:                  deliveryStore,
-		PersistenceRoles:               runtimeTestManagerBusRoles(bus),
+		PersistenceRoles:               runtimeTestManagerBusRoles(bus), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, managerStore)
 	rt.Manager = am
 
@@ -500,7 +501,7 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
 		WorkOwner:                      workOwner,
 		DeliveryStore:                  deliveryStore,
-		PersistenceRoles:               runtimeTestManagerBusRoles(bus),
+		PersistenceRoles:               runtimeTestManagerBusRoles(bus), ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	rt.Manager = am
 

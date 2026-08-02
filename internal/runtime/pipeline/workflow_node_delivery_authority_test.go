@@ -127,7 +127,7 @@ func TestPipelineCoordinatorInterceptDeliveryRouteRejectsAmbiguousConnectedInput
 			}},
 		},
 	})
-	testPipelineCoordinatorRunContext(t, pc)
+	runCtx := testPipelineCoordinatorRunContext(t, pc)
 
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -138,7 +138,7 @@ func TestPipelineCoordinatorInterceptDeliveryRouteRejectsAmbiguousConnectedInput
 		Source:       events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()},
 		Target:       target,
 	}, time.Now().UTC())
-	ctx := testAuthorActivityContext(t, context.Background())
+	ctx := testAuthorActivityContext(t, runCtx)
 	seedPipelineEventRecord(t, ctx, db, evt)
 	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "receiver-node", Target: target}
 	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, eventID, route.SubscriberID, target)
@@ -180,7 +180,6 @@ func TestPipelineCoordinatorInterceptTerminalNodeDeliveryDoesNotAuthorizeExecuti
 	for _, name := range []string{"dead_letter"} {
 		t.Run(name, func(t *testing.T) {
 			_, db, _ := testutil.StartPostgres(t)
-			ctx := testAuthorActivityContext(t, context.Background())
 			pc, bus := newDeliveryAuthorityCoordinator(t, db)
 			runCtx := testPipelineCoordinatorRunContext(t, pc)
 			evt := seedDeliveryAuthorityEvent(t, db, runCtx)
@@ -188,7 +187,7 @@ func TestPipelineCoordinatorInterceptTerminalNodeDeliveryDoesNotAuthorizeExecuti
 			seedDeliveryAuthorityTerminalNodeDelivery(t, db, evt.ID(), "node-a")
 
 			postCommit := make([]OwnerAction, 0, 1)
-			ictx := WithPipelinePostCommitActions(ctx, &postCommit)
+			ictx := WithPipelinePostCommitActions(runCtx, &postCommit)
 			passthrough, _, _, err := pc.Intercept(ictx, evt)
 			if err != nil {
 				t.Fatalf("Intercept: %v", err)

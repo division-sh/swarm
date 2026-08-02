@@ -27,6 +27,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -1413,7 +1414,7 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 		BaseContext:     testAuthorActivityRuntimeContext(context.Background()),
 		Sessions:        registry,
 		SessionResetter: pg,
-		WorkOwner:       workOwner,
+		WorkOwner:       workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err := am.ResetRuntimeStateWithSource("admin_cli"); err != nil {
 		t.Fatalf("ResetRuntimeStateWithSource: %v", err)
@@ -1594,7 +1595,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		WorkOwner:        rt.WorkOccurrence(),
 		DeliveryStore:    pg,
 		SessionResetter:  pg,
-		PersistenceRoles: conformanceManagerPersistenceRoles(pg, rt.Bus, rt.Pipeline),
+		PersistenceRoles: conformanceManagerPersistenceRoles(pg, rt.Bus, rt.Pipeline), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, managerStore)
 
 	if err := rt.Start(ctx); err != nil {
@@ -1908,7 +1909,7 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 		HumanTaskExpiry:         selected,
 		GatePublisher:           eventBus,
 		DirectDecisionPublisher: eventBus,
-		DeliveryRuntime:         eventBus,
+		DeliveryRuntime:         eventBus, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
 	entityID := uuid.NewString()

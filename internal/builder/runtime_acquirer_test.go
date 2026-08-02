@@ -10,6 +10,7 @@ import (
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -58,6 +59,9 @@ func newTestOwnedEventBus(t testing.TB, store runtimebus.EventStore, opts runtim
 	t.Helper()
 	acquirer := newTestRuntimeAcquirer(t, nil).(*testRuntimeAcquirer)
 	opts.WorkOwner = acquirer.owner
+	if !opts.ReceiverExecution.Configured() {
+		opts.ReceiverExecution = eventreceiver.NormalExecution()
+	}
 	if opts.BundleSourceFact.Validate() != nil {
 		fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(builderTestBundleHash)
 		if err != nil {

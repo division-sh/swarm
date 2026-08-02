@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -361,6 +362,7 @@ func newSourceMutationProbeBusWithStore(
 		PipelineObligations: owner,
 		Durable:             ExactDurableTestDependencies(store),
 		WorkOwner:           runtimeOwner,
+		ReceiverExecution:   eventreceiver.NormalExecution(),
 		DeliveryAuthority:   mustSourceMutationDeliveryAuthority(t, fact),
 	})
 	if err != nil {

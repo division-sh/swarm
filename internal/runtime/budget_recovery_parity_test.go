@@ -14,6 +14,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -111,7 +112,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 				LifecycleStore: selected,
 				SemanticSource: source,
 				Budget:         tracker,
-				WorkOwner:      runtimeTestEventBusWorkOwner(t, bus),
+				WorkOwner:      runtimeTestEventBusWorkOwner(t, bus), ReceiverExecution: eventreceiver.NormalExecution(),
 			}, selected)
 
 			admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "budget-recovery-test", 1, "", "budget-recovery-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)

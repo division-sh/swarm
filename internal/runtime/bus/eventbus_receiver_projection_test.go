@@ -3,11 +3,13 @@ package bus
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -47,6 +49,12 @@ func (receiverProjectionEffectStore) SettleExternalAttempt(context.Context, runt
 type receiverProjectionInterceptor struct {
 	eventErr error
 	routeErr error
+}
+
+func TestEventBusWithOptionsRejectsUnconfiguredReceiverExecution(t *testing.T) {
+	if _, err := NewEphemeralEventBusWithOptions(InMemoryEventStore{}, EventBusOptions{}); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("unconfigured EventBus receiver execution = %v", err)
+	}
 }
 
 func (i *receiverProjectionInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
@@ -203,6 +211,183 @@ func TestInternalSubscriptionUsesClosedReceiverProjection(t *testing.T) {
 	if err := delivery.Complete(); err != nil {
 		t.Fatalf("complete internal delivery: %v", err)
 	}
+}
+
+func TestRoutedReceiverLifetimeUsesExactEventBusOwner(t *testing.T) {
+	tests := []struct {
+		name     string
+		selected bool
+	}{
+		{name: "normal"},
+		{name: "selected", selected: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			process := worklifetime.NewProcess()
+			publisherOwner := newReceiverProjectionRuntimeOwner(t, process, "publisher")
+			var receiverOwner worklifetime.Occurrence
+			receiverExecution := eventreceiver.NormalExecution()
+			var retireReceiver func() <-chan error
+			if test.selected {
+				executionID := uuid.NewString()
+				forkRunID := uuid.NewString()
+				selectedOwner, err := process.NewSelectedFork(context.Background(), worklifetime.SelectedForkIdentity{
+					ExecutionID: executionID,
+					RunID:       forkRunID,
+					Generation:  1,
+				})
+				if err != nil {
+					t.Fatalf("create selected receiver owner: %v", err)
+				}
+				receiverOwner = selectedOwner
+				receiverExecution = newSelectedReceiverProjectionExecution(t, executionID, forkRunID)
+				retireReceiver = func() <-chan error {
+					done := make(chan error, 1)
+					go func() {
+						ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+						defer cancel()
+						done <- selectedOwner.RetireAndWait(ctx)
+					}()
+					return done
+				}
+			} else {
+				runtimeOwner := newReceiverProjectionRuntimeOwner(t, process, "receiver")
+				receiverOwner = runtimeOwner
+				retireReceiver = func() <-chan error {
+					done := make(chan error, 1)
+					go func() {
+						ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+						defer cancel()
+						_, err := runtimeOwner.RetireAndWait(ctx)
+						done <- err
+					}()
+					return done
+				}
+			}
+
+			eventBus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{
+				WorkOwner:         receiverOwner,
+				ReceiverExecution: receiverExecution,
+			})
+			if err != nil {
+				t.Fatalf("create %s event bus: %v", test.name, err)
+			}
+			eventType := events.EventType("custom.receiver_lifetime_" + test.name)
+			agentID := "receiver-agent-" + test.name
+			deliveries := subscribeTestAgent(t, eventBus, agentID, eventType)
+			evt := receiverProjectionEventForType("receiver-lifetime-"+test.name, eventType)
+			publisherCtx := worklifetime.WithOccurrence(hostilePublisherContext(t), publisherOwner)
+
+			projection, err := eventBus.receiverProjection(publisherCtx, evt.DeliveryContext())
+			if err != nil {
+				t.Fatalf("project %s receiver: %v", test.name, err)
+			}
+			if projection.occurrence != receiverOwner {
+				t.Fatalf("%s receiver projection retained %T, want exact EventBus owner %T", test.name, projection.occurrence, receiverOwner)
+			}
+			if err := eventBus.Publish(publisherCtx, evt); err != nil {
+				t.Fatalf("publish to %s routed receiver: %v", test.name, err)
+			}
+			delivery := <-deliveries
+
+			publisherRetirementCtx, cancelPublisherRetirement := context.WithTimeout(context.Background(), time.Second)
+			_, err = publisherOwner.RetireAndWait(publisherRetirementCtx)
+			cancelPublisherRetirement()
+			if err != nil {
+				t.Fatalf("retire %s publisher owner: %v", test.name, err)
+			}
+			select {
+			case <-delivery.Context().Done():
+				t.Fatalf("%s receiver canceled when publisher occurrence retired: %v", test.name, context.Cause(delivery.Context()))
+			default:
+			}
+
+			receiverRetired := retireReceiver()
+			select {
+			case <-delivery.Context().Done():
+			case <-time.After(time.Second):
+				t.Fatalf("%s receiver remained live after EventBus owner retired", test.name)
+			}
+			if err := delivery.Complete(); err != nil {
+				t.Fatalf("complete %s routed delivery: %v", test.name, err)
+			}
+			unsubscribeTestAgent(eventBus, agentID)
+			select {
+			case err := <-receiverRetired:
+				if err != nil {
+					t.Fatalf("retire %s receiver owner: %v", test.name, err)
+				}
+			case <-time.After(time.Second):
+				t.Fatalf("%s receiver owner did not retire", test.name)
+			}
+			process.Retire()
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			if _, err := process.Join(ctx); err != nil {
+				t.Fatalf("join %s receiver process: %v", test.name, err)
+			}
+		})
+	}
+}
+
+func newReceiverProjectionRuntimeOwner(t testing.TB, process *worklifetime.Process, suffix string) *worklifetime.RuntimeOccurrence {
+	t.Helper()
+	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
+		RuntimeInstanceID: "receiver-projection-" + suffix + "-" + uuid.NewString(),
+		BundleHash:        authorActivityTestBundleHash,
+	})
+	if err != nil {
+		t.Fatalf("create %s runtime owner: %v", suffix, err)
+	}
+	return owner
+}
+
+func newSelectedReceiverProjectionExecution(t testing.TB, executionID, forkRunID string) eventreceiver.ExecutionVariant {
+	t.Helper()
+	authority := runtimeeffects.Authority{
+		Kind: runtimeeffects.AuthoritySelectedContractFork,
+		ID:   executionID,
+		SelectedFork: runtimeeffects.SelectedContractForkAuthority{
+			ExecutionID:                executionID,
+			ForkRunID:                  forkRunID,
+			Generation:                 1,
+			AdmissionFingerprint:       "selected-receiver-projection-admission",
+			ContainerPlanFingerprint:   "selected-receiver-projection-container",
+			ActorCensusFingerprint:     "selected-receiver-projection-actors",
+			EffectiveConfigFingerprint: "selected-receiver-projection-config",
+		},
+		ExecutionOwner:  "selected-receiver-projection-test",
+		LeaseExpiresAt:  time.Now().UTC().Add(time.Minute),
+		FenceGeneration: 1,
+		ExecutionMode:   runtimeeffects.ExecutionModeLive,
+	}
+	admission, err := managedexecution.New(
+		managedexecution.KindSelectedContractFork,
+		executionID,
+		1,
+		forkRunID,
+		"selected-receiver-projection-census",
+		authorActivityTestBundleHash,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("create selected receiver admission: %v", err)
+	}
+	variant, err := eventreceiver.SelectedContractForkExecution(
+		authority,
+		admission,
+		runtimeeffects.NewController(receiverProjectionEffectStore{}),
+		runtimecorrelation.RuntimeLineage{
+			Owner:               "selected-receiver-projection-test",
+			RunID:               forkRunID,
+			Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
+			SelectedForkContext: true,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create selected receiver execution: %v", err)
+	}
+	return variant
 }
 
 func hostilePublisherContext(t testing.TB) context.Context {

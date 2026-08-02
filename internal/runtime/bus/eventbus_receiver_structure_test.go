@@ -103,10 +103,103 @@ func TestEventBusReceiverOwnershipBoundaryStructuralGuard(t *testing.T) {
 	}
 }
 
+func TestEventBusReceiverOwnerAdmissionStructuralGuard(t *testing.T) {
+	files := parseReceiverOwnershipProductionFiles(t)
+	requiredValidation := map[string]string{
+		"newEventBusWithOptions":            "Validate",
+		"NewAgentManagerWithOptions":        "Validate",
+		"newPipelineCoordinatorWithOptions": "Validate",
+		"PipelineCoordinator.intercept":     "ValidateBound",
+	}
+	found := make(map[string]bool, len(requiredValidation)+1)
+	receiverOwnerSelected := false
+	for path, file := range files {
+		for _, declaration := range file.Decls {
+			fn, ok := declaration.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			key := receiverFunctionKey(fn)
+			if key == "EventBus.receiverProjection" {
+				found[key] = true
+				ast.Inspect(fn.Body, func(node ast.Node) bool {
+					switch typed := node.(type) {
+					case *ast.CallExpr:
+						name := calledFunctionName(typed)
+						if name == "workOwnerForContext" || name == "OccurrenceFromContext" {
+							t.Errorf("%s: receiverProjection selected ambient occurrence through %s", path, name)
+						}
+					case *ast.SelectorExpr:
+						identifier, ok := typed.X.(*ast.Ident)
+						if ok && identifier.Name == "eb" && typed.Sel.Name == "workOwner" {
+							receiverOwnerSelected = true
+						}
+					}
+					return true
+				})
+			}
+			requiredCall, guarded := requiredValidation[key]
+			if guarded {
+				found[key] = true
+				validationFound := false
+				ast.Inspect(fn.Body, func(node ast.Node) bool {
+					call, ok := node.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					name := calledFunctionName(call)
+					if name == requiredCall {
+						validationFound = true
+					}
+					if name == "Configured" {
+						t.Errorf("%s: %s conditionally bypasses receiver execution validation", path, key)
+					}
+					if name == "NormalExecution" {
+						t.Errorf("%s: %s defaults missing receiver execution to normal", path, key)
+					}
+					return true
+				})
+				if !validationFound {
+					t.Errorf("%s: %s no longer calls %s", path, key, requiredCall)
+				}
+			}
+
+			if key == "ExecutionVariant.Kind" {
+				found[key] = true
+				ast.Inspect(fn.Body, func(node ast.Node) bool {
+					identifier, ok := node.(*ast.Ident)
+					if ok && identifier.Name == "ExecutionNormal" {
+						t.Errorf("%s: ExecutionVariant.Kind inferred normal from missing ownership", path)
+					}
+					return true
+				})
+			}
+		}
+	}
+	for name := range requiredValidation {
+		if !found[name] {
+			t.Errorf("receiver fail-closed guard lost production function %s", name)
+		}
+	}
+	for _, name := range []string{"EventBus.receiverProjection", "ExecutionVariant.Kind"} {
+		if !found[name] {
+			t.Errorf("receiver fail-closed guard lost production function %s", name)
+		}
+	}
+	if !receiverOwnerSelected {
+		t.Fatal("receiverProjection no longer selects the exact EventBus work owner")
+	}
+}
+
 func parseReceiverOwnershipProductionFiles(t testing.TB) map[string]*ast.File {
 	t.Helper()
 	files := make(map[string]*ast.File)
-	for _, dir := range []string{".", filepath.Join("..", "manager")} {
+	for _, dir := range []string{
+		".",
+		filepath.Join("..", "manager"),
+		filepath.Join("..", "pipeline"),
+		filepath.Join("..", "core", "eventreceiver"),
+	} {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			t.Fatalf("read %s: %v", dir, err)
@@ -161,4 +254,15 @@ func selectorCall(call *ast.CallExpr, packageName, functionName string) bool {
 	}
 	identifier, ok := selector.X.(*ast.Ident)
 	return ok && identifier.Name == packageName
+}
+
+func calledFunctionName(call *ast.CallExpr) string {
+	switch function := call.Fun.(type) {
+	case *ast.Ident:
+		return function.Name
+	case *ast.SelectorExpr:
+		return function.Sel.Name
+	default:
+		return ""
+	}
 }

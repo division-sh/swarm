@@ -433,6 +433,78 @@ func TestRuntimeRouteDeliveryRetainsManagerStandingCompositionThroughNestedCompl
 	}
 }
 
+func TestManagerWorkProjectionRetainsExplicitStandingOwnerAcrossRuntimeDelivery(t *testing.T) {
+	process := NewProcess()
+	runtimeOwner, err := process.NewRuntime(context.Background(), RuntimeIdentity{
+		RuntimeInstanceID: "runtime-manager-parent-standing",
+		BundleHash:        "bundle-manager-parent-standing",
+	})
+	if err != nil {
+		t.Fatalf("new runtime: %v", err)
+	}
+	standing, err := runtimeOwner.NewStanding(context.Background(), StandingIdentity{
+		ServiceID:  "telegram",
+		RunID:      uuid.NewString(),
+		Generation: 1,
+	})
+	if err != nil {
+		t.Fatalf("new standing occurrence: %v", err)
+	}
+	manager, err := NewManagerRunOccurrence(context.Background(), runtimeOwner, ManagerRunIdentity{Generation: 1})
+	if err != nil {
+		t.Fatalf("new manager run: %v", err)
+	}
+	route, err := runtimeOwner.NewRoute(context.Background(), RouteIdentity{
+		RuntimeEpoch: 1,
+		Agent:        agentidentitytest.RootRuntime(t, "standing-manager", "worklifetime-test"),
+		Generation:   1,
+	})
+	if err != nil {
+		t.Fatalf("new runtime route: %v", err)
+	}
+	event := eventtest.RuntimeControl(
+		uuid.NewString(), events.EventType("telegram.received"), "test", "", []byte(`{}`), 0,
+		uuid.NewString(), "", events.EventEnvelope{}, time.Now(),
+	)
+	delivery, err := route.NewEventDelivery(context.Background(), event)
+	if err != nil {
+		t.Fatalf("new runtime-owned delivery: %v", err)
+	}
+	work, err := manager.Begin(delivery.Context(), standing)
+	if err != nil {
+		t.Fatalf("begin standing-owned manager work: %v", err)
+	}
+	managerOwner, ok := OccurrenceFromContext(work.Context())
+	if !ok {
+		t.Fatal("standing-owned manager work has no exact occurrence")
+	}
+	if projected, ok := StandingProjection(managerOwner); !ok || projected != standing {
+		t.Fatalf("manager standing projection = %p/%t, want canonical parent %p", projected, ok, standing)
+	}
+	if err := work.Done(); err != nil {
+		t.Fatalf("settle manager work: %v", err)
+	}
+	if err := delivery.Complete(); err != nil {
+		t.Fatalf("complete delivery: %v", err)
+	}
+	if err := route.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire route: %v", err)
+	}
+	if err := manager.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire manager: %v", err)
+	}
+	if err := standing.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire standing: %v", err)
+	}
+	if _, err := runtimeOwner.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire runtime: %v", err)
+	}
+	process.Retire()
+	if _, err := process.Join(context.Background()); err != nil {
+		t.Fatalf("join process: %v", err)
+	}
+}
+
 func TestBeginRetireRaceRejectsLateAdmissionAndJoinsAcceptedWork(t *testing.T) {
 	process := NewProcess()
 	runtime, err := process.NewRuntime(context.Background(), RuntimeIdentity{RuntimeInstanceID: "runtime-1", BundleHash: "bundle-1"})

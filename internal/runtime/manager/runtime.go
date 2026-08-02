@@ -1511,12 +1511,14 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		}
 	}
 	var loopWorkLease *worklifetime.Lease
+	var loopWorkOwner worklifetime.Occurrence
+	var loopWorkOwnerFound bool
 	var preparedRoute runtimebus.AgentRoutePreparation
 	var proposedToken runtimeeffects.LifecycleToken
 	if runtimeRunning {
 		loopWorkLease, err = am.beginStandingWork(runCtx, "agent execution loop")
 		if err != nil {
-			return replaceExecutionResult{}, err
+			return replaceExecutionResult{}, fmt.Errorf("admit agent execution loop: %w", err)
 		}
 		proposedToken, err = am.lifecycle.prepareLoopTokenLocked(identity, cell)
 		if err != nil {
@@ -1601,6 +1603,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 	successor.subscriptions = append([]events.EventType(nil), candidate.Subscriptions...)
 	successor.admission = candidateAdmission
 	successor.startedAt = candidate.StartedAt
+	successor.standingOwner = candidate.StandingOwner
 	am.lifecycle.mu.Unlock()
 
 	if loopCtx != nil {
@@ -1611,6 +1614,12 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		}
 		if loopWorkLease.Context().Err() != nil {
 			transitionErr := fmt.Errorf("agent execution owner retired before publication: %w", loopWorkLease.Context().Err())
+			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
+			return replaceExecutionResult{}, errors.Join(transitionErr, abortErr, cleanupPrepared())
+		}
+		loopWorkOwner, loopWorkOwnerFound = worklifetime.OccurrenceFromContext(loopWorkLease.Context())
+		if !loopWorkOwnerFound {
+			transitionErr := errors.New("agent execution loop work omitted its exact occurrence")
 			abortErr := am.lifecycle.abortUnlaunchedLoopLocked(parent, identity, token, done, cell)
 			return replaceExecutionResult{}, errors.Join(transitionErr, abortErr, cleanupPrepared())
 		}
@@ -1631,16 +1640,20 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 		}
 		am.lifecycle.mu.Unlock()
 		preparedRoute = nil
-		am.launchExecutionLoop(parent, successor, loopCtx, done, loopWorkLease)
+		am.launchExecutionLoop(parent, successor, loopCtx, done, loopWorkLease, loopWorkOwner)
 		loopWorkLease = nil
 	}
 	return replaceExecutionResult{config: candidate.Config, transitioned: true}, nil
 }
 
-func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *agentExecutionProjection, loopCtx context.Context, done chan struct{}, workLease *worklifetime.Lease) {
+func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *agentExecutionProjection, loopCtx context.Context, done chan struct{}, workLease *worklifetime.Lease, executionOwner worklifetime.Occurrence) {
 	agent := execution.agent
 	ch := execution.route
 	token := execution.token
+	eventWorkOwner := executionOwner
+	if execution.standingOwner != nil {
+		eventWorkOwner = execution.standingOwner
+	}
 	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(parent))
 	go func() {
 		executionCtx, cancelExecution := context.WithCancel(workLease.Context())
@@ -1715,7 +1728,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 							if am.shutdownAdmissionClosed() {
 								return true
 							}
-							eventWork, err := am.beginWork(delivery.Context(), "agent event processing")
+							eventWork, err := am.lifecycle.beginWork(delivery.Context(), eventWorkOwner)
 							if err != nil {
 								return true
 							}

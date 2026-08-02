@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -46,6 +47,16 @@ type projectionTestBus struct {
 	runtimeLogs   []runtimepipeline.RuntimeLogEntry
 	beforePublish func()
 	deliveryCtx   context.Context
+}
+
+func TestAgentManagerWithOptionsRejectsUnconfiguredReceiverExecution(t *testing.T) {
+	defer func() {
+		got := recover()
+		if got == nil || !strings.Contains(fmt.Sprint(got), "not configured") {
+			t.Fatalf("unconfigured AgentManager receiver execution panic = %v", got)
+		}
+	}()
+	_ = NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{})
 }
 
 type projectionTestRoutePreparation struct {

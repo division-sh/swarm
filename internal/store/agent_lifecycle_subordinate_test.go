@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -91,7 +92,10 @@ func proveLifecycleConcurrentPartialReconfigure(t *testing.T, store lifecycleOcc
 			}
 		}
 		return lifecycleOccurrenceAgent{id: cfg.ID}, nil
-	}, runtimemanager.AgentManagerOptions{BaseContext: testAuthorActivityContext(), LifecycleStore: store, Sessions: store}, store)
+	}, runtimemanager.AgentManagerOptions{
+		BaseContext: testAuthorActivityContext(), LifecycleStore: store, Sessions: store,
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	}, store)
 	cfg := runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "concurrent-partial-reconfigure-agent",
@@ -277,7 +281,10 @@ func proveLifecycleReconfigureOccurrenceIdentity(t *testing.T, store lifecycleOc
 	t.Helper()
 	manager := runtimemanager.NewAgentManagerWithOptions(nil, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return lifecycleOccurrenceAgent{id: cfg.ID}, nil
-	}, runtimemanager.AgentManagerOptions{BaseContext: testAuthorActivityContext(), LifecycleStore: store, Sessions: store}, store)
+	}, runtimemanager.AgentManagerOptions{
+		BaseContext: testAuthorActivityContext(), LifecycleStore: store, Sessions: store,
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	}, store)
 	cfg := runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "reconfigure-occurrence-agent",
