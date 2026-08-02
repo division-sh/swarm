@@ -34,19 +34,6 @@ type authorActivityTurn struct {
 	OccurredAt       time.Time
 }
 
-func recordAuthorActivityTurn(ctx context.Context, turn authorActivityTurn) error {
-	drafts, err := authorActivityTurnDrafts(turn)
-	if err != nil {
-		return err
-	}
-	for _, draft := range drafts {
-		if err := runtimeauthoractivity.Record(ctx, draft); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func recordAuthorActivityTurnWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, turn authorActivityTurn) error {
 	if story == nil {
 		return fmt.Errorf("agent turn story owner is required")
