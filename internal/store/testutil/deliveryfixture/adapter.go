@@ -102,3 +102,7 @@ func (a *Adapter) RenewClaim(ctx context.Context, tx *sql.Tx, claim runtimedeliv
 func (a *Adapter) ObserveContinuation(ctx context.Context, db *sql.DB, authority runtimedelivery.ExecutionAuthority, deliveryID string) (runtimedelivery.ContinuationObservation, error) {
 	return a.Adapter.ObserveContinuation(ctx, db, authority, deliveryID)
 }
+
+func (a *Adapter) ObserveContinuationInTransaction(ctx context.Context, tx *sql.Tx, authority runtimedelivery.ExecutionAuthority, deliveryID string) (runtimedelivery.ContinuationObservation, error) {
+	return a.Adapter.ObserveContinuation(ctx, tx, authority, deliveryID)
+}

@@ -441,7 +441,6 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					longClaimResult, err := adapter.ClaimExactResult(
 						txctx,
 						tx,
-						nil,
 						longClaimSnapshot.Authority,
 						longEvent,
 						longClaimRoute,
@@ -454,7 +453,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					if !acquired {
 						t.Fatalf("long-transaction claim = %#v, want acquired", longClaimResult)
 					}
-					longRetry, err := adapter.SettleFailure(txctx, tx, nil, longRetryClaim.Claim, runtimedelivery.Settlement{
+					longRetry, err := adapter.SettleFailure(txctx, tx, longRetryClaim.Claim, runtimedelivery.Settlement{
 						Disposition: runtimedelivery.FailureRetry,
 						Failure:     testFailure("long_transaction_retry"),
 						RetryBase:   10 * time.Second,
@@ -462,7 +461,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					if err != nil {
 						t.Fatalf("settle retry in long PostgreSQL transaction: %v", err)
 					}
-					leaseObservation, err := adapter.ObserveContinuation(
+					leaseObservation, err := adapter.ObserveContinuationInTransaction(
 						txctx,
 						tx,
 						longClaimSnapshot.Authority,
