@@ -55,14 +55,7 @@ func (flowActivationTestRunLifecycleOwner) RequireActiveRun(ctx context.Context,
 	if !ok || tx == nil {
 		return errors.New("flow activation lifecycle transaction is required")
 	}
-	var state string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, strings.TrimSpace(runID)).Scan(&state); err != nil {
-		return err
-	}
-	if strings.TrimSpace(state) != "running" && strings.TrimSpace(state) != "paused" {
-		return fmt.Errorf("flow activation run %s is not active", strings.TrimSpace(runID))
-	}
-	return nil
+	return runlifecyclefixture.PostgresRequireActiveRunInMutation(ctx, tx, runID)
 }
 
 func (flowActivationTestRunLifecycleOwner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
@@ -70,14 +63,7 @@ func (flowActivationTestRunLifecycleOwner) RequireActiveRunSource(ctx context.Co
 	if !ok || tx == nil {
 		return runtimecorrelation.BundleSourceFact{}, errors.New("flow activation lifecycle transaction is required")
 	}
-	var state, bundleHash, bundleSource string
-	if err := tx.QueryRowContext(ctx, `SELECT status, bundle_hash, bundle_source FROM runs WHERE run_id = $1::uuid`, strings.TrimSpace(runID)).Scan(&state, &bundleHash, &bundleSource); err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
-	}
-	if strings.TrimSpace(state) != "running" && strings.TrimSpace(state) != "paused" {
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("flow activation run %s is not active", strings.TrimSpace(runID))
-	}
-	return runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+	return runlifecyclefixture.PostgresRequireActiveRunSourceInMutation(ctx, tx, runID)
 }
 
 func (o flowActivationTestRunLifecycleOwner) LoadActiveWorkflowRoute(ctx context.Context, instancePath string) (runtimeworkflowroute.RecoveryRecord, error) {
@@ -166,14 +152,7 @@ func (flowActivationTestRunLifecycleOwner) RequestCompletionCandidate(
 	if !ok || tx == nil {
 		return "", errors.New("flow activation lifecycle transaction is required")
 	}
-	var exists bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid)`, request.RunID).Scan(&exists); err != nil {
-		return "", err
-	}
-	if !exists {
-		return "", runtimerunlifecycle.ErrRunNotFound
-	}
-	return runtimerunlifecycle.CandidateRequested, nil
+	return runlifecyclefixture.PostgresRequestCompletionCandidateInMutation(ctx, tx, request)
 }
 
 func (flowActivationTestRunLifecycleOwner) TransitionActiveRun(
@@ -187,18 +166,7 @@ func (flowActivationTestRunLifecycleOwner) TransitionActiveRun(
 	if !ok || tx == nil {
 		return "", errors.New("flow activation lifecycle transaction is required")
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE runs SET status = $2 WHERE run_id = $1::uuid`, request.RunID, request.State)
-	if err != nil {
-		return "", err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return "", err
-	}
-	if rows != 1 {
-		return "", runtimerunlifecycle.ErrRunNotFound
-	}
-	return runtimerunlifecycle.MutationApplied, nil
+	return runlifecyclefixture.PostgresTransitionActiveRunInMutation(ctx, tx, request)
 }
 
 func (flowActivationTestRunLifecycleOwner) MarkTerminalRun(
@@ -212,26 +180,7 @@ func (flowActivationTestRunLifecycleOwner) MarkTerminalRun(
 	if !ok || tx == nil {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("flow activation lifecycle transaction is required")
 	}
-	failure, err := json.Marshal(request.Failure)
-	if err != nil {
-		return runtimerunlifecycle.Snapshot{}, "", err
-	}
-	result, err := tx.ExecContext(ctx, `
-		UPDATE runs SET status = $2, failure = NULLIF($3, 'null')::jsonb, ended_at = $4
-		WHERE run_id = $1::uuid
-	`, request.RunID, request.State, failure, request.EndedAt.UTC())
-	if err != nil {
-		return runtimerunlifecycle.Snapshot{}, "", err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return runtimerunlifecycle.Snapshot{}, "", err
-	}
-	if rows != 1 {
-		return runtimerunlifecycle.Snapshot{}, "", runtimerunlifecycle.ErrRunNotFound
-	}
-	endedAt := request.EndedAt.UTC()
-	return runtimerunlifecycle.Snapshot{RunID: request.RunID, State: request.State, Failure: request.Failure, EndedAt: &endedAt}, runtimerunlifecycle.MutationApplied, nil
+	return runlifecyclefixture.PostgresMarkTerminalRunInMutation(ctx, tx, request)
 }
 
 func TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSchema(t *testing.T) {

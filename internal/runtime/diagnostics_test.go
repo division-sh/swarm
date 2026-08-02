@@ -1024,41 +1024,13 @@ func ensureRuntimeLogRunRowInStoryForTest(ctx context.Context, rawTx any, runID 
 	if !ok || tx == nil {
 		return errors.New("runtime log run fixture requires transaction")
 	}
-	bundleHash, bundleSource := source.StorageValues()
-	if bundleSource == storerunlifecycle.BundleSourcePersisted {
-		var exists bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)`, bundleHash).Scan(&exists); err != nil {
-			return err
-		}
-		if !exists {
-			return storerunlifecycle.ErrPersistedBundleUnavailable
-		}
-	}
-	result, err := tx.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, bundle_hash, bundle_source, origin_kind, started_at)
-		VALUES ($1::uuid, 'running', $2, $3, 'scenario_setup', $4)
-		ON CONFLICT (run_id) DO NOTHING
-	`, runID, bundleHash, bundleSource, time.Now().UTC())
-	if err != nil {
-		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil || rows == 1 {
-		return err
-	}
-	var existingHash, existingSource string
-	if err := tx.QueryRowContext(ctx, `
-		SELECT bundle_hash, bundle_source FROM runs WHERE run_id = $1::uuid
-	`, runID).Scan(&existingHash, &existingSource); err != nil {
-		return err
-	}
-	if bundleSource == storerunlifecycle.BundleSourcePersisted && existingSource == storerunlifecycle.BundleSourceDeleted {
-		return storerunlifecycle.ErrPersistedBundleUnavailable
-	}
-	if existingHash != bundleHash || existingSource != bundleSource {
-		return errors.New("runtime log run fixture conflicts with existing bundle source")
-	}
-	return nil
+	_, err := runlifecyclefixture.PostgresCreateRunInMutation(ctx, tx, storerunlifecycle.CreateRequest{
+		RunID:     runID,
+		Source:    source,
+		Origin:    runlifecyclefixture.ScenarioSetupOrigin(),
+		StartedAt: time.Now().UTC(),
+	})
+	return err
 }
 
 func syncRuntimeLogRunCountsForTest(ctx context.Context, rawTx any, runID string) error {
@@ -1066,13 +1038,7 @@ func syncRuntimeLogRunCountsForTest(ctx context.Context, rawTx any, runID string
 	if !ok || tx == nil {
 		return errors.New("runtime log counter fixture requires transaction")
 	}
-	_, err := tx.ExecContext(ctx, `
-		UPDATE runs
-		SET event_count = (SELECT COUNT(*) FROM events WHERE run_id = $1::uuid),
-		    entity_count = (SELECT COUNT(*) FROM entity_state WHERE run_id = $1::uuid)
-		WHERE run_id = $1::uuid
-	`, strings.TrimSpace(runID))
-	return err
+	return runlifecyclefixture.PostgresSyncCountersInMutation(ctx, tx, runID)
 }
 
 type runtimeLogPayloadArg struct {

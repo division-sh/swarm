@@ -243,11 +243,11 @@ func TestSelectedRuntimeConstructionUsesOpaqueWorkflowPersistence(t *testing.T) 
 		t.Fatalf("read internal/serveapp/main.go: %v", err)
 	}
 	mainText := string(mainData)
-	if !strings.Contains(mainText, "NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore)") {
-		t.Fatal("serve runtime SQLite construction must wire the selected private transaction executor into opaque workflow persistence")
+	if !strings.Contains(mainText, "NewSQLiteWorkflowPersistence(constructionDB, sqliteStore)") {
+		t.Fatal("serve runtime SQLite construction must keep the raw lifecycle handle confined to construction and wire the selected semantic owner")
 	}
-	if !strings.Contains(mainText, "NewPostgresWorkflowPersistence(pg.DB, pg)") {
-		t.Fatal("serve runtime PostgreSQL construction must wire opaque workflow persistence")
+	if !strings.Contains(mainText, "NewPostgresWorkflowPersistence(constructionDB, pg)") {
+		t.Fatal("serve runtime PostgreSQL construction must keep the raw lifecycle handle confined to construction and wire the selected semantic owner")
 	}
 	for _, forbidden := range []string{
 		"NewSQLiteWorkflowInstanceStore",

@@ -170,7 +170,7 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 		{
 			path: "internal/runtime/mutationlog/mutationlog.go",
 			required: []string{
-				"runtimerunlifecycle.RequireActiveSource",
+				"runLifecycle.RequireActiveRunSource",
 				"runFact.Matches(contextFact)",
 			},
 			prohibited: []string{
