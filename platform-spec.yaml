@@ -22575,11 +22575,21 @@ cli_specification:
           finite five-second default timeout owned by the run-start implementation. Status polling and interruption
           handling begin as soon as workload existence is established and MUST NOT wait for subscription acquisition.
           Cancellation closes the pending or active WebSocket and joins the child before command teardown.
+        rendering: >
+          One run-start-specific bounded rendering controller owns independent joined stdout trace and stderr detach-fact
+          workers. The authoritative lifecycle goroutine never writes optional observation output directly. It offers
+          trace rows to a one-row rendering lane without waiting; a full lane produces queue_overflow, stops and joins
+          observation, and uses the separately reserved one-fact lane to render the exact detach fact. A blocked trace
+          sink therefore cannot suppress the detach fact, status polling, start-mode run.stop, reattach-mode no-stop,
+          terminal selection, or observer settlement. Command teardown joins both rendering workers after canonical
+          control or terminal truth has been selected and before writing same-stream canonical lifecycle output.
         failure_policy: >
           After successful run.start, or after active reattach proves the run exists, any trace attach failure,
           acquisition timeout, invalid subscription response, transport loss, invalid notification, subscription
           mismatch, invalid trace row, clean premature close, or local queue overflow detaches observation exactly
-          once and continues authoritative run.get polling. There is no reconnect, replay, or queue-size fallback.
+          once and continues authoritative run.get polling. A syntactically valid JSON-RPC error response rejecting
+          run.subscribe_trace is attach_failed; subscription_response_invalid is reserved for malformed protocol
+          envelopes or malformed success results. There is no reconnect, replay, or queue-size fallback.
         detach_fact:
           type: run_trace_observer_detached
           severity: warning
@@ -22627,6 +22637,7 @@ cli_specification:
       - every post-start attach, timeout, protocol, transport, validation, mismatch, clean-close, and overflow manifestation emits exactly one typed detach fact and continues run.get polling
       - local start, connected start, and active reattach consume the same observer policy; terminal reattach opens no WebSocket; pre-start failures remain lethal
       - terminal success/failure and both start/reattach interrupt modes remain status/control-owned while pending and detached observers close and join without socket or goroutine leaks
+      - blocked trace stdout and blocked detach-fact stderr cannot delay status/control decisions; start interruption still calls run.stop, active reattach still performs no stop, terminal polling still selects exact terminal truth, and observer plus renderer children settle after output is released
       - TTY and non-TTY render the same typed detach facts, including the exact connect-aware reattach command
       - a compiled public local foreground run exceeding the trace queue bound detaches observation loudly, reaches terminal completion, and exits 0 without premature runtime teardown
       - standalone `swarm run trace --follow`, dashboard SSE, API WebSocket subscriptions, event/log followers, and the serve story follower retain their separate non-cancelling lifecycle contracts

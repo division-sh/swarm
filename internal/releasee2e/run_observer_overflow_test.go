@@ -18,6 +18,7 @@ import (
 )
 
 func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
+	const runID = "00000000-0000-4000-8000-000000002156"
 	repo := releaseE2ERepoRoot(t)
 	releaseRoot := t.TempDir()
 	releaseRoot, err := filepath.EvalSymlinks(releaseRoot)
@@ -71,6 +72,7 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 		"--api-port", fmt.Sprint(apiPort),
 		"--event", "worker/task.assigned",
 		"--payload", filepath.Join(releaseRoot, "payload.json"),
+		"--run-id", runID,
 	)
 	cmd.Dir = releaseRoot
 	cmd.Env = env
@@ -98,29 +100,30 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	waitDone := make(chan error, 1)
 	go func() { waitDone <- cmd.Wait() }()
 	if err := waitForReleaseDockerRecordClass(ctx, fakeRoot, "mcp_emit"); err != nil {
-		t.Fatalf("wait for managed Claude completion: %v\nstderr:\n%s", err, stderr.String())
+		calls, _ := os.ReadFile(filepath.Join(fakeRoot, "calls.jsonl"))
+		t.Fatalf("wait for managed Claude completion: %v\nstderr:\n%s\ndocker calls:\n%s", err, stderr.String(), calls)
 	}
-	time.Sleep(2500 * time.Millisecond)
 	type stdoutResult struct {
 		output []byte
 		err    error
+	}
+	select {
+	case <-stderr.signal:
+	case err := <-waitDone:
+		select {
+		case <-stderr.signal:
+			t.Fatalf("release foreground run exited after publishing overflow but before output release: %v\nstderr:\n%s", err, stderr.String())
+		default:
+			t.Fatalf("release foreground run exited before observer overflow: %v\nstderr:\n%s", err, stderr.String())
+		}
+	case <-ctx.Done():
+		t.Fatalf("release foreground run did not shed its blocked observer: %v\nstderr:\n%s", ctx.Err(), stderr.String())
 	}
 	stdoutDone := make(chan stdoutResult, 1)
 	go func() {
 		output, err := io.ReadAll(stdoutReader)
 		stdoutDone <- stdoutResult{output: output, err: err}
 	}()
-
-	select {
-	case <-stderr.signal:
-	case err := <-waitDone:
-		stdout := (<-stdoutDone).output
-		t.Fatalf("release foreground run exited before observer overflow: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr.String())
-	case <-ctx.Done():
-		stdout := (<-stdoutDone).output
-		<-waitDone
-		t.Fatalf("release foreground run did not shed its blocked observer: %v\nstdout:\n%s\nstderr:\n%s", ctx.Err(), stdout, stderr.String())
-	}
 	stdoutRead := <-stdoutDone
 	if stdoutRead.err != nil {
 		t.Fatal(stdoutRead.err)
@@ -190,7 +193,7 @@ func writeReleaseObserverOverflowFixture(t *testing.T, repo, root string, eventC
 	flowRoot := filepath.Join(root, "contracts", "flows", "worker")
 	writeReleaseFile(t, filepath.Join(flowRoot, "entities.yaml"), "worker_state:\n  requests: \"[text]\"\n")
 	writeReleaseFile(t, filepath.Join(flowRoot, "events.yaml"), "task.assigned:\n  request: \"[text]\"\nagent.requested:\n  request: \"[text]\"\nagent.completed:\n  flow_result: text\ncompletion.item:\n  request: text\n")
-	writeReleaseFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: claude-cli-release-worker\nmode: singleton\ninitial_state: pending\nterminal_states: [done]\nstates: [pending, active, done]\npins:\n  inputs:\n    events:\n      - name: task_assigned\n        event: task.assigned\n        source: external\n  outputs:\n    events: []\n")
+	writeReleaseFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: claude-cli-release-worker\nmode: singleton\nstages:\n  pending:\n    initial: true\n  active:\n    timers:\n      - id: complete_after_overflow\n        after: 10s\n        advances_to: done\n  done:\n    terminal: true\npins:\n  inputs:\n    events:\n      - name: task_assigned\n        event: task.assigned\n        source: external\n  outputs:\n    events: []\n")
 	writeReleaseFile(t, filepath.Join(flowRoot, "nodes.yaml"), fmt.Sprintf(`intake:
   id: intake
   execution_type: system_node
@@ -223,7 +226,6 @@ worker-completion:
           event: completion.item
           fields:
             request: completed_request
-      advances_to: done
 
 completion-sink:
   id: completion-sink
@@ -231,7 +233,7 @@ completion-sink:
   subscribes_to: [completion.item]
   event_handlers:
     completion.item:
-      advances_to: done
+      advances_to: active
 `))
 }
 

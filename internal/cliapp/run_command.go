@@ -139,6 +139,13 @@ type foregroundRunTraceObserver struct {
 	stopOnce sync.Once
 }
 
+type foregroundRunTraceRenderer struct {
+	rows     chan diagnosticRunTraceRow
+	detached chan runTraceObserverDetachedFact
+	workers  sync.WaitGroup
+	stopOnce sync.Once
+}
+
 func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 	opts := runCommandOptions{apiOptions: rootOpts}
 	cmd := &cobra.Command{
@@ -649,12 +656,15 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 		replaySince,
 		opts.apiOptions.runTraceAttachTimeout,
 	)
-	defer observer.stop()
+	renderer := startForegroundRunTraceRenderer(out, errOut)
+	defer func() {
+		observer.stop()
+		renderer.stop()
+	}()
 	rows := observer.rows
 	detached := observer.detached
-	traceWriter := &runTraceRowLineWriter{}
 	reportDetach := func(reason runTraceDetachReason) {
-		writeRunTraceObserverDetached(errOut, runTraceObserverDetachedFact{
+		renderer.enqueueDetached(runTraceObserverDetachedFact{
 			Type:            runTraceObserverDetachedType,
 			Severity:        runTraceObserverWarning,
 			ReasonCode:      reason,
@@ -665,6 +675,15 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 		rows = nil
 		detached = nil
 	}
+	settleObservation := func() {
+		observer.stop()
+		select {
+		case reason := <-detached:
+			reportDetach(reason)
+		default:
+		}
+		renderer.stop()
+	}
 	for {
 		select {
 		case reason := <-detached:
@@ -674,12 +693,15 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 		}
 		select {
 		case <-ctx.Done():
+			var stopErr error
 			if stopOnInterrupt {
-				if err := runCommandStop(context.Background(), client, runID); err != nil {
-					fmt.Fprintln(errOut, "interrupted; run.stop failed")
-					writeCLIAPIError(errOut, err)
-					return commandExitError{code: 130}
-				}
+				stopErr = runCommandStop(context.Background(), client, runID)
+			}
+			settleObservation()
+			if stopErr != nil {
+				fmt.Fprintln(errOut, "interrupted; run.stop failed")
+				writeCLIAPIError(errOut, stopErr)
+				return commandExitError{code: 130}
 			}
 			if stopOnInterrupt {
 				fmt.Fprintln(errOut, "interrupted; requested run.stop")
@@ -692,27 +714,76 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 				rows = nil
 				continue
 			}
-			traceWriter.Write(out, row)
+			if !renderer.enqueueRow(row) {
+				observer.stop()
+				reportDetach(runTraceDetachQueueOverflow)
+			}
 		case reason := <-detached:
 			reportDetach(reason)
 		case <-ticker.C:
 			run, err := runCommandGet(ctx, client, runID)
 			if err != nil {
+				settleObservation()
 				writeCLIAPIError(errOut, err)
 				return commandExitError{code: runCommandErrorExitCode(err)}
 			}
 			if runCommandTerminalStatus(run.Status) {
-				observer.stop()
-				select {
-				case reason := <-detached:
-					reportDetach(reason)
-				default:
-				}
+				settleObservation()
 				writeRunCommandTerminalSummary(out, run)
 				return runCommandTerminalExit(run.Status)
 			}
 		}
 	}
+}
+
+func startForegroundRunTraceRenderer(out, errOut io.Writer) *foregroundRunTraceRenderer {
+	renderer := &foregroundRunTraceRenderer{
+		rows:     make(chan diagnosticRunTraceRow, 1),
+		detached: make(chan runTraceObserverDetachedFact, 1),
+	}
+	renderer.workers.Add(2)
+	go func() {
+		defer renderer.workers.Done()
+		writer := &runTraceRowLineWriter{}
+		for row := range renderer.rows {
+			writer.Write(out, row)
+		}
+	}()
+	go func() {
+		defer renderer.workers.Done()
+		for fact := range renderer.detached {
+			writeRunTraceObserverDetached(errOut, fact)
+		}
+	}()
+	return renderer
+}
+
+func (r *foregroundRunTraceRenderer) enqueueRow(row diagnosticRunTraceRow) bool {
+	select {
+	case r.rows <- row:
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *foregroundRunTraceRenderer) enqueueDetached(fact runTraceObserverDetachedFact) {
+	select {
+	case r.detached <- fact:
+	default:
+		panic("foreground run trace renderer received more than one detach fact")
+	}
+}
+
+func (r *foregroundRunTraceRenderer) stop() {
+	if r == nil {
+		return
+	}
+	r.stopOnce.Do(func() {
+		close(r.rows)
+		close(r.detached)
+		r.workers.Wait()
+	})
 }
 
 func startForegroundRunTraceObserver(ctx context.Context, wsEndpoint, token, runID string, replaySince *time.Time, attachTimeout time.Duration) *foregroundRunTraceObserver {
@@ -884,7 +955,7 @@ func subscribeRunTrace(ctx context.Context, wsEndpoint, token, runID string, rep
 	}
 	if envelope.Error != nil {
 		conn.Close()
-		return nil, wrapRunTraceObserverError(runTraceDetachSubscriptionResponseInvalid, envelope.Error)
+		return nil, wrapRunTraceObserverError(runTraceDetachAttachFailed, envelope.Error)
 	}
 	var result runTraceSubscriptionResult
 	if err := json.Unmarshal(envelope.Result, &result); err != nil {
