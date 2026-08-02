@@ -74,6 +74,20 @@ type publishDirectBusStub struct {
 	event      events.Event
 }
 
+type captureScheduleScheduler struct {
+	schedule Schedule
+}
+
+func (s *captureScheduleScheduler) Register(_ context.Context, schedule Schedule) error {
+	if err := schedule.ValidateRoutingSource(); err != nil {
+		return err
+	}
+	s.schedule = schedule
+	return nil
+}
+
+func (*captureScheduleScheduler) Stop() {}
+
 func (b *publishDirectBusStub) Publish(context.Context, events.Event) error { return nil }
 
 func (b *publishDirectBusStub) PublishDirect(_ context.Context, event events.Event, recipients []string) error {
@@ -1111,6 +1125,35 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 	}
 	if bus.event.ExecutionMode() != runtimeeffects.ExecutionModeMock {
 		t.Fatalf("agent_message event execution mode = %q, want mock", bus.event.ExecutionMode())
+	}
+}
+
+func TestExecSchedulePreservesRootAgentRoutingSource(t *testing.T) {
+	scheduler := &captureScheduleScheduler{}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	exec := NewExecutorWithOptions(nil, scheduler, ExecutorOptions{WorkflowSource: source})
+	actor := models.AgentConfig{
+		ID:       "root-agent",
+		Identity: toolTestRootAgentIdentity(t, "root-agent"),
+		EntityID: "entity-root",
+	}
+
+	if _, err := exec.execSchedule(context.Background(), actor, map[string]any{
+		"event_type": "root.timer.fired",
+		"mode":       "once",
+		"at":         time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+		"payload":    map[string]any{"reason": "root-owned"},
+	}); err != nil {
+		t.Fatalf("execSchedule(root agent): %v", err)
+	}
+	if scheduler.schedule.RoutingSource.Kind() != events.RoutingSourceRoot {
+		t.Fatalf("schedule routing source kind = %q, want root", scheduler.schedule.RoutingSource.Kind().StorageCode())
+	}
+	if got := scheduler.schedule.RoutingSource.Route(); got != (events.RouteIdentity{EntityID: "entity-root"}) {
+		t.Fatalf("schedule routing source route = %#v, want exact root entity", got)
+	}
+	if scheduler.schedule.FlowInstance != "" {
+		t.Fatalf("schedule flow instance = %q, want absent for root agent", scheduler.schedule.FlowInstance)
 	}
 }
 

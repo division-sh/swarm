@@ -922,8 +922,8 @@ contract_formats:
           negative_proof: TestProductionEventConstructionUsesPublicAPI
         runtime.event.routing_source_typed_at_construction:
           owner: internal/events RoutingSource
-          rule: Routing source is an opaque typed construction fact; target, receiver, payload, top-level projections, and empty strings never become source evidence.
-          negative_proof: TestEventConstructionClassInvariantMatrix
+          rule: Routing source is an opaque typed construction fact; target, receiver, payload, top-level projections, and empty strings never become source evidence. Runtime-control publication preserves a root schedule's root source, converts declared-flow execution sources to flow-owned control, and uses platform control only for closed global system work.
+          negative_proof: TestRunScopedRuntimeControlPreservesExactRootRoutingSource
         runtime.event.admitted_persistence_boundary:
           owner: internal/events AdmittedEvent and the closed named store operations
           rule: Durable event writers accept only opaque admitted values; raw Event, SQL, row, transaction, and generic mutation capabilities are unavailable to runtime and API consumers.
@@ -1042,7 +1042,9 @@ contract_formats:
             runtime-control constructors so control traffic is not confused with
             producer-authored domain emits. A causal control requires typed EventLineage;
             a deliberately unparented control must choose the run-scoped or standalone
-            constructor explicitly. Optional lineage inputs are forbidden. platform.agent_directive is not a
+            constructor explicitly. Runtime control admits only the exact root, flow-owned-control,
+            or platform-control source stamped by its owner; root-owned schedules retain root provenance
+            through firing rather than being coerced to a flow identity. Optional lineage inputs are forbidden. platform.agent_directive is not a
             generic runtime-control event; its durable operation owner uses the
             closed diagnostic-direct constructor and persistence path.
         runtime_diagnostic:
@@ -11956,7 +11958,7 @@ platform_tables:
             CHECK (event_name NOT IN ('platform.inbound_recorded', 'platform.agent_directive') OR run_id IS NOT NULL),
             CHECK ((event_name = 'platform.runtime_log' AND scope = 'global') OR (event_name = 'platform.inbound_recorded' AND scope IN ('entity', 'global')) OR (event_name = 'platform.agent_directive' AND scope = 'global') OR event_name NOT IN ('platform.runtime_log', 'platform.inbound_recorded', 'platform.agent_directive')),
             CHECK ((routing_source_kind IN ('absent', 'platform_control') AND source_route = '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL) OR (routing_source_kind = 'external_ingress' AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NOT NULL) OR (routing_source_kind IN ('root', 'static_flow', 'concrete_template_instance', 'flow_owned_control') AND source_route <> '{}' AND NULLIF(TRIM(COALESCE(routing_source_authority, '')), '') IS NULL)),
-            CHECK ((event_class = 'runtime_control' AND routing_source_kind IN ('flow_owned_control', 'platform_control')) OR (event_class IN ('runtime_diagnostic', 'diagnostic_direct') AND routing_source_kind = 'absent') OR event_class NOT IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
+            CHECK ((event_class = 'runtime_control' AND routing_source_kind IN ('root', 'flow_owned_control', 'platform_control')) OR (event_class IN ('runtime_diagnostic', 'diagnostic_direct') AND routing_source_kind = 'absent') OR event_class NOT IN ('runtime_control', 'runtime_diagnostic', 'diagnostic_direct')),
             UNIQUE (event_id, run_id),
             INDEX idx_events_run (run_id, created_at) WHERE run_id IS NOT NULL,
             INDEX idx_events_entity (entity_id, created_at) WHERE entity_id IS NOT NULL,
