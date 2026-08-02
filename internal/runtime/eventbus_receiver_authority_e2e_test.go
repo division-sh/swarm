@@ -41,18 +41,17 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var (
-				runtimeDB *sql.DB
-				db        *sql.DB
-				selected  closedReceiverE2EStore
+				db       *sql.DB
+				selected closedReceiverE2EStore
 			)
 			if backend == "postgres" {
 				_, postgresDB, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				runtimeDB, db = postgresDB, postgresDB
+				db = postgresDB
 				selected = storetest.AdmitPostgresRuntimeStore(t, postgresDB)
 			} else {
 				sqlite := storetest.StartSQLiteRuntimeStore(t)
-				db = sqlite.DB
+				db = storetest.Database(sqlite)
 				selected = sqlite
 			}
 
@@ -97,8 +96,8 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 				},
 			}
 			rt, err := swarmruntime.NewValidationHarnessRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
-				Config: cfg,
-				SQLDB:  runtimeDB, EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
+				Config:     cfg,
+				EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
 				EventPayloadValidationBinder: selected, InboundPayloadValidationBinder: selected,
 				AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
 				RunLifecycleCandidates:   selected, WorkflowPersistence: workflowPersistence,
