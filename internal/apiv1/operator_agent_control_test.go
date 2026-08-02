@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -271,7 +272,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			DirectiveOperations: pg,
 			DirectiveTargets:    pg,
-		},
+		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
 	t.Cleanup(func() {
 		if err := manager.Shutdown(); err != nil {
@@ -340,7 +341,7 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			DirectiveOperations: pg,
 			DirectiveTargets:    pg,
-		},
+		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
 	t.Cleanup(func() {
 		if err := manager.Shutdown(); err != nil {

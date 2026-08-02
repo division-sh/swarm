@@ -22,6 +22,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -454,7 +455,7 @@ func TestAgentManagerDirectDeadLetterPersistsCanonicalEnvelopeSelectedStores(t *
 				Sessions:         backend.sessions,
 				SessionResetter:  backend.store,
 				PersistenceRoles: selectedStoreManagerPersistenceRoles(backend.store, eventBus),
-				WorkOwner:        workOwner,
+				WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 			}, backend.store)
 			if err := manager.SpawnAgent(claudeAttemptProofAgentConfig()); err != nil {
 				t.Fatalf("spawn chain-depth proof agent: %v", err)
@@ -553,7 +554,7 @@ func newClaudeAttemptProofManagerForGeneration(
 		Sessions:         backend.sessions,
 		SessionResetter:  backend.store,
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(backend.store, eventBus),
-		WorkOwner:        workOwner,
+		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend.store)
 	return manager, eventBus, coordinator
 }
@@ -617,6 +618,7 @@ func newClaudeAttemptProofEventBus(
 		RuntimeInstanceID:   claudeAttemptProofRuntimeID,
 		BundleSourceFact:    claudeAttemptProofBundleSourceFact,
 		WorkOwner:           workOwner,
+		ReceiverExecution:   eventreceiver.NormalExecution(),
 		PipelineObligations: backend.store.PipelineObligations(),
 		DeliveryAuthority:   authority,
 		Durable: runtimebus.DurableDependencies{

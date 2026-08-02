@@ -174,7 +174,7 @@ func TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(
 				managerDeliveryTestStore: deliveryStore,
 			}
 			probe := lifecycletest.New(t)
-			eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+			eventBus, err := newTestManagerEventBus(t)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -291,7 +291,7 @@ func TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim(t 
 				managerDeliveryTestStore: baseStore,
 			}
 			probe := lifecycletest.New(t, lifecycletest.WithTimeout(5*time.Second))
-			eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+			eventBus, err := newTestManagerEventBus(t)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}

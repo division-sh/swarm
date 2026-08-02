@@ -190,8 +190,10 @@ func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 	if bus == nil {
 		return nil
 	}
-	if requireObligationOwner && opts.ReceiverExecution.Configured() && opts.ReceiverExecution.Validate() != nil {
-		return nil
+	if requireObligationOwner {
+		if err := opts.ReceiverExecution.Validate(); err != nil {
+			return nil
+		}
 	}
 	module := opts.Module
 	if module == nil {
@@ -394,7 +396,7 @@ func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, 
 	if pc == nil {
 		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
-	if pc.runtimeReceiver && pc.receiverExecution.Configured() {
+	if pc.runtimeReceiver {
 		if err := pc.receiverExecution.ValidateBound(ctx, evt.ExecutionMode()); err != nil {
 			return false, nil, runtimepipelineobligation.Continue(), fmt.Errorf("pipeline receiver execution: %w", err)
 		}

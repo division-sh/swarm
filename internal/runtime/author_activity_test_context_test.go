@@ -13,6 +13,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -69,6 +70,9 @@ func (*runtimeTestUnavailableHumanTaskExpiry) ExpireHumanTaskCardsInMutation(con
 }
 
 func completeRuntimeTestPipelineOptions(bus *runtimebus.EventBus, opts runtimepipeline.PipelineCoordinatorOptions) runtimepipeline.PipelineCoordinatorOptions {
+	if !opts.ReceiverExecution.Configured() {
+		opts.ReceiverExecution = eventreceiver.NormalExecution()
+	}
 	if opts.DeliveryStore == nil {
 		opts.DeliveryStore = &runtimeTestUnavailableDeliveryStore{}
 	}
@@ -221,6 +225,9 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = runtimeTestOccurrence(t, runtimeTestBundleHash)
+	}
+	if !opts.ReceiverExecution.Configured() {
+		opts.ReceiverExecution = eventreceiver.NormalExecution()
 	}
 	if opts.DeliveryAuthority.Kind() == "" {
 		authority, authorityErr := runtimedelivery.NewNormalExecutionAuthority(

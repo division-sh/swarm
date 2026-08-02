@@ -85,7 +85,7 @@ func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredeces
 	}
 	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
 		BundleSourceFact: selectedContractAgentTestSourceFact(t),
-		WorkOwner:        runtimeOwner,
+		WorkOwner:        runtimeOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -131,7 +131,7 @@ func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredeces
 		t.Fatal("successor event was not dequeued")
 	}
 
-	runtime := &selectedContractAgentRuntime{manager: runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{WorkOwner: runtimeOwner})}
+	runtime := &selectedContractAgentRuntime{manager: runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{WorkOwner: runtimeOwner, ReceiverExecution: eventreceiver.NormalExecution()})}
 	waitCtx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
 	if err := runtime.WaitForQuiescence(waitCtx, eventBus); !errors.Is(err, context.DeadlineExceeded) {
@@ -220,7 +220,7 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 	mockIdentity := selectedContractTestRootAgentIdentity(t, "mock-agent")
 	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
 		BundleSourceFact: selectedContractAgentTestSourceFact(t),
-		WorkOwner:        owner,
+		WorkOwner:        owner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -231,8 +231,10 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 		AgentRuntime: selectedContractAgentRuntimePlan{
 			Proof: SelectedContractAgentRuntimeMaterialization{AgentRecipients: []agentidentity.Identity{mockIdentity}},
 			Options: SelectedContractAgentRuntimeOptions{
-				Config:              &config.Config{LLM: config.LLMConfig{Backend: "mock"}},
-				AgentManagerOptions: runtimemanager.AgentManagerOptions{WorkOwner: owner},
+				Config: &config.Config{LLM: config.LLMConfig{Backend: "mock"}},
+				AgentManagerOptions: runtimemanager.AgentManagerOptions{
+					WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(),
+				},
 			},
 		},
 	}, eventBus, &runtimepipeline.PipelineCoordinator{})

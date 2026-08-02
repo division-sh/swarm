@@ -20,6 +20,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
@@ -271,7 +272,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			}, runtimemanager.AgentManagerOptions{
 				BaseContext: ctx, LifecycleStore: selected, DeliveryStore: selected, SemanticSource: source,
 				PersistenceRoles:  externalRuntimeTestManagerBusRoles(runtime.Bus),
-				WorkflowInstances: runtime.Pipeline, WorkOwner: runtime.WorkOccurrence(),
+				WorkflowInstances: runtime.Pipeline, WorkOwner: runtime.WorkOccurrence(), ReceiverExecution: eventreceiver.NormalExecution(),
 			}, selected)
 
 			if err := runtime.Start(ctx); err != nil {

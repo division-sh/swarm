@@ -935,7 +935,7 @@ func TestClaimedAttemptExecutorSerializesLiveAndRecoveryForOneAgent(t *testing.T
 }
 
 func TestClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBusDescendant(t *testing.T) {
-	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	eventBus, err := newTestManagerEventBus(t)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

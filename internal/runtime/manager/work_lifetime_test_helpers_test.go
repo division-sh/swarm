@@ -9,6 +9,7 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -169,8 +170,19 @@ func newTestAgentManager(t *testing.T, bus Bus, factory AgentFactory, stores ...
 	return newTestAgentManagerWithOptions(t, bus, factory, AgentManagerOptions{}, stores...)
 }
 
+func newTestManagerEventBus(t *testing.T) (*runtimebus.EventBus, error) {
+	t.Helper()
+	return runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
+		WorkOwner:         newTestManagerWorkOwner(t),
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
+}
+
 func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory, opts AgentManagerOptions, stores ...ManagerPersistence) *AgentManager {
 	t.Helper()
+	if !opts.ReceiverExecution.Configured() {
+		opts.ReceiverExecution = eventreceiver.NormalExecution()
+	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = newTestManagerWorkOwner(t)
 	}

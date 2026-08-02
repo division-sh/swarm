@@ -15,6 +15,7 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -810,7 +811,7 @@ func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			DirectiveOperations: pg,
 			DirectiveTargets:    pg,
-		},
+		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
 	t.Cleanup(func() {
 		if err := manager.Shutdown(); err != nil {

@@ -9,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
@@ -29,7 +28,7 @@ func (a shutdownTestAgent) OnEvent(ctx context.Context, evt events.Event) ([]eve
 }
 
 func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
-	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := newTestManagerEventBus(t)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -115,7 +114,7 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 }
 
 func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t *testing.T) {
-	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := newTestManagerEventBus(t)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -189,7 +188,7 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 }
 
 func TestShutdownWithOptions_RejectsNegativeGrace(t *testing.T) {
-	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := newTestManagerEventBus(t)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -202,7 +201,7 @@ func TestShutdownWithOptions_RejectsNegativeGrace(t *testing.T) {
 }
 
 func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
-	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := newTestManagerEventBus(t)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -291,7 +290,7 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 }
 
 func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing.T) {
-	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	bus, err := newTestManagerEventBus(t)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -79,6 +80,9 @@ func newScopedTestEventBus(store EventStore, options ...EventBusOptions) (*Event
 	opts := EventBusOptions{}
 	if len(options) > 0 {
 		opts = options[0]
+	}
+	if !opts.ReceiverExecution.Configured() {
+		opts.ReceiverExecution = eventreceiver.NormalExecution()
 	}
 	if opts.PipelineObligations == nil {
 		if provider, ok := store.(interface {

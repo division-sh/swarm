@@ -16,6 +16,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -49,7 +50,7 @@ func TestTypeformManualLiveHTTPSWebhookSmoke(t *testing.T) {
 
 	bus, err := runtimebus.NewEventBusWithOptions(sqliteStore, runtimebus.EventBusOptions{
 		PipelineObligations: sqliteStore.PipelineObligations(),
-		BundleSourceFact:    mustServeTestEphemeralBundleSourceFact(serveRuntimeTestBundleHash),
+		BundleSourceFact:    mustServeTestEphemeralBundleSourceFact(serveRuntimeTestBundleHash), ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)

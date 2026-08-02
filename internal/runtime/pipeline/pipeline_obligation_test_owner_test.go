@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -173,6 +176,9 @@ func (*unavailablePipelineTestRunLifecycle) MarkTerminalRun(context.Context, run
 // allowing a focused unit test to state only the durable role it exercises.
 // Calling an unstated role still panics through its nil embedded test interface.
 func completeDurablePipelineTestOptions(bus Bus, opts PipelineCoordinatorOptions) PipelineCoordinatorOptions {
+	if !opts.ReceiverExecution.Configured() {
+		opts.ReceiverExecution = eventreceiver.NormalExecution()
+	}
 	if opts.DeliveryStore == nil {
 		opts.DeliveryStore = &unavailablePipelineTestDeliveryStore{}
 	}
@@ -238,4 +244,33 @@ func TestPipelineCoordinatorRequiresCanonicalObligationOwner(t *testing.T) {
 		t.Fatal("durable coordinator accepted incomplete persistence roles")
 	}
 
+}
+
+func TestRuntimePipelineRejectsUnconfiguredReceiverExecution(t *testing.T) {
+	module := staticSemanticWorkflowModule{source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})}
+	opts := completeDurablePipelineTestOptions(previewBus{}, PipelineCoordinatorOptions{
+		Module:      module,
+		Persistence: WorkflowPersistence{store: &workflowInstanceStore{db: new(sql.DB)}},
+	})
+	opts.ReceiverExecution = eventreceiver.ExecutionVariant{}
+	if coordinator := NewPipelineCoordinatorWithOptions(previewBus{}, nil, opts); coordinator != nil {
+		t.Fatal("runtime Pipeline accepted unconfigured receiver execution")
+	}
+
+	coordinator := &PipelineCoordinator{runtimeReceiver: true}
+	evt := eventtest.RuntimeControl(
+		"11111111-1111-4111-8111-111111111111",
+		"pipeline.receiver_execution",
+		"pipeline-test",
+		"",
+		[]byte(`{}`),
+		0,
+		"22222222-2222-4222-8222-222222222222",
+		"",
+		events.EventEnvelope{},
+		time.Now().UTC(),
+	)
+	if _, _, _, err := coordinator.Intercept(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("unconfigured runtime Pipeline interception = %v", err)
+	}
 }

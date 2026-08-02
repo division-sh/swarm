@@ -16,6 +16,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -285,6 +286,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 			GatePublisher:           bus,
 			DirectDecisionPublisher: bus,
 			DeliveryRuntime:         bus,
+			ReceiverExecution:       eventreceiver.NormalExecution(),
 		})
 
 		reconciled, err := workflow.ReconcileStandingService(ctx, runtimepipeline.StandingServiceCandidate{
@@ -575,7 +577,8 @@ func (f completeEventDispatchFixture) newRecordingManager(
 			RouteRestorer: f.bus, RouteRetirer: f.bus, RouteRemover: f.bus,
 			CreationPublisher: f.bus, DeliveryRuntime: f.bus,
 		},
-		WorkOwner: owner,
+		WorkOwner:         owner,
+		ReceiverExecution: eventreceiver.NormalExecution(),
 	}, f.store)
 	return manager, owner
 }

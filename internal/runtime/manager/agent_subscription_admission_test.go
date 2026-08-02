@@ -10,6 +10,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -36,7 +37,10 @@ func testManagerSubscriptionAdmission(t *testing.T, cfg runtimeactors.AgentConfi
 func TestSpawnAgentRejectsForeignExactAndPatternBeforeRegistration(t *testing.T) {
 	for _, subscription := range []string{"foreign/task.ready", "foreign/**/task.ready"} {
 		t.Run(strings.ReplaceAll(subscription, "/", "_"), func(t *testing.T) {
-			eb, err := runtimebus.NewEphemeralEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+			eb, err := runtimebus.NewEphemeralEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
+				WorkOwner:         newTestManagerWorkOwner(t),
+				ReceiverExecution: eventreceiver.NormalExecution(),
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -61,7 +65,10 @@ func TestSpawnAgentRejectsForeignExactAndPatternBeforeRegistration(t *testing.T)
 }
 
 func TestReconfigureAgentRejectsForeignSubscriptionWithoutReplacingCurrentAdmission(t *testing.T) {
-	eb, err := runtimebus.NewEphemeralEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{WorkOwner: newTestManagerWorkOwner(t)})
+	eb, err := runtimebus.NewEphemeralEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
+		WorkOwner:         newTestManagerWorkOwner(t),
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -68,7 +69,9 @@ func TestEventBusBundleSourceAdmissionAllowsContextOwnedSelectedForkBus(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	eb, err := NewEphemeralEventBusWithOptions(InMemoryEventStore{}, EventBusOptions{})
+	eb, err := NewEphemeralEventBusWithOptions(InMemoryEventStore{}, EventBusOptions{
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
 	if err != nil {
 		t.Fatalf("create ownerless selected-fork event bus: %v", err)
 	}
@@ -107,6 +110,7 @@ func TestExplicitEphemeralEventBusAllowsOwnerlessPublish(t *testing.T) {
 	eb, err := NewEphemeralEventBusWithOptions(store, EventBusOptions{
 		RuntimeInstanceID: "ownerless-source-runtime",
 		WorkOwner:         runtimeOwner,
+		ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
 		t.Fatalf("create ownerless event bus: %v", err)

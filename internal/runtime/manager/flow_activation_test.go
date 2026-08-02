@@ -24,6 +24,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -74,6 +75,7 @@ func (*unavailableFlowActivationHumanTaskExpiry) ExpireHumanTaskCardsInMutation(
 }
 
 func completeFlowActivationWorkflowOptions(opts runtimepipeline.PipelineCoordinatorOptions) runtimepipeline.PipelineCoordinatorOptions {
+	opts.ReceiverExecution = eventreceiver.NormalExecution()
 	opts.DeliveryStore = &unavailableFlowActivationDeliveryStore{}
 	opts.DecisionCards = &unavailableFlowActivationDecisionCards{}
 	opts.ProposedEffects = &unavailableFlowActivationProposedEffects{}

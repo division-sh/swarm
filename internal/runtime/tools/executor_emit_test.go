@@ -16,6 +16,7 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -113,7 +114,7 @@ func newEmitRoutePlanEventBus(t *testing.T, store *emitRoutePlanStore, source se
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(store, runtimebus.EventBusOptions{
 		BundleSourceFact: sourceFact,
 		ContractBundle:   source,
-		WorkOwner:        owner,
+		WorkOwner:        owner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)

@@ -20,6 +20,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -430,7 +431,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 			RouteVerifier:  bus,
 			RouteRestorer:  bus,
 			RouteRetirer:   bus,
-		},
+		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, sqliteStore))
 	req := sqliteFlowActivationRequest(bundle, "review", "inst-1", "parent-ent", "review/inst-1")
 	if err := sqliteStore.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
@@ -483,7 +484,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 			RouteVerifier:  bus,
 			RouteRestorer:  bus,
 			RouteRetirer:   bus,
-		},
+		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, sqliteStore))
 	start := make(chan struct{})
 	errs := make(chan error, 2)
@@ -604,7 +605,7 @@ func configureSQLiteFlowActivationLifecycle(
 		GatePublisher:           bus,
 		DirectDecisionPublisher: bus,
 		DeliveryRuntime:         workflowTestBus{},
-		WorkOwner:               storeTestWorkOwner(t),
+		WorkOwner:               storeTestWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
 }

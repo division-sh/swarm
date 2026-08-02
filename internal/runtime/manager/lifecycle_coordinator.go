@@ -73,6 +73,7 @@ type agentExecutionProjection struct {
 	admission        semanticview.FlowOwnedAgentSubscriptionAdmission
 	startedAt        time.Time
 	token            runtimeeffects.LifecycleToken
+	standingOwner    *worklifetime.StandingOccurrence
 	generationCtx    context.Context
 	cancelGeneration context.CancelFunc
 	loopCancel       context.CancelFunc
@@ -98,6 +99,7 @@ type agentExecutionSnapshot struct {
 	Admission     semanticview.FlowOwnedAgentSubscriptionAdmission
 	StartedAt     time.Time
 	Token         runtimeeffects.LifecycleToken
+	StandingOwner *worklifetime.StandingOccurrence
 }
 
 type agentExecutionLease struct {
@@ -507,13 +509,17 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 		}
 	}
 	generationCtx, cancelGeneration := context.WithCancel(c.context())
+	var standingOwner *worklifetime.StandingOccurrence
+	if owner, ok := worklifetime.OccurrenceFromContext(ctx); ok {
+		standingOwner, _ = worklifetime.StandingProjection(owner)
+	}
 	startedAt := rec.StartedAt
 	if startedAt.IsZero() {
 		startedAt = time.Now()
 	}
 	execution := &agentExecutionProjection{
 		agent: agent, config: rec.Config, admission: admission, startedAt: startedAt,
-		token:         lifecycleToken(identity, epoch, generation),
+		token: lifecycleToken(identity, epoch, generation), standingOwner: standingOwner,
 		generationCtx: generationCtx, cancelGeneration: cancelGeneration,
 	}
 	execution.subscriptions = admittedSubscriptionEventTypes(admission)
@@ -1124,7 +1130,7 @@ func snapshotExecution(execution *agentExecutionProjection) agentExecutionSnapsh
 		Agent: execution.agent, Config: execution.config,
 		Subscriptions: append([]events.EventType(nil), execution.subscriptions...),
 		Admission:     execution.admission,
-		StartedAt:     execution.startedAt, Token: execution.token,
+		StartedAt:     execution.startedAt, Token: execution.token, StandingOwner: execution.standingOwner,
 	}
 }
 
@@ -1376,6 +1382,7 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 		nextExecution.config = previousExecution.config
 		nextExecution.subscriptions = append([]events.EventType(nil), previousExecution.subscriptions...)
 		nextExecution.startedAt = previousExecution.startedAt
+		nextExecution.standingOwner = previousExecution.standingOwner
 	}
 	if rec != nil {
 		nextExecution.config = rec.Config

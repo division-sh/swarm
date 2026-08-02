@@ -47,7 +47,7 @@ func (eb *EventBus) receiverProjection(ctx context.Context, deliveryContext even
 	runtimeInstanceID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(ctx)
 	bundleSourceFact, _ := runtimecorrelation.BundleSourceFactFromContext(ctx)
 	projection := receiverDispatchProjection{
-		occurrence:        eb.workOwnerForContext(ctx),
+		occurrence:        eb.workOwner,
 		runtimeInstanceID: runtimeInstanceID,
 		bundleSourceFact:  bundleSourceFact,
 		deliveryContext:   deliveryContext.Normalized(),

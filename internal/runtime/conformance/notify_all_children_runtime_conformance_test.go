@@ -21,6 +21,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -1512,7 +1513,7 @@ func newNotifyAllChildrenRuntime(
 		DeliveryRuntime:         eventBus,
 		FlowRoutes:              eventBus,
 		TestEngineEmitNow:       engineNow,
-		WorkOwner:               workOwner,
+		WorkOwner:               workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, agentFactory, runtimemanager.AgentManagerOptions{
@@ -1526,7 +1527,7 @@ func newNotifyAllChildrenRuntime(
 		PromptResolver:    promptResolver,
 		Sessions:          sessionStore,
 		LLMBackend:        llmBackend,
-		PersistenceRoles:  conformanceManagerPersistenceRoles(backend, eventBus, coordinator),
+		PersistenceRoles:  conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend))
 	return notifyAllChildrenRuntime{
 		bus: eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator,

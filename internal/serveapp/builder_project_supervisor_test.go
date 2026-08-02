@@ -28,6 +28,7 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -429,6 +430,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 			BundleSourceFact:       mustServeTestEphemeralBundleSourceFact(hash),
 			ProviderOutputVerifier: catalog,
 			WorkOwner:              workOwner,
+			ReceiverExecution:      eventreceiver.NormalExecution(),
 		})
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions(%s): %v", alias, err)
@@ -2316,8 +2318,9 @@ func TestDashboardDynamicAgentControl_DeniesWhenRuntimeShutdownAdmissionClosed(t
 	hash := runtimeContextTestHash("8")
 	workOwner := newSupervisorTestRuntimeOccurrence(t, hash)
 	bus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
-		BundleSourceFact: mustServeTestEphemeralBundleSourceFact(hash),
-		WorkOwner:        workOwner,
+		BundleSourceFact:  mustServeTestEphemeralBundleSourceFact(hash),
+		WorkOwner:         workOwner,
+		ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2327,6 +2330,7 @@ func TestDashboardDynamicAgentControl_DeniesWhenRuntimeShutdownAdmissionClosed(t
 	}, runtimemanager.AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: func() bool { return true },
 		WorkOwner:                      workOwner,
+		ReceiverExecution:              eventreceiver.NormalExecution(),
 	})
 	t.Cleanup(func() {
 		_ = manager.Shutdown()

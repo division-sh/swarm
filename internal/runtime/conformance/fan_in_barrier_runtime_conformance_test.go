@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -220,7 +221,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		DirectDecisionPublisher: diagnosticBus,
 		DeliveryRuntime:         eventBus,
 		FlowRoutes:              eventBus,
-		TimerScheduleStore:      backend,
+		TimerScheduleStore:      backend, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{
@@ -230,7 +231,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		WorkflowInstances: coordinator,
 		WorkOwner:         workOwner,
 		DeliveryStore:     backend,
-		PersistenceRoles:  conformanceManagerPersistenceRoles(backend, eventBus, coordinator),
+		PersistenceRoles:  conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
 	}))
 	return fanInBarrierRuntime{bus: eventBus, diagnostics: diagnosticBus, pipeline: coordinator}
 }

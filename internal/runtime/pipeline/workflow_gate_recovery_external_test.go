@@ -19,11 +19,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -45,7 +45,11 @@ const (
 )
 
 func withLiveGateExecution(ctx context.Context) context.Context {
-	return runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
+	bound, err := eventreceiver.NormalExecution().Bind(ctx, executionmode.Live)
+	if err != nil {
+		panic(err)
+	}
+	return bound
 }
 
 type gateRecoveryModule struct {
@@ -110,6 +114,7 @@ type proposedEffectProofCredentialStore struct {
 }
 
 func newGateRecoveryCoordinator(bus gateRecoveryRuntimeBus, selected gateRecoveryStoreCase, opts runtimepipeline.PipelineCoordinatorOptions) *runtimepipeline.PipelineCoordinator {
+	opts.ReceiverExecution = eventreceiver.NormalExecution()
 	opts.Persistence = selected.persistence
 	opts.DeliveryStore = selected.events
 	opts.DecisionCards = selected.cards
@@ -715,7 +720,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					Module: gateRecoveryModule{source: source}, Persistence: selected.persistence,
 					DecisionCards: selected.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle),
 				})
-				forward, emitted, _, err := coordinator.Intercept(ctx, decisionEvent)
+				forward, emitted, _, err := coordinator.Intercept(withLiveGateExecution(ctx), decisionEvent)
 				if err != nil || forward || len(emitted) != 0 {
 					t.Fatalf("route %s = forward:%v emitted:%d error:%v", verdict, forward, len(emitted), err)
 				}
@@ -748,7 +753,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					Module: gateRecoveryModule{source: source}, Persistence: selected.persistence,
 					DecisionCards: selected.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(otherGateBundle),
 				})
-				if _, _, _, err := changed.Intercept(ctx, decisionEvent); err != nil {
+				if _, _, _, err := changed.Intercept(withLiveGateExecution(ctx), decisionEvent); err != nil {
 					t.Fatalf("%s terminal route replay under changed bundle: %v", verdict, err)
 				}
 				if len(bus.outbox) != beforeOutbox || len(bus.published) != beforePublished {

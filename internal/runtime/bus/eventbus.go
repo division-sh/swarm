@@ -477,7 +477,9 @@ func (eb *EventBus) DeliveryAuthority() (runtimedelivery.ExecutionAuthority, err
 // NewEphemeralEventBus is the explicit non-durable constructor for isolated
 // previews and tests. A selected store cannot cross this boundary.
 func NewEphemeralEventBus(store EventStore) (*EventBus, error) {
-	return NewEphemeralEventBusWithOptions(store, EventBusOptions{})
+	return NewEphemeralEventBusWithOptions(store, EventBusOptions{
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
 }
 
 func NewEphemeralEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, error) {
@@ -493,9 +495,6 @@ func NewEphemeralEventBusWithOptions(store EventStore, opts EventBusOptions) (*E
 }
 
 func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, error) {
-	if !opts.ReceiverExecution.Configured() {
-		opts.ReceiverExecution = eventreceiver.NormalExecution()
-	}
 	if err := opts.ReceiverExecution.Validate(); err != nil {
 		return nil, fmt.Errorf("event bus receiver execution: %w", err)
 	}

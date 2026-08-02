@@ -32,6 +32,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -769,7 +770,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 				return errors.New("source lifecycle manager is not initialized")
 			}
 			return manager.ActivateFlowInstance(ctx, req)
-		},
+		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -801,13 +802,13 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		GatePublisher:           sourceBus,
 		DirectDecisionPublisher: sourceBus,
 		DeliveryRuntime:         sourceBus,
-		WorkOwner:               workOwner,
+		WorkOwner:               workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
 	manager = runtimemanager.NewAgentManagerWithOptions(sourceBus, nil, runtimemanager.AgentManagerOptions{
 		SemanticSource:    loaded.Source,
 		WorkflowInstances: workflowStore,
-		WorkOwner:         workOwner,
+		WorkOwner:         workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg)
 	t.Cleanup(func() { _ = manager.Shutdown() })
 
@@ -2657,7 +2658,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", staleContainerURL)
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	owner := testGatewayWorkOwner(t)
-	eventBus, err := bus.NewEphemeralEventBusWithOptions(nil, bus.EventBusOptions{WorkOwner: owner})
+	eventBus, err := bus.NewEphemeralEventBusWithOptions(nil, bus.EventBusOptions{WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution()})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -2691,9 +2692,11 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 				},
 			}},
 			Options: SelectedContractAgentRuntimeOptions{
-				Config:              &config.Config{},
-				LLMRuntime:          selectedContractCleanupRuntime{},
-				AgentManagerOptions: runtimemanager.AgentManagerOptions{WorkOwner: owner},
+				Config:     &config.Config{},
+				LLMRuntime: selectedContractCleanupRuntime{},
+				AgentManagerOptions: runtimemanager.AgentManagerOptions{
+					WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(),
+				},
 			},
 		},
 	}, eventBus, &runtimepipeline.PipelineCoordinator{})

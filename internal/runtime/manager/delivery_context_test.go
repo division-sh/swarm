@@ -119,7 +119,10 @@ func TestAgentManagerWorkUsesContextualStandingOccurrence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new standing occurrence: %v", err)
 	}
-	am := NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{WorkOwner: runtimeOwner})
+	am := NewAgentManagerWithOptions(nil, nil, AgentManagerOptions{
+		WorkOwner:         runtimeOwner,
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
 	if _, started, err := am.lifecycle.beginRun(context.Background(), AgentRunModeStandard, runtimeOwner); err != nil || !started {
 		t.Fatalf("begin manager run: started=%v err=%v", started, err)
 	}
