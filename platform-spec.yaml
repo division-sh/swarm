@@ -194,6 +194,15 @@ vocabulary:
       examples:
       - scoring (static flow — scope key and instance path are the same)
       - operating/vert-001 (template instance — scope key is "operating", instance path includes the ID)
+    canonical_instance_route:
+      type: runtime/core/flowidentity.Route
+      row_key: instance_path
+      formula: 'The canonical instance path is the flow scope plus an instance discriminator when one exists. A template instance is `<scope>/<discriminator>`, a singleton is exactly `<scope>`, and a root flow is exactly the run scope.'
+      rules:
+      - Runtime semantic persistence ports that name an instance MUST accept the typed Route, never a string, entity id, or inferred key.
+      - Entity id is a fact about an instance and MUST NOT be accepted or reconstructed as the instance address.
+      - Empty, incomplete, or noncanonical routes fail closed with a typed lookup error carrying the requested route key; missing identity MUST NOT return nil success or fabricate a blank instance.
+      - Fresh stores support only canonical route keys. Historical duplicated singleton keys such as `scout/scout` have no compatibility, migration, or fallback path.
     not_interchangeable: 'These are not interchangeable. Using instance path where scope key is needed
       causes prefix-based ownership bugs. Using scope key where instance path is needed causes
       cross-instance state leakage. The runtime MUST use the correct identity for each context.'
