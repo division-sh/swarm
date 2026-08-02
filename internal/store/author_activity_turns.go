@@ -11,6 +11,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
 
 type authorActivityTurn struct {
@@ -34,9 +35,22 @@ type authorActivityTurn struct {
 }
 
 func recordAuthorActivityTurn(ctx context.Context, turn authorActivityTurn) error {
-	activity, _, _, err := projectAuthorSafeTurnActivity(turn.Blocks, turn.ParseOK)
+	drafts, err := authorActivityTurnDrafts(turn)
 	if err != nil {
 		return err
+	}
+	for _, draft := range drafts {
+		if err := runtimeauthoractivity.Record(ctx, draft); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func authorActivityTurnDrafts(turn authorActivityTurn) ([]runtimeauthoractivity.Draft, error) {
+	activity, _, _, err := projectAuthorSafeTurnActivity(turn.Blocks, turn.ParseOK)
+	if err != nil {
+		return nil, err
 	}
 	transition := "completed"
 	if turn.Failure != nil {
@@ -46,7 +60,7 @@ func recordAuthorActivityTurn(ctx context.Context, turn authorActivityTurn) erro
 	duration := turn.DurationMS
 	retry := turn.RetryCount
 	identity := strings.TrimSpace(turn.TurnID) + ":" + transition
-	if err := runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+	drafts := []runtimeauthoractivity.Draft{{
 		Kind: runtimeauthoractivity.KindTurnLifecycle, Transition: transition,
 		SourceOwner: "agent_turns", SourceIdentity: identity, DedupKey: "turn:" + identity,
 		OccurredAt: turn.OccurredAt.UTC(), RunID: turn.RunID, EntityID: turn.EntityID, AgentID: turn.AgentID, FlowID: turn.FlowID,
@@ -57,16 +71,14 @@ func recordAuthorActivityTurn(ctx context.Context, turn authorActivityTurn) erro
 			ExecutionMode: turn.ExecutionMode,
 		},
 		Failure: turn.Failure,
-	}); err != nil {
-		return err
-	}
+	}}
 	for _, item := range activity {
 		if item.Kind != "tool_result" {
 			continue
 		}
 		ordinal := item.BlockOrdinal
 		blockIdentity := fmt.Sprintf("%s:block:%d", turn.TurnID, ordinal)
-		if err := runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+		drafts = append(drafts, runtimeauthoractivity.Draft{
 			Kind: runtimeauthoractivity.KindTurnToolCompleted, Transition: "completed",
 			SourceOwner: "agent_turns", SourceIdentity: blockIdentity, DedupKey: "turn-tool:" + blockIdentity,
 			OccurredAt: turn.OccurredAt.UTC(), RunID: turn.RunID, EntityID: turn.EntityID, AgentID: turn.AgentID, FlowID: turn.FlowID,
@@ -74,16 +86,17 @@ func recordAuthorActivityTurn(ctx context.Context, turn authorActivityTurn) erro
 				SubjectType: "agent", SubjectID: turn.AgentID, TurnID: turn.TurnID,
 				ToolName: item.ToolName, ToolUseID: item.ToolUseID, ExecutionMode: turn.ExecutionMode,
 			},
-		}); err != nil {
-			return err
-		}
+		})
 	}
-	return nil
+	return drafts, nil
 }
 
-func recordCompletionTurnAuthorActivity(ctx context.Context, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) error {
+func recordCompletionTurnAuthorActivity(ctx context.Context, story *privateauthoractivity.Mutation, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) error {
 	if settlement.AgentTurn == nil {
 		return nil
+	}
+	if story == nil {
+		return fmt.Errorf("completion author activity owner is required")
 	}
 	var blocks []runtimellm.TurnBlock
 	if len(settlement.AgentTurn.TurnBlocks) > 0 {
@@ -92,7 +105,7 @@ func recordCompletionTurnAuthorActivity(ctx context.Context, attempt runtimeeffe
 		}
 	}
 	t := settlement.AgentTurn
-	return recordAuthorActivityTurn(ctx, authorActivityTurn{
+	drafts, err := authorActivityTurnDrafts(authorActivityTurn{
 		TurnID: t.TurnID, RunID: t.RunID, AgentID: t.AgentID, SessionID: t.SessionID, EntityID: t.EntityID,
 		FlowID: settlement.Spend.FlowInstance, TriggerEventType: t.TriggerEventType, Blocks: blocks,
 		ParseOK: t.ParseOK, DurationMS: t.LatencyMS, RetryCount: t.RetryCount,
@@ -100,4 +113,13 @@ func recordCompletionTurnAuthorActivity(ctx context.Context, attempt runtimeeffe
 		OutputTokens: settlement.Usage.OutputTokens, ExecutionMode: string(attempt.Authority.ExecutionMode),
 		Failure: t.Failure, OccurredAt: settlement.Now.UTC(),
 	})
+	if err != nil {
+		return err
+	}
+	for _, draft := range drafts {
+		if err := story.Record(ctx, draft); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -13,6 +13,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/google/uuid"
 )
 
@@ -22,7 +23,11 @@ var _ runtimeeffects.CompletionStore = (*SQLiteRuntimeStore)(nil)
 func (s *PostgresStore) SettleCompletion(ctx context.Context, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) (runtimeeffects.CompletionSettlementResult, error) {
 	var providerHeadErr error
 	var spendRecorded bool
-	err := s.runAuthorActivityMutation(ctx, "postgres settle completion", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
+		if err != nil {
+			return err
+		}
 		providerHeadErr = nil
 		spendRecorded = false
 		attemptSettlement := settlement
@@ -44,10 +49,9 @@ func (s *PostgresStore) SettleCompletion(ctx context.Context, attempt runtimeeff
 		if err := insertCompletionTargetPostgres(txctx, tx, attempt, attemptSettlement); err != nil {
 			return err
 		}
-		if err := recordCompletionTurnAuthorActivity(txctx, attempt, attemptSettlement); err != nil {
+		if err := recordCompletionTurnAuthorActivity(txctx, story, attempt, attemptSettlement); err != nil {
 			return err
 		}
-		var err error
 		spendRecorded, err = insertCompletionSpendPostgres(txctx, tx, attempt, attemptSettlement)
 		if err != nil {
 			return err
@@ -64,7 +68,10 @@ func (s *PostgresStore) SettleCompletion(ctx context.Context, attempt runtimeeff
 				return err
 			}
 		}
-		return recordExternalEffectStory(txctx, externalEffectStorySourceFromAttempt(attempt), attemptSettlement.Settlement.State, attemptSettlement.Settlement.Failure, attemptSettlement.Now.UTC())
+		if err := recordExternalEffectStory(txctx, story, externalEffectStorySourceFromAttempt(attempt), attemptSettlement.Settlement.State, attemptSettlement.Settlement.Failure, attemptSettlement.Now.UTC()); err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 	if err != nil {
 		return runtimeeffects.CompletionSettlementResult{}, err
@@ -77,7 +84,11 @@ func (s *PostgresStore) SettleCompletion(ctx context.Context, attempt runtimeeff
 func (s *SQLiteRuntimeStore) SettleCompletion(ctx context.Context, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) (runtimeeffects.CompletionSettlementResult, error) {
 	var providerHeadErr error
 	var spendRecorded bool
-	err := s.runAuthorActivityMutation(ctx, "sqlite settle completion", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
+		if err != nil {
+			return err
+		}
 		providerHeadErr = nil
 		spendRecorded = false
 		attemptSettlement := settlement
@@ -99,10 +110,9 @@ func (s *SQLiteRuntimeStore) SettleCompletion(ctx context.Context, attempt runti
 		if err := insertCompletionTargetSQLite(txctx, tx, attempt, attemptSettlement); err != nil {
 			return err
 		}
-		if err := recordCompletionTurnAuthorActivity(txctx, attempt, attemptSettlement); err != nil {
+		if err := recordCompletionTurnAuthorActivity(txctx, story, attempt, attemptSettlement); err != nil {
 			return err
 		}
-		var err error
 		spendRecorded, err = insertCompletionSpendSQLite(txctx, tx, attempt, attemptSettlement)
 		if err != nil {
 			return err
@@ -119,7 +129,10 @@ func (s *SQLiteRuntimeStore) SettleCompletion(ctx context.Context, attempt runti
 				return err
 			}
 		}
-		return recordExternalEffectStory(txctx, externalEffectStorySourceFromAttempt(attempt), attemptSettlement.Settlement.State, attemptSettlement.Settlement.Failure, attemptSettlement.Now.UTC())
+		if err := recordExternalEffectStory(txctx, story, externalEffectStorySourceFromAttempt(attempt), attemptSettlement.Settlement.State, attemptSettlement.Settlement.Failure, attemptSettlement.Now.UTC()); err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 	if err != nil {
 		return runtimeeffects.CompletionSettlementResult{}, err

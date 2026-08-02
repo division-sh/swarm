@@ -19,6 +19,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	authoractivityadapter "github.com/division-sh/swarm/internal/store/authoractivityadapter"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -247,7 +248,7 @@ func TestAuthorActivityEventAndEffectAdaptersRenderExactSubjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	story, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectSQLite)
 	if err != nil {
 		_ = tx.Rollback()
 		t.Fatal(err)
@@ -257,18 +258,27 @@ func TestAuthorActivityEventAndEffectAdaptersRenderExactSubjects(t *testing.T) {
 		uuid.NewString(), events.EventType("phrase.completed"), "phrase-completer", "", []byte(`{}`), 0,
 		uuid.NewString(), "", events.EventEnvelope{}, now,
 	)
-	if err := recordPersistedEventAuthorActivity(story, authoredEventOutputClassifier{}, event, "phrase-completer", "agent"); err != nil {
+	draft, ok, err := persistedEventAuthorActivityDraft(ctx, authoredEventOutputClassifier{}, event, "phrase-completer", "agent")
+	if err != nil {
 		_ = tx.Rollback()
 		t.Fatal(err)
 	}
-	if err := recordExternalEffectStory(story, externalEffectStorySource{
+	if !ok {
+		_ = tx.Rollback()
+		t.Fatal("event author activity draft was not projected")
+	}
+	if err := story.Record(ctx, draft); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := recordExternalEffectStory(ctx, story, externalEffectStorySource{
 		AttemptID: uuid.NewString(), Kind: "provider_turn", Class: "provider_call", Adapter: "anthropic_api",
 		Transport: "https", AuthorityKind: "normal_agent", AuthorityID: "normalizer", AgentID: "normalizer", Ordinal: 1,
 	}, runtimeeffects.StateLaunched, nil, now.Add(time.Second)); err != nil {
 		_ = tx.Rollback()
 		t.Fatal(err)
 	}
-	if err := runtimeauthoractivity.Finalize(story); err != nil {
+	if err := story.Finalize(ctx); err != nil {
 		_ = tx.Rollback()
 		t.Fatal(err)
 	}

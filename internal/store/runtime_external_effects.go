@@ -13,6 +13,7 @@ import (
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
 
 var _ runtimeeffects.Store = (*PostgresStore)(nil)
@@ -40,7 +41,11 @@ const sqliteExternalEffectActiveOwnerPredicate = `(o.authority_kind = 'conversat
 
 func (s *PostgresStore) ReconcileExternalEffectAttempts(ctx context.Context, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	var summary runtimeeffects.RecoverySummary
-	err := s.runAuthorActivityMutation(ctx, "postgres reconcile external effect attempts", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
+		if err != nil {
+			return err
+		}
 		candidates, err := loadExternalEffectRecoveryCandidates(txctx, tx, true)
 		if err != nil {
 			return err
@@ -52,14 +57,21 @@ func (s *PostgresStore) ReconcileExternalEffectAttempts(ctx context.Context, now
 		if err := s.requestRecoveredExternalEffectCandidates(txctx, tx, candidates); err != nil {
 			return err
 		}
-		return recordRecoveredExternalEffectStories(txctx, tx, candidates, now.UTC(), true)
+		if err := recordRecoveredExternalEffectStories(txctx, story, tx, candidates, now.UTC(), true); err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 	return summary, err
 }
 
 func (s *SQLiteRuntimeStore) ReconcileExternalEffectAttempts(ctx context.Context, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	var summary runtimeeffects.RecoverySummary
-	err := s.runAuthorActivityMutation(ctx, "sqlite reconcile external effect attempts", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
+		if err != nil {
+			return err
+		}
 		candidates, err := loadExternalEffectRecoveryCandidates(txctx, tx, false)
 		if err != nil {
 			return err
@@ -71,7 +83,10 @@ func (s *SQLiteRuntimeStore) ReconcileExternalEffectAttempts(ctx context.Context
 		if err := s.requestRecoveredExternalEffectCandidates(txctx, tx, candidates); err != nil {
 			return err
 		}
-		return recordRecoveredExternalEffectStories(txctx, tx, candidates, now.UTC(), false)
+		if err := recordRecoveredExternalEffectStories(txctx, story, tx, candidates, now.UTC(), false); err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 	return summary, err
 }
@@ -323,7 +338,10 @@ func externalEffectStoryDispositionFor(kind, adapter string) (externalEffectStor
 	return disposition, nil
 }
 
-func recordExternalEffectStory(ctx context.Context, source externalEffectStorySource, state runtimeeffects.State, failure *runtimefailures.Envelope, occurredAt time.Time) error {
+func recordExternalEffectStory(ctx context.Context, story *privateauthoractivity.Mutation, source externalEffectStorySource, state runtimeeffects.State, failure *runtimefailures.Envelope, occurredAt time.Time) error {
+	if story == nil {
+		return fmt.Errorf("external effect author activity owner is required")
+	}
 	disposition, err := externalEffectStoryDispositionFor(source.Kind, source.Adapter)
 	if err != nil {
 		return err
@@ -347,7 +365,7 @@ func recordExternalEffectStory(ctx context.Context, source externalEffectStorySo
 		}
 		scope = runtimeauthoractivity.BundleScope(current.RuntimeInstanceID, source.BundleHash)
 	}
-	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+	return story.Record(ctx, runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindEffectLifecycle, Transition: transition,
 		SourceOwner: "runtime_external_effect_attempts", SourceIdentity: identity, DedupKey: "effect:" + identity,
 		OccurredAt: occurredAt.UTC(), AgentID: source.AgentID,
@@ -360,7 +378,7 @@ func recordExternalEffectStory(ctx context.Context, source externalEffectStorySo
 	})
 }
 
-func recordSettledExternalEffectStory(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement, postgres bool) error {
+func recordSettledExternalEffectStory(ctx context.Context, story *privateauthoractivity.Mutation, tx *sql.Tx, settlement runtimeeffects.Settlement, postgres bool) error {
 	if settlement.State != runtimeeffects.StateTerminalFailure && settlement.State != runtimeeffects.StateOutcomeUncertain {
 		return nil
 	}
@@ -372,7 +390,7 @@ func recordSettledExternalEffectStory(ctx context.Context, tx *sql.Tx, settlemen
 	if err != nil {
 		return err
 	}
-	return recordExternalEffectStory(ctx, source, state, failure, occurredAt)
+	return recordExternalEffectStory(ctx, story, source, state, failure, occurredAt)
 }
 
 func loadExternalEffectStorySettlement(ctx context.Context, tx *sql.Tx, attemptID, operationID string, postgres bool) (runtimeeffects.State, *runtimefailures.Envelope, time.Time, error) {
@@ -491,7 +509,7 @@ func (s *SQLiteRuntimeStore) requestRecoveredExternalEffectCandidates(ctx contex
 	return nil
 }
 
-func recordRecoveredExternalEffectStories(ctx context.Context, tx *sql.Tx, candidates []externalEffectRecoveryCandidate, occurredAt time.Time, postgres bool) error {
+func recordRecoveredExternalEffectStories(ctx context.Context, story *privateauthoractivity.Mutation, tx *sql.Tx, candidates []externalEffectRecoveryCandidate, occurredAt time.Time, postgres bool) error {
 	query := `SELECT state, failure FROM runtime_external_effect_attempts WHERE attempt_id = ?`
 	if postgres {
 		query = `SELECT state, failure FROM runtime_external_effect_attempts WHERE attempt_id = $1::uuid`
@@ -514,7 +532,7 @@ func recordRecoveredExternalEffectStories(ctx context.Context, tx *sql.Tx, candi
 		if err != nil {
 			return err
 		}
-		if err := recordExternalEffectStory(ctx, source, runtimeeffects.State(state), &failure, occurredAt); err != nil {
+		if err := recordExternalEffectStory(ctx, story, source, runtimeeffects.State(state), &failure, occurredAt); err != nil {
 			return err
 		}
 	}
@@ -904,7 +922,11 @@ func externalAuthorizedAttempt(authority runtimeeffects.Authority, req runtimeef
 }
 
 func (s *PostgresStore) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time) error {
-	return s.runAuthorActivityMutation(ctx, "postgres mark external attempt launched", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
+		if err != nil {
+			return err
+		}
 		if err := requireExternalEffectAuthorityPostgres(txctx, tx, attempt.Authority, false); err != nil {
 			return err
 		}
@@ -925,12 +947,19 @@ func (s *PostgresStore) MarkExternalAttemptLaunched(ctx context.Context, attempt
 		if err != nil {
 			return err
 		}
-		return recordExternalEffectStory(txctx, externalEffectStorySourceFromAttempt(attempt), runtimeeffects.StateLaunched, nil, launchedAt)
+		if err := recordExternalEffectStory(txctx, story, externalEffectStorySourceFromAttempt(attempt), runtimeeffects.StateLaunched, nil, launchedAt); err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 }
 
 func (s *SQLiteRuntimeStore) MarkExternalAttemptLaunched(ctx context.Context, attempt runtimeeffects.Attempt, now time.Time) error {
-	return s.runAuthorActivityMutation(ctx, "sqlite mark external attempt launched", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
+		if err != nil {
+			return err
+		}
 		if err := requireExternalEffectAuthoritySQLite(txctx, tx, attempt.Authority, false); err != nil {
 			return err
 		}
@@ -951,7 +980,10 @@ func (s *SQLiteRuntimeStore) MarkExternalAttemptLaunched(ctx context.Context, at
 		if err != nil {
 			return err
 		}
-		return recordExternalEffectStory(txctx, externalEffectStorySourceFromAttempt(attempt), runtimeeffects.StateLaunched, nil, launchedAt)
+		if err := recordExternalEffectStory(txctx, story, externalEffectStorySourceFromAttempt(attempt), runtimeeffects.StateLaunched, nil, launchedAt); err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 }
 
@@ -1079,7 +1111,11 @@ func requireExternalAttemptTransition(res sql.Result, err error) error {
 }
 
 func (s *PostgresStore) SettleExternalAttempt(ctx context.Context, settlement runtimeeffects.Settlement) error {
-	return s.runAuthorActivityMutation(ctx, "postgres settle external attempt", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
+		if err != nil {
+			return err
+		}
 		if settlement.Authority.Valid() {
 			if err := requireExternalEffectAuthorityPostgres(txctx, tx, settlement.Authority, false); err != nil {
 				return err
@@ -1100,12 +1136,19 @@ func (s *PostgresStore) SettleExternalAttempt(ctx context.Context, settlement ru
 				}
 			}
 		}
-		return recordSettledExternalEffectStory(txctx, tx, settlement, true)
+		if err := recordSettledExternalEffectStory(txctx, story, tx, settlement, true); err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 }
 
 func (s *SQLiteRuntimeStore) SettleExternalAttempt(ctx context.Context, settlement runtimeeffects.Settlement) error {
-	return s.runAuthorActivityMutation(ctx, "sqlite settle external attempt", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
+		if err != nil {
+			return err
+		}
 		if settlement.Authority.Valid() {
 			if err := requireExternalEffectAuthoritySQLite(txctx, tx, settlement.Authority, false); err != nil {
 				return err
@@ -1126,7 +1169,10 @@ func (s *SQLiteRuntimeStore) SettleExternalAttempt(ctx context.Context, settleme
 				}
 			}
 		}
-		return recordSettledExternalEffectStory(txctx, tx, settlement, false)
+		if err := recordSettledExternalEffectStory(txctx, story, tx, settlement, false); err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 }
 

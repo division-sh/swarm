@@ -56,47 +56,58 @@ type authoredEventCatalogLeaseResolver interface {
 }
 
 func recordPersistedEventAuthorActivity(ctx context.Context, resolver authoredEventDescriptorResolver, evt events.Event, producedBy, producedByType string) error {
+	if platformEventRegistered(strings.TrimSpace(string(evt.Type()))) {
+		return recordPlatformSignalAuthorActivity(ctx, evt)
+	}
+	draft, ok, err := persistedEventAuthorActivityDraft(ctx, resolver, evt, producedBy, producedByType)
+	if err != nil || !ok {
+		return err
+	}
+	return runtimeauthoractivity.Record(ctx, draft)
+}
+
+func persistedEventAuthorActivityDraft(ctx context.Context, resolver authoredEventDescriptorResolver, evt events.Event, producedBy, producedByType string) (runtimeauthoractivity.Draft, bool, error) {
 	name := strings.TrimSpace(string(evt.Type()))
 	if name == "platform.inbound_recorded" || platformEventHandledElsewhere(name) || platformEventDifferentConcept(name) {
-		return nil
+		return runtimeauthoractivity.Draft{}, false, nil
 	}
 	if platformEventRegistered(name) {
-		return recordPlatformSignalAuthorActivity(ctx, evt)
+		return runtimeauthoractivity.Draft{}, false, fmt.Errorf("platform signal event %q requires its named story operation", name)
 	}
 	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
 	if !ok || scope.Kind != runtimeauthoractivity.ScopeBundle {
-		return fmt.Errorf("persist event %q author activity requires exact bundle scope", name)
+		return runtimeauthoractivity.Draft{}, false, fmt.Errorf("persist event %q author activity requires exact bundle scope", name)
 	}
 	if resolver == nil {
-		return fmt.Errorf("persist event %q author activity descriptor registry is required", name)
+		return runtimeauthoractivity.Draft{}, false, fmt.Errorf("persist event %q author activity descriptor registry is required", name)
 	}
 	descriptor, registered := resolver.authorActivityEventDescriptor(scope, name)
 	resolved, hasResolved, err := runtimeauthoractivity.ResolvedEventDescriptorFromContext(ctx, scope, name)
 	if err != nil {
-		return fmt.Errorf("persist event %q author activity descriptor: %w", name, err)
+		return runtimeauthoractivity.Draft{}, false, fmt.Errorf("persist event %q author activity descriptor: %w", name, err)
 	}
 	if registered && hasResolved && descriptor != resolved {
-		return fmt.Errorf("persist event %q author activity descriptor conflicts with registered bundle descriptor", name)
+		return runtimeauthoractivity.Draft{}, false, fmt.Errorf("persist event %q author activity descriptor conflicts with registered bundle descriptor", name)
 	}
 	if !registered && hasResolved {
 		leaseResolver, ok := resolver.(authoredEventCatalogLeaseResolver)
 		if !ok || !leaseResolver.authorActivityEventCatalogRegistered(scope) {
-			return fmt.Errorf("persist event %q author activity descriptor has no live registry lease for runtime %q bundle %q", name, scope.RuntimeInstanceID, scope.BundleHash)
+			return runtimeauthoractivity.Draft{}, false, fmt.Errorf("persist event %q author activity descriptor has no live registry lease for runtime %q bundle %q", name, scope.RuntimeInstanceID, scope.BundleHash)
 		}
 		descriptor = resolved
 		registered = true
 	}
 	if !registered {
-		return fmt.Errorf("persist event %q has no author activity descriptor for runtime %q bundle %q", name, scope.RuntimeInstanceID, scope.BundleHash)
+		return runtimeauthoractivity.Draft{}, false, fmt.Errorf("persist event %q has no author activity descriptor for runtime %q bundle %q", name, scope.RuntimeInstanceID, scope.BundleHash)
 	}
 	if descriptor.Disposition == runtimeauthoractivity.StoryDifferent {
-		return nil
+		return runtimeauthoractivity.Draft{}, false, nil
 	}
 	summary, err := authoredEventSummary(evt.Payload(), descriptor.AuthorSummaryField)
 	if err != nil {
-		return fmt.Errorf("persist event %q author summary: %w", name, err)
+		return runtimeauthoractivity.Draft{}, false, fmt.Errorf("persist event %q author summary: %w", name, err)
 	}
-	return runtimeauthoractivity.Record(ctx, runtimeauthoractivity.Draft{
+	return runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindEventEmitted, Transition: "emitted",
 		SourceOwner: "events", SourceIdentity: evt.ID(), DedupKey: "emit:" + evt.ID(),
 		OccurredAt: evt.CreatedAt(), RunID: evt.RunID(), EntityID: evt.EntityID(), FlowID: evt.FlowInstance(),
@@ -104,7 +115,7 @@ func recordPersistedEventAuthorActivity(ctx context.Context, resolver authoredEv
 		Projection: runtimeauthoractivity.Projection{
 			EventType: name, ProducerType: strings.TrimSpace(producedByType), ProducerID: strings.TrimSpace(producedBy),
 		},
-	})
+	}, true, nil
 }
 
 func authoredEventSummary(payload []byte, field string) (string, error) {
