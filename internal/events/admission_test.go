@@ -214,6 +214,34 @@ func TestAdmissionCarriesExactRunDispositionAndReadbackNeverRegainsCreation(t *t
 	}
 }
 
+func TestRunScopedRuntimeControlPreservesExactRootRoutingSource(t *testing.T) {
+	source, err := NewRootRoutingSource("entity-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	facts := platformControlFacts()
+	facts.Type = "root.timer.fired"
+	facts.Producer = ProducerClaim{Type: EventProducerPlatform, ID: "runtime.scheduler"}
+	facts.RoutingSource = source
+	facts.Envelope = EventEnvelope{EntityID: "entity-root"}
+
+	event, err := NewRunScopedRuntimeControlEvent(RunScopedRuntimeEventInput{Facts: facts, RunID: testRunID})
+	if err != nil {
+		t.Fatalf("NewRunScopedRuntimeControlEvent(root source): %v", err)
+	}
+	if event.RoutingSource().Kind() != RoutingSourceRoot || event.RoutingSource().Route() != (RouteIdentity{EntityID: "entity-root"}) {
+		t.Fatalf("routing source = %#v, want exact root entity", event.RoutingSource())
+	}
+	if event.SourceRoute() != (RouteIdentity{EntityID: "entity-root"}) {
+		t.Fatalf("envelope source = %#v, want exact root entity", event.SourceRoute())
+	}
+
+	facts.Envelope.Source = RouteIdentity{EntityID: "entity-other"}
+	if _, err := NewRunScopedRuntimeControlEvent(RunScopedRuntimeEventInput{Facts: facts, RunID: testRunID}); err == nil || !strings.Contains(err.Error(), "does not match typed routing source") {
+		t.Fatalf("mismatched root source error = %v, want exact-source rejection", err)
+	}
+}
+
 func TestExistingRunRootIngressRequiresExactRun(t *testing.T) {
 	if _, err := NewExistingRunRootIngressEvent(ExistingRunRootIngressEventInput{Facts: validFacts()}); err == nil || !strings.Contains(err.Error(), "requires run_id") {
 		t.Fatalf("missing-run error = %v, want run_id failure", err)

@@ -1142,8 +1142,8 @@ func newSemanticEvent(class EventAdmissionClass, rootIntent rootIngressRunIntent
 	}
 	switch class {
 	case EventAdmissionRuntimeControl:
-		if facts.RoutingSource.Kind() != RoutingSourceFlowOwnedControl && facts.RoutingSource.Kind() != RoutingSourcePlatformControl {
-			return Event{}, fmt.Errorf("runtime control requires flow-owned or platform-control routing source")
+		if facts.RoutingSource.Kind() != RoutingSourceRoot && facts.RoutingSource.Kind() != RoutingSourceFlowOwnedControl && facts.RoutingSource.Kind() != RoutingSourcePlatformControl {
+			return Event{}, fmt.Errorf("runtime control requires root, flow-owned, or platform-control routing source")
 		}
 	case EventAdmissionRuntimeDiagnostic, EventAdmissionDiagnosticDirect:
 		if !facts.RoutingSource.Empty() {

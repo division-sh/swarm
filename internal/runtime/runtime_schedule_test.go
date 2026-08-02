@@ -128,6 +128,29 @@ func TestScheduledEventUsesTypedScheduleEnvelope(t *testing.T) {
 	}
 }
 
+func TestScheduledEventPreservesRootScheduleRoutingSource(t *testing.T) {
+	evt, err := scheduledEvent(runtimepipeline.Schedule{
+		RunID:         "11111111-1111-1111-1111-111111111111",
+		AgentID:       "root-agent",
+		EventType:     "timer.check",
+		EntityID:      "ent-root",
+		Payload:       []byte(`{}`),
+		RoutingSource: mustRuntimeRootScheduleSource(t, "ent-root"),
+	})
+	if err != nil {
+		t.Fatalf("scheduledEvent(root source): %v", err)
+	}
+	if evt.RoutingSource().Kind() != events.RoutingSourceRoot {
+		t.Fatalf("routing source kind = %q, want root", evt.RoutingSource().Kind().StorageCode())
+	}
+	if got := evt.SourceRoute(); got != (events.RouteIdentity{EntityID: "ent-root"}) {
+		t.Fatalf("source route = %#v, want exact root entity", got)
+	}
+	if got := evt.FlowInstance(); got != "" {
+		t.Fatalf("flow instance = %q, want absent for root schedule", got)
+	}
+}
+
 type recordingRuntimeScheduleStore struct {
 	schedules   []runtimepipeline.Schedule
 	active      []runtimepipeline.Schedule

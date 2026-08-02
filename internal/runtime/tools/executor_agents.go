@@ -238,9 +238,12 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 	if err != nil {
 		return nil, fmt.Errorf("admit schedule owner source: %w", err)
 	}
-	routingSource, err := events.NewFlowOwnedControlRoutingSource(executionSource.Route())
-	if err != nil {
-		return nil, fmt.Errorf("admit schedule control source: %w", err)
+	routingSource := executionSource
+	if executionSource.Kind() != events.RoutingSourceRoot {
+		routingSource, err = events.NewFlowOwnedControlRoutingSource(executionSource.Route())
+		if err != nil {
+			return nil, fmt.Errorf("admit schedule control source: %w", err)
+		}
 	}
 
 	schedule := Schedule{
