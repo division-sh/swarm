@@ -267,7 +267,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			"connect_route_plans_count": len(matched),
 		},
 	}
-	receiverPinFacts := make([]connectReceiverPinFact, 0, len(matched))
+	var receiverPinAdmission runtimepinrouting.ConnectReceiverPinAdmission
 	createdRoutes := make(map[runtimeflowidentity.Route]struct{}, len(matched))
 	replyContextConsumed := false
 	for _, plan := range matched {
@@ -287,10 +287,13 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			if err != nil {
 				return connectRoutePlanDispatch{}, err
 			}
-			if previous, current, collision := admitConnectReceiverPinFacts(&receiverPinFacts, routes, plan.ReceiverPinIdentity()); collision {
+			if err := receiverPinAdmission.Admit(plan, routes); err != nil {
+				return connectRoutePlanDispatch{}, err
+			}
+			if pins, collision := connectReceiverPinCollisionDetail(receiverPinAdmission); collision {
 				out.Failure = connectRoutePlanTargetFailure(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
 				out.ExtraDetail["connect_route_plan_failure"] = runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code()
-				out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = []string{previous, current}
+				out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = pins
 				return out, nil
 			}
 			replyContextConsumed = true
@@ -374,10 +377,13 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			out.ExtraDetail["connect_route_plan_receiver_event"] = plan.ReceiverEndpoint().Readback().ResolvedEvent
 			return out, nil
 		}
-		if previous, current, collision := admitConnectReceiverPinFacts(&receiverPinFacts, routes, plan.ReceiverPinIdentity()); collision {
+		if err := receiverPinAdmission.Admit(plan, routes); err != nil {
+			return connectRoutePlanDispatch{}, err
+		}
+		if pins, collision := connectReceiverPinCollisionDetail(receiverPinAdmission); collision {
 			out.Failure = connectRoutePlanTargetFailure(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
 			out.ExtraDetail["connect_route_plan_failure"] = runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code()
-			out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = []string{previous, current}
+			out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = pins
 			return out, nil
 		}
 		out.DeliveryIntents = append(out.DeliveryIntents, connectRoutePlanDeliveryIntents(routes, liveRoutes, routeCreatedInPlan)...)
@@ -402,28 +408,12 @@ func stampConnectExecutionClaims(plan runtimepinrouting.ConnectRoutePlan, routes
 	return events.NormalizeDeliveryRoutes(routes), nil
 }
 
-type connectReceiverPinFact struct {
-	route    events.DeliveryRoute
-	identity runtimepinrouting.ConnectReceiverPinIdentity
-}
-
-func admitConnectReceiverPinFacts(admitted *[]connectReceiverPinFact, routes []events.DeliveryRoute, identity runtimepinrouting.ConnectReceiverPinIdentity) (string, string, bool) {
-	if admitted == nil || identity.Empty() {
-		return "", "", false
+func connectReceiverPinCollisionDetail(admission runtimepinrouting.ConnectReceiverPinAdmission) ([]string, bool) {
+	collisions := admission.Collisions()
+	if len(collisions) == 0 {
+		return nil, false
 	}
-	for _, route := range routes {
-		route = route.Normalized()
-		if route.SubscriberType == "" || route.SubscriberID == "" {
-			continue
-		}
-		for _, previous := range *admitted {
-			if events.SameDeliveryRecipientIdentity(previous.route, route) && !previous.identity.Equal(identity) {
-				return previous.identity.Diagnostic(), identity.Diagnostic(), true
-			}
-		}
-		*admitted = append(*admitted, connectReceiverPinFact{route: route, identity: identity})
-	}
-	return "", "", false
+	return collisions[0].ReceiverPinDiagnostics(), true
 }
 
 func (r connectRoutePlanResolver) materializeReplyRequest(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, routes []events.DeliveryRoute, values map[string]string) ([]events.DeliveryRoute, *connectReplyApplication, error) {

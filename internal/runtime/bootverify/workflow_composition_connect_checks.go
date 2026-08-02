@@ -8,7 +8,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -18,7 +17,8 @@ func checkCompositionConnectValidation(c *checkerContext) []Finding {
 	}
 	var findings []Finding
 	findings = append(findings, validateInputPinResolutions(c.source)...)
-	for _, issue := range runtimepinrouting.CompileConnectGraph(c.source).Issues() {
+	graph := runtimepinrouting.CompileConnectGraph(c.source)
+	for _, issue := range graph.Issues() {
 		context := issue.DiagnosticContext()
 		if context != "" {
 			context += ": "
@@ -30,20 +30,17 @@ func checkCompositionConnectValidation(c *checkerContext) []Finding {
 			Evidence: []string{"classification: " + issue.Failure.Code()},
 		})
 	}
-	for _, issue := range routingtopology.Build(c.source).Issues {
-		if strings.TrimSpace(issue.Failure) != routingtopology.FailureConnectReceiverPinCollision {
-			continue
-		}
+	for _, collision := range graph.ReceiverPinCollisions() {
 		findings = append(findings, Finding{
 			CheckID:     "composition_connect_validation",
 			Severity:    "error",
-			Location:    strings.TrimSpace(issue.Location),
-			Message:     strings.TrimSpace(issue.Message),
-			Remediation: strings.TrimSpace(issue.Remediation),
+			Location:    strings.TrimSpace(collision.AuthoredLocation()),
+			Message:     collision.Message(),
+			Remediation: "Route the source event to distinct subscribers or targets, or consolidate the receiver pins behind one handler. One event x subscriber cannot select multiple receiver-local handlers.",
 			Evidence: []string{
-				"classification: " + routingtopology.FailureConnectReceiverPinCollision,
-				"source: " + strings.TrimSpace(issue.From),
-				"subscriber: " + strings.TrimSpace(issue.To),
+				"classification: " + runtimepinrouting.ConnectReceiverPinCollisionFailure,
+				"source: " + collision.SourceDiagnostic(),
+				"subscriber: " + collision.SubscriberType() + ":" + collision.SubscriberID(),
 			},
 		})
 	}

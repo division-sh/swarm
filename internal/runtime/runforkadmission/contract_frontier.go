@@ -398,7 +398,7 @@ func resolveContractFrontierRoutes(routeTable *runtimebus.RouteTable, lookups []
 		}
 		for _, eventName := range lookup.eventNames {
 			for _, subscriber := range routeTable.Resolve(eventName) {
-				if lookup.receiverPolicy == contractFrontierReceiverCarrier && strings.TrimSpace(subscriber.RouteSource) != "receiver_carrier" {
+				if !contractFrontierSubscriberAdmitted(lookup.receiverPolicy, subscriber) {
 					continue
 				}
 				out = append(out, subscriber)
@@ -406,6 +406,10 @@ func resolveContractFrontierRoutes(routeTable *runtimebus.RouteTable, lookups []
 		}
 	}
 	return out
+}
+
+func contractFrontierSubscriberAdmitted(policy contractFrontierReceiverPolicy, subscriber runtimebus.Subscriber) bool {
+	return policy != contractFrontierReceiverCarrier || subscriber.IsConnectReceiverCarrier()
 }
 
 func workflowNodeSubscribers(nodes []runtimepipeline.WorkflowNode, eventNames ...string) []string {

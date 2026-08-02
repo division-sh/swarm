@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
@@ -955,9 +956,160 @@ func (m ConnectRoutePlanInstanceKeyMaterial) CanonicalValues() map[string]any {
 // Authored rows are retained only inside this package while downstream
 // consumers receive compiled plans or typed projections.
 type CompiledConnectGraph struct {
-	source semanticview.Source
-	plans  []ConnectRoutePlan
-	issues []ConnectRoutePlanIssue
+	source                semanticview.Source
+	plans                 []ConnectRoutePlan
+	issues                []ConnectRoutePlanIssue
+	receiverPinCollisions []ConnectReceiverPinCollision
+}
+
+const ConnectReceiverPinCollisionFailure = "connect_receiver_pin_delivery_collision"
+
+type connectSourceEndpointIdentity struct {
+	kind   connectEndpointKind
+	flowID connectFlowID
+	event  connectResolvedEvent
+}
+
+type connectReceiverPinAdmissionKey struct {
+	source    connectSourceEndpointIdentity
+	recipient events.DeliveryRouteIdentity
+}
+
+type connectReceiverPinAdmissionGroup struct {
+	sourceDiagnostic string
+	route            events.DeliveryRoute
+	authoredLocation string
+	pins             map[[sha256.Size]byte]ConnectReceiverPinIdentity
+}
+
+// ConnectReceiverPinAdmission is the shared owner for the invariant that one
+// source event and durable recipient cannot select multiple receiver pins.
+// Both graph compilation and live delivery planning admit evidence here.
+type ConnectReceiverPinAdmission struct {
+	groups map[connectReceiverPinAdmissionKey]*connectReceiverPinAdmissionGroup
+}
+
+// ConnectReceiverPinCollision is an immutable diagnostic projection from the
+// typed admission owner. Its display values cannot be admitted back into the
+// evaluator.
+type ConnectReceiverPinCollision struct {
+	sourceDiagnostic string
+	route            events.DeliveryRoute
+	authoredLocation string
+	receiverPins     []ConnectReceiverPinIdentity
+}
+
+func (c ConnectReceiverPinCollision) SourceDiagnostic() string { return c.sourceDiagnostic }
+func (c ConnectReceiverPinCollision) SubscriberType() string   { return c.route.SubscriberType }
+func (c ConnectReceiverPinCollision) SubscriberID() string     { return c.route.SubscriberID }
+func (c ConnectReceiverPinCollision) Target() events.RouteIdentity {
+	return c.route.Target.Normalized()
+}
+func (c ConnectReceiverPinCollision) AuthoredLocation() string { return c.authoredLocation }
+func (c ConnectReceiverPinCollision) ReceiverPinDiagnostics() []string {
+	out := make([]string, 0, len(c.receiverPins))
+	for _, pin := range c.receiverPins {
+		out = append(out, pin.Diagnostic())
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (c ConnectReceiverPinCollision) Message() string {
+	target := c.Target().FlowInstance
+	if target == "" {
+		target = "<global-root>"
+	}
+	return fmt.Sprintf(
+		"source event %s reaches %s %s at target %s through multiple receiver pins: %s",
+		c.SourceDiagnostic(),
+		c.SubscriberType(),
+		c.SubscriberID(),
+		target,
+		strings.Join(c.ReceiverPinDiagnostics(), ", "),
+	)
+}
+
+func (a *ConnectReceiverPinAdmission) Admit(plan ConnectRoutePlan, routes []events.DeliveryRoute) error {
+	if a == nil {
+		return fmt.Errorf("connect receiver-pin admission owner is required")
+	}
+	identity := plan.ReceiverPinIdentity()
+	if identity.Empty() {
+		return fmt.Errorf("connect receiver-pin admission requires a compiled receiver pin")
+	}
+	source, sourceDiagnostic, err := connectSourceEndpointAdmissionIdentity(plan.source)
+	if err != nil {
+		return err
+	}
+	if a.groups == nil {
+		a.groups = make(map[connectReceiverPinAdmissionKey]*connectReceiverPinAdmissionGroup)
+	}
+	for _, route := range routes {
+		route = route.Normalized()
+		route.ConnectClaim = events.ConnectExecutionClaim{}
+		recipient, err := route.Identity()
+		if err != nil {
+			return fmt.Errorf("connect receiver-pin recipient: %w", err)
+		}
+		key := connectReceiverPinAdmissionKey{source: source, recipient: recipient}
+		group := a.groups[key]
+		if group == nil {
+			group = &connectReceiverPinAdmissionGroup{
+				sourceDiagnostic: sourceDiagnostic,
+				route:            route,
+				authoredLocation: plan.authoredLocation,
+				pins:             make(map[[sha256.Size]byte]ConnectReceiverPinIdentity),
+			}
+			a.groups[key] = group
+		}
+		group.pins[identity.digest] = identity
+	}
+	return nil
+}
+
+func (a ConnectReceiverPinAdmission) Collisions() []ConnectReceiverPinCollision {
+	out := make([]ConnectReceiverPinCollision, 0)
+	for _, group := range a.groups {
+		if len(group.pins) < 2 {
+			continue
+		}
+		collision := ConnectReceiverPinCollision{
+			sourceDiagnostic: group.sourceDiagnostic,
+			route:            group.route,
+			authoredLocation: group.authoredLocation,
+			receiverPins:     make([]ConnectReceiverPinIdentity, 0, len(group.pins)),
+		}
+		for _, pin := range group.pins {
+			collision.receiverPins = append(collision.receiverPins, pin)
+		}
+		out = append(out, collision)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		left, _ := out[i].route.Identity()
+		right, _ := out[j].route.Identity()
+		if out[i].sourceDiagnostic != out[j].sourceDiagnostic {
+			return out[i].sourceDiagnostic < out[j].sourceDiagnostic
+		}
+		return events.EncodeDeliveryRouteIdentity(left) < events.EncodeDeliveryRouteIdentity(right)
+	})
+	return out
+}
+
+func connectSourceEndpointAdmissionIdentity(endpoint ConnectRoutePlanEndpoint) (connectSourceEndpointIdentity, string, error) {
+	readback := endpoint.Readback()
+	diagnostic := readback.ResolvedEvent
+	if diagnostic == "" {
+		diagnostic = readback.LocalEvent
+	}
+	if diagnostic == "" || endpoint.kind == 0 {
+		return connectSourceEndpointIdentity{}, "", fmt.Errorf("connect receiver-pin admission requires a compiled source event")
+	}
+	resolved := endpoint.resolvedEvent
+	if resolved.value == "" {
+		resolved = connectResolvedEvent{value: endpoint.event.value}
+	}
+	return connectSourceEndpointIdentity{kind: endpoint.kind, flowID: endpoint.flowID, event: resolved}, diagnostic, nil
 }
 
 type ConnectEndpointRoleKind uint8
@@ -1244,7 +1396,107 @@ func CompileConnectGraph(source semanticview.Source) CompiledConnectGraph {
 		issues = append(issues, externalIssues...)
 	}
 	sortConnectRoutePlans(plans)
-	return CompiledConnectGraph{source: source, plans: plans, issues: issues}
+	return CompiledConnectGraph{
+		source:                source,
+		plans:                 plans,
+		issues:                issues,
+		receiverPinCollisions: compileStaticConnectReceiverPinCollisions(source, plans),
+	}
+}
+
+func compileStaticConnectReceiverPinCollisions(source semanticview.Source, plans []ConnectRoutePlan) []ConnectReceiverPinCollision {
+	census := semanticview.BuildAuthoredEventEndpointCensus(source)
+	var admission ConnectReceiverPinAdmission
+	for _, plan := range plans {
+		if plan.RequiresRuntimeResolution() {
+			continue
+		}
+		var input *semanticview.AuthoredEventEndpoint
+		for _, candidate := range census.InputPins() {
+			if plan.receiver.matchesFlowPin(candidate.FlowID, candidate.PinName, ConnectEndpointRoleConsumer) {
+				matched := candidate
+				input = &matched
+				break
+			}
+		}
+		if input == nil {
+			continue
+		}
+		matches, _ := census.ResolveTypedPubSubConsumerMatches(*input)
+		targets := append([]events.RouteIdentity(nil), plan.targetSet...)
+		if !plan.target.Empty() || len(targets) == 0 {
+			targets = append([]events.RouteIdentity{plan.target}, targets...)
+		}
+		for _, target := range targets {
+			routes := make([]events.DeliveryRoute, 0, len(matches))
+			for _, match := range matches {
+				if route, ok := staticConnectReceiverDeliveryRoute(source, match.Consumer, target); ok {
+					routes = append(routes, route)
+				}
+			}
+			if err := admission.Admit(plan, routes); err != nil {
+				continue
+			}
+		}
+	}
+	return admission.Collisions()
+}
+
+func staticConnectReceiverDeliveryRoute(source semanticview.Source, endpoint semanticview.AuthoredEventEndpoint, target events.RouteIdentity) (events.DeliveryRoute, bool) {
+	target = target.Normalized()
+	switch endpoint.Kind {
+	case semanticview.EventEndpointNodeHandler:
+		nodeID := strings.TrimSpace(endpoint.NodeID)
+		if nodeID == "" {
+			return events.DeliveryRoute{}, false
+		}
+		return events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID, Target: target}, true
+	case semanticview.EventEndpointAgent:
+		logicalID := strings.TrimSpace(endpoint.AgentID)
+		agentID, owner, ok := staticConnectReceiverAgent(source, endpoint.FlowID, logicalID)
+		if !ok {
+			return events.DeliveryRoute{}, false
+		}
+		name, err := agentidentity.DeclaredName(agentID, owner)
+		if err != nil {
+			return events.DeliveryRoute{}, false
+		}
+		route := agentidentity.RootRoute()
+		if target.FlowInstance != "" {
+			route, err = runtimeflowidentity.StoredRoute("", "", target.FlowInstance).AgentIdentityRoute()
+			if err != nil {
+				return events.DeliveryRoute{}, false
+			}
+		}
+		identity, err := agentidentity.New(name, route)
+		if err != nil {
+			return events.DeliveryRoute{}, false
+		}
+		return events.DeliveryRoute{
+			SubscriberType: "agent",
+			SubscriberID:   agentID,
+			AgentIdentity:  identity,
+			Target:         target,
+		}, true
+	default:
+		return events.DeliveryRoute{}, false
+	}
+}
+
+func staticConnectReceiverAgent(source semanticview.Source, flowID, logicalID string) (string, string, bool) {
+	owner, ok := semanticview.AgentDeclarationOwner(source, flowID, logicalID)
+	if !ok {
+		return "", "", false
+	}
+	agentID := logicalID
+	if scope, found := source.FlowScopeByID(strings.TrimSpace(flowID)); found {
+		if entry, exists := scope.Agents[logicalID]; exists && strings.TrimSpace(entry.ID) != "" {
+			agentID = strings.TrimSpace(entry.ID)
+		}
+	} else if entry, exists := source.AgentEntries()[logicalID]; exists && strings.TrimSpace(entry.ID) != "" {
+		agentID = strings.TrimSpace(entry.ID)
+	}
+	return agentID, owner, agentID != ""
 }
 
 func (g CompiledConnectGraph) MatchingPlans(evt events.Event) []ConnectRoutePlan {
@@ -1276,6 +1528,10 @@ func (g CompiledConnectGraph) Plans() []ConnectRoutePlan {
 
 func (g CompiledConnectGraph) Issues() []ConnectRoutePlanIssue {
 	return append([]ConnectRoutePlanIssue(nil), g.issues...)
+}
+
+func (g CompiledConnectGraph) ReceiverPinCollisions() []ConnectReceiverPinCollision {
+	return append([]ConnectReceiverPinCollision(nil), g.receiverPinCollisions...)
 }
 
 func (g CompiledConnectGraph) EndpointRoles() []ConnectEndpointRole {

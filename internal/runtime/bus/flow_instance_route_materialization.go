@@ -3,12 +3,10 @@ package bus
 import (
 	"strings"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 )
 
 type FlowInstanceRouteMaterializationRequest struct {
-	Template            runtimecontracts.SystemNodeContract
 	Identity            runtimeflowidentity.Route
 	ActivationVariables map[string]string
 }

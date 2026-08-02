@@ -1253,6 +1253,9 @@ contract_formats:
             For each publish, the evaluator reads one immutable graph/descriptor/route snapshot and produces a complete typed
             result before lifecycle, reply-context, route-table, delivery, or event persistence mutation. Application is once
             against the same snapshot generation. A stale generation rejects before mutation and requires a fresh evaluation.
+            The compiled graph also owns receiver-pin collision evidence through one typed admission ledger shared by static
+            verification and live delivery planning. Routing-topology/readback DTOs may render that evidence but cannot create,
+            suppress, or reinterpret a collision.
             Replay, duplicate recovery, settlement, handler execution, and selected-fork execution consume the persisted
             connect execution claim and MUST NOT rematch current connect topology.
           finite_variant_boundary: |
@@ -1444,6 +1447,11 @@ contract_formats:
               concrete flow input events MUST materialize receiver-carrier
               evidence at the selected receiver path, except where
               import-boundary alias policy requires exclusive alias patterns.
+              Receiver-carrier eligibility is an immutable private route-table
+              fact produced by canonical derivation. RouteSource remains
+              display/readback text and MUST NOT authorize selected-fork or
+              runtime carrier admission even when it contains
+              `receiver_carrier`.
           descriptor_evidence_boundary:
             status: merge_bearing_runtime_behavior
             implementation_slice: '#1485/#1479'
@@ -4585,6 +4593,11 @@ engine:
           before emitting a structurally routed pin output.
         single_parent_v1: Each child has exactly one ParentRoute in v1. Multiple parents are v2.
       route_materialization:
+        canonical_template_source: Dynamic flow-instance routes MUST materialize only from the exact template registered by
+          the EventBus semantic source. FlowInstanceRouteMaterializationRequest carries only typed route identity and
+          activation variables; it MUST NOT carry a request-local node/template contract or any compatibility fallback that
+          fabricates routes when the registry lacks that scope. An unknown template fails before in-memory or durable route
+          mutation.
         subscriber_identity_variables: Dynamic flow-instance route subscribers MUST render from the same activation variable
           set used to materialize the child instance's agents. That set includes `config_from` values plus runtime built-ins
           `instance_id`, `template_id`, `flow_scope_key`, and `flow_instance_path`; built-ins remain authoritative for their
@@ -10623,13 +10636,16 @@ flow_model:
             Receiver `resolution.mode: reply` lowers through typed paired-edge request lineage;
             missing or ambiguous lineage fails closed.
         receiver_pin_delivery_collision:
-          owner: routing topology over lowered ConnectRoutePlan edges and resolved typed receiver consumers
+          owner: internal/runtime/core/pinrouting.CompiledConnectGraph and ConnectReceiverPinAdmission
           rule: >
             The durable delivery and receipt model owns exactly one lifecycle row per event x normalized subscriber.
             Therefore one source event MUST NOT reach the same normalized subscriber and target through more than one
             distinct receiver input pin or receiver-local event. Verify and boot MUST reject that composition with
             `connect_receiver_pin_delivery_collision`; duplicate declarations of the same edge remain idempotent, and
-            fan-out to distinct subscribers or distinct targets remains valid.
+            fan-out to distinct subscribers or distinct targets remains valid. Static graph compilation and runtime
+            materialization MUST admit the same typed source endpoint, canonical delivery-route identity, and opaque receiver
+            pin identity through this owner. Routing topology is diagnostic-only and MUST NOT reconstruct collision identity
+            from flattened edges, authored locations, delimiters, or readback strings.
           runtime_invariant: >
             Connect-route materialization MUST preserve the normalized receiver input pin and receiver-local event as
             one transient routing fact, then compare that fact before DeliveryRoute or RoutePlanDeliveryIntent
@@ -14443,7 +14459,8 @@ run_model:
       runtime.run_fork.selected_contract_route_admission as prerequisite evidence, classifies selected-source static
       route topology as fork-local truth only through internal/runtime/bus.DeriveRouteTable and the durable selected
       contract/frontier binding, and classifies dynamic flow-instance topology as fork-local-proven or fail-closed with
-      a named blocker. It is the only selected owner allowed to discharge unknown_unversioned, and only when selected
+      a named blocker. Receiver-carrier selection consumes the route table''s private typed carrier projection; display
+      RouteSource text cannot create or suppress selected recipient authority. It is the only selected owner allowed to discharge unknown_unversioned, and only when selected
       owner identity, binding, frontier IDs/fingerprint, and complete static/dynamic topology all match. It MUST NOT
       read or copy source/current routing_rules or materialized flow-instance route rows, persist
       fork-local route rows, derive executable recipients, invoke the delivery planner for fork work, create
