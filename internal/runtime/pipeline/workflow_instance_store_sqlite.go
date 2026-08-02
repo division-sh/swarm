@@ -376,8 +376,8 @@ func (s *workflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 			Accumulator:  projection.Accumulator,
 		}
 		previousForDiff := previous
-		if createInfo, ok := workflowCreateEntityInitialValuesFromContext(txctx); ok {
-			nextPrevious, err := insertSQLiteWorkflowCreateEntityInitialValueMutations(txctx, tx, s.runLifecycle, rowID, previous, afterProjection, createInfo.Fields)
+		if len(instance.InitialFieldValues) > 0 {
+			nextPrevious, err := insertSQLiteWorkflowCreateEntityInitialValueMutations(txctx, tx, s.runLifecycle, rowID, previous, afterProjection, instance.InitialFieldValues)
 			if err != nil {
 				return err
 			}

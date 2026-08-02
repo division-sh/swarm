@@ -52,21 +52,22 @@ func (s *workflowInstanceStore) ReadTimerObligations(ctx context.Context, scope 
 }
 
 type WorkflowInstance struct {
-	InstanceID        string
-	StorageRef        string
-	WorkflowName      string
-	WorkflowVersion   string
-	RuntimeReadiness  *DynamicFlowRuntimeReadinessPlan
-	Status            string
-	TerminatedAt      time.Time
-	CurrentState      string
-	Config            map[string]any
-	EnteredStageAt    time.Time
-	TransitionHistory []WorkflowTransitionRecord
-	StateBuckets      map[string]any
-	Metadata          map[string]any
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	InstanceID         string
+	StorageRef         string
+	WorkflowName       string
+	WorkflowVersion    string
+	RuntimeReadiness   *DynamicFlowRuntimeReadinessPlan
+	Status             string
+	TerminatedAt       time.Time
+	CurrentState       string
+	Config             map[string]any
+	EnteredStageAt     time.Time
+	TransitionHistory  []WorkflowTransitionRecord
+	StateBuckets       map[string]any
+	Metadata           map[string]any
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	InitialFieldValues map[string]any
 }
 
 // WorkflowInstanceLookupMiss reports the exact key that failed to resolve.
@@ -242,12 +243,6 @@ func (p WorkflowPersistence) Valid() bool {
 
 var errSQLiteWorkflowMutationOwnerRequired = errors.New("sqlite workflow persistence requires its selected mutation owner")
 
-type workflowCreateEntityInitialValuesContextKey struct{}
-
-type workflowCreateEntityInitialValues struct {
-	Fields map[string]any
-}
-
 // RegisterDeliveryContinuationSignal installs the exact runtime-generation
 // notification used after standing-run terminalization commits.
 func (s *workflowInstanceStore) RegisterDeliveryContinuationSignal(authority runtimedelivery.ExecutionAuthority, signal func()) (*DeliveryContinuationSignalRegistration, error) {
@@ -312,27 +307,6 @@ func (s *workflowInstanceStore) requestRunCompletionCandidate(ctx context.Contex
 	}
 	_, err := s.runLifecycle.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID))
 	return err
-}
-
-func withWorkflowCreateEntityInitialValues(ctx context.Context, fields map[string]any) context.Context {
-	if len(fields) == 0 {
-		return ctx
-	}
-	return context.WithValue(ctx, workflowCreateEntityInitialValuesContextKey{}, workflowCreateEntityInitialValues{
-		Fields: cloneStringAnyMap(fields),
-	})
-}
-
-func workflowCreateEntityInitialValuesFromContext(ctx context.Context) (workflowCreateEntityInitialValues, bool) {
-	if ctx == nil {
-		return workflowCreateEntityInitialValues{}, false
-	}
-	raw := ctx.Value(workflowCreateEntityInitialValuesContextKey{})
-	info, ok := raw.(workflowCreateEntityInitialValues)
-	if !ok || len(info.Fields) == 0 {
-		return workflowCreateEntityInitialValues{}, false
-	}
-	return workflowCreateEntityInitialValues{Fields: cloneStringAnyMap(info.Fields)}, true
 }
 
 func (s *workflowInstanceStore) enabled() bool {
@@ -1304,8 +1278,8 @@ func (s *workflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 		Accumulator:  projection.Accumulator,
 	}
 	previousForDiff := previous
-	if createInfo, ok := workflowCreateEntityInitialValuesFromContext(ctx); ok {
-		nextPrevious, err := insertWorkflowCreateEntityInitialValueMutations(ctx, tx, s.runLifecycle, rowID, previous, afterProjection, createInfo.Fields)
+	if len(instance.InitialFieldValues) > 0 {
+		nextPrevious, err := insertWorkflowCreateEntityInitialValueMutations(ctx, tx, s.runLifecycle, rowID, previous, afterProjection, instance.InitialFieldValues)
 		if err != nil {
 			return err
 		}
@@ -1416,8 +1390,8 @@ func (s *workflowInstanceStore) createSpec(ctx context.Context, rowID, storageRe
 		Accumulator:  projection.Accumulator,
 	}
 	previousForDiff := runtimemutationlog.EntityStateProjection{}
-	if createInfo, ok := workflowCreateEntityInitialValuesFromContext(ctx); ok {
-		nextPrevious, err := insertWorkflowCreateEntityInitialValueMutations(ctx, tx, s.runLifecycle, rowID, previousForDiff, afterProjection, createInfo.Fields)
+	if len(instance.InitialFieldValues) > 0 {
+		nextPrevious, err := insertWorkflowCreateEntityInitialValueMutations(ctx, tx, s.runLifecycle, rowID, previousForDiff, afterProjection, instance.InitialFieldValues)
 		if err != nil {
 			return err
 		}

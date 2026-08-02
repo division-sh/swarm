@@ -2466,6 +2466,7 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) error {
 	frame.result.StateMutation.TriggerEventID = strings.TrimSpace(frame.req.Event.ID())
 	frame.result.StateMutation.TriggerEventType = strings.TrimSpace(string(frame.req.Event.Type()))
 	frame.result.StateMutation.TriggeredAt = frame.req.Event.CreatedAt()
+	frame.result.StateMutation.InitialFieldValues = cloneStringAnyMap(frame.req.InitialFieldValues)
 	deliveryContext := events.DeliveryContextFromContext(ctx)
 	if !deliveryContext.Empty() {
 		for i := range frame.result.EmitIntents {

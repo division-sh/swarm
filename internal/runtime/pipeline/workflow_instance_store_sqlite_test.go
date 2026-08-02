@@ -25,10 +25,6 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	ensurePipelineTestRun(t, store, runID)
-	ctx = withWorkflowCreateEntityInitialValues(ctx, map[string]any{
-		"region": "west",
-		"tier":   float64(1),
-	})
 	storageRef := "root/acme"
 	entityID := FlowInstanceEntityID(storageRef)
 
@@ -43,6 +39,10 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 			"flow_path": storageRef,
 			"region":    "west",
 			"tier":      float64(2),
+		},
+		InitialFieldValues: map[string]any{
+			"region": "west",
+			"tier":   float64(1),
 		},
 	})); err != nil {
 		t.Fatalf("Create workflow instance: %v", err)

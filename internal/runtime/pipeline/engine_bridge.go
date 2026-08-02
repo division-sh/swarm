@@ -211,8 +211,9 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	ctx = withPipelineFlowScope(ctx, flowID)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, triggerCtx.Event)
 	ctx = runtimecorrelation.WithHandlerID(ctx, strings.TrimSpace(nodeID)+":"+strings.TrimSpace(string(triggerCtx.Event.Type())))
+	initialFieldValues := map[string]any(nil)
 	if handler.CreateEntity {
-		ctx = withWorkflowCreateEntityInitialValues(ctx, workflowEntitySchemaInitialValues(source, flowID))
+		initialFieldValues = workflowEntitySchemaInitialValues(source, flowID)
 	}
 	handlerEventKey := strings.TrimSpace(triggerCtx.HandlerEventKey)
 	if handlerEventKey == "" {
@@ -239,16 +240,17 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		return contractHandlerExecutionResult{}, fmt.Errorf("admit workflow node producer source: %w", err)
 	}
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
-		EntityID:        identity.NormalizeEntityID(entityID),
-		NodeID:          identity.NormalizeNodeID(nodeID),
-		FlowID:          identity.NormalizeFlowID(flowID),
-		Event:           triggerCtx.Event,
-		ProducerSource:  producerSource,
-		HandlerEventKey: handlerEventKey,
-		ChainDepth:      triggerCtx.Event.ChainDepth(),
-		Handler:         handler,
-		Preview:         preview,
-		State:           stateSnapshot,
+		EntityID:           identity.NormalizeEntityID(entityID),
+		NodeID:             identity.NormalizeNodeID(nodeID),
+		FlowID:             identity.NormalizeFlowID(flowID),
+		Event:              triggerCtx.Event,
+		ProducerSource:     producerSource,
+		HandlerEventKey:    handlerEventKey,
+		ChainDepth:         triggerCtx.Event.ChainDepth(),
+		Handler:            handler,
+		Preview:            preview,
+		State:              stateSnapshot,
+		InitialFieldValues: initialFieldValues,
 	})
 	if !preview {
 		logComputeModuleReplayEvidence(ctx, pc.bus, nodeID, triggerCtx.Event, result.ComputeModuleTraces)
