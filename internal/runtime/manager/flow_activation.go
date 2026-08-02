@@ -35,7 +35,6 @@ type flowInstancePersistence interface {
 	ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
 	ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadinessKey, error)
 	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error
-	CommitDynamicFlowRuntimeCreationOccurrence(context.Context, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest, runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher) error
 	MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, terminatedAt time.Time) error
 	Load(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error)
 	LoadRouteRecoveryProjection(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
@@ -138,6 +137,23 @@ func (am *AgentManager) PrepareFlowInstanceActivation(
 ) (runtimepipeline.FlowInstanceActivationPlan, error) {
 	_, plan, err := am.prepareFlowInstanceActivation(ctx, req)
 	return plan, err
+}
+
+func (am *AgentManager) FinalizeCommittedFlowInstanceActivation(
+	ctx context.Context,
+	plan runtimepipeline.FlowInstanceActivationPlan,
+) error {
+	if am == nil {
+		return fmt.Errorf("agent manager is required")
+	}
+	if err := plan.Validate(); err != nil {
+		return err
+	}
+	err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, plan.Readiness, am.semanticReadinessSource.source)
+	if err != nil {
+		am.signalDynamicFlowRuntimeReadiness()
+	}
+	return err
 }
 
 func (am *AgentManager) prepareFlowInstanceActivation(

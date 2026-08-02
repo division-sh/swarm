@@ -45,8 +45,9 @@ type CommitPublicationOwner interface {
 // admission and route planning. Activation plans are semantic facts derived by
 // the runtime; selected-store adapters persist them atomically with the event.
 type PublicationCommand struct {
-	Commit      CommitPublishRequest
-	Activations []runtimepipeline.FlowInstanceActivationPlan
+	Commit              CommitPublishRequest
+	Activations         []runtimepipeline.FlowInstanceActivationPlan
+	DynamicFlowCreation *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
 }
 
 func (c PublicationCommand) Validate() error {
@@ -58,6 +59,17 @@ func (c PublicationCommand) Validate() error {
 			return fmt.Errorf("publication activation %d: %w", index, err)
 		}
 	}
+	if c.DynamicFlowCreation != nil {
+		if err := c.DynamicFlowCreation.Validate(); err != nil {
+			return err
+		}
+		if c.DynamicFlowCreation.Event.ID() != c.Commit.Event.ID() {
+			return fmt.Errorf("dynamic flow creation event does not match publication event")
+		}
+		if len(c.Activations) != 0 {
+			return fmt.Errorf("dynamic flow creation publication cannot activate another flow instance")
+		}
+	}
 	return nil
 }
 
@@ -67,6 +79,7 @@ func (c PublicationCommand) Validate() error {
 type CommittedPublication struct {
 	AppendOutcome    EventAppendOutcome
 	DeliveryHandoffs []runtimedelivery.DurableHandoffProof
+	Activations      []CommittedFlowInstanceActivation
 }
 
 func (r CommittedPublication) Validate() error {
@@ -77,6 +90,26 @@ func (r CommittedPublication) Validate() error {
 		if err := handoff.Validate(); err != nil {
 			return fmt.Errorf("committed delivery handoff %d: %w", index, err)
 		}
+	}
+	for index, activation := range r.Activations {
+		if err := activation.Validate(); err != nil {
+			return fmt.Errorf("committed flow activation %d: %w", index, err)
+		}
+	}
+	return nil
+}
+
+// CommittedFlowInstanceActivation is immutable post-commit evidence that the
+// exact activation plan is durable. Runtime may install process-local topology
+// only after consuming this evidence.
+type CommittedFlowInstanceActivation struct {
+	Plan    runtimepipeline.FlowInstanceActivationPlan
+	Created bool
+}
+
+func (a CommittedFlowInstanceActivation) Validate() error {
+	if err := a.Plan.Validate(); err != nil {
+		return err
 	}
 	return nil
 }

@@ -222,13 +222,14 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 }
 
 type eventBusCommitPublishPlan struct {
-	bus              *EventBus
-	event            events.Event
-	direct           bool
-	directRecipients []string
-	directRoutes     []events.DeliveryRoute
-	admitted         events.AdmittedEvent
-	publicationClaim *pipelinePublicationClaim
+	bus                 *EventBus
+	event               events.Event
+	direct              bool
+	directRecipients    []string
+	directRoutes        []events.DeliveryRoute
+	admitted            events.AdmittedEvent
+	publicationClaim    *pipelinePublicationClaim
+	dynamicFlowCreation *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
 }
 
 func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublishPlan) (PreparedPublish, error) {
@@ -248,33 +249,50 @@ func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublis
 			if err != nil {
 				return PreparedPublish{}, err
 			}
-			// Dynamic flow creation still requires the complete workflow
-			// activation adapter before this path can own the commit. Keep the
-			// existing owner on the branch until that adapter lands; the final
-			// migration deletes this branch together with CommitPublishPlan.
-			if len(command.Activations) == 0 {
-				committed, err := closedOwner.CommitPublication(preparedCtx, command)
-				if err != nil {
-					return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
-				}
-				prepared, err = prepared.WithCommitOutcome(committed.AppendOutcome)
-				if err != nil {
-					return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
-				}
-				prepared.committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed.DeliveryHandoffs...)
-				if eb.testLifecycleProbe != nil && !prepared.exactDuplicate {
-					eb.notifyTestPublishPersisted(preparedCtx, prepared.Event, prepared.plan)
-				}
-				return prepared, nil
+			committed, err := closedOwner.CommitPublication(preparedCtx, command)
+			if err != nil {
+				return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
 			}
-			plan.publicationClaim = prepared.publicationClaim
+			prepared, err = prepared.WithCommitOutcome(committed.AppendOutcome)
+			if err != nil {
+				return PreparedPublish{}, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
+			}
+			prepared.committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed.DeliveryHandoffs...)
+			eb.finalizeCommittedFlowInstanceActivations(preparedCtx, prepared.Event, committed.Activations)
+			if eb.testLifecycleProbe != nil && !prepared.exactDuplicate {
+				eb.notifyTestPublishPersisted(preparedCtx, prepared.Event, prepared.plan)
+			}
+			return prepared, nil
 		}
+	}
+	if plan.dynamicFlowCreation != nil {
+		return PreparedPublish{}, errors.New("dynamic flow creation occurrence requires the closed publication owner")
 	}
 	prepared, err := owner.CommitPublish(preparedCtx, plan)
 	if err != nil {
 		return PreparedPublish{}, err
 	}
 	return prepared, nil
+}
+
+func (eb *EventBus) finalizeCommittedFlowInstanceActivations(
+	ctx context.Context,
+	evt events.Event,
+	activations []CommittedFlowInstanceActivation,
+) {
+	if len(activations) == 0 {
+		return
+	}
+	finalizer, ok := eb.templateInstancePlanner.(runtimepipeline.CommittedFlowInstanceActivationFinalizer)
+	if !ok || finalizer == nil {
+		eb.reportLocalDispatchFailure("flow_activation_finalize_failed", evt, errors.New("committed flow activation finalizer is unavailable"))
+		return
+	}
+	for _, activation := range activations {
+		if err := finalizer.FinalizeCommittedFlowInstanceActivation(ctx, activation.Plan); err != nil {
+			eb.reportLocalDispatchFailure("flow_activation_finalize_failed", evt, err)
+		}
+	}
 }
 
 func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication eventBusCommitPublishPlan) (PreparedPublish, PublicationCommand, error) {
@@ -309,7 +327,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 			}
 			request := prepared.CommitRequest()
 			request.DeliveryReceipt = nil
-			return prepared, PublicationCommand{Commit: request}, nil
+			return prepared, PublicationCommand{Commit: request, DynamicFlowCreation: publication.dynamicFlowCreation}, nil
 		}
 	}
 
@@ -390,8 +408,9 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	request := prepared.CommitRequest()
 	request.DeliveryReceipt = nil
 	return prepared, PublicationCommand{
-		Commit:      request,
-		Activations: append([]runtimepipeline.FlowInstanceActivationPlan(nil), routePlan.ActivationPlans...),
+		Commit:              request,
+		Activations:         append([]runtimepipeline.FlowInstanceActivationPlan(nil), routePlan.ActivationPlans...),
+		DynamicFlowCreation: publication.dynamicFlowCreation,
 	}, nil
 }
 
@@ -941,6 +960,42 @@ func sameRouteIdentities(left, right []events.RouteIdentity) bool {
 		}
 	}
 	return true
+}
+
+// CommitDynamicFlowRuntimeCreationOccurrence commits the creation occurrence
+// and its readiness completion through one closed selected-store operation.
+// No transaction callback or ambient SQL authority crosses this boundary.
+func (eb *EventBus) CommitDynamicFlowRuntimeCreationOccurrence(
+	ctx context.Context,
+	req runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest,
+) error {
+	if err := req.Validate(); err != nil {
+		return err
+	}
+	ctx, lease, err := eb.beginRuntimeWork(ctx)
+	if err != nil {
+		return err
+	}
+	if lease != nil {
+		defer func() { _ = lease.Done() }()
+	}
+	ctx = WithCurrentRuntimeEpoch(ctx)
+	if err := ensurePublishEpoch(ctx); err != nil {
+		return err
+	}
+	request := req
+	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{
+		bus:                 eb,
+		event:               req.Event,
+		dynamicFlowCreation: &request,
+	})
+	if err != nil {
+		return err
+	}
+	if prepared.exactDuplicate {
+		return eb.DispatchPreparedPublish(ctx, prepared)
+	}
+	return eb.DispatchPreparedPublishAsync(ctx, prepared)
 }
 
 // PublishInMutation preserves the general producer surface by preparing inside

@@ -832,7 +832,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		return fmt.Errorf("dynamic flow creation occurrence requires transactional event publisher")
 	}
 	creationCtx := events.WithDeliveryContext(ctx, plan.CreationEvent.DeliveryContext)
-	if err := am.workflowInstances.CommitDynamicFlowRuntimeCreationOccurrence(
+	if err := publisher.CommitDynamicFlowRuntimeCreationOccurrence(
 		creationCtx,
 		runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest{
 			RunID:        plan.RunID,
@@ -841,7 +841,6 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 			Event:        evt,
 			OccurredAt:   time.Now().UTC(),
 		},
-		publisher,
 	); err != nil {
 		fresh, found, loadErr := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
 		if loadErr == nil && (!found || !fresh.Eligible()) {

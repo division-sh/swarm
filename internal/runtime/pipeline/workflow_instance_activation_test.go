@@ -38,12 +38,6 @@ type concurrentWorkflowInitialMaterializationTestOwner struct {
 	effects int
 }
 
-type workflowCreationOccurrenceTestPublisher struct{}
-
-func (workflowCreationOccurrenceTestPublisher) PublishInMutation(context.Context, events.Event) error {
-	return nil
-}
-
 func (o *workflowInitialMaterializationTestOwner) ApplyWorkflowLifecycleEffects(_ context.Context, effects []runtimeworkflowlifecycle.Effect) error {
 	o.effects += len(effects)
 	return nil
@@ -429,21 +423,21 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				t.Fatalf("mark topology ready: %v", err)
 			}
 			creationEvent := workflowReadinessCreationEventForTest(t, plan)
-			if err := store.CommitDynamicFlowRuntimeCreationOccurrence(ctx, DynamicFlowRuntimeCreationOccurrenceRequest{
+			if err := (DynamicFlowRuntimeCreationOccurrenceRequest{
 				RunID:        runID,
 				InstancePath: instance.StorageRef,
 				Plan:         plan,
 				Event:        creationEvent,
 				OccurredAt:   readyAt.Add(time.Second),
-			}, workflowCreationOccurrenceTestPublisher{}); err != nil {
-				t.Fatalf("commit creation occurrence: %v", err)
+			}).Validate(); err != nil {
+				t.Fatalf("validate creation occurrence: %v", err)
 			}
 			items, err := store.ListDynamicFlowRuntimeReadiness(ctx)
 			if err != nil || len(items) != 1 {
 				t.Fatalf("list readiness: items=%#v err=%v", items, err)
 			}
-			if items[0].TopologyReadyAt.IsZero() || items[0].CreationEventEmittedAt.IsZero() {
-				t.Fatalf("completed readiness = %#v", items[0])
+			if items[0].TopologyReadyAt.IsZero() || !items[0].CreationEventEmittedAt.IsZero() {
+				t.Fatalf("topology-only readiness = %#v", items[0])
 			}
 			revisedSourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact(
 				"bundle-v1:sha256:" + strings.Repeat("c", 64),

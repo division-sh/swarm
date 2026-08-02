@@ -287,6 +287,7 @@ type flowActivationTestBus struct {
 	stageRoute         func(runtimebus.FlowInstanceRouteMaterializationRequest) error
 	publishErr         error
 	routeStore         flowActivationRouteStore
+	creationStore      *flowActivationTestInstanceStore
 }
 
 type flowActivationSemanticRouteBus struct {
@@ -447,6 +448,14 @@ func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersi
 		if testInstances, ok := instances.(*flowActivationTestInstanceStore); ok {
 			routes, _ := bus.(FlowInstanceRouteContextRemover)
 			terminalOwner = flowActivationTestTerminationOwner{instances: testInstances, routes: routes}
+		}
+	}
+	if testInstances, ok := instances.(*flowActivationTestInstanceStore); ok {
+		switch typed := bus.(type) {
+		case *flowActivationTestBus:
+			typed.creationStore = testInstances
+		case *flowActivationSemanticRouteBus:
+			typed.flowActivationTestBus.creationStore = testInstances
 		}
 	}
 	return newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
@@ -749,11 +758,14 @@ func (s *flowActivationTestInstanceStore) MarkDynamicFlowRuntimeTopologyReady(
 	return nil
 }
 
-func (s *flowActivationTestInstanceStore) CommitDynamicFlowRuntimeCreationOccurrence(
+func (b *flowActivationTestBus) CommitDynamicFlowRuntimeCreationOccurrence(
 	ctx context.Context,
 	req runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest,
-	publisher runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher,
 ) error {
+	s := b.creationStore
+	if s == nil {
+		return b.Publish(ctx, req.Event)
+	}
 	if s.beforeCreation != nil {
 		s.beforeCreation()
 	}
@@ -772,7 +784,7 @@ func (s *flowActivationTestInstanceStore) CommitDynamicFlowRuntimeCreationOccurr
 		s.readinessMu.Unlock()
 		return nil
 	}
-	if err := publisher.PublishInMutation(ctx, req.Event); err != nil {
+	if err := b.Publish(ctx, req.Event); err != nil {
 		s.readinessMu.Unlock()
 		return err
 	}

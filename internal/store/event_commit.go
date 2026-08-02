@@ -259,27 +259,49 @@ func commitPublication(
 	if err := command.Validate(); err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
-	if len(command.Activations) != 0 {
-		return runtimebus.CommittedPublication{}, fmt.Errorf("publication flow activation persistence is not configured")
-	}
+	_, postgres := store.(*PostgresStore)
 	request := command.Commit
 	request.DeliveryReceipt = nil
 	result := runtimebus.CommittedPublication{}
 	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		committer := sqlPublishCommitter{tx: tx, store: store, story: runtimeAuthorActivityMutation(story)}
+		creationAlreadyCommitted := false
+		var err error
+		if command.DynamicFlowCreation != nil {
+			creationAlreadyCommitted, err = prepareDynamicFlowCreationOccurrenceCommit(txctx, tx, postgres, *command.DynamicFlowCreation)
+			if err != nil {
+				return err
+			}
+		}
 		outcome, err := store.appendAdmittedEventTxOutcome(txctx, tx, committer.story, request.Event)
 		if err != nil {
 			return err
 		}
 		result.AppendOutcome = outcome
 		if outcome == runtimebus.EventAppendExactDuplicate {
+			if command.DynamicFlowCreation != nil && !creationAlreadyCommitted {
+				return fmt.Errorf("dynamic flow creation event exists before readiness completion")
+			}
 			return nil
 		}
 		if outcome != runtimebus.EventAppendInserted {
 			return fmt.Errorf("publication commit returned invalid append outcome")
 		}
+		if command.DynamicFlowCreation != nil && creationAlreadyCommitted {
+			return fmt.Errorf("dynamic flow readiness is complete without its creation event")
+		}
+		result.Activations, err = commitFlowInstanceActivations(txctx, tx, story, postgres, command.Activations)
+		if err != nil {
+			return err
+		}
 		result.DeliveryHandoffs, err = committer.commitInitialSideEffectEvidence(txctx, request, true)
-		return err
+		if err != nil {
+			return err
+		}
+		if command.DynamicFlowCreation != nil {
+			return markDynamicFlowCreationOccurrenceCommitted(txctx, tx, postgres, *command.DynamicFlowCreation)
+		}
+		return nil
 	})
 	if err != nil {
 		return runtimebus.CommittedPublication{}, err

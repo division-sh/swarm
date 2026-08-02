@@ -240,10 +240,6 @@ func (pc *PipelineCoordinator) MarkDynamicFlowRuntimeTopologyReady(ctx context.C
 	return pc.workflowStore.MarkDynamicFlowRuntimeTopologyReady(ctx, expected, readyAt)
 }
 
-func (pc *PipelineCoordinator) CommitDynamicFlowRuntimeCreationOccurrence(ctx context.Context, req DynamicFlowRuntimeCreationOccurrenceRequest, publisher DynamicFlowRuntimeCreationOccurrencePublisher) error {
-	return pc.workflowStore.CommitDynamicFlowRuntimeCreationOccurrence(ctx, req, publisher)
-}
-
 func (pc *PipelineCoordinator) MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, terminatedAt time.Time) error {
 	return pc.workflowStore.MarkTerminated(ctx, route, terminatedAt)
 }

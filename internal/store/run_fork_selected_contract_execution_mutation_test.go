@@ -10,13 +10,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -242,14 +242,14 @@ func TestLoadRunForkSelectedContractSourceEventsRestoresPersistedChronology(t *t
 		t.Fatalf("begin later event transaction: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
 	if err != nil {
 		t.Fatalf("begin later event story: %v", err)
 	}
-	if err := commitSemanticEventFixtureWithRoutesTx(storyctx, pg, tx, laterEvent, []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("test-node")}}); err != nil {
+	if err := commitSemanticEventFixtureWithRoutesStoryTx(ctx, pg, tx, story, laterEvent, []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("test-node")}}); err != nil {
 		t.Fatalf("seed later event and delivery: %v", err)
 	}
-	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
+	if err := story.Finalize(ctx); err != nil {
 		t.Fatalf("finalize later event story: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -2009,14 +2009,14 @@ func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourc
 		t.Fatalf("begin source fact transaction: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+	story, err := privateauthoractivity.Begin(ctx, tx, privateauthoractivity.DialectPostgres)
 	if err != nil {
 		t.Fatalf("begin source story transaction: %v", err)
 	}
-	if err := commitSemanticEventFixtureWithRoutesTx(storyctx, selected, tx, event, routes); err != nil {
+	if err := commitSemanticEventFixtureWithRoutesStoryTx(ctx, selected, tx, story, event, routes); err != nil {
 		t.Fatalf("seed source event and delivery obligations: %v", err)
 	}
-	if _, err := tx.ExecContext(storyctx, `
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
@@ -2026,7 +2026,7 @@ func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourc
 	`, sourceRunID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}
-	if _, err := tx.ExecContext(storyctx, `
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, name,
 			current_state, gates, fields, accumulator, revision,
@@ -2040,7 +2040,7 @@ func seedSelectedContractExecutionStoreSourceRaw(t *testing.T, db *sql.DB, sourc
 	`, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
-	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
+	if err := story.Finalize(ctx); err != nil {
 		t.Fatalf("finalize source story transaction: %v", err)
 	}
 	if err := tx.Commit(); err != nil {

@@ -2,11 +2,13 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
@@ -34,6 +36,127 @@ type FlowInstanceActivationPlan struct {
 	Readiness           DynamicFlowRuntimeReadinessPlan
 	ActivationVariables map[string]string
 	OccurredAt          time.Time
+}
+
+// FlowInstanceActivationRecord is the exact immutable persistence projection
+// for one planned activation. Runtime derives semantic facts; selected-store
+// adapters decide only how those facts are represented by their backend.
+type FlowInstanceActivationRecord struct {
+	RunID                  string
+	Route                  runtimeflowidentity.Route
+	EntityID               string
+	WorkflowName           string
+	WorkflowVersion        string
+	Mode                   string
+	CurrentState           string
+	EntityType             string
+	Slug                   string
+	Name                   string
+	Fields                 json.RawMessage
+	Gates                  json.RawMessage
+	Accumulator            json.RawMessage
+	Config                 json.RawMessage
+	InitialMaterialization json.RawMessage
+	Readiness              json.RawMessage
+	EnteredStageAt         time.Time
+	CreatedAt              time.Time
+}
+
+func (r FlowInstanceActivationRecord) Validate() error {
+	r.Route = runtimeflowidentity.StoredRoute(r.Route.ScopeKey, r.Route.InstanceID, r.Route.InstancePath)
+	if strings.TrimSpace(r.RunID) == "" || !r.Route.Valid() || strings.TrimSpace(r.EntityID) == "" {
+		return fmt.Errorf("flow instance activation record requires exact run, route, and entity identity")
+	}
+	if strings.TrimSpace(r.WorkflowName) == "" || strings.TrimSpace(r.WorkflowVersion) == "" || strings.TrimSpace(r.CurrentState) == "" {
+		return fmt.Errorf("flow instance activation record requires exact workflow and initial state")
+	}
+	if r.Mode != "template" {
+		return fmt.Errorf("flow instance activation record mode %q is unsupported", r.Mode)
+	}
+	for label, raw := range map[string]json.RawMessage{
+		"fields": r.Fields, "gates": r.Gates, "accumulator": r.Accumulator,
+		"config": r.Config, "initial materialization": r.InitialMaterialization,
+		"readiness": r.Readiness,
+	} {
+		if len(raw) == 0 || !json.Valid(raw) {
+			return fmt.Errorf("flow instance activation record %s must be valid JSON", label)
+		}
+	}
+	if r.EnteredStageAt.IsZero() || r.CreatedAt.IsZero() {
+		return fmt.Errorf("flow instance activation record requires exact persisted times")
+	}
+	return nil
+}
+
+// PersistenceRecord closes the planner/store boundary without exposing a
+// database handle, transaction, dialect, or callback to runtime code.
+func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationRecord, error) {
+	normalized, err := p.Normalized()
+	if err != nil {
+		return FlowInstanceActivationRecord{}, err
+	}
+	if err := normalized.Validate(); err != nil {
+		return FlowInstanceActivationRecord{}, err
+	}
+	instance, identity, ok, err := normalizeWorkflowInstanceForPersistence(normalized.Instance)
+	if err != nil {
+		return FlowInstanceActivationRecord{}, err
+	}
+	if !ok || identity.StorageRef != normalized.Identity.InstancePath || identity.RowID() != normalized.Identity.EntityID {
+		return FlowInstanceActivationRecord{}, fmt.Errorf("flow instance activation persistence identity disagrees with planned route")
+	}
+	projection, err := workflowInstancePersistedProjectionFromInstance(instance, identity.StorageRef)
+	if err != nil {
+		return FlowInstanceActivationRecord{}, err
+	}
+	fields, err := canonicaljson.Bytes(projection.Fields)
+	if err != nil {
+		return FlowInstanceActivationRecord{}, err
+	}
+	gates, err := canonicaljson.Bytes(projection.GatesAny())
+	if err != nil {
+		return FlowInstanceActivationRecord{}, err
+	}
+	accumulator, err := canonicaljson.Bytes(projection.Accumulator)
+	if err != nil {
+		return FlowInstanceActivationRecord{}, err
+	}
+	config, err := canonicaljson.Bytes(projection.ConfigPayload(instance.WorkflowVersion))
+	if err != nil {
+		return FlowInstanceActivationRecord{}, err
+	}
+	initial := workflowInitialMaterializationProjection{
+		Version:         workflowInitialMaterializationProjectionVersion,
+		RunID:           normalized.Readiness.RunID,
+		EntityID:        identity.RowID(),
+		FlowInstance:    identity.StorageRef,
+		WorkflowName:    instance.WorkflowName,
+		WorkflowVersion: instance.WorkflowVersion,
+		InitialState:    instance.CurrentState,
+		OccurredAt:      canonicalWorkflowInstancePersistedTime(normalized.OccurredAt),
+		Persisted:       projection,
+	}
+	initialJSON, err := canonicaljson.Bytes(initial)
+	if err != nil {
+		return FlowInstanceActivationRecord{}, err
+	}
+	readinessJSON, err := canonicaljson.Bytes(normalized.Readiness)
+	if err != nil {
+		return FlowInstanceActivationRecord{}, err
+	}
+	record := FlowInstanceActivationRecord{
+		RunID: normalized.Readiness.RunID, Route: normalized.Identity.Route(), EntityID: identity.RowID(),
+		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion, Mode: workflowInstanceMode(instance),
+		CurrentState: instance.CurrentState, EntityType: projection.Control.EntityType, Slug: projection.Control.Slug, Name: projection.Control.Name,
+		Fields: fields, Gates: gates, Accumulator: accumulator, Config: config,
+		InitialMaterialization: initialJSON, Readiness: readinessJSON,
+		EnteredStageAt: canonicalWorkflowInstancePersistedTime(instance.EnteredStageAt),
+		CreatedAt:      canonicalWorkflowInstancePersistedTime(instance.CreatedAt),
+	}
+	if err := record.Validate(); err != nil {
+		return FlowInstanceActivationRecord{}, err
+	}
+	return record, nil
 }
 
 func (p FlowInstanceActivationPlan) Normalized() (FlowInstanceActivationPlan, error) {
@@ -84,6 +207,13 @@ type FlowInstanceActivator func(context.Context, FlowInstanceActivationRequest) 
 
 type FlowInstanceActivationPlanner interface {
 	PrepareFlowInstanceActivation(context.Context, FlowInstanceActivationRequest) (FlowInstanceActivationPlan, error)
+}
+
+// CommittedFlowInstanceActivationFinalizer consumes only durable activation
+// evidence. It owns process-local topology installation and readiness retry;
+// persistence remains entirely inside the selected-store operation.
+type CommittedFlowInstanceActivationFinalizer interface {
+	FinalizeCommittedFlowInstanceActivation(context.Context, FlowInstanceActivationPlan) error
 }
 
 type FlowInstanceActivationPlannerFunc func(context.Context, FlowInstanceActivationRequest) (FlowInstanceActivationPlan, error)

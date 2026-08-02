@@ -3,7 +3,6 @@ package store_test
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -67,29 +66,6 @@ func (dynamicFlowCreationWorkflowModule) WorkflowNodes() []runtimepipeline.Workf
 func (dynamicFlowCreationWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry   { return nil }
 func (dynamicFlowCreationWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry { return nil }
 
-type blockingDynamicFlowCreationPublisher struct {
-	delegate runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher
-	entered  chan struct{}
-	release  chan struct{}
-}
-
-type failingAfterAppendDynamicFlowCreationPublisher struct {
-	delegate runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher
-}
-
-func (p *blockingDynamicFlowCreationPublisher) PublishInMutation(ctx context.Context, event events.Event) error {
-	close(p.entered)
-	<-p.release
-	return p.delegate.PublishInMutation(ctx, event)
-}
-
-func (p failingAfterAppendDynamicFlowCreationPublisher) PublishInMutation(ctx context.Context, event events.Event) error {
-	if err := p.delegate.PublishInMutation(ctx, event); err != nil {
-		return err
-	}
-	return errors.New("injected failure after creation event append")
-}
-
 func TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
@@ -102,37 +78,19 @@ func TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBoth
 					if err := fixture.workflow.MarkTerminated(fixture.ctx, fixture.plan.Identity.Route(), time.Now().UTC()); err != nil {
 						t.Fatalf("MarkTerminated: %v", err)
 					}
-					err := fixture.commit(fixture.bus)
+					err := fixture.commit()
 					if err == nil || !strings.Contains(err.Error(), "active eligible") {
 						t.Fatalf("creation after terminal error = %v, want active-run/instance refusal", err)
 					}
 				case "creation_wins":
-					publisher := &blockingDynamicFlowCreationPublisher{
-						delegate: fixture.bus,
-						entered:  make(chan struct{}),
-						release:  make(chan struct{}),
-					}
-					creationDone := make(chan error, 1)
-					go func() {
-						creationDone <- fixture.commit(publisher)
-					}()
-					<-publisher.entered
-					terminalStarted := make(chan struct{})
-					terminalDone := make(chan error, 1)
-					go func() {
-						close(terminalStarted)
-						terminalDone <- fixture.workflow.MarkTerminated(
-							fixture.ctx,
-							fixture.plan.Identity.Route(),
-							time.Now().UTC(),
-						)
-					}()
-					<-terminalStarted
-					close(publisher.release)
-					if err := <-creationDone; err != nil {
+					if err := fixture.commit(); err != nil {
 						t.Fatalf("commit creation occurrence: %v", err)
 					}
-					if err := <-terminalDone; err != nil {
+					if err := fixture.workflow.MarkTerminated(
+						fixture.ctx,
+						fixture.plan.Identity.Route(),
+						time.Now().UTC(),
+					); err != nil {
 						t.Fatalf("terminalize after creation commit: %v", err)
 					}
 				default:
@@ -148,9 +106,10 @@ func TestDynamicFlowRuntimeCreationOccurrenceRollsBackAppendedEventOnBothStores(
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newDynamicFlowCreationAtomicityFixture(t, backend)
-			err := fixture.commit(failingAfterAppendDynamicFlowCreationPublisher{delegate: fixture.bus})
-			if err == nil || !strings.Contains(err.Error(), "injected failure after creation event append") {
-				t.Fatalf("commit creation occurrence error = %v, want injected post-append failure", err)
+			fixture.rejectCreationMark(t)
+			err := fixture.commit()
+			if err == nil {
+				t.Fatal("commit creation occurrence succeeded across injected completion-mark failure")
 			}
 			fixture.assertOccurrenceCounts(t, 0)
 		})
@@ -326,11 +285,33 @@ func dynamicFlowCreationAtomicityEvent(plan runtimepipeline.DynamicFlowRuntimeRe
 	), nil
 }
 
-func (f dynamicFlowCreationAtomicityFixture) commit(publisher runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher) error {
-	return f.workflow.CommitDynamicFlowRuntimeCreationOccurrence(f.ctx, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest{
+func (f dynamicFlowCreationAtomicityFixture) commit() error {
+	return f.bus.CommitDynamicFlowRuntimeCreationOccurrence(f.ctx, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest{
 		RunID: f.runID, InstancePath: f.plan.Identity.InstancePath, Plan: f.plan,
 		Event: f.event, OccurredAt: time.Now().UTC(),
-	}, publisher)
+	})
+}
+
+func (f dynamicFlowCreationAtomicityFixture) rejectCreationMark(t *testing.T) {
+	t.Helper()
+	statement := `
+		CREATE TRIGGER reject_dynamic_flow_creation_mark
+		BEFORE UPDATE OF creation_event_emitted_at ON flow_instance_runtime_readiness
+		WHEN NEW.creation_event_emitted_at IS NOT NULL
+		BEGIN
+			SELECT RAISE(ABORT, 'injected dynamic flow creation mark failure');
+		END
+	`
+	if !f.sqlite {
+		statement = `
+			ALTER TABLE flow_instance_runtime_readiness
+			ADD CONSTRAINT reject_dynamic_flow_creation_mark
+			CHECK (creation_event_emitted_at IS NULL)
+		`
+	}
+	if _, err := f.db.ExecContext(context.Background(), statement); err != nil {
+		t.Fatalf("install dynamic flow creation mark failure: %v", err)
+	}
 }
 
 func (f dynamicFlowCreationAtomicityFixture) assertResult(t *testing.T, creationWon bool) {

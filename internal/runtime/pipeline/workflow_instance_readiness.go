@@ -38,16 +38,43 @@ type DynamicFlowRuntimeCreationEventPlan struct {
 	DeliveryContext events.DeliveryContext `json:"delivery_context,omitempty"`
 }
 
-type DynamicFlowRuntimeCreationOccurrencePublisher interface {
-	PublishInMutation(context.Context, events.Event) error
-}
-
 type DynamicFlowRuntimeCreationOccurrenceRequest struct {
 	RunID        string
 	InstancePath string
 	Plan         DynamicFlowRuntimeReadinessPlan
 	Event        events.Event
 	OccurredAt   time.Time
+}
+
+func (r DynamicFlowRuntimeCreationOccurrenceRequest) Validate() error {
+	r.RunID = strings.TrimSpace(r.RunID)
+	r.InstancePath = strings.Trim(strings.TrimSpace(r.InstancePath), "/")
+	if _, err := uuid.Parse(r.RunID); err != nil {
+		return fmt.Errorf("dynamic flow runtime creation occurrence requires valid run_id: %w", err)
+	}
+	if r.InstancePath == "" || r.OccurredAt.IsZero() {
+		return fmt.Errorf("dynamic flow runtime creation occurrence requires exact instance and time")
+	}
+	expected, err := r.Plan.Normalized()
+	if err != nil {
+		return fmt.Errorf("normalize dynamic flow runtime creation occurrence plan: %w", err)
+	}
+	if expected.RunID != r.RunID || expected.Identity.InstancePath != r.InstancePath {
+		return fmt.Errorf("dynamic flow runtime creation occurrence identity does not match readiness plan")
+	}
+	if expected.CreationEvent == nil {
+		return fmt.Errorf("dynamic flow runtime creation occurrence plan is missing creation event")
+	}
+	if strings.TrimSpace(r.Event.ID()) != expected.CreationEvent.EventID ||
+		strings.TrimSpace(string(r.Event.Type())) != expected.CreationEvent.EventType ||
+		strings.TrimSpace(r.Event.RunID()) != r.RunID {
+		return fmt.Errorf("dynamic flow runtime creation occurrence event does not match readiness plan")
+	}
+	return nil
+}
+
+type DynamicFlowRuntimeCreationOccurrencePublisher interface {
+	CommitDynamicFlowRuntimeCreationOccurrence(context.Context, DynamicFlowRuntimeCreationOccurrenceRequest) error
 }
 
 // DynamicFlowRuntimeReadinessPlan is the durable desired topology and
@@ -668,80 +695,6 @@ func (s *workflowInstanceStore) MarkDynamicFlowRuntimeTopologyReady(
 		expectedJSON,
 		readyAt,
 	)
-}
-
-func (s *workflowInstanceStore) CommitDynamicFlowRuntimeCreationOccurrence(
-	ctx context.Context,
-	req DynamicFlowRuntimeCreationOccurrenceRequest,
-	publisher DynamicFlowRuntimeCreationOccurrencePublisher,
-) error {
-	if s == nil || s.db == nil {
-		return fmt.Errorf("workflow instance store is required")
-	}
-	if publisher == nil {
-		return fmt.Errorf("dynamic flow runtime creation occurrence publisher is required")
-	}
-	runID := strings.TrimSpace(req.RunID)
-	instancePath := strings.Trim(strings.TrimSpace(req.InstancePath), "/")
-	occurredAt := req.OccurredAt.UTC()
-	if _, err := uuid.Parse(runID); err != nil {
-		return fmt.Errorf("dynamic flow runtime creation occurrence requires valid run_id: %w", err)
-	}
-	if instancePath == "" || occurredAt.IsZero() {
-		return fmt.Errorf("dynamic flow runtime creation occurrence requires exact instance and time")
-	}
-	expected, err := req.Plan.Normalized()
-	if err != nil {
-		return fmt.Errorf("normalize dynamic flow runtime creation occurrence plan: %w", err)
-	}
-	if expected.RunID != runID || expected.Identity.InstancePath != instancePath {
-		return fmt.Errorf("dynamic flow runtime creation occurrence identity does not match readiness plan")
-	}
-	if expected.CreationEvent == nil {
-		return fmt.Errorf("dynamic flow runtime creation occurrence plan is missing creation event")
-	}
-	if strings.TrimSpace(req.Event.ID()) != expected.CreationEvent.EventID ||
-		strings.TrimSpace(string(req.Event.Type())) != expected.CreationEvent.EventType ||
-		strings.TrimSpace(req.Event.RunID()) != runID {
-		return fmt.Errorf("dynamic flow runtime creation occurrence event does not match readiness plan")
-	}
-
-	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := s.lockDynamicFlowRuntimeCreationEligibility(txctx, tx, runID, instancePath); err != nil {
-			return err
-		}
-		current, found, err := s.LoadDynamicFlowRuntimeReadiness(txctx, runID, runtimeflowidentity.RouteForInstancePath(instancePath))
-		if err != nil {
-			return err
-		}
-		if !found || !current.Eligible() {
-			return fmt.Errorf("dynamic flow runtime creation occurrence requires one active eligible record: %s", instancePath)
-		}
-		if current.TopologyReadyAt.IsZero() {
-			return fmt.Errorf("dynamic flow runtime creation occurrence requires topology readiness: %s", instancePath)
-		}
-		actualJSON, err := canonicaljson.Bytes(current.Plan)
-		if err != nil {
-			return fmt.Errorf("encode persisted dynamic flow runtime readiness %s: %w", instancePath, err)
-		}
-		expectedJSON, err := canonicaljson.Bytes(expected)
-		if err != nil {
-			return fmt.Errorf("encode expected dynamic flow runtime readiness %s: %w", instancePath, err)
-		}
-		if string(actualJSON) != string(expectedJSON) {
-			return fmt.Errorf("dynamic flow runtime creation occurrence readiness plan changed for %s", instancePath)
-		}
-		if !current.CreationEventEmittedAt.IsZero() {
-			return nil
-		}
-		if err := publisher.PublishInMutation(txctx, req.Event); err != nil {
-			return fmt.Errorf("append dynamic flow runtime creation occurrence: %w", err)
-		}
-		if err := s.markDynamicFlowRuntimeReadiness(txctx, runID, instancePath, "creation_event_emitted_at", nil, occurredAt); err != nil {
-			return fmt.Errorf("mark dynamic flow runtime creation occurrence complete: %w", err)
-		}
-		return nil
-	})
 }
 
 func (s *workflowInstanceStore) lockDynamicFlowRuntimeCreationEligibility(
