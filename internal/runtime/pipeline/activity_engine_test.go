@@ -1572,7 +1572,7 @@ func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *t
 	runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 	runner := &activityCommitAckLossRunner{db: db}
 	store := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
-	activation, entityID := seedLoopActivityInstance(t, store, ctx, "review")
+	activation, flowInstance, entityID := seedLoopActivityInstance(t, store, ctx, "review")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
@@ -1585,6 +1585,7 @@ func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *t
 	bus := &recordingPipelineBus{}
 	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{}})
 	intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), entityID)
+	intent.FlowInstance = flowInstance
 	intent.Generation, intent.LoopStage = activation.Generation(), activation.CurrentStage
 	runner.failNext.Store(true)
 	if err := (pipelineActivityDispatcher{coordinator: pc}).executeActivityIntent(ctx, intent); err != nil {

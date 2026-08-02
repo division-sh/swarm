@@ -604,6 +604,7 @@ func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (Workflo
 	instance.InstanceID = identity.InstanceID
 	instance.Metadata["storage_ref"] = identity.StorageRef
 	instance.Metadata["instance_id"] = identity.InstanceID
+	instance.Metadata["entity_id"] = identity.EntityID
 	if identity.HasStoredPath && identity.InstancePath != "" {
 		instance.Metadata["flow_path"] = identity.InstancePath
 	} else {
@@ -661,16 +662,21 @@ func (s *workflowInstanceStore) mutateE(ctx context.Context, route runtimeflowid
 	})
 }
 
-func (s *workflowInstanceStore) MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error {
+func (s *workflowInstanceStore) MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, terminatedAt time.Time) error {
 	if s == nil || s.db == nil {
 		return nil
 	}
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	if !route.Valid() {
+		return fmt.Errorf("workflow instance termination requires an exact route")
+	}
+	storageRef := route.InstancePath
 	if s.decisionCards != nil {
 		return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			if _, err := s.requireActiveWorkflowRun(txctx, tx); err != nil {
 				return err
 			}
-			if err := s.mutateE(txctx, runtimeflowidentity.RouteForInstancePath(storageRef), func(instance *WorkflowInstance) error {
+			if err := s.mutateE(txctx, route, func(instance *WorkflowInstance) error {
 				return s.supersedeWorkflowInstanceGates(txctx, instance, "flow_terminated", terminatedAt)
 			}); err != nil {
 				return err
@@ -1805,6 +1811,9 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 	if err != nil {
 		return nil, workflowInstancePersistedControl{}, err
 	}
+	if _, declared := config["flow_path"]; declared && strings.Trim(strings.TrimSpace(flowPath), "/") == "" {
+		return nil, workflowInstancePersistedControl{}, fmt.Errorf("flow_instances.config flow_path must name an exact instance route when declared")
+	}
 	configStorageRef, err := workflowInstanceOptionalString(config, "storage_ref")
 	if err != nil {
 		return nil, workflowInstancePersistedControl{}, err
@@ -1853,7 +1862,7 @@ func decodeWorkflowInstanceConfigPayload(raw []byte, control workflowInstancePer
 	delete(config, "parent_entity_id")
 	delete(config, "transition_history")
 	control.InstanceID = strings.TrimSpace(instanceID)
-	control.FlowPath = strings.TrimSpace(flowPath)
+	control.FlowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
 	if strings.TrimSpace(control.StorageRef) == "" {
 		control.StorageRef = strings.TrimSpace(configStorageRef)
 	}

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -40,13 +39,60 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
+	runtimeworkflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
 type flowActivationTestRunLifecycleOwner struct {
 	runtimerunlifecycle.OperationOwner
 	db *sql.DB
+}
+
+func (flowActivationTestRunLifecycleOwner) RequireActiveRun(ctx context.Context, runID string) error {
+	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil {
+		return errors.New("flow activation lifecycle transaction is required")
+	}
+	var state string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, strings.TrimSpace(runID)).Scan(&state); err != nil {
+		return err
+	}
+	if strings.TrimSpace(state) != "running" && strings.TrimSpace(state) != "paused" {
+		return fmt.Errorf("flow activation run %s is not active", strings.TrimSpace(runID))
+	}
+	return nil
+}
+
+func (flowActivationTestRunLifecycleOwner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil {
+		return runtimecorrelation.BundleSourceFact{}, errors.New("flow activation lifecycle transaction is required")
+	}
+	var state, bundleHash, bundleSource string
+	if err := tx.QueryRowContext(ctx, `SELECT status, bundle_hash, bundle_source FROM runs WHERE run_id = $1::uuid`, strings.TrimSpace(runID)).Scan(&state, &bundleHash, &bundleSource); err != nil {
+		return runtimecorrelation.BundleSourceFact{}, err
+	}
+	if strings.TrimSpace(state) != "running" && strings.TrimSpace(state) != "paused" {
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("flow activation run %s is not active", strings.TrimSpace(runID))
+	}
+	return runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+}
+
+func (o flowActivationTestRunLifecycleOwner) LoadActiveWorkflowRoute(ctx context.Context, instancePath string) (runtimeworkflowroute.RecoveryRecord, error) {
+	if o.db == nil {
+		return runtimeworkflowroute.RecoveryRecord{}, errors.New("flow activation route recovery store is required")
+	}
+	var record runtimeworkflowroute.RecoveryRecord
+	if err := o.db.QueryRowContext(ctx, `
+		SELECT flow_template, config
+		FROM flow_instances
+		WHERE instance_id = $1 AND status = 'active' AND terminated_at IS NULL
+	`, strings.Trim(strings.TrimSpace(instancePath), "/")).Scan(&record.WorkflowName, &record.Config); err != nil {
+		return runtimeworkflowroute.RecoveryRecord{}, err
+	}
+	return record, nil
 }
 
 type unavailableFlowActivationDeliveryStore struct{ runtimedelivery.Store }
@@ -394,9 +440,10 @@ func (o flowActivationTestTerminationOwner) CommitFlowInstanceTermination(ctx co
 	if o.instances == nil || o.routes == nil {
 		return runtimepipeline.FlowInstanceTermination{}, errors.New("flow activation test termination owner is incomplete")
 	}
-	storageRef := strings.TrimSpace(req.StorageRef)
-	if storageRef == "" || strings.TrimSpace(req.RunID) == "" {
-		return runtimepipeline.FlowInstanceTermination{}, errors.New("flow activation test termination requires storage_ref and run_id")
+	route := runtimeflowidentity.StoredRoute(req.Route.ScopeKey, req.Route.InstanceID, req.Route.InstancePath)
+	storageRef := strings.TrimSpace(route.InstancePath)
+	if !route.Valid() || strings.TrimSpace(req.RunID) == "" {
+		return runtimepipeline.FlowInstanceTermination{}, errors.New("flow activation test termination requires an exact route and run_id")
 	}
 	priorInstance, found, err := o.instances.Load(ctx, runtimeflowidentity.RouteForInstancePath(storageRef))
 	if err != nil || !found {
@@ -418,7 +465,7 @@ func (o flowActivationTestTerminationOwner) CommitFlowInstanceTermination(ctx co
 		o.instances.readiness = priorReadiness
 		o.instances.readinessMu.Unlock()
 	}
-	if err := o.instances.MarkTerminated(ctx, storageRef, req.TerminatedAt); err != nil {
+	if err := o.instances.MarkTerminated(ctx, route, req.TerminatedAt); err != nil {
 		return runtimepipeline.FlowInstanceTermination{}, err
 	}
 	instance, found, err := o.instances.Load(ctx, runtimeflowidentity.RouteForInstancePath(storageRef))
@@ -426,16 +473,16 @@ func (o flowActivationTestTerminationOwner) CommitFlowInstanceTermination(ctx co
 		rollback()
 		return runtimepipeline.FlowInstanceTermination{}, errors.Join(err, fmt.Errorf("canonical terminal flow instance %s was not persisted", storageRef))
 	}
-	route := runtimeflowidentity.StoredRoute("", "", instance.StorageRef)
-	if !route.Valid() {
+	canonicalRoute := runtimeflowidentity.StoredRoute("", "", instance.StorageRef)
+	if !canonicalRoute.Valid() {
 		rollback()
 		return runtimepipeline.FlowInstanceTermination{}, fmt.Errorf("derive canonical route identity for flow path %s", instance.StorageRef)
 	}
-	if err := o.routes.RemoveFlowInstanceRouteContext(ctx, route); err != nil {
+	if err := o.routes.RemoveFlowInstanceRouteContext(ctx, canonicalRoute); err != nil {
 		rollback()
 		return runtimepipeline.FlowInstanceTermination{}, err
 	}
-	return runtimepipeline.FlowInstanceTermination{Instance: instance, Route: route}, nil
+	return runtimepipeline.FlowInstanceTermination{Instance: instance, Route: canonicalRoute}, nil
 }
 
 func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersistence, stores ...ManagerPersistence) *AgentManager {
@@ -613,7 +660,7 @@ func flowActivationReadinessKey(runID, instanceID string) string {
 	return strings.TrimSpace(runID) + "\x00" + strings.TrimSpace(instanceID)
 }
 
-func (s *flowActivationTestInstanceStore) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID, instanceID string) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error) {
+func (s *flowActivationTestInstanceStore) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error) {
 	if s.respectReadinessContext {
 		if err := ctx.Err(); err != nil {
 			return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, err
@@ -626,7 +673,7 @@ func (s *flowActivationTestInstanceStore) LoadDynamicFlowRuntimeReadiness(ctx co
 	}
 	s.readinessMu.Lock()
 	defer s.readinessMu.Unlock()
-	item, ok := s.readiness[flowActivationReadinessKey(runID, instanceID)]
+	item, ok := s.readiness[flowActivationReadinessKey(runID, route.InstancePath)]
 	return item, ok, nil
 }
 
@@ -803,7 +850,8 @@ func (s *flowActivationTestInstanceStore) storeInstance(instance runtimepipeline
 	}
 }
 
-func (s *flowActivationTestInstanceStore) MarkTerminated(_ context.Context, storageRef string, terminatedAt time.Time) error {
+func (s *flowActivationTestInstanceStore) MarkTerminated(_ context.Context, route runtimeflowidentity.Route, terminatedAt time.Time) error {
+	storageRef := route.InstancePath
 	s.terminatedPaths = append(s.terminatedPaths, strings.TrimSpace(storageRef))
 	s.terminatedAtSeen = append(s.terminatedAtSeen, terminatedAt)
 	if s.byStorageRef != nil {
@@ -1725,7 +1773,7 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 					t.Fatal("initial timers were not armed after readiness recovery")
 				}
 				recoveryCtx := testAuthorActivityContext(context.Background())
-				readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(recoveryCtx, req.TriggerEvent.RunID(), req.Instance.InstancePath)
+				readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(recoveryCtx, req.TriggerEvent.RunID(), req.Instance.Route())
 				if err != nil || !found || readiness.TopologyReadyAt.IsZero() || readiness.CreationEventEmittedAt.IsZero() {
 					t.Fatalf("completed readiness: found=%v readiness=%#v err=%v", found, readiness, err)
 				}
@@ -1785,7 +1833,7 @@ func TestDynamicFlowRuntimeReadinessAutomaticRetryCompletesWithoutEnsureOrRestar
 	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(
 		context.Background(),
 		req.TriggerEvent.RunID(),
-		req.Instance.InstancePath,
+		req.Instance.Route(),
 	)
 	if err != nil || !found || readiness.TopologyReadyAt.IsZero() || readiness.CreationEventEmittedAt.IsZero() {
 		t.Fatalf("automatic retry readiness: found=%v readiness=%#v err=%v", found, readiness, err)
@@ -1831,7 +1879,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing
 	readiness, found, loadErr := instances.LoadDynamicFlowRuntimeReadiness(
 		context.Background(),
 		req.TriggerEvent.RunID(),
-		req.Instance.InstancePath,
+		req.Instance.Route(),
 	)
 	if loadErr != nil || !found {
 		t.Fatalf("load concurrently revised readiness: found=%v err=%v", found, loadErr)
@@ -1877,7 +1925,7 @@ func TestDynamicFlowRuntimeReadinessRejectsRevisionAfterAdmissionBeforeExecution
 	current, found, err := instances.LoadDynamicFlowRuntimeReadiness(
 		ctx,
 		req.TriggerEvent.RunID(),
-		req.Instance.InstancePath,
+		req.Instance.Route(),
 	)
 	if err != nil || !found {
 		t.Fatalf("load admitted readiness: found=%v err=%v", found, err)
@@ -1927,7 +1975,7 @@ func TestDynamicFlowRuntimeReadinessRejectsCurrentFactWithOldSemanticSource(t *t
 	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(
 		ctx,
 		req.TriggerEvent.RunID(),
-		req.Instance.InstancePath,
+		req.Instance.Route(),
 	)
 	if err != nil || !found {
 		t.Fatalf("load current readiness: found=%v err=%v", found, err)
@@ -2156,7 +2204,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	readiness, found, loadErr := instances.LoadDynamicFlowRuntimeReadiness(
 		context.Background(),
 		req.TriggerEvent.RunID(),
-		req.Instance.InstancePath,
+		req.Instance.Route(),
 	)
 	if loadErr != nil || !found {
 		t.Fatalf("load post-CAS revised readiness: found=%v err=%v", found, loadErr)
@@ -2192,7 +2240,7 @@ func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(
 	initial, found, err := instances.LoadDynamicFlowRuntimeReadiness(
 		initialCtx,
 		req.TriggerEvent.RunID(),
-		req.Instance.InstancePath,
+		req.Instance.Route(),
 	)
 	if err != nil || !found || initial.TopologyReadyAt.IsZero() {
 		t.Fatalf("initial readiness: found=%v err=%v readiness=%#v", found, err, initial)
@@ -2225,7 +2273,7 @@ func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(
 	pending, found, err := instances.LoadDynamicFlowRuntimeReadiness(
 		revisedCtx,
 		req.TriggerEvent.RunID(),
-		req.Instance.InstancePath,
+		req.Instance.Route(),
 	)
 	if err != nil || !found {
 		t.Fatalf("load pending revised source: found=%v err=%v", found, err)
@@ -2243,7 +2291,7 @@ func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(
 	completed, found, err := instances.LoadDynamicFlowRuntimeReadiness(
 		revisedCtx,
 		req.TriggerEvent.RunID(),
-		req.Instance.InstancePath,
+		req.Instance.Route(),
 	)
 	if err != nil || !found {
 		t.Fatalf("load completed revised source: found=%v err=%v", found, err)
@@ -2287,7 +2335,7 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 	initial, found, err := instances.LoadDynamicFlowRuntimeReadiness(
 		ctxA,
 		reqA.TriggerEvent.RunID(),
-		reqA.Instance.InstancePath,
+		reqA.Instance.Route(),
 	)
 	if err != nil || !found || initial.TopologyReadyAt.IsZero() {
 		t.Fatalf("source A readiness: found=%v err=%v readiness=%#v", found, err, initial)
@@ -2354,7 +2402,7 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 	revised, found, err := instances.LoadDynamicFlowRuntimeReadiness(
 		ctxB,
 		reqB.TriggerEvent.RunID(),
-		reqB.Instance.InstancePath,
+		reqB.Instance.Route(),
 	)
 	if err != nil || !found || revised.TopologyReadyAt.IsZero() {
 		t.Fatalf("source B readiness: found=%v err=%v readiness=%#v", found, err, revised)
@@ -2413,7 +2461,7 @@ func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureRemainsPendingUntilAutom
 	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(
 		context.Background(),
 		req.TriggerEvent.RunID(),
-		req.Instance.InstancePath,
+		req.Instance.Route(),
 	)
 	if err != nil || !found || !readiness.Pending() || !readiness.TopologyReadyAt.IsZero() {
 		t.Fatalf("failed no-auto readiness: found=%v readiness=%#v err=%v", found, readiness, err)
@@ -2433,7 +2481,7 @@ func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureRemainsPendingUntilAutom
 	readiness, found, err = instances.LoadDynamicFlowRuntimeReadiness(
 		context.Background(),
 		req.TriggerEvent.RunID(),
-		req.Instance.InstancePath,
+		req.Instance.Route(),
 	)
 	if err != nil || !found || readiness.Pending() || readiness.TopologyReadyAt.IsZero() {
 		t.Fatalf("completed no-auto readiness: found=%v readiness=%#v err=%v", found, readiness, err)
@@ -2537,7 +2585,7 @@ func TestDynamicFlowRuntimeReadinessTerminalRaceRetiresProcessRoute(t *testing.T
 		)
 	}()
 	<-stageEntered
-	if err := instances.MarkTerminated(context.Background(), req.Instance.InstancePath, time.Now().UTC()); err != nil {
+	if err := instances.MarkTerminated(context.Background(), req.Instance.Route(), time.Now().UTC()); err != nil {
 		t.Fatalf("MarkTerminated: %v", err)
 	}
 	close(stageRelease)
@@ -2568,7 +2616,7 @@ func TestDynamicFlowRuntimeReadinessTerminalBeforeCreationCommitRetiresMateriali
 	instances.creationMarkErr = nil
 	instances.beforeCreation = func() {
 		instances.beforeCreation = nil
-		if err := instances.MarkTerminated(context.Background(), req.Instance.InstancePath, time.Now().UTC()); err != nil {
+		if err := instances.MarkTerminated(context.Background(), req.Instance.Route(), time.Now().UTC()); err != nil {
 			t.Fatalf("terminalize at creation boundary: %v", err)
 		}
 	}
@@ -2816,7 +2864,7 @@ func TestEnsureFlowInstanceReconcilesRevisedSemanticSourceIntoReadinessOwner(t *
 	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(
 		ctx,
 		revisedReq.TriggerEvent.RunID(),
-		revisedReq.Instance.InstancePath,
+		revisedReq.Instance.Route(),
 	)
 	if err != nil || !found {
 		t.Fatalf("load revised readiness: found=%v err=%v", found, err)

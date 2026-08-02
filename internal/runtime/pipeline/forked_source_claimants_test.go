@@ -80,11 +80,18 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndSelectorsExclude(t *testi
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedPipelineBackend(t, backend)
-			storageRef := "freeze/" + uuid.NewString()
+			instanceID := uuid.NewString()
+			storageRef := "freeze/" + instanceID
+			entityID := uuid.NewString()
 			instance := WorkflowInstance{
-				InstanceID: uuid.NewString(), StorageRef: storageRef, WorkflowName: "freeze", WorkflowVersion: "1",
+				InstanceID: instanceID, StorageRef: storageRef, WorkflowName: "freeze", WorkflowVersion: "1",
 				CurrentState: "active", EnteredStageAt: fixture.frozenAt.Add(-time.Minute),
-				Metadata: map[string]any{"marker": "source"},
+				Metadata: map[string]any{
+					"marker":      "source",
+					"flow_path":   storageRef,
+					"instance_id": instanceID,
+					"entity_id":   entityID,
+				},
 			}
 			if err := fixture.store.create(fixture.ctx, instance); err != nil {
 				t.Fatal(err)
@@ -99,14 +106,17 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndSelectorsExclude(t *testi
 			late.CurrentState = "changed"
 			requireForkedPipelineRefusal(t, "upsert workflow", fixture.store.upsert(fixture.ctx, late))
 			late.InstanceID = uuid.NewString()
-			late.StorageRef = "freeze/" + uuid.NewString()
+			late.StorageRef = "freeze/" + late.InstanceID
+			late.Metadata = cloneStringAnyMap(late.Metadata)
+			late.Metadata["flow_path"] = late.StorageRef
+			late.Metadata["instance_id"] = late.InstanceID
 			requireForkedPipelineRefusal(t, "create workflow", fixture.store.create(fixture.ctx, late))
 			requireForkedPipelineRefusal(t, "mutate workflow", fixture.store.mutate(fixture.ctx, testWorkflowInstanceRoute(storageRef), func(item *WorkflowInstance) { item.CurrentState = "changed" }))
 			requireForkedPipelineRefusal(t, "mutate workflow with error", fixture.store.mutateE(fixture.ctx, testWorkflowInstanceRoute(storageRef), func(item *WorkflowInstance) error {
 				item.CurrentState = "changed"
 				return nil
 			}))
-			requireForkedPipelineRefusal(t, "terminate workflow", fixture.store.MarkTerminated(fixture.ctx, storageRef, fixture.frozenAt))
+			requireForkedPipelineRefusal(t, "terminate workflow", fixture.store.MarkTerminated(fixture.ctx, testWorkflowInstanceRoute(storageRef), fixture.frozenAt))
 
 			after, err := fixture.store.selectActiveByFieldsExported(fixture.ctx, "freeze", []WorkflowInstanceFieldSelector{{Field: "marker", Value: "source"}}, nil)
 			if err != nil || len(after) != 0 {

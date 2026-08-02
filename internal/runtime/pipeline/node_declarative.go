@@ -361,7 +361,9 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if hasSelectedState && strings.TrimSpace(selectedState.EntityID) != "" && strings.TrimSpace(currentState.EntityID) == "" {
 		currentState = selectedState
 	}
-	prepareHandlerMaterializationState(source, flowID, handler, &currentState)
+	if err := prepareHandlerMaterializationState(source, flowID, handler, stateRoute, entityID, &currentState); err != nil {
+		return nil, err
+	}
 	exec := e.executor
 	node := e.node
 	var (
@@ -529,14 +531,33 @@ func handlerMaterializesEntity(source semanticview.Source, flowID string, handle
 	return false
 }
 
-func prepareHandlerMaterializationState(source semanticview.Source, flowID string, handler SystemNodeEventHandler, state *WorkflowState) {
+func prepareHandlerMaterializationState(source semanticview.Source, flowID string, handler SystemNodeEventHandler, route runtimeflowidentity.Route, entityID string, state *WorkflowState) error {
 	if state == nil || !handlerMaterializesEntity(source, flowID, handler) {
-		return
+		return nil
+	}
+	if !route.Valid() {
+		return fmt.Errorf("materializing handler requires an exact workflow instance route")
 	}
 	state.Metadata = workflowMaterializeEntityMetadata(source, flowID, state.Metadata)
+	if state.Metadata == nil {
+		state.Metadata = map[string]any{}
+	}
+	exactFacts := map[string]string{
+		"flow_path":   route.InstancePath,
+		"instance_id": route.InstanceID,
+		"entity_id":   strings.TrimSpace(entityID),
+	}
+	for key, value := range exactFacts {
+		if existing := strings.TrimSpace(asString(state.Metadata[key])); existing != "" && existing != value {
+			return fmt.Errorf("materializing handler %s %q disagrees with exact value %q", key, existing, value)
+		}
+		state.Metadata[key] = value
+	}
+	state.EntityID = strings.TrimSpace(entityID)
 	if strings.TrimSpace(string(state.Stage)) == "" {
 		state.Stage = NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID))
 	}
+	return nil
 }
 
 func handlerActionMaterializesEntity(handler SystemNodeEventHandler) bool {

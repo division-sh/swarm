@@ -303,7 +303,7 @@ func (s *workflowInstanceStore) dynamicFlowRuntimeReadinessPlanEqual(
 	if runID == "" {
 		return false, fmt.Errorf("dynamic flow runtime readiness comparison requires run_id")
 	}
-	actual, found, err := s.LoadDynamicFlowRuntimeReadiness(ctx, runID, instancePath)
+	actual, found, err := s.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(instancePath))
 	if err != nil {
 		return false, err
 	}
@@ -360,7 +360,7 @@ func (s *workflowInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(
 		if err := s.lockDynamicFlowRuntimeCreationEligibility(txctx, tx, normalized.RunID, instancePath); err != nil {
 			return err
 		}
-		current, found, err := s.LoadDynamicFlowRuntimeReadiness(txctx, normalized.RunID, instancePath)
+		current, found, err := s.LoadDynamicFlowRuntimeReadiness(txctx, normalized.RunID, runtimeflowidentity.RouteForInstancePath(instancePath))
 		if err != nil {
 			return err
 		}
@@ -446,19 +446,20 @@ func (s *workflowInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(
 func (s *workflowInstanceStore) LoadDynamicFlowRuntimeReadiness(
 	ctx context.Context,
 	runID string,
-	instancePath string,
+	route runtimeflowidentity.Route,
 ) (DynamicFlowRuntimeReadiness, bool, error) {
 	if s == nil || s.db == nil {
 		return DynamicFlowRuntimeReadiness{}, false, fmt.Errorf("workflow instance store is required")
 	}
 	runID = strings.TrimSpace(runID)
-	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
 	if _, err := uuid.Parse(runID); err != nil {
 		return DynamicFlowRuntimeReadiness{}, false, fmt.Errorf("dynamic flow runtime readiness requires valid run_id: %w", err)
 	}
-	if instancePath == "" {
-		return DynamicFlowRuntimeReadiness{}, false, fmt.Errorf("dynamic flow runtime readiness requires instance path")
+	if !route.Valid() {
+		return DynamicFlowRuntimeReadiness{}, false, fmt.Errorf("dynamic flow runtime readiness requires an exact instance route")
 	}
+	instancePath := route.InstancePath
 	query := `
 		SELECT readiness.plan, readiness.topology_ready_at, readiness.creation_event_emitted_at,
 		       run.status, instance.status, instance.terminated_at
@@ -709,7 +710,7 @@ func (s *workflowInstanceStore) CommitDynamicFlowRuntimeCreationOccurrence(
 		if err := s.lockDynamicFlowRuntimeCreationEligibility(txctx, tx, runID, instancePath); err != nil {
 			return err
 		}
-		current, found, err := s.LoadDynamicFlowRuntimeReadiness(txctx, runID, instancePath)
+		current, found, err := s.LoadDynamicFlowRuntimeReadiness(txctx, runID, runtimeflowidentity.RouteForInstancePath(instancePath))
 		if err != nil {
 			return err
 		}

@@ -31,12 +31,12 @@ type flowInstancePersistence interface {
 	ReconcileInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error
 	RetireInitialEntryTimerWakeups(ctx context.Context, route runtimeflowidentity.Route) error
 	ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, plan runtimepipeline.DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error)
-	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID, instanceID string) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
+	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
 	ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
 	ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadinessKey, error)
 	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error
 	CommitDynamicFlowRuntimeCreationOccurrence(context.Context, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest, runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher) error
-	MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error
+	MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, terminatedAt time.Time) error
 	Load(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error)
 	LoadRouteRecoveryProjection(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
 }
@@ -728,7 +728,7 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 	}
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 	termination, err := owner.CommitFlowInstanceTermination(ctx, runtimepipeline.FlowInstanceTerminationRequest{
-		StorageRef: flowPath, RunID: runID, TerminatedAt: time.Now().UTC(),
+		Route: instance.Route(), RunID: runID, TerminatedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		return fmt.Errorf("persist flow instance terminalization %s: %w", flowPath, err)

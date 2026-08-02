@@ -344,10 +344,10 @@ func (*startupReadinessFinalizationStore) ReconcileDynamicFlowRuntimeReadinessPl
 func (s *startupReadinessFinalizationStore) LoadDynamicFlowRuntimeReadiness(
 	_ context.Context,
 	runID string,
-	instancePath string,
+	route runtimeflowidentity.Route,
 ) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error) {
 	for _, item := range s.items {
-		if item.Plan.RunID == runID && item.InstancePath == instancePath {
+		if item.Plan.RunID == runID && item.InstancePath == route.InstancePath {
 			return item, true, nil
 		}
 	}
@@ -385,7 +385,7 @@ func (*startupReadinessFinalizationStore) CommitDynamicFlowRuntimeCreationOccurr
 	return errors.New("unexpected readiness creation completion")
 }
 
-func (*startupReadinessFinalizationStore) MarkTerminated(context.Context, string, time.Time) error {
+func (*startupReadinessFinalizationStore) MarkTerminated(context.Context, runtimeflowidentity.Route, time.Time) error {
 	return errors.New("unexpected readiness termination")
 }
 

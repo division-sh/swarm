@@ -107,6 +107,9 @@ func ValidateActivityAttemptStart(rec ActivityAttemptRecord) error {
 	if rec.ActivityID == "" || rec.Tool == "" || rec.EffectClass == "" || rec.SuccessEvent == "" || rec.FailureEvent == "" || rec.InputHash == "" {
 		return fmt.Errorf("activity attempt %s is missing required identity fields", rec.RequestEventID)
 	}
+	if rec.Generation.Valid() && rec.FlowInstance == "" {
+		return fmt.Errorf("generated activity attempt %s requires exact flow_instance", rec.RequestEventID)
+	}
 	if rec.EffectClass != "non_idempotent_write" {
 		return fmt.Errorf("activity attempt effect_class %q is not supported by the non-idempotent journal", rec.EffectClass)
 	}
@@ -148,7 +151,7 @@ func ValidateActivityAttemptTerminal(rec ActivityAttemptRecord) error {
 func ValidateActivityAttemptClaimIdentity(actual, expected ActivityAttemptRecord) error {
 	actual, expected = NormalizeActivityAttemptRecord(actual), NormalizeActivityAttemptRecord(expected)
 	if actual.RequestEventID == expected.RequestEventID && actual.RunID == expected.RunID &&
-		actual.EntityID == expected.EntityID && actual.NodeID == expected.NodeID &&
+		actual.EntityID == expected.EntityID && actual.FlowInstance == expected.FlowInstance && actual.NodeID == expected.NodeID &&
 		actual.HandlerEventKey == expected.HandlerEventKey && actual.ActivityID == expected.ActivityID &&
 		actual.Tool == expected.Tool && actual.EffectClass == expected.EffectClass && actual.ExecutionMode == expected.ExecutionMode &&
 		actual.SuccessEvent == expected.SuccessEvent && actual.FailureEvent == expected.FailureEvent &&

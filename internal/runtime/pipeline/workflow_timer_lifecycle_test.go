@@ -191,6 +191,7 @@ func stageTimerTemplateLifecycleBundle() *runtimecontracts.WorkflowContractBundl
 }
 
 func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
+	const entityID = "11111111-1111-1111-1111-111111111111"
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-absolute-path")
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -213,24 +214,33 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	}
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	if err := pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      "ent-001",
+		InstanceID:      bundle.WorkflowName(),
+		StorageRef:      bundle.WorkflowName(),
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "waiting",
+		Metadata:        map[string]any{"entity_id": entityID, "flow_path": bundle.WorkflowName(), "instance_id": bundle.WorkflowName()},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
+	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), bundle.WorkflowName())
+	envelope = events.EnvelopeForSourceRoute(envelope, events.RouteIdentity{
+		FlowID: "child", FlowInstance: "child", EntityID: entityID,
+	})
+	envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{
+		FlowID: bundle.WorkflowName(), FlowInstance: bundle.WorkflowName(), EntityID: entityID,
+	})
 	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("child/task.done"),
 		"cataloge2e",
 		"",
-		[]byte(`{"entity_id":"ent-001"}`),
+		[]byte(`{"entity_id":"`+entityID+`"}`),
 		0,
 		testPipelineRunID,
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-001"),
+		envelope,
 		time.Now().UTC(),
 	)
 
@@ -243,7 +253,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	if handled := pc.executeNodeHandlerPlan(deliveryCtx, "dispatcher", evt); handled {
 		t.Fatal("dispatcher should not handle child/task.done")
 	}
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute("ent-001"))
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(bundle.WorkflowName()))
 	if err != nil {
 		t.Fatalf("load workflow instance after wrong node execution: %v", err)
 	}
@@ -257,7 +267,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	if handled, err := pc.executeNodeHandlerPlanResult(deliveryCtx, "listener", evt); err != nil || !handled {
 		t.Fatalf("listener should handle child/task.done: handled=%v err=%v", handled, err)
 	}
-	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute("ent-001"))
+	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(bundle.WorkflowName()))
 	if err != nil {
 		t.Fatalf("load workflow instance after listener execution: %v", err)
 	}
@@ -270,6 +280,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 }
 
 func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *testing.T) {
+	const entityID = "11111111-1111-1111-1111-111111111111"
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-pin-wiring")
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -291,34 +302,40 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 		t.Fatal("expected coordinator")
 	}
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      "ent-001",
+		InstanceID:      bundle.WorkflowName(),
+		StorageRef:      bundle.WorkflowName(),
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "ready",
+		Metadata:        map[string]any{"entity_id": entityID, "flow_path": bundle.WorkflowName(), "instance_id": bundle.WorkflowName()},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
+	triggerEnvelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "child")
+	triggerEnvelope = events.EnvelopeForTargetRoute(triggerEnvelope, events.RouteIdentity{
+		FlowID: "child", FlowInstance: "child", EntityID: entityID,
+	})
 	trigger := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("work.requested"),
 		"cataloge2e",
 		"",
-		[]byte(`{"entity_id":"ent-001"}`),
+		[]byte(`{"entity_id":"`+entityID+`"}`),
 		0,
 		testPipelineRunID,
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-001"),
+		triggerEnvelope,
 		time.Now().UTC(),
 	)
 
 	configurePipelineTestDeliveryOwner(t, pc)
 	triggerRoute := seedPipelineNodeDeliveryAuthority(t, db, trigger, "child-worker")
 
-	if handled := pc.executeNodeHandlerPlan(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), triggerRoute), "child-worker", trigger); !handled {
-		t.Fatal("child-worker should handle work.requested through the input-pin alias")
+	if handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), triggerRoute), "child-worker", trigger); err != nil || !handled {
+		t.Fatalf("child-worker should handle work.requested through the input-pin alias: handled=%v err=%v", handled, err)
 	}
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute("ent-001"))
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(bundle.WorkflowName()))
 	if err != nil {
 		t.Fatalf("load workflow instance after child-worker execution: %v", err)
 	}
@@ -330,16 +347,23 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	}
 
 	listenerCtx := withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), "child")
+	completionEnvelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), bundle.WorkflowName())
+	completionEnvelope = events.EnvelopeForSourceRoute(completionEnvelope, events.RouteIdentity{
+		FlowID: "child", FlowInstance: "child", EntityID: entityID,
+	})
+	completionEnvelope = events.EnvelopeForTargetRoute(completionEnvelope, events.RouteIdentity{
+		FlowID: bundle.WorkflowName(), FlowInstance: bundle.WorkflowName(), EntityID: entityID,
+	})
 	completion := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("work.completed"),
 		"cataloge2e",
 		"",
-		[]byte(`{"entity_id":"ent-001"}`),
+		[]byte(`{"entity_id":"`+entityID+`"}`),
 		0,
 		testPipelineRunID,
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-001"),
+		completionEnvelope,
 		time.Now().UTC(),
 	)
 
@@ -350,7 +374,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	}
 	result, err := pc.executeNodeContractHandler(withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), "child"), "parent-listener", handler, workflowTriggerContext{
 		Event: completion,
-		State: mustCurrentWorkflowState(t, pc, withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), ""), "ent-001"),
+		State: mustCurrentWorkflowState(t, pc, withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), ""), testWorkflowInstanceRoute(bundle.WorkflowName()), entityID),
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -362,7 +386,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	if handled := pc.executeNodeHandlerPlan(withWorkflowNodeDeliveryRoute(listenerCtx, completionRoute), "parent-listener", completion); !handled {
 		t.Fatal("parent-listener should clear inherited child flow scope and handle root-local work.completed")
 	}
-	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute("ent-001"))
+	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(bundle.WorkflowName()))
 	if err != nil {
 		t.Fatalf("load workflow instance after parent-listener execution: %v", err)
 	}
@@ -375,6 +399,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 }
 
 func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
+	const entityID = "11111111-1111-1111-1111-111111111111"
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-pin-wiring")
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -397,11 +422,12 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 		t.Fatal("expected coordinator")
 	}
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      "ent-001",
+		InstanceID:      bundle.WorkflowName(),
+		StorageRef:      bundle.WorkflowName(),
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "ready",
-		Metadata:        map[string]any{},
+		Metadata:        map[string]any{"entity_id": entityID, "flow_path": bundle.WorkflowName(), "instance_id": bundle.WorkflowName()},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -411,11 +437,11 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 		events.EventType("work.completed"),
 		"cataloge2e",
 		"",
-		[]byte(`{"entity_id":"ent-001"}`),
+		[]byte(`{"entity_id":"`+entityID+`"}`),
 		0,
 		testPipelineRunID,
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-001"),
+		handlerTestWorkflowEnvelope(bundle.WorkflowName(), bundle.WorkflowName(), entityID),
 		time.Now().UTC(),
 	)
 
@@ -510,7 +536,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 		t.Fatalf("failed delivery result = passThrough:%v emitted:%#v, want no output", passThrough, emitted)
 	}
 
-	child, found, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(childEntityID))
+	child, found, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute("child/inst-1"))
 	if err != nil {
 		t.Fatalf("load child instance: %v", err)
 	}

@@ -83,9 +83,7 @@ func workflowInstanceIdentity(source semanticview.Source, instance WorkflowInsta
 
 func workflowInstancePersistedIdentity(source semanticview.Source, instance WorkflowInstance) (runtimeflowidentity.Persisted, error) {
 	flowPath := strings.Trim(strings.TrimSpace(asString(instance.Metadata["flow_path"])), "/")
-	if flowPath == "" {
-		flowPath = strings.Trim(strings.TrimSpace(firstNonEmptyString(instance.StorageRef, asString(instance.Metadata["storage_ref"]))), "/")
-	}
+	hasStoredPath := flowPath != ""
 	instanceID := strings.TrimSpace(asString(instance.Metadata["instance_id"]))
 	if instanceID == "" && flowPath == "" {
 		instanceID = strings.TrimSpace(instance.InstanceID)
@@ -105,6 +103,10 @@ func workflowInstancePersistedIdentity(source semanticview.Source, instance Work
 	)
 	if err != nil {
 		return runtimeflowidentity.Persisted{}, err
+	}
+	persisted.HasStoredPath = hasStoredPath
+	if !hasStoredPath {
+		persisted.InstanceID = runtimeflowidentity.LogicalInstanceID(persisted.InstancePath)
 	}
 	persisted.ParentRoute = runtimeflowidentity.ParentRouteFromMetadata(instance.Metadata)
 	return persisted, nil

@@ -178,7 +178,7 @@ func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *
 		t.Fatalf("seed flow instance: %v", err)
 	}
 
-	if err := store.MarkTerminated(ctx, storageRef, terminatedAt); err != nil {
+	if err := store.MarkTerminated(ctx, testWorkflowInstanceRoute(storageRef), terminatedAt); err != nil {
 		t.Fatalf("MarkTerminated: %v", err)
 	}
 	if got := atomic.LoadInt32(&runner.calls); got != 1 {

@@ -185,12 +185,13 @@ func TestResolveWorkspace_PerAgentMountsStandardPaths(t *testing.T) {
 
 func TestResolveWorkspace_BundleScopeDisambiguatesContainersVolumesAndLabels(t *testing.T) {
 	const bundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const entityID = "22222222-2222-2222-2222-222222222222"
 	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
-	manager := NewDockerManager(nil)
+	manager := NewDockerManager(workspaceLookupStub{entity: WorkspaceEntityLookup{Slug: "acme"}})
 	cfg := DefaultDockerConfig()
 	cfg.SharedDataSource = dataDir
 	cfg.ContractsSource = contractsDir
@@ -252,7 +253,7 @@ func TestResolveWorkspace_BundleScopeDisambiguatesContainersVolumesAndLabels(t *
 	}
 
 	creates = nil
-	if err := manager.EnsureEntityWorkspace(ctx, "acme"); err != nil {
+	if err := manager.EnsureEntityWorkspace(ctx, entityID); err != nil {
 		t.Fatalf("EnsureEntityWorkspace: %v", err)
 	}
 	joined = flattenDockerCalls(creates)

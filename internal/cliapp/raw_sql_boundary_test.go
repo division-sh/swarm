@@ -207,13 +207,13 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "pipeline coordinator owns pipeline SQL dependency injection, not selected capability inference",
 		},
-		"internal/runtime/deliverylifecycle/adapter.go": {
+		"internal/store/internal/delivery/adapter.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          2105,
 			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.selected_runtime_mutation_unit_of_work",
 			Reason:         "the private backend-neutral delivery adapter is the sole executable-delivery SQL owner below the typed lifecycle port",
 		},
-		"internal/runtime/deliverylifecycle/read_projections.go": {
+		"internal/store/internal/delivery/read_projections.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          2105,
 			SpecRef:        "platform-spec.yaml#platform_tables.event_deliveries",

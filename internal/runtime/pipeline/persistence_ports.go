@@ -16,7 +16,7 @@ import (
 )
 
 type FlowInstanceTerminationRequest struct {
-	StorageRef   string
+	Route        runtimeflowidentity.Route
 	RunID        string
 	TerminatedAt time.Time
 }
@@ -132,14 +132,15 @@ func (pc *PipelineCoordinator) CommitFlowInstanceTermination(ctx context.Context
 	if pc == nil || pc.workflowStore == nil {
 		return FlowInstanceTermination{}, fmt.Errorf("flow instance termination requires workflow persistence")
 	}
-	storageRef := strings.TrimSpace(req.StorageRef)
+	route := runtimeflowidentity.StoredRoute(req.Route.ScopeKey, req.Route.InstanceID, req.Route.InstancePath)
+	storageRef := strings.TrimSpace(route.InstancePath)
 	runID := strings.TrimSpace(req.RunID)
-	if storageRef == "" || runID == "" {
-		return FlowInstanceTermination{}, fmt.Errorf("flow instance termination requires storage_ref and run_id")
+	if !route.Valid() || runID == "" {
+		return FlowInstanceTermination{}, fmt.Errorf("flow instance termination requires an exact route and run_id")
 	}
 	var result FlowInstanceTermination
 	err := pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-		if err := pc.workflowStore.MarkTerminated(txctx, storageRef, req.TerminatedAt); err != nil {
+		if err := pc.workflowStore.MarkTerminated(txctx, route, req.TerminatedAt); err != nil {
 			return err
 		}
 		route, err := workflowInstanceRouteForPath(storageRef)
@@ -223,8 +224,8 @@ func (pc *PipelineCoordinator) ReconcileDynamicFlowRuntimeReadinessPlan(ctx cont
 	return pc.workflowStore.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, plan, observedAt)
 }
 
-func (pc *PipelineCoordinator) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID, instanceID string) (DynamicFlowRuntimeReadiness, bool, error) {
-	return pc.workflowStore.LoadDynamicFlowRuntimeReadiness(ctx, runID, instanceID)
+func (pc *PipelineCoordinator) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error) {
+	return pc.workflowStore.LoadDynamicFlowRuntimeReadiness(ctx, runID, route)
 }
 
 func (pc *PipelineCoordinator) ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error) {
@@ -243,8 +244,8 @@ func (pc *PipelineCoordinator) CommitDynamicFlowRuntimeCreationOccurrence(ctx co
 	return pc.workflowStore.CommitDynamicFlowRuntimeCreationOccurrence(ctx, req, publisher)
 }
 
-func (pc *PipelineCoordinator) MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error {
-	return pc.workflowStore.MarkTerminated(ctx, storageRef, terminatedAt)
+func (pc *PipelineCoordinator) MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, terminatedAt time.Time) error {
+	return pc.workflowStore.MarkTerminated(ctx, route, terminatedAt)
 }
 
 func (pc *PipelineCoordinator) CommitDecision(ctx context.Context, card decisioncard.Card, decision string, decidedAt time.Time) error {

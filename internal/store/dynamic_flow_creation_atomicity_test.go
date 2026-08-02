@@ -99,7 +99,7 @@ func TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBoth
 				fixture := newDynamicFlowCreationAtomicityFixture(t, backend)
 				switch order {
 				case "terminal_wins":
-					if err := fixture.workflow.MarkTerminated(fixture.ctx, fixture.plan.Identity.InstancePath, time.Now().UTC()); err != nil {
+					if err := fixture.workflow.MarkTerminated(fixture.ctx, fixture.plan.Identity.Route(), time.Now().UTC()); err != nil {
 						t.Fatalf("MarkTerminated: %v", err)
 					}
 					err := fixture.commit(fixture.bus)
@@ -123,7 +123,7 @@ func TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBoth
 						close(terminalStarted)
 						terminalDone <- fixture.workflow.MarkTerminated(
 							fixture.ctx,
-							fixture.plan.Identity.InstancePath,
+							fixture.plan.Identity.Route(),
 							time.Now().UTC(),
 						)
 					}()

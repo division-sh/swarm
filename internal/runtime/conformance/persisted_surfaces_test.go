@@ -1903,15 +1903,16 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 	entityID := uuid.NewString()
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	if _, err := pipeline.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID:      entityID,
-		StorageRef:      entityID,
+		InstanceID:      "mutation-flow",
+		StorageRef:      "mutation-flow",
 		WorkflowName:    "mutation-flow",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "done",
 		EnteredStageAt:  enteredAt,
 		CreatedAt:       enteredAt,
 		Metadata: map[string]any{
-			"status": "closed",
+			"entity_id": entityID,
+			"status":    "closed",
 			"gates": map[string]any{
 				"g_done": true,
 			},

@@ -45,7 +45,7 @@ func Claim(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner
 	if err := runs.RequireActiveRun(ctx, record.RunID); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
-	metadata, stateBuckets, found, err := loadLoopState(ctx, tx, dialect, record.RunID, record.EntityID)
+	metadata, stateBuckets, found, err := loadLoopState(ctx, tx, dialect, record.RunID, record.FlowInstance)
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
@@ -357,13 +357,13 @@ func scan(row interface{ Scan(...any) error }) (runtimepipeline.ActivityAttemptR
 	return runtimepipeline.NormalizeActivityAttemptRecord(record), nil
 }
 
-func loadLoopState(ctx context.Context, tx *sql.Tx, dialect Dialect, runID, entityID string) (map[string]any, map[string]any, bool, error) {
-	query := `SELECT fields, gates, accumulator FROM entity_state WHERE run_id = ? AND entity_id = ?`
+func loadLoopState(ctx context.Context, tx *sql.Tx, dialect Dialect, runID, flowInstance string) (map[string]any, map[string]any, bool, error) {
+	query := `SELECT fields, gates, accumulator FROM entity_state WHERE run_id = ? AND flow_instance = ?`
 	if dialect == DialectPostgres {
-		query = `SELECT fields, gates, accumulator FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid FOR UPDATE`
+		query = `SELECT fields, gates, accumulator FROM entity_state WHERE run_id = $1::uuid AND flow_instance = $2 FOR UPDATE`
 	}
 	var fieldsRaw, gatesRaw, accumulatorRaw any
-	err := tx.QueryRowContext(ctx, query, runID, entityID).Scan(&fieldsRaw, &gatesRaw, &accumulatorRaw)
+	err := tx.QueryRowContext(ctx, query, runID, strings.Trim(strings.TrimSpace(flowInstance), "/")).Scan(&fieldsRaw, &gatesRaw, &accumulatorRaw)
 	if err == sql.ErrNoRows {
 		return nil, nil, false, nil
 	}

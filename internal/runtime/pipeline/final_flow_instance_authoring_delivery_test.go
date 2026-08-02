@@ -70,7 +70,7 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 	if !handled {
 		t.Fatal("dispatchWorkflowNodeEventResult handled = false, want account_case handler delivery")
 	}
-	loaded, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(entityID))
+	loaded, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(flowInstance))
 	if err != nil {
 		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
 	}
@@ -161,7 +161,7 @@ func assertNoFinalFlowInstanceAuthoringContainedRouteRows(t *testing.T, db *sql.
 func assertNoFinalFlowInstanceAuthoringContainedWorkflowInstance(t *testing.T, db *sql.DB, store *workflowInstanceStore, ctx context.Context, flowInstance string) {
 	t.Helper()
 	entityID := FlowInstanceEntityID(flowInstance)
-	if _, ok, err := store.Load(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
+	if _, ok, err := store.Load(ctx, testWorkflowInstanceRoute(flowInstance)); err != nil {
 		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
 	} else if ok {
 		t.Fatalf("contained flow_instance %q materialized with canonical entity id %s", flowInstance, entityID)

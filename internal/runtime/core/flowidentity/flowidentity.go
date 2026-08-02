@@ -334,26 +334,20 @@ func StoredPersisted(
 ) (Persisted, error) {
 	instance := Stored(source, workflowName, instancePath, instanceID, entityID, parentEntityID)
 	storageRef = normalizeRef(storageRef)
-	if instance.InstancePath != "" {
-		if logical := LogicalInstanceID(instance.InstancePath); logical != "" && SemanticScopeFromInstancePath(instance.InstancePath) != "" {
-			if strings.TrimSpace(instance.InstanceID) != "" && strings.TrimSpace(instance.InstanceID) != logical {
-				return Persisted{}, fmt.Errorf("flow identity instance_id %q disagrees with flow_instance_path %q", instance.InstanceID, instance.InstancePath)
-			}
+	if instance.InstancePath == "" {
+		return Persisted{}, fmt.Errorf("persisted flow identity requires an exact instance route")
+	}
+	if logical := LogicalInstanceID(instance.InstancePath); logical != "" && SemanticScopeFromInstancePath(instance.InstancePath) != "" {
+		if strings.TrimSpace(instance.InstanceID) != "" && strings.TrimSpace(instance.InstanceID) != logical {
+			return Persisted{}, fmt.Errorf("flow identity instance_id %q disagrees with flow_instance_path %q", instance.InstanceID, instance.InstancePath)
 		}
 	}
-	if storageRef == "" {
-		switch {
-		case instance.HasStoredPath && instance.InstancePath != "":
-			storageRef = instance.InstancePath
-		case strings.TrimSpace(entityID) != "":
-			storageRef = strings.TrimSpace(entityID)
-		default:
-			storageRef = strings.TrimSpace(instance.InstanceID)
-		}
+	if storageRef != "" && storageRef != instance.InstancePath {
+		return Persisted{}, fmt.Errorf("flow identity storage_ref %q disagrees with canonical instance route %q", storageRef, instance.InstancePath)
 	}
 	return Persisted{
 		Instance:   instance,
-		StorageRef: storageRef,
+		StorageRef: instance.InstancePath,
 	}, nil
 }
 

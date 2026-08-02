@@ -202,6 +202,21 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, address runtimee
 			if mutation.TriggeredAt.IsZero() {
 				return fmt.Errorf("workflow initial materialization requires exact accepted event time")
 			}
+			initialMetadata := mutation.StateCarrier.PersistedMetadata()
+			if initialMetadata == nil {
+				initialMetadata = map[string]any{}
+			}
+			exactFacts := map[string]string{
+				"flow_path":   address.Route.InstancePath,
+				"instance_id": address.Route.InstanceID,
+				"entity_id":   entityID.String(),
+			}
+			for key, value := range exactFacts {
+				if existing := strings.TrimSpace(asString(initialMetadata[key])); existing != "" && existing != value {
+					return fmt.Errorf("engine state %s %q disagrees with exact value %q", key, existing, value)
+				}
+				initialMetadata[key] = value
+			}
 			source := r.coordinator.SemanticSource()
 			workflowName := flowID
 			workflowVersion := ""
@@ -216,12 +231,12 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, address runtimee
 				WorkflowName:       workflowName,
 				WorkflowVersion:    workflowVersion,
 				CurrentState:       initialState,
-				Metadata:           workflowMaterializeEntityMetadata(source, flowID, mutation.StateCarrier.PersistedMetadata()),
+				Metadata:           workflowMaterializeEntityMetadata(source, flowID, initialMetadata),
 				StateBuckets:       mutation.StateCarrier.PersistedStateBuckets(),
 				InitialFieldValues: cloneStringAnyMap(mutation.InitialFieldValues),
 			}, mutation.TriggeredAt)
 			if err != nil {
-				return err
+				return fmt.Errorf("materialize exact workflow state route %s: %w", address.Route.InstancePath, err)
 			}
 			if materialization != WorkflowInitialMaterializationCreated && materialization != WorkflowInitialMaterializationAlreadyExists {
 				return fmt.Errorf("workflow initial materialization returned unknown result %d", materialization)

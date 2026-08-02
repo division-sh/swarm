@@ -165,7 +165,7 @@ func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
 	if occurredAt.IsZero() {
 		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("flow readiness reconciliation requires an exact occurrence time")
 	}
-	current, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, runID, req.Instance.InstancePath)
+	current, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, runID, req.Instance.Route())
 	if err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
 	}
@@ -384,7 +384,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadiness(
 	if err != nil {
 		return err
 	}
-	readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, key.instancePath)
+	readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
 	if err != nil {
 		return err
 	}
@@ -608,7 +608,7 @@ func (am *AgentManager) loadDynamicFlowRuntimeReadinessPlanCoordinate(
 	ctx context.Context,
 	key dynamicFlowRuntimeReadinessKey,
 ) (string, error) {
-	readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, key.instancePath)
+	readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
 	if err != nil {
 		return "", err
 	}
@@ -645,7 +645,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if source == nil {
 		return fmt.Errorf("dynamic flow runtime readiness reconciler requires semantic source")
 	}
-	readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, key.instancePath)
+	readiness, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
 	if err != nil {
 		return err
 	}
@@ -799,7 +799,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	if err := am.workflowInstances.MarkDynamicFlowRuntimeTopologyReady(ctx, plan, now); err != nil {
 		return fmt.Errorf("record dynamic flow runtime readiness %s: %w", readiness.InstancePath, err)
 	}
-	fresh, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, key.instancePath)
+	fresh, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
 	if err != nil {
 		return err
 	}
@@ -843,7 +843,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		},
 		publisher,
 	); err != nil {
-		fresh, found, loadErr := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, key.instancePath)
+		fresh, found, loadErr := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
 		if loadErr == nil && (!found || !fresh.Eligible()) {
 			if retireErr := am.retireDynamicFlowProcessTopology(key.instancePath); retireErr != nil {
 				return errors.Join(
@@ -871,7 +871,7 @@ func (am *AgentManager) dynamicFlowRuntimeReadinessStillEligible(
 	key dynamicFlowRuntimeReadinessKey,
 	expected runtimepipeline.DynamicFlowRuntimeReadinessPlan,
 ) (bool, error) {
-	fresh, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, key.instancePath)
+	fresh, found, err := am.workflowInstances.LoadDynamicFlowRuntimeReadiness(ctx, key.runID, runtimeflowidentity.RouteForInstancePath(key.instancePath))
 	if err != nil {
 		return false, err
 	}

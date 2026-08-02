@@ -410,7 +410,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("first materialization: result=%d err=%v", result, err)
 			}
-			readiness, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, instance.StorageRef)
+			readiness, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(instance.StorageRef))
 			if err != nil || !found {
 				t.Fatalf("load readiness: found=%v err=%v", found, err)
 			}
@@ -458,7 +458,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if err != nil || !reconciled {
 				t.Fatalf("reconcile same-version revised-source readiness plan: changed=%v err=%v", reconciled, err)
 			}
-			revised, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, instance.StorageRef)
+			revised, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, runtimeflowidentity.RouteForInstancePath(instance.StorageRef))
 			if err != nil || !found {
 				t.Fatalf("load revised readiness: found=%v err=%v", found, err)
 			}
@@ -480,7 +480,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if err := store.MarkDynamicFlowRuntimeTopologyReady(revisedCtx, plan, readyAt.Add(4*time.Second)); err == nil {
 				t.Fatal("stale topology plan marked revised readiness complete")
 			}
-			stillRevised, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, instance.StorageRef)
+			stillRevised, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, runtimeflowidentity.RouteForInstancePath(instance.StorageRef))
 			if err != nil || !found {
 				t.Fatalf("load readiness after stale topology completion: found=%v err=%v", found, err)
 			}
@@ -519,7 +519,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if changed, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(revisedCtx, revisedNoAutoPlan, readyAt.Add(5*time.Second)); err != nil || !changed {
 				t.Fatalf("reconcile revised no-auto readiness: changed=%v err=%v", changed, err)
 			}
-			revisedNoAuto, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, noAutoInstance.StorageRef)
+			revisedNoAuto, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, runtimeflowidentity.RouteForInstancePath(noAutoInstance.StorageRef))
 			if err != nil || !found {
 				t.Fatalf("load revised no-auto readiness: found=%v err=%v", found, err)
 			}
@@ -555,12 +555,12 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("successor generation materialization: result=%d err=%v", result, err)
 			}
-			if prior, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, instance.StorageRef); err != nil || !found || prior.CreationEventEmittedAt.IsZero() {
+			if prior, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(instance.StorageRef)); err != nil || !found || prior.CreationEventEmittedAt.IsZero() {
 				t.Fatalf("retired generation readiness changed: found=%v readiness=%#v err=%v", found, prior, err)
 			} else if prior.Eligible() {
 				t.Fatal("retired generation readiness remained eligible")
 			}
-			if successor, found, err := store.LoadDynamicFlowRuntimeReadiness(nextContext, nextRunID, instance.StorageRef); err != nil || !found || !successor.TopologyReadyAt.IsZero() {
+			if successor, found, err := store.LoadDynamicFlowRuntimeReadiness(nextContext, nextRunID, runtimeflowidentity.RouteForInstancePath(instance.StorageRef)); err != nil || !found || !successor.TopologyReadyAt.IsZero() {
 				t.Fatalf("successor generation readiness: found=%v readiness=%#v err=%v", found, successor, err)
 			}
 			items, err = store.ListDynamicFlowRuntimeReadiness(nextContext)
@@ -588,7 +588,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if err := store.MarkDynamicFlowRuntimeTopologyReady(nextContext, nextPlan, occurredAt.Add(2*time.Hour)); err == nil {
 				t.Fatal("terminal successor accepted topology completion")
 			}
-			if successor, found, err := store.LoadDynamicFlowRuntimeReadiness(nextContext, nextRunID, instance.StorageRef); err != nil || !found {
+			if successor, found, err := store.LoadDynamicFlowRuntimeReadiness(nextContext, nextRunID, runtimeflowidentity.RouteForInstancePath(instance.StorageRef)); err != nil || !found {
 				t.Fatalf("load terminal successor readiness: found=%v err=%v", found, err)
 			} else if successor.Eligible() {
 				t.Fatal("terminal successor readiness remained eligible")
@@ -1339,16 +1339,17 @@ opco.ceo_ready:
       emit: opco.ceo_ready
 `,
 	})
+	entityID := FlowInstanceEntityID("operating/inst-1")
 	evt := handlerTestRootIngress(
 		uuid.NewString(),
 		events.EventType("opco.product_initialization_requested"),
 		"",
 		"",
-		[]byte(`{"entity_id":"ent-operating"}`),
+		mustJSON(map[string]any{"entity_id": entityID}),
 		0,
 		testPipelineRunID,
 		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-operating"), "operating/inst-1"),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "operating/inst-1"),
 		time.Time{},
 	)
 	evt = eventtest.TargetRouted(evt, events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: "ent-operating"})
@@ -1453,13 +1454,17 @@ states: [initializing, ready]
 	}
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      entityID,
-		StorageRef:      entityID,
+		InstanceID:      "inst-1",
+		StorageRef:      "operating/inst-1",
 		WorkflowName:    "operating",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "initializing",
-		Metadata:        map[string]any{},
-		StateBuckets:    map[string]any{},
+		Metadata: map[string]any{
+			"entity_id":   entityID,
+			"flow_path":   "operating/inst-1",
+			"instance_id": "inst-1",
+		},
+		StateBuckets: map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -1474,7 +1479,7 @@ states: [initializing, ready]
 		t.Fatal("executeNodeHandlerPlanResult handled = false, want true")
 	}
 
-	instance, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(entityID))
+	instance, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute("operating/inst-1"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}

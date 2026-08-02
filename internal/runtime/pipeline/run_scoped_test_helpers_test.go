@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -119,6 +120,30 @@ func testWorkflowStoreRunContext(t *testing.T, store *workflowInstanceStore) con
 
 func materializedWorkflowInstanceForTest(instance WorkflowInstance) WorkflowInstance {
 	occurredAt := time.Date(2026, time.July, 25, 12, 0, 0, 0, time.UTC)
+	instance.Metadata = cloneStringAnyMap(instance.Metadata)
+	if instance.Metadata == nil {
+		instance.Metadata = map[string]any{}
+	}
+	if strings.TrimSpace(asString(instance.Metadata["entity_id"])) == "" {
+		for _, candidate := range []string{instance.InstanceID, instance.StorageRef} {
+			if parsed, err := uuid.Parse(strings.TrimSpace(candidate)); err == nil {
+				instance.Metadata["entity_id"] = parsed.String()
+				break
+			}
+		}
+	}
+	storageRef := strings.Trim(strings.TrimSpace(instance.StorageRef), "/")
+	if _, declared := instance.Metadata["flow_path"]; !declared && strings.Contains(storageRef, "/") {
+		instance.Metadata["flow_path"] = storageRef
+		instance.Metadata["instance_id"] = runtimeflowidentity.LogicalInstanceID(storageRef)
+	} else if !declared {
+		canonicalRoute := strings.Trim(strings.TrimSpace(instance.WorkflowName), "/")
+		if canonicalRoute != "" {
+			instance.StorageRef = canonicalRoute
+			instance.InstanceID = runtimeflowidentity.LogicalInstanceID(canonicalRoute)
+			instance.Metadata["instance_id"] = instance.InstanceID
+		}
+	}
 	if instance.EnteredStageAt.IsZero() {
 		instance.EnteredStageAt = occurredAt
 	}
@@ -166,17 +191,27 @@ func testPipelineCoordinatorRunContext(t *testing.T, pc *PipelineCoordinator) co
 	return bound
 }
 
-func testWorkflowStateTransitionContext(ctx context.Context, entityID, eventType string) context.Context {
+func testWorkflowSourceEnvelope(flowID, instancePath, entityID string) events.EventEnvelope {
+	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), instancePath)
+	return events.EnvelopeForSourceRoute(envelope, events.RouteIdentity{
+		FlowID:       flowID,
+		FlowInstance: instancePath,
+		EntityID:     entityID,
+	})
+}
+
+func testWorkflowStateTransitionContext(ctx context.Context, route runtimeflowidentity.Route, entityID, eventType string) context.Context {
+	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), route.InstancePath)
 	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(), events.EventType(strings.TrimSpace(eventType)), "test", "", []byte(`{}`), 0,
-		runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
+		runtimecorrelation.RunIDFromContext(ctx), "", envelope, time.Now().UTC(),
 	)
 	return runtimecorrelation.WithInboundEvent(ctx, evt)
 }
 
-func testPersistedWorkflowStateTransitionContext(t *testing.T, store *workflowInstanceStore, ctx context.Context, entityID, eventType string) context.Context {
+func testPersistedWorkflowStateTransitionContext(t *testing.T, store *workflowInstanceStore, ctx context.Context, route runtimeflowidentity.Route, entityID, eventType string) context.Context {
 	t.Helper()
-	transitionCtx := testWorkflowStateTransitionContext(ctx, entityID, eventType)
+	transitionCtx := testWorkflowStateTransitionContext(ctx, route, entityID, eventType)
 	evt, ok := runtimecorrelation.InboundEventFromContext(transitionCtx)
 	if !ok {
 		t.Fatal("test workflow transition context has no inbound event")

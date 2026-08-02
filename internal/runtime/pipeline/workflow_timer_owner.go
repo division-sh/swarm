@@ -685,9 +685,7 @@ func (l *WorkflowTimerLifecycle) CancelSupersededGenerations(ctx context.Context
 
 func workflowTimerCanonicalEntityID(instance WorkflowInstance, fallback string) string {
 	ref := firstNonEmptyString(
-		strings.TrimSpace(instance.StorageRef),
 		strings.TrimSpace(asString(instance.Metadata["entity_id"])),
-		strings.TrimSpace(instance.InstanceID),
 		strings.TrimSpace(fallback),
 	)
 	if ref == "" {

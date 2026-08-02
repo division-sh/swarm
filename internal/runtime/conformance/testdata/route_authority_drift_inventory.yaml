@@ -35,7 +35,7 @@ search_dimensions:
     minimum_matching_files: 110
     required_paths:
       - platform-spec.yaml
-      - internal/runtime/deliverylifecycle/adapter.go
+      - internal/store/internal/delivery/adapter.go
       - internal/store/platformschema/platformschema.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
       - internal/serveapp/main_runtime_test.go
@@ -290,7 +290,7 @@ search_dimensions:
     minimum_matching_files: 18
     required_paths:
       - platform-spec.yaml
-      - internal/runtime/deliverylifecycle/adapter.go
+      - internal/store/internal/delivery/adapter.go
       - internal/runtime/pipeline/coordinator.go
     canonical_layer: execution_admission
   - id: replay_scope
@@ -322,14 +322,14 @@ search_dimensions:
     minimum_matching_files: 7
     required_paths:
       - platform-spec.yaml
-      - internal/runtime/deliverylifecycle/adapter.go
+      - internal/store/internal/delivery/adapter.go
       - internal/runtime/deliverylifecycle/snapshot_fact.go
     canonical_layer: durable_delivery_authority
   - id: delivery_authority_writers
     pattern: 'CommitInitial|commitInitialDeliveryObligationsTx|CommitPublish'
     minimum_matching_files: 20
     required_paths:
-      - internal/runtime/deliverylifecycle/adapter.go
+      - internal/store/internal/delivery/adapter.go
       - internal/store/delivery_lifecycle.go
       - internal/runtime/bus/eventbus_publish.go
     canonical_layer: durable_delivery_authority
@@ -337,7 +337,7 @@ search_dimensions:
     pattern: 'ClaimNodeDelivery|SettleSuccess|SettleFailure|DeliveryLifecycleStore'
     minimum_matching_files: 15
     required_paths:
-      - internal/runtime/deliverylifecycle/adapter.go
+      - internal/store/internal/delivery/adapter.go
       - internal/runtime/pipeline/coordinator.go
       - internal/runtime/pipeline/workflow_node_delivery_authority_test.go
     canonical_layer: execution_admission
@@ -957,7 +957,7 @@ seam_families:
     classification: canonical_owner
     paths:
       - internal/runtime/deliverylifecycle/model.go
-      - internal/runtime/deliverylifecycle/adapter.go
+      - internal/store/internal/delivery/adapter.go
       - internal/store/delivery_lifecycle.go
       - internal/store/event_commit.go
       - internal/store/delivery_lifecycle_boundary_guard_test.go
@@ -1012,7 +1012,7 @@ seam_families:
     classification: canonical_owner
     paths:
       - internal/runtime/deliverylifecycle/model.go
-      - internal/runtime/deliverylifecycle/adapter.go
+      - internal/store/internal/delivery/adapter.go
       - internal/store/delivery_lifecycle.go
       - internal/runtime/conformance/delivery_lifecycle_conformance_test.go
       - platform-spec.yaml

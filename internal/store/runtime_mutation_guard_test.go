@@ -911,7 +911,7 @@ func runtimeWriterRules() []runtimeWriterRule {
 	return []runtimeWriterRule{
 		{
 			name:           "canonical executable delivery adapter",
-			path:           rx(`^internal/runtime/deliverylifecycle/adapter\.go$`),
+			path:           rx(`^internal/store/internal/delivery/adapter\.go$`),
 			function:       rx(`^(insertExactObligation|ActivateNormalAuthority|CommitPipelineHandoff|claimCandidates|ClaimCandidates|claimLocked|BindAgentSession|RenewClaim|settle|TerminalizeRun|closeAttemptForTerminalization|insertTerminalizedAttempt|insertAttempt|expireAttempt|completeAttempt|insertOutcome)$`),
 			kinds:          kinds(primitiveRead, primitiveWrite),
 			classification: classActiveTxHelper,

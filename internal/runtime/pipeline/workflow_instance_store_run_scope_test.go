@@ -55,11 +55,11 @@ func TestWorkflowInstanceStore_RunScopedCurrentStateRowsDoNotBleed(t *testing.T)
 			t.Fatalf("upsert %s: %v", tc.state, err)
 		}
 	}
-	gotA, ok, err := store.Load(ctxA, testWorkflowInstanceRoute(entityID))
+	gotA, ok, err := store.Load(ctxA, testWorkflowInstanceRoute("run-scope"))
 	if err != nil || !ok {
 		t.Fatalf("load source ok=%v err=%v", ok, err)
 	}
-	gotB, ok, err := store.Load(ctxB, testWorkflowInstanceRoute(entityID))
+	gotB, ok, err := store.Load(ctxB, testWorkflowInstanceRoute("run-scope"))
 	if err != nil || !ok {
 		t.Fatalf("load fork ok=%v err=%v", ok, err)
 	}

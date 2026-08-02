@@ -837,7 +837,7 @@ func snapshotNotifyAllChildrenTopology(
 	descriptor runtimebus.ActiveFlowInstanceDescriptor,
 ) notifyAllChildrenTopologySnapshot {
 	t.Helper()
-	readiness, found, err := runtime.pipeline.LoadDynamicFlowRuntimeReadiness(ctx, runID, descriptor.FlowInstance)
+	readiness, found, err := runtime.pipeline.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(descriptor.FlowInstance))
 	if err != nil || !found {
 		t.Fatalf("snapshot readiness: readiness=%#v found=%t err=%v", readiness, found, err)
 	}
@@ -1175,7 +1175,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				"portfolio_id": "portfolio-main",
 				"account_ids":  []string{"acct-a", "acct-b", "acct-stale"},
 			})
-			assertNotifyAllChildrenMetadata(t, ctx, backend, db, "portfolio/portfolio", "account_ids", []any{"acct-a", "acct-b", "acct-stale"})
+			assertNotifyAllChildrenMetadata(t, ctx, backend, db, "portfolio", "account_ids", []any{"acct-a", "acct-b", "acct-stale"})
 
 			stale := descriptors["acct-stale"]
 			if err := runtime.manager.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
@@ -1607,7 +1607,7 @@ func waitNotifyAllChildrenRuntimeReadiness(
 		err   error
 	)
 	for time.Now().Before(deadline) {
-		last, found, err = workflow.LoadDynamicFlowRuntimeReadiness(ctx, runID, instancePath)
+		last, found, err = workflow.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(instancePath))
 		if err == nil && found && !last.TopologyReadyAt.IsZero() {
 			return last
 		}

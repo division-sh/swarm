@@ -766,7 +766,12 @@ func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(nodeID string, 
 	}
 	flowID := strings.TrimSpace(workflowNodeFlowID(source, nodeID))
 	if flowID == "" {
-		return false
+		rootScope := strings.Trim(strings.TrimSpace(source.WorkflowName()), "/")
+		targetPath := strings.Trim(strings.TrimSpace(target.FlowInstance), "/")
+		if rootScope == "" || targetPath != rootScope {
+			return false
+		}
+		return target.FlowID == "" || strings.Trim(strings.TrimSpace(target.FlowID), "/") == rootScope
 	}
 	if target.FlowID != "" {
 		return target.FlowID == flowID && pc.workflowNodeDeliveryTargetFlowInstanceMatches(source, flowID, target.FlowInstance)

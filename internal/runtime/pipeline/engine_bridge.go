@@ -348,7 +348,15 @@ func resolveHandlerEntityIDForFlow(
 	if err != nil {
 		return "", evt, err
 	}
-	prepareHandlerMaterializationState(source, flowID, handler, state)
+	if handlerMaterializesEntity(source, flowID, handler) {
+		route, routeErr := canonicalHandlerRoute(source, flowID, evt)
+		if routeErr != nil {
+			return "", evt, routeErr
+		}
+		if err := prepareHandlerMaterializationState(source, flowID, handler, route, entityID, state); err != nil {
+			return "", evt, err
+		}
+	}
 	if state != nil && strings.TrimSpace(state.EntityID) == "" {
 		state.EntityID = entityID
 	}

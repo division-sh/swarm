@@ -433,7 +433,7 @@ func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testin
 		t.Fatalf("seed root instance: %v", err)
 	}
 
-	if err := pc.maybeDeactivateTerminalFlowInstance(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID), entityID, "done"); err != nil {
+	if err := pc.maybeDeactivateTerminalFlowInstance(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute("root"), entityID, "done"); err != nil {
 		t.Fatalf("maybeDeactivateTerminalFlowInstance: %v", err)
 	}
 	if deactivated {
@@ -609,7 +609,7 @@ func TestUpdateEntityState_ReturnsWorkflowStoreMutationError(t *testing.T) {
 
 	const entityID = "11111111-1111-1111-1111-111111111111"
 	ctx := testPipelineRunContextNoSeed(t)
-	err := pc.persistWorkflowStateForTest(testWorkflowStateTransitionContext(ctx, entityID, "scoring/vertical.marginal"), entityID, "marginal_review", "scoring/vertical.marginal")
+	err := pc.persistWorkflowStateForTest(testWorkflowStateTransitionContext(ctx, testWorkflowInstanceRoute(entityID), entityID, "scoring/vertical.marginal"), testWorkflowInstanceRoute(entityID), entityID, "marginal_review", "scoring/vertical.marginal")
 	if err == nil {
 		t.Fatal("expected workflow state persistence to fail when workflow store mutate fails")
 	}
@@ -855,6 +855,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTarg
 	tests := []struct {
 		name            string
 		entityID        string
+		flowInstance    string
 		concreteEvent   events.EventType
 		handlerEventKey string
 		action          runtimecontracts.ActionSpec
@@ -865,6 +866,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTarg
 		{
 			name:            "handler action",
 			entityID:        "11111111-1111-1111-1111-111111111111",
+			flowInstance:    "operating/instance-1",
 			concreteEvent:   "operating/instance-1/build_progress",
 			handlerEventKey: "build_progress",
 			action:          runtimecontracts.ActionSpec{ID: "record_evidence"},
@@ -878,6 +880,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTarg
 		{
 			name:            "selected rule action",
 			entityID:        "22222222-2222-2222-2222-222222222222",
+			flowInstance:    "operating/instance-2",
 			concreteEvent:   "operating/instance-2/build_progress",
 			handlerEventKey: "build_progress",
 			action:          runtimecontracts.ActionSpec{ID: "record_evidence"},
@@ -897,13 +900,15 @@ func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTarg
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := testWorkflowStoreRunContext(t, store)
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID:      tt.entityID,
-				StorageRef:      tt.entityID,
+				InstanceID:      runtimeflowidentity.LogicalInstanceID(tt.flowInstance),
+				StorageRef:      tt.flowInstance,
 				WorkflowName:    "operating",
 				WorkflowVersion: "1.0.0",
 				CurrentState:    "initializing",
-				Metadata:        map[string]any{},
-				StateBuckets:    map[string]any{},
+				Metadata: map[string]any{
+					"entity_id": tt.entityID, "flow_path": tt.flowInstance, "instance_id": runtimeflowidentity.LogicalInstanceID(tt.flowInstance),
+				},
+				StateBuckets: map[string]any{},
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
@@ -912,6 +917,12 @@ func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTarg
 				Request: runtimeengine.ExecutionRequest{
 					EntityID: identity.NormalizeEntityID(tt.entityID),
 					NodeID:   identity.NormalizeNodeID("build-orchestrator"),
+					FlowID:   identity.NormalizeFlowID("operating"),
+					ProducerRoute: events.RouteIdentity{
+						FlowID:       "operating",
+						FlowInstance: tt.flowInstance,
+						EntityID:     tt.entityID,
+					},
 					Event: eventtest.RunCreatingRootIngress(
 						"",
 						tt.concreteEvent,
@@ -921,7 +932,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTarg
 						0,
 						"",
 						"",
-						events.EnvelopeForEntityID(events.EventEnvelope{}, tt.entityID),
+						testWorkflowSourceEnvelope("operating", tt.flowInstance, tt.entityID),
 						time.Time{},
 					),
 					HandlerEventKey: tt.handlerEventKey,
@@ -935,7 +946,7 @@ func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTarg
 				t.Fatalf("ExecuteAction: %v", err)
 			}
 
-			instance, exists, err := store.Load(ctx, testWorkflowInstanceRoute(tt.entityID))
+			instance, exists, err := store.Load(ctx, testWorkflowInstanceRoute(tt.flowInstance))
 			if err != nil {
 				t.Fatalf("load workflow instance: %v", err)
 			}
@@ -1651,7 +1662,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitQueuesSuccessResultEvent(t
 		workflowStore: store,
 		artifactRoot:  t.TempDir(),
 		bus:           bus,
-		module:        &previewWorkflowModule{bundle: bundle},
+		module:        handlerTestWorkflowModuleWithBundle(bundle, "artifact-repo", "artifact-node"),
 		entityLocks:   map[string]*sync.Mutex{},
 	}
 	ctx := testWorkflowStoreRunContext(t, store)
@@ -1751,7 +1762,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesSuccessResultThroughO
 		workflowStore: workflowStore,
 		artifactRoot:  t.TempDir(),
 		bus:           bus,
-		module:        &previewWorkflowModule{bundle: bundle},
+		module:        handlerTestWorkflowModuleWithBundle(bundle, "artifact-repo", "artifact-node"),
 		entityLocks:   map[string]*sync.Mutex{},
 	}
 	ctx := testWorkflowStoreRunContext(t, workflowStore)
@@ -1819,7 +1830,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 		workflowStore: workflowStore,
 		artifactRoot:  t.TempDir(),
 		bus:           bus,
-		module:        &previewWorkflowModule{bundle: bundle},
+		module:        handlerTestWorkflowModuleWithBundle(bundle, "artifact-repo", "artifact-node"),
 		entityLocks:   map[string]*sync.Mutex{},
 	}
 	ctx := testWorkflowStoreRunContext(t, workflowStore)
@@ -1891,7 +1902,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureR
 		workflowStore: workflowStore,
 		artifactRoot:  t.TempDir(),
 		bus:           bus,
-		module:        &previewWorkflowModule{bundle: bundle},
+		module:        handlerTestWorkflowModuleWithBundle(bundle, "artifact-repo", "artifact-node"),
 		entityLocks:   map[string]*sync.Mutex{},
 	}
 	ctx := testWorkflowStoreRunContext(t, workflowStore)
@@ -2540,7 +2551,7 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 		0,
 		testPipelineRunID,
 		"",
-		events.EventEnvelope{EntityID: entityID},
+		handlerTestWorkflowEnvelope("artifact-repo", "artifact-repo", entityID),
 		time.Unix(1_700_000_000, 0).UTC(),
 		mode,
 	)
