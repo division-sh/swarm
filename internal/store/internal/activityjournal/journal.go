@@ -30,14 +30,14 @@ type QueryRower interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func Start(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
-	return start(ctx, tx, dialect, runs, record, true)
+func Start(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
+	return start(ctx, tx, dialect, runs, story, record, true)
 }
 
-func Claim(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
+func Claim(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
 	record = runtimepipeline.NormalizeActivityAttemptRecord(record)
 	if !record.Generation.Valid() {
-		return start(ctx, tx, dialect, runs, record, true)
+		return start(ctx, tx, dialect, runs, story, record, true)
 	}
 	if err := requireMutation(tx, dialect, runs); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
@@ -64,7 +64,7 @@ func Claim(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner
 			"revision_id": record.Generation.RevisionID, "expected_stage": record.LoopStage,
 		})
 	}
-	actual, inserted, err := start(ctx, tx, dialect, runs, record, false)
+	actual, inserted, err := start(ctx, tx, dialect, runs, story, record, false)
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
@@ -74,7 +74,7 @@ func Claim(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner
 	return actual, inserted, nil
 }
 
-func start(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner, record runtimepipeline.ActivityAttemptRecord, verifyRun bool) (runtimepipeline.ActivityAttemptRecord, bool, error) {
+func start(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord, verifyRun bool) (runtimepipeline.ActivityAttemptRecord, bool, error) {
 	record = runtimepipeline.NormalizeActivityAttemptRecord(record)
 	record.Status = runtimepipeline.ActivityAttemptStatusStarted
 	if err := runtimepipeline.ValidateActivityAttemptStart(record); err != nil {
@@ -135,13 +135,16 @@ func start(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner
 	if err := runtimepipeline.ValidateActivityAttemptClaimIdentity(actual, record); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
-	if err := runtimeauthoractivity.Record(ctx, runtimepipeline.ActivityAttemptStoryDraft(actual, runtimepipeline.ActivityAttemptStatusStarted)); err != nil {
+	if story == nil {
+		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("activity attempt story owner is required")
+	}
+	if err := story.Record(ctx, runtimepipeline.ActivityAttemptStoryDraft(actual, runtimepipeline.ActivityAttemptStatusStarted)); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	return actual, rows > 0, nil
 }
 
-func Complete(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, error) {
+func Complete(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, error) {
 	record = runtimepipeline.NormalizeActivityAttemptRecord(record)
 	if err := runtimepipeline.ValidateActivityAttemptTerminal(record); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, err
@@ -198,13 +201,16 @@ func Complete(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOw
 	if rows == 0 && actual.Status == runtimepipeline.ActivityAttemptStatusStarted {
 		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("activity attempt %s remained started after terminal update", record.RequestEventID)
 	}
-	if err := runtimeauthoractivity.Record(ctx, runtimepipeline.ActivityAttemptStoryDraft(actual, actual.Status)); err != nil {
+	if story == nil {
+		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("activity attempt story owner is required")
+	}
+	if err := story.Record(ctx, runtimepipeline.ActivityAttemptStoryDraft(actual, actual.Status)); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, err
 	}
 	return actual, nil
 }
 
-func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, error) {
+func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, runs ActiveRunOwner, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, error) {
 	record = runtimepipeline.NormalizeActivityAttemptRecord(record)
 	record.Status = runtimepipeline.ActivityAttemptStatusUncertain
 	if err := runtimepipeline.ValidateActivityAttemptTerminal(record); err != nil {
@@ -251,7 +257,10 @@ func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, runs Active
 	if err := runtimepipeline.ValidateActivityAttemptTerminalMode(actual, record); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, err
 	}
-	if err := runtimeauthoractivity.Record(ctx, runtimepipeline.ActivityAttemptStoryDraft(actual, runtimepipeline.ActivityAttemptStatusUncertain)); err != nil {
+	if story == nil {
+		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("activity attempt story owner is required")
+	}
+	if err := story.Record(ctx, runtimepipeline.ActivityAttemptStoryDraft(actual, runtimepipeline.ActivityAttemptStatusUncertain)); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, err
 	}
 	return actual, nil

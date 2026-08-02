@@ -7,68 +7,125 @@ import (
 
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	activityjournaladapter "github.com/division-sh/swarm/internal/store/internal/activityjournal"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
 
 func (s *PostgresStore) StartActivityAttempt(ctx context.Context, record runtimepipeline.ActivityAttemptRecord) (out runtimepipeline.ActivityAttemptRecord, inserted bool, err error) {
-	err = s.runAuthorActivityMutation(ctx, "start activity attempt", func(txctx context.Context, tx *sql.Tx) error {
-		out, inserted, err = activityjournaladapter.Start(txctx, tx, activityjournaladapter.DialectPostgres, s, record)
-		return err
+	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, beginErr := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
+		if beginErr != nil {
+			return beginErr
+		}
+		out, inserted, err = activityjournaladapter.Start(txctx, tx, activityjournaladapter.DialectPostgres, s, story, record)
+		if err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 	return
 }
 
 func (s *SQLiteRuntimeStore) StartActivityAttempt(ctx context.Context, record runtimepipeline.ActivityAttemptRecord) (out runtimepipeline.ActivityAttemptRecord, inserted bool, err error) {
-	err = s.runAuthorActivityMutation(ctx, "start activity attempt", func(txctx context.Context, tx *sql.Tx) error {
-		out, inserted, err = activityjournaladapter.Start(txctx, tx, activityjournaladapter.DialectSQLite, s, record)
-		return err
+	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, beginErr := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
+		if beginErr != nil {
+			return beginErr
+		}
+		out, inserted, err = activityjournaladapter.Start(txctx, tx, activityjournaladapter.DialectSQLite, s, story, record)
+		if err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 	return
 }
 
 func (s *PostgresStore) ClaimActivityAttemptForLoopGeneration(ctx context.Context, record runtimepipeline.ActivityAttemptRecord) (out runtimepipeline.ActivityAttemptRecord, inserted bool, err error) {
-	err = s.runAuthorActivityMutation(ctx, "claim activity attempt", func(txctx context.Context, tx *sql.Tx) error {
-		out, inserted, err = activityjournaladapter.Claim(txctx, tx, activityjournaladapter.DialectPostgres, s, record)
-		return err
+	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, beginErr := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
+		if beginErr != nil {
+			return beginErr
+		}
+		out, inserted, err = activityjournaladapter.Claim(txctx, tx, activityjournaladapter.DialectPostgres, s, story, record)
+		if err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 	return
 }
 
 func (s *SQLiteRuntimeStore) ClaimActivityAttemptForLoopGeneration(ctx context.Context, record runtimepipeline.ActivityAttemptRecord) (out runtimepipeline.ActivityAttemptRecord, inserted bool, err error) {
-	err = s.runAuthorActivityMutation(ctx, "claim activity attempt", func(txctx context.Context, tx *sql.Tx) error {
-		out, inserted, err = activityjournaladapter.Claim(txctx, tx, activityjournaladapter.DialectSQLite, s, record)
-		return err
+	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, beginErr := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
+		if beginErr != nil {
+			return beginErr
+		}
+		out, inserted, err = activityjournaladapter.Claim(txctx, tx, activityjournaladapter.DialectSQLite, s, story, record)
+		if err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 	return
 }
 
 func (s *PostgresStore) CompleteActivityAttempt(ctx context.Context, record runtimepipeline.ActivityAttemptRecord) (out runtimepipeline.ActivityAttemptRecord, err error) {
-	err = s.runAuthorActivityMutation(ctx, "complete activity attempt", func(txctx context.Context, tx *sql.Tx) error {
-		out, err = activityjournaladapter.Complete(txctx, tx, activityjournaladapter.DialectPostgres, s, record)
-		return err
+	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, beginErr := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
+		if beginErr != nil {
+			return beginErr
+		}
+		out, err = activityjournaladapter.Complete(txctx, tx, activityjournaladapter.DialectPostgres, s, story, record)
+		if err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 	return
 }
 
 func (s *SQLiteRuntimeStore) CompleteActivityAttempt(ctx context.Context, record runtimepipeline.ActivityAttemptRecord) (out runtimepipeline.ActivityAttemptRecord, err error) {
-	err = s.runAuthorActivityMutation(ctx, "complete activity attempt", func(txctx context.Context, tx *sql.Tx) error {
-		out, err = activityjournaladapter.Complete(txctx, tx, activityjournaladapter.DialectSQLite, s, record)
-		return err
+	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, beginErr := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
+		if beginErr != nil {
+			return beginErr
+		}
+		out, err = activityjournaladapter.Complete(txctx, tx, activityjournaladapter.DialectSQLite, s, story, record)
+		if err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 	return
 }
 
 func (s *PostgresStore) MarkActivityAttemptUncertain(ctx context.Context, record runtimepipeline.ActivityAttemptRecord) (out runtimepipeline.ActivityAttemptRecord, err error) {
-	err = s.runAuthorActivityMutation(ctx, "mark activity attempt uncertain", func(txctx context.Context, tx *sql.Tx) error {
-		out, err = activityjournaladapter.MarkUncertain(txctx, tx, activityjournaladapter.DialectPostgres, s, record)
-		return err
+	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, beginErr := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
+		if beginErr != nil {
+			return beginErr
+		}
+		out, err = activityjournaladapter.MarkUncertain(txctx, tx, activityjournaladapter.DialectPostgres, s, story, record)
+		if err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 	return
 }
 
 func (s *SQLiteRuntimeStore) MarkActivityAttemptUncertain(ctx context.Context, record runtimepipeline.ActivityAttemptRecord) (out runtimepipeline.ActivityAttemptRecord, err error) {
-	err = s.runAuthorActivityMutation(ctx, "mark activity attempt uncertain", func(txctx context.Context, tx *sql.Tx) error {
-		out, err = activityjournaladapter.MarkUncertain(txctx, tx, activityjournaladapter.DialectSQLite, s, record)
-		return err
+	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, beginErr := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
+		if beginErr != nil {
+			return beginErr
+		}
+		out, err = activityjournaladapter.MarkUncertain(txctx, tx, activityjournaladapter.DialectSQLite, s, story, record)
+		if err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 	return
 }
