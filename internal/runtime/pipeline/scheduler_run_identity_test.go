@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/google/uuid"
 )
@@ -486,10 +487,42 @@ func TestScheduleRootRoutingSourceRequiresExactEntityScope(t *testing.T) {
 	}
 }
 
+func TestScheduleFlowOwnedRoutingSourceRequiresExactAgentFlowScope(t *testing.T) {
+	const (
+		flowInstance = "flow-a/instance-1"
+		entityID     = "entity-1"
+	)
+	schedule := Schedule{
+		AgentID:       "agent-a",
+		OwnerKind:     ScheduleOwnerAgent,
+		AgentIdentity: agentidentitytest.Runtime(t, "agent-a", "schedule-test", "flow-a", "instance-1", flowInstance),
+		EventType:     "flow-a/timer.fire",
+		Mode:          "once",
+		At:            time.Now().Add(time.Hour),
+		EntityID:      entityID,
+		FlowInstance:  flowInstance,
+		RoutingSource: mustFlowOwnedScheduleSourceForFlow(t, "flow-a", flowInstance, entityID),
+	}
+	if _, _, err := validateSchedule(schedule); err != nil {
+		t.Fatalf("exact agent flow source: %v", err)
+	}
+
+	schedule.EventType = "flow-b/timer.fire"
+	schedule.RoutingSource = mustFlowOwnedScheduleSourceForFlow(t, "flow-b", flowInstance, entityID)
+	if _, _, err := validateSchedule(schedule); err == nil {
+		t.Fatal("schedule accepted a routing source from another flow scope")
+	}
+}
+
 func mustFlowOwnedScheduleSource(t testing.TB, flowInstance, entityID string) events.RoutingSource {
 	t.Helper()
+	return mustFlowOwnedScheduleSourceForFlow(t, "test-flow", flowInstance, entityID)
+}
+
+func mustFlowOwnedScheduleSourceForFlow(t testing.TB, flowID, flowInstance, entityID string) events.RoutingSource {
+	t.Helper()
 	source, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
-		FlowID: "test-flow", FlowInstance: flowInstance, EntityID: entityID,
+		FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID,
 	})
 	if err != nil {
 		t.Fatal(err)

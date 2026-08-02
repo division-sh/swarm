@@ -3,10 +3,12 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1234,6 +1236,47 @@ func TestWorkflowTimerLifecycleListsScopeWildcardsOnBothStores(t *testing.T) {
 						t.Fatalf("listed activations = %#v, want exact activation %#v", activations, activation.Ref)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestWorkflowTimerWakeupRejectsForeignDeclarationSourceOnBothStores(t *testing.T) {
+	for _, tc := range workflowJoinStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			store, ctx := tc.open(t)
+			pc, _, activation := seedWorkflowTimerOwnerActivationAt(
+				t, store, ctx, &recordingPipelineBus{}, false, "1h", time.Now(), false,
+			)
+			pc.workflowTimers.workOwner = pipelineTestWorkOwner(t)
+			scheduler := newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)
+			if err := pc.workflowTimers.bindScheduler(scheduler); err != nil {
+				t.Fatalf("bind workflow timer scheduler: %v", err)
+			}
+			foreignSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+				FlowID: "foreign", FlowInstance: activation.FlowInstance, EntityID: activation.EntityID,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := json.Marshal(foreignSource)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if store.isSQLite() {
+				_, err = store.db.ExecContext(ctx, `UPDATE timers SET routing_source = ?, fire_event = ? WHERE timer_id = ?`, raw, "foreign/timer.timeout", activation.Ref.ActivationID)
+			} else {
+				_, err = store.db.ExecContext(ctx, `UPDATE timers SET routing_source = $1::jsonb, fire_event = $2 WHERE timer_id = $3::uuid`, raw, "foreign/timer.timeout", activation.Ref.ActivationID)
+			}
+			if err != nil {
+				t.Fatalf("install foreign workflow timer source: %v", err)
+			}
+
+			if err := pc.workflowTimers.ReconcileWakeup(ctx, activation.Ref); err == nil || !strings.Contains(err.Error(), "does not match declaration") {
+				t.Fatalf("ReconcileWakeup error = %v, want declaration binding rejection", err)
+			}
+			if active, draining := workflowTimerScheduledCounts(scheduler); active != 0 || draining != 0 {
+				t.Fatalf("foreign workflow timer scheduled active=%d draining=%d", active, draining)
 			}
 		})
 	}
