@@ -440,7 +440,7 @@ func ensureHandlerEntityID(source semanticview.Source, flowID string, handler Sy
 	if !handlerMaterializesEntity(source, flowID, handler) {
 		return "", evt, nil
 	}
-	route, err := canonicalHandlerRoute(source, flowID, evt)
+	route, err := canonicalHandlerRoute(source, flowID, "", evt)
 	if err != nil {
 		return "", evt, err
 	}
@@ -454,18 +454,22 @@ func ensureHandlerEntityID(source semanticview.Source, flowID string, handler Sy
 	return entityID, resolved, nil
 }
 
-func canonicalHandlerRoute(source semanticview.Source, flowID string, evt Event) (runtimeflowidentity.Route, error) {
-	if instancePath := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/"); instancePath != "" {
-		return workflowInstanceRouteForPath(instancePath)
-	}
+func canonicalHandlerRoute(source semanticview.Source, flowID, statePath string, evt Event) (runtimeflowidentity.Route, error) {
 	flowID = strings.TrimSpace(flowID)
+	statePath = strings.Trim(strings.TrimSpace(statePath), "/")
 	if flowID != "" {
+		if statePath != "" {
+			return workflowInstanceRouteForExecution(source, flowID, statePath)
+		}
+		if source != nil && flowID == strings.TrimSpace(source.WorkflowName()) {
+			return workflowInstanceRouteForExecution(source, flowID, evt.RunID())
+		}
 		if source != nil {
 			if schema, ok := source.FlowSchemaByID(flowID); ok && strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
-				return runtimeflowidentity.Route{}, fmt.Errorf("template flow %q requires an exact instance discriminator", flowID)
+				return workflowInstanceRouteForExecution(source, flowID, evt.FlowInstance())
 			}
 		}
-		return workflowInstanceRouteForPath(runtimeflowidentity.ScopeKey(source, flowID))
+		return workflowInstanceRouteForExecution(source, flowID, "")
 	}
 	if runID := strings.TrimSpace(evt.RunID()); runID != "" {
 		return workflowInstanceRouteForPath(runID)

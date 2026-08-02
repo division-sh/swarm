@@ -141,8 +141,8 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	flowID := workflowNodeFlowID(pc.SemanticSource(), nodeID)
 	entityID := strings.TrimSpace(firstNonEmptyString(
-		workflowEventEntityID(triggerCtx.Event),
 		triggerCtx.State.EntityID,
+		workflowEventEntityID(triggerCtx.Event),
 	))
 	source := pc.SemanticSource()
 	if handler.SelectEntity != nil && !handler.SelectEntity.Empty() {
@@ -349,7 +349,11 @@ func resolveHandlerEntityIDForFlow(
 		return "", evt, err
 	}
 	if handlerMaterializesEntity(source, flowID, handler) {
-		route, routeErr := canonicalHandlerRoute(source, flowID, evt)
+		statePath := ""
+		if state != nil {
+			statePath = asString(state.Metadata["flow_path"])
+		}
+		route, routeErr := canonicalHandlerRoute(source, flowID, statePath, evt)
 		if routeErr != nil {
 			return "", evt, routeErr
 		}

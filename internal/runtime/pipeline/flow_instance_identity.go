@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/google/uuid"
 )
 
 func workflowInstanceRouteForPath(instancePath string) (runtimeflowidentity.Route, error) {
@@ -18,25 +19,27 @@ func workflowInstanceRouteForPath(instancePath string) (runtimeflowidentity.Rout
 }
 
 func workflowInstanceRouteForExecution(source semanticview.Source, flowID, explicitPath string) (runtimeflowidentity.Route, error) {
+	flowID = strings.TrimSpace(flowID)
 	instancePath := strings.Trim(strings.TrimSpace(explicitPath), "/")
+	expectedScope := runtimeflowidentity.ScopeKey(source, flowID)
 	if instancePath == "" && source != nil {
-		scope := runtimeflowidentity.ScopeKey(source, strings.TrimSpace(flowID))
-		if schema, ok := source.FlowSchemaByID(strings.TrimSpace(flowID)); ok && !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
-			instancePath = scope
+		if schema, ok := source.FlowSchemaByID(flowID); ok && !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") && flowID != strings.TrimSpace(source.WorkflowName()) {
+			instancePath = expectedScope
 		}
 	}
 	if instancePath == "" {
-		return runtimeflowidentity.Route{}, fmt.Errorf("workflow instance route is unavailable for flow %q", strings.TrimSpace(flowID))
+		return runtimeflowidentity.Route{}, fmt.Errorf("workflow instance route is unavailable for flow %q", flowID)
 	}
-	route, err := workflowInstanceRouteForPath(instancePath)
-	if err != nil {
-		return runtimeflowidentity.Route{}, err
+	rootRunScope := source != nil && flowID == strings.TrimSpace(source.WorkflowName())
+	if rootRunScope {
+		if _, err := uuid.Parse(instancePath); err == nil {
+			return runtimeflowidentity.StoredRoute(instancePath, runtimeflowidentity.LogicalInstanceID(instancePath), instancePath), nil
+		}
 	}
-	expectedScope := runtimeflowidentity.ScopeKey(source, strings.TrimSpace(flowID))
-	if expectedScope != "" && route.ScopeKey != expectedScope && route.InstancePath != expectedScope {
-		return runtimeflowidentity.Route{}, fmt.Errorf("workflow instance route %q is outside flow scope %q", route.InstancePath, expectedScope)
+	if expectedScope == "" || (instancePath != expectedScope && !strings.HasPrefix(instancePath, expectedScope+"/")) {
+		return runtimeflowidentity.Route{}, fmt.Errorf("workflow instance route %q is outside flow scope %q", instancePath, expectedScope)
 	}
-	return route, nil
+	return runtimeflowidentity.StoredRoute(expectedScope, runtimeflowidentity.LogicalInstanceID(instancePath), instancePath), nil
 }
 
 func workflowInstanceRouteForPersisted(source semanticview.Source, instance WorkflowInstance) (runtimeflowidentity.Route, error) {

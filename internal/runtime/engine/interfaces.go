@@ -82,7 +82,7 @@ type OutboxWriter interface {
 }
 
 type WorkflowLifecycleEffectOwner interface {
-	AcceptedEventEffect(entityID identity.EntityID, event events.Event, fromState, toState string) (runtimeworkflowlifecycle.Effect, error)
+	AcceptedEventEffect(route runtimeflowidentity.Route, entityID identity.EntityID, event events.Event, fromState, toState string) (runtimeworkflowlifecycle.Effect, error)
 	ApplyWorkflowLifecycleEffects(ctx context.Context, effects []runtimeworkflowlifecycle.Effect) error
 }
 

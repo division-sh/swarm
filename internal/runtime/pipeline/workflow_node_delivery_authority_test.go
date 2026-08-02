@@ -81,7 +81,7 @@ func TestPipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAu
 	seedDeliveryAuthorityWorkflowInstance(t, pc, runCtx, evt.EntityID())
 
 	target := events.RouteIdentity{
-		FlowID: "delivery-authority", FlowInstance: "delivery-authority", EntityID: evt.EntityID(),
+		FlowID: "delivery-authority", FlowInstance: testPipelineRunID, EntityID: evt.EntityID(),
 	}
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-a"), Target: target}
 	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, evt.ID(), route.Recipient.ID(), target)
@@ -455,11 +455,12 @@ func seedDeliveryAuthorityEvent(t *testing.T, db *sql.DB, ctx context.Context) e
 func seedDeliveryAuthorityWorkflowInstance(t *testing.T, pc *PipelineCoordinator, ctx context.Context, entityID string) {
 	t.Helper()
 	if err := pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      entityID,
-		StorageRef:      entityID,
+		InstanceID:      testPipelineRunID,
+		StorageRef:      testPipelineRunID,
 		WorkflowName:    "delivery-authority",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
+		Metadata:        map[string]any{"entity_id": entityID, "flow_path": testPipelineRunID, "instance_id": testPipelineRunID},
 	})); err != nil {
 		t.Fatalf("seed delivery authority workflow instance: %v", err)
 	}
@@ -472,7 +473,7 @@ func seedDeliveryAuthorityNodeDelivery(t *testing.T, db *sql.DB, eventID, nodeID
 		t.Fatalf("load delivery authority event: %v", err)
 	}
 	return seedDeliveryAuthorityNodeDeliveryForTarget(t, db, eventID, nodeID, events.RouteIdentity{
-		FlowID: "delivery-authority", FlowInstance: "delivery-authority", EntityID: evt.EntityID(),
+		FlowID: "delivery-authority", FlowInstance: testPipelineRunID, EntityID: evt.EntityID(),
 	})
 }
 

@@ -240,8 +240,8 @@ func TestServeCompositionProvidesExactRuntimePorts(t *testing.T) {
 	mainSource := readOwnershipSource(t, root, "internal/serveapp/main.go")
 	facadeSource := readOwnershipSource(t, root, "internal/serveapp/store_facade.go")
 	assertOwnershipSourceContains(t, mainSource,
-		"runtimepipeline.NewPostgresWorkflowPersistence(pg.DB, pg)",
-		"runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore)",
+		"runtimepipeline.NewPostgresWorkflowPersistence(constructionDB, pg)",
+		"runtimepipeline.NewSQLiteWorkflowPersistence(constructionDB, sqliteStore)",
 		"LiveSessionAcquirer:            pg",
 		"LiveSessionAcquirer:            sqliteStore",
 		"SessionResetter:                pg",

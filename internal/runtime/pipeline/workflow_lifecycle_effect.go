@@ -15,7 +15,7 @@ type pipelineWorkflowLifecycleOwner struct {
 	coordinator *PipelineCoordinator
 }
 
-func (o pipelineWorkflowLifecycleOwner) AcceptedEventEffect(entityID identity.EntityID, event events.Event, fromState, toState string) (runtimeworkflowlifecycle.Effect, error) {
+func (o pipelineWorkflowLifecycleOwner) AcceptedEventEffect(route runtimeflowidentity.Route, entityID identity.EntityID, event events.Event, fromState, toState string) (runtimeworkflowlifecycle.Effect, error) {
 	pc := o.coordinator
 	if pc == nil {
 		return runtimeworkflowlifecycle.Effect{}, fmt.Errorf("workflow lifecycle owner is unavailable")
@@ -24,7 +24,7 @@ func (o pipelineWorkflowLifecycleOwner) AcceptedEventEffect(entityID identity.En
 	if entityID.IsZero() {
 		return runtimeworkflowlifecycle.Effect{}, fmt.Errorf("accepted workflow event requires entity identity")
 	}
-	route := runtimeflowidentity.RouteForInstancePath(event.FlowInstance())
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
 	if !route.Valid() {
 		return runtimeworkflowlifecycle.Effect{}, fmt.Errorf("accepted workflow event requires exact instance route")
 	}
@@ -117,9 +117,9 @@ func (pc *PipelineCoordinator) applyWorkflowLifecycleEffect(ctx context.Context,
 	return pc.applyWorkflowGateIntents(ctx, route, entityID, fromState, toState, cause.EventType, effect.OccurredAt())
 }
 
-func (pc *PipelineCoordinator) applyAcceptedWorkflowEvent(ctx context.Context, entityID string, event events.Event, fromState, toState string) error {
+func (pc *PipelineCoordinator) applyAcceptedWorkflowEvent(ctx context.Context, route runtimeflowidentity.Route, entityID string, event events.Event, fromState, toState string) error {
 	owner := pipelineWorkflowLifecycleOwner{coordinator: pc}
-	effect, err := owner.AcceptedEventEffect(identity.NormalizeEntityID(entityID), event, fromState, toState)
+	effect, err := owner.AcceptedEventEffect(route, identity.NormalizeEntityID(entityID), event, fromState, toState)
 	if err != nil {
 		return err
 	}

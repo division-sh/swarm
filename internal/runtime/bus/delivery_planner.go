@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/google/uuid"
 )
 
 type deliveryRoutingResult struct {
@@ -1250,9 +1251,23 @@ func routeMatchesInternalSubscriber(route events.RouteIdentity, subscriber Subsc
 	}
 	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
 	if path == "" {
-		return route.FlowInstance == "" && route.FlowID == "" && route.EntityID != ""
+		return exactRootTarget(route) || entityOnlyRootTarget(route)
 	}
 	return route.FlowInstance != "" && route.FlowInstance == path
+}
+
+func exactRootTarget(route events.RouteIdentity) bool {
+	route = route.Normalized()
+	if route.FlowID == "" || route.FlowInstance == "" || route.EntityID == "" {
+		return false
+	}
+	_, err := uuid.Parse(route.FlowInstance)
+	return err == nil
+}
+
+func entityOnlyRootTarget(route events.RouteIdentity) bool {
+	route = route.Normalized()
+	return route.FlowID == "" && route.FlowInstance == "" && route.EntityID != ""
 }
 
 func targetDeliveryFailure(evt events.Event, descriptors []ActiveTargetDescriptor) runtimepinrouting.TargetFailure {
@@ -1312,6 +1327,10 @@ func deliveryTargetForDescriptor(descriptor ActiveAgentDescriptor, singular even
 }
 
 func routeMatchesAgentDescriptor(route events.RouteIdentity, descriptor ActiveAgentDescriptor) bool {
+	descriptor = descriptor.Normalized()
+	if descriptor.Identity.Route.Presence == agentidentity.RouteRoot {
+		return (exactRootTarget(route) || entityOnlyRootTarget(route)) && descriptor.EntityID != "" && descriptor.EntityID == route.Normalized().EntityID
+	}
 	return routeMatchesTargetDescriptor(route, descriptor.TargetDescriptor())
 }
 

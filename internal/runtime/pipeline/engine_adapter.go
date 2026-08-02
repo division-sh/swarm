@@ -20,6 +20,7 @@ import (
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/google/uuid"
 )
 
 type pipelineEngineEvaluator struct {
@@ -1040,6 +1041,11 @@ func workflowInstanceOwnedByFlow(source semanticview.Source, instance WorkflowIn
 	flowID = strings.TrimSpace(flowID)
 	if flowID == "" {
 		return true
+	}
+	if source != nil && flowID == strings.TrimSpace(source.WorkflowName()) && strings.TrimSpace(instance.WorkflowName) == flowID {
+		if _, err := uuid.Parse(strings.TrimSpace(instance.StorageRef)); err == nil {
+			return true
+		}
 	}
 	ownerScope := runtimeflowidentity.ScopeKey(source, flowID)
 	targetScope := workflowInstanceScopeKey(source, instance)

@@ -225,6 +225,9 @@ func workflowNodeFlowID(source semanticview.Source, nodeID string) string {
 	if flowID := strings.TrimSpace(contractSource.FlowID); flowID != "" {
 		return flowID
 	}
+	if strings.TrimSpace(contractSource.Layer) == "project" {
+		return strings.TrimSpace(source.WorkflowName())
+	}
 	return ""
 }
 

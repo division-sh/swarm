@@ -2447,6 +2447,7 @@ func (e *Executor) buildWorkflowLifecycleEffect(frame *executionFrame) (runtimew
 	}
 	toState := strings.TrimSpace(frame.result.StateMutation.NextState)
 	effect, err := e.deps.WorkflowLifecycle.AcceptedEventEffect(
+		frame.req.StateAddress().Route,
 		frame.req.EntityID,
 		frame.req.Event,
 		strings.TrimSpace(frame.result.CurrentState),

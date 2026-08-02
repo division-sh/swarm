@@ -39,6 +39,22 @@ type startupRecoveryPipelineOwner struct {
 	scans    map[string]runtimepipelineobligation.ScanRequest
 }
 
+type startupRecoveryWorkflowOwner struct {
+	runtimeTestRejectedMutationOwner
+	timers runtimetimerobligation.Reader
+}
+
+func (o startupRecoveryWorkflowOwner) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
+	if o.timers != nil {
+		return o.timers.ReadTimerObligations(ctx, scope, observedAt)
+	}
+	return runtimetimerobligation.Snapshot{ObservedAt: observedAt.UTC()}, nil
+}
+
+func startupRecoveryWorkflowPersistence(db *sql.DB, timers runtimetimerobligation.Reader) runtimepipeline.WorkflowPersistence {
+	return runtimepipeline.NewPostgresWorkflowPersistence(db, startupRecoveryWorkflowOwner{timers: timers})
+}
+
 func newStartupRecoveryPipelineOwner(work []events.PersistedReplayEvent, claimErr error) *startupRecoveryPipelineOwner {
 	return &startupRecoveryPipelineOwner{
 		issuer:   runtimepipelineobligation.NewClaimIssuer(),
@@ -783,7 +799,7 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, scheduleStore),
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,
 		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
@@ -846,7 +862,7 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, nil),
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,
 		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
@@ -931,7 +947,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, scheduleStore),
 		DeliveryStore:         deliveryStore,
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,
@@ -1010,7 +1026,7 @@ func TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetai
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, scheduleStore),
 		DeliveryStore:         deliveryStore,
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,
@@ -1116,7 +1132,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, scheduleStore),
 		DeliveryStore:         deliveryStore,
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,
@@ -1230,7 +1246,7 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, nil),
 		DeliveryStore:         deliveryStore,
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,
@@ -1290,7 +1306,7 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 	eventStore := startupRecoveryMinimalEventStore{}
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, nil),
 		DeliveryStore:         deliveryStore,
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,
@@ -1368,7 +1384,7 @@ func TestRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatal(t 
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, nil),
 		DeliveryStore:         deliveryStore,
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,
@@ -1433,7 +1449,7 @@ func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndD
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, scheduleStore),
 		DeliveryStore:         deliveryStore,
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,

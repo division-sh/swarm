@@ -215,7 +215,8 @@ func NewPostgresWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) Wo
 	activityResults, _ := runner.(runtimeactivityresult.Reader)
 	activityJournal, _ := runner.(ActivityAttemptJournal)
 	gateRoutes, _ := runner.(GateRouteAdmissionReader)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes}}
+	timerObligations, _ := runner.(runtimetimerobligation.Reader)
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations}}
 }
 
 func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) WorkflowPersistence {
@@ -224,7 +225,8 @@ func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) Work
 	activityResults, _ := runner.(runtimeactivityresult.Reader)
 	activityJournal, _ := runner.(ActivityAttemptJournal)
 	gateRoutes, _ := runner.(GateRouteAdmissionReader)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes}}
+	timerObligations, _ := runner.(runtimetimerobligation.Reader)
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations}}
 }
 
 func (p WorkflowPersistence) empty() bool {

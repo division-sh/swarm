@@ -964,13 +964,13 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 				t.Fatalf("create loop activation: %v", err)
 			}
 			carrier := runtimeengine.NewStateCarrier(
-				map[string]any{"run_id": runID}, nil, map[string]map[string]any{},
+				map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID}, nil, map[string]map[string]any{},
 			)
 			if err := loopruntime.Store(carrier.StateBuckets, loopActivation); err != nil {
 				t.Fatalf("store loop activation: %v", err)
 			}
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID: entityID, StorageRef: entityID, WorkflowName: "workflow-timer-owner-test",
+				InstanceID: runID, StorageRef: runID, WorkflowName: "workflow-timer-owner-test",
 				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
 				CreatedAt: createdAt, Metadata: carrier.PersistedMetadata(), StateBuckets: carrier.PersistedStateBuckets(),
 			})); err != nil {
@@ -992,11 +992,11 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 				evt := eventtest.RunCreatingRootIngress(
 					eventID, events.EventType(eventType), "operator", "",
 					payload, 0, runID, "",
-					events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), eventAt,
+					handlerTestWorkflowEnvelope("workflow-timer-owner-test", runID, entityID), eventAt,
 				)
 				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runID, entityID, payload, eventAt)
 				result, err := pc.executeNodeContractHandler(ctx, "observer", handler, workflowTriggerContext{
-					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, entityID),
+					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(runID), entityID),
 				}, false)
 				if err != nil {
 					t.Fatalf("execute %s handler: %v", eventType, err)
@@ -1021,7 +1021,7 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 				AdvancesTo: "waiting",
 			}
 			execute(uuid.NewString(), "loop.repeat", firstGeneration.RevisionID, repeatHandler)
-			persistedInstance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
+			persistedInstance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(runID))
 			if err != nil || !ok {
 				t.Fatalf("load repeated workflow instance found=%v err=%v", ok, err)
 			}

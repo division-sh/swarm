@@ -897,11 +897,12 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			poisonEntityID := eventtest.UUID("node-recovery-poison-entity")
 			poisonTarget := events.RouteIdentity{FlowID: "repo-scaffold", FlowInstance: "repo-scaffold/poison", EntityID: poisonEntityID}
 			poisonInstance := artifactActionResultWorkflowInstance()
-			poisonInstance.InstanceID = poisonEntityID
-			poisonInstance.StorageRef = poisonEntityID
+			poisonInstance.InstanceID = "poison"
+			poisonInstance.StorageRef = poisonTarget.FlowInstance
 			poisonInstance.Metadata = map[string]any{
 				"repo_id": "poison-repo", "namespace": "tenant-alpha", "partition_key": "poison",
 				"display_slug": "Poison", "source_record_id": "poison-record", "flow_path": poisonTarget.FlowInstance,
+				"instance_id": "poison", "entity_id": poisonEntityID,
 			}
 			if _, err := pc.MaterializeInitialEntry(ctx, poisonInstance, time.Now().UTC()); err != nil {
 				t.Fatalf("seed poison workflow instance: %v", err)

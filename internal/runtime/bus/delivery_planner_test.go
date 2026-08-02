@@ -6,13 +6,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	"time"
+	"github.com/google/uuid"
 )
 
 func testActiveAgentDescriptor(t testing.TB, agentID, entityID, flowInstance string) ActiveAgentDescriptor {
@@ -435,7 +436,7 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 	}
 }
 
-func TestDeliveryPlanner_DoesNotDeadLetterTargetedWorkflowNodeSubscriber(t *testing.T) {
+func TestDeliveryPlanner_DoesNotDeadLetterExactlyTargetedRootWorkflowNodeSubscriber(t *testing.T) {
 	planner := newDeliveryPlanner(
 		deliveryRouteResolver{
 			resolveRoutedSubscribers: func(events.Event) []Subscriber {
@@ -453,6 +454,8 @@ func TestDeliveryPlanner_DoesNotDeadLetterTargetedWorkflowNodeSubscriber(t *test
 		},
 	)
 
+	rootRunID := uuid.NewString()
+	rootTarget := events.RouteIdentity{FlowID: "root", FlowInstance: rootRunID, EntityID: "ent-1"}
 	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
 		"child/output.done",
@@ -462,7 +465,7 @@ func TestDeliveryPlanner_DoesNotDeadLetterTargetedWorkflowNodeSubscriber(t *test
 		0,
 		"",
 		"",
-		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: "ent-1"}),
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, rootTarget),
 		time.Time{},
 	))
 	if err != nil {
@@ -471,7 +474,10 @@ func TestDeliveryPlanner_DoesNotDeadLetterTargetedWorkflowNodeSubscriber(t *test
 	if !plan.TargetFailure.Empty() {
 		t.Fatalf("target failure = %q, want none for routed workflow node subscriber", plan.TargetFailure)
 	}
-	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("parent-listener"), Target: events.RouteIdentity{EntityID: "ent-1"}}
+	wantRoute := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient("parent-listener"),
+		Target:    rootTarget,
+	}
 	if len(plan.DeliveryRoutes()) != 1 || !deliveryPlannerRoutesContain(plan.DeliveryRoutes(), wantRoute) {
 		t.Fatalf("delivery routes = %#v, want semantic node route %#v", plan.DeliveryRoutes(), wantRoute)
 	}

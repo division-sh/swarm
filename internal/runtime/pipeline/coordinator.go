@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -271,7 +272,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 			activityResults:  storeTemplate.activityResults,
 			activityJournal:  storeTemplate.activityJournal,
 			gateRoutes:       storeTemplate.gateRoutes,
-			timerObligations: opts.TimerObligationReader,
+			timerObligations: storeTemplate.timerObligations,
 			deliveryStore:    opts.DeliveryStore,
 			pipelineStore:    opts.PipelineObligations,
 			decisionCards:    opts.DecisionCards,
@@ -598,7 +599,21 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 		}
 		executionCtx := heartbeat.Context()
 		executionCtx = runtimecorrelation.WithInboundEvent(executionCtx, evt)
-		stateRoute, err := workflowInstanceRouteForExecution(source, workflowNodeFlowID(source, nodeID), evt.FlowInstance())
+		nodeFlowID := workflowNodeFlowID(source, nodeID)
+		instancePath := evt.FlowInstance()
+		if target := route.Target.Normalized(); !target.Empty() {
+			instancePath = target.FlowInstance
+		} else if source != nil && strings.TrimSpace(nodeFlowID) != strings.TrimSpace(source.WorkflowName()) {
+			if schema, ok := source.FlowSchemaByID(nodeFlowID); ok && !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+				instancePath = runtimeflowidentity.ScopeKey(source, nodeFlowID)
+			}
+		}
+		rootScope := runtimeflowidentity.ScopeKey(source, nodeFlowID)
+		if source != nil && strings.TrimSpace(nodeFlowID) == strings.TrimSpace(source.WorkflowName()) &&
+			(strings.TrimSpace(instancePath) == "" || strings.Trim(strings.TrimSpace(instancePath), "/") == rootScope) {
+			instancePath = evt.RunID()
+		}
+		stateRoute, err := workflowInstanceRouteForExecution(source, nodeFlowID, instancePath)
 		if err != nil {
 			_ = heartbeat.Stop()
 			return false, err

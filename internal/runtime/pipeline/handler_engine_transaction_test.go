@@ -643,18 +643,19 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 
 	pc, bus := newEmitPersistenceTestCoordinator(db)
 	const entityID = "11111111-1111-1111-1111-111111111111"
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	runID := runtimecorrelation.RunIDFromContext(ctx)
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      entityID,
-		StorageRef:      entityID,
+		InstanceID:      runID,
+		StorageRef:      runID,
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "researching",
-		Metadata:        map[string]any{},
+		Metadata:        map[string]any{"entity_id": entityID, "flow_path": runID, "instance_id": runID},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	ctx := testPipelineCoordinatorRunContext(t, pc)
 	evt := handlerTestRootIngress(
 		uuid.NewString(), events.EventType("research.completed"), "", "", mustJSON(map[string]any{}), 0,
 		runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
@@ -685,7 +686,7 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 		t.Fatalf("published count = %d, want 0 when persistence prerequisite is missing", got)
 	}
 
-	instance, ok, loadErr := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID))
+	instance, ok, loadErr := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(runID))
 	if loadErr != nil {
 		t.Fatalf("load workflow instance: %v", loadErr)
 	}
@@ -706,18 +707,19 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 
 	pc, bus := newEmitPersistenceTestCoordinator(db)
 	const entityID = "11111111-1111-1111-1111-111111111111"
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	runID := runtimecorrelation.RunIDFromContext(ctx)
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      entityID,
-		StorageRef:      entityID,
+		InstanceID:      runID,
+		StorageRef:      runID,
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "researching",
-		Metadata:        map[string]any{},
+		Metadata:        map[string]any{"entity_id": entityID, "flow_path": runID, "instance_id": runID},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	ctx := testPipelineCoordinatorRunContext(t, pc)
 	evt := handlerTestRootIngress(
 		uuid.NewString(), events.EventType("research.completed"), "", "",
 		mustJSON(map[string]any{"business_brief": map[string]any{"summary": "validated"}}), 0,
@@ -755,7 +757,7 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 		t.Fatalf("published type = %q, want spec.requested", got)
 	}
 
-	instance, ok, loadErr := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID))
+	instance, ok, loadErr := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(runID))
 	if loadErr != nil {
 		t.Fatalf("load workflow instance: %v", loadErr)
 	}

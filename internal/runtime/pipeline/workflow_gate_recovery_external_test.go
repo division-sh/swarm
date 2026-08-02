@@ -355,7 +355,11 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			bundleSource := mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
 				ContractBundle: source, BundleSourceFact: bundleSource,
-			}, "support.reply_drafted")
+			},
+				"support.reply_drafted",
+				"support/send_support_reply.revision_requested",
+				"support/send_support_reply.rejected",
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -612,8 +616,8 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 					t.Fatalf("%s readback = %#v, %v", verdict, readback, routeErr)
 				}
 			}
-			routeWithoutDispatch("revise", "send_support_reply.revision_requested", map[string]any{"feedback": "Please rewrite it."})
-			routeWithoutDispatch("reject", "send_support_reply.rejected", map[string]any{"reason": "Do not send."})
+			routeWithoutDispatch("revise", "support/send_support_reply.revision_requested", map[string]any{"feedback": "Please rewrite it."})
+			routeWithoutDispatch("reject", "support/send_support_reply.rejected", map[string]any{"reason": "Do not send."})
 		})
 	}
 }

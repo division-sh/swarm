@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -213,23 +214,24 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 		t.Fatal("expected coordinator")
 	}
 	ctx := testPipelineCoordinatorRunContext(t, pc)
+	runID := runtimecorrelation.RunIDFromContext(ctx)
 	if err := pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      bundle.WorkflowName(),
-		StorageRef:      bundle.WorkflowName(),
+		InstanceID:      runID,
+		StorageRef:      runID,
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "waiting",
-		Metadata:        map[string]any{"entity_id": entityID, "flow_path": bundle.WorkflowName(), "instance_id": bundle.WorkflowName()},
+		Metadata:        map[string]any{"entity_id": entityID, "flow_path": runID, "instance_id": runID},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), bundle.WorkflowName())
+	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), runID)
 	envelope = events.EnvelopeForSourceRoute(envelope, events.RouteIdentity{
 		FlowID: "child", FlowInstance: "child", EntityID: entityID,
 	})
 	envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{
-		FlowID: bundle.WorkflowName(), FlowInstance: bundle.WorkflowName(), EntityID: entityID,
+		FlowID: bundle.WorkflowName(), FlowInstance: runID, EntityID: entityID,
 	})
 	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
@@ -253,7 +255,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	if handled := pc.executeNodeHandlerPlan(deliveryCtx, "dispatcher", evt); handled {
 		t.Fatal("dispatcher should not handle child/task.done")
 	}
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(bundle.WorkflowName()))
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(runID))
 	if err != nil {
 		t.Fatalf("load workflow instance after wrong node execution: %v", err)
 	}
@@ -267,7 +269,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	if handled, err := pc.executeNodeHandlerPlanResult(deliveryCtx, "listener", evt); err != nil || !handled {
 		t.Fatalf("listener should handle child/task.done: handled=%v err=%v", handled, err)
 	}
-	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(bundle.WorkflowName()))
+	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(runID))
 	if err != nil {
 		t.Fatalf("load workflow instance after listener execution: %v", err)
 	}

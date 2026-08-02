@@ -32,7 +32,7 @@ func (pc *PipelineCoordinator) persistWorkflowStateForTest(ctx context.Context, 
 	}); err != nil {
 		return err
 	}
-	return pc.applyAcceptedWorkflowEvent(ctx, entityID, inbound, currentState, nextState)
+	return pc.applyAcceptedWorkflowEvent(ctx, route, entityID, inbound, currentState, nextState)
 }
 
 func (pc *PipelineCoordinator) applyWorkflowGateForTest(ctx context.Context, route runtimeflowidentity.Route, _ string, setGate string, clearAll bool) error {

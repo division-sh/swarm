@@ -45,7 +45,7 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if entityID == "" {
 		return true, false, fmt.Errorf("stage timer %s fired without entity_id", timer.ID)
 	}
-	route, err := workflowInstanceRouteForExecution(pc.SemanticSource(), "", evt.FlowInstance())
+	route, err := workflowInstanceRouteForExecution(source, source.WorkflowName(), evt.FlowInstance())
 	if err != nil {
 		return true, false, fmt.Errorf("workflow timer event route: %w", err)
 	}
@@ -98,7 +98,7 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 		if !applied || nextStage == "" {
 			return nil
 		}
-		if err := pc.applyAcceptedWorkflowEvent(txctx, entityID, evt, currentStage, nextStage); err != nil {
+		if err := pc.applyAcceptedWorkflowEvent(txctx, route, entityID, evt, currentStage, nextStage); err != nil {
 			return err
 		}
 		return pc.maybeDeactivateTerminalFlowInstance(txctx, route, entityID, nextStage)

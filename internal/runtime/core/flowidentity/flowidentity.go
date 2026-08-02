@@ -388,6 +388,10 @@ func OwnedByScope(ownerScope, targetInstancePath string) bool {
 func storedScopeKey(source semanticview.Source, workflowName, instancePath string) string {
 	instancePath = normalizeRef(instancePath)
 	if instancePath != "" {
+		expectedScope := normalizeRef(ScopeKey(source, workflowName))
+		if expectedScope != "" && (instancePath == expectedScope || strings.HasPrefix(instancePath, expectedScope+"/")) {
+			return expectedScope
+		}
 		return SemanticScope(instancePath)
 	}
 	return normalizeRef(ScopeKey(source, workflowName))

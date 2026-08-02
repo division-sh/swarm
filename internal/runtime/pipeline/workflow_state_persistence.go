@@ -31,6 +31,11 @@ func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, route r
 	if !ok {
 		return state, nil
 	}
+	persisted := StoredFlowInstance(pc.SemanticSource(), instance)
+	if strings.TrimSpace(persisted.EntityID) == "" {
+		return WorkflowState{}, fmt.Errorf("loaded workflow state is missing its exact entity identity")
+	}
+	state.EntityID = strings.TrimSpace(persisted.EntityID)
 	state.Stage = NormalizeWorkflowStateID(strings.TrimSpace(instance.CurrentState))
 	state.Metadata = cloneStringAnyMap(instance.Metadata)
 	if state.Metadata == nil {

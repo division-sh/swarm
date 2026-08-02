@@ -499,13 +499,14 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 	if err != nil {
 		return err
 	}
+	instanceRoute := runtimeflowidentity.RouteForInstancePath(anchor.FlowInstance)
 	return pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
 		if err := pc.workflowStore.RequireGateRouteAdmitted(txctx, card.RunID); err != nil {
 			return err
 		}
 		currentStage := ""
 		alreadyRouted := false
-		if err := pc.workflowStore.mutateE(txctx, runtimeflowidentity.RouteForInstancePath(anchor.FlowInstance), func(instance *WorkflowInstance) error {
+		if err := pc.workflowStore.mutateE(txctx, instanceRoute, func(instance *WorkflowInstance) error {
 			currentStage = strings.TrimSpace(instance.CurrentState)
 			carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 			if err != nil {
@@ -547,7 +548,7 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 			return nil
 		}
 		pc.notifyTestEntityStateUpdated(anchor.EntityID, route.AdvancesTo)
-		if err := pc.applyAcceptedWorkflowEvent(txctx, anchor.EntityID, evt, currentStage, route.AdvancesTo); err != nil {
+		if err := pc.applyAcceptedWorkflowEvent(txctx, instanceRoute, anchor.EntityID, evt, currentStage, route.AdvancesTo); err != nil {
 			return err
 		}
 		if emitted != nil {
