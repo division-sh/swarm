@@ -515,7 +515,7 @@ func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.C
 
 func newSQLiteWorkflowInstanceStoreForTest(t *testing.T, db *sql.DB) *workflowInstanceStore {
 	t.Helper()
-	store := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db})
+	store := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite})
 	store.deliveryStore = newPipelineTestDeliveryOwner(t, db, true)
 	return store
 }

@@ -2,20 +2,23 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
-	"strings"
 	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
 type GateDecisionFence interface {
 	CommitDecision(context.Context, decisioncard.Card, string, time.Time) error
+}
+
+// GateRouteAdmissionReader owns the selected-store projection used to decide
+// whether a persisted run may receive a gate decision route.
+type GateRouteAdmissionReader interface {
+	RequireGateRouteAdmitted(context.Context, string) error
 }
 
 func (s *workflowInstanceStore) CommitDecision(ctx context.Context, card decisioncard.Card, eventID string, now time.Time) error {
@@ -67,27 +70,8 @@ func (s *workflowInstanceStore) commitGateDecision(ctx context.Context, card dec
 }
 
 func (s *workflowInstanceStore) RequireGateRouteAdmitted(ctx context.Context, runID string) error {
-	if s == nil || !s.enabled() {
+	if s == nil || s.gateRoutes == nil {
 		return fmt.Errorf("workflow instance store is required for gate routing")
 	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return fmt.Errorf("gate route run id is required")
-	}
-	query := `SELECT LOWER(COALESCE(status, '')) FROM runs WHERE run_id = $1::uuid`
-	if s.isSQLite() {
-		query = `SELECT LOWER(COALESCE(status, '')) FROM runs WHERE run_id = ?`
-	}
-	var status string
-	if err := dbQueryRowContext(ctx, s.db, query, runID).Scan(&status); err != nil {
-		if err == sql.ErrNoRows {
-			return fmt.Errorf("gate route run %s is unavailable", runID)
-		}
-		return err
-	}
-	state, stateErr := runtimerunlifecycle.ParseState(status)
-	if stateErr != nil || state != runtimerunlifecycle.StateRunning {
-		return fmt.Errorf("gate route run %s is not routable in status %s", runID, strings.TrimSpace(status))
-	}
-	return nil
+	return s.gateRoutes.RequireGateRouteAdmitted(ctx, runID)
 }

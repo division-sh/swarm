@@ -130,6 +130,7 @@ type workflowInstanceStore struct {
 	routeRecovery    runtimeworkflowroute.RecoveryReader
 	activityResults  runtimeactivityresult.Reader
 	activityJournal  ActivityAttemptJournal
+	gateRoutes       GateRouteAdmissionReader
 	timerObligations runtimetimerobligation.Reader
 	deliveryStore    runtimedelivery.Store
 	pipelineStore    runtimepipelineobligation.Store
@@ -213,7 +214,8 @@ func NewPostgresWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) Wo
 	routeRecovery, _ := runner.(runtimeworkflowroute.RecoveryReader)
 	activityResults, _ := runner.(runtimeactivityresult.Reader)
 	activityJournal, _ := runner.(ActivityAttemptJournal)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal}}
+	gateRoutes, _ := runner.(GateRouteAdmissionReader)
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes}}
 }
 
 func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) WorkflowPersistence {
@@ -221,7 +223,8 @@ func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) Work
 	routeRecovery, _ := runner.(runtimeworkflowroute.RecoveryReader)
 	activityResults, _ := runner.(runtimeactivityresult.Reader)
 	activityJournal, _ := runner.(ActivityAttemptJournal)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal}}
+	gateRoutes, _ := runner.(GateRouteAdmissionReader)
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes}}
 }
 
 func (p WorkflowPersistence) empty() bool {

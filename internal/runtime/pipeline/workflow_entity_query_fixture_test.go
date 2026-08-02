@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	"github.com/division-sh/swarm/internal/runtime/entityquery"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimeworkflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
 )
 
@@ -131,4 +133,33 @@ func (r *recordingRuntimeMutationRunner) CountWorkflowEntities(ctx context.Conte
 		}
 	}
 	return count, rows.Err()
+}
+
+func (r *recordingRuntimeMutationRunner) RequireGateRouteAdmitted(ctx context.Context, runID string) error {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return errors.New("gate route run id is required")
+	}
+	query := `SELECT status FROM runs WHERE run_id = $1::uuid`
+	args := []any{runID}
+	queryer := interface {
+		QueryRowContext(context.Context, string, ...any) *sql.Row
+	}(r.db)
+	if r.dialect == workflowStoreDialectSQLite {
+		query = `SELECT status FROM runs WHERE run_id = ?`
+	}
+	if tx, ok := PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		queryer = tx
+	}
+	var status string
+	if err := queryer.QueryRowContext(ctx, query, args...).Scan(&status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("gate route run %s is unavailable", runID)
+		}
+		return err
+	}
+	if status != string(runtimerunlifecycle.StateRunning) {
+		return fmt.Errorf("gate route run %s is not routable in status %s", runID, status)
+	}
+	return nil
 }
