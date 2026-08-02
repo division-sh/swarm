@@ -23,11 +23,7 @@ var _ runtimeeffects.CompletionStore = (*SQLiteRuntimeStore)(nil)
 func (s *PostgresStore) SettleCompletion(ctx context.Context, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) (runtimeeffects.CompletionSettlementResult, error) {
 	var providerHeadErr error
 	var spendRecorded bool
-	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
+	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		providerHeadErr = nil
 		spendRecorded = false
 		attemptSettlement := settlement
@@ -52,6 +48,7 @@ func (s *PostgresStore) SettleCompletion(ctx context.Context, attempt runtimeeff
 		if err := recordCompletionTurnAuthorActivity(txctx, story, attempt, attemptSettlement); err != nil {
 			return err
 		}
+		var err error
 		spendRecorded, err = insertCompletionSpendPostgres(txctx, tx, attempt, attemptSettlement)
 		if err != nil {
 			return err
@@ -71,7 +68,7 @@ func (s *PostgresStore) SettleCompletion(ctx context.Context, attempt runtimeeff
 		if err := recordExternalEffectStory(txctx, story, externalEffectStorySourceFromAttempt(attempt), attemptSettlement.Settlement.State, attemptSettlement.Settlement.Failure, attemptSettlement.Now.UTC()); err != nil {
 			return err
 		}
-		return story.Finalize(txctx)
+		return nil
 	})
 	if err != nil {
 		return runtimeeffects.CompletionSettlementResult{}, err
@@ -84,11 +81,7 @@ func (s *PostgresStore) SettleCompletion(ctx context.Context, attempt runtimeeff
 func (s *SQLiteRuntimeStore) SettleCompletion(ctx context.Context, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) (runtimeeffects.CompletionSettlementResult, error) {
 	var providerHeadErr error
 	var spendRecorded bool
-	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
+	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite settle completion", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		providerHeadErr = nil
 		spendRecorded = false
 		attemptSettlement := settlement
@@ -113,6 +106,7 @@ func (s *SQLiteRuntimeStore) SettleCompletion(ctx context.Context, attempt runti
 		if err := recordCompletionTurnAuthorActivity(txctx, story, attempt, attemptSettlement); err != nil {
 			return err
 		}
+		var err error
 		spendRecorded, err = insertCompletionSpendSQLite(txctx, tx, attempt, attemptSettlement)
 		if err != nil {
 			return err
@@ -132,7 +126,7 @@ func (s *SQLiteRuntimeStore) SettleCompletion(ctx context.Context, attempt runti
 		if err := recordExternalEffectStory(txctx, story, externalEffectStorySourceFromAttempt(attempt), attemptSettlement.Settlement.State, attemptSettlement.Settlement.Failure, attemptSettlement.Now.UTC()); err != nil {
 			return err
 		}
-		return story.Finalize(txctx)
+		return nil
 	})
 	if err != nil {
 		return runtimeeffects.CompletionSettlementResult{}, err

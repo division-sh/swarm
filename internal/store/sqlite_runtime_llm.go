@@ -50,11 +50,7 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 	if err != nil {
 		return err
 	}
-	return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
+	return s.runPrivateAuthorActivityMutation(ctx, "sqlite append agent turn", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if err := requireSQLiteRunActive(txctx, tx, identity.RunID); err != nil {
 			return err
 		}
@@ -109,7 +105,7 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 		}); err != nil {
 			return err
 		}
-		return story.Finalize(txctx)
+		return nil
 	})
 }
 

@@ -33,11 +33,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		return err
 	}
 
-	return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
+	return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		ctx = txctx
 		if err := requirePostgresRunActive(ctx, tx, identity.RunID); err != nil {
 			return err
@@ -118,7 +114,7 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		}); err != nil {
 			return err
 		}
-		return story.Finalize(ctx)
+		return nil
 	})
 }
 

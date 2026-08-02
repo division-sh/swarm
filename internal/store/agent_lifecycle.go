@@ -222,11 +222,7 @@ func (s *PostgresStore) CommitAgentLifecycleTransition(ctx context.Context, req 
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	var result runtimemanager.AgentLifecycleTransitionResult
-	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
+	err = s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		fingerprint, err := req.Identity.Fingerprint()
 		if err != nil {
 			return err
@@ -262,7 +258,7 @@ func (s *PostgresStore) CommitAgentLifecycleTransition(ctx context.Context, req 
 		if err := story.Record(txctx, agentLifecycleAuthorActivityDraft(req, result)); err != nil {
 			return err
 		}
-		return story.Finalize(txctx)
+		return nil
 	})
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
@@ -277,11 +273,7 @@ func (s *SQLiteRuntimeStore) CommitAgentLifecycleTransition(ctx context.Context,
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	var result runtimemanager.AgentLifecycleTransitionResult
-	err = s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
+	err = s.runPrivateAuthorActivityMutation(ctx, "sqlite commit agent lifecycle transition", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		previous, exists, err := loadSQLiteLifecycleCell(txctx, tx, req.Identity)
 		if err != nil {
 			return err
@@ -311,7 +303,7 @@ func (s *SQLiteRuntimeStore) CommitAgentLifecycleTransition(ctx context.Context,
 		if err := story.Record(txctx, agentLifecycleAuthorActivityDraft(req, result)); err != nil {
 			return err
 		}
-		return story.Finalize(txctx)
+		return nil
 	})
 	return result, err
 }
