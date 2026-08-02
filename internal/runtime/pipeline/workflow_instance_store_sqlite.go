@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -18,21 +19,15 @@ import (
 	"github.com/google/uuid"
 )
 
-func (s *workflowInstanceStore) loadSQLite(ctx context.Context, instanceID string) (WorkflowInstance, bool, error) {
-	keys := workflowInstanceLookupKeys(instanceID)
-	if len(keys) == 0 {
+func (s *workflowInstanceStore) loadSQLite(ctx context.Context, route runtimeflowidentity.Route) (WorkflowInstance, bool, error) {
+	instancePath := strings.Trim(strings.TrimSpace(route.InstancePath), "/")
+	if instancePath == "" {
 		return WorkflowInstance{}, false, nil
 	}
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
 		return WorkflowInstance{}, false, err
 	}
-	placeholders := strings.TrimRight(strings.Repeat("?,", len(keys)), ",")
-	args := make([]any, 0, len(keys)+1)
-	for _, key := range keys {
-		args = append(args, key)
-	}
-	args = append(args, runID)
 	rows, err := dbQueryContext(ctx, s.db, `
 		SELECT
 			es.entity_id,
@@ -54,11 +49,11 @@ func (s *workflowInstanceStore) loadSQLite(ctx context.Context, instanceID strin
 			es.updated_at
 		FROM entity_state es
 		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-		WHERE es.entity_id IN (`+placeholders+`)
+		WHERE es.flow_instance = ?
 		  AND es.run_id = ?
 		ORDER BY es.created_at DESC, es.entity_id DESC
 		LIMIT 1
-	`, args...)
+	`, instancePath, runID)
 	if err != nil {
 		return WorkflowInstance{}, false, err
 	}
@@ -194,22 +189,22 @@ func (s *workflowInstanceStore) createSQLite(ctx context.Context, instance Workf
 	return s.writeSQLite(ctx, identity.RowID(), identity.StorageRef, instance, true)
 }
 
-func (s *workflowInstanceStore) mutateSQLite(ctx context.Context, instanceID string, fn func(*WorkflowInstance)) error {
+func (s *workflowInstanceStore) mutateSQLite(ctx context.Context, route runtimeflowidentity.Route, fn func(*WorkflowInstance)) error {
 	if fn == nil {
 		return nil
 	}
-	return s.mutateSQLiteE(ctx, instanceID, instanceID, func(instance *WorkflowInstance) error {
+	return s.mutateSQLiteE(ctx, route, route.InstancePath, func(instance *WorkflowInstance) error {
 		fn(instance)
 		return nil
 	})
 }
 
-func (s *workflowInstanceStore) mutateSQLiteE(ctx context.Context, instanceID, requestedKey string, fn func(*WorkflowInstance) error) error {
+func (s *workflowInstanceStore) mutateSQLiteE(ctx context.Context, route runtimeflowidentity.Route, requestedKey string, fn func(*WorkflowInstance) error) error {
 	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		if _, err := s.requireActiveWorkflowRun(txctx, tx); err != nil {
 			return err
 		}
-		instance, ok, err := s.loadSQLite(txctx, instanceID)
+		instance, ok, err := s.loadSQLite(txctx, route)
 		if err != nil {
 			return err
 		}

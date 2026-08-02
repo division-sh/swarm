@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -149,15 +150,15 @@ func (l *WorkflowTimerLifecycle) store() *workflowInstanceStore {
 	return l.storeOwner
 }
 
-func (l *WorkflowTimerLifecycle) Reconcile(ctx context.Context, entityID, currentState, nextState string, cause workflowTimerCause) error {
-	return l.reconcile(ctx, entityID, currentState, nextState, cause, true)
+func (l *WorkflowTimerLifecycle) Reconcile(ctx context.Context, route runtimeflowidentity.Route, entityID, currentState, nextState string, cause workflowTimerCause) error {
+	return l.reconcile(ctx, route, entityID, currentState, nextState, cause, true)
 }
 
-func (l *WorkflowTimerLifecycle) reconcileInitialEntry(ctx context.Context, entityID, initialState string, cause workflowTimerCause) error {
-	return l.reconcile(ctx, entityID, "", initialState, cause, false)
+func (l *WorkflowTimerLifecycle) reconcileInitialEntry(ctx context.Context, route runtimeflowidentity.Route, entityID, initialState string, cause workflowTimerCause) error {
+	return l.reconcile(ctx, route, entityID, "", initialState, cause, false)
 }
 
-func (l *WorkflowTimerLifecycle) reconcile(ctx context.Context, entityID, currentState, nextState string, cause workflowTimerCause, armWakeups bool) error {
+func (l *WorkflowTimerLifecycle) reconcile(ctx context.Context, route runtimeflowidentity.Route, entityID, currentState, nextState string, cause workflowTimerCause, armWakeups bool) error {
 	store := l.store()
 	if store == nil || !store.enabled() {
 		return nil
@@ -169,20 +170,21 @@ func (l *WorkflowTimerLifecycle) reconcile(ctx context.Context, entityID, curren
 	currentState = strings.TrimSpace(currentState)
 	nextState = strings.TrimSpace(nextState)
 	cause = cause.normalized()
-	if entityID == "" {
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	if entityID == "" || !route.Valid() {
 		return nil
 	}
-	instance, ok, err := store.Load(ctx, entityID)
+	source := l.source
+	if source == nil {
+		return fmt.Errorf("workflow timer lifecycle requires semantic source")
+	}
+	instance, ok, err := store.Load(ctx, route)
 	if err != nil || !ok {
 		return err
 	}
 	entityID = workflowTimerCanonicalEntityID(instance, entityID)
 	if entityID == "" {
 		return fmt.Errorf("workflow timer lifecycle requires canonical entity identity")
-	}
-	source := l.source
-	if source == nil {
-		return fmt.Errorf("workflow timer lifecycle requires semantic source")
 	}
 	runID := workflowTimerRunID(ctx, instance)
 	if runID == "" {
@@ -279,8 +281,8 @@ func (l *WorkflowTimerLifecycle) reconcile(ctx context.Context, entityID, curren
 	return nil
 }
 
-func (l *WorkflowTimerLifecycle) ArmInitialEntryTimers(ctx context.Context, instanceID string) error {
-	active, err := l.initialEntryTimerActivations(ctx, instanceID)
+func (l *WorkflowTimerLifecycle) ArmInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error {
+	active, err := l.initialEntryTimerActivations(ctx, route)
 	if err != nil {
 		return err
 	}
@@ -292,7 +294,7 @@ func (l *WorkflowTimerLifecycle) ArmInitialEntryTimers(ctx context.Context, inst
 	return nil
 }
 
-func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.Context, instanceID string) error {
+func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.Context, route runtimeflowidentity.Route) error {
 	store := l.store()
 	if store == nil || !store.enabled() {
 		return nil
@@ -300,22 +302,22 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 	if _, ok := PipelineSQLTxFromContext(ctx); !ok {
 		return fmt.Errorf("workflow initial timer reconciliation requires the selected workflow mutation")
 	}
-	instanceID = strings.TrimSpace(instanceID)
-	if instanceID == "" {
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	if !route.Valid() {
 		return fmt.Errorf("workflow initial timer reconciliation requires instance identity")
 	}
-	instance, found, err := store.Load(ctx, instanceID)
+	instance, found, err := store.Load(ctx, route)
 	if err != nil {
 		return err
 	}
 	if !found {
-		return fmt.Errorf("workflow initial timer reconciliation instance %s is missing", instanceID)
+		return fmt.Errorf("workflow initial timer reconciliation instance %s is missing", route.InstancePath)
 	}
 	source := l.source
 	if source == nil {
 		return fmt.Errorf("workflow initial timer reconciliation requires semantic source")
 	}
-	entityID := workflowTimerCanonicalEntityID(instance, instanceID)
+	entityID := workflowTimerCanonicalEntityID(instance, route.InstancePath)
 	runID := workflowTimerRunID(ctx, instance)
 	if entityID == "" || runID == "" {
 		return fmt.Errorf("workflow initial timer reconciliation requires exact run and entity identity")
@@ -467,8 +469,8 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 	return nil
 }
 
-func (l *WorkflowTimerLifecycle) RetireInitialEntryTimerWakeups(ctx context.Context, instanceID string) error {
-	active, err := l.initialEntryTimerActivations(ctx, instanceID)
+func (l *WorkflowTimerLifecycle) RetireInitialEntryTimerWakeups(ctx context.Context, route runtimeflowidentity.Route) error {
+	active, err := l.initialEntryTimerActivations(ctx, route)
 	if err != nil {
 		return err
 	}
@@ -485,23 +487,23 @@ func (l *WorkflowTimerLifecycle) RetireInitialEntryTimerWakeups(ctx context.Cont
 	return l.scheduler.retireWorkflowTimerWakeups(ctx, refs)
 }
 
-func (l *WorkflowTimerLifecycle) initialEntryTimerActivations(ctx context.Context, instanceID string) ([]WorkflowTimerActivation, error) {
+func (l *WorkflowTimerLifecycle) initialEntryTimerActivations(ctx context.Context, route runtimeflowidentity.Route) ([]WorkflowTimerActivation, error) {
 	store := l.store()
 	if store == nil || !store.enabled() {
 		return nil, nil
 	}
-	instanceID = strings.TrimSpace(instanceID)
-	if instanceID == "" {
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	if !route.Valid() {
 		return nil, fmt.Errorf("workflow initial timer activation requires instance identity")
 	}
-	instance, found, err := store.Load(ctx, instanceID)
+	instance, found, err := store.Load(ctx, route)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
-		return nil, fmt.Errorf("workflow initial timer activation instance %s is missing", instanceID)
+		return nil, fmt.Errorf("workflow initial timer activation instance %s is missing", route.InstancePath)
 	}
-	entityID := workflowTimerCanonicalEntityID(instance, instanceID)
+	entityID := workflowTimerCanonicalEntityID(instance, route.InstancePath)
 	runID := workflowTimerRunID(ctx, instance)
 	if entityID == "" || runID == "" {
 		return nil, fmt.Errorf("workflow initial timer activation requires exact run and entity identity")
@@ -649,7 +651,11 @@ func (l *WorkflowTimerLifecycle) CancelSupersededGenerations(ctx context.Context
 	if store == nil || !store.enabled() {
 		return nil
 	}
-	instance, ok, err := store.Load(ctx, strings.TrimSpace(entityID))
+	route, err := workflowInstanceRouteForContext(ctx, l.source, "", "")
+	if err != nil {
+		return err
+	}
+	instance, ok, err := store.Load(ctx, route)
 	if err != nil || !ok {
 		return err
 	}
@@ -1068,10 +1074,10 @@ func (l *WorkflowTimerLifecycle) workflowTimerDeclarationForActivation(
 	}
 	instanceID := strings.Trim(strings.TrimSpace(activation.FlowInstance), "/")
 	if instanceID == "" {
-		instanceID = strings.TrimSpace(activation.EntityID)
+		return runtimecontracts.WorkflowTimerContract{}, false, fmt.Errorf("workflow timer activation is missing its instance route")
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(activation.RunID))
-	instance, found, err := store.Load(ctx, instanceID)
+	instance, found, err := store.Load(ctx, runtimeflowidentity.RouteForInstancePath(instanceID))
 	if err != nil || !found {
 		return runtimecontracts.WorkflowTimerContract{}, false, err
 	}

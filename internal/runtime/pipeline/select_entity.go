@@ -122,7 +122,10 @@ func (pc *PipelineCoordinator) selectedHandlerEntityFromInstance(ctx context.Con
 	if entityID == "" {
 		return selectedHandlerEntity{}, fmt.Errorf("%s_no_match: node %s flow %s selected entity has empty entity_id", label, nodeID, flowID)
 	}
-	state := pc.currentWorkflowState(ctx, entityID)
+	state, err := pc.currentWorkflowState(ctx, entityID)
+	if err != nil {
+		return selectedHandlerEntity{}, err
+	}
 	if strings.TrimSpace(state.EntityID) == "" {
 		state.EntityID = entityID
 	}
@@ -184,7 +187,7 @@ func (pc *PipelineCoordinator) createdHandlerEntityForDeclaredKey(ctx context.Co
 	if entityID == "" {
 		return selectedHandlerEntity{}, fmt.Errorf("select_or_create_entity_invalid: node %s flow %s derived empty entity_id", nodeID, flowID)
 	}
-	if existing, ok, err := pc.workflowStore.Load(ctx, entityID); err != nil {
+	if existing, ok, err := pc.workflowStore.Load(ctx, instance.Route()); err != nil {
 		return selectedHandlerEntity{}, fmt.Errorf("select_or_create_entity_lookup_failed: node %s flow %s: %w", nodeID, flowID, err)
 	} else if ok {
 		if !workflowInstanceOwnedByFlow(source, existing, flowID) || !selectEntityCandidateMatches(existing, expected) || workflowInstanceInTerminalState(pc, flowID, existing) {

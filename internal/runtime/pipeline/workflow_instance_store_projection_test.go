@@ -72,7 +72,7 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 		t.Fatalf("upsert workflow instance: %v", err)
 	}
 
-	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), storageRef)
+	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute(storageRef))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 		t.Fatalf("upsert workflow instance: %v", err)
 	}
 
-	loaded, ok, err := workflowStore.Load(ctx, storageRef)
+	loaded, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(storageRef))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 		t.Fatalf("duplicate create failure = %#v, want canonical already-exists failure", failure)
 	}
 
-	loaded, ok, err := store.Load(ctx, storageRef)
+	loaded, ok, err := store.Load(ctx, testWorkflowInstanceRoute(storageRef))
 	if err != nil {
 		t.Fatalf("load workflow instance after duplicate create: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestWorkflowInstanceStoreProjection_StaticRowsDoNotGainMaterializedFlowPath
 		t.Fatalf("upsert static workflow instance: %v", err)
 	}
 
-	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), storageRef)
+	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute(storageRef))
 	if err != nil {
 		t.Fatalf("load static workflow instance: %v", err)
 	}
@@ -452,7 +452,7 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 				t.Fatalf("mutate malformed persisted shape: %v", err)
 			}
 
-			loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), storageRef)
+			loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute(storageRef))
 			if tc.wantContains == "" {
 				if err != nil {
 					t.Fatalf("load with slash-only flow_path: %v", err)

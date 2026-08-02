@@ -62,27 +62,27 @@ func (o *concurrentWorkflowInitialMaterializationTestOwner) effectCount() int {
 	return o.effects
 }
 
-func (*workflowInitialMaterializationTestOwner) ArmInitialEntryTimers(context.Context, string) error {
+func (*workflowInitialMaterializationTestOwner) ArmInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
 	return nil
 }
 
-func (*concurrentWorkflowInitialMaterializationTestOwner) ArmInitialEntryTimers(context.Context, string) error {
+func (*concurrentWorkflowInitialMaterializationTestOwner) ArmInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
 	return nil
 }
 
-func (*workflowInitialMaterializationTestOwner) ReconcileInitialEntryTimers(context.Context, string) error {
+func (*workflowInitialMaterializationTestOwner) ReconcileInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
 	return nil
 }
 
-func (*concurrentWorkflowInitialMaterializationTestOwner) ReconcileInitialEntryTimers(context.Context, string) error {
+func (*concurrentWorkflowInitialMaterializationTestOwner) ReconcileInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
 	return nil
 }
 
-func (*workflowInitialMaterializationTestOwner) RetireInitialEntryTimerWakeups(context.Context, string) error {
+func (*workflowInitialMaterializationTestOwner) RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.Route) error {
 	return nil
 }
 
-func (*concurrentWorkflowInitialMaterializationTestOwner) RetireInitialEntryTimerWakeups(context.Context, string) error {
+func (*concurrentWorkflowInitialMaterializationTestOwner) RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.Route) error {
 	return nil
 }
 
@@ -140,7 +140,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			if first != WorkflowInitialMaterializationCreated {
 				t.Fatalf("first materialization = %d, want created", first)
 			}
-			persisted, found, err := store.Load(ctx, instance.StorageRef)
+			persisted, found, err := store.Load(ctx, testWorkflowInstanceRoute(instance.StorageRef))
 			if err != nil {
 				t.Fatalf("load persisted initial materialization: %v", err)
 			}
@@ -178,7 +178,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			if owner.effects != 1 {
 				t.Fatalf("initial-entry effects = %d, want exactly 1", owner.effects)
 			}
-			afterReplay, found, err := store.Load(ctx, instance.StorageRef)
+			afterReplay, found, err := store.Load(ctx, testWorkflowInstanceRoute(instance.StorageRef))
 			if err != nil || !found {
 				t.Fatalf("load progressed workflow after replay: found=%v err=%v", found, err)
 			}
@@ -1474,7 +1474,7 @@ states: [initializing, ready]
 		t.Fatal("executeNodeHandlerPlanResult handled = false, want true")
 	}
 
-	instance, ok, err := workflowStore.Load(ctx, entityID)
+	instance, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(entityID))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}

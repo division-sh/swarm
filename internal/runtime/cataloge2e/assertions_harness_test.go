@@ -166,7 +166,7 @@ func assertGates(t testing.TB, workflow catalogWorkflowPersistence, entityID str
 	if workflow == nil {
 		t.Fatal("workflow instance store is required for gates assertions")
 	}
-	instance, ok, err := workflow.Load(catalogRuntimeContext(), strings.TrimSpace(entityID))
+	instance, ok, err := workflow.Load(catalogRuntimeContext(), catalogWorkflowRoute(strings.TrimSpace(entityID)))
 	if err != nil {
 		t.Fatalf("load workflow instance %s for gates: %v", entityID, err)
 	}
@@ -200,7 +200,7 @@ func assertEntityFields(t testing.TB, workflow catalogWorkflowPersistence, entit
 	if workflow == nil {
 		t.Fatal("workflow instance store is required for entity_fields assertions")
 	}
-	instance, ok, err := workflow.Load(catalogRuntimeContext(), strings.TrimSpace(entityID))
+	instance, ok, err := workflow.Load(catalogRuntimeContext(), catalogWorkflowRoute(strings.TrimSpace(entityID)))
 	if err != nil {
 		t.Fatalf("load workflow instance %s for entity_fields: %v", entityID, err)
 	}
@@ -238,7 +238,7 @@ func assertEntityState(t testing.TB, db *sql.DB, workflow catalogWorkflowPersist
 	if workflow == nil {
 		t.Fatal("workflow instance store is required")
 	}
-	instance, ok, err := workflow.Load(catalogRuntimeContext(), strings.TrimSpace(entityID))
+	instance, ok, err := workflow.Load(catalogRuntimeContext(), catalogWorkflowRoute(strings.TrimSpace(entityID)))
 	if err != nil {
 		t.Fatalf("load workflow instance %s: %v", entityID, err)
 	}
@@ -263,7 +263,7 @@ func assertFlowState(t testing.TB, h *runtimeHarness, entityID, flowID, wantStat
 	if h == nil || h.workflow == nil {
 		t.Fatal("workflow instance store is required")
 	}
-	instance, ok, err := h.workflow.Load(catalogRuntimeContext(), strings.TrimSpace(entityID))
+	instance, ok, err := h.workflow.Load(catalogRuntimeContext(), catalogWorkflowRoute(strings.TrimSpace(entityID)))
 	if err != nil {
 		t.Fatalf("load workflow instance %s for flow state: %v", entityID, err)
 	}
@@ -376,7 +376,7 @@ func catalogFlowInstanceForCausalFlow(db *sql.DB, workflow catalogWorkflowPersis
 	}
 	instances := make([]runtimepipeline.WorkflowInstance, 0, len(keys))
 	for key := range keys {
-		row, found, err := workflow.Load(catalogRuntimeContext(), key)
+		row, found, err := workflow.Load(catalogRuntimeContext(), catalogWorkflowRoute(key))
 		if err != nil {
 			return runtimepipeline.WorkflowInstance{}, false, err
 		}

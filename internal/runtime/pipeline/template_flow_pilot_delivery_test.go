@@ -68,7 +68,7 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 	if !handled {
 		t.Fatal("dispatchWorkflowNodeEventResult handled = false, want account handler delivery")
 	}
-	loaded, ok, err := workflowStore.Load(ctx, entityID)
+	loaded, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(entityID))
 	if err != nil {
 		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
 	}

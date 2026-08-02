@@ -321,15 +321,15 @@ func (*startupReadinessFinalizationStore) MaterializeInitialEntry(
 	return 0, errors.New("unexpected readiness materialization")
 }
 
-func (*startupReadinessFinalizationStore) ArmInitialEntryTimers(context.Context, string) error {
+func (*startupReadinessFinalizationStore) ArmInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
 	return errors.New("unexpected readiness timer arm")
 }
 
-func (*startupReadinessFinalizationStore) ReconcileInitialEntryTimers(context.Context, string) error {
+func (*startupReadinessFinalizationStore) ReconcileInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
 	return errors.New("unexpected readiness timer reconciliation")
 }
 
-func (*startupReadinessFinalizationStore) RetireInitialEntryTimerWakeups(context.Context, string) error {
+func (*startupReadinessFinalizationStore) RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.Route) error {
 	return errors.New("unexpected readiness timer retirement")
 }
 
@@ -389,7 +389,7 @@ func (*startupReadinessFinalizationStore) MarkTerminated(context.Context, string
 	return errors.New("unexpected readiness termination")
 }
 
-func (*startupReadinessFinalizationStore) Load(context.Context, string) (runtimepipeline.WorkflowInstance, bool, error) {
+func (*startupReadinessFinalizationStore) Load(context.Context, runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error) {
 	return runtimepipeline.WorkflowInstance{}, false, errors.New("unexpected readiness workflow load")
 }
 

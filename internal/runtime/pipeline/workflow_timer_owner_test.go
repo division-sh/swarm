@@ -111,7 +111,7 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("materialize source A: result=%v err=%v", result, err)
 			}
-			if err := pcA.ArmInitialEntryTimers(ctx, entityID); err != nil {
+			if err := pcA.ArmInitialEntryTimers(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
 				t.Fatalf("arm source A: %v", err)
 			}
 			sourceARows := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
@@ -140,16 +140,16 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 			})
 			cancelledCtx, cancel := context.WithCancel(ctx)
 			cancel()
-			if err := pcB.ReconcileInitialEntryTimers(cancelledCtx, entityID); err == nil {
+			if err := pcB.ReconcileInitialEntryTimers(cancelledCtx, testWorkflowInstanceRoute(entityID)); err == nil {
 				t.Fatal("cancelled source revision unexpectedly committed")
 			}
 			if active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true); len(active) != 3 {
 				t.Fatalf("cancelled source revision changed active timers: %#v", active)
 			}
-			if err := pcB.ReconcileInitialEntryTimers(ctx, entityID); err != nil {
+			if err := pcB.ReconcileInitialEntryTimers(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
 				t.Fatalf("reconcile source B: %v", err)
 			}
-			if err := pcB.ReconcileInitialEntryTimers(ctx, entityID); err != nil {
+			if err := pcB.ReconcileInitialEntryTimers(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
 				t.Fatalf("replay source B reconciliation: %v", err)
 			}
 
@@ -255,7 +255,7 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("materialize source A: result=%v err=%v", result, err)
 			}
-			if err := pcA.ArmInitialEntryTimers(ctx, entityID); err != nil {
+			if err := pcA.ArmInitialEntryTimers(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
 				t.Fatalf("arm source A: %v", err)
 			}
 			sourceARows := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true)
@@ -265,14 +265,14 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 			sourceAByDeclaration := workflowTimerActivationsByDeclaration(sourceARows)
 			transitionAt := createdAt.Add(time.Minute)
 			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-				if err := store.mutateE(txctx, entityID, func(instance *WorkflowInstance) error {
+				if err := store.mutateE(txctx, testWorkflowInstanceRoute(entityID), func(instance *WorkflowInstance) error {
 					instance.CurrentState = "done"
 					instance.EnteredStageAt = transitionAt
 					return nil
 				}); err != nil {
 					return err
 				}
-				return pcA.workflowTimers.Reconcile(txctx, entityID, "waiting", "done", workflowTimerCause{
+				return pcA.workflowTimers.Reconcile(txctx, testWorkflowInstanceRoute(entityID), entityID, "waiting", "done", workflowTimerCause{
 					Kind: workflowTimerCauseTransition, EventID: uuid.NewString(),
 					OccurredAt: transitionAt, TransitionID: "waiting->done",
 					FromState: "waiting", ToState: "done",
@@ -299,10 +299,10 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 				WorkOwner:      ownerB,
 				TimerScheduler: schedulerB,
 			})
-			if err := pcB.ReconcileInitialEntryTimers(ctx, entityID); err != nil {
+			if err := pcB.ReconcileInitialEntryTimers(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
 				t.Fatalf("reconcile progressed source B: %v", err)
 			}
-			if err := pcB.ReconcileInitialEntryTimers(ctx, entityID); err != nil {
+			if err := pcB.ReconcileInitialEntryTimers(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
 				t.Fatalf("replay progressed source B: %v", err)
 			}
 
@@ -357,11 +357,11 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("materialize initial/event timers: result=%v err=%v", result, err)
 			}
-			if err := pc.ArmInitialEntryTimers(ctx, entityID); err != nil {
+			if err := pc.ArmInitialEntryTimers(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
 				t.Fatalf("arm initial timer: %v", err)
 			}
 			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-				return pc.workflowTimers.Reconcile(txctx, entityID, "waiting", "waiting", workflowTimerCause{
+				return pc.workflowTimers.Reconcile(txctx, testWorkflowInstanceRoute(entityID), entityID, "waiting", "waiting", workflowTimerCause{
 					Kind: workflowTimerCauseEvent, EventID: uuid.NewString(),
 					EventType: "timer.arm", OccurredAt: createdAt.Add(time.Minute),
 				})
@@ -386,7 +386,7 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 				t.Fatal("event-caused timer activation is missing")
 			}
 
-			if err := pc.RetireInitialEntryTimerWakeups(ctx, entityID); err != nil {
+			if err := pc.RetireInitialEntryTimerWakeups(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
 				t.Fatalf("retire initial wakeups: %v", err)
 			}
 			waitForWorkflowTimerCondition(t, time.Second, func() bool {
@@ -400,7 +400,7 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 				t.Fatalf("initial cleanup changed durable activations: %#v", active)
 			}
 
-			if err := pc.ArmInitialEntryTimers(ctx, entityID); err != nil {
+			if err := pc.ArmInitialEntryTimers(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
 				t.Fatalf("rearm initial wakeup after cleanup: %v", err)
 			}
 			waitForWorkflowTimerCondition(t, time.Second, func() bool {
@@ -449,7 +449,7 @@ func TestWorkflowTimerLifecycleScopesDeclarationsToOwningFlowOnBothStores(t *tes
 					t.Fatalf("%s initial timer event = %q, want %q", instanceFlow, rows[0].EventType, wantInitialEvent)
 				}
 				if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-					return pc.workflowTimers.Reconcile(txctx, entityID, "waiting", "waiting", workflowTimerCause{
+					return pc.workflowTimers.Reconcile(txctx, testWorkflowInstanceRoute(entityID), entityID, "waiting", "waiting", workflowTimerCause{
 						Kind: workflowTimerCauseEvent, EventID: uuid.NewString(),
 						EventType: "timer.arm", OccurredAt: createdAt.Add(time.Minute),
 					})
@@ -683,7 +683,7 @@ func TestWorkflowTimerLifecycleExactCauseReplayConvergesAfterTerminalStateOnBoth
 					Kind: workflowTimerCauseInitial, OccurredAt: activation.CreatedAt, ToState: "waiting",
 				}
 				if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-					return pc.workflowTimers.Reconcile(txctx, entityID, "", "waiting", cause)
+					return pc.workflowTimers.Reconcile(txctx, testWorkflowInstanceRoute(entityID), entityID, "", "waiting", cause)
 				}); err != nil {
 					t.Fatalf("replay exact activation cause: %v", err)
 				}
@@ -714,7 +714,7 @@ func TestWorkflowTimerLifecycleReactivatesOnlyOnLaterStageEntryOnBothStores(t *t
 				FromState: "waiting", ToState: "waiting",
 			}
 			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-				return pc.workflowTimers.Reconcile(txctx, entityID, "waiting", "waiting", unrelated)
+				return pc.workflowTimers.Reconcile(txctx, testWorkflowInstanceRoute(entityID), entityID, "waiting", "waiting", unrelated)
 			}); err != nil {
 				t.Fatalf("reconcile unrelated same-stage event: %v", err)
 			}
@@ -730,7 +730,7 @@ func TestWorkflowTimerLifecycleReactivatesOnlyOnLaterStageEntryOnBothStores(t *t
 			}
 			activate := func() error {
 				return store.runPipelineMutation(ctx, func(txctx context.Context) error {
-					return pc.workflowTimers.Reconcile(txctx, entityID, "done", "waiting", reentry)
+					return pc.workflowTimers.Reconcile(txctx, testWorkflowInstanceRoute(entityID), entityID, "done", "waiting", reentry)
 				})
 			}
 			if err := activate(); err != nil {
@@ -775,7 +775,7 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 			})
 
 			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-				return pc.workflowTimers.Reconcile(txctx, entityID, "", "waiting", workflowTimerCause{
+				return pc.workflowTimers.Reconcile(txctx, testWorkflowInstanceRoute(entityID), entityID, "", "waiting", workflowTimerCause{
 					Kind: workflowTimerCauseInitial, OccurredAt: createdAt, ToState: "waiting",
 				})
 			}); err != nil {
@@ -796,7 +796,7 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 				)
 				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runID, entityID, payload, eventAt)
 				result, err := pc.executeNodeContractHandler(ctx, "observer", runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
-					Event: evt, State: pc.currentWorkflowState(ctx, entityID),
+					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, entityID),
 				}, false)
 				if err != nil {
 					t.Fatalf("execute %s event-only handler: %v", eventType, err)
@@ -883,7 +883,7 @@ func TestWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores(t *test
 				)
 				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runtimecorrelation.RunIDFromContext(ctx), entityID, payload, eventAt)
 				result, err := pc.executeNodeContractHandler(ctx, "observer", handler, workflowTriggerContext{
-					Event: evt, State: pc.currentWorkflowState(ctx, entityID),
+					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, entityID),
 				}, false)
 				if err != nil {
 					t.Fatalf("execute %s handler: %v", eventType, err)
@@ -996,7 +996,7 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 				)
 				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runID, entityID, payload, eventAt)
 				result, err := pc.executeNodeContractHandler(ctx, "observer", handler, workflowTriggerContext{
-					Event: evt, State: pc.currentWorkflowState(ctx, entityID),
+					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, entityID),
 				}, false)
 				if err != nil {
 					t.Fatalf("execute %s handler: %v", eventType, err)
@@ -1021,7 +1021,7 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 				AdvancesTo: "waiting",
 			}
 			execute(uuid.NewString(), "loop.repeat", firstGeneration.RevisionID, repeatHandler)
-			persistedInstance, ok, err := store.Load(ctx, entityID)
+			persistedInstance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
 			if err != nil || !ok {
 				t.Fatalf("load repeated workflow instance found=%v err=%v", ok, err)
 			}
@@ -1087,10 +1087,10 @@ func TestWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnBothStore
 				initial := workflowTimerCause{
 					Kind: workflowTimerCauseInitial, EventType: "state:waiting", OccurredAt: createdAt, ToState: "waiting",
 				}
-				if err := pc.workflowTimers.Reconcile(txctx, entityID, "", "waiting", initial); err != nil {
+				if err := pc.workflowTimers.Reconcile(txctx, testWorkflowInstanceRoute(entityID), entityID, "", "waiting", initial); err != nil {
 					return err
 				}
-				return pc.workflowTimers.Reconcile(txctx, entityID, "waiting", "waiting", workflowTimerCause{
+				return pc.workflowTimers.Reconcile(txctx, testWorkflowInstanceRoute(entityID), entityID, "waiting", "waiting", workflowTimerCause{
 					Kind: workflowTimerCauseEvent, EventID: eventID, EventType: "work.created", OccurredAt: createdAt,
 					FromState: "waiting", ToState: "waiting",
 				})
@@ -1302,7 +1302,7 @@ func TestWorkflowTimerLifecycleRollbackAndCancellationOnBothStores(t *testing.T)
 			bus.publishErr = nil
 			transitionAt := canonicalWorkflowTimerTime(time.Now())
 			err = store.runPipelineMutation(ctx, func(txctx context.Context) error {
-				return pc.workflowTimers.Reconcile(txctx, entityID, "waiting", "done", workflowTimerCause{
+				return pc.workflowTimers.Reconcile(txctx, testWorkflowInstanceRoute(entityID), entityID, "waiting", "done", workflowTimerCause{
 					Kind: workflowTimerCauseTransition, EventID: uuid.NewString(), EventType: "work.completed",
 					OccurredAt: transitionAt, TransitionID: uuid.NewString(), FromState: "waiting", ToState: "done",
 				})
@@ -1381,7 +1381,7 @@ func TestWorkflowTimerLifecycleCommitOrdersConvergeOnBothStores(t *testing.T) {
 							t.Fatalf("cancel: %v", err)
 						}
 					case "unrelated":
-						if err := store.mutateE(ctx, entityID, func(instance *WorkflowInstance) error {
+						if err := store.mutateE(ctx, testWorkflowInstanceRoute(entityID), func(instance *WorkflowInstance) error {
 							if instance.Metadata == nil {
 								instance.Metadata = map[string]any{}
 							}
@@ -1401,7 +1401,7 @@ func TestWorkflowTimerLifecycleCommitOrdersConvergeOnBothStores(t *testing.T) {
 					t.Fatalf("converged timer = status:%s publishes:%d, want %s/%d", persisted.Status, bus.publishedCount(), test.wantStatus, test.wantPublishes)
 				}
 				if unrelatedApplied {
-					instance, found, err := store.Load(ctx, entityID)
+					instance, found, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
 					if err != nil || !found || instance.Metadata["unrelated_timer_order_proof"] != test.name {
 						t.Fatalf("unrelated mutation found=%v value=%#v err=%v", found, instance.Metadata["unrelated_timer_order_proof"], err)
 					}
@@ -1460,7 +1460,7 @@ func TestWorkflowTimerLifecycleIsolatesStaleActivationAcrossCancelAndReentryOnBo
 			pc, entityID, first := seedWorkflowTimerOwnerActivation(t, store, ctx, bus, false)
 			cancelAt := canonicalWorkflowTimerTime(first.CreatedAt.Add(time.Minute))
 			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-				return pc.workflowTimers.Reconcile(txctx, entityID, "waiting", "done", workflowTimerCause{
+				return pc.workflowTimers.Reconcile(txctx, testWorkflowInstanceRoute(entityID), entityID, "waiting", "done", workflowTimerCause{
 					Kind: workflowTimerCauseTransition, EventID: uuid.NewString(), EventType: "work.completed",
 					OccurredAt: cancelAt, TransitionID: "waiting_to_done", FromState: "waiting", ToState: "done",
 				})
@@ -1469,7 +1469,7 @@ func TestWorkflowTimerLifecycleIsolatesStaleActivationAcrossCancelAndReentryOnBo
 			}
 			reenterAt := canonicalWorkflowTimerTime(cancelAt.Add(time.Minute))
 			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-				return pc.workflowTimers.Reconcile(txctx, entityID, "done", "waiting", workflowTimerCause{
+				return pc.workflowTimers.Reconcile(txctx, testWorkflowInstanceRoute(entityID), entityID, "done", "waiting", workflowTimerCause{
 					Kind: workflowTimerCauseTransition, EventID: uuid.NewString(), EventType: "work.reopened",
 					OccurredAt: reenterAt, TransitionID: "done_to_waiting", FromState: "done", ToState: "waiting",
 				})
@@ -1525,7 +1525,7 @@ func TestWorkflowTimerLifecycleActivationRollbackDoesNotRegisterOnBothStores(t *
 			})
 			rollback := errors.New("rollback activation")
 			err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-				if err := pc.workflowTimers.Reconcile(txctx, entityID, "", "waiting", workflowTimerCause{
+				if err := pc.workflowTimers.Reconcile(txctx, testWorkflowInstanceRoute(entityID), entityID, "", "waiting", workflowTimerCause{
 					Kind: workflowTimerCauseInitial, OccurredAt: createdAt, ToState: "waiting",
 				}); err != nil {
 					return err
@@ -1911,7 +1911,7 @@ func TestWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStores(t *te
 			default:
 			}
 
-			if err := pc.ArmInitialEntryTimers(ctx, entityID); err != nil {
+			if err := pc.ArmInitialEntryTimers(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
 				t.Fatalf("ArmInitialEntryTimers: %v", err)
 			}
 			var event events.Event
@@ -1951,7 +1951,7 @@ func TestWorkflowTimerInitialWakeupRetirementJoinsAndRearmsOnBothStores(t *testi
 			if err := pc.workflowTimers.bindScheduler(newWorkflowTimerTestScheduler(t, pc.workflowTimers.workOwner)); err != nil {
 				t.Fatalf("bind workflow timer scheduler: %v", err)
 			}
-			if err := pc.ArmInitialEntryTimers(ctx, entityID); err != nil {
+			if err := pc.ArmInitialEntryTimers(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
 				t.Fatalf("arm initial workflow timer: %v", err)
 			}
 			waitForWorkflowTimerCondition(t, time.Second, func() bool {
@@ -1959,7 +1959,7 @@ func TestWorkflowTimerInitialWakeupRetirementJoinsAndRearmsOnBothStores(t *testi
 				return active == 1 && draining == 0
 			}, "initial workflow timer wakeup")
 
-			if err := pc.RetireInitialEntryTimerWakeups(ctx, entityID); err != nil {
+			if err := pc.RetireInitialEntryTimerWakeups(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
 				t.Fatalf("retire initial workflow timer wakeup: %v", err)
 			}
 			waitForWorkflowTimerSchedulerEmpty(t, pc.workflowTimers.scheduler)
@@ -1968,7 +1968,7 @@ func TestWorkflowTimerInitialWakeupRetirementJoinsAndRearmsOnBothStores(t *testi
 				t.Fatalf("retired wakeup durable status = %q, want active", persisted.Status)
 			}
 
-			if err := pc.ArmInitialEntryTimers(ctx, entityID); err != nil {
+			if err := pc.ArmInitialEntryTimers(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
 				t.Fatalf("rearm initial workflow timer: %v", err)
 			}
 			waitForWorkflowTimerCondition(t, time.Second, func() bool {
@@ -2225,7 +2225,7 @@ func seedWorkflowTimerOwnerActivationAt(
 		TimerScheduler: scheduler,
 	})
 	if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-		return pc.workflowTimers.Reconcile(txctx, entityID, "", "waiting", workflowTimerCause{
+		return pc.workflowTimers.Reconcile(txctx, testWorkflowInstanceRoute(entityID), entityID, "", "waiting", workflowTimerCause{
 			Kind: workflowTimerCauseInitial, OccurredAt: createdAt, ToState: "waiting",
 		})
 	}); err != nil {

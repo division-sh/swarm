@@ -1,12 +1,58 @@
 package pipeline
 
 import (
+	"context"
+	"fmt"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+func workflowInstanceRouteForPath(instancePath string) (runtimeflowidentity.Route, error) {
+	route := runtimeflowidentity.RouteForInstancePath(instancePath)
+	if !route.Valid() {
+		return runtimeflowidentity.Route{}, fmt.Errorf("workflow instance route requires an exact instance path")
+	}
+	return route, nil
+}
+
+func workflowInstanceRouteForContext(ctx context.Context, source semanticview.Source, flowID, explicitPath string) (runtimeflowidentity.Route, error) {
+	instancePath := strings.Trim(strings.TrimSpace(explicitPath), "/")
+	if instancePath == "" {
+		if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
+			instancePath = strings.Trim(strings.TrimSpace(inbound.FlowInstance()), "/")
+		}
+	}
+	if instancePath == "" && source != nil {
+		scope := runtimeflowidentity.ScopeKey(source, strings.TrimSpace(flowID))
+		if schema, ok := source.FlowSchemaByID(strings.TrimSpace(flowID)); ok && !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+			instancePath = scope
+		}
+	}
+	if instancePath == "" {
+		return runtimeflowidentity.Route{}, fmt.Errorf("workflow instance route is unavailable for flow %q", strings.TrimSpace(flowID))
+	}
+	route, err := workflowInstanceRouteForPath(instancePath)
+	if err != nil {
+		return runtimeflowidentity.Route{}, err
+	}
+	expectedScope := runtimeflowidentity.ScopeKey(source, strings.TrimSpace(flowID))
+	if expectedScope != "" && route.ScopeKey != expectedScope && route.InstancePath != expectedScope {
+		return runtimeflowidentity.Route{}, fmt.Errorf("workflow instance route %q is outside flow scope %q", route.InstancePath, expectedScope)
+	}
+	return route, nil
+}
+
+func workflowInstanceRouteForPersisted(source semanticview.Source, instance WorkflowInstance) (runtimeflowidentity.Route, error) {
+	route := StoredFlowInstance(source, instance).Route()
+	if !route.Valid() {
+		return runtimeflowidentity.Route{}, fmt.Errorf("persisted workflow instance is missing its canonical route")
+	}
+	return route, nil
+}
 
 type FlowInstanceIdentity struct {
 	runtimeflowidentity.Instance
@@ -44,6 +90,9 @@ func workflowInstanceIdentity(source semanticview.Source, instance WorkflowInsta
 
 func workflowInstancePersistedIdentity(source semanticview.Source, instance WorkflowInstance) (runtimeflowidentity.Persisted, error) {
 	flowPath := strings.Trim(strings.TrimSpace(asString(instance.Metadata["flow_path"])), "/")
+	if flowPath == "" {
+		flowPath = strings.Trim(strings.TrimSpace(firstNonEmptyString(instance.StorageRef, asString(instance.Metadata["storage_ref"]))), "/")
+	}
 	instanceID := strings.TrimSpace(asString(instance.Metadata["instance_id"]))
 	if instanceID == "" && flowPath == "" {
 		instanceID = strings.TrimSpace(instance.InstanceID)

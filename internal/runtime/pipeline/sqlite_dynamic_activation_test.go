@@ -240,7 +240,7 @@ func sqliteDynamicActivationBundle() *runtimecontracts.WorkflowContractBundle {
 
 func assertSQLiteWorkflowInstancePersisted(t *testing.T, store *workflowInstanceStore, ctx context.Context, storageRef string) {
 	t.Helper()
-	instance, ok, err := store.Load(ctx, storageRef)
+	instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(storageRef))
 	if err != nil {
 		t.Fatalf("load workflow instance %s: %v", storageRef, err)
 	}

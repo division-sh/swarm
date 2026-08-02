@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,13 +22,13 @@ func TestWorkflowInstanceStoreMutateE_RollsBackCallbackFailure(t *testing.T) {
 	seedWorkflowInstanceForMutationTest(t, store, entityID)
 	ctx := testWorkflowStoreRunContext(t, store)
 	sentinel := errors.New("supersession failed")
-	if err := store.mutateE(ctx, entityID, func(instance *WorkflowInstance) error {
+	if err := store.mutateE(ctx, testWorkflowInstanceRoute(entityID), func(instance *WorkflowInstance) error {
 		instance.CurrentState = "must_not_commit"
 		return sentinel
 	}); !errors.Is(err, sentinel) {
 		t.Fatalf("MutateE error = %v, want sentinel", err)
 	}
-	loaded, ok, err := store.Load(ctx, entityID)
+	loaded, ok, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
 	if err != nil || !ok {
 		t.Fatalf("Load = found %v err %v", ok, err)
 	}
@@ -69,7 +70,7 @@ func TestWorkflowInstanceLookupMissIsTypedAndExactOnBothStores(t *testing.T) {
 				t.Run(fmt.Sprintf("key_%q", requestedKey), func(t *testing.T) {
 					before := workflowInstanceRowCount(t, ctx, db)
 					callbackRan := false
-					err := store.mutateE(ctx, requestedKey, func(*WorkflowInstance) error {
+					err := store.mutateE(ctx, testWorkflowInstanceRoute(requestedKey), func(*WorkflowInstance) error {
 						callbackRan = true
 						return nil
 					})
@@ -77,8 +78,9 @@ func TestWorkflowInstanceLookupMissIsTypedAndExactOnBothStores(t *testing.T) {
 					if !errors.As(err, &miss) {
 						t.Fatalf("mutateE error = %T %v, want *WorkflowInstanceLookupMiss", err, err)
 					}
-					if miss.RequestedKey != requestedKey {
-						t.Fatalf("RequestedKey = %q, want exact %q", miss.RequestedKey, requestedKey)
+					wantKey := strings.Trim(strings.TrimSpace(requestedKey), "/")
+					if miss.RequestedKey != wantKey {
+						t.Fatalf("RequestedKey = %q, want canonical %q", miss.RequestedKey, wantKey)
 					}
 					if callbackRan {
 						t.Fatal("workflow mutation callback ran after lookup miss")
@@ -87,6 +89,63 @@ func TestWorkflowInstanceLookupMissIsTypedAndExactOnBothStores(t *testing.T) {
 						t.Fatalf("workflow rows after miss = %d, want unchanged %d", after, before)
 					}
 				})
+			}
+		})
+	}
+}
+
+func TestWorkflowInstanceStoreAddressesRowsOnlyByExactRouteOnBothStores(t *testing.T) {
+	setups := []struct {
+		name string
+		open func(*testing.T) (*workflowInstanceStore, context.Context)
+	}{
+		{
+			name: "sqlite",
+			open: func(t *testing.T) (*workflowInstanceStore, context.Context) {
+				db := newSQLiteWorkflowInstanceStoreTestDB(t)
+				store := newSQLiteWorkflowInstanceStoreForTest(t, db)
+				return store, sqliteExactOnceRunContext(t, db)
+			},
+		},
+		{
+			name: "postgres",
+			open: func(t *testing.T) (*workflowInstanceStore, context.Context) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				store := newPostgresWorkflowInstanceStoreForTest(db)
+				return store, testWorkflowStoreRunContext(t, store)
+			},
+		},
+	}
+
+	for _, setup := range setups {
+		setup := setup
+		t.Run(setup.name, func(t *testing.T) {
+			store, ctx := setup.open(t)
+			instancePath := "scout-" + uuid.NewString()
+			entityID := FlowInstanceEntityID(instancePath)
+			if err := store.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID:      instancePath,
+				StorageRef:      instancePath,
+				WorkflowName:    instancePath,
+				WorkflowVersion: "v1",
+				CurrentState:    "active",
+				EnteredStageAt:  time.Now().UTC(),
+				Metadata: map[string]any{
+					"entity_id": entityID,
+					"flow_path": instancePath,
+				},
+			})); err != nil {
+				t.Fatalf("create workflow instance: %v", err)
+			}
+
+			if _, found, err := store.Load(ctx, testWorkflowInstanceRoute(instancePath)); err != nil || !found {
+				t.Fatalf("load exact route = found %v err %v", found, err)
+			}
+			if _, found, err := store.Load(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
+				t.Fatalf("load entity identity: %v", err)
+			} else if found {
+				t.Fatalf("entity identity %q addressed workflow route %q", entityID, instancePath)
 			}
 		})
 	}
@@ -116,7 +175,7 @@ func TestWorkflowInstanceStoreMutate_SerializesOverlappingMutations(t *testing.T
 	errCh := make(chan error, 2)
 
 	go func() {
-		errCh <- store.mutate(ctx, entityID, func(instance *WorkflowInstance) {
+		errCh <- store.mutate(ctx, testWorkflowInstanceRoute(entityID), func(instance *WorkflowInstance) {
 			setWorkflowGate(instance, "g_first")
 			appendWorkflowEvidence(instance, "audit", map[string]any{"writer": "first"})
 			close(firstEntered)
@@ -126,7 +185,7 @@ func TestWorkflowInstanceStoreMutate_SerializesOverlappingMutations(t *testing.T
 
 	<-firstEntered
 	go func() {
-		errCh <- store.mutate(ctx, entityID, func(instance *WorkflowInstance) {
+		errCh <- store.mutate(ctx, testWorkflowInstanceRoute(entityID), func(instance *WorkflowInstance) {
 			close(secondEntered)
 			setWorkflowGate(instance, "g_second")
 			appendWorkflowEvidence(instance, "audit", map[string]any{"writer": "second"})
@@ -147,7 +206,7 @@ func TestWorkflowInstanceStoreMutate_SerializesOverlappingMutations(t *testing.T
 		}
 	}
 
-	instance, ok, err := store.Load(ctx, entityID)
+	instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -188,7 +247,7 @@ func TestUpdateEntityState_PreservesMutationCommittedWhileTransitionWaits(t *tes
 	errCh := make(chan error, 2)
 
 	go func() {
-		errCh <- store.mutate(ctx, entityID, func(instance *WorkflowInstance) {
+		errCh <- store.mutate(ctx, testWorkflowInstanceRoute(entityID), func(instance *WorkflowInstance) {
 			setWorkflowGate(instance, "g_ready")
 			close(firstEntered)
 			<-releaseFirst
@@ -208,7 +267,7 @@ func TestUpdateEntityState_PreservesMutationCommittedWhileTransitionWaits(t *tes
 		}
 	}
 
-	instance, ok, err := store.Load(ctx, entityID)
+	instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -235,7 +294,7 @@ func TestWorkflowInstanceStoreMutate_PersistsSingleWriterUpdates(t *testing.T) {
 	entityID := uuid.NewString()
 	seedWorkflowInstanceForMutationTest(t, store, entityID)
 
-	if err := store.mutate(testWorkflowStoreRunContext(t, store), entityID, func(instance *WorkflowInstance) {
+	if err := store.mutate(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute(entityID), func(instance *WorkflowInstance) {
 		setWorkflowGate(instance, "g_single")
 		appendWorkflowEvidence(instance, "audit", map[string]any{"writer": "single"})
 		instance.CurrentState = "processing"
@@ -243,7 +302,7 @@ func TestWorkflowInstanceStoreMutate_PersistsSingleWriterUpdates(t *testing.T) {
 		t.Fatalf("mutate: %v", err)
 	}
 
-	instance, ok, err := store.Load(testWorkflowStoreRunContext(t, store), entityID)
+	instance, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute(entityID))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -299,13 +358,13 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 		t.Fatalf("insert scheduler-owned timer row: %v", err)
 	}
 
-	if err := store.mutate(testWorkflowStoreRunContext(t, store), entityID, func(instance *WorkflowInstance) {
+	if err := store.mutate(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute(entityID), func(instance *WorkflowInstance) {
 		instance.CurrentState = "active"
 	}); err != nil {
 		t.Fatalf("mutate with scheduler-owned timer row present: %v", err)
 	}
 
-	_, ok, err := store.Load(testWorkflowStoreRunContext(t, store), entityID)
+	_, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute(entityID))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}

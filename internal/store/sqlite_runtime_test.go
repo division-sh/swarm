@@ -439,7 +439,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUsePipelineTransaction(t *test
 		t.Fatalf("ActivateFlowInstance inside sqlite pipeline transaction: %v", err)
 	}
 
-	loaded, ok, err := workflowStore.Load(ctx, "review/inst-1")
+	loaded, ok, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath("review/inst-1"))
 	if err != nil {
 		t.Fatalf("Load workflow instance: %v", err)
 	}
@@ -510,7 +510,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	}
 
 	for _, storageRef := range []string{"review/component-a", "review/component-b"} {
-		loaded, ok, err := workflowStore.Load(ctx, storageRef)
+		loaded, ok, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(storageRef))
 		if err != nil {
 			t.Fatalf("Load workflow instance %s: %v", storageRef, err)
 		}
@@ -1190,7 +1190,7 @@ func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	}, createdAt); err != nil {
 		t.Fatalf("materialize workflow instance: %v", err)
 	}
-	loaded, ok, err := owner.Load(ctx, "root/acme")
+	loaded, ok, err := owner.Load(ctx, runtimeflowidentity.RouteForInstancePath("root/acme"))
 	if err != nil {
 		t.Fatalf("Load workflow instance: %v", err)
 	}

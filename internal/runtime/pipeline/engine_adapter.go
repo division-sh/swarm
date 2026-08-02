@@ -129,7 +129,11 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 	}
 	flowID := strings.TrimSpace(pipelineFlowScope(ctx))
 	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.enabled() {
-		instance, ok, err := r.coordinator.workflowStore.Load(ctx, entityID.String())
+		route, err := workflowInstanceRouteForContext(ctx, r.coordinator.SemanticSource(), flowID, "")
+		if err != nil {
+			return runtimeengine.StateSnapshot{}, false, err
+		}
+		instance, ok, err := r.coordinator.workflowStore.Load(ctx, route)
 		if err != nil {
 			return runtimeengine.StateSnapshot{}, false, err
 		}
@@ -155,7 +159,10 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 		}
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
-	state := r.coordinator.currentWorkflowState(ctx, entityID.String())
+	state, err := r.coordinator.currentWorkflowState(ctx, entityID.String())
+	if err != nil {
+		return runtimeengine.StateSnapshot{}, false, err
+	}
 	if strings.TrimSpace(string(state.Stage)) == "" && len(state.Metadata) == 0 {
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
@@ -181,10 +188,14 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 	currentState := ""
 	nextState := strings.TrimSpace(mutation.NextState)
 	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.enabled() {
+		route, err := workflowInstanceRouteForContext(ctx, r.coordinator.SemanticSource(), pipelineFlowScope(ctx), "")
+		if err != nil {
+			return err
+		}
 		if err := r.ensureFlowOwnsEntity(ctx, entityID.String()); err != nil {
 			return err
 		}
-		_, hadState, err := r.coordinator.workflowStore.Load(ctx, entityID.String())
+		_, hadState, err := r.coordinator.workflowStore.Load(ctx, route)
 		if err != nil {
 			return err
 		}
@@ -215,12 +226,12 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 			if materialization != WorkflowInitialMaterializationCreated && materialization != WorkflowInitialMaterializationAlreadyExists {
 				return fmt.Errorf("workflow initial materialization returned unknown result %d", materialization)
 			}
-			if err := r.coordinator.workflowStore.ArmInitialEntryTimers(ctx, entityID.String()); err != nil {
+			if err := r.coordinator.workflowStore.ArmInitialEntryTimers(ctx, route); err != nil {
 				return err
 			}
 		}
 		allowedFields := workflowEntitySchemaFields(r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
-		if err := r.coordinator.workflowStore.mutateE(ctx, entityID.String(), func(instance *WorkflowInstance) error {
+		if err := r.coordinator.workflowStore.mutateE(ctx, route, func(instance *WorkflowInstance) error {
 			currentState = strings.TrimSpace(instance.CurrentState)
 			if err := applyEngineStateMutation(instance, mutation, allowedFields, r.coordinator.SemanticSource(), pipelineFlowScope(ctx)); err != nil {
 				return err
@@ -319,7 +330,11 @@ func (r pipelineEngineStateRepo) ensureFlowOwnsEntity(ctx context.Context, entit
 	if flowID == "" {
 		return nil
 	}
-	instance, ok, err := r.coordinator.workflowStore.Load(ctx, entityID)
+	route, routeErr := workflowInstanceRouteForContext(ctx, r.coordinator.SemanticSource(), flowID, "")
+	if routeErr != nil {
+		return routeErr
+	}
+	instance, ok, err := r.coordinator.workflowStore.Load(ctx, route)
 	if err != nil || !ok {
 		return err
 	}
@@ -919,7 +934,11 @@ func (pc *PipelineCoordinator) maybeDeactivateTerminalFlowInstance(ctx context.C
 	if nextState == "" || entityID == "" {
 		return nil
 	}
-	instance, ok, err := pc.workflowStore.Load(ctx, entityID)
+	route, routeErr := workflowInstanceRouteForContext(ctx, pc.SemanticSource(), "", "")
+	if routeErr != nil {
+		return routeErr
+	}
+	instance, ok, err := pc.workflowStore.Load(ctx, route)
 	if err != nil || !ok {
 		return err
 	}

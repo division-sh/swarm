@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -33,7 +34,7 @@ type workflowGateIntent struct {
 	card       decisioncard.Card
 }
 
-func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string, occurredAt time.Time) error {
+func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, route runtimeflowidentity.Route, entityID, currentStage, nextStage, sourceEvent string, occurredAt time.Time) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.SemanticSource() == nil {
 		return nil
 	}
@@ -45,7 +46,7 @@ func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, ent
 	}
 	if _, ok := PipelineSQLTxFromContext(ctx); !ok {
 		return pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-			return pc.applyWorkflowGateIntents(txctx, entityID, currentStage, nextStage, sourceEvent, occurredAt)
+			return pc.applyWorkflowGateIntents(txctx, route, entityID, currentStage, nextStage, sourceEvent, occurredAt)
 		})
 	}
 
@@ -56,7 +57,7 @@ func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, ent
 	if now.IsZero() {
 		return fmt.Errorf("workflow gate lifecycle requires an exact occurrence time")
 	}
-	err := pc.workflowStore.mutateE(ctx, entityID, func(instance *WorkflowInstance) error {
+	err := pc.workflowStore.mutateE(ctx, route, func(instance *WorkflowInstance) error {
 		lifecycleOwner = *instance
 		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 		if err != nil {

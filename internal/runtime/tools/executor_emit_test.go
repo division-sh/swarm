@@ -63,11 +63,11 @@ type emitWorkflowInstanceLoader struct {
 
 func (l emitWorkflowInstanceLoader) Enabled() bool { return true }
 
-func (l emitWorkflowInstanceLoader) Load(_ context.Context, ref string) (runtimepipeline.WorkflowInstance, bool, error) {
+func (l emitWorkflowInstanceLoader) Load(_ context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error) {
 	if l.err != nil {
 		return runtimepipeline.WorkflowInstance{}, false, l.err
 	}
-	instance, ok := l.rows[strings.TrimSpace(ref)]
+	instance, ok := l.rows[strings.TrimSpace(route.InstancePath)]
 	return instance, ok, nil
 }
 

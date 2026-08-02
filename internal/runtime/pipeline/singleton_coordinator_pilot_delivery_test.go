@@ -54,7 +54,7 @@ func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback
 	if !handled {
 		t.Fatal("dispatchWorkflowNodeEventResult handled = false, want coordinator handler delivery")
 	}
-	loaded, ok, err := workflowStore.Load(ctx, entityID)
+	loaded, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(entityID))
 	if err != nil {
 		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
 	}
@@ -219,12 +219,12 @@ func assertNoSingletonCoordinatorPilotContainedRouteRows(t *testing.T, db *sql.D
 func assertNoSingletonCoordinatorPilotContainedWorkflowInstance(t *testing.T, db *sql.DB, store *workflowInstanceStore, ctx context.Context, flowInstance string) {
 	t.Helper()
 	entityID := FlowInstanceEntityID(flowInstance)
-	if _, ok, err := store.Load(ctx, entityID); err != nil {
+	if _, ok, err := store.Load(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
 		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
 	} else if ok {
 		t.Fatalf("contained flow_instance %q materialized with canonical entity id %s", flowInstance, entityID)
 	}
-	if _, ok, err := store.Load(ctx, flowInstance); err != nil {
+	if _, ok, err := store.Load(ctx, testWorkflowInstanceRoute(flowInstance)); err != nil {
 		t.Fatalf("workflowStore.Load(%s): %v", flowInstance, err)
 	} else if ok {
 		t.Fatalf("contained flow_instance %q materialized through storage-ref lookup", flowInstance)

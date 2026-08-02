@@ -151,21 +151,6 @@ func EntityID(ref string) string {
 	return uuid.NewSHA1(flowInstanceEntityNamespace, []byte(ref)).String()
 }
 
-func LookupKeys(ref string) []string {
-	ref = normalizeRef(ref)
-	if ref == "" {
-		return nil
-	}
-	keys := make([]string, 0, 2)
-	if parsed, err := uuid.Parse(ref); err == nil {
-		keys = append(keys, parsed.String())
-	}
-	if entityID := EntityID(ref); entityID != "" && !contains(keys, entityID) {
-		keys = append(keys, entityID)
-	}
-	return keys
-}
-
 func LogicalInstanceID(instancePath string) string {
 	instancePath = normalizeRef(instancePath)
 	if instancePath == "" {
@@ -234,6 +219,17 @@ func StoredRoute(scopeKey, instanceID, instancePath string) Route {
 		InstanceID:   instanceID,
 		InstancePath: instancePath,
 	}
+}
+
+// RouteForInstancePath constructs the canonical semantic lookup key from an
+// already-materialized instance path. A singleton path is its own scope;
+// template paths use the final segment as their discriminator.
+func RouteForInstancePath(instancePath string) Route {
+	instancePath = normalizeRef(instancePath)
+	if instancePath == "" {
+		return Route{}
+	}
+	return StoredRoute(SemanticScope(instancePath), "", instancePath)
 }
 
 func (i Instance) Route() Route {
@@ -357,10 +353,6 @@ func StoredPersisted(
 
 func (p Persisted) RowID() string {
 	return EntityID(p.StorageRef)
-}
-
-func (p Persisted) LookupKeys() []string {
-	return LookupKeys(p.StorageRef)
 }
 
 func IsDescendant(scopeKey, instancePath string) bool {

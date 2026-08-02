@@ -596,10 +596,15 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 			return false, fmt.Errorf("renew workflow node delivery claim: %w", heartbeatErr)
 		}
 		executionCtx := heartbeat.Context()
+		currentState, err := pc.currentWorkflowState(executionCtx, workflowEventEntityID(evt))
+		if err != nil {
+			_ = heartbeat.Stop()
+			return false, err
+		}
 		result, err := pc.executeNodeContractHandler(executionCtx, nodeID, handler, workflowTriggerContext{
 			Event:           evt,
 			HandlerEventKey: handlerEventKey,
-			State:           pc.currentWorkflowState(executionCtx, workflowEventEntityID(evt)),
+			State:           currentState,
 		}, false)
 		if err == nil {
 			pc.notifyTestLifecycleHandlerCompleted(executionCtx, nodeID, evt, "completed")

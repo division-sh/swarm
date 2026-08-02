@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -21,7 +22,7 @@ const (
 	joinCompleteEvent = "platform.join_complete"
 )
 
-func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, entityID, currentStage, nextStage string, occurredAt time.Time) error {
+func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, route runtimeflowidentity.Route, entityID, currentStage, nextStage string, occurredAt time.Time) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.SemanticSource() == nil {
 		return nil
 	}
@@ -38,7 +39,7 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, ent
 	if now.IsZero() {
 		return fmt.Errorf("workflow join lifecycle requires an exact occurrence time")
 	}
-	err := pc.workflowStore.mutateE(ctx, entityID, func(instance *WorkflowInstance) error {
+	err := pc.workflowStore.mutateE(ctx, route, func(instance *WorkflowInstance) error {
 		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 		if err != nil {
 			return fmt.Errorf("decode join state: %w", err)
@@ -153,7 +154,11 @@ func (pc *PipelineCoordinator) reconcileClosedJoinSchedules(ctx context.Context,
 	if err != nil {
 		return fmt.Errorf("list join activations: %w", err)
 	}
-	instance, ok, err := pc.workflowStore.Load(ctx, strings.TrimSpace(entityID))
+	route, err := workflowInstanceRouteForContext(ctx, pc.SemanticSource(), "", "")
+	if err != nil {
+		return err
+	}
+	instance, ok, err := pc.workflowStore.Load(ctx, route)
 	if err != nil || !ok {
 		return err
 	}
@@ -183,7 +188,7 @@ func (pc *PipelineCoordinator) reconcileClosedJoinSchedules(ctx context.Context,
 		changed = true
 	}
 	if changed {
-		return pc.workflowStore.mutate(ctx, strings.TrimSpace(entityID), func(instance *WorkflowInstance) {
+		return pc.workflowStore.mutate(ctx, route, func(instance *WorkflowInstance) {
 			instance.StateBuckets = carrier.PersistedStateBuckets()
 		})
 	}

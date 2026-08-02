@@ -142,7 +142,11 @@ func (pc *PipelineCoordinator) CommitFlowInstanceTermination(ctx context.Context
 		if err := pc.workflowStore.MarkTerminated(txctx, storageRef, req.TerminatedAt); err != nil {
 			return err
 		}
-		instance, ok, err := pc.workflowStore.Load(txctx, storageRef)
+		route, err := workflowInstanceRouteForPath(storageRef)
+		if err != nil {
+			return err
+		}
+		instance, ok, err := pc.workflowStore.Load(txctx, route)
 		if err != nil {
 			return err
 		}
@@ -150,25 +154,25 @@ func (pc *PipelineCoordinator) CommitFlowInstanceTermination(ctx context.Context
 			return fmt.Errorf("canonical terminal flow instance %s was not persisted", storageRef)
 		}
 		canonicalRef := strings.TrimSpace(instance.StorageRef)
-		route := runtimeflowidentity.StoredRoute("", "", canonicalRef)
-		if !route.Valid() {
+		canonicalRoute := runtimeflowidentity.RouteForInstancePath(canonicalRef)
+		if !canonicalRoute.Valid() {
 			return fmt.Errorf("derive canonical route identity for flow path %s", canonicalRef)
 		}
 		if pc.flowRoutes == nil {
 			return fmt.Errorf("flow instance termination requires route topology owner")
 		}
 		txctx = runtimecorrelation.WithRunID(txctx, runID)
-		if err := pc.flowRoutes.RemoveFlowInstanceRouteContext(txctx, route); err != nil {
+		if err := pc.flowRoutes.RemoveFlowInstanceRouteContext(txctx, canonicalRoute); err != nil {
 			return err
 		}
-		result = FlowInstanceTermination{Instance: instance, Route: route}
+		result = FlowInstanceTermination{Instance: instance, Route: canonicalRoute}
 		return nil
 	})
 	return result, err
 }
 
-func (pc *PipelineCoordinator) Load(ctx context.Context, instanceID string) (WorkflowInstance, bool, error) {
-	return pc.workflowStore.Load(ctx, instanceID)
+func (pc *PipelineCoordinator) Load(ctx context.Context, route runtimeflowidentity.Route) (WorkflowInstance, bool, error) {
+	return pc.workflowStore.Load(ctx, route)
 }
 
 func (pc *PipelineCoordinator) StartActivityAttempt(ctx context.Context, record ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {
@@ -203,16 +207,16 @@ func (pc *PipelineCoordinator) MaterializeInitialEntry(ctx context.Context, inst
 	return pc.workflowStore.MaterializeInitialEntry(ctx, instance, occurredAt)
 }
 
-func (pc *PipelineCoordinator) ArmInitialEntryTimers(ctx context.Context, instanceID string) error {
-	return pc.workflowStore.ArmInitialEntryTimers(ctx, instanceID)
+func (pc *PipelineCoordinator) ArmInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error {
+	return pc.workflowStore.ArmInitialEntryTimers(ctx, route)
 }
 
-func (pc *PipelineCoordinator) ReconcileInitialEntryTimers(ctx context.Context, instanceID string) error {
-	return pc.workflowStore.ReconcileInitialEntryTimers(ctx, instanceID)
+func (pc *PipelineCoordinator) ReconcileInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error {
+	return pc.workflowStore.ReconcileInitialEntryTimers(ctx, route)
 }
 
-func (pc *PipelineCoordinator) RetireInitialEntryTimerWakeups(ctx context.Context, instanceID string) error {
-	return pc.workflowStore.RetireInitialEntryTimerWakeups(ctx, instanceID)
+func (pc *PipelineCoordinator) RetireInitialEntryTimerWakeups(ctx context.Context, route runtimeflowidentity.Route) error {
+	return pc.workflowStore.RetireInitialEntryTimerWakeups(ctx, route)
 }
 
 func (pc *PipelineCoordinator) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {

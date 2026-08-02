@@ -10,7 +10,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
-func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, entityID string) WorkflowState {
+func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, entityID string) (WorkflowState, error) {
 	entityID = strings.TrimSpace(entityID)
 	state := WorkflowState{
 		EntityID: entityID,
@@ -18,18 +18,25 @@ func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, entityI
 		Metadata: map[string]any{},
 	}
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || entityID == "" {
-		return state
+		return state, nil
 	}
-	instance, ok, err := pc.workflowStore.Load(ctx, entityID)
-	if err != nil || !ok {
-		return state
+	route, err := workflowInstanceRouteForContext(ctx, pc.SemanticSource(), pipelineFlowScope(ctx), "")
+	if err != nil {
+		return WorkflowState{}, err
+	}
+	instance, ok, err := pc.workflowStore.Load(ctx, route)
+	if err != nil {
+		return WorkflowState{}, err
+	}
+	if !ok {
+		return state, nil
 	}
 	state.Stage = NormalizeWorkflowStateID(strings.TrimSpace(instance.CurrentState))
 	state.Metadata = cloneStringAnyMap(instance.Metadata)
 	if state.Metadata == nil {
 		state.Metadata = map[string]any{}
 	}
-	return state
+	return state, nil
 }
 
 func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entityID string, flowID string, bucketID string, payload map[string]any) error {
@@ -42,7 +49,11 @@ func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entit
 	if entityID == "" || bucketID == "" {
 		return nil
 	}
-	_, found, err := pc.workflowStore.Load(ctx, entityID)
+	route, err := workflowInstanceRouteForContext(ctx, pc.SemanticSource(), flowID, "")
+	if err != nil {
+		return err
+	}
+	_, found, err := pc.workflowStore.Load(ctx, route)
 	if err != nil {
 		return err
 	}
@@ -72,11 +83,11 @@ func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entit
 		if materialization != WorkflowInitialMaterializationCreated && materialization != WorkflowInitialMaterializationAlreadyExists {
 			return fmt.Errorf("workflow initial materialization returned unknown result %d", materialization)
 		}
-		if err := pc.workflowStore.ArmInitialEntryTimers(ctx, entityID); err != nil {
+		if err := pc.workflowStore.ArmInitialEntryTimers(ctx, route); err != nil {
 			return err
 		}
 	}
-	return pc.workflowStore.mutate(ctx, entityID, func(instance *WorkflowInstance) {
+	return pc.workflowStore.mutate(ctx, route, func(instance *WorkflowInstance) {
 		instance.Metadata = workflowMaterializeEntityMetadata(pc.SemanticSource(), flowID, instance.Metadata)
 		bucket := workflowMutableStateBucket(instance, "evidence")
 		workflowAppendEvidence(bucket, bucketID, payload)

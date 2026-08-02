@@ -171,7 +171,11 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	entityID, triggerCtx.Event = resolvedEntityID, resolvedEvent
 	if !handler.CreateEntity && entityID != "" && originalStateEntityID != "" && originalStateEntityID != entityID {
-		triggerCtx.State = pc.currentWorkflowState(ctx, entityID)
+		currentState, err := pc.currentWorkflowState(ctx, entityID)
+		if err != nil {
+			return contractHandlerExecutionResult{}, err
+		}
+		triggerCtx.State = currentState
 		if strings.TrimSpace(triggerCtx.State.EntityID) == "" {
 			triggerCtx.State.EntityID = entityID
 		}
@@ -315,6 +319,9 @@ func resolveHandlerEntityIDForFlow(
 		sourceEntityID := strings.TrimSpace(firstNonEmptyString(entityID, evt.EntityID()))
 		instanceID := canonicalHandlerInstanceID(flowID, evt)
 		instance := deriveFlowInstanceIdentity(source, flowID, instanceID)
+		if !instance.Route().Valid() {
+			return "", evt, fmt.Errorf("create_entity requires an exact workflow instance route")
+		}
 		instance.ParentEntityID = sourceEntityID
 		entityID = instance.EntityID
 		if state != nil {
@@ -323,7 +330,13 @@ func resolveHandlerEntityIDForFlow(
 			state.Status = ""
 			state.Metadata = workflowCreateEntityMetadata(source, flowID, instance)
 		}
-		return entityID, evt, nil
+		envelope := events.EnvelopeForFlowInstance(evt.NormalizedEnvelope(), instance.InstancePath)
+		envelope = events.EnvelopeForEntityID(envelope, entityID)
+		resolved, err := events.ResolveEnvelope(evt, envelope)
+		if err != nil {
+			return "", evt, fmt.Errorf("carry created workflow instance route: %w", err)
+		}
+		return entityID, resolved, nil
 	}
 	var err error
 	entityID, evt, err = ensureHandlerEntityID(source, flowID, handler, entityID, evt)

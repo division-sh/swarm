@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -399,7 +400,7 @@ func (pc *PipelineCoordinator) loadStageGateRoute(ctx context.Context, card deci
 	if err != nil {
 		return gateruntime.Route{}, err
 	}
-	instance, found, err := pc.workflowStore.Load(ctx, anchor.EntityID)
+	instance, found, err := pc.workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(anchor.FlowInstance))
 	if err != nil {
 		return gateruntime.Route{}, err
 	}
@@ -504,7 +505,7 @@ func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, ca
 		}
 		currentStage := ""
 		alreadyRouted := false
-		if err := pc.workflowStore.mutateE(txctx, anchor.EntityID, func(instance *WorkflowInstance) error {
+		if err := pc.workflowStore.mutateE(txctx, runtimeflowidentity.RouteForInstancePath(anchor.FlowInstance), func(instance *WorkflowInstance) error {
 			currentStage = strings.TrimSpace(instance.CurrentState)
 			carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 			if err != nil {

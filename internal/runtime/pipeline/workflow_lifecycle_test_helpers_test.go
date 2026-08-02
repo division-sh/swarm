@@ -20,7 +20,7 @@ func (pc *PipelineCoordinator) persistWorkflowStateForTest(ctx context.Context, 
 		return fmt.Errorf("test transition requires an inbound event")
 	}
 	var currentState string
-	if err := pc.workflowStore.mutateE(ctx, entityID, func(instance *WorkflowInstance) error {
+	if err := pc.workflowStore.mutateE(ctx, testWorkflowInstanceRoute(entityID), func(instance *WorkflowInstance) error {
 		currentState = strings.TrimSpace(instance.CurrentState)
 		instance.CurrentState = strings.TrimSpace(nextState)
 		instance.EnteredStageAt = inbound.CreatedAt()
@@ -35,7 +35,7 @@ func (pc *PipelineCoordinator) persistWorkflowStateForTest(ctx context.Context, 
 }
 
 func (pc *PipelineCoordinator) applyWorkflowGateForTest(ctx context.Context, entityID, _ string, setGate string, clearAll bool) error {
-	return pc.workflowStore.mutate(ctx, entityID, func(instance *WorkflowInstance) {
+	return pc.workflowStore.mutate(ctx, testWorkflowInstanceRoute(entityID), func(instance *WorkflowInstance) {
 		metadata := cloneStringAnyMap(instance.Metadata)
 		gates := payloadMap(metadata["gates"])
 		if clearAll {
@@ -72,14 +72,14 @@ func applyTestInitialEntryEffect(ctx context.Context, pc *PipelineCoordinator, e
 			return applyTestInitialEntryEffect(txctx, pc, entityID)
 		})
 	}
-	instance, found, err := pc.workflowStore.Load(ctx, entityID)
+	instance, found, err := pc.workflowStore.Load(ctx, testWorkflowInstanceRoute(entityID))
 	if err != nil {
 		return err
 	}
 	if !found {
 		return fmt.Errorf("test workflow instance %s is missing", entityID)
 	}
-	effect, err := runtimeworkflowlifecycle.NewInitialEntry(entityID, instance.CurrentState, instance.EnteredStageAt)
+	effect, err := runtimeworkflowlifecycle.NewInitialEntry(testWorkflowInstanceRoute(instance.StorageRef), entityID, instance.CurrentState, instance.EnteredStageAt)
 	if err != nil {
 		return err
 	}

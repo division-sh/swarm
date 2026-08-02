@@ -373,14 +373,14 @@ func TestWorkflowGateEntryUsesOneTransactionAndRollsBackOnCardFailure(t *testing
 				DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(pipelineTestBundleHash),
 			})
 
-			err := pc.applyWorkflowGateIntents(ctx, entityID, "drafting", "awaiting_review", "draft.ready", time.Now().UTC())
+			err := pc.applyWorkflowGateIntents(ctx, testWorkflowInstanceRoute(entityID), entityID, "drafting", "awaiting_review", "draft.ready", time.Now().UTC())
 			if err == nil || err.Error() != cards.createErr.Error() {
 				t.Fatalf("applyWorkflowGateIntents error = %v, want planted card failure", err)
 			}
 			if len(cards.createTx) != 1 || !cards.createTx[0] {
 				t.Fatalf("card create transaction evidence = %#v, want active transaction", cards.createTx)
 			}
-			loaded, ok, err := workflowStore.Load(ctx, entityID)
+			loaded, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(entityID))
 			if err != nil || !ok {
 				t.Fatalf("Load = %#v, %v, %v", loaded, ok, err)
 			}
@@ -416,13 +416,13 @@ func TestWorkflowGateEntryCreatesMatchingActivationAndCardOnBothStores(t *testin
 				Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, Persistence: workflowPersistenceForTest(workflowStore),
 				DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(pipelineTestBundleHash),
 			})
-			if err := pc.applyWorkflowGateIntents(ctx, entityID, "drafting", "awaiting_review", "draft.ready", time.Now().UTC()); err != nil {
+			if err := pc.applyWorkflowGateIntents(ctx, testWorkflowInstanceRoute(entityID), entityID, "drafting", "awaiting_review", "draft.ready", time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
 			if len(cards.created) != 1 || len(cards.createTx) != 1 || !cards.createTx[0] {
 				t.Fatalf("created cards/transaction = %#v/%#v", cards.created, cards.createTx)
 			}
-			loaded, ok, err := workflowStore.Load(ctx, entityID)
+			loaded, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(entityID))
 			if err != nil || !ok {
 				t.Fatalf("Load = %#v, %v, %v", loaded, ok, err)
 			}
@@ -490,7 +490,7 @@ func TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBo
 				Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, Persistence: workflowPersistenceForTest(workflowStore),
 				DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(bundleHash),
 			})
-			if err := pc.applyWorkflowGateIntents(ctx, entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
+			if err := pc.applyWorkflowGateIntents(ctx, testWorkflowInstanceRoute(entityID), entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
 			card := cards.created[0]
@@ -555,7 +555,7 @@ func TestWorkflowGateCommittedDecisionWinsOrdinaryAndTimerExitRacesOnBothStores(
 				}
 				cards := &gateLifecycleCardStore{}
 				pc := newGateLifecyclePipelineCoordinator(&recordingPipelineBus{}, workflowStore.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, Persistence: workflowPersistenceForTest(workflowStore), DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(pipelineTestBundleHash)})
-				if err := pc.applyWorkflowGateIntents(ctx, entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
+				if err := pc.applyWorkflowGateIntents(ctx, testWorkflowInstanceRoute(entityID), entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}
 				card := cards.created[0]
@@ -563,13 +563,13 @@ func TestWorkflowGateCommittedDecisionWinsOrdinaryAndTimerExitRacesOnBothStores(
 					t.Fatal(err)
 				}
 				err := workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-					if err := workflowStore.mutateE(txctx, entityID, func(instance *WorkflowInstance) error {
+					if err := workflowStore.mutateE(txctx, testWorkflowInstanceRoute(entityID), func(instance *WorkflowInstance) error {
 						instance.CurrentState = "operating"
 						return nil
 					}); err != nil {
 						return err
 					}
-					return pc.applyWorkflowGateIntents(txctx, entityID, "awaiting_review", "operating", sourceEvent, time.Now().UTC())
+					return pc.applyWorkflowGateIntents(txctx, testWorkflowInstanceRoute(entityID), entityID, "awaiting_review", "operating", sourceEvent, time.Now().UTC())
 				})
 				if err == nil {
 					t.Fatal("competing exit beat a committed verdict")
@@ -593,7 +593,7 @@ func TestWorkflowGateDecisionWaitsForItsRecordedBundlePinOnBothStores(t *testing
 			}
 			cards := &gateLifecycleCardStore{}
 			pc := newGateLifecyclePipelineCoordinator(&recordingPipelineBus{}, workflowStore.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, Persistence: workflowPersistenceForTest(workflowStore), DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(pipelineTestBundleHash)})
-			if err := pc.applyWorkflowGateIntents(ctx, entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
+			if err := pc.applyWorkflowGateIntents(ctx, testWorkflowInstanceRoute(entityID), entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
 			decisionEventID := uuid.NewString()
@@ -661,7 +661,7 @@ func TestWorkflowGateTerminationUsesCanonicalPersistedEntityIdentityOnBothStores
 			cards := &gateLifecycleCardStore{}
 			bus := &recordingPipelineBus{}
 			pc := newGateLifecyclePipelineCoordinator(bus, workflowStore.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, Persistence: workflowPersistenceForTest(workflowStore), DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(pipelineTestBundleHash)})
-			if err := pc.applyWorkflowGateIntents(ctx, entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
+			if err := pc.applyWorkflowGateIntents(ctx, testWorkflowInstanceRoute(entityID), entityID, "", "awaiting_review", "state:awaiting_review", time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
 			if err := pc.MarkTerminated(ctx, entityID, time.Now().UTC()); err != nil {
@@ -691,17 +691,17 @@ func TestWorkflowGateOrdinaryExitSupersessionCarriesCardFlowIdentityOnBothStores
 			cards := &gateLifecycleCardStore{}
 			bus := &recordingPipelineBus{}
 			pc := newGateLifecyclePipelineCoordinator(bus, workflowStore.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(gateLifecycleBundle())}, Persistence: workflowPersistenceForTest(workflowStore), DecisionCards: cards, BundleSourceFact: mustPipelineTestBundleSourceFact(pipelineTestBundleHash)})
-			if err := pc.applyWorkflowGateIntents(ctx, entityID, "drafting", "awaiting_review", "draft.ready", time.Now().UTC()); err != nil {
+			if err := pc.applyWorkflowGateIntents(ctx, testWorkflowInstanceRoute(entityID), entityID, "drafting", "awaiting_review", "draft.ready", time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
 			if err := workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-				if err := workflowStore.mutateE(txctx, entityID, func(instance *WorkflowInstance) error {
+				if err := workflowStore.mutateE(txctx, testWorkflowInstanceRoute(entityID), func(instance *WorkflowInstance) error {
 					instance.CurrentState = "operating"
 					return nil
 				}); err != nil {
 					return err
 				}
-				return pc.applyWorkflowGateIntents(txctx, entityID, "awaiting_review", "operating", "review.expired", time.Now().UTC())
+				return pc.applyWorkflowGateIntents(txctx, testWorkflowInstanceRoute(entityID), entityID, "awaiting_review", "operating", "review.expired", time.Now().UTC())
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -736,7 +736,7 @@ func mustStageGateAnchor(t *testing.T, card decisioncard.Card) decisioncard.Stag
 
 func assertGateLifecycleState(t *testing.T, store *workflowInstanceStore, ctx context.Context, entityID, stage string, status gateruntime.Status) {
 	t.Helper()
-	loaded, ok, err := store.Load(ctx, entityID)
+	loaded, ok, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
 	if err != nil || !ok {
 		t.Fatalf("Load = %#v, %v, %v", loaded, ok, err)
 	}

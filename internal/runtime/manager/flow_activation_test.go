@@ -398,7 +398,7 @@ func (o flowActivationTestTerminationOwner) CommitFlowInstanceTermination(ctx co
 	if storageRef == "" || strings.TrimSpace(req.RunID) == "" {
 		return runtimepipeline.FlowInstanceTermination{}, errors.New("flow activation test termination requires storage_ref and run_id")
 	}
-	priorInstance, found, err := o.instances.Load(ctx, storageRef)
+	priorInstance, found, err := o.instances.Load(ctx, runtimeflowidentity.RouteForInstancePath(storageRef))
 	if err != nil || !found {
 		return runtimepipeline.FlowInstanceTermination{}, errors.Join(err, fmt.Errorf("flow activation test instance %s not found", storageRef))
 	}
@@ -421,7 +421,7 @@ func (o flowActivationTestTerminationOwner) CommitFlowInstanceTermination(ctx co
 	if err := o.instances.MarkTerminated(ctx, storageRef, req.TerminatedAt); err != nil {
 		return runtimepipeline.FlowInstanceTermination{}, err
 	}
-	instance, found, err := o.instances.Load(ctx, storageRef)
+	instance, found, err := o.instances.Load(ctx, runtimeflowidentity.RouteForInstancePath(storageRef))
 	if err != nil || !found || strings.TrimSpace(instance.Status) != "terminated" || instance.TerminatedAt.IsZero() {
 		rollback()
 		return runtimepipeline.FlowInstanceTermination{}, errors.Join(err, fmt.Errorf("canonical terminal flow instance %s was not persisted", storageRef))
@@ -587,8 +587,8 @@ func (s *flowActivationTestInstanceStore) MaterializeInitialEntry(_ context.Cont
 	return runtimepipeline.WorkflowInitialMaterializationCreated, nil
 }
 
-func (s *flowActivationTestInstanceStore) ArmInitialEntryTimers(_ context.Context, instanceID string) error {
-	instanceID = strings.TrimSpace(instanceID)
+func (s *flowActivationTestInstanceStore) ArmInitialEntryTimers(_ context.Context, route runtimeflowidentity.Route) error {
+	instanceID := strings.TrimSpace(route.InstancePath)
 	s.armedEntries = append(s.armedEntries, instanceID)
 	if s.armInitialEntry != nil {
 		return s.armInitialEntry(instanceID)
@@ -596,12 +596,12 @@ func (s *flowActivationTestInstanceStore) ArmInitialEntryTimers(_ context.Contex
 	return nil
 }
 
-func (s *flowActivationTestInstanceStore) ReconcileInitialEntryTimers(ctx context.Context, instanceID string) error {
-	return s.ArmInitialEntryTimers(ctx, instanceID)
+func (s *flowActivationTestInstanceStore) ReconcileInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error {
+	return s.ArmInitialEntryTimers(ctx, route)
 }
 
-func (s *flowActivationTestInstanceStore) RetireInitialEntryTimerWakeups(_ context.Context, instanceID string) error {
-	instanceID = strings.TrimSpace(instanceID)
+func (s *flowActivationTestInstanceStore) RetireInitialEntryTimerWakeups(_ context.Context, route runtimeflowidentity.Route) error {
+	instanceID := strings.TrimSpace(route.InstancePath)
 	s.retiredTimerEntries = append(s.retiredTimerEntries, instanceID)
 	if s.retireInitialEntry != nil {
 		return s.retireInitialEntry(instanceID)
@@ -825,11 +825,11 @@ func (s *flowActivationTestInstanceStore) MarkTerminated(_ context.Context, stor
 	return nil
 }
 
-func (s *flowActivationTestInstanceStore) Load(_ context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error) {
+func (s *flowActivationTestInstanceStore) Load(_ context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error) {
 	if s.byStorageRef == nil {
 		return runtimepipeline.WorkflowInstance{}, false, nil
 	}
-	instance, ok := s.byStorageRef[strings.TrimSpace(instanceID)]
+	instance, ok := s.byStorageRef[strings.TrimSpace(route.InstancePath)]
 	return instance, ok, nil
 }
 
@@ -3775,7 +3775,7 @@ func TestDeactivateFlowInstanceFailsBeforePostCommitSideEffectsWhenRoutePersiste
 	if len(instances.terminatedPaths) != 0 {
 		t.Fatalf("terminal state survived route replacement rollback: %#v", instances.terminatedPaths)
 	}
-	instance, ok, loadErr := instances.Load(context.Background(), "review/inst-1")
+	instance, ok, loadErr := instances.Load(context.Background(), runtimeflowidentity.RouteForInstancePath("review/inst-1"))
 	if loadErr != nil || !ok || instance.Status != "active" {
 		t.Fatalf("flow instance after route replacement rollback: found=%t instance=%#v err=%v", ok, instance, loadErr)
 	}
@@ -3879,7 +3879,7 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 		t.Fatalf("routing_rules.status = %q, want inactive", routeStatus)
 	}
 
-	instance, ok, err := workflowStore.Load(ctx, req.Instance.EntityID)
+	instance, ok, err := workflowStore.Load(ctx, req.Instance.Route())
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}

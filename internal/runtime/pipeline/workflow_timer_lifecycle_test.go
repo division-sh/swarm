@@ -243,7 +243,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	if handled := pc.executeNodeHandlerPlan(deliveryCtx, "dispatcher", evt); handled {
 		t.Fatal("dispatcher should not handle child/task.done")
 	}
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), "ent-001")
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute("ent-001"))
 	if err != nil {
 		t.Fatalf("load workflow instance after wrong node execution: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 	if handled, err := pc.executeNodeHandlerPlanResult(deliveryCtx, "listener", evt); err != nil || !handled {
 		t.Fatalf("listener should handle child/task.done: handled=%v err=%v", handled, err)
 	}
-	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), "ent-001")
+	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute("ent-001"))
 	if err != nil {
 		t.Fatalf("load workflow instance after listener execution: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	if handled := pc.executeNodeHandlerPlan(withWorkflowNodeDeliveryRoute(testPipelineCoordinatorRunContext(t, pc), triggerRoute), "child-worker", trigger); !handled {
 		t.Fatal("child-worker should handle work.requested through the input-pin alias")
 	}
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), "ent-001")
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute("ent-001"))
 	if err != nil {
 		t.Fatalf("load workflow instance after child-worker execution: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	}
 	result, err := pc.executeNodeContractHandler(withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), "child"), "parent-listener", handler, workflowTriggerContext{
 		Event: completion,
-		State: pc.currentWorkflowState(withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), ""), "ent-001"),
+		State: mustCurrentWorkflowState(t, pc, withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), ""), "ent-001"),
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -362,7 +362,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 	if handled := pc.executeNodeHandlerPlan(withWorkflowNodeDeliveryRoute(listenerCtx, completionRoute), "parent-listener", completion); !handled {
 		t.Fatal("parent-listener should clear inherited child flow scope and handle root-local work.completed")
 	}
-	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), "ent-001")
+	instance, ok, err = pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute("ent-001"))
 	if err != nil {
 		t.Fatalf("load workflow instance after parent-listener execution: %v", err)
 	}
@@ -510,7 +510,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 		t.Fatalf("failed delivery result = passThrough:%v emitted:%#v, want no output", passThrough, emitted)
 	}
 
-	child, found, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), childEntityID)
+	child, found, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(childEntityID))
 	if err != nil {
 		t.Fatalf("load child instance: %v", err)
 	}

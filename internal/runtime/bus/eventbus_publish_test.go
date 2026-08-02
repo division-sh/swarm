@@ -3302,7 +3302,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		t.Fatalf("WaitForQuiescence: %v", err)
 	}
 
-	child, found, err := workflowStore.Load(ctx, childEntityID)
+	child, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath("child"))
 	if err != nil {
 		t.Fatalf("load child instance: %v", err)
 	}
@@ -3313,7 +3313,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		t.Fatalf("child current_state = %q, want completed", got)
 	}
 
-	root, found, err := workflowStore.Load(ctx, rootEntityID)
+	root, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(rootEntityID))
 	if err != nil {
 		t.Fatalf("load root instance: %v", err)
 	}
@@ -3730,7 +3730,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("grandchild connect preflight failure=%q routes=%#v", grandchildConnectPlan.TargetFailure, grandchildConnectPlan.DeliveryRoutes)
 	}
 	grandchildTarget := grandchildConnectPlan.DeliveryRoutes[0].Target.Normalized()
-	storedGrandchild, found, err := workflowStore.Load(ctx, grandchildTarget.EntityID)
+	storedGrandchild, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(grandchildTarget.FlowInstance))
 	if err != nil {
 		t.Fatalf("load grandchild connect target: %v", err)
 	}
@@ -3810,7 +3810,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	}
 	assertNodeDeliveryStatus(t, db, microRelayedEventID, "root-collector", "delivered")
 
-	root, found, err := workflowStore.Load(ctx, rootEntityID)
+	root, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(rootEntityID))
 	if err != nil {
 		t.Fatalf("load root instance: %v", err)
 	}
@@ -3832,11 +3832,11 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("root current_state = %q, want done through declared ancestor connects; events=%v", got, dump)
 	}
 
-	childInstance, childFound, err := workflowStore.Load(ctx, runtimeflowidentity.EntityID("child"))
+	childInstance, childFound, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath("child"))
 	if err != nil || !childFound {
 		t.Fatalf("load child workflow instance: found=%t err=%v", childFound, err)
 	}
-	grandchildInstance, grandchildFound, err := workflowStore.Load(ctx, runtimeflowidentity.EntityID("child/grandchild"))
+	grandchildInstance, grandchildFound, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath("child/grandchild"))
 	if err != nil || !grandchildFound {
 		t.Fatalf("load grandchild workflow instance: found=%t err=%v", grandchildFound, err)
 	}
@@ -3954,7 +3954,7 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 		t.Fatalf("dead-lettered exact deliveries = %d, want 1", deadLettered)
 	}
 
-	root, found, err := workflowStore.Load(ctx, rootEntityID)
+	root, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(rootEntityID))
 	if err != nil {
 		t.Fatalf("load root instance: %v", err)
 	}

@@ -319,7 +319,7 @@ func publishFanInBarrierEvent(t *testing.T, ctx context.Context, eventBus *runti
 
 func loadFanInBarrierPortfolio(t *testing.T, ctx context.Context, pipeline *runtimepipeline.PipelineCoordinator) runtimepipeline.WorkflowInstance {
 	t.Helper()
-	instance, ok, err := pipeline.Load(ctx, "portfolio")
+	instance, ok, err := pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath("portfolio"))
 	if err != nil || !ok {
 		t.Fatalf("load portfolio = found:%v err:%v", ok, err)
 	}

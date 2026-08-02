@@ -14,6 +14,7 @@ import (
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -323,7 +324,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			}
 			shutdown("failed restart", restarted, restartedProcess)
 
-			instance, found, err := restarted.Pipeline.Load(ctx, entityID)
+			instance, found, err := restarted.Pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath(entityID))
 			if err != nil {
 				t.Fatalf("load workflow instance after failed restart: %v", err)
 			}
@@ -478,7 +479,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 
 			deadline := time.Now().Add(8 * time.Second)
 			for {
-				instance, found, err := restarted.Pipeline.Load(ctx, entityID)
+				instance, found, err := restarted.Pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath(entityID))
 				if err != nil {
 					t.Fatalf("load restored workflow instance: %v", err)
 				}

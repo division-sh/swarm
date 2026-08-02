@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -24,7 +25,7 @@ const ScheduleOwnerAgent = runtimepipeline.ScheduleOwnerAgent
 type SchedulePersistence = runtimepipeline.SchedulePersistence
 
 type WorkflowInstanceLoader interface {
-	Load(ctx context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error)
+	Load(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error)
 }
 
 type EventPublisher interface {

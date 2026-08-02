@@ -755,7 +755,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 			)
 			retireErr := am.workflowInstances.RetireInitialEntryTimerWakeups(
 				cleanupCtx,
-				readiness.InstancePath,
+				runtimeflowidentity.RouteForInstancePath(readiness.InstancePath),
 			)
 			cancel()
 			if retireErr != nil {
@@ -787,7 +787,7 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 		return nil
 	}
 	wakeupsArmed = true
-	if err := am.workflowInstances.ReconcileInitialEntryTimers(ctx, readiness.InstancePath); err != nil {
+	if err := am.workflowInstances.ReconcileInitialEntryTimers(ctx, runtimeflowidentity.RouteForInstancePath(readiness.InstancePath)); err != nil {
 		return fmt.Errorf("reconcile initial workflow timers for %s: %w", readiness.InstancePath, err)
 	}
 	if eligible, err := am.dynamicFlowRuntimeReadinessStillEligible(ctx, key, plan); err != nil {

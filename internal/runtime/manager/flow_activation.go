@@ -27,9 +27,9 @@ import (
 
 type flowInstancePersistence interface {
 	MaterializeInitialEntry(ctx context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error)
-	ArmInitialEntryTimers(ctx context.Context, instanceID string) error
-	ReconcileInitialEntryTimers(ctx context.Context, instanceID string) error
-	RetireInitialEntryTimerWakeups(ctx context.Context, instanceID string) error
+	ArmInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error
+	ReconcileInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error
+	RetireInitialEntryTimerWakeups(ctx context.Context, route runtimeflowidentity.Route) error
 	ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, plan runtimepipeline.DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error)
 	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID, instanceID string) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
 	ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
@@ -37,7 +37,7 @@ type flowInstancePersistence interface {
 	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error
 	CommitDynamicFlowRuntimeCreationOccurrence(context.Context, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest, runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher) error
 	MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error
-	Load(ctx context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error)
+	Load(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error)
 	LoadRouteRecoveryProjection(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
 }
 
@@ -233,7 +233,7 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 	}
 	req.ContractBundle = admittedSource.source
 	instance := req.Instance
-	stored, exists, err := am.workflowInstances.Load(ctx, instance.InstancePath)
+	stored, exists, err := am.workflowInstances.Load(ctx, instance.Route())
 	if err != nil {
 		return false, err
 	}

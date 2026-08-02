@@ -78,7 +78,7 @@ func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t
 				t.Fatalf("first event outcome = %#v, want handled", outcome)
 			}
 
-			instance, found, err := store.Load(ctx, entityID)
+			instance, found, err := store.Load(ctx, testWorkflowInstanceRoute(entityID))
 			if err != nil {
 				t.Fatalf("load first-event workflow instance: %v", err)
 			}

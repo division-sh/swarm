@@ -640,6 +640,8 @@ func newActivityBoringSourceEvent(entityID, runID, inputURL string) events.Event
 	if strings.TrimSpace(runID) == "" {
 		runID = testPipelineRunID
 	}
+	envelope := events.EnvelopeForFlowInstance(events.EventEnvelope{}, "research/"+strings.TrimSpace(entityID))
+	envelope = events.EnvelopeForEntityID(envelope, entityID)
 	return eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("source.requested"),
@@ -649,7 +651,7 @@ func newActivityBoringSourceEvent(entityID, runID, inputURL string) events.Event
 		2,
 		runID,
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		envelope,
 		time.Now().UTC(),
 	)
 }
@@ -905,7 +907,7 @@ func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, k
 	}
 	if err := fixture.pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "research/" + entityID,
 		WorkflowName:    "research",
 		WorkflowVersion: "v-test",
 		CurrentState:    "pending",

@@ -45,11 +45,15 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if entityID == "" {
 		return true, false, fmt.Errorf("stage timer %s fired without entity_id", timer.ID)
 	}
+	route, err := workflowInstanceRouteForContext(ctx, pc.SemanticSource(), "", evt.FlowInstance())
+	if err != nil {
+		return true, false, err
+	}
 	applied := false
 	err = pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
 		currentStage := ""
 		nextStage := strings.TrimSpace(timer.AdvancesTo)
-		if err := pc.workflowStore.mutateE(txctx, entityID, func(instance *WorkflowInstance) error {
+		if err := pc.workflowStore.mutateE(txctx, route, func(instance *WorkflowInstance) error {
 			currentStage = strings.TrimSpace(instance.CurrentState)
 			if currentStage != strings.TrimSpace(timer.Stage) {
 				return nil

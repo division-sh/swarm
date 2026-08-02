@@ -8,8 +8,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -347,7 +349,11 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	}
 	entityID, evt = resolvedEntityID, resolvedEvent
 	ctx = withPipelineFlowScope(ctx, flowID)
-	currentState := e.coordinator.currentWorkflowState(ctx, entityID)
+	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
+	currentState, err := e.coordinator.currentWorkflowState(ctx, entityID)
+	if err != nil {
+		return nil, err
+	}
 	if hasSelectedState && strings.TrimSpace(selectedState.EntityID) != "" && strings.TrimSpace(currentState.EntityID) == "" {
 		currentState = selectedState
 	}
@@ -428,15 +434,37 @@ func ensureHandlerEntityID(source semanticview.Source, flowID string, handler Sy
 	if !handlerMaterializesEntity(source, flowID, handler) {
 		return "", evt, nil
 	}
-	entityID = canonicalHandlerEntityID(source, flowID, evt)
-	if entityID == "" {
-		return "", evt, nil
+	route, err := canonicalHandlerRoute(source, flowID, evt)
+	if err != nil {
+		return "", evt, err
 	}
-	resolved, err := events.ResolveEnvelope(evt, events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID))
+	entityID = runtimeflowidentity.EntityID(route.InstancePath)
+	envelope := events.EnvelopeForFlowInstance(evt.NormalizedEnvelope(), route.InstancePath)
+	envelope = events.EnvelopeForEntityID(envelope, entityID)
+	resolved, err := events.ResolveEnvelope(evt, envelope)
 	if err != nil {
 		return "", evt, err
 	}
 	return entityID, resolved, nil
+}
+
+func canonicalHandlerRoute(source semanticview.Source, flowID string, evt Event) (runtimeflowidentity.Route, error) {
+	if instancePath := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/"); instancePath != "" {
+		return workflowInstanceRouteForPath(instancePath)
+	}
+	flowID = strings.TrimSpace(flowID)
+	if flowID != "" {
+		if source != nil {
+			if schema, ok := source.FlowSchemaByID(flowID); ok && strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+				return runtimeflowidentity.Route{}, fmt.Errorf("template flow %q requires an exact instance discriminator", flowID)
+			}
+		}
+		return workflowInstanceRouteForPath(runtimeflowidentity.ScopeKey(source, flowID))
+	}
+	if runID := strings.TrimSpace(evt.RunID()); runID != "" {
+		return workflowInstanceRouteForPath(runID)
+	}
+	return runtimeflowidentity.Route{}, fmt.Errorf("materializing handler requires an exact workflow instance route")
 }
 
 func canonicalHandlerEntityID(source semanticview.Source, flowID string, evt Event) string {

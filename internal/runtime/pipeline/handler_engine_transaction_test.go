@@ -685,7 +685,7 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 		t.Fatalf("published count = %d, want 0 when persistence prerequisite is missing", got)
 	}
 
-	instance, ok, loadErr := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), entityID)
+	instance, ok, loadErr := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID))
 	if loadErr != nil {
 		t.Fatalf("load workflow instance: %v", loadErr)
 	}
@@ -755,7 +755,7 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 		t.Fatalf("published type = %q, want spec.requested", got)
 	}
 
-	instance, ok, loadErr := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), entityID)
+	instance, ok, loadErr := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID))
 	if loadErr != nil {
 		t.Fatalf("load workflow instance: %v", loadErr)
 	}
@@ -821,13 +821,13 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 		},
 	}, workflowTriggerContext{
 		Event: trigger,
-		State: pc.currentWorkflowState(ctx, entityID),
+		State: mustCurrentWorkflowState(t, pc, ctx, entityID),
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
 
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), entityID)
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -896,7 +896,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 		},
 	}, workflowTriggerContext{
 		Event: trigger,
-		State: pc.currentWorkflowState(ctx, entityID),
+		State: mustCurrentWorkflowState(t, pc, ctx, entityID),
 	}, false)
 	if err == nil {
 		t.Fatal("expected executeNodeContractHandler to fail on data accumulation CEL runtime error")
@@ -905,7 +905,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 		t.Fatalf("error = %v, want data_accumulation target context", err)
 	}
 
-	instance, ok, loadErr := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), entityID)
+	instance, ok, loadErr := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID))
 	if loadErr != nil {
 		t.Fatalf("load workflow instance: %v", loadErr)
 	}
@@ -966,13 +966,13 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 		},
 	}, workflowTriggerContext{
 		Event: trigger,
-		State: pc.currentWorkflowState(ctx, entityID),
+		State: mustCurrentWorkflowState(t, pc, ctx, entityID),
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
 
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), entityID)
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -1506,7 +1506,7 @@ node-a:
 		t.Fatalf("emitted payload revision_count = %#v, want 0", got)
 	}
 
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), entityID)
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID))
 	if err != nil {
 		t.Fatalf("workflowStore.Load: %v", err)
 	}
@@ -1749,7 +1749,7 @@ node-a:
 	if entityID == "" {
 		t.Fatal("expected emitted event to carry created entity id")
 	}
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), entityID)
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID))
 	if err != nil {
 		t.Fatalf("workflowStore.Load: %v", err)
 	}
@@ -1877,7 +1877,7 @@ node-a:
 		t.Fatal("expected emitted event to carry created entity id")
 	}
 
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), entityID)
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID))
 	if err != nil {
 		t.Fatalf("workflowStore.Load: %v", err)
 	}
@@ -2310,7 +2310,7 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 	if handled {
 		t.Fatal("nested package-root delivery handled without a stamped connect claim")
 	}
-	child, found, err := store.Load(testWorkflowStoreRunContext(t, store), childEntityID)
+	child, found, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute(childEntityID))
 	if err != nil {
 		t.Fatalf("load child instance: %v", err)
 	}

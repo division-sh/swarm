@@ -101,8 +101,8 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndSelectorsExclude(t *testi
 			late.InstanceID = uuid.NewString()
 			late.StorageRef = "freeze/" + uuid.NewString()
 			requireForkedPipelineRefusal(t, "create workflow", fixture.store.create(fixture.ctx, late))
-			requireForkedPipelineRefusal(t, "mutate workflow", fixture.store.mutate(fixture.ctx, storageRef, func(item *WorkflowInstance) { item.CurrentState = "changed" }))
-			requireForkedPipelineRefusal(t, "mutate workflow with error", fixture.store.mutateE(fixture.ctx, storageRef, func(item *WorkflowInstance) error {
+			requireForkedPipelineRefusal(t, "mutate workflow", fixture.store.mutate(fixture.ctx, testWorkflowInstanceRoute(storageRef), func(item *WorkflowInstance) { item.CurrentState = "changed" }))
+			requireForkedPipelineRefusal(t, "mutate workflow with error", fixture.store.mutateE(fixture.ctx, testWorkflowInstanceRoute(storageRef), func(item *WorkflowInstance) error {
 				item.CurrentState = "changed"
 				return nil
 			}))
@@ -112,7 +112,7 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndSelectorsExclude(t *testi
 			if err != nil || len(after) != 0 {
 				t.Fatalf("active selector after freeze = %d, %v", len(after), err)
 			}
-			preserved, ok, err := fixture.store.Load(fixture.ctx, storageRef)
+			preserved, ok, err := fixture.store.Load(fixture.ctx, testWorkflowInstanceRoute(storageRef))
 			if err != nil || !ok || preserved.CurrentState != "active" {
 				t.Fatalf("preserved workflow = %#v found=%v err=%v", preserved, ok, err)
 			}

@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -55,7 +54,11 @@ func (pc *PipelineCoordinator) reconcileSupersededLoopSchedules(ctx context.Cont
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return nil
 	}
-	instance, ok, err := pc.workflowStore.Load(ctx, strings.TrimSpace(entityID))
+	route, err := workflowInstanceRouteForContext(ctx, pc.SemanticSource(), "", "")
+	if err != nil {
+		return err
+	}
+	instance, ok, err := pc.workflowStore.Load(ctx, route)
 	if err != nil || !ok {
 		return err
 	}

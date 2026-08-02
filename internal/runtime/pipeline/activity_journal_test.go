@@ -237,7 +237,7 @@ func loopActivityStartRecord(ctx context.Context, activation loopruntime.Activat
 
 func advanceLoopActivityInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, entityID, operation string) {
 	t.Helper()
-	if err := store.mutateE(ctx, entityID, func(instance *WorkflowInstance) error {
+	if err := store.mutateE(ctx, testWorkflowInstanceRoute(entityID), func(instance *WorkflowInstance) error {
 		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 		if err != nil {
 			return err

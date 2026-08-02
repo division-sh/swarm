@@ -834,7 +834,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 				t.Fatalf("proposal failure disposition = %#v, present=%v; want typed dead letter", disposition, disposed)
 			}
 
-			instance, ok, err := coordinator.Load(ctx, entityID)
+			instance, ok, err := coordinator.Load(ctx, testWorkflowInstanceRoute(entityID))
 			if err != nil || !ok || instance.CurrentState != "drafting" {
 				t.Fatalf("workflow after rollback = %#v, %v, %v", instance, ok, err)
 			}
@@ -1610,7 +1610,7 @@ func insertGateRecoveryRun(t *testing.T, tc gateRecoveryStoreCase, runID string)
 
 func assertGateRecoveryActivation(t *testing.T, workflowStore *runtimepipeline.PipelineCoordinator, ctx context.Context, entityID, stage string, status gateruntime.Status) {
 	t.Helper()
-	instance, ok, err := workflowStore.Load(ctx, entityID)
+	instance, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(entityID))
 	if err != nil || !ok {
 		t.Fatalf("Load workflow instance = %#v, %v, %v", instance, ok, err)
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
@@ -22,6 +23,10 @@ func (o pipelineWorkflowLifecycleOwner) AcceptedEventEffect(entityID identity.En
 	entityID = identity.NormalizeEntityID(entityID.String())
 	if entityID.IsZero() {
 		return runtimeworkflowlifecycle.Effect{}, fmt.Errorf("accepted workflow event requires entity identity")
+	}
+	route := runtimeflowidentity.RouteForInstancePath(event.FlowInstance())
+	if !route.Valid() {
+		return runtimeworkflowlifecycle.Effect{}, fmt.Errorf("accepted workflow event requires exact instance route")
 	}
 	fromState = strings.TrimSpace(fromState)
 	toState = strings.TrimSpace(toState)
@@ -41,6 +46,7 @@ func (o pipelineWorkflowLifecycleOwner) AcceptedEventEffect(entityID identity.En
 		transition = &value
 	}
 	return runtimeworkflowlifecycle.NewAcceptedEvent(
+		route,
 		entityID.String(),
 		event.ID(),
 		string(event.Type()),
@@ -70,7 +76,8 @@ func (o pipelineWorkflowLifecycleOwner) ApplyWorkflowLifecycleEffects(ctx contex
 
 func (pc *PipelineCoordinator) applyWorkflowLifecycleEffect(ctx context.Context, effect runtimeworkflowlifecycle.Effect) error {
 	entityID := strings.TrimSpace(effect.InstanceID())
-	if entityID == "" || effect.OccurredAt().IsZero() {
+	route := effect.Route()
+	if entityID == "" || !route.Valid() || effect.OccurredAt().IsZero() {
 		return fmt.Errorf("workflow lifecycle effect is incomplete")
 	}
 	fromState := ""
@@ -98,16 +105,16 @@ func (pc *PipelineCoordinator) applyWorkflowLifecycleEffect(ctx context.Context,
 		return fmt.Errorf("workflow lifecycle effect kind is unsupported")
 	}
 	if effect.Kind() == runtimeworkflowlifecycle.KindInitialEntry {
-		if err := pc.workflowTimers.reconcileInitialEntry(ctx, entityID, toState, cause); err != nil {
+		if err := pc.workflowTimers.reconcileInitialEntry(ctx, route, entityID, toState, cause); err != nil {
 			return err
 		}
-	} else if err := pc.workflowTimers.Reconcile(ctx, entityID, fromState, toState, cause); err != nil {
+	} else if err := pc.workflowTimers.Reconcile(ctx, route, entityID, fromState, toState, cause); err != nil {
 		return err
 	}
-	if err := pc.applyWorkflowJoinIntents(ctx, entityID, fromState, toState, effect.OccurredAt()); err != nil {
+	if err := pc.applyWorkflowJoinIntents(ctx, route, entityID, fromState, toState, effect.OccurredAt()); err != nil {
 		return err
 	}
-	return pc.applyWorkflowGateIntents(ctx, entityID, fromState, toState, cause.EventType, effect.OccurredAt())
+	return pc.applyWorkflowGateIntents(ctx, route, entityID, fromState, toState, cause.EventType, effect.OccurredAt())
 }
 
 func (pc *PipelineCoordinator) applyAcceptedWorkflowEvent(ctx context.Context, entityID string, event events.Event, fromState, toState string) error {
@@ -119,26 +126,26 @@ func (pc *PipelineCoordinator) applyAcceptedWorkflowEvent(ctx context.Context, e
 	return owner.ApplyWorkflowLifecycleEffects(ctx, []runtimeworkflowlifecycle.Effect{effect})
 }
 
-func (o pipelineWorkflowLifecycleOwner) ArmInitialEntryTimers(ctx context.Context, instanceID string) error {
+func (o pipelineWorkflowLifecycleOwner) ArmInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error {
 	pc := o.coordinator
 	if pc == nil || pc.workflowTimers == nil {
 		return fmt.Errorf("workflow timer lifecycle owner is unavailable")
 	}
-	return pc.workflowTimers.ArmInitialEntryTimers(ctx, instanceID)
+	return pc.workflowTimers.ArmInitialEntryTimers(ctx, route)
 }
 
-func (o pipelineWorkflowLifecycleOwner) ReconcileInitialEntryTimers(ctx context.Context, instanceID string) error {
+func (o pipelineWorkflowLifecycleOwner) ReconcileInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error {
 	pc := o.coordinator
 	if pc == nil || pc.workflowTimers == nil {
 		return fmt.Errorf("workflow timer lifecycle owner is unavailable")
 	}
-	return pc.workflowTimers.reconcileInitialEntryDeclarations(ctx, instanceID)
+	return pc.workflowTimers.reconcileInitialEntryDeclarations(ctx, route)
 }
 
-func (o pipelineWorkflowLifecycleOwner) RetireInitialEntryTimerWakeups(ctx context.Context, instanceID string) error {
+func (o pipelineWorkflowLifecycleOwner) RetireInitialEntryTimerWakeups(ctx context.Context, route runtimeflowidentity.Route) error {
 	pc := o.coordinator
 	if pc == nil || pc.workflowTimers == nil {
 		return fmt.Errorf("workflow timer lifecycle owner is unavailable")
 	}
-	return pc.workflowTimers.RetireInitialEntryTimerWakeups(ctx, instanceID)
+	return pc.workflowTimers.RetireInitialEntryTimerWakeups(ctx, route)
 }

@@ -137,7 +137,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 		t.Fatalf("Create workflow instance: %v", err)
 	}
 
-	loaded, ok, err := store.Load(ctx, storageRef)
+	loaded, ok, err := store.Load(ctx, testWorkflowInstanceRoute(storageRef))
 	if err != nil {
 		t.Fatalf("Load workflow instance: %v", err)
 	}
@@ -271,13 +271,13 @@ func TestSQLiteWorkflowInstanceStore_MutateERollsBackCallbackFailure(t *testing.
 		t.Fatalf("seed: %v", err)
 	}
 	sentinel := errors.New("supersession failed")
-	if err := store.mutateE(ctx, instance.InstanceID, func(item *WorkflowInstance) error {
+	if err := store.mutateE(ctx, testWorkflowInstanceRoute(instance.StorageRef), func(item *WorkflowInstance) error {
 		item.CurrentState = "must_not_commit"
 		return sentinel
 	}); !errors.Is(err, sentinel) {
 		t.Fatalf("MutateE error = %v, want sentinel", err)
 	}
-	loaded, ok, err := store.Load(ctx, instance.InstanceID)
+	loaded, ok, err := store.Load(ctx, testWorkflowInstanceRoute(instance.StorageRef))
 	if err != nil || !ok {
 		t.Fatalf("Load = found %v err %v", ok, err)
 	}

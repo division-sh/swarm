@@ -18,6 +18,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -145,8 +146,12 @@ type runtimeHarness struct {
 }
 
 type catalogWorkflowPersistence interface {
-	Load(context.Context, string) (runtimepipeline.WorkflowInstance, bool, error)
+	Load(context.Context, runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error)
 	MaterializeInitialEntry(context.Context, runtimepipeline.WorkflowInstance, time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error)
+}
+
+func catalogWorkflowRoute(instancePath string) runtimeflowidentity.Route {
+	return runtimeflowidentity.RouteForInstancePath(instancePath)
 }
 
 type agentFixtureDoc struct {
@@ -643,7 +648,7 @@ func (h *runtimeHarness) hasExpectedRootEntityState(ctx context.Context, entityI
 	if h == nil || h.workflow == nil {
 		return false
 	}
-	instance, found, err := h.workflow.Load(ctx, strings.TrimSpace(entityID))
+	instance, found, err := h.workflow.Load(ctx, catalogWorkflowRoute(strings.TrimSpace(entityID)))
 	if err != nil {
 		h.t.Fatalf("load workflow instance while waiting for emitted-event effects: %v", err)
 	}
@@ -756,7 +761,7 @@ func (h *runtimeHarness) previewHandlerOutcome(evt events.Event) (runtimepipelin
 		EntityID: entityID,
 	}
 	if strings.TrimSpace(entityID) != "" && h.workflow != nil {
-		if instance, ok, err := h.workflow.Load(h.ctx, entityID); err == nil && ok {
+		if instance, ok, err := h.workflow.Load(h.ctx, catalogWorkflowRoute(entityID)); err == nil && ok {
 			state.Stage = runtimepipeline.NormalizeWorkflowStateID(instance.CurrentState)
 			state.Metadata = cloneStringAnyMap(instance.Metadata)
 		}
@@ -789,7 +794,7 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 	if entityID == "" {
 		return
 	}
-	if _, ok, err := h.workflow.Load(h.ctx, entityID); err == nil && ok {
+	if _, ok, err := h.workflow.Load(h.ctx, catalogWorkflowRoute(entityID)); err == nil && ok {
 		return
 	}
 	initialState := strings.TrimSpace(h.initialState)
@@ -828,7 +833,7 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 	if entityID == "" {
 		entityID = runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID)
 	}
-	instance, ok, err := h.workflow.Load(h.ctx, entityID)
+	instance, ok, err := h.workflow.Load(h.ctx, catalogWorkflowRoute(entityID))
 	if err != nil {
 		h.t.Fatalf("load workflow instance for entity field seeding %s: %v", entityID, err)
 	}
