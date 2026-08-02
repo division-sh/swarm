@@ -11,6 +11,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -184,10 +185,7 @@ func (eb *EventBus) PublishAndWait(ctx context.Context, evt events.Event) error 
 	}
 	group := newLocalDeliveryCompletionGroup()
 	waitCtx := ctx
-	ctx = withLocalDeliveryCompletionGroup(ctx, group)
-	if prepared.dispatchContext != nil {
-		prepared.dispatchContext = withLocalDeliveryCompletionGroup(prepared.dispatchContext, group)
-	}
+	prepared.receiver = prepared.receiver.withCompletion(group)
 	return eb.dispatchPreparedPublishWithCompletion(ctx, prepared, func() error {
 		group.releaseDispatch()
 		return group.wait(waitCtx)
@@ -318,7 +316,7 @@ type PreparedPublish struct {
 	queueReason      string
 	direct           bool
 	publicationClaim *pipelinePublicationClaim
-	dispatchContext  context.Context
+	receiver         receiverDispatchProjection
 	deliveryReceipt  *DeliveryCommitReceipt
 }
 
@@ -409,15 +407,16 @@ func (eb *EventBus) admitPreparedPublish(ctx context.Context, prepared PreparedP
 	if _, err := eb.admitBundleSourceFact(ctx); err != nil {
 		return nil, fmt.Errorf("admit prepared publication caller: %w", err)
 	}
-	if prepared.dispatchContext == nil {
-		return nil, errors.New("prepared publication dispatch context is required")
+	if prepared.requiresReceiver() {
+		if err := prepared.receiver.validate(); err != nil {
+			return nil, fmt.Errorf("admit prepared publication receiver: %w", err)
+		}
 	}
-	dispatchCtx := preparedPublishDispatchContext(prepared)
-	dispatchCtx, err := eb.admitBundleSourceFact(dispatchCtx)
-	if err != nil {
-		return nil, fmt.Errorf("admit prepared publication owner context: %w", err)
-	}
-	return dispatchCtx, nil
+	return eb.admitBundleSourceFact(ctx)
+}
+
+func (prepared PreparedPublish) requiresReceiver() bool {
+	return !prepared.exactDuplicate && !prepared.targetFailure && !prepared.dispatchQueued
 }
 
 // PrepareSelectedForkPublish performs canonical admission and route planning
@@ -470,8 +469,8 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 	}
 	prepared := PreparedPublish{
 		Event: evt, admitted: admitted, plan: plan,
-		publicationClaim: publicationClaim, dispatchContext: preparedCtx,
-		deliveryReceipt: newDeliveryCommitReceipt(),
+		publicationClaim: publicationClaim,
+		deliveryReceipt:  newDeliveryCommitReceipt(),
 	}
 	if plan.TargetFailure != "" {
 		prepared.targetFailure = true
@@ -482,6 +481,13 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 	} else if reason != "" {
 		prepared.dispatchQueued = true
 		prepared.queueReason = reason
+	}
+	if prepared.requiresReceiver() {
+		receiver, receiverErr := eb.receiverProjection(preparedCtx, evt.DeliveryContext())
+		if receiverErr != nil {
+			return PreparedPublish{}, errors.Join(receiverErr, publicationClaim.Release(preparedCtx))
+		}
+		prepared.receiver = receiver
 	}
 	return prepared, nil
 }
@@ -577,7 +583,6 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 		admitted:         admitted,
 		direct:           replayScope == runtimepipelineobligation.ScopeDirect,
 		publicationClaim: publicationClaim,
-		dispatchContext:  txctx,
 		deliveryReceipt:  newDeliveryCommitReceipt(),
 	}
 	if replayScope == runtimepipelineobligation.ScopeSubscribed {
@@ -647,6 +652,13 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 	} else if reason != "" {
 		prepared.dispatchQueued = true
 		prepared.queueReason = reason
+	}
+	if prepared.requiresReceiver() {
+		receiver, receiverErr := eb.receiverProjection(txctx, evt.DeliveryContext())
+		if receiverErr != nil {
+			return PreparedPublish{}, receiverErr
+		}
+		prepared.receiver = receiver
 	}
 	return prepared, nil
 }
@@ -857,13 +869,6 @@ func (eb *EventBus) DispatchPreparedPublish(ctx context.Context, prepared Prepar
 	if err != nil {
 		return err
 	}
-	dispatchCtx, lease, err := eb.beginRuntimeWork(dispatchCtx)
-	if err != nil {
-		return errors.Join(err, prepared.publicationClaim.Release(dispatchCtx))
-	}
-	if lease != nil {
-		defer func() { _ = lease.Done() }()
-	}
 	return eb.dispatchPreparedPublish(dispatchCtx, prepared)
 }
 
@@ -878,19 +883,9 @@ func (eb *EventBus) DispatchPreparedPublishAndWait(ctx context.Context, prepared
 	if err != nil {
 		return err
 	}
-	dispatchCtx, lease, err := eb.beginRuntimeWork(dispatchCtx)
-	if err != nil {
-		return errors.Join(err, prepared.publicationClaim.Release(dispatchCtx))
-	}
-	if lease != nil {
-		defer func() { _ = lease.Done() }()
-	}
 	group := newLocalDeliveryCompletionGroup()
 	waitCtx := ctx
-	dispatchCtx = withLocalDeliveryCompletionGroup(dispatchCtx, group)
-	if prepared.dispatchContext != nil {
-		prepared.dispatchContext = withLocalDeliveryCompletionGroup(prepared.dispatchContext, group)
-	}
+	prepared.receiver = prepared.receiver.withCompletion(group)
 	return eb.dispatchPreparedPublishWithCompletion(dispatchCtx, prepared, func() error {
 		group.releaseDispatch()
 		return group.wait(waitCtx)
@@ -939,7 +934,7 @@ func (eb *EventBus) dispatchPreparedPublishBody(ctx context.Context, prepared Pr
 		eb.logPublished(ctx, prepared.Event, 0)
 		return nil
 	}
-	return eb.completeCommittedPublishDispatch(ctx, prepared.Event, prepared.plan, prepared.publicationClaim)
+	return eb.completeCommittedPublishDispatch(prepared.Event, prepared.plan, prepared.publicationClaim, prepared.receiver)
 }
 
 // AcceptCommittedDeliveryHandoffs transfers exact selected-store commit
@@ -958,10 +953,6 @@ func (eb *EventBus) AcceptCommittedDeliveryHandoffs(handoffs []runtimedelivery.D
 	return nil
 }
 
-func preparedPublishDispatchContext(prepared PreparedPublish) context.Context {
-	return WithoutCommitPublishTransaction(runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(prepared.dispatchContext))))
-}
-
 func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared PreparedPublish) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -973,22 +964,31 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 	releaseOnFailure := func(err error) error {
 		return errors.Join(err, prepared.publicationClaim.Release(dispatchCtx))
 	}
+	if !prepared.requiresReceiver() {
+		return eb.dispatchPreparedPublish(dispatchCtx, prepared)
+	}
 	if eb == nil || eb.workOwner == nil {
 		return releaseOnFailure(errors.New("asynchronous event dispatch requires a runtime work occurrence"))
 	}
 	if strings.TrimSpace(prepared.Event.ID()) == "" {
 		return releaseOnFailure(errors.New("prepared event is required"))
 	}
-	owner := eb.workOwnerForContext(dispatchCtx)
-	admissionCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(dispatchCtx)))
-	lease, err := owner.Begin(admissionCtx)
+	owner := prepared.receiver.occurrence
+	lease, err := owner.Begin(context.Background())
 	if err != nil {
 		return releaseOnFailure(fmt.Errorf("admit asynchronous event dispatch: %w", err))
 	}
-	dispatchCtx = lease.Context()
+	dispatchCtx, closeDispatchContext := eventreceiver.NewContext(lease.Context())
+	dispatchCtx, err = eb.admitBundleSourceFact(dispatchCtx)
+	if err != nil {
+		closeDispatchContext()
+		_ = lease.Done()
+		return releaseOnFailure(err)
+	}
 	go func() {
+		defer closeDispatchContext()
 		defer func() { _ = lease.Done() }()
-		if err := eb.dispatchPreparedPublish(bindWorkContext(dispatchCtx, lease, owner), prepared); err != nil {
+		if err := eb.dispatchPreparedPublish(dispatchCtx, prepared); err != nil {
 			eb.reportLocalDispatchFailure("async_dispatch_failed", prepared.Event, err)
 		}
 	}()
@@ -1007,9 +1007,14 @@ func (eb *EventBus) reportLocalDispatchFailure(action string, evt events.Event, 
 	)
 }
 
-func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt events.Event, inboundPlan RoutePlan, publicationClaim *pipelinePublicationClaim) error {
-	ctx = WithoutCommitPublishTransaction(ctx)
-	workCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(ctx))
+func (eb *EventBus) completeCommittedPublishDispatch(evt events.Event, inboundPlan RoutePlan, publicationClaim *pipelinePublicationClaim, projection receiverDispatchProjection) (err error) {
+	receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(projection, evt)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, closeReceiver()) }()
+	ctx := receiverCtx.Context
+	workCtx := receiverCtx.Context
 	eb.notifyTestPostCommitDispatchStarted(workCtx, evt)
 	defer eb.notifyTestPostCommitDispatchCompleted(workCtx, evt)
 
@@ -1182,8 +1187,10 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 		if err != nil {
 			return passthrough, nil, runtimepipelineobligation.Continue(), err
 		}
+		routeCtx := events.WithDeliveryContext(ctx, route.Context)
+		routeCtx = runtimedelivery.WithRoute(routeCtx, route)
 		for _, it := range interceptors {
-			pass, out, outcome, err := it.InterceptDeliveryRoute(ctx, projected, route)
+			pass, out, outcome, err := it.InterceptDeliveryRoute(routeCtx, projected, route)
 			if err != nil {
 				return passthrough, nil, runtimepipelineobligation.Continue(), err
 			}
@@ -1193,7 +1200,7 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 			if !pass {
 				passthrough = false
 			}
-			admitted, err := admitDeferredEvents(ctx, out)
+			admitted, err := admitDeferredEvents(routeCtx, out)
 			if err != nil {
 				return passthrough, nil, runtimepipelineobligation.Continue(), err
 			}
@@ -1223,6 +1230,20 @@ func (eb *EventBus) admitBundleSourceFact(ctx context.Context) (context.Context,
 	sourceFact := eb.bundleSourceFact
 	eb.mu.RUnlock()
 
+	contextRuntimeInstanceID, hasContextRuntimeInstanceID := runtimecorrelation.RuntimeInstanceIDFromContext(ctx)
+	contextScope, hasContextScope := runtimeauthoractivity.ScopeFromContext(ctx)
+	if hasContextScope && contextScope.Kind == runtimeauthoractivity.ScopeBundle {
+		if hasContextRuntimeInstanceID && contextRuntimeInstanceID != contextScope.RuntimeInstanceID {
+			return ctx, errors.New("event bus runtime instance conflicts with bundle scope")
+		}
+		contextRuntimeInstanceID = contextScope.RuntimeInstanceID
+		hasContextRuntimeInstanceID = contextRuntimeInstanceID != ""
+	}
+	if runtimeInstanceID == "" {
+		runtimeInstanceID = contextRuntimeInstanceID
+	} else if hasContextRuntimeInstanceID && contextRuntimeInstanceID != runtimeInstanceID {
+		return ctx, errors.New("event bus runtime instance conflicts with publication context")
+	}
 	contextFact, hasContextFact := runtimecorrelation.BundleSourceFactFromContext(ctx)
 	hasOwnedFact := sourceFact.Validate() == nil
 	if !hasOwnedFact && !eb.ephemeral {
@@ -1241,6 +1262,9 @@ func (eb *EventBus) admitBundleSourceFact(ctx context.Context) (context.Context,
 		if !hasContextFact {
 			ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
 		}
+	}
+	if hasContextScope && contextScope.Kind == runtimeauthoractivity.ScopeBundle && admittedFact.Validate() == nil && contextScope.BundleHash != admittedFact.BundleHash() {
+		return ctx, errors.New("event bus bundle source fact conflicts with bundle scope")
 	}
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
 	if runtimeInstanceID != "" && admittedFact.Validate() == nil {
@@ -1875,7 +1899,7 @@ func (eb *EventBus) publishClaimedPipeline(ctx context.Context, evt events.Event
 	return eb.publishPersistedRecipientsWithScope(ctx, evt, scope, recipients, true, dispatchRecipients)
 }
 
-func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt events.Event, scope runtimepipelineobligation.CommittedScope, recipients []string, replayInterceptors, dispatchRecipients bool) (runtimepipelineobligation.ExecutionOutcome, error) {
+func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt events.Event, scope runtimepipelineobligation.CommittedScope, recipients []string, replayInterceptors, dispatchRecipients bool) (result runtimepipelineobligation.ExecutionOutcome, err error) {
 	if _, err := runtimepipelineobligation.ParseCommittedScope(string(scope)); err != nil {
 		return runtimepipelineobligation.Continue(), err
 	}
@@ -1883,6 +1907,16 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 	if err != nil {
 		return runtimepipelineobligation.Continue(), err
 	}
+	projection, err := eb.receiverProjection(ctx, evt.DeliveryContext())
+	if err != nil {
+		return runtimepipelineobligation.Continue(), err
+	}
+	receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(projection, evt)
+	if err != nil {
+		return runtimepipelineobligation.Continue(), err
+	}
+	defer func() { err = errors.Join(err, closeReceiver()) }()
+	ctx = receiverCtx.Context
 	passthrough := true
 	deferred := []events.Event(nil)
 	if replayInterceptors && scope == runtimepipelineobligation.ScopeSubscribed {

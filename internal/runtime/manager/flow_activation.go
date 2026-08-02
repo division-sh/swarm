@@ -67,12 +67,13 @@ type FlowInstanceTerminalMutationOwner interface {
 }
 
 type terminalFlowInstanceSideEffectPlan struct {
-	EntityID        string
-	FlowPath        string
-	AgentIdentities []runtimeagentidentity.Identity
-	Route           runtimeflowidentity.Route
-	RunID           string
-	FinalState      string
+	EntityID          string
+	FlowPath          string
+	AgentIdentities   []runtimeagentidentity.Identity
+	SelfRetiringAgent runtimeagentidentity.Identity
+	Route             runtimeflowidentity.Route
+	RunID             string
+	FinalState        string
 }
 
 func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
@@ -780,25 +781,59 @@ func (am *AgentManager) terminalFlowInstanceSideEffectPlan(
 		}
 		return agentIdentities[i].FlowInstance() < agentIdentities[j].FlowInstance()
 	})
+	selfRetiringAgent, err := terminalFlowSelfRetiringAgent(ctx, agentIdentities)
+	if err != nil {
+		return terminalFlowInstanceSideEffectPlan{}, err
+	}
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 	if runID == "" {
 		return terminalFlowInstanceSideEffectPlan{}, fmt.Errorf("flow instance terminalization requires canonical run_id for %s", canonicalFlowPath)
 	}
 	plan := terminalFlowInstanceSideEffectPlan{
-		EntityID:        entityID,
-		FlowPath:        canonicalFlowPath,
-		AgentIdentities: agentIdentities,
-		Route:           canonicalRoute,
-		RunID:           runID,
-		FinalState:      req.FinalState,
+		EntityID:          entityID,
+		FlowPath:          canonicalFlowPath,
+		AgentIdentities:   agentIdentities,
+		SelfRetiringAgent: selfRetiringAgent,
+		Route:             canonicalRoute,
+		RunID:             runID,
+		FinalState:        req.FinalState,
 	}
 	return plan, nil
+}
+
+func terminalFlowSelfRetiringAgent(ctx context.Context, candidates []runtimeagentidentity.Identity) (runtimeagentidentity.Identity, error) {
+	evt, ok := runtimecorrelation.InboundEventFromContext(ctx)
+	if !ok || evt.ProducerType() != events.EventProducerAgent {
+		return runtimeagentidentity.Identity{}, nil
+	}
+	source := evt.RoutingSource().Route()
+	if source.FlowInstance == "" {
+		return runtimeagentidentity.Identity{}, nil
+	}
+	var match runtimeagentidentity.Identity
+	for _, candidate := range candidates {
+		if candidate.AgentID() != evt.SourceAgent() || candidate.FlowInstance() != source.FlowInstance {
+			continue
+		}
+		if !match.IsZero() {
+			return runtimeagentidentity.Identity{}, fmt.Errorf(
+				"terminal event %s has ambiguous exact source agent %s at %s",
+				evt.ID(), evt.SourceAgent(), source.FlowInstance,
+			)
+		}
+		match = candidate
+	}
+	return match, nil
 }
 
 func (am *AgentManager) applyTerminalFlowInstanceSideEffects(ctx context.Context, plan terminalFlowInstanceSideEffectPlan) error {
 	var agentErrs []error
 	for _, identity := range plan.AgentIdentities {
-		if err := am.teardownIdentity(ctx, identity, "flow_instance_terminal"); err != nil && !errors.Is(err, ErrAgentNotFound) {
+		deferRouteRetirement := false
+		if !plan.SelfRetiringAgent.IsZero() {
+			deferRouteRetirement, _ = runtimeagentidentity.Equal(identity, plan.SelfRetiringAgent)
+		}
+		if err := am.teardownIdentityAfterTerminalEvent(ctx, identity, "flow_instance_terminal", deferRouteRetirement); err != nil && !errors.Is(err, ErrAgentNotFound) {
 			agentErrs = append(agentErrs, fmt.Errorf(
 				"teardown flow instance agent %s at %s: %w",
 				identity.AgentID(),

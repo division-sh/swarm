@@ -1317,7 +1317,7 @@ func TestEventBusPublish_LogsQueuedDeliveryLifecycleTransition(t *testing.T) {
 	}
 }
 
-func TestEventBusPublish_AttachesTypedRuntimeDiagnosticLineage(t *testing.T) {
+func TestEventBusPublish_RejectsPublisherRuntimeDiagnosticLineage(t *testing.T) {
 	logger := &recordingLoggerHook{}
 	bus, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{Logger: logger})
 	if err != nil {
@@ -1357,15 +1357,8 @@ func TestEventBusPublish_AttachesTypedRuntimeDiagnosticLineage(t *testing.T) {
 			break
 		}
 	}
-	if !published.HasLineage {
-		t.Fatalf("logger entries = %#v, want typed lineage on published diagnostic", logger.entries)
-	}
-	if published.Lineage.Owner != "runtime.run_fork.selected_contract_execution.fork_local_runtime_typed_lineage" ||
-		published.Lineage.RowCategory != runtimecorrelation.RuntimeLineageRowCategoryDiagnostic ||
-		published.Lineage.SubjectEventID != eventID ||
-		published.Lineage.ParentEventID != eventID ||
-		published.Lineage.Classification != runtimecorrelation.RuntimeLineageClassificationForkLocal {
-		t.Fatalf("published diagnostic lineage = %#v", published.Lineage)
+	if published.HasLineage {
+		t.Fatalf("published diagnostic inherited publisher lineage = %#v", published.Lineage)
 	}
 }
 

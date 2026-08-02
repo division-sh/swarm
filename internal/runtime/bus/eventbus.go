@@ -12,7 +12,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -87,6 +89,7 @@ type EventBus struct {
 	pipelineSweepMu             pipelineSweepLock
 	pipelineScans               map[runtimepipelineobligation.ScanRequest]*pipelineSweepScan
 	workOwner                   worklifetime.Occurrence
+	receiverExecution           eventreceiver.ExecutionVariant
 	deliveryAuthority           runtimedelivery.ExecutionAuthority
 	deliveryContinuations       DeliveryContinuationOwner
 	durable                     DurableDependencies
@@ -309,6 +312,7 @@ type EventBusOptions struct {
 	TestLifecycleProbe          runtimelifecycleprobe.Observer
 	ProviderOutputVerifier      ProviderOutputAuthorizationVerifier
 	WorkOwner                   worklifetime.Occurrence
+	ReceiverExecution           eventreceiver.ExecutionVariant
 	PipelineObligations         runtimepipelineobligation.Store
 	DeliveryAuthority           runtimedelivery.ExecutionAuthority
 	Durable                     DurableDependencies
@@ -388,6 +392,20 @@ func (eb *EventBus) SetDeliveryAuthority(authority runtimedelivery.ExecutionAuth
 	eb.mu.Lock()
 	eb.deliveryAuthority = authority
 	eb.mu.Unlock()
+	return nil
+}
+
+// FinalizeSelectedReceiverAdmission installs provider-preflight evidence before
+// the selected EventBus begins dispatching receiver work.
+func (eb *EventBus) FinalizeSelectedReceiverAdmission(admission managedexecution.Admission) error {
+	if eb == nil {
+		return errors.New("event bus is required")
+	}
+	variant, err := eb.receiverExecution.WithSelectedAdmission(admission)
+	if err != nil {
+		return fmt.Errorf("finalize selected event bus receiver admission: %w", err)
+	}
+	eb.receiverExecution = variant
 	return nil
 }
 
@@ -475,6 +493,12 @@ func NewEphemeralEventBusWithOptions(store EventStore, opts EventBusOptions) (*E
 }
 
 func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, error) {
+	if !opts.ReceiverExecution.Configured() {
+		opts.ReceiverExecution = eventreceiver.NormalExecution()
+	}
+	if err := opts.ReceiverExecution.Validate(); err != nil {
+		return nil, fmt.Errorf("event bus receiver execution: %w", err)
+	}
 	if opts.PipelineObligations != nil {
 		if err := opts.BundleSourceFact.Validate(); err != nil {
 			return nil, fmt.Errorf("durable event bus requires an immutable bundle source fact: %w", err)
@@ -533,6 +557,7 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		testLifecycleProbe:          opts.TestLifecycleProbe,
 		providerOutputVerifier:      opts.ProviderOutputVerifier,
 		workOwner:                   opts.WorkOwner,
+		receiverExecution:           opts.ReceiverExecution,
 		deliveryAuthority:           opts.DeliveryAuthority,
 		durable:                     opts.Durable,
 	}
@@ -1364,7 +1389,7 @@ func (eb *EventBus) PrepareAgentRoute(token runtimeeffects.LifecycleToken, admis
 		return nil
 	}
 	ch := make(chan *LocalDelivery, 128)
-	route := newAgentRouteHandle(token, ch, owner)
+	route := newAgentRouteHandle(eb, token, ch, owner)
 	return &preparedAgentRoute{
 		bus: eb, lifecycleCtx: lifecycleCtx, token: token,
 		eventTypes: eventTypes, route: route, ch: ch,

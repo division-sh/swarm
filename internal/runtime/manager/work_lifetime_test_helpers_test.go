@@ -128,7 +128,7 @@ func admitManagerTestBusContext(ctx context.Context) (context.Context, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return ctx, nil
+	return testAuthorActivityContext(ctx), nil
 }
 
 func newTestManagerWorkOwner(t *testing.T) worklifetime.Occurrence {

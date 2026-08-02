@@ -550,8 +550,8 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	t.Helper()
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
-		RuntimeInstanceID: "complete-event-dispatch-runtime",
-		BundleHash:        "complete-event-dispatch-bundle",
+		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+		BundleHash:        authorActivityTestBundleSourceFact.BundleHash(),
 	})
 	if err != nil {
 		t.Fatalf("create complete-event work owner: %v", err)
@@ -568,7 +568,8 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	manager := runtimemanager.NewAgentManagerWithOptions(f.bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return &completeEventRecordingAgent{id: cfg.ID, subscriptions: []events.EventType{f.event.Type()}, seen: seen}, nil
 	}, runtimemanager.AgentManagerOptions{
-		DeliveryStore: f.store,
+		BundleSourceFact: authorActivityTestBundleSourceFact,
+		DeliveryStore:    f.store,
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			AgentRoutes: f.bus, RouteInstaller: f.bus, RouteVerifier: f.bus,
 			RouteRestorer: f.bus, RouteRetirer: f.bus, RouteRemover: f.bus,

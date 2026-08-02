@@ -2419,6 +2419,10 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		ExecutionOwner:        runfork.RunForkSelectedContractExecutionOwner,
 		DeferredWorkAdmission: deferredWorkAdmission,
 	}
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
+		runForkTestRuntimeInstanceID,
+		baseRequest.LoadedSource.BundleSourceFact.BundleHash(),
+	))
 	type contenderResult struct {
 		surface   string
 		container selectedContractForkLocalRuntimeContainer

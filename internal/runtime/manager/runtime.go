@@ -17,6 +17,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -1736,11 +1737,22 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 								}
 								return true
 							}
-							evtCtx := agentDeliveryExecutionContext(eventWork.Context(), loopCtx, token, deliveryOwner)
-							evtCtx = runtimecorrelation.WithInboundEvent(evtCtx, evt)
-							evtCtx = runtimecorrelation.WithRunID(evtCtx, strings.TrimSpace(evt.RunID()))
 							route := delivery.HandoffRoute()
-							evtCtx = runtimedelivery.WithRoute(evtCtx, route)
+							evtCtx, closeEvtCtx, contextErr := agentDeliveryExecutionContext(
+								eventWork.Context(), loopCtx, token, deliveryOwner, evt, route, am.receiverExecution,
+								am.bus.AdmitBundleSourceFact,
+							)
+							if contextErr != nil {
+								if am.bus != nil {
+									am.bus.LogRuntime(loopCtx, runtimepipeline.RuntimeLogEntry{
+										Level: "error", Component: "agent-manager", Action: "delivery_receiver_context_rejected",
+										EventID: strings.TrimSpace(evt.ID()), EventType: strings.TrimSpace(string(evt.Type())), AgentID: agent.ID(),
+										Failure: failureEnvelope(contextErr, "agent-manager", "construct_delivery_receiver_context"),
+									})
+								}
+								return true
+							}
+							defer closeEvtCtx()
 							if am.deliveryStore == nil {
 								if am.bus != nil {
 									am.bus.LogRuntime(evtCtx, runtimepipeline.RuntimeLogEntry{
@@ -1902,16 +1914,60 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 	}()
 }
 
-func agentDeliveryExecutionContext(deliveryCtx, loopCtx context.Context, token runtimeeffects.LifecycleToken, deliveryOwner worklifetime.Occurrence) context.Context {
-	ctx := worklifetime.WithOccurrence(deliveryCtx, deliveryOwner)
+func agentDeliveryExecutionContext(
+	deliveryCtx, loopCtx context.Context,
+	token runtimeeffects.LifecycleToken,
+	deliveryOwner worklifetime.Occurrence,
+	evt events.Event,
+	route events.DeliveryRoute,
+	variant eventreceiver.ExecutionVariant,
+	admitBundleSourceFact func(context.Context) (context.Context, error),
+) (context.Context, func(), error) {
+	runtimeInstanceID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(deliveryCtx)
+	bundleSourceFact, _ := runtimecorrelation.BundleSourceFactFromContext(deliveryCtx)
+	ctx, cleanup := eventreceiver.NewContext(deliveryCtx)
+	fail := func(err error) (context.Context, func(), error) {
+		cleanup()
+		return nil, nil, err
+	}
+	if admitBundleSourceFact == nil {
+		return fail(errors.New("agent receiver requires the EventBus bundle source owner"))
+	}
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, bundleSourceFact)
+	var err error
+	ctx, err = admitBundleSourceFact(ctx)
+	if err != nil {
+		return fail(fmt.Errorf("admit agent receiver bundle source: %w", err))
+	}
+	ctx = worklifetime.WithOccurrence(ctx, deliveryOwner)
 	ctx = runtimeeffects.WithLifecycleToken(ctx, token)
-	if controller, found := runtimeeffects.ControllerFromContext(loopCtx); found {
-		ctx = runtimeeffects.WithController(ctx, controller)
+	ctx, err = variant.Bind(ctx, evt.ExecutionMode())
+	if err != nil {
+		return fail(err)
 	}
-	if admission, found := managedexecution.FromContext(loopCtx); found {
-		ctx = managedexecution.WithAdmission(ctx, admission)
+	if err := variant.ValidateBound(ctx, evt.ExecutionMode()); err != nil {
+		return fail(err)
 	}
-	return ctx
+	if variant.Kind() == eventreceiver.ExecutionNormal {
+		if controller, found := runtimeeffects.ControllerFromContext(loopCtx); found {
+			ctx = runtimeeffects.WithController(ctx, controller)
+		}
+		if admission, found := managedexecution.FromContext(loopCtx); found {
+			ctx = managedexecution.WithAdmission(ctx, admission)
+		}
+	}
+	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
+	if runID := strings.TrimSpace(evt.RunID()); runID != "" {
+		ctx = runtimecorrelation.WithRunID(ctx, runID)
+	}
+	deliveryContext := route.Context.Normalized()
+	if deliveryContext.Empty() {
+		deliveryContext = evt.DeliveryContext()
+	}
+	ctx = events.WithDeliveryContext(ctx, deliveryContext)
+	ctx = runtimedelivery.WithRoute(ctx, route)
+	return ctx, cleanup, nil
 }
 
 func (am *AgentManager) beginWork(ctx context.Context, kind string) (*worklifetime.Lease, error) {

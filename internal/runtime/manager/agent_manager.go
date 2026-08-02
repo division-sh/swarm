@@ -14,6 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -54,6 +55,7 @@ type AgentManager struct {
 	throttleSuppressPrefixes        []string
 	workflowInstances               flowInstancePersistence
 	workOwner                       worklifetime.Occurrence
+	receiverExecution               eventreceiver.ExecutionVariant
 	selectedContractRouteRecoveries map[string]SelectedContractRouteRecoveryTruth
 	directiveHeartbeat              directiveHeartbeatConfig
 	lifecycle                       *agentLifecycleCoordinator
@@ -117,6 +119,12 @@ func NewAgentManager(bus Bus, factory AgentFactory, stores ...ManagerPersistence
 }
 
 func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManagerOptions, stores ...ManagerPersistence) *AgentManager {
+	if !opts.ReceiverExecution.Configured() {
+		opts.ReceiverExecution = eventreceiver.NormalExecution()
+	}
+	if err := opts.ReceiverExecution.Validate(); err != nil {
+		panic(fmt.Sprintf("agent manager receiver execution: %v", err))
+	}
 	var store ManagerPersistence
 	if len(stores) > 0 {
 		store = stores[0]
@@ -155,6 +163,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		promptResolver:                  opts.PromptResolver,
 		workflowInstances:               opts.WorkflowInstances,
 		workOwner:                       opts.WorkOwner,
+		receiverExecution:               opts.ReceiverExecution,
 		selectedContractRouteRecoveries: map[string]SelectedContractRouteRecoveryTruth{},
 		directiveHeartbeat:              defaultDirectiveHeartbeatConfig(),
 		runtimeMode:                     strings.TrimSpace(opts.RuntimeMode),
@@ -179,6 +188,25 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		dynamicFlowReadinessAttempts:    make(map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt),
 		dynamicFlowReadinessSignal:      make(chan struct{}, 1),
 	}
+}
+
+// SetReceiverExecution replaces the selected-fork receiver owner before the
+// manager starts. Selected provider preflight finalizes admission surfaces
+// after manager materialization but before any delivery loop is live.
+func (am *AgentManager) SetReceiverExecution(variant eventreceiver.ExecutionVariant) error {
+	if am == nil {
+		return errors.New("agent manager is required")
+	}
+	if err := variant.Validate(); err != nil {
+		return fmt.Errorf("agent manager receiver execution: %w", err)
+	}
+	if _, _, running := am.lifecycle.runSnapshot(); running {
+		return errors.New("agent manager receiver execution cannot change after start")
+	}
+	am.mu.Lock()
+	am.receiverExecution = variant
+	am.mu.Unlock()
+	return nil
 }
 
 func (am *AgentManager) runtimeContext() context.Context {
@@ -662,6 +690,31 @@ func (am *AgentManager) teardownIdentity(
 	return am.teardownIdentityWithTopology(ctx, identity, trigger, nil)
 }
 
+func (am *AgentManager) teardownIdentityAfterTerminalEvent(
+	ctx context.Context,
+	identity runtimeagentidentity.Identity,
+	trigger string,
+	deferRouteRetirement bool,
+) error {
+	if err := identity.Validate(); err != nil {
+		return err
+	}
+	if err := am.lifecycle.terminateIdentityWithTopologyCommitHooks(
+		ctx,
+		identity,
+		trigger,
+		AgentLifecycleTerminated,
+		nil,
+		nil,
+		nil,
+		deferRouteRetirement,
+	); err != nil {
+		return err
+	}
+	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(ctx))
+	return nil
+}
+
 func (am *AgentManager) teardownIdentityWithTopology(
 	ctx context.Context,
 	identity runtimeagentidentity.Identity,
@@ -690,6 +743,7 @@ func (am *AgentManager) teardownIdentityWithTopologyCommitHooks(
 		topology,
 		beforeCommit,
 		restoreBeforeCommit,
+		false,
 	); err != nil {
 		return err
 	}

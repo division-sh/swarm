@@ -238,6 +238,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			WorkflowInstances: pipeline,
 			DeliveryStore:     ports.busDurable.DeliveryLifecycle,
 			WorkOwner:         req.AgentRuntime.Options.AgentManagerOptions.WorkOwner,
+			ReceiverExecution: req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution,
 		}, bus, ports, pipeline)
 		manager := runtimemanager.NewAgentManagerWithOptions(bus, nil, options, ports.manager)
 		return &selectedContractAgentRuntime{manager: manager}, admission, nil
@@ -314,6 +315,19 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			return nil, managedexecution.Admission{}, err
 		}
 		ctx = managedexecution.WithAdmission(ctx, admission)
+		if err := bus.FinalizeSelectedReceiverAdmission(admission); err != nil {
+			return nil, managedexecution.Admission{}, err
+		}
+		if err := pipeline.FinalizeSelectedReceiverAdmission(admission); err != nil {
+			return nil, managedexecution.Admission{}, err
+		}
+	}
+	receiverExecution, err := builder.options.ReceiverExecution.WithSelectedAdmission(admission)
+	if err != nil {
+		return nil, managedexecution.Admission{}, fmt.Errorf("finalize selected-contract manager receiver execution: %w", err)
+	}
+	if err := manager.SetReceiverExecution(receiverExecution); err != nil {
+		return nil, managedexecution.Admission{}, fmt.Errorf("install selected-contract manager receiver execution: %w", err)
 	}
 	if err := manager.RunAuthoritativeDeliveryOnly(ctx); err != nil {
 		return nil, managedexecution.Admission{}, err

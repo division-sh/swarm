@@ -784,6 +784,7 @@ seam_families:
       - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/eventbus_target_routes_test.go
+      - internal/runtime/bus/eventbus_receiver_structure_test.go
       - internal/runtime/bus/routing_derivation.go
       - internal/runtime/bus/routing_derivation_test.go
       - internal/runtime/conformance/route_authority_matrix_test.go

@@ -336,6 +336,7 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"EngineDispatcher":                       operationRetained,
 		"EngineOutbox":                           operationRetained,
 		"FenceAgentRoute":                        operationMutation,
+		"FinalizeSelectedReceiverAdmission":      operationRetained,
 		"HasFlowInstanceRoute":                   operationPureRead,
 		"ListFlowInstanceRoutes":                 operationPureRead,
 		"LogRuntime":                             operationMutation,

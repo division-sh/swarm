@@ -248,7 +248,7 @@ func TestPipelineOneShotTerminalSinksPropagateOrRecordCleanupEvidence(t *testing
 					}
 					err = bus.AbandonPreparedPublish(context.Background(), PreparedPublish{
 						publicationClaim: claim,
-						dispatchContext:  context.Background(),
+						receiver:         receiverDispatchProjection{occurrence: bus.workOwner},
 					})
 					if err == nil || !strings.Contains(err.Error(), failureMode+" one-shot cleanup failure") {
 						t.Fatalf("abandon cleanup error = %v, want propagated evidence", err)
@@ -362,7 +362,7 @@ func TestPreparedDispatchAdmissionFailureTerminallyConsumesPublicationClaim(t *t
 						time.Now().UTC(),
 					),
 					publicationClaim: claim,
-					dispatchContext:  context.Background(),
+					receiver:         receiverDispatchProjection{occurrence: runtimeOwner},
 				}
 				if lifecycle == "fenced" {
 					if err := runtimeOwner.Fence(); err != nil {
@@ -453,7 +453,7 @@ func TestInvalidPreparedDispatchTerminallyConsumesAttachedPublicationClaim(t *te
 
 			err = dispatch.run(bus, context.Background(), PreparedPublish{
 				publicationClaim: claim,
-				dispatchContext:  context.Background(),
+				receiver:         receiverDispatchProjection{occurrence: runtimeOwner},
 			})
 			if err == nil ||
 				!strings.Contains(err.Error(), "prepared event is required") ||

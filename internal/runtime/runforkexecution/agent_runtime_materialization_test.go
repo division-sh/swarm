@@ -16,7 +16,9 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -284,13 +286,6 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 	_, db, _ := testutil.StartPostgres(t)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	owner := testGatewayWorkOwner(t)
-	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
-		BundleSourceFact: selectedContractAgentTestSourceFact(t),
-		WorkOwner:        owner,
-	})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
 	authority := runtimeeffects.Authority{
 		Kind: runtimeeffects.AuthoritySelectedContractFork, ID: "00000000-0000-0000-0000-000000000311",
 		SelectedFork: runtimeeffects.SelectedContractForkAuthority{
@@ -307,6 +302,27 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 	initiatingCtx, cancel := context.WithCancel(context.Background())
 	ctx := selectedForkExecutionTestContext(t, initiatingCtx, authority)
 	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
+	admission, ok := managedexecution.FromContext(ctx)
+	if !ok {
+		t.Fatal("selected-contract test admission is missing")
+	}
+	receiverExecution, err := eventreceiver.SelectedContractForkExecution(
+		authority,
+		admission,
+		runtimeeffects.NewCompletionController(selected, selected, selected, selectedForkDiscardSpendProjection{}),
+		runtimecorrelation.RuntimeLineage{},
+	)
+	if err != nil {
+		t.Fatalf("construct selected-contract receiver execution: %v", err)
+	}
+	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
+		BundleSourceFact:  selectedContractAgentTestSourceFact(t),
+		WorkOwner:         owner,
+		ReceiverExecution: receiverExecution,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
 	probe := &selectedContractSelfReleaseScopeProbe{want: wantScope, seen: make(chan runtimeauthoractivity.Scope, 1)}
 
 	runtime, _, err := startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
@@ -320,7 +336,9 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 				AgentFactory: func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 					return selectedContractSelfReleaseAgent{id: cfg.ID}, nil
 				},
-				AgentManagerOptions: runtimemanager.AgentManagerOptions{LifecycleStore: probe, WorkOwner: owner},
+				AgentManagerOptions: runtimemanager.AgentManagerOptions{
+					LifecycleStore: probe, WorkOwner: owner, ReceiverExecution: receiverExecution,
+				},
 			},
 		},
 	}, eventBus, &runtimepipeline.PipelineCoordinator{})
