@@ -326,6 +326,7 @@ type publishSelectedContractForkEventsRequest struct {
 	ForkEventID           string
 	SourceEvents          []string
 	ExecutionOwner        string
+	RuntimeInstanceID     string
 	DeferredWorkAdmission selectedContractDeferredWorkAdmission
 }
 
@@ -387,6 +388,7 @@ func selectedContractPipelineCoordinatorOptions(
 ) runtimepipeline.PipelineCoordinatorOptions {
 	return runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:               agentRuntime.AgentManagerOptions.WorkOwner,
+		ReceiverExecution:       agentRuntime.AgentManagerOptions.ReceiverExecution,
 		Module:                  loaded.Module,
 		Persistence:             ports.workflow,
 		DeliveryStore:           ports.busDurable.DeliveryLifecycle,

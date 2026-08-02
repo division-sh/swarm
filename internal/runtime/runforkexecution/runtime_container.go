@@ -12,8 +12,10 @@ import (
 	"github.com/google/uuid"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -62,11 +64,12 @@ type SelectedContractForkLocalRuntimeContainer struct {
 }
 
 type selectedContractForkLocalRuntimeContainer struct {
-	proof     SelectedContractForkLocalRuntimeContainer
-	req       publishSelectedContractForkEventsRequest
-	ports     *selectedContractExecutionPorts
-	authority runtimeeffects.Authority
-	admission managedexecution.Admission
+	proof             SelectedContractForkLocalRuntimeContainer
+	req               publishSelectedContractForkEventsRequest
+	ports             *selectedContractExecutionPorts
+	authority         runtimeeffects.Authority
+	admission         managedexecution.Admission
+	runtimeInstanceID string
 }
 
 func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req publishSelectedContractForkEventsRequest) (selectedContractForkLocalRuntimeContainer, error) {
@@ -212,7 +215,14 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
-	return selectedContractForkLocalRuntimeContainer{proof: proof, req: req, ports: ports, authority: authority, admission: admission}, nil
+	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+	if !ok || scope.Kind != runtimeauthoractivity.ScopeBundle || strings.TrimSpace(scope.RuntimeInstanceID) == "" || scope.BundleHash != bundleHash {
+		return selectedContractForkLocalRuntimeContainer{}, errors.New("selected-contract runtime container requires exact selected bundle scope")
+	}
+	return selectedContractForkLocalRuntimeContainer{
+		proof: proof, req: req, ports: ports, authority: authority, admission: admission,
+		runtimeInstanceID: strings.TrimSpace(scope.RuntimeInstanceID),
+	}, nil
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Proof() SelectedContractForkLocalRuntimeContainer {
@@ -221,6 +231,7 @@ func (c selectedContractForkLocalRuntimeContainer) Proof() SelectedContractForkL
 
 func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) ([]SelectedContractExecutionForkEvent, error) {
 	req := c.req
+	req.RuntimeInstanceID = c.runtimeInstanceID
 	parent, ok := worklifetime.RuntimeOccurrenceFromContext(ctx)
 	if !ok {
 		return nil, fmt.Errorf("selected-contract fork requires an acquired runtime occurrence")
@@ -236,6 +247,14 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	defer func() { _ = forkOwner.RetireAndWait(context.Background()) }()
 	ctx = worklifetime.WithOccurrence(ctx, forkOwner)
 	req.AgentRuntime.Options.AgentManagerOptions.WorkOwner = forkOwner
+	controller := runtimeeffects.NewController(c.ports.effects)
+	receiverExecution, err := eventreceiver.SelectedContractForkExecution(
+		c.authority, c.admission, controller, selectedContractRuntimeContainerLineage(c.proof),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("construct selected-contract receiver execution: %w", err)
+	}
+	req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution = receiverExecution
 	if err := c.ports.replay.EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx, req.SourceRunID, req.ForkEventID); err != nil {
 		return nil, err
 	}
@@ -259,6 +278,8 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	}
 	bus, err := runtimebus.NewEventBusWithOptions(c.ports.events, runtimebus.EventBusOptions{
 		WorkOwner:                   forkOwner,
+		RuntimeInstanceID:           c.runtimeInstanceID,
+		ReceiverExecution:           receiverExecution,
 		Durable:                     c.ports.busDurable,
 		PipelineObligations:         c.ports.pipelineObligations,
 		BundleSourceFact:            req.LoadedSource.BundleSourceFact,
@@ -288,7 +309,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 
 	runCtx := selectedContractRuntimeContainerLineageContext(ctx, c.proof)
 	runCtx = runtimeeffects.WithAuthority(runCtx, c.authority)
-	runCtx = runtimeeffects.WithController(runCtx, runtimeeffects.NewController(c.ports.effects))
+	runCtx = runtimeeffects.WithController(runCtx, controller)
 	runCtx = managedexecution.WithAdmission(runCtx, c.admission)
 	runCtx, cancelRuntime := context.WithCancel(runCtx)
 	defer cancelRuntime()
@@ -467,14 +488,18 @@ func (h selectedContractRuntimeContainerLoggerHook) Log(ctx context.Context, lev
 
 func selectedContractRuntimeContainerLineageContext(ctx context.Context, proof SelectedContractForkLocalRuntimeContainer) context.Context {
 	ctx = runtimecorrelation.WithRunID(ctx, proof.ForkRunID)
-	return runtimecorrelation.WithRuntimeLineage(ctx, runtimecorrelation.RuntimeLineage{
+	return runtimecorrelation.WithRuntimeLineage(ctx, selectedContractRuntimeContainerLineage(proof))
+}
+
+func selectedContractRuntimeContainerLineage(proof SelectedContractForkLocalRuntimeContainer) runtimecorrelation.RuntimeLineage {
+	return runtimecorrelation.RuntimeLineage{
 		Owner:               proof.TypedRuntimeLineageOwner,
 		RunID:               proof.ForkRunID,
 		RowCategory:         runtimecorrelation.RuntimeLineageRowCategoryRuntimeContainer,
 		SelectedForkOwner:   proof.Owner,
 		Classification:      runtimecorrelation.RuntimeLineageClassificationForkLocal,
 		SelectedForkContext: true,
-	})
+	}
 }
 
 func selectedContractRuntimeContainerExecutionOwner(owner string) string {

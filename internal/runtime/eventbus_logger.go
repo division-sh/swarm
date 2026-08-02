@@ -7,6 +7,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -34,6 +35,7 @@ func newRuntimeEventBus(store runtimebus.EventStore, durable runtimebus.DurableD
 		BundleSourceFact:          bundleSourceFact,
 		RuntimeInstanceID:         strings.TrimSpace(runtimeInstanceID),
 		WorkOwner:                 workOwner,
+		ReceiverExecution:         eventreceiver.NormalExecution(),
 		TestLifecycleProbe:        testLifecycleProbe,
 		ProviderOutputVerifier:    providerOutputVerifier,
 		PipelineObligations:       pipelineObligations,

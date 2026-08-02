@@ -328,7 +328,7 @@ func clonePostCommitPublish(evt events.Event) events.Event {
 	return evt.Clone()
 }
 
-func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengine.EmitIntent) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
+func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengine.EmitIntent) (queued bool, result runtimepipelineobligation.ExecutionOutcome, err error) {
 	ctx = events.WithDeliveryContext(ctx, intent.Context)
 	if reason, err := d.bus.dispatchQueueReason(ctx, intent.Event); err != nil {
 		return false, runtimepipelineobligation.Continue(), err
@@ -336,6 +336,16 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		d.bus.logDispatchQueued(ctx, reason, intent.Event, len(intent.Recipients), len(intent.Recipients) > 0, false)
 		return true, runtimepipelineobligation.Continue(), nil
 	}
+	projection, err := d.bus.receiverProjection(ctx, intent.Context)
+	if err != nil {
+		return false, runtimepipelineobligation.Continue(), err
+	}
+	receiverCtx, closeReceiver, err := d.bus.beginReceiverDispatch(projection, intent.Event)
+	if err != nil {
+		return false, runtimepipelineobligation.Continue(), err
+	}
+	defer func() { err = errors.Join(err, closeReceiver()) }()
+	ctx = receiverCtx.Context
 	deliveryRoutes := d.bus.deliveryRoutesForPostCommitIntent(ctx, intent.Event.ID())
 	if intent.Recipients == nil {
 		passthrough, deferred, outcome, err := d.bus.runInterceptorsForDeliveryRoutes(ctx, intent.Event, deliveryRoutes)

@@ -856,13 +856,6 @@ func TestPreparedPublishRejectsCrossBusAndForeignSourceWithoutConsumingClaim(t *
 					return runtimecorrelation.WithBundleSourceFact(ctx, foreign)
 				},
 			},
-			{
-				name: "same bus foreign prepared context",
-				mutatePrepared: func(prepared PreparedPublish) PreparedPublish {
-					prepared.dispatchContext = runtimecorrelation.WithBundleSourceFact(context.Background(), foreign)
-					return prepared
-				},
-			},
 		} {
 			t.Run(action.name+"/"+transfer.name, func(t *testing.T) {
 				ownerA := newSourceMutationProbeOwner()

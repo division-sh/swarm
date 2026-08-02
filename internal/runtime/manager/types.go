@@ -12,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -273,6 +274,7 @@ type AgentManagerOptions struct {
 	ResetRuntimeOwnedState         func()
 	RuntimeShutdownAdmissionClosed func() bool
 	WorkOwner                      worklifetime.Occurrence
+	ReceiverExecution              eventreceiver.ExecutionVariant
 	RuntimeIngressSafetyPause      func(context.Context, string, *runtimefailures.Envelope) error
 	NativeToolAdmissionValidator   func(context.Context, models.AgentConfig) error
 	ThrottleSuppressPrefixes       []string

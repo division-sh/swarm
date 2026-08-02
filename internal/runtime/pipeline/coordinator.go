@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -77,6 +78,8 @@ type PipelineCoordinator struct {
 	testLifecycleProbe               runtimelifecycleprobe.Observer
 	testEngineEmitNow                func() time.Time
 	workOwner                        worklifetime.Occurrence
+	receiverExecution                eventreceiver.ExecutionVariant
+	runtimeReceiver                  bool
 	testMaintenanceInterval          time.Duration
 }
 
@@ -116,6 +119,7 @@ type PipelineCoordinatorOptions struct {
 	TestLifecycleProbe               runtimelifecycleprobe.Observer
 	TestEngineEmitNow                func() time.Time
 	WorkOwner                        worklifetime.Occurrence
+	ReceiverExecution                eventreceiver.ExecutionVariant
 }
 
 type ChannelActivityTarget struct {
@@ -186,6 +190,9 @@ func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 	if bus == nil {
 		return nil
 	}
+	if requireObligationOwner && opts.ReceiverExecution.Configured() && opts.ReceiverExecution.Validate() != nil {
+		return nil
+	}
 	module := opts.Module
 	if module == nil {
 		panic("pipeline: workflow module is required")
@@ -239,6 +246,8 @@ func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		testLifecycleProbe:               opts.TestLifecycleProbe,
 		testEngineEmitNow:                opts.TestEngineEmitNow,
 		workOwner:                        opts.WorkOwner,
+		receiverExecution:                opts.ReceiverExecution,
+		runtimeReceiver:                  requireObligationOwner,
 		entityLocks:                      make(map[string]*sync.Mutex),
 	}
 	var workflowStore *workflowInstanceStore
@@ -270,6 +279,20 @@ func (pc *PipelineCoordinator) SetTestMaintenanceInterval(interval time.Duration
 	pc.mu.Lock()
 	pc.testMaintenanceInterval = interval
 	pc.mu.Unlock()
+}
+
+// FinalizeSelectedReceiverAdmission installs provider-preflight evidence before
+// the selected Pipeline begins receiving EventBus work.
+func (pc *PipelineCoordinator) FinalizeSelectedReceiverAdmission(admission managedexecution.Admission) error {
+	if pc == nil {
+		return errors.New("pipeline coordinator is required")
+	}
+	variant, err := pc.receiverExecution.WithSelectedAdmission(admission)
+	if err != nil {
+		return fmt.Errorf("finalize selected pipeline receiver admission: %w", err)
+	}
+	pc.receiverExecution = variant
+	return nil
 }
 
 func NewPipelineCoordinator(bus Bus, db *sql.DB) *PipelineCoordinator {
@@ -370,6 +393,11 @@ func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) 
 func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, exactDeliveryBoundary bool) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if pc == nil {
 		return true, nil, runtimepipelineobligation.Continue(), nil
+	}
+	if pc.runtimeReceiver && pc.receiverExecution.Configured() {
+		if err := pc.receiverExecution.ValidateBound(ctx, evt.ExecutionMode()); err != nil {
+			return false, nil, runtimepipelineobligation.Continue(), fmt.Errorf("pipeline receiver execution: %w", err)
+		}
 	}
 	eventType := strings.TrimSpace(string(evt.Type()))
 	if eventType == "" {

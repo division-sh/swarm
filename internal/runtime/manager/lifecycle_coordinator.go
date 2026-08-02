@@ -1558,7 +1558,7 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopology(
 	target AgentLifecyclePhase,
 	topology *DynamicAgentTopologyMutation,
 ) error {
-	return c.terminateIdentityWithTopologyCommitHooks(ctx, identity, trigger, target, topology, nil, nil)
+	return c.terminateIdentityWithTopologyCommitHooks(ctx, identity, trigger, target, topology, nil, nil, false)
 }
 
 func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyCommitHooks(
@@ -1569,6 +1569,7 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyCommitHooks(
 	topology *DynamicAgentTopologyMutation,
 	beforeCommit func(models.AgentConfig) error,
 	restoreBeforeCommit func(models.AgentConfig) error,
+	deferRouteRetirement bool,
 ) error {
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {
@@ -1678,11 +1679,9 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyCommitHooks(
 		cancel()
 	}
 	c.mu.Unlock()
-	callerToken, callerOwnsExecution := runtimeeffects.LifecycleTokenFromContext(ctx)
-	selfTermination := callerOwnsExecution && callerToken == routeToken
 	if c.routes != nil && routeToken.Valid() {
 		c.routes.FenceAgentRoute(routeToken)
-		if selfTermination {
+		if deferRouteRetirement {
 			// The current delivery owns a lease on this route. Fence admission
 			// now, then let releaseLoop retire it after the delivery settles.
 			return nil

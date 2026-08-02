@@ -27,6 +27,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -1097,6 +1098,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			return nil, fmt.Errorf("artifact repo root validation failed: %w", err)
 		}
 		rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, runtimeDeps.SQLDB, runtimepipeline.PipelineCoordinatorOptions{
+			ReceiverExecution:     eventreceiver.NormalExecution(),
 			Module:                opts.WorkflowModule,
 			Persistence:           runtimeDeps.WorkflowPersistence,
 			DeliveryStore:         runtimeDeps.DeliveryStore,
@@ -1317,6 +1319,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		},
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
 		WorkOwner:                      workOccurrence,
+		ReceiverExecution:              eventreceiver.NormalExecution(),
 		RuntimeIngressSafetyPause: func(ctx context.Context, reason string, failure *runtimefailures.Envelope) error {
 			_, err := rt.RuntimeIngress.SafetyPause(ctx, runtimeingress.TransitionRequest{
 				Reason:       reason,

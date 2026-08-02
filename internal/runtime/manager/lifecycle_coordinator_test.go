@@ -445,6 +445,7 @@ func TestLifecycleCoordinatorTeardownPersistenceFailureLeavesLoopOwned(t *testin
 			}
 			return nil
 		},
+		false,
 	); err == nil {
 		t.Fatal("teardown succeeded despite persistence failure")
 	}

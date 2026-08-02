@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -34,7 +35,7 @@ func (deliveryContextEffectStore) SettleExternalAttempt(context.Context, runtime
 	return nil
 }
 
-func TestAgentDeliveryExecutionContextPreservesDeliveryTreeAndGenerationAuthority(t *testing.T) {
+func TestAgentDeliveryExecutionContextRejectsPublisherValuesAndBuildsNormalReceiverState(t *testing.T) {
 	process := worklifetime.NewProcess()
 	runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{RuntimeInstanceID: "manager-delivery-runtime", BundleHash: "manager-delivery-bundle"})
 	if err != nil {
@@ -60,9 +61,20 @@ func TestAgentDeliveryExecutionContextPreservesDeliveryTreeAndGenerationAuthorit
 		t.Fatal("delivery context has no occurrence owner")
 	}
 
-	got := agentDeliveryExecutionContext(delivery.Context(), loopCtx, token, deliveryOwner)
-	if got.Value(deliveryContextKey{}) != "delivery-tree" {
-		t.Fatal("agent execution context dropped delivery-tree values")
+	route := events.DeliveryRoute{
+		SubscriberType: "agent",
+		SubscriberID:   identity.AgentID(),
+		AgentIdentity:  identity,
+	}
+	got, cleanup, err := agentDeliveryExecutionContext(
+		delivery.Context(), loopCtx, token, deliveryOwner, event, route, eventreceiver.NormalExecution(), admitManagerTestBusContext,
+	)
+	if err != nil {
+		t.Fatalf("construct agent delivery receiver context: %v", err)
+	}
+	defer cleanup()
+	if got.Value(deliveryContextKey{}) != nil {
+		t.Fatal("agent execution context inherited an arbitrary publisher value")
 	}
 	if owner, ok := worklifetime.OccurrenceFromContext(got); !ok || owner != runtimeOwner {
 		t.Fatalf("agent execution occurrence = %v, %v; want delivery owner", owner, ok)
@@ -75,6 +87,9 @@ func TestAgentDeliveryExecutionContextPreservesDeliveryTreeAndGenerationAuthorit
 	}
 	if _, ok := managedexecution.FromContext(got); !ok {
 		t.Fatal("agent execution context dropped managed-execution admission")
+	}
+	if _, ok := runtimeeffects.AuthorityFromContext(got); ok {
+		t.Fatal("normal agent execution context inherited explicit effect authority")
 	}
 	if err := delivery.Complete(); err != nil {
 		t.Fatalf("complete event delivery: %v", err)

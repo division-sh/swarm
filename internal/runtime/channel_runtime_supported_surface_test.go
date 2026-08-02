@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -344,7 +345,13 @@ func configuredChannelExecutor(source semanticview.Source, binding packs.Outboun
 
 func configuredChannelCallContext(t *testing.T, ctx context.Context, selectedStore any, actor models.AgentConfig, runID, entityID, flowInstance, operationID string) context.Context {
 	t.Helper()
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, testBundleSourceFact(t, "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	sourceFact := testBundleSourceFact(t, "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	scope, ok := runtimeauthoractivity.ScopeFromContext(ctx)
+	if !ok || scope.RuntimeInstanceID == "" {
+		t.Fatal("configured channel call context requires a runtime author-activity scope")
+	}
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, sourceFact)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(scope.RuntimeInstanceID, sourceFact.BundleHash()))
 	inbound := eventtest.ExistingRunRootIngress(
 		uuid.NewSHA1(uuid.NameSpaceURL, []byte(runID+"\x00"+operationID)).String(),
 		events.EventType("channel.requested"), actor.ID, operationID, json.RawMessage(`{}`), 0, runID,

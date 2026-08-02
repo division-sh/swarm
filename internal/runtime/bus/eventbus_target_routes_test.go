@@ -866,7 +866,11 @@ func TestEventBusCommittedPublishDispatch_NodeOnlyRouteDoesNotRequireAgentChanne
 		t.Fatalf("claim node-only publication: %v", err)
 	}
 	publication := &pipelinePublicationClaim{bus: eb, eventID: evt.ID(), claim: claim}
-	if err := eb.completeCommittedPublishDispatch(context.Background(), evt, nodeOnlyDeliveryPlan(evt, "workflow-node"), publication); err != nil {
+	receiver, err := eb.receiverProjection(context.Background(), evt.DeliveryContext())
+	if err != nil {
+		t.Fatalf("project committed receiver: %v", err)
+	}
+	if err := eb.completeCommittedPublishDispatch(evt, nodeOnlyDeliveryPlan(evt, "workflow-node"), publication, receiver); err != nil {
 		t.Fatalf("dispatch committed node-only publication: %v", err)
 	}
 

@@ -136,6 +136,9 @@ func registerDifferentTestAuthorActivityEvents(t *testing.T, eventStore any, eve
 
 func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts runtimebus.EventBusOptions, differentEvents ...string) (*runtimebus.EventBus, error) {
 	t.Helper()
+	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
+		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
+	}
 	if opts.BundleSourceFact.Validate() != nil {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
 	}

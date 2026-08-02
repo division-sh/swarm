@@ -131,24 +131,40 @@ func (h *internalSubscriptionHandle) send(ctx context.Context, evt events.Event,
 		return agentRouteSendInactive, returnDeliveryContinuation(ctx, continuation)
 	}
 	h.mu.RLock()
-	defer h.mu.RUnlock()
-	if !h.active || h.ch == nil {
+	active := h.active && h.ch != nil
+	h.mu.RUnlock()
+	if !active {
 		return agentRouteSendInactive, returnDeliveryContinuation(ctx, continuation)
 	}
 	owner := h.bus.workOwnerForContext(ctx)
 	if owner == nil {
 		return agentRouteSendInactive, returnDeliveryContinuation(ctx, continuation)
 	}
-	delivery, err := owner.NewRoutedEventDelivery(localDeliveryContext(ctx), evt, handoff)
+	deliveryCtx, closeDeliveryCtx, err := h.bus.receiverRouteContext(ctx, evt, handoff)
 	if err != nil {
 		return agentRouteSendInactive, errors.Join(err, returnDeliveryContinuation(ctx, continuation))
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if !h.active || h.ch == nil {
+		closeDeliveryCtx()
+		return agentRouteSendInactive, returnDeliveryContinuation(ctx, continuation)
+	}
+	delivery, err := owner.NewRoutedEventDelivery(deliveryCtx, evt, handoff)
+	if err != nil {
+		closeDeliveryCtx()
+		return agentRouteSendInactive, errors.Join(err, returnDeliveryContinuation(ctx, continuation))
+	}
+	if err := delivery.OnComplete(closeDeliveryCtx); err != nil {
+		closeDeliveryCtx()
+		return agentRouteSendInactive, errors.Join(err, delivery.Complete())
 	}
 	if continuation != nil {
 		if err := delivery.AttachContinuation(continuation); err != nil {
 			return agentRouteSendInactive, errors.Join(err, delivery.Complete())
 		}
 	}
-	if err := trackLocalDeliveryCompletion(ctx, delivery); err != nil {
+	if err := trackLocalDeliveryCompletion(deliveryCtx, delivery); err != nil {
 		return agentRouteSendInactive, errors.Join(err, delivery.Complete())
 	}
 	timer := time.NewTimer(deliverySendTimeout)
@@ -204,10 +220,11 @@ type agentRouteHandle struct {
 	owner    *worklifetime.RouteOccurrence
 	active   bool
 	retained []*LocalDelivery
+	bus      *EventBus
 }
 
-func newAgentRouteHandle(token runtimeeffects.LifecycleToken, ch chan *LocalDelivery, owner *worklifetime.RouteOccurrence) *agentRouteHandle {
-	return &agentRouteHandle{token: token, ch: ch, owner: owner, active: true}
+func newAgentRouteHandle(bus *EventBus, token runtimeeffects.LifecycleToken, ch chan *LocalDelivery, owner *worklifetime.RouteOccurrence) *agentRouteHandle {
+	return &agentRouteHandle{bus: bus, token: token, ch: ch, owner: owner, active: true}
 }
 
 func (r *agentRouteHandle) deactivate() {
@@ -229,24 +246,40 @@ const (
 )
 
 func (r *agentRouteHandle) send(ctx context.Context, evt events.Event, handoff events.DeliveryRoute, continuation worklifetime.DeliveryContinuation) (agentRouteSendResult, error) {
-	if r == nil {
+	if r == nil || r.bus == nil {
 		return agentRouteSendInactive, returnDeliveryContinuation(ctx, continuation)
+	}
+	r.mu.RLock()
+	active := r.active && r.ch != nil
+	r.mu.RUnlock()
+	if !active {
+		return agentRouteSendInactive, returnDeliveryContinuation(ctx, continuation)
+	}
+	deliveryCtx, closeDeliveryCtx, err := r.bus.receiverRouteContext(ctx, evt, handoff)
+	if err != nil {
+		return agentRouteSendInactive, errors.Join(err, returnDeliveryContinuation(ctx, continuation))
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if !r.active || r.ch == nil {
+		closeDeliveryCtx()
 		return agentRouteSendInactive, returnDeliveryContinuation(ctx, continuation)
 	}
-	delivery, err := r.owner.NewRoutedEventDelivery(localDeliveryContext(ctx), evt, handoff)
+	delivery, err := r.owner.NewRoutedEventDelivery(deliveryCtx, evt, handoff)
 	if err != nil {
+		closeDeliveryCtx()
 		return agentRouteSendInactive, errors.Join(err, returnDeliveryContinuation(ctx, continuation))
+	}
+	if err := delivery.OnComplete(closeDeliveryCtx); err != nil {
+		closeDeliveryCtx()
+		return agentRouteSendInactive, errors.Join(err, delivery.Complete())
 	}
 	if continuation != nil {
 		if err := delivery.AttachContinuation(continuation); err != nil {
 			return agentRouteSendInactive, errors.Join(err, delivery.Complete())
 		}
 	}
-	if err := trackLocalDeliveryCompletion(ctx, delivery); err != nil {
+	if err := trackLocalDeliveryCompletion(deliveryCtx, delivery); err != nil {
 		return agentRouteSendInactive, errors.Join(err, delivery.Complete())
 	}
 	timer := time.NewTimer(deliverySendTimeout)
@@ -303,16 +336,6 @@ func settleBufferedLocalDelivery(ctx context.Context, store EventStore, delivery
 		return nil
 	}
 	return delivery.Complete()
-}
-
-func localDeliveryContext(ctx context.Context) context.Context {
-	ctx = WithoutCommitPublishTransaction(ctx)
-	ctx = runtimepipeline.WithoutPipelineSQLTxContext(ctx)
-	ctx = runtimepipeline.WithoutPipelineSQLConnContext(ctx)
-	// A successful channel send transfers the item from the producer to the
-	// queue occurrence. Preserve values, but let only occurrence retirement
-	// cancel receiver-owned execution after that handoff.
-	return context.WithoutCancel(ctx)
 }
 
 func drainBufferedLocalDeliveryChannel(ctx context.Context, store EventStore, ch chan *LocalDelivery) error {
@@ -713,6 +736,16 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	if err != nil {
 		return err
 	}
+	projection, err := eb.receiverProjection(ctx, route.Context)
+	if err != nil {
+		return err
+	}
+	receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(projection, evt)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, closeReceiver()) }()
+	ctx = receiverCtx.Context
 	if route.SubscriberType == string(runtimedelivery.SubscriberNode) {
 		passthrough, deferred, outcome, err := eb.runInterceptorsForDeliveryRoutes(ctx, evt, []events.DeliveryRoute{route})
 		if err != nil {
