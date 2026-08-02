@@ -227,12 +227,12 @@ func compiledConnectClaimFixture(t testing.TB, mode canonicalrouting.TemplateIns
 	}
 	var selected runtimepinrouting.ConnectRoutePlan
 	for _, plan := range runtimepinrouting.CompileConnectGraph(semanticview.Wrap(bundle)).Plans() {
-		if plan.Receiver.PinCode() == receiverPin {
+		if plan.ReceiverEndpoint().Readback().Pin == receiverPin {
 			selected = plan
 			break
 		}
 	}
-	if selected.Receiver.PinCode() == "" {
+	if selected.ReceiverEndpoint().Readback().Pin == "" {
 		t.Fatalf("compiled connect graph has no receiver pin %q", receiverPin)
 	}
 	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "claim-node"}

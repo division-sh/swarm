@@ -45,15 +45,15 @@ func TestReplyResolutionConformance_BootAndLoweringExposePairedLoop(t *testing.T
 	if len(issues) != 0 {
 		t.Fatalf("reply lowering issues=%#v, want none", issues)
 	}
-	roles := map[string]runtimepinrouting.ConnectRoutePlanReplyResolution{}
+	roles := map[string]runtimepinrouting.ConnectRoutePlanReplyReadback{}
 	for _, plan := range plans {
-		if plan.ReplyResolution == nil {
+		if plan.ReplyResolution() == nil {
 			continue
 		}
-		if plan.ReplyResolution.Role == runtimepinrouting.ConnectReplyRoleResponse && plan.ResolutionKind != runtimepinrouting.ConnectResolutionReply {
-			t.Fatalf("reply response plan resolution = %q, want reply", plan.ResolutionKind)
+		if plan.ReplyRole() == runtimepinrouting.ConnectReplyRoleResponse && plan.ResolutionKind() != runtimepinrouting.ConnectResolutionReply {
+			t.Fatalf("reply response plan resolution = %q, want reply", plan.ResolutionKind())
 		}
-		roles[plan.ReplyResolution.Role.Code()] = *plan.ReplyResolution
+		roles[plan.ReplyRole().Code()] = plan.ReplyResolution().Readback()
 	}
 	if len(roles) != 2 {
 		t.Fatalf("reply lowering plans=%#v, want exactly two paired reply roles", plans)

@@ -226,20 +226,28 @@ func TestBuildProjectsReplyAsPairedEdges(t *testing.T) {
 }
 
 func TestResolutionViewPreservesCreateAndStaticDeclarations(t *testing.T) {
+	createPlans := pinrouting.CompileConnectGraph(loadHarnessTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.TemplateCreateMintedKey))).Plans()
+	var createPlan pinrouting.ConnectRoutePlan
+	for _, plan := range createPlans {
+		if plan.InstanceKey() != nil && plan.InstanceKey().Mode() == runtimecontracts.FlowInputResolutionModeCreate {
+			createPlan = plan
+			break
+		}
+	}
+	if createPlan.InstanceKey() == nil {
+		t.Fatal("canonical create plan is missing")
+	}
+	staticPlans := pinrouting.CompileConnectGraph(loadHarnessTopologySource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.ParentConnect))).Plans()
+	if len(staticPlans) == 0 {
+		t.Fatal("canonical parent-connect static plan is missing")
+	}
 	tests := []struct {
 		name string
 		plan pinrouting.ConnectRoutePlan
 		want string
 	}{
-		{name: "create", want: runtimecontracts.FlowInputResolutionModeCode(runtimecontracts.FlowInputResolutionModeCreate), plan: pinrouting.ConnectRoutePlan{
-			ResolutionKind: pinrouting.ConnectResolutionInstanceKey,
-			InstanceKey: &pinrouting.ConnectRoutePlanInstanceKey{
-				Mode:   runtimecontracts.FlowInputResolutionModeCreate,
-				Field:  mustTopologyTemplateInstanceField(t, "account_id"),
-				Source: runtimecontracts.FlowInputInstanceSource{Kind: runtimecontracts.FlowInputInstanceSourceGeneratedUUID, Path: runtimecontracts.FlowInputCarrySourceGeneratedUUID},
-			},
-		}},
-		{name: "static", want: pinrouting.ConnectResolutionStatic.Code(), plan: pinrouting.ConnectRoutePlan{ResolutionKind: pinrouting.ConnectResolutionStatic}},
+		{name: "create", want: runtimecontracts.FlowInputResolutionModeCode(runtimecontracts.FlowInputResolutionModeCreate), plan: createPlan},
+		{name: "static", want: pinrouting.ConnectResolutionStatic.Code(), plan: staticPlans[0]},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -252,15 +260,6 @@ func TestResolutionViewPreservesCreateAndStaticDeclarations(t *testing.T) {
 			}
 		})
 	}
-}
-
-func mustTopologyTemplateInstanceField(t testing.TB, raw string) runtimecontracts.TemplateInstanceField {
-	t.Helper()
-	field, err := runtimecontracts.ParseTemplateInstanceField(raw)
-	if err != nil {
-		t.Fatalf("ParseTemplateInstanceField(%q): %v", raw, err)
-	}
-	return field
 }
 
 func TestBuildKeepsInvalidConnectAsIssueOnly(t *testing.T) {
@@ -301,7 +300,7 @@ func TestBuildDoesNotReconstructMissingConnectSourceFromBundlePaths(t *testing.T
 	}
 
 	topology := Build(source)
-	if len(topology.Issues) != 1 || topology.Issues[0].Failure != string(pinrouting.ConnectFailureSourceLocationMissing) || topology.Issues[0].AuthoredLocation != "" {
+	if len(topology.Issues) != 1 || topology.Issues[0].Failure != pinrouting.ConnectFailureSourceLocationMissing.Code() || topology.Issues[0].AuthoredLocation != "" {
 		t.Fatalf("issues = %#v, want source-location issue without renderer fallback", topology.Issues)
 	}
 	for _, edge := range topology.Edges {

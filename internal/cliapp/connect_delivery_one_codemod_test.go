@@ -52,7 +52,7 @@ func TestMigrateConnectDeliveryOneCommandRewritesLoadableEquivalentEdge(t *testi
 	if len(issues) != 0 || len(plans) != 1 {
 		t.Fatalf("lower rewritten bundle plans/issues = %#v/%#v, want one valid edge plan", plans, issues)
 	}
-	if plans[0].Source.FlowIDCode() != "producer" || plans[0].Receiver.FlowIDCode() != "consumer" || plans[0].Target.FlowID != "consumer" {
+	if plans[0].SourceEndpoint().Readback().FlowID != "producer" || plans[0].ReceiverEndpoint().Readback().FlowID != "consumer" || plans[0].Readback().Targets[0].FlowID != "consumer" {
 		t.Fatalf("rewritten route plan = %#v, want unchanged producer-to-consumer semantics", plans[0])
 	}
 

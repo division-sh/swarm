@@ -25,16 +25,16 @@ func ResolveFlowInputProducerWithOptions(source semanticview.Source, flowID, eve
 	}
 	connected := false
 	for _, plan := range CompileConnectGraph(source).Plans() {
-		if plan.ProviderOutputAuthorization != nil || plan.Receiver.IsRoot() != (flowID == "") || strings.TrimSpace(plan.Receiver.flowID) != flowID {
+		if plan.providerOutputAuthorization != nil || plan.receiver.IsRoot() != (flowID == "") || plan.receiver.flowID.value != flowID {
 			continue
 		}
-		if eventidentity.Normalize(plan.Receiver.event) != eventType && eventidentity.Normalize(plan.Receiver.resolvedEvent) != eventType {
+		if string(plan.receiver.event.value) != eventType && string(plan.receiver.resolvedEvent.value) != eventType {
 			continue
 		}
 		connected = true
 		evidence := runtimecontracts.FlowInputProducerEvidence{
-			Kind: runtimecontracts.FlowInputProducerBoundaryParentConnect, FlowID: strings.TrimSpace(plan.Source.flowID),
-			EventType: eventType, Pin: strings.TrimSpace(plan.Receiver.pin), Detail: "compiled parent connect",
+			Kind: runtimecontracts.FlowInputProducerBoundaryParentConnect, FlowID: plan.source.flowID.value,
+			EventType: eventType, Pin: plan.receiver.pin.value, Detail: "compiled parent connect",
 		}
 		if !flowInputProducerEvidenceContains(out.Evidence, evidence) {
 			out.Evidence = append(out.Evidence, evidence)

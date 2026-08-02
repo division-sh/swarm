@@ -272,12 +272,8 @@ func pinRoutingKnownProducers(census semanticview.AuthoredEventEndpointCensus, g
 			continue
 		}
 		producer := edge.Producer()
-		for _, producerEvent := range []events.EventType{producer.LocalEvent(), producer.Event()} {
-			for _, endpoint := range census.MatchingProducersAcrossFlows(producer.FlowID(), string(producerEvent)) {
-				if !producer.Matches(endpoint.FlowID, events.EventType(endpoint.Event.Authored)) &&
-					!producer.Matches(endpoint.FlowID, events.EventType(endpoint.Event.Canonical)) {
-					continue
-				}
+		for _, endpoint := range census.Producers() {
+			if producer.MatchesAuthoredEndpoint(endpoint) {
 				byID[endpoint.ID] = endpoint
 			}
 		}
@@ -301,11 +297,10 @@ func pinRoutingEmitSiteForEndpoint(sites []semanticview.AuthoredEmitSite, endpoi
 
 func compiledConnectsProducerToReceiver(graph runtimepinrouting.CompiledConnectGraph, producer semanticview.AuthoredEventEndpoint, receiverFlowID string) bool {
 	for _, edge := range graph.Edges() {
-		if edge.Consumer().FlowID() != strings.TrimSpace(receiverFlowID) {
+		if !edge.Consumer().BelongsToFlow(strings.TrimSpace(receiverFlowID)) {
 			continue
 		}
-		if edge.Producer().Matches(producer.FlowID, events.EventType(producer.Event.Authored)) ||
-			edge.Producer().Matches(producer.FlowID, events.EventType(producer.Event.Canonical)) {
+		if edge.Producer().MatchesAuthoredEndpoint(producer) {
 			return true
 		}
 	}

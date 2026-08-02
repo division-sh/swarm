@@ -128,24 +128,27 @@ func assertSealedPackageConformanceConnectRoutePlan(t *testing.T, source semanti
 	}
 	var plan runtimepinrouting.ConnectRoutePlan
 	for _, candidate := range plans {
-		if candidate.Source.ResolvedEventCode() == "producer/work.ready" && candidate.Receiver.ResolvedEventCode() == "consumer/work.ready" {
+		source := candidate.SourceEndpoint().Readback()
+		receiver := candidate.ReceiverEndpoint().Readback()
+		if source.ResolvedEvent == "producer/work.ready" && receiver.ResolvedEvent == "consumer/work.ready" {
 			plan = candidate
 			break
 		}
 	}
-	if plan.Source.ResolvedEventCode() == "" {
+	if plan.SourceEndpoint().Readback().ResolvedEvent == "" {
 		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, missing producer/work.ready -> consumer/work.ready", plans)
 	}
-	if got, want := plan.Source.ResolvedEventCode(), "producer/work.ready"; got != want {
+	if got, want := plan.SourceEndpoint().Readback().ResolvedEvent, "producer/work.ready"; got != want {
 		t.Fatalf("source resolved event = %q, want %q", got, want)
 	}
-	if got, want := plan.Receiver.ResolvedEventCode(), "consumer/work.ready"; got != want {
+	if got, want := plan.ReceiverEndpoint().Readback().ResolvedEvent, "consumer/work.ready"; got != want {
 		t.Fatalf("receiver resolved event = %q, want %q", got, want)
 	}
-	if plan.Target.FlowInstance != "consumer" || plan.Target.EntityID != runtimeflowidentity.EntityID("consumer") {
-		t.Fatalf("connect plan target = %#v, want static consumer route", plan.Target)
+	target := plan.Readback().Targets[0]
+	if target.FlowInstance != "consumer" || target.EntityID != runtimeflowidentity.EntityID("consumer") {
+		t.Fatalf("connect plan target = %#v, want static consumer route", target)
 	}
-	if plan.RequiresRuntimeResolution {
+	if plan.RequiresRuntimeResolution() {
 		t.Fatal("static sealed package connect route unexpectedly requires runtime descriptor resolution")
 	}
 }

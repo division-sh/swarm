@@ -57,20 +57,22 @@ func TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners(t *testing
 		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one template instance-key route plan", plans)
 	}
 	plan := plans[0]
-	if plan.ResolutionKind != pinrouting.ConnectResolutionInstanceKey || !plan.RequiresRuntimeResolution {
-		t.Fatalf("route plan resolution = %s runtime=%v, want instance_key runtime resolution", plan.ResolutionKind.Code(), plan.RequiresRuntimeResolution)
+	sourceEndpoint := plan.SourceEndpoint().Readback()
+	receiverEndpoint := plan.ReceiverEndpoint().Readback()
+	if plan.ResolutionKind() != pinrouting.ConnectResolutionInstanceKey || !plan.RequiresRuntimeResolution() {
+		t.Fatalf("route plan resolution = %s runtime=%v, want instance_key runtime resolution", plan.ResolutionKind().Code(), plan.RequiresRuntimeResolution())
 	}
-	if plan.Source.FlowIDCode() != finalflowinstanceauthoring.ProducerFlowID || plan.Source.PinCode() != finalflowinstanceauthoring.ProducerOutputPin || plan.Source.KeyCode() != "" {
-		t.Fatalf("route plan source = %#v, want %s.%s without producer key authority", plan.Source, finalflowinstanceauthoring.ProducerFlowID, finalflowinstanceauthoring.ProducerOutputPin)
+	if sourceEndpoint.FlowID != finalflowinstanceauthoring.ProducerFlowID || sourceEndpoint.Pin != finalflowinstanceauthoring.ProducerOutputPin || sourceEndpoint.Key != "" {
+		t.Fatalf("route plan source = %#v, want %s.%s without producer key authority", sourceEndpoint, finalflowinstanceauthoring.ProducerFlowID, finalflowinstanceauthoring.ProducerOutputPin)
 	}
-	if plan.Receiver.FlowIDCode() != finalflowinstanceauthoring.TemplateFlowID || plan.Receiver.PinCode() != finalflowinstanceauthoring.TemplateInputPin || !plan.Receiver.IsTemplate() {
-		t.Fatalf("route plan receiver = %#v, want template %s.%s", plan.Receiver, finalflowinstanceauthoring.TemplateFlowID, finalflowinstanceauthoring.TemplateInputPin)
+	if receiverEndpoint.FlowID != finalflowinstanceauthoring.TemplateFlowID || receiverEndpoint.Pin != finalflowinstanceauthoring.TemplateInputPin || !plan.ReceiverEndpoint().IsTemplate() {
+		t.Fatalf("route plan receiver = %#v, want template %s.%s", receiverEndpoint, finalflowinstanceauthoring.TemplateFlowID, finalflowinstanceauthoring.TemplateInputPin)
 	}
-	if plan.InstanceKey == nil || plan.InstanceKey.Mode != runtimecontracts.FlowInputResolutionModeSelectOrCreate || plan.InstanceKey.Field.Path() != finalflowinstanceauthoring.TemplateInstanceBy {
-		t.Fatalf("route plan instance key = %#v, want select-or-create/%s", plan.InstanceKey, finalflowinstanceauthoring.TemplateInstanceBy)
+	if plan.InstanceKey() == nil || plan.InstanceKey().Mode() != runtimecontracts.FlowInputResolutionModeSelectOrCreate || plan.InstanceKey().Field().Path() != finalflowinstanceauthoring.TemplateInstanceBy {
+		t.Fatalf("route plan instance key = %#v, want select-or-create/%s", plan.InstanceKey(), finalflowinstanceauthoring.TemplateInstanceBy)
 	}
-	if plan.InstanceKey.Source.Kind != runtimecontracts.FlowInputInstanceSourcePayload || plan.InstanceKey.Source.Path != "payload."+finalflowinstanceauthoring.TemplatePayloadKey {
-		t.Fatalf("route plan source = %#v, want payload source for %s", plan.InstanceKey.Source, finalflowinstanceauthoring.TemplatePayloadKey)
+	if key := plan.InstanceKey().Readback(); key.SourceKind != string(runtimecontracts.FlowInputInstanceSourcePayload) || key.SourcePath != "payload."+finalflowinstanceauthoring.TemplatePayloadKey {
+		t.Fatalf("route plan source = %#v, want payload source for %s", key, finalflowinstanceauthoring.TemplatePayloadKey)
 	}
 
 }

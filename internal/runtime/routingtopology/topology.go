@@ -486,28 +486,30 @@ func (b *topologyBuilder) addBoundaryExposures() {
 
 func (b *topologyBuilder) addConnectEdges(plans []pinrouting.ConnectRoutePlan) {
 	for _, plan := range plans {
-		producerEndpoints := b.census.MatchingProducers(plan.Source.FlowIDCode(), plan.Source.ResolvedEventCode())
+		source := plan.SourceEndpoint().Readback()
+		receiver := plan.ReceiverEndpoint().Readback()
+		producerEndpoints := b.census.MatchingProducers(source.FlowID, source.ResolvedEvent)
 		if len(producerEndpoints) == 0 {
-			producerEndpoints = b.census.MatchingProducers(plan.Source.FlowIDCode(), plan.Source.LocalEventCode())
+			producerEndpoints = b.census.MatchingProducers(source.FlowID, source.LocalEvent)
 		}
 		if len(producerEndpoints) == 0 {
-			if endpoint, ok := findPinEndpoint(b.census.OutputPins(), plan.Source.FlowIDCode(), plan.Source.PinCode()); ok {
+			if endpoint, ok := findPinEndpoint(b.census.OutputPins(), source.FlowID, source.Pin); ok {
 				producerEndpoints = []semanticview.AuthoredEventEndpoint{endpoint}
 			}
 		}
-		consumer, ok := findPinEndpoint(b.census.InputPins(), plan.Receiver.FlowIDCode(), plan.Receiver.PinCode())
+		consumer, ok := findPinEndpoint(b.census.InputPins(), receiver.FlowID, receiver.Pin)
 		if !ok {
 			continue
 		}
 		for _, producer := range producerEndpoints {
 			b.addEdge(Edge{
 				Scope:                     DeliveryScopeInterFlowConnect,
-				Event:                     eventIdentity(plan.Source.LocalEventCode(), plan.Source.ResolvedEventCode()),
+				Event:                     eventIdentity(source.LocalEvent, source.ResolvedEvent),
 				Producer:                  endpointView(producer),
 				Consumer:                  endpointView(consumer),
 				Boundary:                  boundaryView(plan),
 				Resolution:                resolutionView(plan),
-				RequiresRuntimeResolution: plan.RequiresRuntimeResolution,
+				RequiresRuntimeResolution: plan.RequiresRuntimeResolution(),
 			})
 		}
 	}
@@ -608,64 +610,71 @@ func findPinEndpoint(endpoints []semanticview.AuthoredEventEndpoint, flowID, pin
 }
 
 func boundaryView(plan pinrouting.ConnectRoutePlan) *Boundary {
+	planReadback := plan.Readback()
+	source := plan.SourceEndpoint().Readback()
+	receiver := plan.ReceiverEndpoint().Readback()
 	return &Boundary{
-		PackageKey:       strings.TrimSpace(plan.PackageKey),
-		AuthoredLocation: strings.TrimSpace(plan.AuthoredLocation),
-		From:             connectEndpointRef(plan.Source),
-		To:               connectEndpointRef(plan.Receiver),
-		OutputPin:        strings.TrimSpace(plan.Source.PinCode()),
-		InputPin:         strings.TrimSpace(plan.Receiver.PinCode()),
+		PackageKey:       planReadback.PackageKey,
+		AuthoredLocation: planReadback.AuthoredLocation,
+		From:             connectEndpointRef(plan.SourceEndpoint()),
+		To:               connectEndpointRef(plan.ReceiverEndpoint()),
+		OutputPin:        source.Pin,
+		InputPin:         receiver.Pin,
 	}
 }
 
 func connectEndpointRef(endpoint pinrouting.ConnectRoutePlanEndpoint) string {
+	readback := endpoint.Readback()
 	if endpoint.IsRoot() {
-		return "." + strings.TrimSpace(endpoint.PinCode())
+		return "." + readback.Pin
 	}
-	return strings.TrimSpace(endpoint.FlowIDCode()) + "." + strings.TrimSpace(endpoint.PinCode())
+	return readback.FlowID + "." + readback.Pin
 }
 
 func resolutionView(plan pinrouting.ConnectRoutePlan) *Resolution {
 	resolution := &Resolution{
-		Mode:       plan.ResolutionKind.Code(),
-		TargetKind: plan.TargetKind.Code(),
+		Mode:       plan.ResolutionKind().Code(),
+		TargetKind: plan.TargetKind().Code(),
 	}
-	if plan.InstanceKey != nil {
-		resolution.Mode = runtimecontracts.FlowInputResolutionModeCode(plan.InstanceKey.Mode)
+	if plan.InstanceKey() != nil {
+		instanceKey := plan.InstanceKey().Readback()
+		resolution.Mode = instanceKey.Mode
 		if resolution.Mode == "" {
-			resolution.Mode = plan.ResolutionKind.Code()
+			resolution.Mode = plan.ResolutionKind().Code()
 		}
 		instance := &InstanceKey{
-			Mode:       runtimecontracts.FlowInputResolutionModeCode(plan.InstanceKey.Mode),
-			Field:      plan.InstanceKey.Field.Path(),
-			SourceKind: strings.TrimSpace(string(plan.InstanceKey.Source.Kind)),
-			SourcePath: strings.TrimSpace(plan.InstanceKey.Source.Path),
+			Mode:       instanceKey.Mode,
+			Field:      instanceKey.Field,
+			SourceKind: instanceKey.SourceKind,
+			SourcePath: instanceKey.SourcePath,
 		}
 		if instance.SourcePath != "" && instance.Field != "" {
 			instance.DerivedFrom = fmt.Sprintf("instance.%s + carries.%s.from", instance.Field, instance.Field)
 		}
 		resolution.InstanceKey = instance
 	}
-	if plan.FanIn != nil {
+	if plan.FanIn() != nil {
+		fanIn := plan.FanIn().Readback()
 		resolution.Mode = runtimecontracts.FlowInputResolutionModeCode(runtimecontracts.FlowInputResolutionModeFanIn)
 		resolution.FanIn = &FanIn{
-			Aggregation: plan.FanIn.Aggregation.Code(),
-			Window:      strings.TrimSpace(plan.FanIn.Window),
-			DedupBy:     normalizedStrings(plan.FanIn.DedupBy),
-			Singleton:   strings.TrimSpace(plan.FanIn.Singleton),
+			Aggregation: fanIn.Aggregation,
+			Window:      fanIn.Window,
+			DedupBy:     normalizedStrings(fanIn.DedupBy),
+			Singleton:   fanIn.Singleton,
 		}
 	}
-	if plan.ReplyResolution != nil {
+	if plan.ReplyResolution() != nil {
+		reply := plan.ReplyResolution().Readback()
 		resolution.Mode = runtimecontracts.FlowInputResolutionModeCode(runtimecontracts.FlowInputResolutionModeReply)
 		resolution.Reply = &Reply{
-			Role:              plan.ReplyResolution.Role.Code(),
-			RequesterFlowID:   strings.TrimSpace(plan.ReplyResolution.RequesterFlowID),
-			RequestOutputPin:  strings.TrimSpace(plan.ReplyResolution.RequestOutputPin),
-			ReplyInputPin:     strings.TrimSpace(plan.ReplyResolution.ReplyInputPin),
-			ProviderFlowID:    strings.TrimSpace(plan.ReplyResolution.ProviderFlowID),
-			ProviderInputPin:  strings.TrimSpace(plan.ReplyResolution.ProviderInputPin),
-			ProviderOutputPin: strings.TrimSpace(plan.ReplyResolution.ProviderOutputPin),
-			CorrelationKey:    strings.TrimSpace(plan.ReplyResolution.CorrelationKey),
+			Role:              reply.Role,
+			RequesterFlowID:   reply.RequesterFlowID,
+			RequestOutputPin:  reply.RequestOutputPin,
+			ReplyInputPin:     reply.ReplyInputPin,
+			ProviderFlowID:    reply.ProviderFlowID,
+			ProviderInputPin:  reply.ProviderInputPin,
+			ProviderOutputPin: reply.ProviderOutputPin,
+			CorrelationKey:    reply.CorrelationKey,
 		}
 	}
 	return resolution
@@ -678,7 +687,7 @@ func issueViews(connectIssues []pinrouting.ConnectRoutePlanIssue, relationIssues
 			PackageKey:       strings.TrimSpace(issue.Connect.PackageKey),
 			From:             strings.TrimSpace(issue.Connect.From),
 			To:               strings.TrimSpace(issue.Connect.To),
-			Failure:          string(issue.Failure),
+			Failure:          issue.Failure.Code(),
 			Detail:           strings.TrimSpace(issue.Detail),
 			AuthoredLocation: strings.TrimSpace(issue.AuthoredLocation),
 		}

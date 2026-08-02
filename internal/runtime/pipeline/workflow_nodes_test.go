@@ -453,7 +453,7 @@ func TestWorkflowNodeConnectedInputHandlerUsesExactStampedReceiverPin(t *testing
 func workflowNodeStampedConnectRouteForHandlerEvent(t testing.TB, source semanticview.Source, handlerEvent, nodeID string) events.DeliveryRoute {
 	t.Helper()
 	for _, plan := range runtimepinrouting.CompileConnectGraph(source).Plans() {
-		if eventidentity.Normalize(plan.Receiver.LocalEventCode()) != eventidentity.Normalize(handlerEvent) {
+		if plan.ReceiverLocalEvent() != events.EventType(eventidentity.Normalize(handlerEvent)) {
 			continue
 		}
 		route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID}
@@ -471,7 +471,8 @@ func workflowNodeStampedConnectRouteForHandlerEvent(t testing.TB, source semanti
 func workflowNodeStampedConnectRoute(t testing.TB, source semanticview.Source, receiverFlow, receiverPin, nodeID string) events.DeliveryRoute {
 	t.Helper()
 	for _, plan := range runtimepinrouting.CompileConnectGraph(source).Plans() {
-		if strings.TrimSpace(plan.Receiver.FlowIDCode()) != receiverFlow || strings.TrimSpace(plan.Receiver.PinCode()) != receiverPin {
+		receiver := plan.ReceiverEndpoint().Readback()
+		if receiver.FlowID != receiverFlow || receiver.Pin != receiverPin {
 			continue
 		}
 		route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID}

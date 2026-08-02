@@ -1,6 +1,7 @@
 package runforkadmission
 
 import (
+	"crypto/sha256"
 	"testing"
 
 	"github.com/google/uuid"
@@ -92,6 +93,60 @@ func TestAdmitSelectedContractRouteHistoryConnectMatchesConcreteTemplateSourceEn
 	if len(admission.SelectedRouteEvents) != 1 || len(admission.SelectedRouteEvents[0].DerivedRecipients) != 1 || admission.SelectedRouteEvents[0].DerivedRecipients[0].SubscriberID != "consumer-node" {
 		t.Fatalf("selected route events = %#v, want consumer-node through producer connect", admission.SelectedRouteEvents)
 	}
+}
+
+func TestAdmitSelectedContractRouteHistoryRetainsEveryStampedRecipient(t *testing.T) {
+	plan := testRunForkPlan("producer/scan.requested", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "consumer-a")
+	plan.PendingWork[0].DeliveryRoute = testStampedConnectRoute(t, "consumer-a")
+	second := plan.PendingWork[0]
+	second.DeliveryID = uuid.NewString()
+	second.SubscriberID = "consumer-b"
+	second.DeliveryRoute = testStampedConnectRoute(t, "consumer-b")
+	plan.PendingWork = append(plan.PendingWork, second)
+	plan.PendingWorkCount = len(plan.PendingWork)
+
+	source := testContractFrontierSource("consumer-a")
+	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
+		Plan:              plan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+	})
+	if err != nil {
+		t.Fatalf("AdmitContractFrontier: %v", err)
+	}
+	history, err := AdmitSelectedContractRouteHistory(SelectedContractRouteHistoryRequest{
+		Plan:              plan,
+		Source:            source,
+		ContractSelection: SelectedContractSelection(source, "/tmp/contracts-a"),
+		FrontierAdmission: frontier,
+	})
+	if err != nil {
+		t.Fatalf("AdmitSelectedContractRouteHistory: %v", err)
+	}
+	if len(history.SelectedRouteEvents) != 1 {
+		t.Fatalf("selected route events = %#v, want one source event", history.SelectedRouteEvents)
+	}
+	recipients := history.SelectedRouteEvents[0].DerivedRecipients
+	if len(recipients) != 2 || recipients[0].SubscriberID != "consumer-a" || recipients[1].SubscriberID != "consumer-b" {
+		t.Fatalf("derived recipients = %#v, want both stamped fan-out recipients", recipients)
+	}
+}
+
+func testStampedConnectRoute(t testing.TB, subscriberID string) events.DeliveryRoute {
+	t.Helper()
+	route := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   subscriberID,
+		Target:         events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: "consumer-entity"},
+	}
+	digest := sha256.Sum256([]byte("edge:" + subscriberID))
+	pinDigest := sha256.Sum256([]byte("pin:consumer.scan.requested"))
+	claim, err := events.AdmitConnectExecutionClaim(digest, pinDigest, route, events.EventType("scan.requested"))
+	if err != nil {
+		t.Fatalf("admit connect execution claim: %v", err)
+	}
+	route.ConnectClaim = claim
+	return route
 }
 
 func TestAdmitSelectedContractRouteHistoryRejectsConcreteTemplateIdentityWhenSourceRouteIsAbsent(t *testing.T) {

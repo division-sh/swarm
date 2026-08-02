@@ -1259,6 +1259,19 @@ contract_formats:
           string_boundary: |
             Routing semantic values do not implement fmt.Stringer. Explicit persistence codecs and diagnostic projections are
             one-way boundaries and cannot re-enter graph compilation or evaluation.
+          compiled_value_boundary: |
+            ConnectRoutePlan, its producer and receiver endpoints, target and resolution discriminants, instance-key,
+            fan-in, reply, and failure values are opaque compiled values with no exported semantic fields. Runtime consumers
+            use typed behavior queries; describe and topology surfaces use explicit one-way readback projections. Readback
+            values and authored FlowPackageConnect rows cannot be accepted by matching, materialization, claim, recovery,
+            replay, fork, or handler APIs. Dynamic payload/event match values cross into compiled materialization through one
+            admitted immutable snapshot rather than a public map-valued policy surface.
+          execution_claim_boundary: |
+            Each durable connect delivery carries a deterministic claim over the complete compiled producer endpoint,
+            receiver endpoint, target cardinality, resolution policy, static targets, provider authorization when present,
+            and exact recipient route. Claim and receiver-pin identities use structured canonical encoding, not delimiter-
+            joined or diagnostic strings. Recovery, replay, selected-fork execution, and handler admission consume this
+            stamped claim and never reconstruct it from current topology or readback.
         decision_state:
           status: merge_bearing_runtime_behavior
           implementation_slice: '#1482'

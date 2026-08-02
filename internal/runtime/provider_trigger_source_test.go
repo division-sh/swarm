@@ -179,7 +179,7 @@ func TestProviderTriggerNormalizedEventLowersThroughExactExternalInputPin(t *tes
 		t.Fatalf("target-free route plans = %#v, want one normalized input plan", plans)
 	}
 	plan := plans[0]
-	if plan.Source.ResolvedEventCode() != "inbound.telegram.text_message" || plan.Receiver.FlowIDCode() != "coordinator" || plan.Receiver.PinCode() == "" {
+	if plan.SourceEndpoint().Readback().ResolvedEvent != "inbound.telegram.text_message" || plan.ReceiverEndpoint().Readback().FlowID != "coordinator" || plan.ReceiverEndpoint().Readback().Pin == "" {
 		t.Fatalf("target-free normalized route plan = %#v", plan)
 	}
 

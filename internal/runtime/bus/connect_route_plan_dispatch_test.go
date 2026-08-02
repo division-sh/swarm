@@ -144,25 +144,47 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 			source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
 				id: "producer", mode: tc.mode,
 				outputs: []runtimecontracts.FlowOutputEventPin{{Name: "deploy_done", Event: "deploy.done"}},
-			}}, nil))
+			}}, []runtimecontracts.FlowPackageConnect{{From: "producer.deploy_done", To: "missing.ready"}}))
 			graph := runtimepinrouting.CompileConnectGraph(source)
-			issue := runtimepinrouting.ConnectRoutePlanIssue{
-				Failure: runtimepinrouting.ConnectFailureReceiverFlowMissing,
-				Connect: runtimecontracts.FlowPackageConnect{From: "producer.deploy_done"},
+			issues := graph.Issues()
+			if len(issues) != 1 || issues[0].Failure != runtimepinrouting.ConnectFailureReceiverFlowMissing {
+				t.Fatalf("compiled issues = %#v, want receiver-flow failure", issues)
 			}
 			evt := connectRoutePlanStaticProducerEvent("", events.EventType(tc.eventType), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{Source: tc.source}, time.Unix(1, 0).UTC())
-			if got := graph.IssueMatchesEvent(issue, evt); got != tc.want {
+			if got := graph.IssueMatchesEvent(issues[0], evt); got != tc.want {
 				t.Fatalf("connectIssueMatchesEvent = %v, want %v", got, tc.want)
 			}
 		})
 	}
+	diagnosticOnlyIssue := runtimepinrouting.ConnectRoutePlanIssue{
+		Connect: runtimecontracts.FlowPackageConnect{From: "producer.deploy_done", To: "missing.ready"},
+		Failure: runtimepinrouting.ConnectFailureReceiverFlowMissing,
+	}
+	diagnosticEvent := connectRoutePlanStaticProducerEvent("", "producer/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
+		Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("entity-1")},
+	}, time.Unix(1, 0).UTC())
+	diagnosticSource := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
+		id: "producer", mode: "static",
+		outputs: []runtimecontracts.FlowOutputEventPin{{Name: "deploy_done", Event: "deploy.done"}},
+	}}, nil))
+	if runtimepinrouting.CompileConnectGraph(diagnosticSource).IssueMatchesEvent(diagnosticOnlyIssue, diagnosticEvent) {
+		t.Fatal("diagnostic-only connect issue re-entered event matching")
+	}
 
 	rootSource := connectRoutePlanRootProducerStaticSource()
-	rootGraph := runtimepinrouting.CompileConnectGraph(rootSource)
-	rootIssue := runtimepinrouting.ConnectRoutePlanIssue{
-		Failure: runtimepinrouting.ConnectFailureReceiverFlowMissing,
-		Connect: runtimecontracts.FlowPackageConnect{From: ".root_ready"},
+	rootBundle, ok := semanticview.Bundle(rootSource)
+	if !ok {
+		t.Fatal("root source has no contract bundle")
 	}
+	invalidRootConnect := runtimecontracts.FlowPackageConnect{From: ".root_ready", To: "missing.ready", SourceFile: "package.yaml", SourceLine: 1}
+	rootBundle.Package.Connect = []runtimecontracts.FlowPackageConnect{invalidRootConnect}
+	rootBundle.Semantics.CompositionConnects = []runtimecontracts.FlowPackageConnect{invalidRootConnect}
+	rootGraph := runtimepinrouting.CompileConnectGraph(rootSource)
+	rootIssues := rootGraph.Issues()
+	if len(rootIssues) != 1 {
+		t.Fatalf("root issues = %#v, want one", rootIssues)
+	}
+	rootIssue := rootIssues[0]
 	for _, tc := range []struct {
 		name         string
 		flowInstance string
@@ -246,7 +268,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 					if err != nil {
 						t.Fatalf("CheckPublishRecipientPlan: %v", err)
 					}
-					if got, want := plan.TargetFailure, string(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid); got != want {
+					if got, want := plan.TargetFailure, runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code(); got != want {
 						t.Fatalf("target failure = %q, want %q; plan=%#v", got, want, plan)
 					}
 					if len(plan.DeliveryRoutes) != 0 {
@@ -265,36 +287,6 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 }
 
 func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplicateEdges(t *testing.T) {
-	targetA := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/a", EntityID: "a"}
-	targetB := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/b", EntityID: "b"}
-	for _, tc := range []struct {
-		name   string
-		first  events.DeliveryRoute
-		second events.DeliveryRoute
-		pinA   string
-		pinB   string
-		localA string
-		localB string
-		want   bool
-	}{
-		{name: "duplicate same edge", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, pinA: "work_accepted", pinB: "work_accepted", localA: "work.accepted", localB: "work.accepted"},
-		{name: "different subscriber", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "accept", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "audit", Target: targetA}, pinA: "work_accepted", pinB: "work_audited", localA: "work.accepted", localB: "work.audited"},
-		{name: "different target", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetB}, pinA: "work_accepted", pinB: "work_audited", localA: "work.accepted", localB: "work.audited"},
-		{name: "distinct local events", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, pinA: "work_accepted", pinB: "work_audited", localA: "work.accepted", localB: "work.audited", want: true},
-		{name: "distinct pins same local event", first: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, second: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "worker", Target: targetA}, pinA: "work_primary", pinB: "work_secondary", localA: "work.accepted", localB: "work.accepted", want: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var admitted []connectReceiverPinFact
-			if _, _, collision := admitConnectReceiverPinFacts(&admitted, []events.DeliveryRoute{tc.first}, tc.pinA, tc.localA); collision {
-				t.Fatal("first fact collided")
-			}
-			_, _, got := admitConnectReceiverPinFacts(&admitted, []events.DeliveryRoute{tc.second}, tc.pinB, tc.localB)
-			if got != tc.want {
-				t.Fatalf("collision = %v, want %v", got, tc.want)
-			}
-		})
-	}
-
 	source := connectReceiverPinCollisionSource("static", false, "node", true)
 	store := newTargetRouteMemoryStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
@@ -314,7 +306,7 @@ func TestConnectRoutePlanReceiverPinCollisionGuardPreservesLegalFanoutAndDuplica
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
 	}
-	if got, want := plan.TargetFailure, string(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid); got != want {
+	if got, want := plan.TargetFailure, runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code(); got != want {
 		t.Fatalf("mixed fanout target failure = %q, want %q", got, want)
 	}
 
@@ -863,7 +855,8 @@ func connectRoutePlanLifecycleAgentRoute(
 	secondPin canonicalrouting.TemplateInstanceSecondPin,
 ) (agentidentity.Identity, semanticview.FlowOwnedAgentSubscriptionAdmission, string) {
 	t.Helper()
-	instanceID := templateInstanceLifecycleInstanceID("consumer", []runtimecontracts.TemplateInstanceKeyValue{{
+	plan := mustInstanceKeyConnectRoutePlan(t, source)
+	instanceID := templateInstanceLifecycleInstanceID(plan, []runtimecontracts.TemplateInstanceKeyValue{{
 		Field: mustBusTemplateInstanceField(t, "vertical_id"), Value: "v-1",
 	}})
 	instance := runtimeflowidentity.Derive(source, "consumer", instanceID)
@@ -1069,18 +1062,21 @@ func TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution(t *testing.T) {
 		},
 	}
 
-	if _, err := resolver.descriptorsForPlans(context.Background(), []runtimepinrouting.ConnectRoutePlan{{
-		RequiresRuntimeResolution: false,
-	}}); err != nil {
+	staticPlans := runtimepinrouting.CompileConnectGraph(connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
+		From: "producer.deploy_done", To: "consumer.deploy_completed",
+	})).Plans()
+	if len(staticPlans) != 1 {
+		t.Fatalf("static plans = %#v, want one", staticPlans)
+	}
+	if _, err := resolver.descriptorsForPlans(context.Background(), staticPlans); err != nil {
 		t.Fatalf("descriptorsForPlans static: %v", err)
 	}
 	if calls != 0 {
 		t.Fatalf("descriptor loader calls after static plan = %d, want 0", calls)
 	}
 
-	if _, err := resolver.descriptorsForPlans(context.Background(), []runtimepinrouting.ConnectRoutePlan{{
-		RequiresRuntimeResolution: true,
-	}}); err != nil {
+	instancePlan := mustInstanceKeyConnectRoutePlan(t, connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelect))
+	if _, err := resolver.descriptorsForPlans(context.Background(), []runtimepinrouting.ConnectRoutePlan{instancePlan}); err != nil {
 		t.Fatalf("descriptorsForPlans runtime: %v", err)
 	}
 	if calls != 1 {
@@ -1798,17 +1794,6 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 }
 
 func TestTemplateInstanceLifecycleUsesResolutionModeWithoutContractPolicyFallback(t *testing.T) {
-	source := connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelect)
-	plan := mustInstanceKeyConnectRoutePlan(t, source)
-	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
-		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	descriptors := []runtimepinrouting.Descriptor{{
-		ID:            "one",
-		EntityID:      eventtest.UUID("ent-1"),
-		FlowInstance:  "account/one",
-		AddressFields: map[string]string{"entity.account_id": "acct-1"},
-	}}
-	owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil)
 	for _, tc := range []struct {
 		name        string
 		mode        runtimecontracts.FlowInputResolutionMode
@@ -1820,11 +1805,29 @@ func TestTemplateInstanceLifecycleUsesResolutionModeWithoutContractPolicyFallbac
 		{name: "select-or-create reuses", mode: runtimecontracts.FlowInputResolutionModeSelectOrCreate, wantAction: templateInstanceLifecycleActionReused},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			candidate := plan
-			instanceKey := *plan.InstanceKey
-			instanceKey.Mode = tc.mode
-			candidate.InstanceKey = &instanceKey
-			materialization, decision, handled, err := owner.Materialize(context.Background(), evt, candidate, map[string]string{"payload.account_id": "acct-1"}, descriptors)
+			evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
+				events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+			descriptors := []runtimepinrouting.Descriptor{{
+				ID:            "one",
+				EntityID:      eventtest.UUID("ent-1"),
+				FlowInstance:  "account/one",
+				AddressFields: map[string]string{"entity.account_id": "acct-1"},
+			}}
+			values := map[string]string{"payload.account_id": "acct-1"}
+			var source semanticview.Source
+			if tc.mode == runtimecontracts.FlowInputResolutionModeCreate {
+				source = connectRoutePlanPayloadCreateResolutionSource(t)
+				evt = connectRoutePlanStaticProducerEvent(uuid.NewString(),
+					events.EventType("producer/validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+				descriptors[0].FlowInstance = "validator/one"
+				descriptors[0].AddressFields = map[string]string{"entity.validation_case_id": "acct-1"}
+				values = map[string]string{"payload.candidate": "acct-1"}
+			} else {
+				source = connectRoutePlanCarriedKeyResolutionSource(t, tc.mode)
+			}
+			plan := mustInstanceKeyConnectRoutePlan(t, source)
+			owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil)
+			materialization, decision, handled, err := owner.Materialize(context.Background(), evt, plan, values, descriptors)
 			if err != nil {
 				t.Fatalf("Materialize: %v", err)
 			}
@@ -1848,7 +1851,7 @@ func TestTemplateInstanceLifecycleDecisionAndActivationConfigContainNoPolicyFact
 	if !ok {
 		t.Fatal("canonical resolution source does not expose a bundle")
 	}
-	instanceContract, err := bundle.ResolveFlowTemplateInstance(plan.Receiver.FlowIDCode())
+	instanceContract, err := plan.ReceiverTemplate(bundle)
 	if err != nil {
 		t.Fatalf("ResolveFlowTemplateInstance: %v", err)
 	}
@@ -1856,11 +1859,11 @@ func TestTemplateInstanceLifecycleDecisionAndActivationConfigContainNoPolicyFact
 		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil)
 	request, decision, failure := owner.activationRequest(evt, plan, instanceContract, []runtimecontracts.TemplateInstanceKeyValue{{
-		Field: plan.InstanceKey.Field,
+		Field: plan.InstanceKey().Field(),
 		Value: "acct-1",
 	}})
-	if failure != "" {
-		t.Fatalf("activationRequest failure = %q", failure)
+	if !failure.Empty() {
+		t.Fatalf("activationRequest failure = %q", failure.Code())
 	}
 	for _, typ := range []reflect.Type{reflect.TypeOf(TemplateInstanceLifecycleDecision{}), reflect.TypeOf(runtimepipeline.FlowInstanceActivationRequest{})} {
 		for index := 0; index < typ.NumField(); index++ {
@@ -1963,7 +1966,7 @@ func TestEventBusCheckPublishRecipientPlan_RenamedInstanceSourceRemediationUsesA
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
 			}
-			if got, want := preflight.TargetFailure, string(runtimepinrouting.ConnectFailureInstanceSourceValueMissing); got != want {
+			if got, want := preflight.TargetFailure, runtimepinrouting.ConnectFailureInstanceSourceValueMissing.Code(); got != want {
 				t.Fatalf("preflight target failure = %q, want %q", got, want)
 			}
 			if len(preflight.DeliveryRoutes) != 0 || len(store.activations) != 0 {
@@ -2091,7 +2094,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 				AddressFields: map[string]string{"entity.account_id": "acct-2"},
 			}},
 			addRoutes:   []string{"other"},
-			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetUnresolved),
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetUnresolved.Code()),
 			wantDetail: map[string]any{
 				"connect_route_plan_receiver_flow":      "account",
 				"connect_route_plan_instance_key_field": "account_id",
@@ -2105,7 +2108,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 				{InstanceID: "two", EntityID: eventtest.UUID("ent-2"), FlowInstance: "account/two", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
 			},
 			addRoutes:   []string{"one", "two"},
-			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetAmbiguous),
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetAmbiguous.Code()),
 			wantDetail: map[string]any{
 				"connect_route_plan_receiver_flow":          "account",
 				"connect_route_plan_instance_key_field":     "account_id",
@@ -2385,7 +2388,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionFailsClosedForA
 	if err != nil {
 		t.Fatalf("planSubscribedRoutePlan: %v", err)
 	}
-	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.TargetFailure != runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetAmbiguous) {
+	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.TargetFailure != runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetAmbiguous.Code()) {
 		t.Fatalf("route plan authority/failure = %q/%q, want fail-closed ambiguous", routePlan.AuthorityState, routePlan.TargetFailure)
 	}
 	if got := routePlan.ExtraDetail["connect_route_plan_matched_instance_count"]; got != 2 {
@@ -2505,7 +2508,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
 			}
-			if got, want := preflight.TargetFailure, string(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid); got != want {
+			if got, want := preflight.TargetFailure, runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code(); got != want {
 				t.Fatalf("preflight target failure = %q, want %q; plan=%#v", got, want, preflight)
 			}
 			if len(preflight.DeliveryRoutes) != 0 {
@@ -2815,7 +2818,7 @@ func TestEventBusPublish_ConnectRoutePlanRejectsCreateConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("planSubscribedRoutePlan: %v", err)
 	}
-	if got, want := routePlan.TargetFailure, runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureInstanceConflict); got != want {
+	if got, want := routePlan.TargetFailure, runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureInstanceConflict.Code()); got != want {
 		t.Fatalf("target failure = %q, want %q", got, want)
 	}
 	if len(routePlan.DeliveryRoutes()) != 0 {
@@ -2856,7 +2859,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleUnavailableBlocksLowerPreceden
 	if materializerCalled {
 		t.Fatalf("recipient plan materializer was called for lifecycle-unavailable canonical failure")
 	}
-	if got, want := routePlan.TargetFailure, runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureLifecycleUnavailable); got != want {
+	if got, want := routePlan.TargetFailure, runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureLifecycleUnavailable.Code()); got != want {
 		t.Fatalf("target failure = %q, want %q", got, want)
 	}
 	if len(routePlan.DeliveryRoutes()) != 0 {
@@ -3032,7 +3035,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
 		t.Fatalf("route plan authority = %q/%q, want fail-closed connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
 	}
-	if routePlan.TargetFailure != runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureInstanceSourceValueMissing) {
+	if routePlan.TargetFailure != runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureInstanceSourceValueMissing.Code()) {
 		t.Fatalf("target failure = %q, want %q", routePlan.TargetFailure, runtimepinrouting.ConnectFailureInstanceSourceValueMissing)
 	}
 	if len(routePlan.LiveRecipients) != 0 || len(routePlan.DeliveryIntents) != 0 || len(routePlan.RoutedRecipients) != 0 ||
@@ -3047,7 +3050,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
 	}
-	if got, want := plan.TargetFailure, string(runtimepinrouting.ConnectFailureInstanceSourceValueMissing); got != want {
+	if got, want := plan.TargetFailure, runtimepinrouting.ConnectFailureInstanceSourceValueMissing.Code(); got != want {
 		t.Fatalf("preflight target failure = %q, want %q", got, want)
 	}
 	if len(plan.Recipients) != 0 || len(plan.PersistedRecipients) != 0 || len(plan.RoutedRecipients) != 0 ||
@@ -3074,7 +3077,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 		{
 			name:        "missing source key value",
 			payload:     `{}`,
-			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureInstanceSourceValueMissing),
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureInstanceSourceValueMissing.Code()),
 		},
 		{
 			name:    "no receiver instance under rejecting policy",
@@ -3086,7 +3089,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 				AddressFields: map[string]string{"entity.vertical_id": "v-2"},
 			}},
 			addRoutes:   []string{"two"},
-			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetUnresolved),
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetUnresolved.Code()),
 		},
 		{
 			name:    "ambiguous receiver instance key",
@@ -3096,7 +3099,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t
 				{InstanceID: "two", EntityID: eventtest.UUID("ent-2"), FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
 			},
 			addRoutes:   []string{"one", "two"},
-			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetAmbiguous),
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetAmbiguous.Code()),
 		},
 	}
 	for _, tc := range tests {
@@ -3516,6 +3519,12 @@ func connectRoutePlanCreateResolutionSource(t testing.TB, mint string) semanticv
 	return loadConnectRoutePlanCanonicalSource(t, root)
 }
 
+func connectRoutePlanPayloadCreateResolutionSource(t testing.TB) semanticview.Source {
+	t.Helper()
+	root := canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintPayload})
+	return loadConnectRoutePlanCanonicalSource(t, root)
+}
+
 func connectRoutePlanCarriedKeyResolutionSource(t testing.TB, mode runtimecontracts.FlowInputResolutionMode) semanticview.Source {
 	t.Helper()
 	resolutionMode := canonicalrouting.SelectResolutionSelect
@@ -3564,7 +3573,7 @@ func mustInstanceKeyConnectRoutePlan(t testing.TB, source semanticview.Source) r
 		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v", issues)
 	}
 	for _, plan := range plans {
-		if plan.InstanceKey != nil {
+		if plan.InstanceKey() != nil {
 			return plan
 		}
 	}

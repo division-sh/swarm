@@ -2,10 +2,12 @@ package runforkadmission
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -110,10 +112,10 @@ func selectedRouteHistoryHasSourceRouteFacts(plan runfork.RunForkPlan) bool {
 }
 
 type selectedRouteHistoryEvent struct {
-	sourceEventID string
-	eventName     string
-	routingSource events.RoutingSource
-	deliveryRoute events.DeliveryRoute
+	sourceEventID  string
+	eventName      string
+	routingSource  events.RoutingSource
+	deliveryRoutes []events.DeliveryRoute
 }
 
 func selectedRouteHistoryEventEvidence(plan runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission) []selectedRouteHistoryEvent {
@@ -123,7 +125,7 @@ func selectedRouteHistoryEventEvidence(plan runfork.RunForkPlan, frontier runfor
 			frontierEventIDs[sourceEventID] = struct{}{}
 		}
 	}
-	seen := map[string]selectedRouteHistoryEvent{}
+	seen := map[string]*selectedRouteHistoryEvent{}
 	add := func(sourceEventID, eventName string, routingSource events.RoutingSource, deliveryRoute events.DeliveryRoute) {
 		sourceEventID = strings.TrimSpace(sourceEventID)
 		eventName = strings.TrimSpace(eventName)
@@ -137,7 +139,17 @@ func selectedRouteHistoryEventEvidence(plan runfork.RunForkPlan, frontier runfor
 		if key == "" {
 			key = eventName
 		}
-		seen[key] = selectedRouteHistoryEvent{sourceEventID: sourceEventID, eventName: eventName, routingSource: routingSource, deliveryRoute: deliveryRoute}
+		event := seen[key]
+		if event == nil {
+			event = &selectedRouteHistoryEvent{sourceEventID: sourceEventID, eventName: eventName, routingSource: routingSource}
+			seen[key] = event
+		}
+		if event.routingSource.Empty() && !routingSource.Empty() {
+			event.routingSource = routingSource
+		}
+		if !deliveryRoute.ConnectClaim.Empty() {
+			event.deliveryRoutes = append(event.deliveryRoutes, deliveryRoute)
+		}
 	}
 	add(plan.ForkPoint.EventID, plan.ForkPoint.EventName, plan.ForkPoint.RoutingSource, events.DeliveryRoute{})
 	for _, item := range plan.PendingWork {
@@ -152,7 +164,7 @@ func selectedRouteHistoryEventEvidence(plan runfork.RunForkPlan, frontier runfor
 	ordered := sortedSet(keys)
 	out := make([]selectedRouteHistoryEvent, 0, len(ordered))
 	for _, key := range ordered {
-		out = append(out, seen[key])
+		out = append(out, *seen[key])
 	}
 	return out
 }
@@ -161,10 +173,10 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectGraph 
 	out := make([]runfork.RunForkSelectedContractRouteEvent, 0, len(events))
 	incomplete := false
 	for _, event := range events {
-		if recipient, ok := contractFrontierRecipientFromStampedRoute(event.deliveryRoute); ok {
+		if recipients := selectedRouteHistoryStampedRecipients(event.deliveryRoutes); len(recipients) > 0 {
 			out = append(out, runfork.RunForkSelectedContractRouteEvent{
 				SourceEventID: event.sourceEventID, EventName: event.eventName,
-				DerivedRecipients: []runfork.RunForkContractFrontierRecipient{recipient},
+				DerivedRecipients: recipients,
 				Disposition:       runfork.RunForkSelectedContractDispositionEvidenceOnly,
 			})
 			continue
@@ -184,6 +196,45 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectGraph 
 		})
 	}
 	return out, incomplete
+}
+
+func selectedRouteHistoryStampedRecipients(routes []events.DeliveryRoute) []runfork.RunForkContractFrontierRecipient {
+	type recipientKey struct {
+		subscriberType string
+		subscriberID   string
+		path           string
+		routeSource    string
+		agentIdentity  runtimeagentidentity.Identity
+	}
+	seen := map[recipientKey]runfork.RunForkContractFrontierRecipient{}
+	for _, route := range routes {
+		recipient, ok := contractFrontierRecipientFromStampedRoute(route)
+		if !ok {
+			continue
+		}
+		key := recipientKey{
+			subscriberType: recipient.SubscriberType,
+			subscriberID:   recipient.SubscriberID,
+			path:           recipient.Path,
+			routeSource:    recipient.RouteSource,
+			agentIdentity:  recipient.AgentIdentity,
+		}
+		seen[key] = recipient
+	}
+	out := make([]runfork.RunForkContractFrontierRecipient, 0, len(seen))
+	for _, recipient := range seen {
+		out = append(out, recipient)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].SubscriberType != out[j].SubscriberType {
+			return out[i].SubscriberType < out[j].SubscriberType
+		}
+		if out[i].SubscriberID != out[j].SubscriberID {
+			return out[i].SubscriberID < out[j].SubscriberID
+		}
+		return out[i].Path < out[j].Path
+	})
+	return out
 }
 
 func selectedRouteHistoryDynamicFlowInstances(source semanticview.Source, plan runfork.RunForkPlan, frontier runfork.RunForkContractFrontierAdmission) []string {
