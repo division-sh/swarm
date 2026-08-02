@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
 
 func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm.AgentTurnRecord) error {
@@ -49,7 +50,11 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 	if err != nil {
 		return err
 	}
-	return s.runAuthorActivityMutation(ctx, "sqlite append agent turn", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
+		if err != nil {
+			return err
+		}
 		if err := requireSQLiteRunActive(txctx, tx, identity.RunID); err != nil {
 			return err
 		}
@@ -96,12 +101,15 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 		if err != nil {
 			return fmt.Errorf("insert sqlite agent turn: %w", err)
 		}
-		return recordAuthorActivityTurn(txctx, authorActivityTurn{
+		if err := recordAuthorActivityTurnWithStory(txctx, story, authorActivityTurn{
 			TurnID: turnID, RunID: rec.RunID, AgentID: rec.AgentID, SessionID: rec.SessionID, EntityID: rec.EntityID,
 			FlowID: identity.FlowInstance(), TriggerEventType: rec.TriggerEventType, Blocks: rec.TurnBlocks,
 			ParseOK: rec.ParseOK, DurationMS: latencyMS, RetryCount: rec.RetryCount, UsageExactness: "unavailable",
 			ExecutionMode: string(executionMode), Failure: rec.Failure, OccurredAt: now,
-		})
+		}); err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
 	})
 }
 

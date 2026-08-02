@@ -47,6 +47,22 @@ func recordAuthorActivityTurn(ctx context.Context, turn authorActivityTurn) erro
 	return nil
 }
 
+func recordAuthorActivityTurnWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, turn authorActivityTurn) error {
+	if story == nil {
+		return fmt.Errorf("agent turn story owner is required")
+	}
+	drafts, err := authorActivityTurnDrafts(turn)
+	if err != nil {
+		return err
+	}
+	for _, draft := range drafts {
+		if err := story.Record(ctx, draft); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func authorActivityTurnDrafts(turn authorActivityTurn) ([]runtimeauthoractivity.Draft, error) {
 	activity, _, _, err := projectAuthorSafeTurnActivity(turn.Blocks, turn.ParseOK)
 	if err != nil {

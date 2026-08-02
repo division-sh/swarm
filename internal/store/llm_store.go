@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/google/uuid"
 )
 
@@ -32,7 +33,11 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		return err
 	}
 
-	return s.runAuthorActivityMutation(ctx, "postgres append agent turn", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
+		if err != nil {
+			return err
+		}
 		ctx = txctx
 		if err := requirePostgresRunActive(ctx, tx, identity.RunID); err != nil {
 			return err
@@ -105,12 +110,15 @@ func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec runtimellm.Agen
 		if err != nil {
 			return fmt.Errorf("insert agent turn: %w", err)
 		}
-		return recordAuthorActivityTurn(ctx, authorActivityTurn{
+		if err := recordAuthorActivityTurnWithStory(ctx, story, authorActivityTurn{
 			TurnID: surface.Authority.ID, RunID: identity.RunID, AgentID: identity.AgentID(), SessionID: rec.SessionID, EntityID: rec.EntityID,
 			FlowID: identity.FlowInstance(), TriggerEventType: rec.TriggerEventType, Blocks: rec.TurnBlocks,
 			ParseOK: rec.ParseOK, DurationMS: latencyMS, RetryCount: rec.RetryCount, UsageExactness: "unavailable",
 			ExecutionMode: string(executionMode), Failure: rec.Failure, OccurredAt: time.Now().UTC(),
-		})
+		}); err != nil {
+			return err
+		}
+		return story.Finalize(ctx)
 	})
 }
 
