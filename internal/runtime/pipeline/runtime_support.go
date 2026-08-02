@@ -339,7 +339,7 @@ func withSQLTxContext(ctx context.Context, tx *sql.Tx) context.Context {
 }
 
 func WithPipelineSQLTxContext(ctx context.Context, tx *sql.Tx) context.Context {
-	return withPipelineRunForkRevisionChanges(withSQLTxContext(ctx, tx))
+	return withSQLTxContext(ctx, tx)
 }
 
 func WithPipelineSQLConnContext(ctx context.Context, conn *sql.Conn) context.Context {

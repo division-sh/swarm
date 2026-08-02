@@ -14,9 +14,9 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
+	runforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -727,7 +727,7 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 		}
 		out[idx] = prepared
 	}
-	if err := runtimepipeline.CapturePipelineRunForkRevisionChanges(storyctx, tx); err != nil {
+	if _, err := runforkrevision.CaptureCurrentTransaction(storyctx, tx); err != nil {
 		return nil, fmt.Errorf("capture selected-contract source event preparation revisions: %w", err)
 	}
 	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {

@@ -9,6 +9,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	authoractivityadapter "github.com/division-sh/swarm/internal/store/authoractivityadapter"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
 )
 
 func (s *PostgresStore) runPrivateAuthorActivityMutation(
@@ -26,7 +27,7 @@ func (s *PostgresStore) runPrivateAuthorActivityMutation(
 		if err := fn(txctx, tx, story); err != nil {
 			return err
 		}
-		if err := runtimepipeline.CapturePipelineRunForkRevisionChanges(txctx, tx); err != nil {
+		if _, err := privaterunforkrevision.CaptureCurrentTransaction(txctx, tx); err != nil {
 			return err
 		}
 		return story.Finalize(txctx)
@@ -78,7 +79,7 @@ func (s *PostgresStore) runAuthorActivityMutation(ctx context.Context, label str
 		if err := fn(storyctx, tx); err != nil {
 			return err
 		}
-		if err := runtimepipeline.CapturePipelineRunForkRevisionChanges(storyctx, tx); err != nil {
+		if _, err := privaterunforkrevision.CaptureCurrentTransaction(storyctx, tx); err != nil {
 			return err
 		}
 		return runtimeauthoractivity.Finalize(storyctx)

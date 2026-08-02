@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
@@ -237,11 +236,6 @@ func (s *workflowInstanceStore) insertWorkflowTimerActivation(ctx context.Contex
 	}
 	if err := requireSameWorkflowTimerActivationFacts(persisted, activation); err != nil {
 		return WorkflowTimerActivation{}, false, err
-	}
-	if rows > 0 {
-		if err := declarePipelineRunForkRevisionChange(ctx, activation.RunID, runforkrevision.FamilyTimers); err != nil {
-			return WorkflowTimerActivation{}, false, err
-		}
 	}
 	return persisted, rows > 0, nil
 }
@@ -497,9 +491,6 @@ func (s *workflowInstanceStore) cancelWorkflowTimerActivation(ctx context.Contex
 		}
 		return WorkflowTimerActivation{}, false, err
 	}
-	if err := declarePipelineRunForkRevisionChange(ctx, activation.RunID, runforkrevision.FamilyTimers); err != nil {
-		return WorkflowTimerActivation{}, false, err
-	}
 	if err := s.requestRunCompletionCandidate(ctx, activation.RunID); err != nil {
 		return WorkflowTimerActivation{}, false, err
 	}
@@ -549,9 +540,6 @@ func (s *workflowInstanceStore) completeWorkflowTimerOccurrence(ctx context.Cont
 		if err == nil {
 			err = fmt.Errorf("workflow timer completion changed %d rows", rows)
 		}
-		return WorkflowTimerActivation{}, err
-	}
-	if err := declarePipelineRunForkRevisionChange(ctx, activation.RunID, runforkrevision.FamilyTimers); err != nil {
 		return WorkflowTimerActivation{}, err
 	}
 	if !activation.Recurring {

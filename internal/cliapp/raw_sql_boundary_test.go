@@ -248,23 +248,11 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "pipeline engine adapter uses selected mutation ownership and diagnostic SQL reads under the pipeline owner boundary",
 		},
-		"internal/runtime/pipeline/run_fork_revision_context.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          2049,
-			SpecRef:        "platform-spec.yaml#run_model.fork.fixed_event_revision_and_workset",
-			Reason:         "pipeline transactions collect changed fork-reader families and publish them only at the existing unit-of-work commit boundary",
-		},
 		"internal/runtime/runforkexecution/store_ports.go": {
 			Classification: rawSQLOptionalProductBoundary,
 			Issue:          2148,
 			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork",
 			Reason:         "the exact selected-fork execution dependency temporarily carries the Postgres runtime SQL mechanic assigned to #2148; execution consumers no longer inspect concrete store shape",
-		},
-		"internal/runtime/runforkrevision/revision.go": {
-			Classification: rawSQLRuntimeUnitOfWorkBoundary,
-			Issue:          2049,
-			SpecRef:        "platform-spec.yaml#run_model.fork.fixed_event_revision_and_workset",
-			Reason:         "the bounded eleven-family revision registry is the canonical fixed-event persistence owner and runs inside existing PostgreSQL transactions",
 		},
 		"internal/runtime/pipeline/runtime_support.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,

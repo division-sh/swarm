@@ -22,8 +22,8 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	runforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -54,8 +54,8 @@ func TestRunForkRevisionStateAccessorInventoryIsClosed(t *testing.T) {
 	root := repoRootForRuntimeWriterGuard(t)
 	want := []string{
 		"internal/runtime/destructivereset/cleanup_catalog.go",
-		"internal/runtime/runforkrevision/revision.go",
 		"internal/store/destructive_reset_cleanup.go",
+		"internal/store/internal/runforkrevision/revision.go",
 		"internal/store/platformschema/platformschema.go",
 		"internal/store/run_fork_activation.go",
 		"internal/store/run_fork_selected_contract_execution_mutation.go",

@@ -7,7 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
+	runforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
 )
 
 func TestRunForkRevisionProjectionPreservesSourceRouteSeparatelyFromReceiverContext(t *testing.T) {

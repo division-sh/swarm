@@ -12,6 +12,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -101,7 +102,7 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 			RunID: fixture.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
 		})
 		if err == nil {
-			err = runtimepipeline.CapturePipelineRunForkRevisionChanges(storyCtx, terminalTx)
+			_, err = privaterunforkrevision.CaptureCurrentTransaction(storyCtx, terminalTx)
 		}
 		if err == nil {
 			err = runtimeauthoractivity.Finalize(storyCtx)

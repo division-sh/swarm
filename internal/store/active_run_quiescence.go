@@ -13,10 +13,10 @@ import (
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
-	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
+	runforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
 	"github.com/lib/pq"
 )
 

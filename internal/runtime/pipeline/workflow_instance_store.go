@@ -835,11 +835,6 @@ func (s *workflowInstanceStore) runInPipelineTransactionOnce(ctx context.Context
 		flushPipelineRollbackActions(rollbackActions)
 		return err
 	}
-	if err := CapturePipelineRunForkRevisionChanges(storyctx, tx); err != nil {
-		_ = tx.Rollback()
-		flushPipelineRollbackActions(rollbackActions)
-		return err
-	}
 	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
 		_ = tx.Rollback()
 		flushPipelineRollbackActions(rollbackActions)

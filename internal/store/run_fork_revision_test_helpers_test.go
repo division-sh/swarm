@@ -7,7 +7,7 @@ import (
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
-	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
+	runforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
 )
 
 const runForkRevisionFlowInstance = "revision-flow"

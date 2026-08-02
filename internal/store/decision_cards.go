@@ -19,6 +19,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -1385,7 +1386,7 @@ func runPostgresDecisionCardMutation(ctx context.Context, selected *PostgresStor
 		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
 		return errors.Join(err, rollbackSQLTransaction(tx))
 	}
-	if err := runtimepipeline.CapturePipelineRunForkRevisionChanges(storyctx, tx); err != nil {
+	if _, err := privaterunforkrevision.CaptureCurrentTransaction(storyctx, tx); err != nil {
 		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
 		return errors.Join(err, rollbackSQLTransaction(tx))
 	}

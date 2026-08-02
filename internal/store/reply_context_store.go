@@ -11,7 +11,7 @@ import (
 
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
-	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
+	runforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
 )
 
 type replyContextSQL interface {

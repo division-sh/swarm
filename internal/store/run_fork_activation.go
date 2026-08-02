@@ -13,6 +13,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -191,7 +192,7 @@ func recordRunForkActivationAuthorActivity(ctx context.Context, lineage runForkA
 }
 
 func commitRunForkAuthorActivityTransaction(ctx context.Context, tx *sql.Tx) error {
-	if err := runtimepipeline.CapturePipelineRunForkRevisionChanges(ctx, tx); err != nil {
+	if _, err := privaterunforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
 		return err
 	}
 	if err := runtimeauthoractivity.Finalize(ctx); err != nil {

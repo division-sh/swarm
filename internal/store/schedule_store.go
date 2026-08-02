@@ -13,8 +13,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
+	runforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
 	timerobligationadapter "github.com/division-sh/swarm/internal/store/timerobligationadapter"
 )
 
