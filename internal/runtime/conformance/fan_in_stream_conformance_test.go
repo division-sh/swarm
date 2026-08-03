@@ -251,8 +251,8 @@ type fanInStreamMemoryStore struct {
 	scopes         map[string]runtimepipelineobligation.CommittedScope
 }
 
-func (s *fanInStreamMemoryStore) CommitPublish(ctx context.Context, plan bus.CommitPublishPlan) (bus.PreparedPublish, error) {
-	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req bus.CommitPublishRequest) error {
+func (s *fanInStreamMemoryStore) CommitPublication(ctx context.Context, command bus.PublicationCommand) (bus.CommittedPublication, error) {
+	return runtimebustest.CommitPublish(ctx, command, nil, func(_ context.Context, req bus.CommitPublishRequest) error {
 		event := req.Event.Event()
 		if s.events == nil {
 			s.events = map[string]events.Event{}

@@ -90,7 +90,6 @@ const (
 type WorkflowTimerLifecycle struct {
 	storeOwner   *workflowInstanceStore
 	source       semanticview.Source
-	publisher    WorkflowGateMutationPublisher
 	logger       systemNodeRuntimeLogger
 	workOwner    worklifetime.Occurrence
 	scheduler    *Scheduler
@@ -107,7 +106,7 @@ type WorkflowTimerLifecycle struct {
 	testAfterWakeupLoad   func()
 }
 
-func newWorkflowTimerLifecycle(store *workflowInstanceStore, source semanticview.Source, bus Bus, publisher WorkflowGateMutationPublisher, workOwner worklifetime.Occurrence, scheduler *Scheduler) *WorkflowTimerLifecycle {
+func newWorkflowTimerLifecycle(store *workflowInstanceStore, source semanticview.Source, bus Bus, workOwner worklifetime.Occurrence, scheduler *Scheduler) *WorkflowTimerLifecycle {
 	if store == nil {
 		return nil
 	}
@@ -115,7 +114,6 @@ func newWorkflowTimerLifecycle(store *workflowInstanceStore, source semanticview
 	lifecycle := &WorkflowTimerLifecycle{
 		storeOwner:            store,
 		source:                source,
-		publisher:             publisher,
 		logger:                bus,
 		workOwner:             workOwner,
 		recoveryCtx:           recoveryCtx,

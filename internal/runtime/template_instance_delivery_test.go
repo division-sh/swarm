@@ -64,8 +64,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,
-		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-		FlowRoutes: bus,
+		FlowRoutes:          bus,
 	})
 
 	if err := bus.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("operating", "inst-1")}); err != nil {
@@ -186,8 +185,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,
-		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-		FlowRoutes: bus,
+		FlowRoutes:          bus,
 		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 			if manager == nil {
 				return errors.New("agent manager is required")
@@ -295,8 +293,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,
-		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-		FlowRoutes: bus,
+		FlowRoutes:          bus,
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
@@ -388,8 +385,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		RunLifecycle:        pg,
 		DeliveryStore:       pg,
 		PipelineObligations: pg.PipelineObligations(),
-		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-		FlowRoutes: bus,
+		FlowRoutes:          bus,
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
@@ -473,8 +469,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,
-		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-		FlowRoutes: bus,
+		FlowRoutes:          bus,
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
@@ -591,8 +586,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,
-		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-		FlowRoutes: bus,
+		FlowRoutes:          bus,
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
@@ -898,8 +892,8 @@ func (s routeMaterializationDBProofStore) RegisterAuthorActivityEventCatalog(sco
 	return s.pg.RegisterAuthorActivityEventCatalog(scope, descriptors)
 }
 
-func (s routeMaterializationDBProofStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return s.pg.CommitPublish(ctx, plan)
+func (s routeMaterializationDBProofStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return s.pg.CommitPublication(ctx, command)
 }
 
 func (s routeMaterializationDBProofStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {

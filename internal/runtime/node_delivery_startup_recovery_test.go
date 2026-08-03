@@ -785,16 +785,14 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 			deliveryOwner := &renewalTrackingDeliveryStore{Store: selected}
 			workOwner := runtimeTestEventBusWorkOwner(t, bus)
 			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, selected, runtimepipeline.PipelineCoordinatorOptions{
-				WorkOwner:               workOwner,
-				Module:                  newRuntimeTestWorkflowModule(t, source),
-				Persistence:             workflowPersistence,
-				RunLifecycle:            selected,
-				PipelineObligations:     selected.PipelineObligations(),
-				DeliveryStore:           deliveryOwner,
-				GatePublisher:           bus,
-				DirectDecisionPublisher: bus,
-				DeliveryRuntime:         bus,
-				FlowRoutes:              bus,
+				WorkOwner:           workOwner,
+				Module:              newRuntimeTestWorkflowModule(t, source),
+				Persistence:         workflowPersistence,
+				RunLifecycle:        selected,
+				PipelineObligations: selected.PipelineObligations(),
+				DeliveryStore:       deliveryOwner,
+				DeliveryRuntime:     bus,
+				FlowRoutes:          bus,
 			})
 
 			if _, err := pc.MaterializeInitialEntry(ctx, artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
@@ -879,16 +877,14 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			}
 			workOwner := runtimeTestEventBusWorkOwner(t, bus)
 			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, selected, runtimepipeline.PipelineCoordinatorOptions{
-				WorkOwner:               workOwner,
-				Module:                  newRuntimeTestWorkflowModule(t, source),
-				Persistence:             workflowPersistence,
-				RunLifecycle:            selected,
-				PipelineObligations:     selected.PipelineObligations(),
-				DeliveryStore:           selected,
-				GatePublisher:           bus,
-				DirectDecisionPublisher: bus,
-				DeliveryRuntime:         bus,
-				FlowRoutes:              bus,
+				WorkOwner:           workOwner,
+				Module:              newRuntimeTestWorkflowModule(t, source),
+				Persistence:         workflowPersistence,
+				RunLifecycle:        selected,
+				PipelineObligations: selected.PipelineObligations(),
+				DeliveryStore:       selected,
+				DeliveryRuntime:     bus,
+				FlowRoutes:          bus,
 			})
 
 			if _, err := pc.MaterializeInitialEntry(ctx, artifactActionResultWorkflowInstance(), time.Now().UTC()); err != nil {
@@ -1032,16 +1028,14 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			deliveryOwner := &renewalTrackingDeliveryStore{Store: selected}
 			workOwner := runtimeTestEventBusWorkOwner(t, bus)
 			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, selected, runtimepipeline.PipelineCoordinatorOptions{
-				WorkOwner:               workOwner,
-				Module:                  newRuntimeTestWorkflowModule(t, source),
-				Persistence:             workflowPersistence,
-				RunLifecycle:            selected,
-				PipelineObligations:     selected.PipelineObligations(),
-				DeliveryStore:           deliveryOwner,
-				GatePublisher:           bus,
-				DirectDecisionPublisher: bus,
-				DeliveryRuntime:         bus,
-				FlowRoutes:              bus,
+				WorkOwner:           workOwner,
+				Module:              newRuntimeTestWorkflowModule(t, source),
+				Persistence:         workflowPersistence,
+				RunLifecycle:        selected,
+				PipelineObligations: selected.PipelineObligations(),
+				DeliveryStore:       deliveryOwner,
+				DeliveryRuntime:     bus,
+				FlowRoutes:          bus,
 				TestWorkflowNodeHandlerStartHook: func(context.Context, string, events.Event) error {
 					select {
 					case handlerStarted <- struct{}{}:

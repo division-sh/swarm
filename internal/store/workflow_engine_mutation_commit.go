@@ -61,9 +61,23 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record r
 					status = EXCLUDED.status,
 					terminated_at = NULL
 			`
+		} else {
+			query += ` ON CONFLICT (instance_id) DO NOTHING`
 		}
-		if _, err := tx.ExecContext(ctx, query, record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt); err != nil {
+		result, err := tx.ExecContext(ctx, query, record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt)
+		if err != nil {
 			return fmt.Errorf("insert workflow engine flow instance: %w", err)
+		}
+		if !rebindExistingRoute {
+			rows, err := result.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("read workflow engine flow insertion: %w", err)
+			}
+			if rows == 0 {
+				if err := verifyWorkflowEngineFlowDescriptor(ctx, tx, true, record); err != nil {
+					return err
+				}
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO entity_state (
@@ -149,9 +163,23 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 					status = excluded.status,
 					terminated_at = NULL
 			`
+		} else {
+			query += ` ON CONFLICT(instance_id) DO NOTHING`
 		}
-		if _, err := tx.ExecContext(ctx, query, record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt); err != nil {
+		result, err := tx.ExecContext(ctx, query, record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt)
+		if err != nil {
 			return fmt.Errorf("insert workflow engine flow instance: %w", err)
+		}
+		if !rebindExistingRoute {
+			rows, err := result.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("read workflow engine flow insertion: %w", err)
+			}
+			if rows == 0 {
+				if err := verifyWorkflowEngineFlowDescriptor(ctx, tx, false, record); err != nil {
+					return err
+				}
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO entity_state (
@@ -214,6 +242,31 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 			return fmt.Errorf("read workflow engine flow update: %w", err)
 		}
 		return fmt.Errorf("workflow engine flow instance is missing: %s", record.Route.InstancePath)
+	}
+	return nil
+}
+
+func verifyWorkflowEngineFlowDescriptor(ctx context.Context, tx *sql.Tx, postgres bool, record runtimepipeline.WorkflowEngineStateRecord) error {
+	query := `SELECT flow_template, mode, config, status FROM flow_instances WHERE instance_id = ?`
+	if postgres {
+		query = `SELECT flow_template, mode, config, status FROM flow_instances WHERE instance_id = $1`
+	}
+	var workflowName, mode, status string
+	var config any
+	if err := tx.QueryRowContext(ctx, query, record.Route.InstancePath).Scan(&workflowName, &mode, &config, &status); err != nil {
+		return fmt.Errorf("load existing workflow engine flow descriptor: %w", err)
+	}
+	var configBytes []byte
+	switch value := config.(type) {
+	case []byte:
+		configBytes = append(configBytes, value...)
+	case string:
+		configBytes = append(configBytes, value...)
+	default:
+		return fmt.Errorf("existing workflow engine flow descriptor has unsupported config type %T", config)
+	}
+	if workflowName != record.WorkflowName || mode != record.Mode || status != record.Status || !workflowCommitJSONEqual(configBytes, record.Config) {
+		return fmt.Errorf("workflow engine flow descriptor conflicts at route %s", record.Route.InstancePath)
 	}
 	return nil
 }

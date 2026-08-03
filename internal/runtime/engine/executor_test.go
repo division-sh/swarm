@@ -421,20 +421,23 @@ type recordingStateRepo struct {
 type actionMergeStateRepo struct {
 	snapshot StateSnapshot
 }
+type testPublicationCommitter interface {
+	CommitPublications(context.Context, []EmitIntent) error
+}
 type stubMutationOwner struct {
 	state StateRepository
 }
 type composedMutationOwner struct {
-	state      StateRepository
-	verifier   EmitPersistenceVerifier
-	lifecycle  WorkflowLifecycleEffectOwner
-	activities ActivityIntentWriter
-	outbox     OutboxWriter
-	order      *[]string
+	state        StateRepository
+	verifier     EmitPersistenceVerifier
+	lifecycle    WorkflowLifecycleEffectOwner
+	activities   ActivityIntentWriter
+	publications testPublicationCommitter
+	order        *[]string
 }
 type stubLocker struct{}
-type stubOutbox struct{}
-type recordingEmitOutbox struct {
+type stubPublicationCommitter struct{}
+type recordingPublicationCommitter struct {
 	intents []EmitIntent
 	err     error
 }
@@ -530,8 +533,8 @@ func (o composedMutationOwner) CommitEngineMutation(ctx context.Context, mutatio
 			return CommittedEngineMutation{}, err
 		}
 	}
-	if o.outbox != nil && len(mutation.EmitIntents) > 0 {
-		if err := o.outbox.WriteOutbox(ctx, mutation.EmitIntents); err != nil {
+	if o.publications != nil && len(mutation.EmitIntents) > 0 {
+		if err := o.publications.CommitPublications(ctx, mutation.EmitIntents); err != nil {
 			return CommittedEngineMutation{}, err
 		}
 	}
@@ -558,8 +561,8 @@ func (l lockOrderLocker) WithEntityLock(ctx context.Context, _ identity.EntityID
 	}
 	return fn(ctx)
 }
-func (stubOutbox) WriteOutbox(context.Context, []EmitIntent) error { return nil }
-func (o *recordingEmitOutbox) WriteOutbox(_ context.Context, intents []EmitIntent) error {
+func (stubPublicationCommitter) CommitPublications(context.Context, []EmitIntent) error { return nil }
+func (o *recordingPublicationCommitter) CommitPublications(_ context.Context, intents []EmitIntent) error {
 	if o.err != nil {
 		return o.err
 	}
@@ -2749,10 +2752,10 @@ func (l orderedLocker) WithEntityLock(ctx context.Context, _ identity.EntityID, 
 	return fn(ctx)
 }
 
-type orderedOutbox struct{ order *[]string }
+type orderedPublicationCommitter struct{ order *[]string }
 
-func (o orderedOutbox) WriteOutbox(context.Context, []EmitIntent) error {
-	*o.order = append(*o.order, "outbox")
+func (o orderedPublicationCommitter) CommitPublications(context.Context, []EmitIntent) error {
+	*o.order = append(*o.order, "publications")
 	return nil
 }
 
@@ -2904,7 +2907,7 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:            stubSource(),
 		StateRepo:         repo,
-		MutationOwner:     composedMutationOwner{state: repo, lifecycle: lifecycle, outbox: orderedOutbox{order: &order}, order: &order},
+		MutationOwner:     composedMutationOwner{state: repo, lifecycle: lifecycle, publications: orderedPublicationCommitter{order: &order}, order: &order},
 		Locker:            orderedLocker{order: &order},
 		WorkflowLifecycle: lifecycle,
 		Dispatcher:        orderedDispatcher{order: &order},
@@ -2928,7 +2931,7 @@ func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if !reflect.DeepEqual(order, []string{"lock", "tx", "save", "lifecycle", "outbox", "dispatch"}) {
+	if !reflect.DeepEqual(order, []string{"lock", "tx", "save", "lifecycle", "publications", "dispatch"}) {
 		t.Fatalf("unexpected envelope order: %v", order)
 	}
 	if len(result.ExecutedSteps) != len(OrderedSteps) {
@@ -3462,11 +3465,11 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			outbox := &recordingEmitOutbox{}
+			publications := &recordingPublicationCommitter{}
 			exec, err := NewExecutor(RuntimeDependencies{
 				Source:        stubSource(),
 				StateRepo:     stubStateRepo{},
-				MutationOwner: composedMutationOwner{outbox: outbox},
+				MutationOwner: composedMutationOwner{publications: publications},
 				Locker:        stubLocker{},
 				Dispatcher:    stubDispatcher{},
 				PayloadShaper: stubPayloadShaper{},
@@ -3549,19 +3552,19 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 			if got := int(payload["score"].(float64)); got != tc.score {
 				t.Fatalf("score = %#v, want %d", payload["score"], tc.score)
 			}
-			if got := len(outbox.intents); got != 1 {
-				t.Fatalf("outbox intents len = %d, want 1", got)
+			if got := len(publications.intents); got != 1 {
+				t.Fatalf("publications intents len = %d, want 1", got)
 			}
 		})
 	}
 }
 
 func TestExecutor_EmitFromLoweringQueuesCanonicalPayload(t *testing.T) {
-	outbox := &recordingEmitOutbox{}
+	publications := &recordingPublicationCommitter{}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        emitFromExecutorSource(),
 		StateRepo:     stubStateRepo{},
-		MutationOwner: composedMutationOwner{outbox: outbox},
+		MutationOwner: composedMutationOwner{publications: publications},
 		Locker:        stubLocker{},
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: stubPayloadShaper{},
@@ -3627,8 +3630,8 @@ func TestExecutor_EmitFromLoweringQueuesCanonicalPayload(t *testing.T) {
 	if got := payload["shaped_for"]; got != "account.bucketed" {
 		t.Fatalf("shaped_for = %#v, want account.bucketed", got)
 	}
-	if got := len(outbox.intents); got != 1 {
-		t.Fatalf("outbox intents len = %d, want 1", got)
+	if got := len(publications.intents); got != 1 {
+		t.Fatalf("publications intents len = %d, want 1", got)
 	}
 }
 
@@ -3644,11 +3647,11 @@ func TestExecutor_EmitFromLoweringRequiresCanonicalBundleAtRuntime(t *testing.T)
 }
 
 func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T) {
-	outbox := &recordingEmitOutbox{}
+	publications := &recordingPublicationCommitter{}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
-		MutationOwner: composedMutationOwner{outbox: outbox},
+		MutationOwner: composedMutationOwner{publications: publications},
 		Locker:        stubLocker{},
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: stubPayloadShaper{},
@@ -3696,8 +3699,8 @@ func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T
 	if got := []string{string(result.EmitIntents[0].Event.Type()), string(result.EmitIntents[1].Event.Type())}; !reflect.DeepEqual(got, []string{"rule.emitted", "handler.succeeded"}) {
 		t.Fatalf("emit order = %#v", got)
 	}
-	if got := len(outbox.intents); got != 2 {
-		t.Fatalf("outbox intents len = %d, want 2", got)
+	if got := len(publications.intents); got != 2 {
+		t.Fatalf("publications intents len = %d, want 2", got)
 	}
 	rulePayload := eventPayloadMap(t, result.EmitIntents[0].Event)
 	if got := rulePayload["score"]; got != float64(9) {
@@ -3745,11 +3748,11 @@ func emitFromExecutorSource() semanticview.Source {
 }
 
 func TestExecutor_OnSuccessEmitFiresWhenRulesDoNotMatch(t *testing.T) {
-	outbox := &recordingEmitOutbox{}
+	publications := &recordingPublicationCommitter{}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
-		MutationOwner: composedMutationOwner{outbox: outbox},
+		MutationOwner: composedMutationOwner{publications: publications},
 		Locker:        stubLocker{},
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: stubPayloadShaper{},
@@ -3787,17 +3790,17 @@ func TestExecutor_OnSuccessEmitFiresWhenRulesDoNotMatch(t *testing.T) {
 	if got := string(result.EmitIntents[0].Event.Type()); got != "handler.succeeded" {
 		t.Fatalf("emit event = %q, want handler.succeeded", got)
 	}
-	if got := len(outbox.intents); got != 1 {
-		t.Fatalf("outbox intents len = %d, want 1", got)
+	if got := len(publications.intents); got != 1 {
+		t.Fatalf("publications intents len = %d, want 1", got)
 	}
 }
 
 func TestExecutor_OnSuccessEmitFailsClosedWhenRuleEventMatchesSuccessEvent(t *testing.T) {
-	outbox := &recordingEmitOutbox{}
+	publications := &recordingPublicationCommitter{}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stubStateRepo{},
-		MutationOwner: composedMutationOwner{outbox: outbox},
+		MutationOwner: composedMutationOwner{publications: publications},
 		Locker:        stubLocker{},
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: stubPayloadShaper{},
@@ -3826,8 +3829,8 @@ func TestExecutor_OnSuccessEmitFailsClosedWhenRuleEventMatchesSuccessEvent(t *te
 	if err == nil || !strings.Contains(err.Error(), "duplicate declarative emit event") {
 		t.Fatalf("Execute error = %v, want duplicate declarative emit event", err)
 	}
-	if got := len(outbox.intents); got != 0 {
-		t.Fatalf("outbox intents len = %d, want 0 after duplicate failure", got)
+	if got := len(publications.intents); got != 0 {
+		t.Fatalf("publications intents len = %d, want 0 after duplicate failure", got)
 	}
 }
 
@@ -3867,12 +3870,12 @@ func TestExecutor_RejectsOnSuccessEmitWithRuleFanOut(t *testing.T) {
 
 func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *testing.T) {
 	stateRepo := &recordingStateRepo{}
-	outbox := &recordingEmitOutbox{}
+	publications := &recordingPublicationCommitter{}
 	shaper := &eventErrPayloadShaper{failEvent: "handler.succeeded"}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
 		StateRepo:     stateRepo,
-		MutationOwner: composedMutationOwner{outbox: outbox},
+		MutationOwner: composedMutationOwner{publications: publications},
 		Locker:        stubLocker{},
 		Dispatcher:    stubDispatcher{},
 		PayloadShaper: shaper,
@@ -3905,8 +3908,8 @@ func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *tes
 	if got := shaper.shaped; !reflect.DeepEqual(got, []string{"rule.emitted", "handler.succeeded"}) {
 		t.Fatalf("payload shaper order = %#v", got)
 	}
-	if got := len(outbox.intents); got != 0 {
-		t.Fatalf("outbox intents len = %d, want 0 after second emit failure", got)
+	if got := len(publications.intents); got != 0 {
+		t.Fatalf("publications intents len = %d, want 0 after second emit failure", got)
 	}
 	if got := stateRepo.saves; got != 0 {
 		t.Fatalf("state saves = %d, want 0 after second emit failure", got)

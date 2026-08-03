@@ -89,7 +89,6 @@ type pipelineEngineMutationOwner struct {
 	verifier    runtimeengine.EmitPersistenceVerifier
 	lifecycle   runtimeengine.WorkflowLifecycleEffectOwner
 	activities  runtimeengine.ActivityIntentWriter
-	outbox      runtimeengine.OutboxWriter
 }
 
 func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, mutation runtimeengine.EngineMutation) (runtimeengine.CommittedEngineMutation, error) {
@@ -213,16 +212,8 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 				return err
 			}
 		}
-		if len(mutation.EmitIntents) > 0 {
-			if o.verifier != nil && len(mutation.EmitPrerequisites.Fields) > 0 {
-				if err := o.verifier.VerifyEmitPersistence(txctx, mutation.Address, mutation.EmitPrerequisites); err != nil {
-					return err
-				}
-			}
-			if o.outbox == nil {
-				return runtimeengine.ErrMissingOutbox
-			}
-			if err := o.outbox.WriteOutbox(txctx, mutation.EmitIntents); err != nil {
+		if len(mutation.EmitIntents) > 0 && o.verifier != nil && len(mutation.EmitPrerequisites.Fields) > 0 {
+			if err := o.verifier.VerifyEmitPersistence(txctx, mutation.Address, mutation.EmitPrerequisites); err != nil {
 				return err
 			}
 		}
@@ -622,10 +613,8 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 	if source == nil {
 		source = semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	}
-	var outbox runtimeengine.OutboxWriter
 	var dispatcher runtimeengine.PostCommitDispatcher
 	if pc.bus != nil {
-		outbox = pc.bus.EngineOutbox()
 		dispatcher = pc.bus.EngineDispatcher()
 	}
 	var lifecycleOwner runtimeengine.WorkflowLifecycleEffectOwner
@@ -638,7 +627,7 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 	return runtimeengine.RuntimeDependencies{
 		Source:              source,
 		StateRepo:           stateRepo,
-		MutationOwner:       pipelineEngineMutationOwner{store: pc.workflowStore, state: stateRepo, publication: publicationPlanner, verifier: stateRepo, lifecycle: lifecycleOwner, activities: activityWriter, outbox: outbox},
+		MutationOwner:       pipelineEngineMutationOwner{store: pc.workflowStore, state: stateRepo, publication: publicationPlanner, verifier: stateRepo, lifecycle: lifecycleOwner, activities: activityWriter},
 		Locker:              pipelineEngineLocker{coordinator: pc},
 		WorkflowLifecycle:   lifecycleOwner,
 		Dispatcher:          dispatcher,

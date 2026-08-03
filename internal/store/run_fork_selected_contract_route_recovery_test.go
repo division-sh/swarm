@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -444,9 +443,6 @@ type selectedRouteRecoveryStoreWrapper struct {
 
 func (s selectedRouteRecoveryStoreWrapper) AppendEvent(context.Context, events.Event) error {
 	return nil
-}
-func (s selectedRouteRecoveryStoreWrapper) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublishNoop(ctx, plan)
 }
 func (s selectedRouteRecoveryStoreWrapper) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
 	return runtimebus.InMemoryEventStore{}.CommitPublication(ctx, command)

@@ -104,10 +104,6 @@ type EntityLocker interface {
 	WithEntityLock(ctx context.Context, entityID identity.EntityID, fn func(context.Context) error) error
 }
 
-type OutboxWriter interface {
-	WriteOutbox(ctx context.Context, intents []EmitIntent) error
-}
-
 type WorkflowLifecycleEffectOwner interface {
 	AcceptedEventEffect(route runtimeflowidentity.Route, entityID identity.EntityID, event events.Event, fromState, toState string) (runtimeworkflowlifecycle.Effect, error)
 	ApplyWorkflowLifecycleEffects(ctx context.Context, effects []runtimeworkflowlifecycle.Effect) error

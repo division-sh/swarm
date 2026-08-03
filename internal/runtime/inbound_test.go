@@ -197,28 +197,12 @@ func (identityInboundCredentialStore) Delete(context.Context, string) error     
 
 type failingInboundEventStore struct{}
 
-func (failingInboundEventStore) CommitPublication(context.Context, runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
-	return runtimebus.CommittedPublication{}, errors.New("append failed")
-}
-
-func (s failingInboundEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublish(ctx, plan, s.beginPublish, nil)
+func (s failingInboundEventStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublish(ctx, command, s.beginPublish, nil)
 }
 
 func (failingInboundEventStore) beginPublish(context.Context, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
 	return runtimebus.EventAppendOutcomeUnknown, errors.New("append failed")
-}
-
-func (failingInboundEventStore) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
-	return events.AdmittedEvent{}, false, nil
-}
-
-func (s failingInboundEventStore) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
-	return s.beginPublish(ctx, prepared.AdmittedEvent())
-}
-
-func (failingInboundEventStore) FinalizePreparedPublish(context.Context, runtimebus.PreparedPublishFinalization) error {
-	return errors.New("failed inbound event must not finalize")
 }
 
 func (failingInboundEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -237,19 +221,8 @@ type capturingInboundEventStore struct {
 	active          []string
 }
 
-func (s *capturingInboundEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
-	if err := command.Validate(); err != nil {
-		return runtimebus.CommittedPublication{}, err
-	}
-	outcome, err := s.beginPublish(context.Background(), command.Commit.Event)
-	if err != nil {
-		return runtimebus.CommittedPublication{}, err
-	}
-	return runtimebus.CommittedPublication{AppendOutcome: outcome}, nil
-}
-
-func (s *capturingInboundEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublish(ctx, plan, s.beginPublish, s.finalizePublish)
+func (s *capturingInboundEventStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublish(ctx, command, s.beginPublish, s.finalizePublish)
 }
 
 func (s *capturingInboundEventStore) beginPublish(_ context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
@@ -267,26 +240,8 @@ func (s *capturingInboundEventStore) finalizePublish(_ context.Context, req runt
 	if len(s.active) == 0 || s.active[len(s.active)-1] != req.Event.ID() {
 		return errors.New("prepared event finalization does not match active inbound event")
 	}
-	if req.DeliveryReceipt == nil {
-		return errors.New("test inbound delivery receipt is required")
-	}
-	if err := req.DeliveryReceipt.Record(nil); err != nil {
-		return err
-	}
 	s.active = s.active[:len(s.active)-1]
 	return nil
-}
-
-func (s *capturingInboundEventStore) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
-	return events.AdmittedEvent{}, false, nil
-}
-
-func (s *capturingInboundEventStore) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
-	return s.beginPublish(ctx, prepared.AdmittedEvent())
-}
-
-func (s *capturingInboundEventStore) FinalizePreparedPublish(ctx context.Context, finalization runtimebus.PreparedPublishFinalization) error {
-	return s.finalizePublish(ctx, finalization.Request())
 }
 
 func (*capturingInboundEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {

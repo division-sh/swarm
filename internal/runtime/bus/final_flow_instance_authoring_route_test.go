@@ -143,6 +143,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 	}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
 	}
+	store.flowInstanceDescriptorCalls = 0
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
 	}, nil); err != nil {

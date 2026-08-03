@@ -49,10 +49,6 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 	}
 	defer terminalTx.Rollback()
 	terminalCtx = runtimepipeline.WithPipelineSQLTxContext(terminalCtx, terminalTx)
-	terminalCtx, attached := eventCommitterForPipelineContext(terminalCtx, terminalStore, nil)
-	if !attached {
-		t.Fatal("attach terminal event commit owner")
-	}
 	storyCtx, err := runtimeauthoractivity.Begin(terminalCtx, terminalTx, runtimeauthoractivity.DialectPostgres)
 	if err != nil {
 		t.Fatalf("begin terminal author activity mutation: %v", err)

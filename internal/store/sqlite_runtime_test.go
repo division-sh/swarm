@@ -611,8 +611,6 @@ func configureSQLiteFlowActivationLifecycle(
 		HumanTasks:              selected,
 		DecisionCardDraftExpiry: selected,
 		HumanTaskExpiry:         selected,
-		GatePublisher:           bus,
-		DirectDecisionPublisher: bus,
 		DeliveryRuntime:         workflowTestBus{},
 		WorkOwner:               storeTestWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution(),
 	})
@@ -663,7 +661,6 @@ func (*sqliteFlowActivationBus) PublishPersistedRecipients(context.Context, even
 }
 
 func (*sqliteFlowActivationBus) ResolveSubscribedRecipients(string) []string { return nil }
-func (*sqliteFlowActivationBus) EngineOutbox() runtimeengine.OutboxWriter    { return nil }
 func (*sqliteFlowActivationBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return nil
 }

@@ -746,7 +746,6 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 		Module: module, Persistence: workflowPersistence, RunLifecycle: backend,
 		DeliveryStore: backend, DeliveryRuntime: eb, DecisionCards: cards, HumanTasks: cards,
 		ProposedEffects: backend, DecisionCardDraftExpiry: backend, HumanTaskExpiry: backend,
-		GatePublisher: eb, DirectDecisionPublisher: eb,
 		PipelineObligations: backend.PipelineObligations(), ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
@@ -1054,8 +1053,8 @@ func newReplyConformanceStore() *replyConformanceStore {
 	}
 }
 
-func (s *replyConformanceStore) CommitPublish(ctx context.Context, plan bus.CommitPublishPlan) (bus.PreparedPublish, error) {
-	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req bus.CommitPublishRequest) error {
+func (s *replyConformanceStore) CommitPublication(ctx context.Context, command bus.PublicationCommand) (bus.CommittedPublication, error) {
+	return runtimebustest.CommitPublish(ctx, command, nil, func(_ context.Context, req bus.CommitPublishRequest) error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.events[req.Event.ID()] = req.Event.Event()

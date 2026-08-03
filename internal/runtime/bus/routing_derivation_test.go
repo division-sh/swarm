@@ -26,7 +26,7 @@ func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
 		Produces:     []string{"task.started"},
 		SubscribesTo: []string{"task.started"},
 	})
-	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestEventBusFlowInstanceTemplateDerivesSubscriptionsFromHandlerKeys(t *test
 			"task.started": {Emit: runtimecontracts.EmitSpec{Event: "task.started"}},
 		},
 	})
-	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -91,12 +91,6 @@ func (s *routePersistenceTestStore) ListActiveFlowInstanceDescriptors(context.Co
 		}
 	}
 	return out, nil
-}
-
-func (s *routePersistenceTestStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return prepareTestCommitPublish(ctx, plan, &testCommitPublishTransaction{finalize: func(ctx context.Context, req runtimebus.CommitPublishRequest) error {
-		return s.InsertEventDeliveryRoutes(ctx, req.Event.ID(), req.DeliveryRoutes)
-	}})
 }
 
 func (s *routePersistenceTestStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
@@ -160,8 +154,13 @@ func (s *routePersistenceTestStore) ReplaceFlowInstanceRouteTopology(
 	ctx context.Context,
 	sets []runtimebus.FlowInstanceRouteRecordSet,
 ) error {
+	before := make(map[string]runtimebus.FlowInstanceRouteRecord, len(s.routes))
+	for key, route := range s.routes {
+		before[key] = route
+	}
 	for _, set := range sets {
 		if err := s.ReplaceFlowInstanceRouteRecords(ctx, set.Identity, set.Routes); err != nil {
+			s.routes = before
 			return err
 		}
 	}
@@ -493,20 +492,21 @@ func TestEventBusFlowInstanceRouteIdentityOwnerRejectsMismatchedExplicitPath(t *
 	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].Recipient.ID() != "reviewer-inst-1" {
 		t.Fatalf("routes after exact replay = %#v, want one installed owner route", got)
 	}
+	replaceCalls := len(store.replaceCalls)
 	mismatched := runtimeflowidentity.StoredRoute("worker", "other", installed.InstancePath)
 	if eb.RouteTable().HasFlowInstanceRoute(mismatched) {
 		t.Fatal("HasFlowInstanceRoute accepted a different identity at the installed path")
 	}
 	mismatchedReq := req
 	mismatchedReq.Identity = mismatched
-	if err := eb.AddFlowInstanceRoute(mismatchedReq); err == nil || !strings.Contains(err.Error(), "is owned by scope") {
+	if err := eb.AddFlowInstanceRoute(mismatchedReq); err == nil || !strings.Contains(err.Error(), "identity is inconsistent") {
 		t.Fatalf("mismatched AddFlowInstanceRoute error = %v, want complete-owner conflict", err)
 	}
 	if err := eb.RemoveFlowInstanceRoute(mismatched); err == nil || !strings.Contains(err.Error(), "is owned by scope") {
 		t.Fatalf("mismatched RemoveFlowInstanceRoute error = %v, want complete-owner conflict", err)
 	}
-	if len(store.replaceCalls) != 0 {
-		t.Fatalf("persistence replacement calls = %#v, want none for rejected removal", store.replaceCalls)
+	if len(store.replaceCalls) != replaceCalls {
+		t.Fatalf("persistence replacement calls = %#v, want unchanged after rejected removal", store.replaceCalls)
 	}
 	if !eb.RouteTable().HasFlowInstanceRoute(installed) {
 		t.Fatal("installed identity disappeared after mismatched add/remove")
@@ -522,13 +522,13 @@ func TestEventBusFlowInstanceRouteIdentityOwnerRejectsMismatchedExplicitPath(t *
 	if err := eb.RemoveFlowInstanceRoute(normalizedRemoval); err != nil {
 		t.Fatalf("RemoveFlowInstanceRoute owner: %v", err)
 	}
-	if len(store.replaceCalls) != 1 || store.replaceCalls[0] != installed {
-		t.Fatalf("persistence replacement calls = %#v, want one canonical owner", store.replaceCalls)
+	if len(store.replaceCalls) != replaceCalls+1 || store.replaceCalls[len(store.replaceCalls)-1] != installed {
+		t.Fatalf("persistence replacement calls = %#v, want one canonical owner removal after setup", store.replaceCalls)
 	}
 	if err := eb.RemoveFlowInstanceRoute(normalizedRemoval); err != nil {
 		t.Fatalf("exact RemoveFlowInstanceRoute replay: %v", err)
 	}
-	if len(store.replaceCalls) != 2 {
+	if len(store.replaceCalls) != replaceCalls+2 {
 		t.Fatalf("persistence replacement calls after absent replay = %#v, want exact replay reconciliation", store.replaceCalls)
 	}
 }
@@ -568,7 +568,7 @@ func TestEventBusFlowInstanceRoutesPersistAcrossAddAndRemove(t *testing.T) {
 	}
 }
 
-func TestEventBusAddFlowInstanceRouteRollsBackPersistedRouteOnActiveInstallFailure(t *testing.T) {
+func TestEventBusAddFlowInstanceRouteDoesNotPublishWhenTopologyCommitFails(t *testing.T) {
 	store := &routePersistenceTestStore{
 		upsertErr:        context.DeadlineExceeded,
 		upsertAfterWrite: true,
@@ -592,8 +592,8 @@ func TestEventBusAddFlowInstanceRouteRollsBackPersistedRouteOnActiveInstallFailu
 	if len(store.routes) != 0 {
 		t.Fatalf("persisted routes after rollback = %#v, want none", store.routes)
 	}
-	if len(store.rollbackCalls) != 1 || store.rollbackCalls[0] != "review/inst-1" {
-		t.Fatalf("rollback calls = %#v, want [review/inst-1]", store.rollbackCalls)
+	if len(store.rollbackCalls) != 0 {
+		t.Fatalf("external rollback calls = %#v, want none because the named operation owns rollback", store.rollbackCalls)
 	}
 	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 0 {
 		t.Fatalf("resolved subscribers after failed add = %#v, want none", got)
@@ -656,7 +656,7 @@ func TestEventBusRemoveNestedFlowInstanceDropsDerivedRoutes(t *testing.T) {
 		Produces:     []string{"micro.started"},
 		SubscribesTo: []string{"micro.started"},
 	})
-	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newScopedTestEventBus(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

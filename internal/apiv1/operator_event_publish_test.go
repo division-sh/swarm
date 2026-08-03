@@ -1937,11 +1937,11 @@ type failCommittedReplayScopeStore struct {
 	err error
 }
 
-func (s *failCommittedReplayScopeStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+func (s *failCommittedReplayScopeStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
 	if s.err != nil {
-		return runtimebus.PreparedPublish{}, s.err
+		return runtimebus.CommittedPublication{}, s.err
 	}
-	return s.PostgresStore.CommitPublish(ctx, plan)
+	return s.PostgresStore.CommitPublication(ctx, command)
 }
 
 type failNormalRunCompletionStore struct {

@@ -43,10 +43,6 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 	if len(intents) == 0 || w.coordinator == nil || w.coordinator.bus == nil {
 		return nil
 	}
-	outbox := w.coordinator.bus.EngineOutbox()
-	if outbox == nil {
-		return fmt.Errorf("activity intent writer requires pipeline outbox")
-	}
 	immediate := make([]runtimeengine.ActivityIntent, 0, len(intents))
 	for _, intent := range intents {
 		intent = intent.Normalized()
@@ -55,11 +51,7 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 		}
 		immediate = append(immediate, intent)
 	}
-	requests, err := activityRequestEmitIntents(immediate)
-	if err != nil {
-		return err
-	}
-	if err := outbox.WriteOutbox(ctx, requests); err != nil {
+	if _, err := activityRequestEmitIntents(immediate); err != nil {
 		return err
 	}
 	for _, intent := range intents {

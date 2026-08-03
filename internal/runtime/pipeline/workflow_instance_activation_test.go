@@ -798,7 +798,7 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 			return err
 		},
 	}
-	pc.workflowTimers = newWorkflowTimerLifecycle(store, pc.SemanticSource(), pc.bus, pc.gatePublisher, pc.workOwner, pc.timerScheduler)
+	pc.workflowTimers = newWorkflowTimerLifecycle(store, pc.SemanticSource(), pc.bus, pc.workOwner, pc.timerScheduler)
 	store.lifecycleOwner = pipelineWorkflowLifecycleOwner{coordinator: pc}
 	trigger := eventtest.RunCreatingRootIngress(
 		"",

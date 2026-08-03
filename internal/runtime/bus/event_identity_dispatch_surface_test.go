@@ -280,8 +280,6 @@ func newCompleteEventDispatchFixtureWithOrigin(
 			HumanTasks:              selected,
 			DecisionCardDraftExpiry: selected,
 			HumanTaskExpiry:         selected,
-			GatePublisher:           bus,
-			DirectDecisionPublisher: bus,
 			DeliveryRuntime:         bus,
 			ReceiverExecution:       eventreceiver.NormalExecution(),
 		})

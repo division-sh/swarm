@@ -116,10 +116,6 @@ type recordingPipelineDispatcher struct {
 	bus *recordingPipelineBus
 }
 
-type recordingPipelineOutbox struct {
-	bus *recordingPipelineBus
-}
-
 func (b *recordingPipelineBus) Publish(ctx context.Context, evt events.Event) error {
 	if b.publishErr != nil {
 		return b.publishErr
@@ -187,24 +183,8 @@ func (b *recordingPipelineBus) LogRuntime(_ context.Context, entry RuntimeLogEnt
 	b.runtimeLogs = append(b.runtimeLogs, entry)
 	return b.runtimeLogErr
 }
-func (b *recordingPipelineBus) EngineOutbox() runtimeengine.OutboxWriter {
-	return recordingPipelineOutbox{bus: b}
-}
 func (b *recordingPipelineBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return recordingPipelineDispatcher{bus: b}
-}
-
-func (o recordingPipelineOutbox) WriteOutbox(_ context.Context, intents []runtimeengine.EmitIntent) error {
-	if o.bus == nil {
-		return nil
-	}
-	if o.bus.outboxErr != nil {
-		return o.bus.outboxErr
-	}
-	o.bus.mu.Lock()
-	defer o.bus.mu.Unlock()
-	o.bus.outboxIntents = append(o.bus.outboxIntents, cloneEmitIntents(intents)...)
-	return nil
 }
 
 func (d recordingPipelineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error {
@@ -2580,33 +2560,6 @@ func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *t
 	}
 	if got := int(payload["score"].(float64)); got != 91 {
 		t.Fatalf("score = %#v, want 91", payload["score"])
-	}
-}
-
-func TestExecuteNodeContractHandlerOnSuccessOutboxFailureDoesNotPartiallyPublish(t *testing.T) {
-	bus := &recordingPipelineBus{outboxErr: errors.New("outbox failed")}
-	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
-		Module: &previewWorkflowModule{bundle: additiveOnSuccessContractBundle()},
-	})
-
-	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
-		AdvancesTo: "done",
-		OnSuccess:  runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
-		Rules: []runtimecontracts.HandlerRuleEntry{
-			{ID: "pick-rule", Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
-		},
-	}, workflowTriggerContext{
-		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
-		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
-	}, false)
-	if err == nil || !strings.Contains(err.Error(), "outbox failed") {
-		t.Fatalf("executeNodeContractHandler error = %v, want outbox failed", err)
-	}
-	if got := len(bus.outboxIntents); got != 0 {
-		t.Fatalf("outbox intents len = %d, want 0 after outbox failure", got)
-	}
-	if got := bus.publishedCount(); got != 0 {
-		t.Fatalf("bus published count = %d, want 0 after outbox failure", got)
 	}
 }
 

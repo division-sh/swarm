@@ -39,8 +39,6 @@ type gateLifecycleCardStore struct {
 
 func newGateLifecyclePipelineCoordinator(bus *recordingPipelineBus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
 	opts.PipelineObligations = unavailablePipelineTestObligationOwner{}
-	opts.GatePublisher = bus
-	opts.DirectDecisionPublisher = bus
 	if opts.Persistence.store != nil {
 		if runner, ok := opts.Persistence.store.engineMutations.(*recordingRuntimeMutationRunner); ok {
 			runner.decisionCards = opts.DecisionCards

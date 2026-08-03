@@ -160,8 +160,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				PipelineObligations:  pipelineObligations,
 				Credentials:          credentialStore,
 				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{privateToolID: privateTarget},
-				GatePublisher:        bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-				FlowRoutes: bus,
+				FlowRoutes:           bus,
 			})
 
 			stopActivityNode := startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
@@ -277,8 +276,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				DeliveryStore:       deliveryStore,
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
-				GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-				FlowRoutes: bus,
+				FlowRoutes:          bus,
 				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{
 					privateToolID: replacementTarget,
 				},
@@ -303,8 +301,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				DeliveryStore:       deliveryStore,
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
-				GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-				FlowRoutes: bus,
+				FlowRoutes:          bus,
 				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{
 					replacementToolID: replacementTarget,
 				},

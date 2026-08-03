@@ -204,8 +204,6 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		HumanTasks:              selected,
 		DecisionCardDraftExpiry: selected,
 		HumanTaskExpiry:         selected,
-		GatePublisher:           eventBus,
-		DirectDecisionPublisher: eventBus,
 		DeliveryRuntime:         eventBus, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 

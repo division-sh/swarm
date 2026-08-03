@@ -74,7 +74,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 					withSource := failure.name != "lineage"
 					req := newSelectedForkAtomicityRequest(t, ctx, fixture, withSource)
 					failure.mutate(&req)
-					if outcome, err := fixture.store.(eventRecordContractStore).CommitSelectedForkEvent(ctx, req); err == nil || outcome != runtimebus.EventAppendOutcomeUnknown {
+					if outcome, err := commitSelectedForkEventOutcome(ctx, fixture.store.(eventRecordContractStore), req); err == nil || outcome != runtimebus.EventAppendOutcomeUnknown {
 						t.Fatalf("outcome=%v err=%v, want rollback failure", outcome, err)
 					}
 					assertSelectedForkOperationCounts(t, ctx, fixture, req.Commit.Event.ID(), selectedForkOperationCounts{})
@@ -87,7 +87,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 				store := fixture.store.(eventRecordContractStore)
 				req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)
 				req.Commit.DeliveryRoutes = []events.DeliveryRoute{testAgentDeliveryRoute(t, "worker", "fixture/worker")}
-				outcome, err := store.CommitSelectedForkEvent(ctx, req)
+				outcome, err := commitSelectedForkEventOutcome(ctx, store, req)
 				if err != nil || outcome != runtimebus.EventAppendInserted {
 					t.Fatalf("initial outcome=%v err=%v", outcome, err)
 				}
@@ -99,7 +99,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 				disposition := runtimepipelineobligation.Terminal("fixture_error", &runtimefailures.Envelope{})
 				duplicate.Commit.Disposition = &disposition
 				duplicate.Commit.DeadLetter = &runtimedeadletters.Record{OriginalEventID: uuid.NewString()}
-				outcome, err = store.CommitSelectedForkEvent(ctx, duplicate)
+				outcome, err = commitSelectedForkEventOutcome(ctx, store, duplicate)
 				if err != nil || outcome != runtimebus.EventAppendExactDuplicate {
 					t.Fatalf("duplicate outcome=%v err=%v", outcome, err)
 				}
@@ -112,7 +112,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 				}
 				conflicting := req
 				conflicting.Commit.Event = conflict
-				if outcome, err := store.CommitSelectedForkEvent(ctx, conflicting); !errors.Is(err, ErrEventIdentityConflict) || outcome != runtimebus.EventAppendOutcomeUnknown {
+				if outcome, err := commitSelectedForkEventOutcome(ctx, store, conflicting); !errors.Is(err, ErrEventIdentityConflict) || outcome != runtimebus.EventAppendOutcomeUnknown {
 					t.Fatalf("conflict outcome=%v err=%v", outcome, err)
 				}
 				assertSelectedForkOperationCounts(t, ctx, fixture, req.Commit.Event.ID(), want)
@@ -138,7 +138,7 @@ func TestCommitSelectedForkEventHostileRepeatPostgres(t *testing.T) {
 		go func() {
 			defer workers.Done()
 			<-start
-			outcome, err := store.CommitSelectedForkEvent(ctx, req)
+			outcome, err := commitSelectedForkEventOutcome(ctx, store, req)
 			results <- outcome
 			errorsSeen <- err
 		}()
@@ -203,7 +203,7 @@ func TestSQLiteCommitSelectedForkEventSerializesWithClaimAbandonment(t *testing.
 	}
 	commitDone := make(chan commitResult, 1)
 	go func() {
-		outcome, err := selected.CommitSelectedForkEvent(ctx, req)
+		outcome, err := commitSelectedForkEventOutcome(ctx, selected, req)
 		commitDone <- commitResult{outcome: outcome, err: err}
 	}()
 	<-commitLocked
@@ -336,7 +336,7 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 	return runtimebus.CommitSelectedForkEventRequest{
 		Commit: runtimebus.CommitPublishRequest{
 			Event: admitted, ReplayScope: runtimepipelineobligation.ScopeDirect, PipelineClaim: claim,
-			DeliveryAuthority: deliveryAuthority, DeliveryReceipt: &runtimebus.DeliveryCommitReceipt{},
+			DeliveryAuthority: deliveryAuthority,
 		},
 		Lineage: runfork.RunForkSelectedContractExecutionLineage{
 			ForkRunID: forkRunID, SourceRunID: sourceRunID, SourceEventID: sourceEventID,

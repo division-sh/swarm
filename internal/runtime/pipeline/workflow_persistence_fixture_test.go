@@ -10,6 +10,7 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
 
@@ -40,9 +41,13 @@ func registerWorkflowPersistenceFixture(store *workflowInstanceStore, db *sql.DB
 }
 
 func workflowStoreForRecordingRunner(runner *recordingRuntimeMutationRunner) *workflowInstanceStore {
+	dialect := runner.dialect
+	if dialect == "" {
+		dialect = workflowStoreDialectSQLite
+	}
 	store := newWorkflowPersistenceFixtureStore(runner)
 	store.decisionCards = runner.decisionCards
-	return registerWorkflowPersistenceFixture(store, runner.db, runner.dialect, runner)
+	return registerWorkflowPersistenceFixture(store, runner.db, dialect, runner)
 }
 
 func (s *workflowInstanceStore) testFixture() workflowPersistenceFixture {
@@ -145,7 +150,7 @@ func (s *workflowInstanceStore) persistFixtureWorkflowInstance(ctx context.Conte
 	}
 	if found {
 		if createOnly {
-			return fmt.Errorf("workflow instance %s already exists", identity.StorageRef)
+			return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-store", "create", map[string]any{"flow_instance": identity.StorageRef})
 		}
 		create = false
 		expectedState = current.CurrentState

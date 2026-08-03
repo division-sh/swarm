@@ -225,7 +225,6 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		if !ok {
 			return contractHandlerExecutionResult{}, fmt.Errorf("pipeline engine mutation owner is unavailable")
 		}
-		owner.outbox = noOpEngineOutbox{}
 		deps.MutationOwner = owner
 	}
 	exec, err := runtimeengine.NewExecutor(deps, newCoordinatorEngineEvaluator(pc))

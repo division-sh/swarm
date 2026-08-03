@@ -88,12 +88,6 @@ type unavailableFlowActivationProposedEffects struct {
 	decisioncard.ProposedEffectStore
 }
 type unavailableFlowActivationHumanTasks struct{ decisioncard.HumanTaskStore }
-type unavailableFlowActivationGatePublisher struct {
-	runtimepipeline.WorkflowGateMutationPublisher
-}
-type unavailableFlowActivationDirectDecisionPublisher struct {
-	runtimepipeline.DecisionCardDirectMutationPublisher
-}
 type unavailableFlowActivationDeliveryRuntime struct {
 	runtimepipeline.WorkflowDeliveryRuntime
 }
@@ -119,8 +113,6 @@ func completeFlowActivationWorkflowOptions(opts runtimepipeline.PipelineCoordina
 	opts.HumanTasks = &unavailableFlowActivationHumanTasks{}
 	opts.DecisionCardDraftExpiry = &unavailableFlowActivationDecisionCardDraftExpiry{}
 	opts.HumanTaskExpiry = &unavailableFlowActivationHumanTaskExpiry{}
-	opts.GatePublisher = &unavailableFlowActivationGatePublisher{}
-	opts.DirectDecisionPublisher = &unavailableFlowActivationDirectDecisionPublisher{}
 	opts.DeliveryRuntime = &unavailableFlowActivationDeliveryRuntime{}
 	return opts
 }
@@ -981,7 +973,6 @@ func (b *flowActivationTestBus) PublishInMutation(ctx context.Context, evt event
 }
 
 func (*flowActivationTestBus) ResolveSubscribedRecipients(string) []string { return nil }
-func (*flowActivationTestBus) EngineOutbox() runtimeengine.OutboxWriter    { return nil }
 func (*flowActivationTestBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return nil
 }

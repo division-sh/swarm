@@ -54,15 +54,8 @@ type recoveryGuardEventLease struct{}
 
 func (recoveryGuardEventLease) Release(context.Context) error { return nil }
 
-func (*recoveryGuardEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
-	if err := command.Validate(); err != nil {
-		return runtimebus.CommittedPublication{}, err
-	}
-	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
-}
-
-func (*recoveryGuardEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublishNoop(ctx, plan)
+func (*recoveryGuardEventStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublishNoop(ctx, command)
 }
 func (*recoveryGuardEventStore) UpsertCommittedReplayScope(context.Context, string, runtimepipelineobligation.CommittedScope) error {
 	return nil
@@ -96,15 +89,8 @@ func (s *recoveryGuardEventStore) ReconcileDirectiveOperations(context.Context, 
 
 type minimalRuntimeEventStore struct{}
 
-func (*minimalRuntimeEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
-	if err := command.Validate(); err != nil {
-		return runtimebus.CommittedPublication{}, err
-	}
-	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
-}
-
-func (*minimalRuntimeEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublishNoop(ctx, plan)
+func (*minimalRuntimeEventStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublishNoop(ctx, command)
 }
 func (*minimalRuntimeEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, nil

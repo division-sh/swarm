@@ -105,8 +105,6 @@ type gateRecoveryDecisionStore interface {
 
 type gateRecoveryRuntimeBus interface {
 	runtimepipeline.Bus
-	runtimepipeline.WorkflowGateMutationPublisher
-	runtimepipeline.DecisionCardDirectMutationPublisher
 	runtimepipeline.WorkflowDeliveryRuntime
 }
 
@@ -124,8 +122,6 @@ func newGateRecoveryCoordinator(bus gateRecoveryRuntimeBus, selected gateRecover
 	opts.HumanTasks = selected.cards
 	opts.DecisionCardDraftExpiry = selected.cards
 	opts.HumanTaskExpiry = selected.cards
-	opts.GatePublisher = bus
-	opts.DirectDecisionPublisher = bus
 	opts.DeliveryRuntime = bus
 	opts.RunLifecycle = selected.events
 	if opts.PipelineObligations == nil {
@@ -143,7 +139,6 @@ type proposedEffectRouteProofBus struct {
 	prepared        map[string]runtimeengine.EmitIntent
 }
 
-type proposedEffectRouteProofOutbox struct{ bus *proposedEffectRouteProofBus }
 type proposedEffectRouteProofDispatcher struct{ bus *proposedEffectRouteProofBus }
 
 func (b *proposedEffectRouteProofBus) PipelineObligationOwner() runtimepipelineobligation.Store {
@@ -163,9 +158,6 @@ func (*proposedEffectRouteProofBus) PublishDirect(context.Context, events.Event,
 func (*proposedEffectRouteProofBus) ResolveSubscribedRecipients(string) []string { return nil }
 func (*proposedEffectRouteProofBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
 	return nil
-}
-func (b *proposedEffectRouteProofBus) EngineOutbox() runtimeengine.OutboxWriter {
-	return proposedEffectRouteProofOutbox{bus: b}
 }
 func (b *proposedEffectRouteProofBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return proposedEffectRouteProofDispatcher{bus: b}
@@ -208,27 +200,6 @@ func (b *proposedEffectRouteProofBus) FinalizeEnginePublications(ctx context.Con
 	}
 	return nil
 }
-func (b *proposedEffectRouteProofBus) PublishInMutation(ctx context.Context, evt events.Event) error {
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return errors.New("proposed-effect proof publication requires pipeline transaction")
-	}
-	if b.eventBus == nil {
-		return errors.New("proposed-effect proof publication requires event bus")
-	}
-	if err := b.eventBus.PublishInMutation(ctx, evt); err != nil {
-		return err
-	}
-	b.published = append(b.published, events.NewContextDeliveryEvent(evt, events.DeliveryContextFromContext(ctx)).Event())
-	b.publishContexts = append(b.publishContexts, events.DeliveryContextFromContext(ctx))
-	return nil
-}
-func (b *proposedEffectRouteProofBus) PublishDirectInMutation(ctx context.Context, evt events.Event, recipients []string) error {
-	if b == nil || b.eventBus == nil {
-		return errors.New("proposed-effect proof direct publication requires event bus")
-	}
-	return b.eventBus.PublishDirectInMutation(ctx, evt, recipients)
-}
 func (b *proposedEffectRouteProofBus) DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error) {
 	if b == nil || b.eventBus == nil {
 		return runtimedelivery.ExecutionAuthority{}, errors.New("proposed-effect proof delivery authority requires event bus")
@@ -252,17 +223,6 @@ func (b *proposedEffectRouteProofBus) RetainDeliveryContinuation(snapshot runtim
 		return errors.New("proposed-effect proof delivery continuation requires event bus")
 	}
 	return b.eventBus.RetainDeliveryContinuation(snapshot)
-}
-func (o proposedEffectRouteProofOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.EmitIntent) error {
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil || o.bus.eventBus == nil {
-		return errors.New("proposed-effect proof outbox requires pipeline event mutation")
-	}
-	if err := o.bus.eventBus.EngineOutbox().WriteOutbox(ctx, intents); err != nil {
-		return err
-	}
-	o.bus.outbox = append(o.bus.outbox, intents...)
-	return nil
 }
 func (d proposedEffectRouteProofDispatcher) DispatchPostCommit(_ context.Context, intents []runtimeengine.EmitIntent) error {
 	d.bus.dispatched = append(d.bus.dispatched, intents...)

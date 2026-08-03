@@ -52,20 +52,6 @@ func completeAPITestDurableWorkflowOptions(t testing.TB, selected any, bus any, 
 	if opts.HumanTaskExpiry == nil {
 		opts.HumanTaskExpiry = roles
 	}
-	if opts.GatePublisher == nil {
-		publisher, ok := bus.(runtimepipeline.WorkflowGateMutationPublisher)
-		if !ok {
-			t.Fatalf("API test bus %T does not provide workflow gate publication", bus)
-		}
-		opts.GatePublisher = publisher
-	}
-	if opts.DirectDecisionPublisher == nil {
-		publisher, ok := bus.(runtimepipeline.DecisionCardDirectMutationPublisher)
-		if !ok {
-			t.Fatalf("API test bus %T does not provide direct decision publication", bus)
-		}
-		opts.DirectDecisionPublisher = publisher
-	}
 	if opts.DeliveryRuntime == nil {
 		deliveryRuntime, ok := bus.(runtimepipeline.WorkflowDeliveryRuntime)
 		if !ok {

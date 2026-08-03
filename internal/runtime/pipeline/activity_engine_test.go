@@ -40,7 +40,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestPipelineActivityIntentWriterPersistsDurableActivityRequestEvent(t *testing.T) {
+func TestPipelineActivityIntentWriterValidatesWithoutPersisting(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	bus := &recordingPipelineBus{}
 	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
@@ -53,10 +53,13 @@ func TestPipelineActivityIntentWriterPersistsDurableActivityRequestEvent(t *test
 	if err := writer.WriteActivityIntents(testAuthorActivityContext(t, context.Background()), []runtimeengine.ActivityIntent{intent}); err != nil {
 		t.Fatalf("WriteActivityIntents: %v", err)
 	}
-	if got := bus.outboxCount(); got != 1 {
-		t.Fatalf("outbox intents = %d, want 1", got)
+	if got := bus.outboxCount(); got != 0 {
+		t.Fatalf("outbox intents = %d, want none outside the named engine mutation", got)
 	}
-	request := bus.outboxIntent(0)
+	request, err := activityRequestEmitIntent(intent)
+	if err != nil {
+		t.Fatalf("activityRequestEmitIntent: %v", err)
+	}
 	if got := request.Event.Type(); got != activityRequestEventType {
 		t.Fatalf("request event type = %q, want %q", got, activityRequestEventType)
 	}
@@ -263,7 +266,7 @@ func TestActivityExecutionContextRejectsCausalModeConflict(t *testing.T) {
 	}
 }
 
-func TestPipelineActivityIntentWriterDefersRuntimeLogUntilPostCommit(t *testing.T) {
+func TestPipelineActivityIntentWriterDoesNotUseAmbientPostCommitAuthority(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	bus := &recordingPipelineBus{}
 	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
@@ -279,16 +282,15 @@ func TestPipelineActivityIntentWriterDefersRuntimeLogUntilPostCommit(t *testing.
 	if err := writer.WriteActivityIntents(ctx, []runtimeengine.ActivityIntent{testActivityIntent("https://example.com/source")}); err != nil {
 		t.Fatalf("WriteActivityIntents: %v", err)
 	}
-	if got := len(bus.runtimeLogEntries()); got != 0 {
-		t.Fatalf("runtime logs before commit = %d, want 0", got)
+	if got := len(bus.runtimeLogEntries()); got != 1 {
+		t.Fatalf("runtime logs = %d, want immediate non-transactional diagnostic", got)
 	}
-	if got := len(postCommit); got != 1 {
-		t.Fatalf("post-commit actions = %d, want 1", got)
+	if got := len(postCommit); got != 0 {
+		t.Fatalf("post-commit actions = %d, want none", got)
 	}
-	FlushPipelinePostCommitActions(postCommit)
 	logs := bus.runtimeLogEntries()
 	if len(logs) != 1 || logs[0].Action != "intent_persisted" {
-		t.Fatalf("runtime logs after commit = %#v, want one intent_persisted entry", logs)
+		t.Fatalf("runtime logs = %#v, want one intent_persisted entry", logs)
 	}
 }
 

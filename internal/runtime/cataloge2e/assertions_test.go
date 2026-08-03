@@ -23,20 +23,13 @@ import (
 type catalogPersistenceBus struct{}
 
 func (catalogPersistenceBus) Publish(context.Context, events.Event) error { return nil }
-func (catalogPersistenceBus) PublishInMutation(context.Context, events.Event) error {
-	return nil
-}
 func (catalogPersistenceBus) PublishDirect(context.Context, events.Event, []string) error {
-	return nil
-}
-func (catalogPersistenceBus) PublishDirectInMutation(context.Context, events.Event, []string) error {
 	return nil
 }
 func (catalogPersistenceBus) ResolveSubscribedRecipients(string) []string { return nil }
 func (catalogPersistenceBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
 	return nil
 }
-func (catalogPersistenceBus) EngineOutbox() runtimeengine.OutboxWriter             { return nil }
 func (catalogPersistenceBus) EngineDispatcher() runtimeengine.PostCommitDispatcher { return nil }
 func (catalogPersistenceBus) DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error) {
 	return runtimedelivery.ExecutionAuthority{}, nil
@@ -269,8 +262,6 @@ func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 		HumanTasks:              pg,
 		DecisionCardDraftExpiry: pg,
 		HumanTaskExpiry:         pg,
-		GatePublisher:           bus,
-		DirectDecisionPublisher: bus,
 		DeliveryRuntime:         bus, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 

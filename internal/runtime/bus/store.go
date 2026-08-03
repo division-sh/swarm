@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -28,10 +27,6 @@ var (
 
 type EventStore interface {
 	ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error)
-}
-
-type CommitPublishOwner interface {
-	CommitPublish(ctx context.Context, plan CommitPublishPlan) (PreparedPublish, error)
 }
 
 // CommitPublicationOwner owns the closed selected-store publication
@@ -78,6 +73,9 @@ type PublicationCommand struct {
 }
 
 func (c PublicationCommand) Validate() error {
+	if err := events.ValidateGenericPublishEvent(c.Commit.Event.Event()); err != nil {
+		return err
+	}
 	if err := events.ValidatePersistentEvent(c.Commit.Event.Event()); err != nil {
 		return err
 	}
@@ -163,14 +161,6 @@ type PreparedPublishEventReader interface {
 	LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error)
 }
 
-// CommitPublishPlan is a sealed EventBus-owned publication plan. Selected
-// stores execute only this exact semantic plan inside their transaction; no
-// caller-supplied function or transaction capability crosses the boundary.
-type CommitPublishPlan interface {
-	PrepareCommitPublish(context.Context) (PreparedPublish, error)
-	commitPublishPlan()
-}
-
 type EventAppendOutcome uint8
 
 const (
@@ -186,7 +176,6 @@ type CommitPublishRequest struct {
 	Event             events.AdmittedEvent
 	DeliveryRoutes    []events.DeliveryRoute
 	DeliveryAuthority runtimedelivery.ExecutionAuthority
-	DeliveryReceipt   *DeliveryCommitReceipt
 	ReplayScope       runtimepipelineobligation.CommittedScope
 	PipelineClaim     runtimepipelineobligation.Claim
 	Disposition       *runtimepipelineobligation.Disposition
@@ -200,100 +189,21 @@ type CommitSelectedForkEventRequest struct {
 	Lineage runfork.RunForkSelectedContractExecutionLineage
 }
 
-// DeliveryCommitReceipt is the transaction result channel for exact committed
-// delivery handoffs. Only the selected-store commit owner may populate it;
-// dispatch consumers receive an immutable copy after commit.
-type DeliveryCommitReceipt struct {
-	mu       sync.Mutex
-	recorded bool
-	proofs   []runtimedelivery.DurableHandoffProof
+type CommittedSelectedForkEvent struct {
+	AppendOutcome    EventAppendOutcome
+	DeliveryHandoffs []runtimedelivery.DurableHandoffProof
 }
 
-func newDeliveryCommitReceipt() *DeliveryCommitReceipt {
-	return &DeliveryCommitReceipt{}
-}
-
-func (r *DeliveryCommitReceipt) Record(proofs []runtimedelivery.DurableHandoffProof) error {
-	if r == nil {
-		return errors.New("delivery commit receipt is required")
+func (r CommittedSelectedForkEvent) Validate() error {
+	if err := validateEventAppendOutcome(r.AppendOutcome); err != nil {
+		return err
 	}
-	for _, proof := range proofs {
-		if err := proof.Validate(); err != nil {
-			return err
+	for index, handoff := range r.DeliveryHandoffs {
+		if err := handoff.Validate(); err != nil {
+			return fmt.Errorf("committed selected-fork delivery handoff %d: %w", index, err)
 		}
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.recorded {
-		return errors.New("delivery commit receipt was already recorded")
-	}
-	r.recorded = true
-	r.proofs = append([]runtimedelivery.DurableHandoffProof(nil), proofs...)
 	return nil
-}
-
-func (r *DeliveryCommitReceipt) Handoffs() ([]runtimedelivery.DurableHandoffProof, error) {
-	if r == nil {
-		return nil, errors.New("delivery commit receipt is required")
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if !r.recorded {
-		return nil, errors.New("delivery commit receipt has not been recorded")
-	}
-	return append([]runtimedelivery.DurableHandoffProof(nil), r.proofs...), nil
-}
-
-// CommitPublishTransaction is the transaction-local half of the sealed
-// CommitPublish operation. The opaque values below can only be constructed by
-// EventBus, so this capability cannot be used as an alternate event writer.
-// Beginning the event before route materialization permits lifecycle writes to
-// reference it while finalization still commits every declared initial fact in
-// the same selected-store transaction.
-type CommitPublishTransaction interface {
-	LoadPreparedPublishEvent(ctx context.Context, eventID string) (events.AdmittedEvent, bool, error)
-	BeginPreparedPublish(ctx context.Context, event PreparedPublishEvent) (EventAppendOutcome, error)
-	FinalizePreparedPublish(ctx context.Context, finalization PreparedPublishFinalization) error
-}
-
-type PreparedPublishEvent struct {
-	event events.AdmittedEvent
-}
-
-func (e PreparedPublishEvent) AdmittedEvent() events.AdmittedEvent {
-	return e.event
-}
-
-type PreparedPublishFinalization struct {
-	request CommitPublishRequest
-}
-
-func (f PreparedPublishFinalization) Request() CommitPublishRequest {
-	return f.request
-}
-
-type commitPublishTransactionContextKey struct{}
-
-func WithCommitPublishTransaction(ctx context.Context, transaction CommitPublishTransaction) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return context.WithValue(ctx, commitPublishTransactionContextKey{}, transaction)
-}
-
-func CommitPublishTransactionFromContext(ctx context.Context) (CommitPublishTransaction, bool) {
-	if ctx == nil {
-		return nil, false
-	}
-	transaction, ok := ctx.Value(commitPublishTransactionContextKey{}).(CommitPublishTransaction)
-	return transaction, ok && transaction != nil
-}
-
-func WithoutCommitPublishTransaction(ctx context.Context) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return context.WithValue(ctx, commitPublishTransactionContextKey{}, nil)
 }
 
 type FlowInstanceRouteRecord struct {
@@ -538,67 +448,6 @@ func cloneFlowInstanceRouteTopology(sets []FlowInstanceRouteRecordSet) []FlowIns
 		}
 	}
 	return out
-}
-
-func (s InMemoryEventStore) CommitPublish(ctx context.Context, plan CommitPublishPlan) (PreparedPublish, error) {
-	if plan == nil {
-		return PreparedPublish{}, errors.New("event publish plan is required")
-	}
-	transaction := &inMemoryCommitPublishTransaction{}
-	return commitPublishInMemory(ctx, plan, transaction)
-}
-
-func commitPublishInMemory(ctx context.Context, plan CommitPublishPlan, transaction CommitPublishTransaction) (PreparedPublish, error) {
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
-	rollback := make([]runtimepipeline.OwnerAction, 0, 4)
-	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
-	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
-	prepared, err := plan.PrepareCommitPublish(WithCommitPublishTransaction(ctx, transaction))
-	if err != nil {
-		runtimepipeline.FlushPipelineRollbackActions(rollback)
-		return PreparedPublish{}, err
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return prepared, nil
-}
-
-type inMemoryCommitPublishTransaction struct {
-	activeEventIDs []string
-}
-
-func (*inMemoryCommitPublishTransaction) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
-	return events.AdmittedEvent{}, false, nil
-}
-
-func (t *inMemoryCommitPublishTransaction) BeginPreparedPublish(_ context.Context, event PreparedPublishEvent) (EventAppendOutcome, error) {
-	admitted := event.AdmittedEvent()
-	if err := events.ValidateGenericPublishEvent(admitted.Event()); err != nil {
-		return EventAppendOutcomeUnknown, err
-	}
-	if err := events.ValidatePersistentEvent(admitted.Event()); err != nil {
-		return EventAppendOutcomeUnknown, err
-	}
-	eventID := strings.TrimSpace(admitted.ID())
-	if eventID == "" {
-		return EventAppendOutcomeUnknown, errors.New("admitted event is required")
-	}
-	t.activeEventIDs = append(t.activeEventIDs, eventID)
-	return EventAppendInserted, nil
-}
-
-func (t *inMemoryCommitPublishTransaction) FinalizePreparedPublish(_ context.Context, finalization PreparedPublishFinalization) error {
-	request := finalization.Request()
-	if len(t.activeEventIDs) == 0 || t.activeEventIDs[len(t.activeEventIDs)-1] != request.Event.ID() {
-		return errors.New("prepared event finalization does not match the active event")
-	}
-	if request.DeliveryReceipt == nil {
-		return errors.New("in-memory event commit requires a delivery receipt")
-	}
-	if err := request.DeliveryReceipt.Record(nil); err != nil {
-		return err
-	}
-	t.activeEventIDs = t.activeEventIDs[:len(t.activeEventIDs)-1]
-	return nil
 }
 
 func (InMemoryEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {

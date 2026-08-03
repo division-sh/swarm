@@ -385,16 +385,20 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 			SelectionAuthority: c.proof.ExecutionOwner,
 			CreatedAt:          prepared.Event.CreatedAt(),
 		}
-		outcome, err := c.ports.replay.CommitSelectedForkEvent(eventCtx, runtimebus.CommitSelectedForkEventRequest{
+		committed, err := c.ports.replay.CommitSelectedForkEvent(eventCtx, runtimebus.CommitSelectedForkEventRequest{
 			Commit: prepared.CommitRequest(), Lineage: lineage,
 		})
 		if err != nil {
 			return out, errors.Join(err, bus.AbandonPreparedPublish(eventCtx, prepared))
 		}
-		committedPrepared, err := prepared.WithCommitOutcome(outcome)
+		if err := committed.Validate(); err != nil {
+			return out, errors.Join(err, bus.AbandonPreparedPublish(eventCtx, prepared))
+		}
+		committedPrepared, err := prepared.WithCommitOutcome(committed.AppendOutcome)
 		if err != nil {
 			return out, errors.Join(err, bus.AbandonPreparedPublish(eventCtx, prepared))
 		}
+		committedPrepared = committedPrepared.WithCommittedDeliveryHandoffs(committed.DeliveryHandoffs)
 		prepared = committedPrepared
 		if err := bus.DispatchPreparedPublishAndWait(eventCtx, prepared); err != nil {
 			return out, fmt.Errorf("%s dispatch committed selected-contract fork event %s as %s: %w",

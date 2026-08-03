@@ -47,67 +47,14 @@ import (
 
 const eventBusTestRunID = "99999999-9999-9999-9999-999999999999"
 
-type testCommitPublishTransaction struct {
-	active   []string
-	begin    func(context.Context, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
-	finalize func(context.Context, runtimebus.CommitPublishRequest) error
-}
-
-func (*testCommitPublishTransaction) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
-	return events.AdmittedEvent{}, false, nil
-}
-
-func (t *testCommitPublishTransaction) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
-	outcome := runtimebus.EventAppendInserted
-	var err error
-	if t.begin != nil {
-		outcome, err = t.begin(ctx, prepared.AdmittedEvent())
-	}
-	if err == nil && outcome == runtimebus.EventAppendInserted {
-		t.active = append(t.active, prepared.AdmittedEvent().ID())
-	}
-	return outcome, err
-}
-
-func (t *testCommitPublishTransaction) FinalizePreparedPublish(ctx context.Context, finalization runtimebus.PreparedPublishFinalization) error {
-	req := finalization.Request()
-	if len(t.active) == 0 || t.active[len(t.active)-1] != req.Event.ID() {
-		return errors.New("prepared event finalization does not match the active event")
-	}
-	if t.finalize != nil {
-		if err := t.finalize(ctx, req); err != nil {
-			return err
-		}
-	}
-	if err := req.DeliveryReceipt.Record(nil); err != nil {
-		return err
-	}
-	t.active = t.active[:len(t.active)-1]
-	return nil
-}
-
-func prepareTestCommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan, transaction *testCommitPublishTransaction) (runtimebus.PreparedPublish, error) {
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
-	rollback := make([]runtimepipeline.OwnerAction, 0, 4)
-	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
-	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
-	prepared, err := plan.PrepareCommitPublish(runtimebus.WithCommitPublishTransaction(ctx, transaction))
-	if err != nil {
-		runtimepipeline.FlushPipelineRollbackActions(rollback)
-		return runtimebus.PreparedPublish{}, err
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return prepared, nil
-}
-
 type retainedConnectionCommitStore struct {
 	runtimebus.InMemoryEventStore
 	conn *sql.Conn
 }
 
-func (s *retainedConnectionCommitStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+func (s *retainedConnectionCommitStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
 	ctx = runtimepipeline.WithPipelineSQLConnContext(ctx, s.conn)
-	return prepareTestCommitPublish(ctx, plan, &testCommitPublishTransaction{})
+	return s.InMemoryEventStore.CommitPublication(ctx, command)
 }
 
 type dispatchContextObserver struct {
@@ -957,6 +904,14 @@ type routeSetEventStore struct {
 	routes map[string][]events.DeliveryRoute
 }
 
+func (s *routeSetEventStore) ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) error {
+	return nil
+}
+
+func (s *routeSetEventStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	return nil, nil
+}
+
 type replayCapableAtomicStoreMissingScope struct {
 	mu         sync.Mutex
 	deliveries []string
@@ -966,20 +921,6 @@ func newRouteSetEventStore() *routeSetEventStore {
 	return &routeSetEventStore{
 		routes: map[string][]events.DeliveryRoute{},
 	}
-}
-
-func (s *descriptorAwareEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return prepareTestCommitPublish(ctx, plan, &testCommitPublishTransaction{finalize: func(_ context.Context, req runtimebus.CommitPublishRequest) error {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		s.deliveries = s.deliveries[:0]
-		for _, route := range req.DeliveryRoutes {
-			if route.Recipient.IsAgent() {
-				s.deliveries = append(s.deliveries, route.Recipient.ID())
-			}
-		}
-		return nil
-	}})
 }
 
 func (s *descriptorAwareEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
@@ -1014,18 +955,6 @@ func (s *descriptorAwareEventStore) persistedDeliveries() []string {
 	return append([]string(nil), s.deliveries...)
 }
 
-func (s *routeSetEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return prepareTestCommitPublish(ctx, plan, &testCommitPublishTransaction{finalize: func(_ context.Context, req runtimebus.CommitPublishRequest) error {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if s.routes == nil {
-			s.routes = map[string][]events.DeliveryRoute{}
-		}
-		s.routes[req.Event.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
-		return nil
-	}})
-}
-
 func (s *routeSetEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
 	if err := command.Validate(); err != nil {
 		return runtimebus.CommittedPublication{}, err
@@ -1043,23 +972,6 @@ func (s *routeSetEventStore) ListEventDeliveryRoutes(_ context.Context, eventID 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]events.DeliveryRoute(nil), s.routes[eventID]...), nil
-}
-
-func (s *replayCapableAtomicStoreMissingScope) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return prepareTestCommitPublish(ctx, plan, &testCommitPublishTransaction{finalize: func(_ context.Context, req runtimebus.CommitPublishRequest) error {
-		if req.ReplayScope != "" {
-			return runtimepipelineobligation.ErrMissingScope
-		}
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		s.deliveries = s.deliveries[:0]
-		for _, route := range req.DeliveryRoutes {
-			if route.Recipient.IsAgent() {
-				s.deliveries = append(s.deliveries, route.Recipient.ID())
-			}
-		}
-		return nil
-	}})
 }
 
 func (s *replayCapableAtomicStoreMissingScope) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
@@ -2476,15 +2388,15 @@ func TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability(t *tes
 	}
 	assertSelectedForkDispatchNotReached(t, deliveries, providerReached)
 
-	outcome, err := pg.CommitSelectedForkEvent(ctx, runtimebus.CommitSelectedForkEventRequest{
+	committed, err := pg.CommitSelectedForkEvent(ctx, runtimebus.CommitSelectedForkEventRequest{
 		Commit: prepared.CommitRequest(),
 		Lineage: runfork.RunForkSelectedContractExecutionLineage{
 			ForkRunID: forkRunID, SourceRunID: sourceRunID, SourceEventID: sourceEventID,
 			ForkEventID: event.ID(), EventName: string(event.Type()), SelectionAuthority: lineage.AuthorityStamp(), CreatedAt: event.CreatedAt(),
 		},
 	})
-	if err == nil || outcome != runtimebus.EventAppendOutcomeUnknown {
-		t.Fatalf("commit outcome=%v err=%v, want missing-source rollback", outcome, err)
+	if err == nil || committed.AppendOutcome != runtimebus.EventAppendOutcomeUnknown {
+		t.Fatalf("commit outcome=%v err=%v, want missing-source rollback", committed.AppendOutcome, err)
 	}
 	eb.AbandonPreparedPublish(ctx, prepared)
 	assertSelectedForkDispatchNotReached(t, deliveries, providerReached)
@@ -2587,7 +2499,7 @@ func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.
 	}
 }
 
-func TestEventBusPublishInMutationSQLiteRecordsTargetFailureDeadLetter(t *testing.T) {
+func TestEventBusPublishSQLiteRecordsTargetFailureDeadLetter(t *testing.T) {
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	eb, err := newScopedTestEventBus(sqliteStore, runtimebus.EventBusOptions{})
 	if err != nil {
@@ -3239,8 +3151,6 @@ func newEventBusWorkflowCoordinator(
 		HumanTasks:              selected,
 		DecisionCardDraftExpiry: selected,
 		HumanTaskExpiry:         selected,
-		GatePublisher:           eventBus,
-		DirectDecisionPublisher: eventBus,
 		DeliveryRuntime:         eventBus,
 		FlowRoutes:              eventBus,
 		ReceiverExecution:       eventreceiver.NormalExecution(),

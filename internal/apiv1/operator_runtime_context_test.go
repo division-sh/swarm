@@ -363,20 +363,6 @@ func (s *rejectingPrimaryDecisionCards) CancelDecisionCardInput(context.Context,
 	return decisioncard.InputDraft{}, s.reject()
 }
 
-type recordingBundleGatePublisher struct {
-	delegate runtimepipeline.WorkflowGateMutationPublisher
-	facts    []runtimecorrelation.BundleSourceFact
-}
-
-func (p *recordingBundleGatePublisher) PublishInMutation(ctx context.Context, event events.Event) error {
-	fact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
-	if !ok {
-		return errors.New("decision publication bundle source fact is required")
-	}
-	p.facts = append(p.facts, fact)
-	return p.delegate.PublishInMutation(ctx, event)
-}
-
 func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelectedPipeline(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	now := time.Date(2026, 7, 14, 14, 0, 0, 0, time.UTC)
@@ -395,17 +381,13 @@ func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelected
 	moduleA := newRunCompletionSystemNodeModule(t, fixture.sourceA)
 	moduleB := newRunCompletionSystemNodeModule(t, fixture.sourceB)
 	primaryCards := &rejectingPrimaryDecisionCards{Store: fixture.pg}
-	primaryPublisher := &recordingBundleGatePublisher{delegate: fixture.busA}
-	selectedPublisher := &recordingBundleGatePublisher{delegate: fixture.busB}
 	primaryPipeline := runtimepipeline.NewPipelineCoordinatorWithOptions(fixture.busA, completeAPITestDurableWorkflowOptions(t, fixture.pg, fixture.busA, runtimepipeline.PipelineCoordinatorOptions{
 		Module: moduleA, Persistence: runtimepipeline.NewWorkflowPersistence(fixture.pg),
-		DecisionCards: primaryCards, GatePublisher: primaryPublisher,
-		BundleSourceFact: runtimeContextTestSourceFact(runStartTestBundleHash),
+		DecisionCards: primaryCards, BundleSourceFact: runtimeContextTestSourceFact(runStartTestBundleHash),
 	}))
 
 	selectedPipeline := runtimepipeline.NewPipelineCoordinatorWithOptions(fixture.busB, completeAPITestDurableWorkflowOptions(t, fixture.pg, fixture.busB, runtimepipeline.PipelineCoordinatorOptions{
 		Module: moduleB, Persistence: runtimepipeline.NewWorkflowPersistence(fixture.pg),
-		GatePublisher: selectedPublisher, BundleSourceFact: runtimeContextTestSourceFact(runtimeContextTestBundleHashB),
 	}))
 
 	manager := runtimeContextManagerWithRuntimes(t, fixture,
@@ -440,16 +422,8 @@ func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelected
 	if replay.Error != nil || asMap(t, replay.Result)["idempotency_replayed"] != true {
 		t.Fatalf("selected mailbox.decide replay = result %#v error %#v", replay.Result, replay.Error)
 	}
-	if primaryCards.calls != 0 || len(primaryPublisher.facts) != 0 {
-		t.Fatalf("primary decision path calls/publications = %d/%d, want 0/0", primaryCards.calls, len(primaryPublisher.facts))
-	}
-	if len(selectedPublisher.facts) != 2 {
-		t.Fatalf("selected decision publications = %d, want defer and decide", len(selectedPublisher.facts))
-	}
-	for _, fact := range selectedPublisher.facts {
-		if fact.BundleHash() != runtimeContextTestBundleHashB {
-			t.Fatalf("selected decision publication bundle = %q, want %q", fact.BundleHash(), runtimeContextTestBundleHashB)
-		}
+	if primaryCards.calls != 0 {
+		t.Fatalf("primary decision path calls = %d, want 0", primaryCards.calls)
 	}
 }
 

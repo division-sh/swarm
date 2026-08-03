@@ -29,7 +29,7 @@ import (
 type eventRecordContractStore interface {
 	semanticEventFixtureStore
 	diagnosticRuntimeLogFixtureStore
-	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.EventAppendOutcome, error)
+	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error)
 }
 
 type eventDeliveryRouteReadbackStore interface {
@@ -96,7 +96,7 @@ func TestEventRecordExactPersistenceParity(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() { _ = owner.Release(context.WithoutCancel(ctx), claim) }()
-			outcome, err := store.CommitSelectedForkEvent(ctx, runtimebus.CommitSelectedForkEventRequest{
+			outcome, err := commitSelectedForkEventOutcome(ctx, store, runtimebus.CommitSelectedForkEventRequest{
 				Commit: runtimebus.CommitPublishRequest{
 					Event: admitted, ReplayScope: runtimepipelineobligation.ScopeDirect, PipelineClaim: claim,
 				},

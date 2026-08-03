@@ -44,7 +44,6 @@ func (workflowTestBus) PublishDirectInMutation(context.Context, events.Event, []
 }
 func (workflowTestBus) ResolveSubscribedRecipients(string) []string                       { return nil }
 func (workflowTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error { return nil }
-func (workflowTestBus) EngineOutbox() runtimeengine.OutboxWriter                          { return nil }
 func (workflowTestBus) EngineDispatcher() runtimeengine.PostCommitDispatcher              { return nil }
 func (workflowTestBus) DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error) {
 	return runtimedelivery.ExecutionAuthority{}, nil
@@ -116,8 +115,6 @@ func completeWorkflowTestCoordinatorOptions(
 		DecisionCardDraftExpiry: selected,
 		HumanTaskExpiry:         selected,
 		TimerObligationReader:   selected,
-		GatePublisher:           bus,
-		DirectDecisionPublisher: bus,
 		DeliveryRuntime:         bus,
 		PipelineObligations:     selected.PipelineObligations(),
 	}
@@ -152,12 +149,6 @@ func TestWorkflowStoreRolesAreImmutableConstructorInputs(t *testing.T) {
 		}},
 		{name: "human_task_expiry", omit: func(opts *runtimepipeline.PipelineCoordinatorOptions, _ runtimepipeline.WorkflowPersistence) {
 			opts.HumanTaskExpiry = nil
-		}},
-		{name: "gate_publisher", omit: func(opts *runtimepipeline.PipelineCoordinatorOptions, _ runtimepipeline.WorkflowPersistence) {
-			opts.GatePublisher = nil
-		}},
-		{name: "direct_decision_publisher", omit: func(opts *runtimepipeline.PipelineCoordinatorOptions, _ runtimepipeline.WorkflowPersistence) {
-			opts.DirectDecisionPublisher = nil
 		}},
 		{name: "delivery_continuation_state", omit: func(opts *runtimepipeline.PipelineCoordinatorOptions, _ runtimepipeline.WorkflowPersistence) {
 			opts.DeliveryRuntime = nil

@@ -8,7 +8,6 @@ var (
 	ErrMissingStateRepo             = errors.New("engine: state repository is required")
 	ErrMissingMutationOwner         = errors.New("engine: mutation owner is required")
 	ErrMissingEntityLocker          = errors.New("engine: entity locker is required")
-	ErrMissingOutbox                = errors.New("engine: outbox writer is required")
 	ErrMissingDispatcher            = errors.New("engine: post-commit dispatcher is required")
 	ErrMissingNodeID                = errors.New("engine: node id is required")
 	ErrMissingNodeHandler           = errors.New("engine: node handler is required")

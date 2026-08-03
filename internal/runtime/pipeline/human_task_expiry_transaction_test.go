@@ -55,7 +55,7 @@ func TestHumanTaskExpiryUsesClosedSelectedStoreCommitEvidence(t *testing.T) {
 		),
 	}
 	bus := &recordingPipelineBus{publishErr: errors.New("injected event persistence failure")}
-	coordinator := &PipelineCoordinator{bus: bus, workflowStore: workflowStore, gatePublisher: bus}
+	coordinator := &PipelineCoordinator{bus: bus, workflowStore: workflowStore}
 
 	if err := coordinator.expireHumanTaskCards(context.Background(), expiry, time.Now().UTC(), 10); err == nil {
 		t.Fatal("expiry succeeded when publication planning failed")

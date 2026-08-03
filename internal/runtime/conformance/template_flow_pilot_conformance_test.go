@@ -576,8 +576,8 @@ func (s *fanOutPinRouteMemoryStore) ListActiveAgentDescriptors(context.Context) 
 	return append([]runtimebus.ActiveAgentDescriptor(nil), s.activeAgents...), nil
 }
 
-func (s *fanOutPinRouteMemoryStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
+func (s *fanOutPinRouteMemoryStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublish(ctx, command, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
 		if s.deliveryRoutes == nil {
 			s.deliveryRoutes = map[string][]events.DeliveryRoute{}
 		}

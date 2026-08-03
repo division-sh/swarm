@@ -111,8 +111,8 @@ func (b *recoveryTestBus) SweepPipelineObligations(context.Context, int) (runtim
 func (*recoveryTestBus) PipelineWorkPresence(context.Context) (runtimepipelineobligation.GlobalWorkPresence, error) {
 	return runtimepipelineobligation.GlobalWorkPresence{}, nil
 }
-func (b *recoveryTestBus) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublishNoop(ctx, plan)
+func (b *recoveryTestBus) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublishNoop(ctx, command)
 }
 func (b *recoveryTestBus) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
 	return append([]string(nil), b.deliveries[eventID]...), nil

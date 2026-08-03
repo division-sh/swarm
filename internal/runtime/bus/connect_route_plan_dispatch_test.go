@@ -492,12 +492,11 @@ func connectReceiverPinLegalSource(shape string) semanticview.Source {
 	}, connects))
 }
 
-func runConnectRoutePlanCommitScope(ctx context.Context, transaction CommitPublishTransaction, fn func(context.Context) error) error {
+func runConnectRoutePlanCommitScope(ctx context.Context, _ any, fn func(context.Context) error) error {
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 2)
 	rollback := make([]runtimepipeline.OwnerAction, 0, 2)
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
 	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
-	ctx = WithCommitPublishTransaction(ctx, transaction)
 	if err := fn(ctx); err != nil {
 		runtimepipeline.FlushPipelineRollbackActions(rollback)
 		return err
@@ -1120,7 +1119,7 @@ func TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution(t *testing.T) {
 	}
 }
 
-func TestEventBusPublishInMutation_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
+func TestEventBusPublish_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
 		From: "producer.deploy_done",
 		To:   "consumer.deploy_completed",
@@ -1135,13 +1134,8 @@ func TestEventBusPublishInMutation_ConnectRoutePlanPersistsSharedRoutePlan(t *te
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	want := connectRoutePlanStaticDeliveryRoute()
-	postCommitActions := make([]runtimepipeline.OwnerAction, 0, 1)
-	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommitActions)
-
-	if err := runConnectRoutePlanCommitScope(ctx, store, func(commitCtx context.Context) error {
-		return eb.PublishInMutation(commitCtx, evt)
-	}); err != nil {
-		t.Fatalf("PublishInMutation: %v", err)
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
 	}
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
@@ -1152,13 +1146,12 @@ func TestEventBusPublishInMutation_ConnectRoutePlanPersistsSharedRoutePlan(t *te
 	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 	if got := store.receipts[eventID]; got != "processed" {
 		t.Fatalf("pipeline receipt = %q, want processed", got)
 	}
 }
 
-func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
+func TestEnginePublication_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
 		From: "producer.deploy_done",
 		To:   "consumer.deploy_completed",
@@ -1174,10 +1167,11 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 
 	want := connectRoutePlanStaticDeliveryRoute()
 
-	planned, err := (engineOutbox{bus: eb}).deliveryPlanForIntent(context.Background(), runtimeengine.EmitIntent{Event: evt})
+	plans, err := eb.PrepareEnginePublications(context.Background(), []runtimeengine.EmitIntent{{Event: evt}})
 	if err != nil {
-		t.Fatalf("deliveryPlanForIntent: %v", err)
+		t.Fatalf("PrepareEnginePublications: %v", err)
 	}
+	planned := plans[0].(EnginePublicationPlan).prepared.plan
 	if planned.AuthorityState != RoutePlanAuthorityCanonicalMatched || planned.AuthorityOwner != routePlanSourceConnectRoutePlan {
 		t.Fatalf("outbox route plan authority = %q/%q, want matched connect route plan", planned.AuthorityState, planned.AuthorityOwner)
 	}
@@ -1185,10 +1179,11 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 		t.Fatalf("outbox route plan delivery routes = %#v, want %#v", planned.DeliveryRoutes(), want)
 	}
 
-	if err := runConnectRoutePlanCommitScope(context.Background(), store, func(commitCtx context.Context) error {
-		return eb.EngineOutbox().WriteOutbox(commitCtx, []runtimeengine.EmitIntent{{Event: evt}})
-	}); err != nil {
-		t.Fatalf("WriteOutbox: %v", err)
+	if err := eb.ReleaseEnginePublications(context.Background(), plans); err != nil {
+		t.Fatalf("release inspection plan: %v", err)
+	}
+	if err := commitSourceMutationEnginePublications(context.Background(), eb, []runtimeengine.EmitIntent{{Event: evt}}); err != nil {
+		t.Fatalf("commit engine publication: %v", err)
 	}
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
@@ -1201,7 +1196,7 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	}
 }
 
-func TestEngineOutbox_ExactDuplicateReusesDurableConnectRouteBeforeDescriptorLookup(t *testing.T) {
+func TestEnginePublication_ExactDuplicateReusesDurableConnectRouteBeforeDescriptorLookup(t *testing.T) {
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -1223,9 +1218,7 @@ func TestEngineOutbox_ExactDuplicateReusesDurableConnectRouteBeforeDescriptorLoo
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	write := func() error {
-		return runConnectRoutePlanCommitScope(context.Background(), store, func(commitCtx context.Context) error {
-			return eb.EngineOutbox().WriteOutbox(commitCtx, []runtimeengine.EmitIntent{{Event: evt}})
-		})
+		return commitSourceMutationEnginePublications(context.Background(), eb, []runtimeengine.EmitIntent{{Event: evt}})
 	}
 	if err := write(); err != nil {
 		t.Fatalf("initial WriteOutbox: %v", err)
@@ -2939,6 +2932,7 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "two")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(two): %v", err)
 	}
+	store.flowInstanceDescriptorCalls = 0
 
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,

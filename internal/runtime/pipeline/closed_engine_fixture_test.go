@@ -629,9 +629,35 @@ func commitPipelineTestWorkflowStateWithRouteRebind(ctx context.Context, store *
 			} else {
 				flowQuery += ` ON CONFLICT(instance_id) DO UPDATE SET flow_template = excluded.flow_template, mode = excluded.mode, config = excluded.config, status = excluded.status, terminated_at = NULL`
 			}
+		} else if store.testDialect() == workflowStoreDialectPostgres {
+			flowQuery += ` ON CONFLICT (instance_id) DO NOTHING`
+		} else {
+			flowQuery += ` ON CONFLICT(instance_id) DO NOTHING`
 		}
-		if _, err := tx.ExecContext(ctx, flowQuery, record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt); err != nil {
-			return err
+		result, err := tx.ExecContext(ctx, flowQuery, record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt)
+		if err != nil {
+			return fmt.Errorf("insert pipeline test workflow flow instance: %w", err)
+		}
+		if !rebindExistingRoute {
+			rows, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if rows == 0 {
+				query := `SELECT flow_template, mode, config, status FROM flow_instances WHERE instance_id = ?`
+				if store.testDialect() == workflowStoreDialectPostgres {
+					query = `SELECT flow_template, mode, config, status FROM flow_instances WHERE instance_id = $1`
+				}
+				var workflowName, mode, status string
+				var config any
+				if err := tx.QueryRowContext(ctx, query, record.Route.InstancePath).Scan(&workflowName, &mode, &config, &status); err != nil {
+					return err
+				}
+				configBytes := pipelineTestJSONBytes(config)
+				if workflowName != record.WorkflowName || mode != record.Mode || status != record.Status || !pipelineTestJSONEqual(configBytes, record.Config) {
+					return fmt.Errorf("pipeline test workflow flow descriptor conflicts at route %s", record.Route.InstancePath)
+				}
+			}
 		}
 		entityArgs := []any{
 			record.RunID, record.EntityID, record.Route.InstancePath, record.EntityType, record.Slug, record.Name,
@@ -642,7 +668,7 @@ func commitPipelineTestWorkflowStateWithRouteRebind(ctx context.Context, store *
 			entityArgs = append(entityArgs, record.CreatedAt)
 		}
 		if _, err := tx.ExecContext(ctx, entityQuery, entityArgs...); err != nil {
-			return err
+			return fmt.Errorf("insert pipeline test workflow entity state with %d arguments: %w", len(entityArgs), err)
 		}
 		return commitPipelineTestWorkflowMutationLog(ctx, tx, store, record, before)
 	}

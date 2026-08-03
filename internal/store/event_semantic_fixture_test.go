@@ -31,7 +31,12 @@ type semanticEventFixtureStore interface {
 }
 
 type selectedForkEventFixtureStore interface {
-	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.EventAppendOutcome, error)
+	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error)
+}
+
+func commitSelectedForkEventOutcome(ctx context.Context, store selectedForkEventFixtureStore, req runtimebus.CommitSelectedForkEventRequest) (runtimebus.EventAppendOutcome, error) {
+	committed, err := store.CommitSelectedForkEvent(ctx, req)
+	return committed.AppendOutcome, err
 }
 
 func commitSemanticEventFixture(ctx context.Context, store any, event events.Event) error {
@@ -187,7 +192,7 @@ func commitSelectedForkEventFixture(
 	defer func() {
 		err = errors.Join(err, owner.Release(context.WithoutCancel(ctx), claim))
 	}()
-	outcome, err := store.CommitSelectedForkEvent(ctx, runtimebus.CommitSelectedForkEventRequest{
+	outcome, err := commitSelectedForkEventOutcome(ctx, store, runtimebus.CommitSelectedForkEventRequest{
 		Commit: runtimebus.CommitPublishRequest{
 			Event:         admitted,
 			ReplayScope:   runtimepipelineobligation.ScopeDirect,
@@ -323,9 +328,6 @@ func commitAdmittedSemanticEventFixtureOutcome(
 	req := runtimebus.CommitPublishRequest{
 		Event: admitted, DeliveryRoutes: events.NormalizeDeliveryRoutes(routes), ReplayScope: scope, PipelineClaim: claim,
 	}
-	if len(req.DeliveryRoutes) > 0 {
-		req.DeliveryReceipt = &runtimebus.DeliveryCommitReceipt{}
-	}
 	ctx, release, err := semanticEventFixtureContext(ctx, store, admitted.Event())
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
@@ -349,7 +351,8 @@ func commitAdmittedSemanticEventFixtureOutcome(
 				return appendErr
 			}
 		}
-		return (sqlPublishCommitter{tx: tx, store: selected, story: runtimeStory}).commitInitialSideEffects(txctx, req, true)
+		_, appendErr = (sqlPublishCommitter{tx: tx, store: selected, story: runtimeStory}).commitInitialSideEffectEvidence(txctx, req, true)
+		return appendErr
 	}
 	switch selected := store.(type) {
 	case *PostgresStore:
@@ -374,15 +377,11 @@ func commitSemanticEventFixtureTx(ctx context.Context, store eventCommitTxStore,
 }
 
 func commitSemanticEventFixtureWithRoutesTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, event events.Event, routes []events.DeliveryRoute) (err error) {
-	transaction, ok := runtimebus.CommitPublishTransactionFromContext(ctx)
-	if !ok {
-		return fmt.Errorf("semantic event fixture transaction owner is required")
+	story, err := eventFixtureStory(ctx)
+	if err != nil {
+		return err
 	}
-	committer, ok := transaction.(*sqlPublishCommitter)
-	if !ok || committer.story == nil {
-		return fmt.Errorf("semantic event fixture private story is required")
-	}
-	return commitSemanticEventFixtureWithRoutesStoryTx(ctx, store, tx, committer.story, event, routes)
+	return commitSemanticEventFixtureWithRoutesStoryTx(ctx, store, tx, story, event, routes)
 }
 
 func commitSemanticEventFixtureWithRoutesStoryTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, story runtimeauthoractivity.Mutation, event events.Event, routes []events.DeliveryRoute) (err error) {
@@ -416,18 +415,17 @@ func commitSemanticEventFixtureWithRoutesStoryTx(ctx context.Context, store even
 		scope = runtimepipelineobligation.ScopeSubscribed
 	}
 	var authority runtimedelivery.ExecutionAuthority
-	var receipt *runtimebus.DeliveryCommitReceipt
 	if len(routes) > 0 {
 		authority, err = semanticEventFixtureDeliveryAuthority(ctx, tx, store, admitted.Event().RunID())
 		if err != nil {
 			return err
 		}
-		receipt = &runtimebus.DeliveryCommitReceipt{}
 	}
-	return (sqlPublishCommitter{tx: tx, store: store, story: story}).commitInitialSideEffects(ctx, runtimebus.CommitPublishRequest{
+	_, err = (sqlPublishCommitter{tx: tx, store: store, story: story}).commitInitialSideEffectEvidence(ctx, runtimebus.CommitPublishRequest{
 		Event: admitted, DeliveryRoutes: events.NormalizeDeliveryRoutes(routes), DeliveryAuthority: authority,
-		DeliveryReceipt: receipt, ReplayScope: scope, PipelineClaim: claim,
+		ReplayScope: scope, PipelineClaim: claim,
 	}, true)
+	return err
 }
 
 func semanticEventFixtureDeliveryAuthority(

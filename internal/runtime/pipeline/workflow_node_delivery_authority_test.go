@@ -22,37 +22,21 @@ import (
 	"github.com/google/uuid"
 )
 
-type failOnceRetryOutbox struct {
-	inner runtimeengine.OutboxWriter
+type failOnceRetryPipelineBus struct {
+	*recordingPipelineBus
 	calls atomic.Int32
 }
 
-func (o *failOnceRetryOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.EmitIntent) error {
-	if o.calls.Add(1) == 1 {
-		return runtimefailures.Wrap(
-			runtimefailures.ClassDependencyUnavailable,
-			"write_failed",
-			"workflow-node-retry-test",
-			"write_outbox",
-			nil,
-			errors.New("transient outbox failure"),
-		)
-	}
-	return o.inner.WriteOutbox(ctx, intents)
-}
-
-type failOnceRetryPipelineBus struct {
-	*recordingPipelineBus
-	outbox *failOnceRetryOutbox
-}
-
-func (b *failOnceRetryPipelineBus) EngineOutbox() runtimeengine.OutboxWriter {
-	return b.outbox
-}
-
 func (b *failOnceRetryPipelineBus) PrepareEnginePublications(ctx context.Context, intents []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
-	if err := b.outbox.WriteOutbox(ctx, intents); err != nil {
-		return nil, err
+	if b.calls.Add(1) == 1 {
+		return nil, runtimefailures.Wrap(
+			runtimefailures.ClassDependencyUnavailable,
+			"prepare_failed",
+			"workflow-node-retry-test",
+			"prepare_engine_publications",
+			nil,
+			errors.New("transient publication preparation failure"),
+		)
 	}
 	return b.recordingPipelineBus.PrepareEnginePublications(ctx, intents)
 }
@@ -246,7 +230,6 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			owner := newPipelineTestDeliveryOwnerForDB(t, workflowStore.testDB())
 			baseBus := &recordingPipelineBus{}
 			bus := &failOnceRetryPipelineBus{recordingPipelineBus: baseBus}
-			bus.outbox = &failOnceRetryOutbox{inner: baseBus.EngineOutbox()}
 			bundle := &runtimecontracts.WorkflowContractBundle{
 				Nodes: map[string]runtimecontracts.SystemNodeContract{
 					"node-a": {ID: "node-a", ExecutionType: "system_node"},
@@ -322,8 +305,8 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			if !handled {
 				t.Fatal("dispatch retrying node delivery handled = false, want true")
 			}
-			if got := bus.outbox.calls.Load(); got == 0 {
-				t.Fatal("outbox failure injector was not reached")
+			if got := bus.calls.Load(); got == 0 {
+				t.Fatal("publication preparation failure injector was not reached")
 			}
 			proof, err := owner.ProveHandoff(ctx, evt.ID(), route)
 			if err != nil {

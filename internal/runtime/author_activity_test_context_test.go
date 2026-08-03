@@ -99,12 +99,6 @@ func completeRuntimeTestPipelineOptions(bus *runtimebus.EventBus, opts runtimepi
 	if opts.HumanTaskExpiry == nil {
 		opts.HumanTaskExpiry = &runtimeTestUnavailableHumanTaskExpiry{}
 	}
-	if opts.GatePublisher == nil {
-		opts.GatePublisher = bus
-	}
-	if opts.DirectDecisionPublisher == nil {
-		opts.DirectDecisionPublisher = bus
-	}
 	if opts.DeliveryRuntime == nil {
 		opts.DeliveryRuntime = bus
 	}

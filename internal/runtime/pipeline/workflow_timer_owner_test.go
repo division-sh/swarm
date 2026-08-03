@@ -30,14 +30,10 @@ import (
 	"github.com/google/uuid"
 )
 
-type workflowTimerOwnerTestBus interface {
-	Bus
-	WorkflowGateMutationPublisher
-}
+type workflowTimerOwnerTestBus interface{ Bus }
 
 func newWorkflowTimerOwnerPipelineCoordinator(bus workflowTimerOwnerTestBus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
 	opts.PipelineObligations = unavailablePipelineTestObligationOwner{}
-	opts.GatePublisher = bus
 	return newDurablePipelineCoordinatorForTest(bus, db, opts)
 }
 
@@ -1500,55 +1496,6 @@ func TestWorkflowTimerLifecycleIsolatesStaleActivationAcrossCancelAndReentryOnBo
 	}
 }
 
-func TestWorkflowTimerLifecycleActivationRollbackDoesNotRegisterOnBothStores(t *testing.T) {
-	for _, tc := range workflowJoinStoreCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			store, ctx := tc.open(t)
-			entityID := uuid.NewString()
-			createdAt := canonicalWorkflowTimerTime(time.Now())
-			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID: entityID, StorageRef: entityID, WorkflowName: "workflow-timer-owner-test",
-				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
-				CreatedAt: createdAt, Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx)},
-			})); err != nil {
-				t.Fatalf("seed workflow instance: %v", err)
-			}
-			owner := pipelineTestWorkOwner(t)
-			scheduler := newWorkflowTimerTestScheduler(t, owner)
-			pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-				Module:         &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowTimerOwnerBundle(false))},
-				Persistence:    workflowPersistenceForTest(store),
-				WorkOwner:      owner,
-				TimerScheduler: scheduler,
-			})
-			t.Cleanup(func() {
-				stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-				defer cancel()
-				_ = pc.StopWorkflowTimerLifecycle(stopCtx)
-			})
-			rollback := errors.New("rollback activation")
-			err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-				if err := pc.workflowTimers.Reconcile(txctx, testWorkflowInstanceRoute(entityID), entityID, "", "waiting", workflowTimerCause{
-					Kind: workflowTimerCauseInitial, OccurredAt: createdAt, ToState: "waiting",
-				}); err != nil {
-					return err
-				}
-				return rollback
-			})
-			if !errors.Is(err, rollback) {
-				t.Fatalf("activation mutation error = %v, want rollback", err)
-			}
-			if activations := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, false); len(activations) != 0 {
-				t.Fatalf("rolled-back workflow timer activations = %#v, want none", activations)
-			}
-			registered, _ := workflowTimerScheduledCounts(scheduler)
-			if registered != 0 {
-				t.Fatalf("workflow wakeups after activation rollback = %d, want 0", registered)
-			}
-		})
-	}
-}
-
 func TestWorkflowTimerWakeupReconciliationSerializesCancellationOnBothStores(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1581,16 +1528,19 @@ func TestWorkflowTimerWakeupReconciliationSerializesCancellationOnBothStores(t *
 
 			cancelErr := make(chan error, 1)
 			go func() {
-				cancelErr <- store.runPipelineMutation(ctx, func(txctx context.Context) error {
-					cancelled, changed, err := store.cancelWorkflowTimerActivation(txctx, activation.Ref)
-					if err != nil {
-						return err
-					}
-					if !changed {
-						return errors.New("workflow timer cancellation did not change the active row")
-					}
-					return pc.workflowTimers.queueCancellation(txctx, cancelled)
+				committed, err := store.timerActivations.CommitWorkflowTimerReconciliation(ctx, WorkflowTimerReconciliationCommand{
+					RunID: activation.RunID, Route: activation.Route, EntityID: activation.EntityID,
+					Plan: WorkflowLifecycleMutationPlan{Timers: []WorkflowTimerMutation{{Kind: WorkflowTimerMutationCancel, Activation: activation}}},
 				})
+				if err != nil {
+					cancelErr <- err
+					return
+				}
+				if len(committed.Cancellations) != 1 || committed.Cancellations[0] != activation.Ref {
+					cancelErr <- fmt.Errorf("workflow timer cancellation evidence = %#v", committed.Cancellations)
+					return
+				}
+				cancelErr <- pc.workflowTimers.queueCancellation(ctx, activation)
 			}()
 			waitForWorkflowTimerPersistedStatus(t, store, ctx, activation.Ref.ActivationID, workflowTimerStatusCancelled)
 			close(release)
@@ -1828,18 +1778,17 @@ func TestWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothSto
 				if !ok {
 					t.Fatal("standing timer test context missing bundle source fact")
 				}
-				standing, err := store.ReconcileStandingService(ctx, StandingServiceCandidate{
-					ServiceID:  runtimeflowidentity.StandingServiceID(packageKey, flowID),
-					PackageKey: packageKey,
-					FlowID:     flowID,
-					InstanceID: flowID,
-					EntityID:   uuid.NewString(),
-					Source:     sourceFact,
-				})
-				if err != nil {
-					t.Fatalf("reconcile standing service: %v", err)
+				bundleHash, bundleSource := sourceFact.StorageValues()
+				if _, err := store.testDB().ExecContext(ctx, `
+					INSERT INTO standing_services (
+						service_id, package_key, flow_id, instance_id, entity_id, declaration_present,
+						operator_override, effective_state, current_bundle_hash, current_bundle_source,
+						revision_sequence, current_generation, current_run_id, publication_state,
+						publication_sequence, created_at, updated_at
+					) VALUES ($1::uuid, $2, $3, $4, $5::uuid, TRUE, 'none', 'active', $6, $7, 1, 1, $8::uuid, 'pending', 0, NOW(), NOW())
+				`, runtimeflowidentity.StandingServiceID(packageKey, flowID), packageKey, flowID, flowID, uuid.NewString(), bundleHash, bundleSource, runtimecorrelation.RunIDFromContext(ctx)); err != nil {
+					t.Fatalf("seed standing ownership fixture: %v", err)
 				}
-				standingCtx = runtimecorrelation.WithRunID(ctx, standing.RunID)
 			}
 			pc, _, _ := seedWorkflowTimerOwnerActivationAt(
 				t, store, standingCtx, &recordingPipelineBus{}, false, "1h", time.Now(), false,

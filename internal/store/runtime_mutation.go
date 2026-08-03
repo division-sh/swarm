@@ -81,15 +81,6 @@ func (s *PostgresStore) runPostgresRuntimeMutation(ctx context.Context, fn func(
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
 	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	if eventCtx, ok := eventCommitterForPipelineContext(txctx, s, nil); ok {
-		txctx = eventCtx
-	} else {
-		rollbackErr := rollbackPostgresSessionTransaction(tx, session)
-		return errors.Join(
-			fmt.Errorf("postgres runtime mutation could not attach the event commit owner"),
-			rollbackErr,
-		)
-	}
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
 	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
 	if runErr := fn(txctx, tx); runErr != nil {
@@ -145,11 +136,7 @@ func (s *SQLiteRuntimeStore) runRuntimeMutationCommitted(
 		ctx = context.Background()
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		eventCtx, attached := eventCommitterForPipelineContext(ctx, s, nil)
-		if !attached {
-			return nil, fmt.Errorf("%s could not attach the event commit owner", label)
-		}
-		return nil, fn(eventCtx, tx)
+		return nil, fn(ctx, tx)
 	}
 	retryDeadline := time.Now().Add(sqliteRuntimeMutationRetryBudget)
 	ctxDeadline, hasCtxDeadline := ctx.Deadline()
@@ -229,14 +216,6 @@ func (s *SQLiteRuntimeStore) runRuntimeMutationOnceLocked(ctx context.Context, f
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
 	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	if eventCtx, ok := eventCommitterForPipelineContext(txctx, s, nil); ok {
-		txctx = eventCtx
-	} else {
-		return nil, errors.Join(
-			fmt.Errorf("sqlite runtime mutation could not attach the event commit owner"),
-			rollbackSQLTransaction(tx),
-		)
-	}
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
 	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
 	if err := fn(txctx, tx); err != nil {

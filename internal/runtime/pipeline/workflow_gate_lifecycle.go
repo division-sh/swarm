@@ -22,14 +22,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type WorkflowGateMutationPublisher interface {
-	PublishInMutation(context.Context, events.Event) error
-}
-
-type DecisionCardDirectMutationPublisher interface {
-	PublishDirectInMutation(context.Context, events.Event, []string) error
-}
-
 func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, route runtimeflowidentity.Route, entityID, currentStage, nextStage, sourceEvent string, occurredAt time.Time) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.SemanticSource() == nil {
 		return nil

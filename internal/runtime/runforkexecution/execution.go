@@ -391,8 +391,6 @@ func selectedContractPipelineCoordinatorOptions(
 		HumanTasks:              ports.humanTasks,
 		DecisionCardDraftExpiry: ports.decisionCardDraftExpiry,
 		HumanTaskExpiry:         ports.humanTaskExpiry,
-		GatePublisher:           bus,
-		DirectDecisionPublisher: bus,
 		DeliveryRuntime:         bus,
 		FlowRoutes:              bus,
 		RunLifecycle:            ports.busDurable.RunLifecycle,

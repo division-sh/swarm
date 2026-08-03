@@ -55,8 +55,7 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 		RunLifecycle:        pg,
 		DeliveryStore:       pg,
 		PipelineObligations: pg.PipelineObligations(),
-		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-		FlowRoutes: bus,
+		FlowRoutes:          bus,
 	})
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{

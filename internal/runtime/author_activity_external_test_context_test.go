@@ -154,12 +154,6 @@ func newExternalRuntimeTestPipelineCoordinator(
 	if opts.HumanTaskExpiry == nil {
 		opts.HumanTaskExpiry = owner
 	}
-	if opts.GatePublisher == nil {
-		opts.GatePublisher = bus
-	}
-	if opts.DirectDecisionPublisher == nil {
-		opts.DirectDecisionPublisher = bus
-	}
 	if opts.DeliveryRuntime == nil {
 		opts.DeliveryRuntime = bus
 	}

@@ -734,7 +734,7 @@ func TestPostgresSessionDiscardTerminalizesSiblingPipelineClaims(t *testing.T) {
 		t.Fatalf("capacity after session discard = %d, want 2", got)
 	}
 
-	if _, err := selected.CommitSelectedForkEvent(ctx, runtimebus.CommitSelectedForkEventRequest{
+	if _, err := commitSelectedForkEventOutcome(ctx, selected, runtimebus.CommitSelectedForkEventRequest{
 		Commit: runtimebus.CommitPublishRequest{PipelineClaim: claims[1]},
 	}); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
 		t.Fatalf("selected-fork commit with discarded-session claim = %v, want ErrStaleClaim", err)

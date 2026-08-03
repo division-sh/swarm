@@ -60,11 +60,7 @@ func (s *PostgresStore) runAuthorActivityMutation(ctx context.Context, label str
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		if runtimeauthoractivity.InMutation(ctx, tx) {
-			eventCtx, attached := eventCommitterForPipelineContext(ctx, s, nil)
-			if !attached {
-				return fmt.Errorf("%s could not attach the event commit owner", label)
-			}
-			return fn(eventCtx, tx)
+			return fn(ctx, tx)
 		}
 		if !runtimeauthoractivity.FinalizedMutation(ctx, tx) {
 			return fmt.Errorf("%s entered from a raw transaction without author activity ownership", label)
@@ -92,11 +88,7 @@ func (s *SQLiteRuntimeStore) runAuthorActivityMutation(ctx context.Context, labe
 	}
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		if runtimeauthoractivity.InMutation(ctx, tx) {
-			eventCtx, attached := eventCommitterForPipelineContext(ctx, s, nil)
-			if !attached {
-				return fmt.Errorf("%s could not attach the event commit owner", label)
-			}
-			return fn(eventCtx, tx)
+			return fn(ctx, tx)
 		}
 		if !runtimeauthoractivity.FinalizedMutation(ctx, tx) {
 			return fmt.Errorf("%s entered from a raw transaction without author activity ownership", label)

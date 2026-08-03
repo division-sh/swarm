@@ -197,7 +197,6 @@ func newProposedEffectMailboxHandler(
 		Module: newRunCompletionSystemNodeModule(t, source), Persistence: workflowPersistence,
 		DecisionCards: cards, ProposedEffects: persistence.(decisioncard.ProposedEffectStore),
 		DeliveryStore: deliveryOwner, DeliveryRuntime: bus, PipelineObligations: obligationOwner,
-		GatePublisher: bus, DirectDecisionPublisher: bus,
 		RunLifecycle: runLifecycle, BundleSourceFact: fact,
 	}))
 

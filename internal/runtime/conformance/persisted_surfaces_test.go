@@ -901,8 +901,8 @@ func (s conformanceRecoveryFailureEventStore) RegisterAuthorActivityEventCatalog
 	return s.store.RegisterAuthorActivityEventCatalog(scope, descriptors)
 }
 
-func (s conformanceRecoveryFailureEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return s.store.CommitPublish(ctx, plan)
+func (s conformanceRecoveryFailureEventStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return s.store.CommitPublication(ctx, command)
 }
 
 func (s conformanceRecoveryFailureEventStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
@@ -1895,8 +1895,6 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 		HumanTasks:              selected,
 		DecisionCardDraftExpiry: selected,
 		HumanTaskExpiry:         selected,
-		GatePublisher:           eventBus,
-		DirectDecisionPublisher: eventBus,
 		DeliveryRuntime:         eventBus, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 

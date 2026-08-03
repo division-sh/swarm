@@ -489,15 +489,8 @@ func (startupRecoveryMinimalEventStore) RegisterAuthorActivityEventCatalog(scope
 	return runtimeauthoractivity.NewEventCatalogRegistry().Register(scope, descriptors)
 }
 
-func (startupRecoveryMinimalEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
-	if err := command.Validate(); err != nil {
-		return runtimebus.CommittedPublication{}, err
-	}
-	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
-}
-
-func (startupRecoveryMinimalEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublishNoop(ctx, plan)
+func (startupRecoveryMinimalEventStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublishNoop(ctx, command)
 }
 
 func (startupRecoveryMinimalEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -524,15 +517,8 @@ func (startupRecoveryEventStore) RegisterAuthorActivityEventCatalog(scope runtim
 	return runtimeauthoractivity.NewEventCatalogRegistry().Register(scope, descriptors)
 }
 
-func (startupRecoveryEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
-	if err := command.Validate(); err != nil {
-		return runtimebus.CommittedPublication{}, err
-	}
-	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
-}
-
-func (startupRecoveryEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublishNoop(ctx, plan)
+func (startupRecoveryEventStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublishNoop(ctx, command)
 }
 
 func (startupRecoveryEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {

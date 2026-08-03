@@ -2034,7 +2034,6 @@ func sortedMutatingProbeFixtureMethods(fixtures map[string]mutatingHTTPRuntimeFi
 
 var _ APIIdempotencyStore = (*mutatingProbeIdempotencyStore)(nil)
 var _ EventPublisher = (*mutatingProbeEventPublisher)(nil)
-var _ EventMutationPublisher = (*mutatingProbeEventPublisher)(nil)
 var _ eventReplayPublisher = (*mutatingProbeEventPublisher)(nil)
 var _ RunControlController = (*mutatingProbeRunControl)(nil)
 var _ AgentControlController = (*mutatingProbeAgentControl)(nil)

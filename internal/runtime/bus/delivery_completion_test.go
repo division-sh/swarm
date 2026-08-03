@@ -21,11 +21,6 @@ type publishAndWaitCommitSpy struct {
 	commitCalls int
 }
 
-func (s *publishAndWaitCommitSpy) CommitPublish(ctx context.Context, plan CommitPublishPlan) (PreparedPublish, error) {
-	s.commitCalls++
-	return s.InMemoryEventStore.CommitPublish(ctx, plan)
-}
-
 func (s *publishAndWaitCommitSpy) CommitPublication(ctx context.Context, command PublicationCommand) (CommittedPublication, error) {
 	s.commitCalls++
 	return s.InMemoryEventStore.CommitPublication(ctx, command)
@@ -130,7 +125,7 @@ func TestExplicitEphemeralEventBusAllowsOwnerlessPublish(t *testing.T) {
 	}
 }
 
-func TestEventBusPublishAndWaitRejectsActiveMutationBeforeCommit(t *testing.T) {
+func TestEventBusPublishAndWaitIgnoresAmbientSQLTransactionAuthority(t *testing.T) {
 	store := &publishAndWaitCommitSpy{}
 	eb, err := newScopedTestEventBus(store)
 	if err != nil {
@@ -138,23 +133,11 @@ func TestEventBusPublishAndWaitRejectsActiveMutationBeforeCommit(t *testing.T) {
 	}
 	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{})
 
-	rejectionHandled := false
-	err = func() error {
-		publishErr := eb.PublishAndWait(ctx, completionTreeEvent("11111111-1111-4111-8111-111111111143", "custom.root"))
-		if publishErr == nil || publishErr.Error() != "PublishAndWait cannot dispatch before its active mutation commits" {
-			return publishErr
-		}
-		rejectionHandled = true
-		return nil
-	}()
-	if err != nil {
-		t.Fatalf("outer mutation result = %v, want handled rejection", err)
+	if err := eb.PublishAndWait(ctx, completionTreeEvent("11111111-1111-4111-8111-111111111143", "custom.root")); err != nil {
+		t.Fatalf("PublishAndWait: %v", err)
 	}
-	if !rejectionHandled {
-		t.Fatal("outer mutation did not observe the active-mutation rejection")
-	}
-	if store.commitCalls != 0 {
-		t.Fatalf("commit calls = %d, want 0", store.commitCalls)
+	if store.commitCalls != 1 {
+		t.Fatalf("closed commit calls = %d, want 1", store.commitCalls)
 	}
 }
 

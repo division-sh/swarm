@@ -3,7 +3,6 @@ package bus
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -212,10 +211,7 @@ func (o *sourceMutationProbeOwner) sourceFact(action string) runtimecorrelation.
 	}
 }
 
-type sourceMutationProbeTransaction struct {
-	begin    int
-	finalize int
-}
+type sourceMutationProbeTransaction struct{}
 
 type sourceBoundaryProbeStore struct {
 	InMemoryEventStore
@@ -303,20 +299,6 @@ func (s *sourceBoundaryProbeStore) BindAgentSession(ctx context.Context, _ runti
 	s.bindCalls++
 	s.bindFact, _ = runtimecorrelation.BundleSourceFactFromContext(ctx)
 	return runtimedelivery.Snapshot{}, nil
-}
-
-func (*sourceMutationProbeTransaction) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
-	return events.AdmittedEvent{}, false, nil
-}
-
-func (t *sourceMutationProbeTransaction) BeginPreparedPublish(context.Context, PreparedPublishEvent) (EventAppendOutcome, error) {
-	t.begin++
-	return EventAppendInserted, nil
-}
-
-func (t *sourceMutationProbeTransaction) FinalizePreparedPublish(_ context.Context, finalization PreparedPublishFinalization) error {
-	t.finalize++
-	return finalization.Request().DeliveryReceipt.Record(nil)
 }
 
 func sourceMutationFact(t testing.TB, marker string) runtimecorrelation.BundleSourceFact {
@@ -455,12 +437,12 @@ func sourceMutationEvent() events.Event {
 	)
 }
 
-func sourceMutationContext(ctx context.Context, transaction CommitPublishTransaction) (context.Context, *[]runtimepipeline.OwnerAction) {
+func sourceMutationContext(ctx context.Context, _ any) (context.Context, *[]runtimepipeline.OwnerAction) {
 	rollback := make([]runtimepipeline.OwnerAction, 0, 2)
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 2)
 	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
 	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
-	return WithCommitPublishTransaction(ctx, transaction), &postCommit
+	return ctx, &postCommit
 }
 
 func TestDurableEventBusConstructionRequiresImmutableBundleSourceFact(t *testing.T) {
@@ -497,24 +479,6 @@ func TestPublishRootsRejectForeignSourceBeforeWorkOccurrenceAdmission(t *testing
 		}},
 		{name: "publish acknowledged", run: func(ctx context.Context) error {
 			return bus.PublishAcknowledged(ctx, sourceMutationEvent())
-		}},
-		{name: "prepare in mutation", run: func(ctx context.Context) error {
-			transaction := &sourceMutationProbeTransaction{}
-			ctx, _ = sourceMutationContext(ctx, transaction)
-			_, err := bus.PreparePublishInMutation(ctx, sourceMutationEvent())
-			if transaction.begin != 0 || transaction.finalize != 0 {
-				return fmt.Errorf("prepare mutated transaction before rejection: %#v", transaction)
-			}
-			return err
-		}},
-		{name: "direct in mutation", run: func(ctx context.Context) error {
-			transaction := &sourceMutationProbeTransaction{}
-			ctx, _ = sourceMutationContext(ctx, transaction)
-			err := bus.PublishDirectInMutation(ctx, sourceMutationEvent(), []string{"agent-a"})
-			if transaction.begin != 0 || transaction.finalize != 0 {
-				return fmt.Errorf("direct mutation changed transaction before rejection: %#v", transaction)
-			}
-			return err
 		}},
 		{name: "direct", run: func(ctx context.Context) error {
 			return bus.PublishDirect(ctx, sourceMutationEvent(), []string{"agent-a"})
@@ -682,7 +646,37 @@ func TestSubscriptionAndQuiescenceRejectForeignSourceBeforeLifecycleMutation(t *
 	}
 }
 
-func TestEngineOutboxAdmitsExactBundleSourceBeforePersistenceOrClaim(t *testing.T) {
+func commitSourceMutationEnginePublications(ctx context.Context, bus *EventBus, intents []runtimeengine.EmitIntent) error {
+	plans, err := bus.PrepareEnginePublications(ctx, intents)
+	if err != nil {
+		return err
+	}
+	evidence := make([]runtimeengine.CommittedDurablePublication, 0, len(plans))
+	for _, value := range plans {
+		plan, ok := value.(EnginePublicationPlan)
+		if !ok {
+			return fmt.Errorf("unexpected engine publication plan %T", value)
+		}
+		owner, ok := bus.store.(CommitPublicationOwner)
+		if !ok {
+			return fmt.Errorf("event store %T has no closed publication owner", bus.store)
+		}
+		committed, err := owner.CommitPublication(ctx, plan.PublicationCommand())
+		if err != nil {
+			_ = bus.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+			return err
+		}
+		proof, err := NewCommittedEnginePublication(plan, committed)
+		if err != nil {
+			_ = bus.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+			return err
+		}
+		evidence = append(evidence, proof)
+	}
+	return bus.FinalizeEnginePublications(ctx, evidence)
+}
+
+func TestEnginePublicationPlanAdmitsExactBundleSourceBeforePersistenceOrClaim(t *testing.T) {
 	owned := sourceMutationFact(t, "a")
 	foreign := sourceMutationFact(t, "b")
 	for _, tc := range []struct {
@@ -704,22 +698,16 @@ func TestEngineOutboxAdmitsExactBundleSourceBeforePersistenceOrClaim(t *testing.
 		t.Run(tc.name, func(t *testing.T) {
 			owner := newSourceMutationProbeOwner()
 			bus := newSourceMutationProbeBus(t, tc.busFact, owner)
-			transaction := &sourceMutationProbeTransaction{}
 			ctx := context.Background()
 			if tc.context != nil {
 				ctx = tc.context(ctx)
 			}
-			ctx, postCommit := sourceMutationContext(ctx, transaction)
 			event := sourceMutationEvent()
 
-			err := bus.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{{Event: event}})
-			runtimepipeline.FlushPipelinePostCommitActions(*postCommit)
+			err := commitSourceMutationEnginePublications(ctx, bus, []runtimeengine.EmitIntent{{Event: event}})
 			if tc.wantError {
 				if err == nil || !strings.Contains(err.Error(), "bundle source fact") {
-					t.Fatalf("WriteOutbox error = %v, want source admission failure", err)
-				}
-				if transaction.begin != 0 || transaction.finalize != 0 {
-					t.Fatalf("transaction mutations = begin:%d finalize:%d, want zero", transaction.begin, transaction.finalize)
+					t.Fatalf("PrepareEnginePublications error = %v, want source admission failure", err)
 				}
 				if got := owner.counts(); got != (sourceMutationProbeCounts{}) {
 					t.Fatalf("pipeline mutations = %#v, want zero", got)
@@ -733,10 +721,7 @@ func TestEngineOutboxAdmitsExactBundleSourceBeforePersistenceOrClaim(t *testing.
 				return
 			}
 			if err != nil {
-				t.Fatalf("WriteOutbox: %v", err)
-			}
-			if transaction.begin != 1 || transaction.finalize != 1 {
-				t.Fatalf("transaction mutations = begin:%d finalize:%d, want one each", transaction.begin, transaction.finalize)
+				t.Fatalf("commit engine publications: %v", err)
 			}
 			if got := owner.counts().claimPublication; got != 1 {
 				t.Fatalf("publication claims = %d, want one", got)
@@ -766,8 +751,7 @@ func TestPostCommitAndDeferredDispatchRetainPendingWorkOnSourceRejection(t *test
 			if err != nil {
 				t.Fatalf("claim staged publication: %v", err)
 			}
-			bus.stagePendingOutboxOperation(
-				context.Background(),
+			bus.stageCommittedOutboxOperation(
 				runtimeengine.EmitIntent{Event: event},
 				EventAppendInserted,
 				claim,
@@ -800,10 +784,10 @@ func TestPostCommitAndDeferredDispatchRetainPendingWorkOnSourceRejection(t *test
 	}
 }
 
-func TestQueuedPostCommitDispatchPreservesBusOwnedSourceFact(t *testing.T) {
+func TestPostCommitDispatchIgnoresAmbientSQLContextAndPreservesBusOwnedSourceFact(t *testing.T) {
 	owned := sourceMutationFact(t, "4")
 	owner := newSourceMutationProbeOwner()
-	bus := newSourceMutationProbeBus(t, owned, owner)
+	bus := newSourceMutationProbeBusWithStore(t, newTargetRouteMemoryStore(), owned, owner)
 	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
 	rollback := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx := context.Background()
@@ -814,15 +798,11 @@ func TestQueuedPostCommitDispatchPreservesBusOwnedSourceFact(t *testing.T) {
 	if err := bus.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{{Event: sourceMutationEvent()}}); err != nil {
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
-	if len(postCommit) != 1 {
-		t.Fatalf("queued post-commit actions = %d, want one", len(postCommit))
+	if len(postCommit) != 0 || len(rollback) != 0 {
+		t.Fatalf("ambient transaction actions = commit:%d rollback:%d, want none", len(postCommit), len(rollback))
 	}
-	if got := owner.counts(); got.claimEvent != 0 || got.settle != 0 {
-		t.Fatalf("pipeline mutations before commit = %#v, want none", got)
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
 	if got := owner.counts(); got.claimEvent != 1 || got.settle != 1 {
-		t.Fatalf("pipeline mutations after commit = %#v, want one claim and settlement", got)
+		t.Fatalf("closed post-commit dispatch mutations = %#v, want one claim and settlement", got)
 	}
 }
 
@@ -844,16 +824,6 @@ func TestPreparedPublishRejectsCrossBusAndForeignSourceWithoutConsumingClaim(t *
 		}},
 		{name: "async", run: func(bus *EventBus, ctx context.Context, prepared PreparedPublish) error {
 			return bus.DispatchPreparedPublishAsync(ctx, prepared)
-		}},
-		{name: "queue", run: func(bus *EventBus, ctx context.Context, prepared PreparedPublish) error {
-			postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
-			ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
-			ctx = WithCommitPublishTransaction(ctx, &sourceMutationProbeTransaction{})
-			err := bus.queuePreparedPublishInMutation(ctx, prepared)
-			if len(postCommit) != 0 {
-				return errors.New("invalid prepared publish queued post-commit work")
-			}
-			return err
 		}},
 	}
 	for _, action := range actions {
@@ -887,13 +857,13 @@ func TestPreparedPublishRejectsCrossBusAndForeignSourceWithoutConsumingClaim(t *
 				ownerA := newSourceMutationProbeOwner()
 				busA := newSourceMutationProbeBus(t, owned, ownerA)
 				event := sourceMutationEvent()
-				transaction := &sourceMutationProbeTransaction{}
 				prepareCtx := runtimecorrelation.WithBundleSourceFact(context.Background(), owned)
-				prepareCtx, _ = sourceMutationContext(prepareCtx, transaction)
-				prepared, err := busA.PreparePublishInMutation(prepareCtx, event)
+				plans, err := busA.PrepareEnginePublications(prepareCtx, []runtimeengine.EmitIntent{{Event: event}})
 				if err != nil {
 					t.Fatalf("prepare publication through production path: %v", err)
 				}
+				plan := plans[0].(EnginePublicationPlan)
+				prepared := plan.prepared
 				ownedPrepared := prepared
 				target := busA
 				if transfer.targetBus != nil {
@@ -932,11 +902,10 @@ func TestRetainedPendingAndScanCapabilitiesRejectSourceSwitchAndPreserveOwnershi
 	t.Run("pending outbox", func(t *testing.T) {
 		owner := newSourceMutationProbeOwner()
 		bus := newSourceMutationProbeBus(t, owned, owner)
-		transaction := &sourceMutationProbeTransaction{}
-		ctx, _ := sourceMutationContext(runtimecorrelation.WithBundleSourceFact(context.Background(), owned), transaction)
+		ctx := runtimecorrelation.WithBundleSourceFact(context.Background(), owned)
 		event := sourceMutationEvent()
-		if err := bus.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{{Event: event}}); err != nil {
-			t.Fatalf("WriteOutbox: %v", err)
+		if err := commitSourceMutationEnginePublications(ctx, bus, []runtimeengine.EmitIntent{{Event: event}}); err != nil {
+			t.Fatalf("commit engine publications: %v", err)
 		}
 		before := owner.counts()
 		foreignCtx := runtimecorrelation.WithBundleSourceFact(context.Background(), foreign)
@@ -999,8 +968,7 @@ func TestRetainedPendingAndScanCapabilitiesRejectSourceSwitchAndPreserveOwnershi
 		if err != nil {
 			t.Fatalf("claim publication: %v", err)
 		}
-		bus.stagePendingOutboxOperation(
-			context.Background(),
+		bus.stageCommittedOutboxOperation(
 			runtimeengine.EmitIntent{Event: event},
 			EventAppendInserted,
 			claim,

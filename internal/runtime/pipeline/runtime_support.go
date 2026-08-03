@@ -44,13 +44,8 @@ type Bus interface {
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
 	ResolveSubscribedRecipients(eventType string) []string
 	LogRuntime(ctx context.Context, entry RuntimeLogEntry) error
-	EngineOutbox() runtimeengine.OutboxWriter
 	EngineDispatcher() runtimeengine.PostCommitDispatcher
 }
-
-type noOpEngineOutbox struct{}
-
-func (noOpEngineOutbox) WriteOutbox(context.Context, []runtimeengine.EmitIntent) error { return nil }
 
 type noOpEngineDispatcher struct{}
 

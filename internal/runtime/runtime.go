@@ -1148,8 +1148,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			HumanTasks:              runtimeDeps.DecisionCardHumanTasks,
 			DecisionCardDraftExpiry: runtimeDeps.DecisionCardDraftExpiry,
 			HumanTaskExpiry:         runtimeDeps.HumanTaskExpiry,
-			GatePublisher:           rt.Bus,
-			DirectDecisionPublisher: rt.Bus,
 			DeliveryRuntime:         rt.Bus,
 			FlowRoutes:              rt.Bus,
 			RunLifecycle:            runtimeDeps.EventBusDurable.RunLifecycle,

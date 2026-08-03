@@ -93,11 +93,11 @@ func newHumanTaskAckLossOwners(
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		return pg, pg, pg, pg, newHumanTaskAckLossDecisionAuthority(t, db, pg, runtimepipeline.NewWorkflowPersistence(pg), pg, pg, publisher), publisher, db
+		return pg, pg, pg, pg, newHumanTaskAckLossDecisionAuthority(t, db, pg, runtimepipeline.NewWorkflowPersistence(pg), pg, pg), publisher, db
 	}
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	return sqliteStore, sqliteStore, sqliteStore, sqliteStore,
-		newHumanTaskAckLossDecisionAuthority(t, storetest.Database(sqliteStore), sqliteStore, runtimepipeline.NewWorkflowPersistence(sqliteStore), sqliteStore, sqliteStore, publisher), publisher, storetest.Database(sqliteStore)
+		newHumanTaskAckLossDecisionAuthority(t, storetest.Database(sqliteStore), sqliteStore, runtimepipeline.NewWorkflowPersistence(sqliteStore), sqliteStore, sqliteStore), publisher, storetest.Database(sqliteStore)
 }
 
 type humanTaskAckLossPersistence interface {
@@ -114,7 +114,6 @@ func newHumanTaskAckLossDecisionAuthority(
 	persistence runtimepipeline.WorkflowPersistence,
 	cards decisioncard.Store,
 	humanTasks decisioncard.HumanTaskStore,
-	publisher runtimepipeline.WorkflowGateMutationPublisher,
 ) DecisionCardAuthority {
 	t.Helper()
 	source := semanticview.Wrap(runCompletionSystemNodeBundle(t))
@@ -127,7 +126,6 @@ func newHumanTaskAckLossDecisionAuthority(
 		Persistence:         persistence,
 		DecisionCards:       cards,
 		HumanTasks:          humanTasks,
-		GatePublisher:       publisher,
 		RunLifecycle:        selected,
 		PipelineObligations: selected.PipelineObligations(),
 	}))

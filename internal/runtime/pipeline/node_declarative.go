@@ -378,7 +378,6 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		if !ok {
 			return nil, fmt.Errorf("pipeline engine mutation owner is unavailable")
 		}
-		owner.outbox = noOpEngineOutbox{}
 		owner.activities = noOpActivityIntentWriter{}
 		deps.MutationOwner = owner
 		deps.ActivityDispatcher = noOpActivityDispatcher{}

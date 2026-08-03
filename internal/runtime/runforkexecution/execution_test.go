@@ -800,8 +800,6 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		HumanTasks:              pg,
 		DecisionCardDraftExpiry: pg,
 		HumanTaskExpiry:         pg,
-		GatePublisher:           sourceBus,
-		DirectDecisionPublisher: sourceBus,
 		DeliveryRuntime:         sourceBus,
 		WorkOwner:               workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})

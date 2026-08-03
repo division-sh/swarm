@@ -34,10 +34,6 @@ type EventPublisher interface {
 	PublishDirectRoutes(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) error
 }
 
-type MutationEventPublisher interface {
-	PublishInMutation(ctx context.Context, evt events.Event) error
-}
-
 type Scheduler interface {
 	Register(context.Context, runtimepipeline.Schedule) error
 	Stop()

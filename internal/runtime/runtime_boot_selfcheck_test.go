@@ -19,24 +19,8 @@ type bootSelfCheckDescriptorStore struct {
 	events      []events.Event
 }
 
-func (s *bootSelfCheckDescriptorStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
-	if err := command.Validate(); err != nil {
-		return runtimebus.CommittedPublication{}, err
-	}
-	s.mu.Lock()
-	s.events = append(s.events, command.Commit.Event.Event())
-	s.deliveries = s.deliveries[:0]
-	for _, route := range command.Commit.DeliveryRoutes {
-		if route.SubscriberType == "agent" {
-			s.deliveries = append(s.deliveries, route.SubscriberID)
-		}
-	}
-	s.mu.Unlock()
-	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
-}
-
-func (s *bootSelfCheckDescriptorStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
+func (s *bootSelfCheckDescriptorStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublish(ctx, command, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.events = append(s.events, req.Event.Event())

@@ -51,7 +51,7 @@ type SelectedContractRuntimeExecutionLifecycle interface {
 type SelectedContractReplayPersistence interface {
 	EnsureRunForkNoPostForkCommittedReplayScopeMarkers(context.Context, string, string) error
 	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string) ([]runfork.RunForkSelectedContractSourceEvent, error)
-	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.EventAppendOutcome, error)
+	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error)
 }
 
 // SelectedContractExecutionOwner is an opaque construction value. Only this

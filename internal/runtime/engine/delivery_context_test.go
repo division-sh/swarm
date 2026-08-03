@@ -19,11 +19,11 @@ func (r *deliveryContextActivityWriter) WriteActivityIntents(_ context.Context, 
 }
 
 func TestExecutorPersistPropagatesDeliveryContextToEveryContinuationIntent(t *testing.T) {
-	outbox := &recordingEmitOutbox{}
+	publications := &recordingPublicationCommitter{}
 	activities := &deliveryContextActivityWriter{}
 	exec := &Executor{deps: RuntimeDependencies{
 		StateRepo:     stubStateRepo{},
-		MutationOwner: composedMutationOwner{outbox: outbox, activities: activities},
+		MutationOwner: composedMutationOwner{publications: publications, activities: activities},
 	}}
 	deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:intent-propagation"}}
 	ctx := events.WithDeliveryContext(context.Background(), deliveryContext)
@@ -37,8 +37,8 @@ func TestExecutorPersistPropagatesDeliveryContextToEveryContinuationIntent(t *te
 	if _, err := exec.persist(ctx, frame); err != nil {
 		t.Fatalf("persist: %v", err)
 	}
-	if len(outbox.intents) != 1 || outbox.intents[0].Context.ReplyContextID() != deliveryContext.ReplyContextID() {
-		t.Fatalf("emit context = %#v", outbox.intents)
+	if len(publications.intents) != 1 || publications.intents[0].Context.ReplyContextID() != deliveryContext.ReplyContextID() {
+		t.Fatalf("emit context = %#v", publications.intents)
 	}
 	if len(activities.intents) != 1 || activities.intents[0].Context.ReplyContextID() != deliveryContext.ReplyContextID() {
 		t.Fatalf("activity context = %#v", activities.intents)

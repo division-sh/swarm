@@ -1518,8 +1518,6 @@ func newNotifyAllChildrenRuntime(
 		HumanTasks:              backend,
 		DecisionCardDraftExpiry: backend,
 		HumanTaskExpiry:         backend,
-		GatePublisher:           diagnosticBus,
-		DirectDecisionPublisher: diagnosticBus,
 		DeliveryRuntime:         eventBus,
 		FlowRoutes:              eventBus,
 		TestEngineEmitNow:       engineNow,

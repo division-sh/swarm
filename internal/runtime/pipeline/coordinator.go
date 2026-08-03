@@ -51,34 +51,32 @@ type PipelineCoordinator struct {
 	entityLockMu sync.Mutex
 	entityLocks  map[string]*sync.Mutex
 
-	module                  WorkflowModule
-	workflowStore           *workflowInstanceStore
-	expressionEval          *workflowExpressionEvaluator
-	instanceActivator       FlowInstanceActivator
-	instanceDeactivator     FlowInstanceDeactivator
-	timerScheduler          *Scheduler
-	timerScheduleStore      SchedulePersistence
-	workflowTimers          *WorkflowTimerLifecycle
-	mailboxMaterializer     MailboxWriteMaterializationStore
-	decisionCards           decisioncard.Store
-	proposedEffects         decisioncard.ProposedEffectStore
-	humanTasks              decisioncard.HumanTaskStore
-	decisionDraftExpiry     DecisionCardDraftExpiry
-	humanTaskExpiry         HumanTaskExpiry
-	gatePublisher           WorkflowGateMutationPublisher
-	directDecisionPublisher DecisionCardDirectMutationPublisher
-	deliveryStore           runtimedelivery.Store
-	deadLetters             runtimedeadletters.Persistence
-	deliveryRuntime         WorkflowDeliveryRuntime
-	flowRoutes              FlowInstanceRouteOwner
-	credentials             runtimecredentials.Store
-	managedCredentials      runtimemanagedcredentials.Store
-	mockConnectorResponses  *providerconnectors.MockResponsePlan
-	channelActivityTools    map[string]ChannelActivityTarget
-	artifactRoot            string
-	bundleSourceFact        runtimecorrelation.BundleSourceFact
-	runBundleAvailability   RunBundleAvailabilityReader
-	decisionCardCadence     decisioncard.CadencePolicy
+	module                 WorkflowModule
+	workflowStore          *workflowInstanceStore
+	expressionEval         *workflowExpressionEvaluator
+	instanceActivator      FlowInstanceActivator
+	instanceDeactivator    FlowInstanceDeactivator
+	timerScheduler         *Scheduler
+	timerScheduleStore     SchedulePersistence
+	workflowTimers         *WorkflowTimerLifecycle
+	mailboxMaterializer    MailboxWriteMaterializationStore
+	decisionCards          decisioncard.Store
+	proposedEffects        decisioncard.ProposedEffectStore
+	humanTasks             decisioncard.HumanTaskStore
+	decisionDraftExpiry    DecisionCardDraftExpiry
+	humanTaskExpiry        HumanTaskExpiry
+	deliveryStore          runtimedelivery.Store
+	deadLetters            runtimedeadletters.Persistence
+	deliveryRuntime        WorkflowDeliveryRuntime
+	flowRoutes             FlowInstanceRouteOwner
+	credentials            runtimecredentials.Store
+	managedCredentials     runtimemanagedcredentials.Store
+	mockConnectorResponses *providerconnectors.MockResponsePlan
+	channelActivityTools   map[string]ChannelActivityTarget
+	artifactRoot           string
+	bundleSourceFact       runtimecorrelation.BundleSourceFact
+	runBundleAvailability  RunBundleAvailabilityReader
+	decisionCardCadence    decisioncard.CadencePolicy
 
 	testEntityStateHook              func(entityID, state string)
 	testWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
@@ -110,8 +108,6 @@ type PipelineCoordinatorOptions struct {
 	HumanTasks                       decisioncard.HumanTaskStore
 	DecisionCardDraftExpiry          DecisionCardDraftExpiry
 	HumanTaskExpiry                  HumanTaskExpiry
-	GatePublisher                    WorkflowGateMutationPublisher
-	DirectDecisionPublisher          DecisionCardDirectMutationPublisher
 	DeliveryRuntime                  WorkflowDeliveryRuntime
 	FlowRoutes                       FlowInstanceRouteOwner
 	RunLifecycle                     runtimerunlifecycle.OperationOwner
@@ -210,9 +206,9 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 			return nil
 		}
 		if opts.DeliveryStore == nil || opts.PipelineObligations == nil || opts.DecisionCards == nil ||
-			opts.ProposedEffects == nil || opts.HumanTasks == nil || opts.GatePublisher == nil ||
+			opts.ProposedEffects == nil || opts.HumanTasks == nil ||
 			opts.DecisionCardDraftExpiry == nil || opts.HumanTaskExpiry == nil ||
-			opts.DirectDecisionPublisher == nil || opts.DeliveryRuntime == nil || opts.RunLifecycle == nil {
+			opts.DeliveryRuntime == nil || opts.RunLifecycle == nil {
 			return nil
 		}
 	}
@@ -234,8 +230,6 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		humanTasks:                       opts.HumanTasks,
 		decisionDraftExpiry:              opts.DecisionCardDraftExpiry,
 		humanTaskExpiry:                  opts.HumanTaskExpiry,
-		gatePublisher:                    opts.GatePublisher,
-		directDecisionPublisher:          opts.DirectDecisionPublisher,
 		deliveryStore:                    opts.DeliveryStore,
 		deadLetters:                      opts.DeadLetters,
 		deliveryRuntime:                  opts.DeliveryRuntime,
@@ -285,7 +279,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 	}
 	coordinator.workflowStore = workflowStore
 	if workflowStore != nil {
-		coordinator.workflowTimers = newWorkflowTimerLifecycle(workflowStore, coordinator.SemanticSource(), bus, opts.GatePublisher, opts.WorkOwner, opts.TimerScheduler)
+		coordinator.workflowTimers = newWorkflowTimerLifecycle(workflowStore, coordinator.SemanticSource(), bus, opts.WorkOwner, opts.TimerScheduler)
 	}
 	return coordinator
 }

@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -48,7 +49,8 @@ func newTestSQLiteWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 }
 
 func newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, runner runtimeMutationRunner) *workflowInstanceStore {
-	store := &workflowInstanceStore{}
+	base := &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite}
+	store := newWorkflowPersistenceFixtureStore(base)
 	registerWorkflowPersistenceFixture(store, db, workflowStoreDialectSQLite, runner)
 	if owner, ok := runner.(DynamicFlowRuntimeReadinessPersistence); ok {
 		store.readiness = owner
@@ -99,6 +101,8 @@ func newWorkflowPersistenceFixtureStore(runner *recordingRuntimeMutationRunner) 
 	}
 	if owner, ok := any(runner).(DecisionCardMutationOwner); ok {
 		store.cardMutations = owner
+	} else {
+		store.cardMutations = &unavailablePipelineTestDecisionCardMutations{}
 	}
 	if owner, ok := any(runner).(WorkflowTimerOccurrenceOwner); ok {
 		store.timerOccurrences = owner
@@ -112,7 +116,28 @@ func newWorkflowPersistenceFixtureStore(runner *recordingRuntimeMutationRunner) 
 	if owner, ok := any(runner).(WorkflowInitialMaterializationCommitOwner); ok {
 		store.initialCommits = owner
 	}
+	store.standingServices = pipelineTestStandingServices{store: store}
 	return store
+}
+
+type pipelineTestStandingServices struct {
+	StandingServicePersistence
+	store *workflowInstanceStore
+}
+
+func (p pipelineTestStandingServices) StandingRunUsesIntrinsicRecovery(ctx context.Context, runID string) (bool, error) {
+	if p.store == nil || p.store.testDB() == nil {
+		return false, errors.New("pipeline test standing-service reader requires selected store")
+	}
+	query := `SELECT EXISTS (SELECT 1 FROM standing_services WHERE current_run_id = ? AND declaration_present = TRUE AND effective_state IN ('active', 'suspended'))`
+	if !p.store.isSQLite() {
+		query = `SELECT EXISTS (SELECT 1 FROM standing_services WHERE current_run_id = $1::uuid AND declaration_present = TRUE AND effective_state IN ('active', 'suspended'))`
+	}
+	var found bool
+	if err := p.store.testDB().QueryRowContext(ctx, query, strings.TrimSpace(runID)).Scan(&found); err != nil {
+		return false, err
+	}
+	return found, nil
 }
 
 type pipelineTestDynamicFlowRuntimeReadinessPersistence struct {
@@ -303,7 +328,7 @@ func testWorkflowStoreRunContext(t *testing.T, store *workflowInstanceStore) con
 }
 
 func materializedWorkflowInstanceForTest(instance WorkflowInstance) WorkflowInstance {
-	occurredAt := time.Date(2026, time.July, 25, 12, 0, 0, 0, time.UTC)
+	occurredAt := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
 	instance.Metadata = cloneStringAnyMap(instance.Metadata)
 	if instance.Metadata == nil {
 		instance.Metadata = map[string]any{}
@@ -343,7 +368,7 @@ func configureWorkflowLifecycleForTest(t testing.TB, pc *PipelineCoordinator) {
 		return
 	}
 	if pc.workflowTimers == nil {
-		pc.workflowTimers = newWorkflowTimerLifecycle(pc.workflowStore, pc.SemanticSource(), pc.bus, pc.gatePublisher, pc.workOwner, pc.timerScheduler)
+		pc.workflowTimers = newWorkflowTimerLifecycle(pc.workflowStore, pc.SemanticSource(), pc.bus, pc.workOwner, pc.timerScheduler)
 	}
 	if pc.workflowStore.lifecycleOwner == nil {
 		pc.workflowStore.lifecycleOwner = pipelineWorkflowLifecycleOwner{coordinator: pc}
