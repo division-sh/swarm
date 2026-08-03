@@ -72,6 +72,9 @@ func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Cont
 	if err != nil {
 		return nil, runtimepipelineobligation.Continue(), err
 	}
+	if err := continuation.Validate(card); err != nil {
+		return nil, runtimepipelineobligation.Continue(), err
+	}
 	if continuation.DecisionEventID != evt.ID() || continuation.Verdict != card.Verdict {
 		return nil, runtimepipelineobligation.Continue(), fmt.Errorf("mailbox.card_decided does not match the authoritative proposed-effect continuation")
 	}
@@ -93,6 +96,9 @@ func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Cont
 	err = pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
 		continuation, err := store.LoadProposedEffectContinuation(txctx, card.CardID)
 		if err != nil {
+			return err
+		}
+		if err := continuation.Validate(card); err != nil {
 			return err
 		}
 		if continuation.RouteEventID == evt.ID() && (continuation.State == decisioncard.ProposedEffectRequestReleased || continuation.State == decisioncard.ProposedEffectOutcomeDispatched) {

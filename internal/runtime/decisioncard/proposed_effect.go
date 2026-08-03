@@ -170,6 +170,9 @@ func (c ProposedEffectContinuation) Validate(card Card) error {
 	if c.RequestEventID != anchor.RequestEventID || c.ActivityID != anchor.ActivityID {
 		return fmt.Errorf("proposed-effect continuation identity does not match its anchor")
 	}
+	if err := validateProposedEffectSourceOwner(anchor, c); err != nil {
+		return err
+	}
 	if c.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		return fmt.Errorf("proposed-effect continuation requires effect_class non_idempotent_write")
 	}

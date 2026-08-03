@@ -1,6 +1,7 @@
 package events
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -211,5 +212,55 @@ func TestValidateDeliveryRouteProjectionsRejectsConflictingFacts(t *testing.T) {
 	left.PayloadProjection, right.PayloadProjection = first, second
 	if err := ValidateDeliveryRouteProjections([]DeliveryRoute{left, right}); err == nil || !strings.Contains(err.Error(), "conflicting synthetic payload projections") {
 		t.Fatalf("ValidateDeliveryRouteProjections error = %v", err)
+	}
+}
+
+func TestDeliveryRouteRejectsConnectClaimForAnotherRecipient(t *testing.T) {
+	digest := sha256.Sum256([]byte("connect-edge"))
+	receiverPinDigest := sha256.Sum256([]byte("receiver-pin"))
+	claim := ConnectExecutionClaim{
+		digest: digest, receiverPinDigest: receiverPinDigest,
+		recipientKind: deliveryRecipientNode, recipientID: "node-b", handlerEvent: "flow.completed", present: true,
+	}
+	route := DeliveryRoute{Recipient: MustNodeDeliveryRecipient("node-a"), ConnectClaim: claim}
+	if _, err := route.Identity(); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("route identity error = %v, want recipient mismatch", err)
+	}
+	if _, err := json.Marshal(route); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("route marshal error = %v, want recipient mismatch", err)
+	}
+
+	raw, err := json.Marshal(deliveryRouteWire{
+		SubscriberType: "node", SubscriberID: "node-a", ConnectClaim: claim,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded DeliveryRoute
+	if err := json.Unmarshal(raw, &decoded); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("route decode error = %v, want recipient mismatch", err)
+	}
+}
+
+func TestConnectExecutionClaimRejectsEveryPartialEmptyEncoding(t *testing.T) {
+	var empty ConnectExecutionClaim
+	if err := json.Unmarshal([]byte(`{}`), &empty); err != nil || !empty.Empty() {
+		t.Fatalf("empty claim = %#v, %v", empty, err)
+	}
+
+	for _, raw := range []string{
+		`null`,
+		`{"sha256":""}`,
+		`{"receiver_pin_sha256":""}`,
+		`{"recipient_kind":"node"}`,
+		`{"recipient_id":"node-a"}`,
+		`{"handler_event":"flow.completed"}`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			var claim ConnectExecutionClaim
+			if err := json.Unmarshal([]byte(raw), &claim); err == nil {
+				t.Fatalf("partial empty claim %s decoded as %#v", raw, claim)
+			}
+		})
 	}
 }
