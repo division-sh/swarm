@@ -173,7 +173,7 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 					t.Fatalf("delivered timer routing source = %#v, want producer flow-owned control", sourceFact)
 				}
 				route := delivery.HandoffRoute()
-				if route.SubscriberID != "consumer-node" || route.ConnectClaim.Empty() {
+				if route.Recipient.ID() != "consumer-node" || route.ConnectClaim.Empty() {
 					t.Fatalf("timer delivery route = %#v, want consumer-node with stamped connect claim", route)
 				}
 				if err := delivery.Complete(); err != nil {
@@ -523,7 +523,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			if err != nil {
 				t.Fatalf("plan timer cancellation transition: %v", err)
 			}
-			if got := plan.DeliveryRoutes; len(got) != 1 || got[0].SubscriberType != "node" || got[0].SubscriberID != "controller" {
+			if got := plan.DeliveryRoutes; len(got) != 1 || !got[0].Recipient.IsNode() || got[0].Recipient.ID() != "controller" {
 				t.Fatalf("timer cancellation delivery routes = %#v, want exact controller node route", got)
 			}
 			if err := bus.Publish(ctx, cancelEvent); err != nil {

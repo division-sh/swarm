@@ -699,11 +699,7 @@ func publishClaudeAttemptProofEvent(t *testing.T, eventBus *runtimebus.EventBus,
 	eventID := uuid.NewString()
 	evt := eventtest.RunCreatingRootIngress(eventID, claudeAttemptProofEventType, "proof", "", json.RawMessage(`{"request":"run"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	cfg := claudeAttemptProofAgentConfig(surface)
-	if err := eventBus.PublishDirectRoutes(claudeAttemptProofContext(), evt, []events.DeliveryRoute{{
-		SubscriberType: "agent",
-		SubscriberID:   cfg.ID,
-		AgentIdentity:  cfg.Identity,
-	}}); err != nil {
+	if err := eventBus.PublishDirectRoutes(claudeAttemptProofContext(), evt, []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(cfg.ID), AgentIdentity: cfg.Identity}}); err != nil {
 		t.Fatalf("publish Claude proof event: %v", err)
 	}
 	return eventID
@@ -723,11 +719,7 @@ func waitClaudeAttemptProofReceipt(t *testing.T, backend claudeAttemptProofBacke
 		t.Fatalf("unsupported receipt-to-delivery test status %q", want)
 	}
 	cfg := claudeAttemptProofAgentConfig()
-	route := events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   cfg.ID,
-		AgentIdentity:  cfg.Identity,
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(cfg.ID), AgentIdentity: cfg.Identity}
 	proof, err := backend.store.ProveHandoff(claudeAttemptProofContext(), eventID, route)
 	if err != nil {
 		t.Fatalf("prove Claude delivery handoff: %v", err)

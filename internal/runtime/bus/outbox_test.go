@@ -309,8 +309,8 @@ func (s *directRecipientTransactionalStore) finalizePreparedPublish(_ context.Co
 	}
 	s.deliveries[evt.ID()] = nil
 	for _, route := range s.routes[evt.ID()] {
-		if route.SubscriberType == "agent" {
-			s.deliveries[evt.ID()] = append(s.deliveries[evt.ID()], route.SubscriberID)
+		if route.Recipient.IsAgent() {
+			s.deliveries[evt.ID()] = append(s.deliveries[evt.ID()], route.Recipient.ID())
 		}
 	}
 	s.active = s.active[:len(s.active)-1]
@@ -325,8 +325,7 @@ func (s *directRecipientTransactionalStore) deliveryRoutes(eventID string) []eve
 
 func deliveryRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRoute) bool {
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
-		if route.SubscriberType == want.SubscriberType &&
-			route.SubscriberID == want.SubscriberID &&
+		if route.Recipient == want.Recipient &&
 			route.Target.Normalized() == want.Target.Normalized() {
 			return true
 		}
@@ -374,7 +373,7 @@ func (r *recordingDeliveryRouteInterceptor) seen(route events.DeliveryRoute) boo
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, got := range events.NormalizeDeliveryRoutes(r.routes) {
-		if got.SubscriberType == route.SubscriberType && got.SubscriberID == route.SubscriberID && got.Target.Normalized() == route.Target.Normalized() {
+		if got.Recipient == route.Recipient && got.Target.Normalized() == route.Target.Normalized() {
 			return true
 		}
 	}
@@ -1103,12 +1102,9 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 		t.Fatalf("Begin: %v", err)
 	}
 	store := &directRecipientTransactionalStore{}
-	want := events.DeliveryRoute{
-		SubscriberType: "node",
-		SubscriberID:   "target-node",
-		Target: events.RouteIdentity{
-			FlowInstance: "review/inst-1",
-		},
+	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("target-node"), Target: events.RouteIdentity{
+		FlowInstance: "review/inst-1",
+	},
 	}
 	guardSawMaterializedRoute := false
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{
@@ -1410,7 +1406,7 @@ func TestEngineOutboxAndDispatcher_RoutesPendingInternalDeliveriesToRouteInterce
 	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
-	wantRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "workflow-runtime"}
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("workflow-runtime")}
 	if !interceptor.seen(wantRoute) {
 		t.Fatalf("delivery route interceptor did not receive pending internal route %#v", wantRoute)
 	}

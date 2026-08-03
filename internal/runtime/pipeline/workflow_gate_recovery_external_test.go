@@ -1523,7 +1523,7 @@ func assertProposedEffectOutcomeCount(t *testing.T, selected gateRecoveryStoreCa
 func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCase, bus *runtimebus.EventBus, evt events.Event, nodeID string) events.DeliveryRoute {
 	t.Helper()
 	ctx := testAuthorActivityContext(t, context.Background())
-	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID)}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected.events, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	proof, err := selected.events.ProveHandoff(ctx, evt.ID(), route)
 	if err != nil {

@@ -150,8 +150,8 @@ func exactSiblingObligationBus(t *testing.T, store *targetRouteMemoryStore, inst
 		channels["review/inst-b"] = bus.ReplaceAgentRoute(tokenB, testAgentSubscriptionAdmissionForFlow(t, "worker", "review/inst-b", events.EventType("test.work")))
 	}
 	recipients := []RoutePlanLiveRecipient{
-		{RecipientID: "worker", AgentIdentity: tokenA.Identity, SubscriberType: routePlanSubscriberAgent, PersistAsDelivery: true},
-		{RecipientID: "worker", AgentIdentity: tokenB.Identity, SubscriberType: routePlanSubscriberAgent, PersistAsDelivery: true},
+		{Recipient: events.MustAgentDeliveryRecipient("worker"), AgentIdentity: tokenA.Identity, PersistAsDelivery: true},
+		{Recipient: events.MustAgentDeliveryRecipient("worker"), AgentIdentity: tokenB.Identity, PersistAsDelivery: true},
 	}
 	routes := []events.DeliveryRoute{
 		exactAgentDeliveryRoute(tokenA.Identity),
@@ -162,9 +162,8 @@ func exactSiblingObligationBus(t *testing.T, store *targetRouteMemoryStore, inst
 
 func exactAgentDeliveryRoute(identity agentidentity.Identity) events.DeliveryRoute {
 	return events.DeliveryRoute{
-		SubscriberType: routePlanSubscriberAgent,
-		SubscriberID:   identity.AgentID(),
-		AgentIdentity:  identity,
+		Recipient:     events.MustAgentDeliveryRecipient(identity.AgentID()),
+		AgentIdentity: identity,
 	}
 }
 

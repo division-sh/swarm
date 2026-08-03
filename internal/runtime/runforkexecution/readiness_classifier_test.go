@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -23,12 +24,9 @@ func TestBuildSelectedContractReadinessClassifierEmitsCompleteOwnerMatrix(t *tes
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
 			SourceEventID: "source-event",
 			EventName:     "work.begin",
-			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{{
-				SubscriberType: "agent",
-				SubscriberID:   "worker",
-				Path:           "flow-a/worker",
-				RouteSource:    "selected_contracts",
-			}},
+			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
+				testAgentFrontierRecipient("worker", "flow-a/worker", "selected_contracts", agentidentity.Identity{}),
+			},
 		}},
 	}
 	model := testSelectedContractExecutionModel(t, frontier)
@@ -106,12 +104,9 @@ func TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteA
 		FrontierEvents: []runfork.RunForkContractFrontierEvent{{
 			SourceEventID: "source-event",
 			EventName:     "work.begin",
-			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{{
-				SubscriberType: "node",
-				SubscriberID:   "worker",
-				Path:           "flow-a/worker",
-				RouteSource:    "selected_contracts",
-			}},
+			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
+				testNodeFrontierRecipient("worker", "flow-a/worker", "selected_contracts"),
+			},
 		}},
 	}
 	routeAdmission := testSelectedContractRouteAdmission(frontier)
@@ -146,12 +141,9 @@ func TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteA
 	selectedAdmission.RecipientPlanning.RecipientPlanEvents = []runfork.RunForkSelectedContractRecipientPlanEvent{{
 		SourceEventID: "source-event",
 		EventName:     "work.begin",
-		Recipients: []runfork.RunForkContractFrontierRecipient{{
-			SubscriberType: "node",
-			SubscriberID:   "worker",
-			Path:           "flow-a/worker",
-			RouteSource:    "selected_contracts",
-		}},
+		Recipients: []runfork.RunForkContractFrontierRecipient{
+			testNodeFrontierRecipient("worker", "flow-a/worker", "selected_contracts"),
+		},
 		Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 	}}
 	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)

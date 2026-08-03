@@ -256,8 +256,8 @@ func TestSelectedContractAgentRecipientsPreserveConcreteTemplateInstanceIdentity
 		Owner: runfork.RunForkSelectedContractRecipientPlanningOwner,
 		RecipientPlanEvents: []runfork.RunForkSelectedContractRecipientPlanEvent{{
 			Recipients: []runfork.RunForkContractFrontierRecipient{
-				{SubscriberType: "agent", SubscriberID: "shared-agent", Path: "review/inst-1", AgentIdentity: first},
-				{SubscriberType: "agent", SubscriberID: "shared-agent", Path: "review/inst-2", AgentIdentity: second},
+				testAgentFrontierRecipient("shared-agent", "review/inst-1", "", first),
+				testAgentFrontierRecipient("shared-agent", "review/inst-2", "", second),
 			},
 		}},
 	}

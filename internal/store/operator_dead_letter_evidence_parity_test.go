@@ -53,15 +53,11 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 				runID, "", events.EventEnvelope{}, now,
 			)
 			routes := []events.DeliveryRoute{
-				{
-					SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-a",
-					AgentIdentity: identity,
-					Target:        events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/one", EntityID: uuid.NewString()},
+				{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity,
+					Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/one", EntityID: uuid.NewString()},
 				},
-				{
-					SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-a",
-					AgentIdentity: identity,
-					Target:        events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/two", EntityID: uuid.NewString()},
+				{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity,
+					Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/two", EntityID: uuid.NewString()},
 				},
 			}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, routes); err != nil {
@@ -72,7 +68,7 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 			for index, route := range routes {
 				claimed, err := claimDeliveryFixture(ctx, selected, event, route)
 				if err != nil {
-					t.Fatalf("claim %s: %v", route.SubscriberID, err)
+					t.Fatalf("claim %s: %v", route.Recipient.ID(), err)
 				}
 				failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "route_"+string(rune('a'+index))+"_failed", nil)
 				snapshot, err := selected.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
@@ -81,7 +77,7 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 					Failure:     &failure,
 				})
 				if err != nil {
-					t.Fatalf("dead-letter %s: %v", route.SubscriberID, err)
+					t.Fatalf("dead-letter %s: %v", route.Recipient.ID(), err)
 				}
 				snapshots[snapshot.DeliveryID] = snapshot
 			}
@@ -146,11 +142,7 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 				eventID, events.EventType("delivery.terminalized"), "gateway", "", json.RawMessage(`{"message":"stop"}`), 0,
 				runID, "", events.EventEnvelope{}, now,
 			)
-			route := events.DeliveryRoute{
-				SubscriberType: string(runtimedelivery.SubscriberAgent),
-				SubscriberID:   "terminal-agent",
-				AgentIdentity:  identity,
-			}
+			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("terminal-agent"), AgentIdentity: identity}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
 				t.Fatalf("commit terminalized event: %v", err)
 			}

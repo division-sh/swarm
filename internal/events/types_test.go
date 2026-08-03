@@ -206,7 +206,7 @@ func TestDeliveryPayloadProjectionIsCanonicalAndIsolated(t *testing.T) {
 func TestValidateDeliveryRouteProjectionsRejectsConflictingFacts(t *testing.T) {
 	first, _ := NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "case-1"})
 	second, _ := NewDeliveryPayloadProjection(map[string]string{"validation_case_id": "case-2"})
-	route := DeliveryRoute{SubscriberType: "node", SubscriberID: "validator", Target: RouteIdentity{FlowID: "validation", FlowInstance: "validation/one"}}
+	route := DeliveryRoute{Recipient: MustNodeDeliveryRecipient("validator"), Target: RouteIdentity{FlowID: "validation", FlowInstance: "validation/one"}}
 	left, right := route, route
 	left.PayloadProjection, right.PayloadProjection = first, second
 	if err := ValidateDeliveryRouteProjections([]DeliveryRoute{left, right}); err == nil || !strings.Contains(err.Error(), "conflicting synthetic payload projections") {

@@ -7,7 +7,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -157,7 +156,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileDeliveryActiv
 	if err := acknowledgePipelineEventFixture(ctx, pg, deliveryEvent.ID()); err != nil {
 		t.Fatalf("seed delivery-event pipeline receipt: %v", err)
 	}
-	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-1"}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1")}
 	claimed, err := claimDeliveryFixture(ctx, pg, deliveryEvent, route)
 	if err != nil {
 		t.Fatalf("claim active delivery: %v", err)
@@ -188,7 +187,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedUntilNodeDeliveryS
 		uuid.NewString(), events.EventType("completion.node.delivery"), eventtest.Producer(events.EventProducerPlatform, "test"), "", []byte(`{}`), 0,
 		fixture.RunID, fixture.EventID, events.EventEnvelope{}, time.Now().UTC(),
 	)
-	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberNode), SubscriberID: "terminal-node"}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("terminal-node")}
 	if err := commitSemanticEventFixtureWithRoutes(ctx, pg, deliveryEvent, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("seed active node delivery: %v", err)
 	}

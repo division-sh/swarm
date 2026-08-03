@@ -43,8 +43,8 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 						second, _ := events.NewDeliveryPayloadProjection(map[string]string{"summary": "two"})
 						worker := testAgentDeliveryRoute(t, "worker", "fixture/worker")
 						req.Commit.DeliveryRoutes = []events.DeliveryRoute{
-							{SubscriberType: worker.SubscriberType, SubscriberID: worker.SubscriberID, AgentIdentity: worker.AgentIdentity, PayloadProjection: first},
-							{SubscriberType: worker.SubscriberType, SubscriberID: worker.SubscriberID, AgentIdentity: worker.AgentIdentity, PayloadProjection: second},
+							{Recipient: worker.Recipient, AgentIdentity: worker.AgentIdentity, PayloadProjection: first},
+							{Recipient: worker.Recipient, AgentIdentity: worker.AgentIdentity, PayloadProjection: second},
 						}
 					},
 				},

@@ -310,7 +310,7 @@ func performEventReplay(
 func eventReplayRouteSubscriberIDs(routes []events.DeliveryRoute) []string {
 	ids := make([]string, 0, len(routes))
 	for _, route := range routes {
-		ids = append(ids, route.SubscriberID)
+		ids = append(ids, route.Recipient.ID())
 	}
 	return uniqueTrimmedStrings(ids)
 }
@@ -441,7 +441,7 @@ func eventReplayTargetsForRequest(original store.OperatorEventFull, requested []
 	}
 	hasAgentDelivery := false
 	for _, delivery := range original.Deliveries {
-		if delivery.Route.Normalized().SubscriberType == eventReplaySubscriberTypeAgent {
+		if delivery.Route.Normalized().Recipient.IsAgent() {
 			hasAgentDelivery = true
 			break
 		}
@@ -452,7 +452,7 @@ func eventReplayTargetsForRequest(original store.OperatorEventFull, requested []
 	deliveries := make([]eventReplayDelivery, 0)
 	for _, delivery := range original.Deliveries {
 		route := delivery.Route.Normalized()
-		if route.SubscriberType != eventReplaySubscriberTypeAgent || route.AgentIdentity.Normalize() != identity {
+		if !route.Recipient.IsAgent() || route.AgentIdentity.Normalize() != identity {
 			continue
 		}
 		if err := validateReplayEligibleDelivery(original.EventID, delivery); err != nil {
@@ -497,7 +497,7 @@ func eventReplayRoutes(deliveries []eventReplayDelivery) ([]events.DeliveryRoute
 	routes := make([]events.DeliveryRoute, 0, len(deliveries))
 	for _, delivery := range deliveries {
 		route := delivery.route.Normalized()
-		if route.SubscriberType != eventReplaySubscriberTypeAgent || route.SubscriberID != strings.TrimSpace(delivery.SubscriberID) {
+		if !route.Recipient.IsAgent() || route.Recipient.ID() != strings.TrimSpace(delivery.SubscriberID) {
 			return nil, fmt.Errorf("replay source delivery %s is missing its exact agent route", strings.TrimSpace(delivery.DeliveryID))
 		}
 		routes = append(routes, route)

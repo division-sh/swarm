@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -65,34 +64,27 @@ func (eb *EventBus) notifyTestPostCommitDispatchCompleted(ctx context.Context, e
 
 func lifecycleDeliveryPersistedSignals(evt events.Event, routePlan RoutePlan) []runtimelifecycleprobe.Signal {
 	routePlan = routePlan.Normalized()
-	seen := map[string]struct{}{}
+	seen := map[events.DeliveryRecipient]struct{}{}
 	out := make([]runtimelifecycleprobe.Signal, 0, len(routePlan.DeliveryRoutes())+len(routePlan.PersistedRecipientIDs()))
 	for _, route := range routePlan.DeliveryRoutes() {
-		subscriberType := strings.TrimSpace(route.SubscriberType)
-		subscriberID := strings.TrimSpace(route.SubscriberID)
-		if subscriberType == "" || subscriberID == "" {
+		if route.Recipient.Empty() {
 			continue
 		}
-		key := subscriberType + "\x00" + subscriberID
-		if _, ok := seen[key]; ok {
+		if _, ok := seen[route.Recipient]; ok {
 			continue
 		}
-		seen[key] = struct{}{}
+		seen[route.Recipient] = struct{}{}
 		out = append(out, runtimelifecycleprobe.Signal{
 			Kind:           runtimelifecycleprobe.DeliveryPersisted,
 			EventID:        evt.ID(),
 			EventType:      string(evt.Type()),
-			SubscriberType: subscriberType,
-			SubscriberID:   subscriberID,
+			SubscriberType: route.Recipient.Code(),
+			SubscriberID:   route.Recipient.ID(),
 			Status:         "pending",
 		})
 	}
 	for _, recipient := range routePlan.PersistedRecipientIDs() {
-		recipient = strings.TrimSpace(recipient)
-		if recipient == "" {
-			continue
-		}
-		key := "agent\x00" + recipient
+		key := events.MustAgentDeliveryRecipient(recipient)
 		if _, ok := seen[key]; ok {
 			continue
 		}

@@ -25,10 +25,10 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 	)
 	for _, route := range []events.DeliveryRoute{
 		testAgentDeliveryRoute(t, "agent-pending", "fixture/agent-pending"),
-		{SubscriberType: "node", SubscriberID: "node-pending"},
+		{Recipient: events.MustNodeDeliveryRecipient("node-pending")},
 	} {
 		if err := commitDeliveryObligationFixture(ctx, pg, event, route); err != nil {
-			t.Fatalf("seed pending %s delivery: %v", route.SubscriberType, err)
+			t.Fatalf("seed pending %s delivery: %v", route.Recipient.Code(), err)
 		}
 	}
 

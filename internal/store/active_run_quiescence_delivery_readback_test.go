@@ -36,11 +36,7 @@ func TestActiveRunDeliveryQuiescenceReadbackParity(t *testing.T) {
 				runID, events.EventEnvelope{}, now,
 			)
 			identity := testAgentIdentity(t, "agent-a", "quiescence/instance-a")
-			route := events.DeliveryRoute{
-				SubscriberType: string(runtimedelivery.SubscriberAgent),
-				SubscriberID:   "agent-a",
-				AgentIdentity:  identity,
-			}
+			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
 				t.Fatalf("commit active-run delivery: %v", err)
 			}

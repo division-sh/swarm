@@ -98,17 +98,14 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 		t.Fatalf("activation metadata = %#v, want entity_type/instance_kind/last_source_event", activation.Metadata)
 	}
 	persistedRoutes := store.routes[evt.ID()]
-	if len(persistedRoutes) != 1 || persistedRoutes[0].SubscriberID != finalflowinstanceauthoring.TemplateNodeID {
+	if len(persistedRoutes) != 1 || persistedRoutes[0].Recipient.ID() != finalflowinstanceauthoring.TemplateNodeID {
 		t.Fatalf("persisted delivery routes = %#v, want one %s subscriber", persistedRoutes, finalflowinstanceauthoring.TemplateNodeID)
 	}
-	want := events.DeliveryRoute{
-		SubscriberType: "node",
-		SubscriberID:   persistedRoutes[0].SubscriberID,
-		Target: events.RouteIdentity{
-			FlowID:       finalflowinstanceauthoring.TemplateFlowID,
-			FlowInstance: activation.Instance.InstancePath,
-			EntityID:     activation.Instance.EntityID,
-		},
+	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(persistedRoutes[0].Recipient.ID()), Target: events.RouteIdentity{
+		FlowID:       finalflowinstanceauthoring.TemplateFlowID,
+		FlowInstance: activation.Instance.InstancePath,
+		EntityID:     activation.Instance.EntityID,
+	},
 	}
 	if !deliveryRoutesContain(persistedRoutes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want lifecycle-created template route %#v", persistedRoutes, want)
@@ -124,7 +121,7 @@ func TestEventBusFinalFlowInstanceAuthoringFixture_RenamedConnectRoutePersistsRe
 		t.Fatalf("post-publish route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
 	}
 
-	retryTarget := subscribeInternalDeliveriesForTest(t, eb, persistedRoutes[0].SubscriberID)
+	retryTarget := subscribeInternalDeliveriesForTest(t, eb, persistedRoutes[0].Recipient.ID())
 	if err := eb.Publish(context.Background(), evt); err != nil {
 		t.Fatalf("Publish same-event retry: %v", err)
 	}

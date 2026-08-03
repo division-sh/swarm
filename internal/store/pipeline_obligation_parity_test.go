@@ -603,10 +603,7 @@ func provePipelineSettlementRollback(
 		eventID, events.EventType("test.event"), "runtime", "", []byte(`{"ok":true}`),
 		0, runID, "", events.EventEnvelope{}, time.Now().UTC().Add(-time.Minute),
 	)
-	if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{{
-		SubscriberType: "agent",
-		SubscriberID:   "pipeline-handoff-rollback",
-	}}); err != nil {
+	if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("pipeline-handoff-rollback")}}); err != nil {
 		t.Fatalf("commit pipeline handoff rollback event: %v", err)
 	}
 	if total, handoff := readDeliveryContinuationHandoffCounts(t, ctx, fixture, eventID); total != 1 || handoff != 0 {

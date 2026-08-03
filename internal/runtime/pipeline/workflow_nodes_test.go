@@ -368,7 +368,7 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_DoesNotInferClaimFromF
 			evt := eventtest.RunCreatingRootIngress("", events.EventType(producerEvent), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
 				FlowInstance: tc.flowInstance,
 			}, time.Unix(1, 0).UTC())
-			route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "child-relay"}
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("child-relay")}
 			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "child-relay", evt)
 			if resolved.Matched {
 				t.Fatalf("connected-input resolution = %#v, want no authority without a stamped claim", resolved)
@@ -456,7 +456,7 @@ func workflowNodeStampedConnectRouteForHandlerEvent(t testing.TB, source semanti
 		if plan.ReceiverLocalEvent() != events.EventType(eventidentity.Normalize(handlerEvent)) {
 			continue
 		}
-		route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID}
+		route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID)}
 		claim, err := runtimepinrouting.ConnectExecutionClaim(plan, route)
 		if err != nil {
 			t.Fatalf("build stamped connect claim: %v", err)
@@ -475,7 +475,7 @@ func workflowNodeStampedConnectRoute(t testing.TB, source semanticview.Source, r
 		if receiver.FlowID != receiverFlow || receiver.Pin != receiverPin {
 			continue
 		}
-		route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID}
+		route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID)}
 		claim, err := runtimepinrouting.ConnectExecutionClaim(plan, route)
 		if err != nil {
 			t.Fatalf("build stamped connect claim: %v", err)
@@ -601,7 +601,7 @@ func TestWorkflowNodeHandlerResolution_TargetRouteDoesNotAuthorizeProducerScoped
 		FlowInstance: "account_case/ti-1",
 		EntityID:     "entity-1",
 	})
-	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "account-case-worker", Target: evt.TargetRoute()}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-case-worker"), Target: evt.TargetRoute()}
 	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "account-case-worker", evt)
 	if resolved.Matched || !strings.Contains(resolved.Failure, "stamped connect claim") {
 		t.Fatalf("target-route-only resolution = %#v, want fail-closed stamped-claim error", resolved)
@@ -626,7 +626,7 @@ func TestWorkflowNodeHandlerResolution_DirectConcreteDeliveryRequiresExactSource
 		{name: "other instance", target: events.RouteIdentity{FlowID: "account_case", FlowInstance: "account_case/ti-2", EntityID: "entity-2"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "account-case-worker", Target: tc.target}
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("account-case-worker"), Target: tc.target}
 			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, "account-case-worker", evt)
 			if resolved.Matched != tc.want {
 				t.Fatalf("direct concrete resolution = %#v, want matched=%t", resolved, tc.want)

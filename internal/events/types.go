@@ -580,7 +580,59 @@ func (p *DeliveryPayloadProjection) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
+type DeliveryRecipient struct {
+	kind deliveryRecipientKind
+	id   string
+}
+
+func NewNodeDeliveryRecipient(id string) (DeliveryRecipient, error) {
+	return newDeliveryRecipient(deliveryRecipientNode, id)
+}
+
+func NewAgentDeliveryRecipient(id string) (DeliveryRecipient, error) {
+	return newDeliveryRecipient(deliveryRecipientAgent, id)
+}
+
+func MustNodeDeliveryRecipient(id string) DeliveryRecipient {
+	recipient, err := NewNodeDeliveryRecipient(id)
+	if err != nil {
+		panic(err)
+	}
+	return recipient
+}
+
+func MustAgentDeliveryRecipient(id string) DeliveryRecipient {
+	recipient, err := NewAgentDeliveryRecipient(id)
+	if err != nil {
+		panic(err)
+	}
+	return recipient
+}
+
+func newDeliveryRecipient(kind deliveryRecipientKind, id string) (DeliveryRecipient, error) {
+	id = strings.TrimSpace(id)
+	if (kind != deliveryRecipientNode && kind != deliveryRecipientAgent) || id == "" {
+		return DeliveryRecipient{}, fmt.Errorf("delivery recipient kind and id are required")
+	}
+	return DeliveryRecipient{kind: kind, id: id}, nil
+}
+
+func (r DeliveryRecipient) Empty() bool   { return r.kind == 0 && r.id == "" }
+func (r DeliveryRecipient) IsNode() bool  { return r.kind == deliveryRecipientNode && r.id != "" }
+func (r DeliveryRecipient) IsAgent() bool { return r.kind == deliveryRecipientAgent && r.id != "" }
+func (r DeliveryRecipient) ID() string    { return r.id }
+func (r DeliveryRecipient) Code() string  { return r.kind.storageCode() }
+
 type DeliveryRoute struct {
+	Recipient         DeliveryRecipient         `json:"-"`
+	AgentIdentity     agentidentity.Identity    `json:"agent_identity,omitempty"`
+	Target            RouteIdentity             `json:"delivery_target_route,omitempty"`
+	Context           DeliveryContext           `json:"delivery_context,omitempty"`
+	PayloadProjection DeliveryPayloadProjection `json:"delivery_payload_projection,omitempty"`
+	ConnectClaim      ConnectExecutionClaim     `json:"connect_execution_claim,omitempty"`
+}
+
+type deliveryRouteWire struct {
 	SubscriberType    string                    `json:"subscriber_type"`
 	SubscriberID      string                    `json:"subscriber_id"`
 	AgentIdentity     agentidentity.Identity    `json:"agent_identity,omitempty"`
@@ -588,6 +640,39 @@ type DeliveryRoute struct {
 	Context           DeliveryContext           `json:"delivery_context,omitempty"`
 	PayloadProjection DeliveryPayloadProjection `json:"delivery_payload_projection,omitempty"`
 	ConnectClaim      ConnectExecutionClaim     `json:"connect_execution_claim,omitempty"`
+}
+
+func (r DeliveryRoute) MarshalJSON() ([]byte, error) {
+	r = r.Normalized()
+	return json.Marshal(deliveryRouteWire{
+		SubscriberType: r.Recipient.Code(), SubscriberID: r.Recipient.ID(), AgentIdentity: r.AgentIdentity,
+		Target: r.Target, Context: r.Context, PayloadProjection: r.PayloadProjection, ConnectClaim: r.ConnectClaim,
+	})
+}
+
+func (r *DeliveryRoute) UnmarshalJSON(raw []byte) error {
+	if r == nil {
+		return fmt.Errorf("delivery route destination is nil")
+	}
+	var wire deliveryRouteWire
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		return fmt.Errorf("decode delivery route: %w", err)
+	}
+	kind, ok := deliveryRecipientKindFromCode(wire.SubscriberType)
+	if !ok {
+		return fmt.Errorf("delivery route recipient kind is invalid")
+	}
+	recipient, err := newDeliveryRecipient(kind, wire.SubscriberID)
+	if err != nil {
+		return err
+	}
+	*r = DeliveryRoute{
+		Recipient: recipient, AgentIdentity: wire.AgentIdentity, Target: wire.Target,
+		Context: wire.Context, PayloadProjection: wire.PayloadProjection, ConnectClaim: wire.ConnectClaim,
+	}.Normalized()
+	return nil
 }
 
 // ConnectExecutionClaim is the opaque proof that one delivery was admitted
@@ -613,8 +698,8 @@ const (
 // this boundary.
 func AdmitConnectExecutionClaim(digest, receiverPinDigest [sha256.Size]byte, route DeliveryRoute, handlerEvent EventType) (ConnectExecutionClaim, error) {
 	route = route.Normalized()
-	kind, ok := deliveryRecipientKindFromCode(route.SubscriberType)
-	if !ok || route.SubscriberID == "" {
+	kind := route.Recipient.kind
+	if route.Recipient.Empty() {
 		return ConnectExecutionClaim{}, fmt.Errorf("connect execution claim requires an admitted node or agent recipient")
 	}
 	handler := eventidentity.Normalize(string(handlerEvent))
@@ -623,7 +708,7 @@ func AdmitConnectExecutionClaim(digest, receiverPinDigest [sha256.Size]byte, rou
 	}
 	return ConnectExecutionClaim{
 		digest: digest, receiverPinDigest: receiverPinDigest,
-		recipientKind: kind, recipientID: route.SubscriberID, handlerEvent: handler, present: true,
+		recipientKind: kind, recipientID: route.Recipient.ID(), handlerEvent: handler, present: true,
 	}, nil
 }
 
@@ -765,23 +850,23 @@ func ParseDeliveryRouteIdentity(raw string) (DeliveryRouteIdentity, error) {
 // duplicate comparison and hydration.
 func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
 	r = r.Normalized()
-	if r.SubscriberType == "" || r.SubscriberID == "" {
+	if r.Recipient.Empty() {
 		return DeliveryRouteIdentity{}, fmt.Errorf("delivery route subscriber type and id are required")
 	}
-	switch r.SubscriberType {
-	case "agent":
+	switch {
+	case r.Recipient.IsAgent():
 		if err := r.AgentIdentity.Validate(); err != nil {
 			return DeliveryRouteIdentity{}, fmt.Errorf("delivery route agent identity: %w", err)
 		}
-		if r.AgentIdentity.AgentID() != r.SubscriberID {
+		if r.AgentIdentity.AgentID() != r.Recipient.ID() {
 			return DeliveryRouteIdentity{}, fmt.Errorf("delivery route subscriber id does not match agent identity")
 		}
-	case "node":
+	case r.Recipient.IsNode():
 		if !r.AgentIdentity.IsZero() {
 			return DeliveryRouteIdentity{}, fmt.Errorf("node delivery route cannot carry agent identity")
 		}
 	default:
-		return DeliveryRouteIdentity{}, fmt.Errorf("delivery route subscriber type %q is unsupported", r.SubscriberType)
+		return DeliveryRouteIdentity{}, fmt.Errorf("delivery route subscriber type %q is unsupported", r.Recipient.Code())
 	}
 	projection, err := r.PayloadProjection.Canonical()
 	if err != nil {
@@ -801,8 +886,8 @@ func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
 		Projection     map[string]string      `json:"projection"`
 		ConnectClaim   *ConnectExecutionClaim `json:"connect_claim,omitempty"`
 	}{
-		SubscriberType: r.SubscriberType,
-		SubscriberID:   r.SubscriberID,
+		SubscriberType: r.Recipient.Code(),
+		SubscriberID:   r.Recipient.ID(),
 		AgentIdentity:  r.AgentIdentity,
 		Target:         r.Target,
 		Context:        r.Context,
@@ -1668,8 +1753,7 @@ func (r RouteIdentity) Empty() bool {
 
 func (r DeliveryRoute) Normalized() DeliveryRoute {
 	return DeliveryRoute{
-		SubscriberType:    strings.TrimSpace(r.SubscriberType),
-		SubscriberID:      strings.TrimSpace(r.SubscriberID),
+		Recipient:         r.Recipient,
 		AgentIdentity:     r.AgentIdentity.Normalize(),
 		Target:            r.Target.Normalized(),
 		Context:           r.Context.Normalized(),
@@ -1686,7 +1770,7 @@ func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
 	seen := map[DeliveryRouteIdentity]struct{}{}
 	for _, route := range in {
 		route = route.Normalized()
-		if route.SubscriberType == "" || route.SubscriberID == "" {
+		if route.Recipient.Empty() {
 			out = append(out, route)
 			continue
 		}
@@ -1711,10 +1795,8 @@ func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
 func ValidateDeliveryRoutes(in []DeliveryRoute) error {
 	for index, route := range in {
 		route = route.Normalized()
-		switch route.SubscriberType {
-		case "agent", "node":
-		default:
-			return fmt.Errorf("delivery route %d has unsupported subscriber type %q", index, route.SubscriberType)
+		if !route.Recipient.IsAgent() && !route.Recipient.IsNode() {
+			return fmt.Errorf("delivery route %d has unsupported subscriber type %q", index, route.Recipient.Code())
 		}
 		if _, err := route.Identity(); err != nil {
 			return fmt.Errorf("delivery route %d: %w", index, err)
@@ -1728,7 +1810,7 @@ func ValidateDeliveryRoutes(in []DeliveryRoute) error {
 func SameDeliveryRouteIdentity(left, right DeliveryRoute) bool {
 	left = left.Normalized()
 	right = right.Normalized()
-	if left.SubscriberType == "" || left.SubscriberID == "" || right.SubscriberType == "" || right.SubscriberID == "" {
+	if left.Recipient.Empty() || right.Recipient.Empty() {
 		return false
 	}
 	leftIdentity, leftErr := left.Identity()
@@ -1747,25 +1829,23 @@ func SameDeliveryRecipientIdentity(left, right DeliveryRoute) bool {
 }
 
 func ValidateDeliveryRouteProjections(in []DeliveryRoute) error {
-	seen := make(map[string]string, len(in))
+	type projectionRouteKey struct {
+		recipient      DeliveryRecipient
+		target         RouteIdentity
+		replyContextID string
+	}
+	seen := make(map[projectionRouteKey]string, len(in))
 	for _, route := range in {
 		route = route.Normalized()
 		projection, err := route.PayloadProjection.Canonical()
 		if err != nil {
-			return fmt.Errorf("delivery route %s=%s has invalid payload projection: %w", route.SubscriberType, route.SubscriberID, err)
+			return fmt.Errorf("delivery route %s=%s has invalid payload projection: %w", route.Recipient.Code(), route.Recipient.ID(), err)
 		}
 		target := route.Target
-		key := strings.Join([]string{
-			route.SubscriberType,
-			route.SubscriberID,
-			target.FlowID,
-			target.FlowInstance,
-			target.EntityID,
-			route.Context.ReplyContextID(),
-		}, "\x00")
+		key := projectionRouteKey{recipient: route.Recipient, target: target, replyContextID: route.Context.ReplyContextID()}
 		fingerprint := projection.Fingerprint()
 		if previous, exists := seen[key]; exists && previous != fingerprint {
-			return fmt.Errorf("delivery route %s=%s has conflicting synthetic payload projections", route.SubscriberType, route.SubscriberID)
+			return fmt.Errorf("delivery route %s=%s has conflicting synthetic payload projections", route.Recipient.Code(), route.Recipient.ID())
 		}
 		seen[key] = fingerprint
 	}
@@ -1777,17 +1857,16 @@ func normalizeRouteIdentities(in []RouteIdentity) []RouteIdentity {
 		return nil
 	}
 	out := make([]RouteIdentity, 0, len(in))
-	seen := map[string]struct{}{}
+	seen := map[RouteIdentity]struct{}{}
 	for _, route := range in {
 		route = route.Normalized()
 		if route.Empty() {
 			continue
 		}
-		key := route.FlowID + "\x00" + route.FlowInstance + "\x00" + route.EntityID
-		if _, ok := seen[key]; ok {
+		if _, ok := seen[route]; ok {
 			continue
 		}
-		seen[key] = struct{}{}
+		seen[route] = struct{}{}
 		out = append(out, route)
 	}
 	return out

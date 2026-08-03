@@ -2250,7 +2250,7 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 	}
 	hasSubscriber := func(subscribers []runtimebus.Subscriber, id string) bool {
 		for _, subscriber := range subscribers {
-			if subscriber.ID == id {
+			if subscriber.Recipient.ID() == id {
 				return true
 			}
 		}

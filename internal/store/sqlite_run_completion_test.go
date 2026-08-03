@@ -9,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
@@ -199,7 +198,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryAc
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	fixture := seedSQLiteNormalRunCompletionFixture(t, store, "done")
 	event := loadSQLiteDeliveryFixtureEvent(t, ctx, store.DB, fixture.EventID)
-	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberNode), SubscriberID: "terminal-node"}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("terminal-node")}
 	if err := commitDeliveryObligationFixture(ctx, store, event, route); err != nil {
 		t.Fatalf("seed sqlite active delivery: %v", err)
 	}

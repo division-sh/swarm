@@ -26,11 +26,7 @@ const dashboardObservabilityBundleHash = "bundle-v1:sha256:dadadadadadadadadadad
 
 func dashboardObservabilityAgentRoute(t testing.TB, agentID string) events.DeliveryRoute {
 	t.Helper()
-	return events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   agentID,
-		AgentIdentity:  agentidentitytest.RootRuntime(t, agentID, "dashboard-observability-test"),
-	}
+	return events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: agentidentitytest.RootRuntime(t, agentID, "dashboard-observability-test")}
 }
 
 func canonicalRuntimeLogTestPayload(t *testing.T, component, action, code, message, agentID string) string {
@@ -171,7 +167,7 @@ func TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity(t *tes
 			events.EventEnvelope{Scope: events.EventScopeGlobal}, at.UTC())
 		routes := make([]events.DeliveryRoute, 0, len(deliveries))
 		for _, delivery := range deliveries {
-			route := events.DeliveryRoute{SubscriberType: delivery.subscriberType, SubscriberID: delivery.subscriberID}
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(delivery.subscriberID)}
 			if delivery.subscriberType == "agent" {
 				route = dashboardObservabilityAgentRoute(t, delivery.subscriberID)
 			}

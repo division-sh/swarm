@@ -535,10 +535,10 @@ func (eb *EventBus) resolveRoutedRecipientsForEvent(evt events.Event) []string {
 	out := make([]string, 0, len(subscribers))
 	seen := make(map[string]struct{}, len(subscribers))
 	for _, subscriber := range subscribers {
-		subscriberID := strings.TrimSpace(subscriber.ID)
-		if subscriberID == "" {
+		if subscriber.Recipient.Empty() {
 			continue
 		}
+		subscriberID := subscriber.Recipient.ID()
 		if _, exists := seen[subscriberID]; exists {
 			continue
 		}
@@ -556,7 +556,7 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 	liveRecipients := connectRoutePlanLiveRecipients(deliveryRoutes)
 	routed := make(map[string]struct{}, len(liveRecipients))
 	for _, recipient := range liveRecipients {
-		routed[recipient.RecipientID] = struct{}{}
+		routed[recipient.Recipient.ID()] = struct{}{}
 	}
 	for _, recipientID := range uniqueStrings(recipientIDs) {
 		if _, ok := routed[recipientID]; ok {
@@ -569,8 +569,7 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 			return fmt.Errorf("recipient %q has no exact delivery route", recipientID)
 		}
 		liveRecipients = append(liveRecipients, RoutePlanLiveRecipient{
-			RecipientID:       recipientID,
-			SubscriberType:    routePlanSubscriberInternal,
+			Recipient:         events.MustNodeDeliveryRecipient(recipientID),
 			PersistAsDelivery: false,
 			liveAuthority:     liveRecipientAuthorityIdentity,
 		})
@@ -592,7 +591,7 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 	liveRecipients = normalizeRoutePlanLiveRecipients(liveRecipients)
 	recipientIDs := make([]string, 0, len(liveRecipients))
 	for _, recipient := range liveRecipients {
-		recipientIDs = append(recipientIDs, recipient.RecipientID)
+		recipientIDs = append(recipientIDs, recipient.Recipient.ID())
 	}
 	expected := authoritativeDeliveryTargetKeys(liveRecipients, deliveryRoutes)
 	dispatchRecipients := uniqueStrings(append(append([]string(nil), recipientIDs...), deliveryTargetKeySubscriberIDs(expected)...))
@@ -632,9 +631,8 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 			route := events.DeliveryRoute{}
 			if eb.ephemeral && recipient.kind == inMemorySubscriberAgent && eb.DeliveryContinuationOwner() != nil {
 				route = events.DeliveryRoute{
-					SubscriberType: string(runtimedelivery.SubscriberAgent),
-					SubscriberID:   recipient.subscriberID(),
-					AgentIdentity:  recipient.identity,
+					Recipient:     events.MustAgentDeliveryRecipient(recipient.subscriberID()),
+					AgentIdentity: recipient.identity,
 				}
 			}
 			routes = []events.DeliveryRoute{route}
@@ -645,7 +643,7 @@ func (eb *EventBus) deliverLiveRecipientsWithRoutes(ctx context.Context, evt eve
 				return err
 			}
 			var continuation worklifetime.DeliveryContinuation
-			if route.SubscriberType != "" {
+			if !route.Recipient.Empty() {
 				deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), route)
 				if err != nil {
 					return err
@@ -746,7 +744,7 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	}
 	defer func() { err = errors.Join(err, closeReceiver()) }()
 	ctx = receiverCtx.Context
-	if route.SubscriberType == string(runtimedelivery.SubscriberNode) {
+	if route.Recipient.IsNode() {
 		passthrough, deferred, outcome, err := eb.runInterceptorsForDeliveryRoutes(ctx, evt, []events.DeliveryRoute{route})
 		if err != nil {
 			return err
@@ -762,8 +760,7 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 		}
 	}
 	recipient := RoutePlanLiveRecipient{
-		RecipientID:       route.SubscriberID,
-		SubscriberType:    route.SubscriberType,
+		Recipient:         route.Recipient,
 		AgentIdentity:     route.AgentIdentity,
 		PersistAsDelivery: true,
 		liveAuthority:     liveRecipientAuthorityIdentity,
@@ -779,13 +776,12 @@ func deliveryRoutesBySubscriber(deliveryRoutes []events.DeliveryRoute) map[deliv
 	out := make(map[deliveryRouteTargetKey][]events.DeliveryRoute, len(deliveryRoutes))
 	for _, route := range deliveryRoutes {
 		route = route.Normalized()
-		if route.SubscriberType == "" || route.SubscriberID == "" {
+		if route.Recipient.Empty() {
 			continue
 		}
 		key := deliveryRouteTargetKey{
-			subscriberType: route.SubscriberType,
-			subscriberID:   route.SubscriberID,
-			agentIdentity:  route.AgentIdentity,
+			recipient:     route.Recipient,
+			agentIdentity: route.AgentIdentity,
 		}
 		out[key] = append(out[key], route)
 	}
@@ -797,13 +793,12 @@ func authoritativeDeliveryTargetKeys(liveRecipients []RoutePlanLiveRecipient, de
 	if len(deliveryRoutes) > 0 {
 		out := make([]deliveryRouteTargetKey, 0, len(deliveryRoutes))
 		for _, route := range deliveryRoutes {
-			if route.SubscriberType != routePlanSubscriberAgent {
+			if !route.Recipient.IsAgent() {
 				continue
 			}
 			out = append(out, deliveryRouteTargetKey{
-				subscriberType: route.SubscriberType,
-				subscriberID:   route.SubscriberID,
-				agentIdentity:  route.AgentIdentity,
+				recipient:     route.Recipient,
+				agentIdentity: route.AgentIdentity,
 			})
 		}
 		return uniqueDeliveryTargetKeys(out)
@@ -811,9 +806,8 @@ func authoritativeDeliveryTargetKeys(liveRecipients []RoutePlanLiveRecipient, de
 	out := make([]deliveryRouteTargetKey, 0, len(liveRecipients))
 	for _, recipient := range normalizeRoutePlanLiveRecipients(liveRecipients) {
 		out = append(out, deliveryRouteTargetKey{
-			subscriberType: recipient.SubscriberType,
-			subscriberID:   recipient.RecipientID,
-			agentIdentity:  recipient.AgentIdentity,
+			recipient:     recipient.Recipient,
+			agentIdentity: recipient.AgentIdentity,
 		})
 	}
 	return uniqueDeliveryTargetKeys(out)
@@ -826,14 +820,14 @@ func deliveryRoutesCoverAgentRecipients(routes []events.DeliveryRoute, recipient
 	projectedRecipients := make(map[string]struct{}, len(exactTargets))
 	agentRouteCount := 0
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
-		if route.SubscriberType != routePlanSubscriberAgent {
+		if !route.Recipient.IsAgent() {
 			continue
 		}
 		agentRouteCount++
-		if err := route.AgentIdentity.Validate(); err != nil || route.AgentIdentity.AgentID() != route.SubscriberID {
+		if err := route.AgentIdentity.Validate(); err != nil || route.AgentIdentity.AgentID() != route.Recipient.ID() {
 			return false
 		}
-		projectedRecipients[route.SubscriberID] = struct{}{}
+		projectedRecipients[route.Recipient.ID()] = struct{}{}
 	}
 	if len(exactTargets) != agentRouteCount {
 		return false
@@ -851,16 +845,15 @@ func deliveryRoutesCoverAgentRecipients(routes []events.DeliveryRoute, recipient
 }
 
 type deliveryRouteTargetKey struct {
-	subscriberType string
-	subscriberID   string
-	agentIdentity  agentidentity.Identity
+	recipient     events.DeliveryRecipient
+	agentIdentity agentidentity.Identity
 }
 
 func (k deliveryRouteTargetKey) description() string {
-	if k.subscriberType == routePlanSubscriberAgent {
+	if k.recipient.IsAgent() {
 		return "agent:" + k.agentIdentity.Description()
 	}
-	return strings.TrimSpace(k.subscriberType) + ":" + strings.TrimSpace(k.subscriberID)
+	return k.recipient.Code() + ":" + k.recipient.ID()
 }
 
 func deliveryTargetKeySet(in []deliveryRouteTargetKey) map[deliveryRouteTargetKey]struct{} {
@@ -878,13 +871,8 @@ func uniqueDeliveryTargetKeys(in []deliveryRouteTargetKey) []deliveryRouteTarget
 	seen := make(map[deliveryRouteTargetKey]struct{}, len(in))
 	out := make([]deliveryRouteTargetKey, 0, len(in))
 	for _, key := range in {
-		key.subscriberType = strings.TrimSpace(key.subscriberType)
-		key.subscriberID = strings.TrimSpace(key.subscriberID)
 		key.agentIdentity = key.agentIdentity.Normalize()
-		if key.subscriberType == routePlanSubscriberInternal {
-			key.subscriberType = "node"
-		}
-		if key.subscriberType == "" || key.subscriberID == "" {
+		if key.recipient.Empty() {
 			continue
 		}
 		if _, ok := seen[key]; ok {
@@ -899,7 +887,7 @@ func uniqueDeliveryTargetKeys(in []deliveryRouteTargetKey) []deliveryRouteTarget
 func deliveryTargetKeySubscriberIDs(in []deliveryRouteTargetKey) []string {
 	out := make([]string, 0, len(in))
 	for _, key := range in {
-		out = append(out, key.subscriberID)
+		out = append(out, key.recipient.ID())
 	}
 	return uniqueStrings(out)
 }
@@ -919,18 +907,15 @@ func deliveryRouteTargetsBySubscriber(deliveryRoutes []events.DeliveryRoute) map
 	}
 	out := make(map[deliveryRouteTargetKey][]events.RouteIdentity, len(deliveryRoutes))
 	for _, route := range deliveryRoutes {
-		subscriberType := strings.TrimSpace(route.SubscriberType)
-		recipient := strings.TrimSpace(route.SubscriberID)
-		if subscriberType == "" || recipient == "" {
+		if route.Recipient.Empty() {
 			continue
 		}
 		if route.Target.Empty() {
 			continue
 		}
 		key := deliveryRouteTargetKey{
-			subscriberType: subscriberType,
-			subscriberID:   recipient,
-			agentIdentity:  route.AgentIdentity,
+			recipient:     route.Recipient,
+			agentIdentity: route.AgentIdentity,
 		}
 		out[key] = append(out[key], route.Target.Normalized())
 	}
@@ -978,14 +963,13 @@ func returnDeliveryContinuation(ctx context.Context, continuation worklifetime.D
 const workflowRuntimeInternalCarrierID = "workflow-runtime"
 
 func (r agentRecipient) deliveryRouteTargetKey() deliveryRouteTargetKey {
-	subscriberType := "agent"
+	recipient := events.MustAgentDeliveryRecipient(r.subscriberID())
 	if r.kind == inMemorySubscriberInternal {
-		subscriberType = "node"
+		recipient = events.MustNodeDeliveryRecipient(r.subscriberID())
 	}
 	return deliveryRouteTargetKey{
-		subscriberType: subscriberType,
-		subscriberID:   r.subscriberID(),
-		agentIdentity:  r.identity,
+		recipient:     recipient,
+		agentIdentity: r.identity,
 	}
 }
 
@@ -1006,20 +990,19 @@ func workflowRuntimeInternalCarrierTargets(deliveryRoutes []events.DeliveryRoute
 		return nil
 	}
 	out := make([]events.RouteIdentity, 0, len(deliveryRoutes))
-	seen := map[string]struct{}{}
+	seen := map[events.RouteIdentity]struct{}{}
 	for _, route := range deliveryRoutes {
-		if strings.TrimSpace(route.SubscriberType) != "node" {
+		if !route.Recipient.IsNode() {
 			continue
 		}
 		target := route.Target.Normalized()
 		if target.Empty() {
 			continue
 		}
-		key := strings.Join([]string{target.FlowID, target.FlowInstance, target.EntityID}, "\x00")
-		if _, ok := seen[key]; ok {
+		if _, ok := seen[target]; ok {
 			continue
 		}
-		seen[key] = struct{}{}
+		seen[target] = struct{}{}
 		out = append(out, target)
 	}
 	return out
@@ -1032,10 +1015,10 @@ func workflowRuntimeInternalCarrierRoutes(deliveryRoutes []events.DeliveryRoute)
 	}
 	out := make([]events.DeliveryRoute, 0, len(deliveryRoutes))
 	for _, route := range deliveryRoutes {
-		if strings.TrimSpace(route.SubscriberType) != "node" {
+		if !route.Recipient.IsNode() {
 			continue
 		}
-		if strings.TrimSpace(route.SubscriberID) == workflowRuntimeInternalCarrierID {
+		if route.Recipient.ID() == workflowRuntimeInternalCarrierID {
 			continue
 		}
 		out = append(out, route)
@@ -1053,7 +1036,7 @@ func (eb *EventBus) snapshotRoutePlanRecipientChans(agentIDs []string, planned [
 	}
 	plannedByID := make(map[string][]RoutePlanLiveRecipient, len(planned))
 	for _, recipient := range normalizeRoutePlanLiveRecipients(planned) {
-		plannedByID[recipient.RecipientID] = append(plannedByID[recipient.RecipientID], recipient)
+		plannedByID[recipient.Recipient.ID()] = append(plannedByID[recipient.Recipient.ID()], recipient)
 	}
 	eb.mu.RLock()
 	defer eb.mu.RUnlock()
@@ -1066,7 +1049,7 @@ func (eb *EventBus) snapshotRoutePlanRecipientChans(agentIDs []string, planned [
 		if plannedRecipients := plannedByID[id]; len(plannedRecipients) > 0 {
 			plannedInternal := false
 			for _, plannedRecipient := range plannedRecipients {
-				if plannedRecipient.SubscriberType != routePlanSubscriberAgent {
+				if !plannedRecipient.Recipient.IsAgent() {
 					plannedInternal = true
 					continue
 				}
@@ -1193,13 +1176,17 @@ func dedupeSubscribers(in []Subscriber) []Subscriber {
 	if len(in) == 0 {
 		return nil
 	}
+	type subscriberKey struct {
+		recipient events.DeliveryRecipient
+		path      string
+	}
 	out := make([]Subscriber, 0, len(in))
-	seen := make(map[string]struct{}, len(in))
+	seen := make(map[subscriberKey]struct{}, len(in))
 	for _, subscriber := range in {
-		key := strings.TrimSpace(subscriber.ID) + "|" + strings.TrimSpace(subscriber.Type) + "|" + strings.TrimSpace(subscriber.Path)
-		if strings.TrimSpace(subscriber.ID) == "" {
+		if subscriber.Recipient.Empty() {
 			continue
 		}
+		key := subscriberKey{recipient: subscriber.Recipient, path: strings.TrimSpace(subscriber.Path)}
 		if _, ok := seen[key]; ok {
 			continue
 		}

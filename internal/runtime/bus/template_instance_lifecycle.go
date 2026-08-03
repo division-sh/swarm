@@ -302,17 +302,16 @@ func templateInstanceLifecycleRoutes(in []events.RouteIdentity) []events.RouteId
 		return nil
 	}
 	out := make([]events.RouteIdentity, 0, len(in))
-	seen := map[string]struct{}{}
+	seen := map[events.RouteIdentity]struct{}{}
 	for _, route := range in {
 		route = route.Normalized()
 		if route.Empty() {
 			continue
 		}
-		key := strings.TrimSpace(route.FlowID) + "\x00" + strings.Trim(route.FlowInstance, "/") + "\x00" + strings.TrimSpace(route.EntityID)
-		if _, ok := seen[key]; ok {
+		if _, ok := seen[route]; ok {
 			continue
 		}
-		seen[key] = struct{}{}
+		seen[route] = struct{}{}
 		out = append(out, route)
 	}
 	return out
@@ -354,14 +353,7 @@ func templateInstanceLifecycleMatchIsRoutable(routeTable *RouteTable, plan runti
 	if target.Empty() {
 		return false
 	}
-	for _, key := range connectReceiverCarrierRouteKeys(plan, target) {
-		for _, subscriber := range routeTable.Resolve(key) {
-			if connectSubscriberMatchesTarget(subscriber, target) {
-				return true
-			}
-		}
-	}
-	return false
+	return len(routeTable.evaluateConnectPlan(plan, []events.RouteIdentity{target}).Recipients()) > 0
 }
 
 func templateInstanceLifecycleParentRoute(evt events.Event, plan runtimepinrouting.ConnectRoutePlan) runtimeflowidentity.ParentRoute {

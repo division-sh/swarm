@@ -129,11 +129,69 @@ type RunForkContractFrontierEvent struct {
 }
 
 type RunForkContractFrontierRecipient struct {
+	Recipient     events.DeliveryRecipient `json:"-"`
+	Path          string                   `json:"path,omitempty"`
+	routeSource   string
+	AgentIdentity agentidentity.Identity `json:"agent_identity,omitempty"`
+}
+
+func NewRunForkContractFrontierRecipient(recipient events.DeliveryRecipient, path, routeSource string, identity agentidentity.Identity) RunForkContractFrontierRecipient {
+	if recipient.Empty() {
+		return RunForkContractFrontierRecipient{}
+	}
+	return RunForkContractFrontierRecipient{
+		Recipient: recipient, Path: strings.TrimSpace(path), routeSource: strings.TrimSpace(routeSource),
+		AgentIdentity: identity.Normalize(),
+	}
+}
+
+func (r RunForkContractFrontierRecipient) RouteSourceCode() string { return r.routeSource }
+
+type runForkContractFrontierRecipientWire struct {
 	SubscriberType string                 `json:"subscriber_type"`
 	SubscriberID   string                 `json:"subscriber_id"`
 	Path           string                 `json:"path,omitempty"`
 	RouteSource    string                 `json:"route_source,omitempty"`
 	AgentIdentity  agentidentity.Identity `json:"agent_identity,omitempty"`
+}
+
+func (r RunForkContractFrontierRecipient) MarshalJSON() ([]byte, error) {
+	if r.Recipient.Empty() {
+		return nil, fmt.Errorf("run-fork contract frontier recipient is required")
+	}
+	return json.Marshal(runForkContractFrontierRecipientWire{
+		SubscriberType: r.Recipient.Code(), SubscriberID: r.Recipient.ID(), Path: strings.TrimSpace(r.Path),
+		RouteSource: r.RouteSourceCode(), AgentIdentity: r.AgentIdentity.Normalize(),
+	})
+}
+
+func (r *RunForkContractFrontierRecipient) UnmarshalJSON(raw []byte) error {
+	if r == nil {
+		return fmt.Errorf("run-fork contract frontier recipient destination is nil")
+	}
+	var wire runForkContractFrontierRecipientWire
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&wire); err != nil {
+		return fmt.Errorf("decode run-fork contract frontier recipient: %w", err)
+	}
+	var (
+		recipient events.DeliveryRecipient
+		err       error
+	)
+	switch strings.TrimSpace(wire.SubscriberType) {
+	case "node":
+		recipient, err = events.NewNodeDeliveryRecipient(wire.SubscriberID)
+	case "agent":
+		recipient, err = events.NewAgentDeliveryRecipient(wire.SubscriberID)
+	default:
+		err = fmt.Errorf("recipient kind is invalid")
+	}
+	if err != nil {
+		return fmt.Errorf("decode run-fork contract frontier recipient: %w", err)
+	}
+	*r = NewRunForkContractFrontierRecipient(recipient, wire.Path, wire.RouteSource, wire.AgentIdentity)
+	return nil
 }
 
 func RunForkSelectedContractDiagnosticPlatformOutcomePolicyApplies(item RunForkPendingWork) bool {
@@ -837,16 +895,23 @@ func RunForkContractFrontierEvidenceBinding(frontier RunForkContractFrontierAdmi
 		recipients := make([]routeRecipient, 0, len(event.DerivedRecipients))
 		for _, recipient := range event.DerivedRecipients {
 			recipients = append(recipients, routeRecipient{
-				SubscriberType: strings.TrimSpace(recipient.SubscriberType),
-				SubscriberID:   strings.TrimSpace(recipient.SubscriberID),
+				SubscriberType: recipient.Recipient.Code(),
+				SubscriberID:   recipient.Recipient.ID(),
 				Path:           strings.TrimSpace(recipient.Path),
-				RouteSource:    strings.TrimSpace(recipient.RouteSource),
+				RouteSource:    recipient.RouteSourceCode(),
 			})
 		}
 		sort.Slice(recipients, func(i, j int) bool {
-			left := strings.Join([]string{recipients[i].SubscriberType, recipients[i].SubscriberID, recipients[i].Path, recipients[i].RouteSource}, "\x00")
-			right := strings.Join([]string{recipients[j].SubscriberType, recipients[j].SubscriberID, recipients[j].Path, recipients[j].RouteSource}, "\x00")
-			return left < right
+			if recipients[i].SubscriberType != recipients[j].SubscriberType {
+				return recipients[i].SubscriberType < recipients[j].SubscriberType
+			}
+			if recipients[i].SubscriberID != recipients[j].SubscriberID {
+				return recipients[i].SubscriberID < recipients[j].SubscriberID
+			}
+			if recipients[i].Path != recipients[j].Path {
+				return recipients[i].Path < recipients[j].Path
+			}
+			return recipients[i].RouteSource < recipients[j].RouteSource
 		})
 		events = append(events, frontierEvent{
 			SourceEventID:           sourceEventID,
@@ -861,9 +926,10 @@ func RunForkContractFrontierEvidenceBinding(frontier RunForkContractFrontierAdmi
 		})
 	}
 	sort.Slice(events, func(i, j int) bool {
-		left := strings.Join([]string{events[i].SourceEventID, events[i].EventName}, "\x00")
-		right := strings.Join([]string{events[j].SourceEventID, events[j].EventName}, "\x00")
-		return left < right
+		if events[i].SourceEventID != events[j].SourceEventID {
+			return events[i].SourceEventID < events[j].SourceEventID
+		}
+		return events[i].EventName < events[j].EventName
 	})
 
 	sourceEventIDs := make([]string, 0, len(ids))

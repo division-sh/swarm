@@ -633,7 +633,7 @@ func TestEventDeliveryCompletionReportsResolutionFailureWithoutPolling(t *testin
 		uuid.NewString(), events.EventType("message.received"), eventtest.Producer(events.EventProducerPlatform, "test"), "",
 		[]byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
 	)
-	delivery, err := runtime.NewRoutedEventDelivery(context.Background(), event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "worker"})
+	delivery, err := runtime.NewRoutedEventDelivery(context.Background(), event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("worker")})
 	if err != nil {
 		t.Fatalf("new routed delivery: %v", err)
 	}
@@ -678,7 +678,7 @@ func TestEventDeliveryCarrierGuardReturnsTypedResolutionExactlyOnce(t *testing.T
 		uuid.NewString(), events.EventType("message.received"), eventtest.Producer(events.EventProducerPlatform, "test"), "",
 		[]byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC(),
 	)
-	delivery, err := runtime.NewRoutedEventDelivery(context.Background(), event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "worker"})
+	delivery, err := runtime.NewRoutedEventDelivery(context.Background(), event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("worker")})
 	if err != nil {
 		t.Fatalf("new routed delivery: %v", err)
 	}

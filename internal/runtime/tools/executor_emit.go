@@ -105,11 +105,6 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	}
 	flowInstance := emitFlowInstanceForActorEvent(actor, inbound)
 	flowID := emitActorFlowID(e.workflowSource, actor, flowInstance)
-	sourceRoute := events.RouteIdentity{
-		FlowID:       flowID,
-		FlowInstance: flowInstance,
-		EntityID:     entityID,
-	}.Normalized()
 	actorIdentity, err := actor.ConcreteIdentity()
 	if err != nil {
 		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.NoEvent(), "routing_source_invalid", "routing_source", "construct", err)
@@ -143,11 +138,10 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	if runtimepinrouting.PinDeclaredOutput(e.workflowSource, flowID, eventType) {
 		resolvedBeforePreflight := false
 		rootResolution := runtimepinrouting.ResolveEnvelope(runtimepinrouting.ResolutionInput{
-			Source:      e.workflowSource,
-			FlowID:      flowID,
-			EventType:   eventType,
-			SourceRoute: sourceRoute,
-			Inbound:     inbound,
+			Source:        e.workflowSource,
+			FlowID:        flowID,
+			EventType:     eventType,
+			RoutingSource: routingSource,
 		}, envelope)
 		if rootResolution.Failure == runtimepinrouting.FailureParentRouteIncomplete {
 			parentRoute, allowEntityOnlyParentRoute, err := e.emitParentRouteForActor(ctx, actor, flowID, flowInstance, inbound)
@@ -166,14 +160,13 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 				Source:                     e.workflowSource,
 				FlowID:                     flowID,
 				EventType:                  eventType,
-				SourceRoute:                sourceRoute,
-				Inbound:                    inbound,
+				RoutingSource:              routingSource,
 				ParentRoute:                parentRoute,
 				AllowEntityOnlyParentRoute: allowEntityOnlyParentRoute,
 			}, envelope)
-			if rootResolution.Failure != "" {
+			if !rootResolution.Failure.Empty() {
 				wrapped := failures.NewTarget(
-					string(rootResolution.Failure),
+					rootResolution.Failure.Code(),
 					"tool-executor",
 					"handle_emit_tool.pin_target_resolution",
 					map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType},
@@ -205,7 +198,7 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 			if plan.UsesCanonicalRouteAuthority() {
 				if plan.TargetFailure != "" {
 					wrapped := failures.NewTarget(
-						string(plan.TargetFailure),
+						plan.TargetFailure,
 						"tool-executor",
 						"handle_emit_tool.route_plan_preflight",
 						map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType},
@@ -233,14 +226,13 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 				Source:                     e.workflowSource,
 				FlowID:                     flowID,
 				EventType:                  eventType,
-				SourceRoute:                sourceRoute,
-				Inbound:                    inbound,
+				RoutingSource:              routingSource,
 				ParentRoute:                parentRoute,
 				AllowEntityOnlyParentRoute: allowEntityOnlyParentRoute,
 			}, envelope)
-			if resolution.Failure != "" {
+			if !resolution.Failure.Empty() {
 				wrapped := failures.NewTarget(
-					string(resolution.Failure),
+					resolution.Failure.Code(),
 					"tool-executor",
 					"handle_emit_tool.pin_target_resolution",
 					map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType},

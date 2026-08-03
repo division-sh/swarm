@@ -589,9 +589,7 @@ func TestRunContinueProcessesOnlyTargetRunDecisionRoutesOnSQLiteAndPostgres(t *t
 				fixture.ctx,
 				fixture.store,
 				target,
-				[]events.DeliveryRoute{{
-					SubscriberType: "agent", SubscriberID: fixture.agentID, AgentIdentity: fixture.identity,
-				}},
+				[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(fixture.agentID), AgentIdentity: fixture.identity}},
 				runtimepipelineobligation.ScopeSubscribed,
 			)
 			fixture.insertDecisionObligationFor(t, target)
@@ -691,9 +689,7 @@ func TestPeriodicGlobalScanReentersDecisionRoutesUnderSustainedRecoveryBacklogOn
 				fixture.ctx,
 				fixture.store,
 				target,
-				[]events.DeliveryRoute{{
-					SubscriberType: "agent", SubscriberID: fixture.agentID, AgentIdentity: fixture.identity,
-				}},
+				[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(fixture.agentID), AgentIdentity: fixture.identity}},
 				runtimepipelineobligation.ScopeSubscribed,
 			)
 			fixture.insertDecisionObligationFor(t, target)

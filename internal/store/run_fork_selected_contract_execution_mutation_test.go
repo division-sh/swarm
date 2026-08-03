@@ -246,7 +246,7 @@ func TestLoadRunForkSelectedContractSourceEventsRestoresPersistedChronology(t *t
 	if err != nil {
 		t.Fatalf("begin later event story: %v", err)
 	}
-	if err := commitSemanticEventFixtureWithRoutesTx(storyctx, pg, tx, laterEvent, []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "test-node"}}); err != nil {
+	if err := commitSemanticEventFixtureWithRoutesTx(storyctx, pg, tx, laterEvent, []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("test-node")}}); err != nil {
 		t.Fatalf("seed later event and delivery: %v", err)
 	}
 	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
@@ -466,7 +466,7 @@ func TestSelectedContractExecutionMaterializationAdmitsSameSourceDeliveryForkPoi
 	forkAt := at.Add(30 * time.Second)
 	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
-	sourceRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "validation-coordinator"}
+	sourceRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("validation-coordinator")}
 	sourceEvent := commitPostgresDeliveryFixture(t, ctx, db, sourceEventID, sourceRoute)
 	claimPostgresDeliveryFixture(t, ctx, db, sourceEvent, sourceRoute)
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
@@ -537,7 +537,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
 		events.EventProducerPlatform, "source-runtime", entityID, "", at.Add(10*time.Second))
-	unrelatedRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "validation-coordinator"}
+	unrelatedRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("validation-coordinator")}
 	unrelatedEvent := commitPostgresDeliveryFixture(t, ctx, db, unrelatedEventID, unrelatedRoute)
 	claimPostgresDeliveryFixture(t, ctx, db, unrelatedEvent, unrelatedRoute)
 	captureRunForkTestRevision(t, db, sourceRunID)
@@ -582,7 +582,7 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
 		events.EventProducerPlatform, "source-runtime", entityID, "", at.Add(10*time.Second))
-	unrelatedRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "unrelated-agent"}
+	unrelatedRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("unrelated-agent")}
 	unrelatedEvent := commitPostgresDeliveryFixture(t, ctx, db, unrelatedEventID, unrelatedRoute)
 	claimPostgresDeliveryFixture(t, ctx, db, unrelatedEvent, unrelatedRoute)
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
@@ -624,7 +624,7 @@ func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsA
 	at := time.Unix(1700002430, 0).UTC()
 	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at)
-	terminalRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "terminal-agent"}
+	terminalRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("terminal-agent")}
 	terminalEvent := commitPostgresDeliveryFixture(t, ctx, db, eventID, terminalRoute)
 	terminalClaim := claimPostgresDeliveryFixture(t, ctx, db, terminalEvent, terminalRoute)
 	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal_source_delivery", nil)
@@ -696,7 +696,7 @@ func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailC
 
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "unrelated.started",
 		events.EventProducerPlatform, "source-runtime", entityID, "flow-a/1", at.Add(10*time.Second))
-	unrelatedRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "unrelated-agent"}
+	unrelatedRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("unrelated-agent")}
 	unrelatedEvent := commitPostgresDeliveryFixture(t, ctx, db, unrelatedEventID, unrelatedRoute)
 	claimPostgresDeliveryFixture(t, ctx, db, unrelatedEvent, unrelatedRoute)
 	captureRunForkTestRevision(t, db, sourceRunID)
@@ -1430,7 +1430,7 @@ func TestSelectedContractExecutionActivationRecordsSameSourceDeliveryCouplingAsB
 	forkAt := at.Add(30 * time.Second)
 	seedSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
 	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, sourceEventID, sessionID, auditID, turnID, at)
-	sourceRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "validation-coordinator"}
+	sourceRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("validation-coordinator")}
 	sourceEvent := commitPostgresDeliveryFixture(t, ctx, db, sourceEventID, sourceRoute)
 	claimPostgresDeliveryFixture(t, ctx, db, sourceEvent, sourceRoute)
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
@@ -1664,7 +1664,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-	forkRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	forkRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a")}
 	forkEvent := commitPostgresDeliveryFixture(t, ctx, db, forkEventID, forkRoute)
 	forkClaim := claimPostgresDeliveryFixture(t, ctx, db, forkEvent, forkRoute)
 	if _, err := pg.SettleSuccess(ctx, forkClaim.Claim, nil, time.Second); err != nil {
@@ -1985,10 +1985,7 @@ func seedSelectedContractExecutionStoreSource(t *testing.T, db *sql.DB, sourceRu
 
 func seedSelectedContractExecutionStoreSourceUnpublished(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
 	t.Helper()
-	seedSelectedContractExecutionStoreSourceRaw(t, db, sourceRunID, entityID, eventID, at, []events.DeliveryRoute{{
-		SubscriberType: "node",
-		SubscriberID:   "test-node",
-	}})
+	seedSelectedContractExecutionStoreSourceRaw(t, db, sourceRunID, entityID, eventID, at, []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("test-node")}})
 }
 
 func seedSelectedContractExecutionStoreSourceWithoutDelivery(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {

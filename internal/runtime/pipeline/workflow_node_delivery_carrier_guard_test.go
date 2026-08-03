@@ -80,7 +80,7 @@ func (c *scriptedWorkflowNodeContinuation) Resolve(_ context.Context, intent wor
 func workflowNodeCarrierTestEventAndRoute(t *testing.T) (events.Event, events.DeliveryRoute, string) {
 	t.Helper()
 	eventID := uuid.NewString()
-	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberNode), SubscriberID: "node-a"}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-a")}
 	deliveryID, err := runtimedelivery.DeliveryID(eventID, route)
 	if err != nil {
 		t.Fatalf("derive delivery id: %v", err)

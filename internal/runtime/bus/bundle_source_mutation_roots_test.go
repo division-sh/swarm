@@ -521,8 +521,7 @@ func TestPublishRootsRejectForeignSourceBeforeWorkOccurrenceAdmission(t *testing
 		}},
 		{name: "direct routes", run: func(ctx context.Context) error {
 			return bus.PublishDirectRoutes(ctx, sourceMutationEvent(), []events.DeliveryRoute{{
-				SubscriberType: "agent",
-				SubscriberID:   "agent-a",
+				Recipient: events.MustAgentDeliveryRecipient("agent-a"),
 			}})
 		}},
 	} {
@@ -608,11 +607,7 @@ func TestDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMuta
 	bus := newSourceMutationProbeBusWithStore(t, store, owned, newSourceMutationProbeOwner())
 	eventID, runID := uuid.NewString(), uuid.NewString()
 	sessionID := uuid.NewString()
-	route := events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   "agent-a",
-		AgentIdentity:  testAgentRouteIdentity(t, "agent-a", ""),
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: testAgentRouteIdentity(t, "agent-a", "")}
 	store.seed(t, eventID, runID, route)
 	claim := store.claim(t, eventID, runID, route)
 	store.seedSession(t, sessionID, runID, route.AgentIdentity)

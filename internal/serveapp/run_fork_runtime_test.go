@@ -86,11 +86,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.pending",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, &store.PostgresStore{DB: db}, event,
-		[]events.DeliveryRoute{{
-			SubscriberType: "agent",
-			SubscriberID:   "cli-agent",
-			AgentIdentity:  servedRuntimeRootIdentity(t, "cli-agent"),
-		}})
+		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("cli-agent"), AgentIdentity: servedRuntimeRootIdentity(t, "cli-agent")}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 
 	var buf bytes.Buffer
@@ -127,7 +123,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "flow-a/work.begin",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, &store.PostgresStore{DB: db}, event,
-		[]events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "source-node"}})
+		[]events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("source-node")}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 
 	repo := cliapp.RepoRoot()
@@ -730,11 +726,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingRejectsDeliveryReplay
 	seedRunForkCLIActivationSourceWithoutRevision(t, db, runID, entityID, eventID, at)
 	event := storetest.LoadCanonicalEventRecord(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), eventID)
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, &store.PostgresStore{DB: db}, event,
-		[]events.DeliveryRoute{{
-			SubscriberType: "agent",
-			SubscriberID:   "safe-agent",
-			AgentIdentity:  servedRuntimeRootIdentity(t, "safe-agent"),
-		}})
+		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("safe-agent"), AgentIdentity: servedRuntimeRootIdentity(t, "safe-agent")}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 	repo := cliapp.RepoRoot()
 	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")

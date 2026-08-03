@@ -347,50 +347,55 @@ rows:
       typed producer migration after this guardrail is in place.
 
   - id: route_table_resolve_role_separation
-    concept: RouteTable.Resolve usages must be classified by role instead of treated as generic route authority.
+    concept: RouteTable.Resolve remains direct pub/sub topology only and cannot participate in compiled-connect recipient admission.
     classification: already_covered_by_existing_proof
     tier: required_pr_smoke
-    proof_dimensions: [route_table_resolve, connect_route_plan, split_tracker, required_pr_smoke]
+    proof_dimensions: [route_table_resolve, typed_connect_recipient_evaluation, connect_route_plan, split_tracker, required_pr_smoke]
     owner_refs:
-      - {kind: artifact, path: internal/runtime/bus/connect_route_plan_dispatch.go}
       - {kind: artifact, path: internal/runtime/runforkadmission/contract_frontier.go}
       - {kind: artifact, path: internal/runtime/runforkadmission/selected_route_history.go}
       - {kind: artifact, path: internal/runtime/runstart/root_inputs.go}
-      - {kind: spec_ref, path: platform-spec.yaml, ref: receiver_carrier_lookup_boundary}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: compiled_connect_recipient_boundary}
     proof_refs:
       - {kind: issue, issue: 1485}
       - {kind: issue, issue: 1494}
-      - {kind: go_test, name: TestConnectRoutePlanReceiverCarrierKeysUseSelectedReceiverIdentity}
+      - {kind: go_test, name: TestConnectRecipientEvaluationUsesCompiledReceiverPin}
       - {kind: go_test, name: TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteAuthority}
       - {kind: go_test, name: TestDeriveRootInputSetRequiresDeclaredAndRoutableRootInput}
     notes: >
-      EventBus connect dispatch uses RouteTable only as selected receiver-carrier
-      lookup. Runstart/runfork use RouteTable for split admission/readiness
-      route facts, not EventBus publish-time authority.
+      EventBus connect dispatch and lifecycle consume the compiled typed
+      recipient evaluator and never call RouteTable.Resolve. Runstart and the
+      separately named direct selected-fork branch retain RouteTable for direct
+      pub/sub admission facts, not lowered-connect authority.
 
-  - id: receiver_carrier_lookup_not_authority
-    concept: Receiver-carrier lookup is post-identity carrier evidence and cannot repair a matched ConnectRoutePlan decision.
+  - id: compiled_connect_recipient_single_owner
+    concept: One typed compiled evaluator owns receiver and recipient admission for EventBus, lifecycle, and selected fork.
     classification: already_covered_by_existing_proof
     tier: required_pr_smoke
-    proof_dimensions: [connect_route_plan, route_table_resolve, negative_authority, required_pr_smoke]
+    proof_dimensions: [connect_route_plan, typed_connect_recipient_evaluation, route_table_resolve, negative_authority, required_pr_smoke]
     invalid_authority:
       - producer/source endpoint keys
       - raw producer event names
       - live subscriber fallback keys
+      - RouteTable Resolve or HasConsumer shadow decisions
+      - selected-fork local receiver rematching
       - legacy route/subscriber interpretations after matched ConnectRoutePlan
     owner_refs:
-      - {kind: spec_ref, path: platform-spec.yaml, ref: receiver_carrier_lookup_boundary}
-      - {kind: artifact, path: internal/runtime/bus/connect_route_plan_dispatch.go}
+      - {kind: spec_ref, path: platform-spec.yaml, ref: compiled_connect_recipient_boundary}
+      - {kind: artifact, path: internal/runtime/core/pinrouting/connect_route_plan.go}
       - {kind: artifact, path: internal/runtime/bus/routing_derivation.go}
+      - {kind: artifact, path: internal/runtime/runforkadmission/contract_frontier.go}
     proof_refs:
-      - {kind: issue, issue: 1485}
-      - {kind: go_test, name: TestConnectRoutePlanReceiverCarrierKeysUseSelectedReceiverIdentity}
+      - {kind: issue, issue: 2114}
+      - {kind: go_test, name: TestConnectRecipientEvaluationUsesCompiledReceiverPin}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanWithoutCanonicalSubscriberFailsClosed}
-      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailureSkipsRecipientPlanMaterializer}
+      - {kind: go_test, name: TestSelectedContractRunForkRouteConsumersAreClassifiedOutsideEventBusRouteAuthority}
+      - {kind: go_test, name: TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority}
     notes: >
-      Receiver carriers may locate the concrete runtime handler after selected
-      route identity exists. They cannot invent a missing canonical receiver or
-      revive a failed matched ConnectRoutePlan.
+      The route table supplies typed registrations to CompiledConnectGraph.
+      EventBus, lifecycle, and selected fork consume its opaque result without
+      rebuilding receiver event keys or rematching recipients. A missing typed
+      recipient fails the matched connect plan closed.
 
   - id: descriptor_evidence_not_authority
     concept: Descriptor evidence may support scalar receiver-instance resolution but is not route authority.

@@ -238,7 +238,7 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 	if err != nil {
 		t.Fatalf("late reply preflight: %v", err)
 	}
-	if store.claimCalls != beforeClaims || latePlan.TargetFailure != string(runtimepinrouting.FailureReplyAlreadyTerminal) {
+	if store.claimCalls != beforeClaims || latePlan.TargetFailure != runtimepinrouting.FailureReplyAlreadyTerminal.Code() {
 		t.Fatalf("late reply preflight = %#v claims=%d/%d", latePlan, store.claimCalls, beforeClaims)
 	}
 	if err := eb.Publish(lateCtx, lateReply); err != nil {
@@ -258,7 +258,7 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 	if err != nil {
 		t.Fatalf("stale reply preflight: %v", err)
 	}
-	if stalePlan.TargetFailure != string(runtimepinrouting.FailureStaleArrival) {
+	if stalePlan.TargetFailure != runtimepinrouting.FailureStaleArrival.Code() {
 		t.Fatalf("stale reply failure = %q, want %q", stalePlan.TargetFailure, runtimepinrouting.FailureStaleArrival)
 	}
 }
@@ -442,7 +442,7 @@ func TestReplyResolutionConformance_DurableExplicitCorrelationFailsClosedOnBothB
 					if err != nil {
 						t.Fatalf("reply preflight: %v", err)
 					}
-					if preflight.TargetFailure != string(runtimepinrouting.FailureStaleArrival) || len(preflight.DeliveryRoutes) != 0 {
+					if preflight.TargetFailure != runtimepinrouting.FailureStaleArrival.Code() || len(preflight.DeliveryRoutes) != 0 {
 						t.Fatalf("reply preflight = %#v, want stale arrival with zero routes", preflight)
 					}
 					assertReplyContextState(t, ctx, backend, deliveryContext.ReplyContextID(), runtimereplycontext.StateOpen, "")
@@ -453,7 +453,7 @@ func TestReplyResolutionConformance_DurableExplicitCorrelationFailsClosedOnBothB
 					if routes, err := backend.ListEventDeliveryRoutes(ctx, replyID); err != nil || len(routes) != 0 {
 						t.Fatalf("invalid reply routes = %#v err=%v, want none", routes, err)
 					}
-					if got := loadReplyConformanceTargetFailure(t, ctx, backend, replyID); got != string(runtimepinrouting.FailureStaleArrival) {
+					if got := loadReplyConformanceTargetFailure(t, ctx, backend, replyID); got != runtimepinrouting.FailureStaleArrival.Code() {
 						t.Fatalf("invalid reply target failure = %q, want %q", got, runtimepinrouting.FailureStaleArrival)
 					}
 					assertReplyContextState(t, ctx, backend, deliveryContext.ReplyContextID(), runtimereplycontext.StateOpen, "")
@@ -649,7 +649,7 @@ func proveTypedHumanTaskStaleOrigin(t *testing.T, ctx context.Context, backend d
 	if routes, err := backend.ListEventDeliveryRoutes(ctx, replyID); err != nil || len(routes) != 0 {
 		t.Fatalf("stale-origin terminal reply routes = %#v err=%v, want none", routes, err)
 	}
-	if got := loadReplyConformanceTargetFailure(t, ctx, backend, replyID); got != string(runtimepinrouting.FailureStaleArrival) {
+	if got := loadReplyConformanceTargetFailure(t, ctx, backend, replyID); got != runtimepinrouting.FailureStaleArrival.Code() {
 		t.Fatalf("stale-origin target failure = %q, want %q", got, runtimepinrouting.FailureStaleArrival)
 	}
 	assertReplyContextState(t, ctx, backend, deliveryContext.ReplyContextID(), runtimereplycontext.StateOpen, "")
@@ -1054,7 +1054,7 @@ func (s *replyConformanceStore) ListEventDeliveryRecipients(_ context.Context, e
 	routes := s.routesFor(eventID)
 	out := make([]string, 0, len(routes))
 	for _, route := range routes {
-		out = append(out, route.SubscriberID)
+		out = append(out, route.Recipient.ID())
 	}
 	return out, nil
 }

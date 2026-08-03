@@ -201,15 +201,9 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 		t.Fatalf("seed mutations: %v", err)
 	}
 	failedDeliveryEnvelope := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "handler_failed", nil)
-	failedDelivery := seedDeliveryStateFixture(t, ctx, pg, targetEvent, events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberAgent),
-		SubscriberID:   "agent-1",
-	}, runtimedelivery.StateExhausted, &failedDeliveryEnvelope)
+	failedDelivery := seedDeliveryStateFixture(t, ctx, pg, targetEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1")}, runtimedelivery.StateExhausted, &failedDeliveryEnvelope)
 	setPostgresDeliveryFixtureTimes(t, ctx, db, failedDelivery, now.Add(5*time.Second), now.Add(10*time.Second))
-	successfulDelivery := seedDeliveryStateFixture(t, ctx, pg, targetEvent, events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberNode),
-		SubscriberID:   "node-success",
-	}, runtimedelivery.StateDelivered, nil)
+	successfulDelivery := seedDeliveryStateFixture(t, ctx, pg, targetEvent, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-success")}, runtimedelivery.StateDelivered, nil)
 	setPostgresDeliveryFixtureTimes(t, ctx, db, successfulDelivery, now.Add(15*time.Second), now.Add(20*time.Second))
 	successDeliveryID := successfulDelivery.DeliveryID
 	report, err := pg.LoadRunDebugReport(ctx, targetRunID, RunDebugQueryOptions{
@@ -300,7 +294,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 	if err := commitSemanticEventFixtureWithAgents(ctx, pg, readyEvent, []string{"agent-done"}); err != nil {
 		t.Fatalf("seed ready delivery event: %v", err)
 	}
-	readyRoute := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: "agent-done"}
+	readyRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-done")}
 	readyClaim, err := claimDeliveryFixture(ctx, pg, readyEvent, readyRoute)
 	if err != nil {
 		t.Fatalf("claim ready delivery: %v", err)
@@ -409,10 +403,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	if err != nil {
 		t.Fatalf("construct delivery payload projection: %v", err)
 	}
-	route := events.DeliveryRoute{
-		SubscriberType:    string(runtimedelivery.SubscriberAgent),
-		SubscriberID:      "agent-source",
-		AgentIdentity:     identity,
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-source"), AgentIdentity: identity,
 		Context:           events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}},
 		PayloadProjection: projection,
 	}

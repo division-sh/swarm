@@ -161,7 +161,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 			if err != nil {
 				t.Fatalf("ListEventDeliveryRoutes: %v", err)
 			}
-			if len(persistedRoutes) != 1 || persistedRoutes[0].SubscriberID != "account-node" || persistedRoutes[0].Target.Normalized() != wantTarget.Normalized() {
+			if len(persistedRoutes) != 1 || persistedRoutes[0].Recipient.ID() != "account-node" || persistedRoutes[0].Target.Normalized() != wantTarget.Normalized() {
 				t.Fatalf("persisted routes = %#v, want account-node at %#v", persistedRoutes, wantTarget)
 			}
 

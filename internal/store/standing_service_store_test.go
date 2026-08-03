@@ -126,7 +126,7 @@ func TestStandingServiceTerminalizationSignalUsesCallbackTimeRegistrationParity(
 				if err != nil {
 					t.Fatal(err)
 				}
-				route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberNode), SubscriberID: "standing-registration-node"}
+				route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("standing-registration-node")}
 				commit := func(eventType events.EventType, authority runtimedelivery.ExecutionAuthority) (events.Event, runtimedelivery.DurableHandoffProof) {
 					evt := eventtest.RuntimeControl(uuid.NewString(), eventType, "test", candidate.EntityID, []byte(`{}`), 0, created[0].RunID, "", events.EventEnvelope{}, time.Now().UTC())
 					if err := eventfixture.Insert(ctx, db, dialect, evt); err != nil {
@@ -313,7 +313,7 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 			if err != nil {
 				t.Fatal(err)
 			}
-			route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberNode), SubscriberID: "standing-startup-node"}
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("standing-startup-node")}
 			evt := eventtest.RuntimeControl(uuid.NewString(), "standing.signal.startup", "test", candidate.EntityID, []byte(`{}`), 0, created[0].RunID, "", events.EventEnvelope{}, time.Now().UTC())
 			if err := eventfixture.Insert(ctx, db, dialect, evt); err != nil {
 				t.Fatalf("insert startup-order event: %v", err)
@@ -465,7 +465,7 @@ func TestStandingServiceTerminalizationSignalFollowsTransactionOutcomeParity(t *
 					if err != nil {
 						t.Fatalf("build delivery continuation signal authority: %v", err)
 					}
-					route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberNode), SubscriberID: "standing-signal-node"}
+					route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("standing-signal-node")}
 					coordinatorEvent := eventtest.RuntimeControl(
 						uuid.NewString(), "standing.signal.coordinator", "test", candidate.EntityID, []byte(`{}`), 0,
 						created[0].RunID, "", events.EventEnvelope{}, time.Now().UTC(),

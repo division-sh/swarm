@@ -17,11 +17,11 @@ import (
 func TestSyntheticCarryProjectionIsRouteScopedForMixedDeliveries(t *testing.T) {
 	evt := eventtest.RunCreatingRootIngress("projection-event", events.EventType("validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	projection := mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": "case-1"})
-	projected, err := projectEventForDeliveryRoute(evt, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "validator", PayloadProjection: projection})
+	projected, err := projectEventForDeliveryRoute(evt, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("validator"), PayloadProjection: projection})
 	if err != nil {
 		t.Fatalf("project synthetic route: %v", err)
 	}
-	unprojected, err := projectEventForDeliveryRoute(evt, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "auditor"})
+	unprojected, err := projectEventForDeliveryRoute(evt, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("auditor")})
 	if err != nil {
 		t.Fatalf("project ordinary route: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestDeliveryRouteProjectionPreservesUntargetedLiveRecipientEnvelope(t *test
 	want := events.RouteIdentity{FlowInstance: "validation/one", EntityID: "entity-1"}
 	evt := eventtest.RunCreatingRootIngress("projection-event", events.EventType("validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{want}), time.Now().UTC())
 
-	projected, err := projectEventForDeliveryRoute(evt, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "validator"})
+	projected, err := projectEventForDeliveryRoute(evt, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("validator")})
 	if err != nil {
 		t.Fatalf("project untargeted live route: %v", err)
 	}
@@ -71,11 +71,7 @@ func TestCreateSyntheticCarryFailsClosedOnDynamicPayloadCollisionBeforeHandler(t
 	}
 	ch := subscribeInternalDeliveriesForTest(t, eb, "validator")
 	evt := eventtest.RunCreatingRootIngress("collision-event", events.EventType("validation.requested"), "", "", json.RawMessage(`{"validation_case_id":"producer-value"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	route := events.DeliveryRoute{
-		SubscriberType:    "node",
-		SubscriberID:      "validator",
-		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": "synthetic-value"}),
-	}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("validator"), PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": "synthetic-value"})}
 	err = eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"validator"}, []events.DeliveryRoute{route})
 	if err == nil || !strings.Contains(err.Error(), "delivery payload projection conflicts with producer field") {
 		t.Fatalf("delivery error = %v, want synthetic carry collision", err)
@@ -93,10 +89,7 @@ func TestDeliveryRouteProjectionHasOneProductionOwner(t *testing.T) {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	route := events.DeliveryRoute{
-		SubscriberType:    "node",
-		SubscriberID:      "validator",
-		Target:            events.RouteIdentity{FlowID: "validation", FlowInstance: "validation/one", EntityID: "entity-1"},
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("validator"), Target: events.RouteIdentity{FlowID: "validation", FlowInstance: "validation/one", EntityID: "entity-1"},
 		PayloadProjection: mustDeliveryPayloadProjection(t, map[string]string{"validation_case_id": "case-1"}),
 	}
 	interceptor := &projectionCaptureInterceptor{}

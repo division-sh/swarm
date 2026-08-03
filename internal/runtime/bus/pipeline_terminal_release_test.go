@@ -490,7 +490,7 @@ func TestEventBusResetPreservesPendingOperationUntilPriorRetirementSucceeds(t *t
 	bus.ReplaceAgentRoute(token, testAgentSubscriptionAdmission(t, token.AgentID, events.EventType("test.work")))
 	eventID, runID := uuid.NewString(), uuid.NewString()
 	event := eventtest.RuntimeControl(eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now())
-	store.seed(t, eventID, runID, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: token.AgentID, AgentIdentity: token.Identity})
+	store.seed(t, eventID, runID, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(token.AgentID), AgentIdentity: token.Identity})
 	if err := deliverToTestAgent(context.Background(), bus, event, token.Identity); err != nil {
 		t.Fatalf("queue buffered delivery: %v", err)
 	}

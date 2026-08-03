@@ -35,13 +35,10 @@ func (t *routeValidationPublishTransaction) FinalizePreparedPublish(_ context.Co
 }
 
 func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
-	routes := []events.DeliveryRoute{{
-		SubscriberType: "node",
-		SubscriberID:   "consumer-node",
-		Target: events.RouteIdentity{
-			FlowInstance: "consumer/inst-1",
-			EntityID:     "ent-consumer",
-		},
+	routes := []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
+		FlowInstance: "consumer/inst-1",
+		EntityID:     "ent-consumer",
+	},
 	}}
 
 	intents := routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerConnectRoutePlan)
@@ -53,31 +50,27 @@ func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
 		t.Fatalf("intent producer = %q, want %q", routeIntentProducerCode(intent.Producer), routeIntentProducerCode(routeIntentProducerConnectRoutePlan))
 	}
 	if intent.Producer.Source() != routePlanSourceConnectRoutePlan || intent.Producer.Reason() != routePlanReasonLoweredConnectRoutePlan {
-		t.Fatalf("intent producer source/reason = %s/%s, want connect route plan/lowered connect", intent.Producer.Source(), intent.Producer.Reason())
+		t.Fatalf("intent producer source/reason = %s/%s, want connect route plan/lowered connect", intent.Producer.Source().code(), intent.Producer.Reason().code())
 	}
 }
 
 func TestRoutePlanRejectsMalformedOrUnpairedPersistentDeliveryIntent(t *testing.T) {
 	identity := agentidentitytest.RootRuntime(t, "agent-a", "route-plan-test")
 	plan := RoutePlan{
-		LiveRecipients: []RoutePlanLiveRecipient{{
-			RecipientID: "agent-a", AgentIdentity: identity, SubscriberType: routePlanSubscriberAgent, PersistAsDelivery: true,
-		}},
+		LiveRecipients: []RoutePlanLiveRecipient{{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity, PersistAsDelivery: true}},
 		DeliveryIntents: []RoutePlanDeliveryIntent{{
-			SubscriberID: "agent-a", Persist: true,
+			Persist: true,
 		}},
 	}
 	if err := plan.ValidatePersistentDeliveries(); err == nil || !strings.Contains(err.Error(), "unsupported subscriber type") {
 		t.Fatalf("malformed durable route validation = %v", err)
 	}
-	if routes := plan.DeliveryRoutes(); len(routes) != 1 || routes[0].SubscriberID != "agent-a" {
+	if routes := plan.DeliveryRoutes(); len(routes) != 1 || !routes[0].Recipient.Empty() {
 		t.Fatalf("malformed durable intent was silently filtered: %#v", routes)
 	}
 
-	plan.DeliveryIntents = []RoutePlanDeliveryIntent{{
-		SubscriberType: routePlanSubscriberAgent, SubscriberID: "agent-b",
-		AgentIdentity: agentidentitytest.RootRuntime(t, "agent-b", "route-plan-test"),
-		Persist:       true,
+	plan.DeliveryIntents = []RoutePlanDeliveryIntent{{Recipient: events.MustAgentDeliveryRecipient("agent-b"), AgentIdentity: agentidentitytest.RootRuntime(t, "agent-b", "route-plan-test"),
+		Persist: true,
 	}}
 	if err := plan.ValidatePersistentDeliveries(); err == nil || !strings.Contains(err.Error(), "has no exact durable delivery route") {
 		t.Fatalf("live/durable recipient mismatch validation = %v", err)
@@ -86,20 +79,14 @@ func TestRoutePlanRejectsMalformedOrUnpairedPersistentDeliveryIntent(t *testing.
 
 func TestRoutePlanPendingLifecycleAuthorityPersistsWithoutLiveDispatch(t *testing.T) {
 	identity := agentidentitytest.Runtime(t, "agent-a", "route-plan-test", "flow", "instance-a", "flow/instance-a")
-	nodeRoute := RoutePlanDeliveryIntent{
-		SubscriberType: "node",
-		SubscriberID:   "node-a",
-		Target: events.RouteIdentity{
-			FlowID:       "flow",
-			FlowInstance: "flow/instance-a",
-			EntityID:     "entity-a",
-		},
+	nodeRoute := RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient("node-a"), Target: events.RouteIdentity{
+		FlowID:       "flow",
+		FlowInstance: "flow/instance-a",
+		EntityID:     "entity-a",
+	},
 		Persist: true,
 	}
-	pendingAgentRoute := RoutePlanDeliveryIntent{
-		SubscriberType:        routePlanSubscriberAgent,
-		SubscriberID:          identity.AgentID(),
-		AgentIdentity:         identity,
+	pendingAgentRoute := RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity,
 		Target:                nodeRoute.Target,
 		Persist:               true,
 		PendingAgentLifecycle: true,
@@ -113,7 +100,7 @@ func TestRoutePlanPendingLifecycleAuthorityPersistsWithoutLiveDispatch(t *testin
 		t.Fatalf("durable routes = %d, want %d", got, want)
 	}
 	dispatchRoutes := plan.liveDispatchDeliveryRoutes()
-	if got, want := len(dispatchRoutes), 1; got != want || dispatchRoutes[0].SubscriberType != "node" {
+	if got, want := len(dispatchRoutes), 1; got != want || !dispatchRoutes[0].Recipient.IsNode() {
 		t.Fatalf("live dispatch routes = %#v, want only node route", dispatchRoutes)
 	}
 }
@@ -127,20 +114,14 @@ func TestRoutePlanRejectsMalformedPendingLifecycleAuthority(t *testing.T) {
 	}{
 		{
 			name: "not persistent",
-			intent: RoutePlanDeliveryIntent{
-				SubscriberType:        routePlanSubscriberAgent,
-				SubscriberID:          identity.AgentID(),
-				AgentIdentity:         identity,
+			intent: RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity,
 				PendingAgentLifecycle: true,
 			},
 			want: "must be persistent",
 		},
 		{
 			name: "not agent",
-			intent: RoutePlanDeliveryIntent{
-				SubscriberType:        "node",
-				SubscriberID:          "node-a",
-				Persist:               true,
+			intent: RoutePlanDeliveryIntent{Recipient: events.MustNodeDeliveryRecipient("node-a"), Persist: true,
 				PendingAgentLifecycle: true,
 			},
 			want: "must identify one agent",
@@ -166,8 +147,8 @@ func TestEventBusPreparationRejectsMalformedDurableRouteBeforeFinalization(t *te
 	ctx := WithCommitPublishTransaction(context.Background(), transaction)
 	_, err = (&EventBus{}).prepareAdmittedPublishInMutation(ctx, admitted, nil, "subscribed", func(context.Context, events.Event) (RoutePlan, error) {
 		return RoutePlan{
-			LiveRecipients:  []RoutePlanLiveRecipient{{RecipientID: "agent-a", AgentIdentity: identity, SubscriberType: routePlanSubscriberAgent, PersistAsDelivery: true}},
-			DeliveryIntents: []RoutePlanDeliveryIntent{{SubscriberID: "agent-a", Persist: true}},
+			LiveRecipients:  []RoutePlanLiveRecipient{{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity, PersistAsDelivery: true}},
+			DeliveryIntents: []RoutePlanDeliveryIntent{{Persist: true}},
 		}, nil
 	})
 	if err == nil || !strings.Contains(err.Error(), "validate durable route plan") {

@@ -178,7 +178,7 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 		t.Fatalf("active-delivery run status = %q, %v, want running", activeStatus, err)
 	}
 
-	claimed, err := claimDeliveryFixture(ctx, pg, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1"})
+	claimed, err := claimDeliveryFixture(ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1")})
 	if err != nil {
 		t.Fatalf("claim delivery: %v", err)
 	}
@@ -3625,7 +3625,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	if err != nil || len(pending.PendingDeliveries) != 1 || pending.PendingDeliveries[0].EventID != evt.ID() {
 		t.Fatalf("ListPendingAgentDeliveryDetails err=%v page=%#v", err, pending)
 	}
-	route := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: ceoID}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(ceoID)}
 	claimed, err := claimDeliveryFixture(ctx, pg, evt, route)
 	if err != nil {
 		t.Fatalf("ClaimAgentDelivery: %v", err)

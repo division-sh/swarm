@@ -175,11 +175,7 @@ func (s *pipelineTestDeliveryOwner) authorityForRun(ctx context.Context, tx *sql
 }
 
 func (s *pipelineTestDeliveryOwner) commitNode(ctx context.Context, event events.Event, nodeID string, target events.RouteIdentity) error {
-	return s.commitInitial(ctx, event, events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberNode),
-		SubscriberID:   strings.TrimSpace(nodeID),
-		Target:         target.Normalized(),
-	})
+	return s.commitInitial(ctx, event, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(strings.TrimSpace(nodeID)), Target: target.Normalized()})
 }
 
 func (s *pipelineTestDeliveryOwner) loadEvent(ctx context.Context, eventID string) (events.Event, error) {

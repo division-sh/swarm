@@ -411,7 +411,7 @@ func (s *managerDeliveryTestStore) TerminalizeRun(ctx context.Context, runID, re
 func (s *managerDeliveryTestStore) markDelivered(t *testing.T, evt events.Event, agentID string) {
 	t.Helper()
 	ctx := testAuthorActivityContext(context.Background())
-	claimed, err := s.claimExact(ctx, evt, events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: agentID})
+	claimed, err := s.claimExact(ctx, evt, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID)})
 	if err != nil {
 		t.Fatalf("claim delivered manager fixture event %s: %v", evt.ID(), err)
 	}
@@ -441,11 +441,7 @@ func (s *managerDeliveryTestStore) markInProgress(t *testing.T, evt events.Event
 
 func managerAgentDeliveryRoute(agentID string) events.DeliveryRoute {
 	identity := managerAgentIdentity(agentID)
-	return events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberAgent),
-		SubscriberID:   identity.AgentID(),
-		AgentIdentity:  identity,
-	}
+	return events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 }
 
 func managerAgentIdentity(agentID string) runtimeagentidentity.Identity {

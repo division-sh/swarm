@@ -1061,12 +1061,9 @@ func testContractFrontierAdmission(selection runfork.RunForkContractSelection) r
 			EventName:               "work.begin",
 			RuntimeEventOwners:      []string{"alpha-intake"},
 			WorkflowNodeSubscribers: []string{"beta-intake"},
-			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{{
-				SubscriberType: "node",
-				SubscriberID:   "alpha-intake",
-				Path:           "flow-a/alpha-intake",
-				RouteSource:    "selected_contracts",
-			}},
+			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
+				testNodeFrontierRecipient("alpha-intake", "flow-a/alpha-intake", "selected_contracts"),
+			},
 		}},
 	}
 }

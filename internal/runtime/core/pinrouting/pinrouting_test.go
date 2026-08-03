@@ -16,7 +16,7 @@ func TestResolveTargetsCompleteParentRouteForPinDeclaredOutput(t *testing.T) {
 	result := Resolve(ResolutionInput{
 		Source: testPinRoutingSource(runtimecontracts.FlowOutputSinkNone, nil), FlowID: "child", EventType: "child.done", ParentRoute: parent,
 	}, eventtest.RunCreatingRootIngress("", "child.done", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
-	if result.Failure != "" || result.Target != parent || result.Event.TargetRoute() != parent {
+	if !result.Failure.Empty() || result.Target != parent || result.Event.TargetRoute() != parent {
 		t.Fatalf("resolution = %#v, want exact parent route", result)
 	}
 }
@@ -36,7 +36,7 @@ func TestResolveAllowsAcceptedExternalConsumerWithoutInventingRoute(t *testing.T
 	result := Resolve(ResolutionInput{
 		Source: testRootPinRoutingSource(runtimecontracts.FlowOutputSinkNone, map[string]runtimecontracts.EventCatalogEntry{"root.ready": entry}), EventType: "root.ready",
 	}, eventtest.RunCreatingRootIngress("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
-	if result.Failure != "" || !result.Event.TargetRoute().Empty() || len(result.Event.TargetRoutes()) != 0 {
+	if !result.Failure.Empty() || !result.Event.TargetRoute().Empty() || len(result.Event.TargetRoutes()) != 0 {
 		t.Fatalf("resolution = %#v, want targetless accepted external observation", result)
 	}
 }
@@ -71,7 +71,7 @@ func TestResolveAllowsTypedSameFlowConsumerWithoutInventingRoute(t *testing.T) {
 		},
 	}
 	result := Resolve(ResolutionInput{Source: source, EventType: "root.ready"}, eventtest.RunCreatingRootIngress("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
-	if result.Failure != "" || !result.Event.TargetRoute().Empty() {
+	if !result.Failure.Empty() || !result.Event.TargetRoute().Empty() {
 		t.Fatalf("resolution = %#v, want targetless same-flow delivery", result)
 	}
 }
@@ -82,7 +82,7 @@ func TestResolveHarnessSinkCreatesNoRuntimeRoute(t *testing.T) {
 		t.Fatal("typed harness sink not found")
 	}
 	result := Resolve(ResolutionInput{Source: source, EventType: "root.ready"}, eventtest.RunCreatingRootIngress("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
-	if result.Failure != "" || !result.Event.TargetRoute().Empty() || len(result.Event.TargetRoutes()) != 0 {
+	if !result.Failure.Empty() || !result.Event.TargetRoute().Empty() || len(result.Event.TargetRoutes()) != 0 {
 		t.Fatalf("resolution = %#v, want targetless validation observation", result)
 	}
 }

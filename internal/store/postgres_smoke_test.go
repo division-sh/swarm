@@ -9,7 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -121,11 +120,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		time.Now(),
 	)
 
-	route := events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberAgent),
-		SubscriberID:   controlPlaneIdentity.AgentID(),
-		AgentIdentity:  controlPlaneIdentity,
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(controlPlaneIdentity.AgentID()), AgentIdentity: controlPlaneIdentity}
 	if err := commitSemanticEventFixtureWithRoutes(ctx, pg, evt, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("append event with exact delivery: %v", err)
 	}

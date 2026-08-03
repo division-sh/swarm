@@ -17,6 +17,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -284,13 +285,42 @@ func TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority(t *testing.
 	}
 
 	subscriber := reflect.TypeOf(runtimebus.Subscriber{})
-	carrier, exists := subscriber.FieldByName("receiverCarrier")
-	if !exists || carrier.IsExported() || carrier.Type.Kind() != reflect.Bool {
-		t.Fatalf("receiver carrier projection = %#v, want one private boolean fact", carrier)
+	recipient, exists := subscriber.FieldByName("Recipient")
+	if !exists || recipient.Type != reflect.TypeOf(events.DeliveryRecipient{}) {
+		t.Fatalf("subscriber recipient = %#v, want typed delivery recipient", recipient)
 	}
-	method, exists := subscriber.MethodByName("IsConnectReceiverCarrier")
-	if !exists || method.Type.NumIn() != 1 || method.Type.NumOut() != 1 || method.Type.Out(0).Kind() != reflect.Bool {
-		t.Fatal("subscriber lost its narrow read-only receiver-carrier projection")
+	provenance, exists := subscriber.FieldByName("routeSource")
+	if !exists || provenance.IsExported() || provenance.Type.Kind() == reflect.String {
+		t.Fatalf("subscriber provenance = %#v, want private non-string discriminant", provenance)
+	}
+	if _, exists := subscriber.FieldByName("RouteSource"); exists {
+		t.Fatal("subscriber regained public route-source string authority")
+	}
+
+	deliveryRoute := reflect.TypeOf(events.DeliveryRoute{})
+	if field, exists := deliveryRoute.FieldByName("Recipient"); !exists || field.Type != reflect.TypeOf(events.DeliveryRecipient{}) {
+		t.Fatalf("delivery route recipient = %#v, want typed delivery recipient", field)
+	}
+	for _, retired := range []string{"SubscriberType", "SubscriberID"} {
+		if _, exists := deliveryRoute.FieldByName(retired); exists {
+			t.Fatalf("delivery route regained public %s wire authority", retired)
+		}
+	}
+
+	forkRecipient := reflect.TypeOf(runfork.RunForkContractFrontierRecipient{})
+	if field, exists := forkRecipient.FieldByName("Recipient"); !exists || field.Type != reflect.TypeOf(events.DeliveryRecipient{}) {
+		t.Fatalf("selected-fork recipient = %#v, want typed delivery recipient", field)
+	}
+	for _, retired := range []string{"SubscriberType", "SubscriberID", "RouteSource"} {
+		if _, exists := forkRecipient.FieldByName(retired); exists {
+			t.Fatalf("selected-fork recipient regained public %s wire authority", retired)
+		}
+	}
+
+	resolutionInput := reflect.TypeOf(runtimepinrouting.ResolutionInput{})
+	routingSource, exists := resolutionInput.FieldByName("RoutingSource")
+	if !exists || routingSource.Type != reflect.TypeOf(events.RoutingSource{}) {
+		t.Fatalf("pin routing source input = %#v, want admitted RoutingSource", routingSource)
 	}
 
 	admit, exists := reflect.TypeOf(&runtimepinrouting.ConnectReceiverPinAdmission{}).MethodByName("Admit")
@@ -305,19 +335,61 @@ func TestCompiledRoutingConsumersCannotReconstructCanonicalAuthority(t *testing.
 	}
 
 	repoRoot := canonicalrouting.RepoRoot(t)
-	assertFileDeclaresNoFunctions(t, filepath.Join(repoRoot, "internal/runtime/routingtopology/topology.go"), map[string]struct{}{
-		"connectReceiverPinCollisionIssues": {},
-		"connectReceiverPinFact":            {},
-		"connectReceiverPinStaticTargetKey": {},
-	})
-	assertFunctionUsesNoSelectorsOrStrings(
-		t,
-		filepath.Join(repoRoot, "internal/runtime/runforkadmission/contract_frontier.go"),
-		"resolveContractFrontierRoutes",
-		map[string]struct{}{"RouteSource": {}},
-		nil,
-	)
+	retiredFunctions := map[string]struct{}{
+		"connectReceiverPinCollisionIssues":       {},
+		"connectReceiverPinFact":                  {},
+		"connectReceiverPinStaticTargetKey":       {},
+		"connectReceiverCarrierRouteKeys":         {},
+		"connectSubscriberMatchesPlanTarget":      {},
+		"routeFlowInputHasLoweredConnectReceiver": {},
+		"contractFrontierRouteLookup":             {},
+		"eventReferencesMatch":                    {},
+		"eventReferencesOverlap":                  {},
+		"routeFromEvent":                          {},
+	}
+	guardedFiles := []string{
+		"internal/events/types.go",
+		"internal/runtime/core/pinrouting/connect_route_plan.go",
+		"internal/runtime/core/pinrouting/pinrouting.go",
+		"internal/runtime/core/pinrouting/flow_input_producer.go",
+		"internal/runtime/bus/connect_route_plan_dispatch.go",
+		"internal/runtime/bus/template_instance_lifecycle.go",
+		"internal/runtime/bus/routing_derivation.go",
+		"internal/runtime/bus/eventbus.go",
+		"internal/runtime/bus/eventbus_routing.go",
+		"internal/runtime/bus/delivery_planner.go",
+		"internal/runtime/bus/route_plan.go",
+		"internal/runtime/runfork/models.go",
+		"internal/runtime/runforkadmission/contract_frontier.go",
+		"internal/runtime/runforkadmission/selected_route_history.go",
+		"internal/runtime/runforkexecution/recipient_planning.go",
+		"internal/runtime/manager/selected_contract_route_recovery.go",
+		"internal/runtime/routingtopology/topology.go",
+	}
+	for _, relative := range guardedFiles {
+		path := filepath.Join(repoRoot, relative)
+		assertFileDeclaresNoFunctions(t, path, retiredFunctions)
+		assertFileUsesNoCompositeDelimiter(t, path)
+	}
 	assertFileImportsNoPath(t, filepath.Join(repoRoot, "internal/runtime/bootverify/workflow_composition_connect_checks.go"), "internal/runtime/routingtopology")
+}
+
+func assertFileUsesNoCompositeDelimiter(t testing.TB, path string) {
+	t.Helper()
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return true
+		}
+		if strings.Contains(literal.Value, `\x00`) || strings.Contains(literal.Value, `\x1f`) {
+			t.Errorf("%s contains prohibited delimiter-backed identity literal %s", path, literal.Value)
+		}
+		return true
+	})
 }
 
 func assertFileDeclaresNoFunctions(t testing.TB, path string, prohibited map[string]struct{}) {

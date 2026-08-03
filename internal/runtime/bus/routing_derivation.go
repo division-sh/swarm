@@ -17,17 +17,73 @@ import (
 )
 
 type Subscriber struct {
-	ID              string
-	Type            string
-	Path            string
-	MatchPattern    string
-	RouteSource     string
-	LocalizedEvent  string
-	AgentIdentity   agentidentity.Identity
-	receiverCarrier bool
+	Recipient      events.DeliveryRecipient
+	Path           string
+	MatchPattern   string
+	routeSource    subscriberRouteSource
+	LocalizedEvent string
+	AgentIdentity  agentidentity.Identity
 }
 
-func (s Subscriber) IsConnectReceiverCarrier() bool { return s.receiverCarrier }
+func (s Subscriber) RouteSourceCode() string { return s.routeSource.code() }
+
+type subscriberRouteSource uint8
+
+const (
+	subscriberRouteSourceSubscription subscriberRouteSource = iota + 1
+	subscriberRouteSourcePinAutoWire
+	subscriberRouteSourceRootInputProject
+	subscriberRouteSourceRootInputFlow
+	subscriberRouteSourceConnectRoutePlan
+	subscriberRouteSourceImportBoundaryWildcardGrant
+	subscriberRouteSourceImportBoundaryWildcardSubtree
+)
+
+func subscriberRouteSourceFromCode(code string) (subscriberRouteSource, bool) {
+	switch strings.TrimSpace(code) {
+	case "subscription":
+		return subscriberRouteSourceSubscription, true
+	case "pin_auto_wire":
+		return subscriberRouteSourcePinAutoWire, true
+	case "root_input_project":
+		return subscriberRouteSourceRootInputProject, true
+	case "root_input_flow":
+		return subscriberRouteSourceRootInputFlow, true
+	case "connect_route_plan":
+		return subscriberRouteSourceConnectRoutePlan, true
+	case "import_boundary_wildcard_grant":
+		return subscriberRouteSourceImportBoundaryWildcardGrant, true
+	case "import_boundary_wildcard_subtree":
+		return subscriberRouteSourceImportBoundaryWildcardSubtree, true
+	default:
+		return 0, false
+	}
+}
+
+func (s subscriberRouteSource) code() string {
+	switch s {
+	case subscriberRouteSourceSubscription:
+		return "subscription"
+	case subscriberRouteSourcePinAutoWire:
+		return "pin_auto_wire"
+	case subscriberRouteSourceRootInputProject:
+		return "root_input_project"
+	case subscriberRouteSourceRootInputFlow:
+		return "root_input_flow"
+	case subscriberRouteSourceConnectRoutePlan:
+		return "connect_route_plan"
+	case subscriberRouteSourceImportBoundaryWildcardGrant:
+		return "import_boundary_wildcard_grant"
+	case subscriberRouteSourceImportBoundaryWildcardSubtree:
+		return "import_boundary_wildcard_subtree"
+	default:
+		return ""
+	}
+}
+
+func (s subscriberRouteSource) importBoundaryWildcard() bool {
+	return s == subscriberRouteSourceImportBoundaryWildcardGrant || s == subscriberRouteSourceImportBoundaryWildcardSubtree
+}
 
 type RouteTable struct {
 	mu                sync.RWMutex
@@ -44,6 +100,13 @@ type RouteTable struct {
 	instanceOwners    map[string]runtimeflowidentity.Route
 	instanceEventPath map[string][]string
 	templateObservers map[string][]routeTemplateSourceObserver
+	connectGraph      runtimepinrouting.CompiledConnectGraph
+	connectRecipients []routeConnectRecipientRegistration
+}
+
+type routeConnectRecipientRegistration struct {
+	registration runtimepinrouting.ConnectRecipientRegistration
+	instancePath string
 }
 
 type routePattern struct {
@@ -70,20 +133,36 @@ type routeFlowTemplate struct {
 
 type routeSubscriberTemplate struct {
 	IDTemplate     string
-	Type           string
+	Kind           subscriberKind
 	RawPatterns    []string
 	AgentNameOwner string
+}
+
+type subscriberKind uint8
+
+const (
+	subscriberNode subscriberKind = iota + 1
+	subscriberAgent
+)
+
+func subscriberRecipient(kind subscriberKind, id string) (events.DeliveryRecipient, error) {
+	if kind == subscriberNode {
+		return events.NewNodeDeliveryRecipient(id)
+	}
+	if kind == subscriberAgent {
+		return events.NewAgentDeliveryRecipient(id)
+	}
+	return events.DeliveryRecipient{}, fmt.Errorf("subscriber kind is required")
 }
 
 type routeResolvedPattern struct {
 	EventPattern       string
 	MatchPattern       string
-	RouteSource        string
+	routeSource        subscriberRouteSource
 	LocalizedEvent     string
 	RoutePath          string
 	SourceTemplatePath string
 	SourceLocalEvent   string
-	receiverCarrier    bool
 }
 
 type TypedPubSubAuthorizationError struct {
@@ -146,7 +225,9 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 		if err := rt.addAgentPatternsLocked(source, scope.Key, owningFlowID, agentFlowID, inputEvents, basePath, agentPath, localEvents, scope.Agents); err != nil {
 			return nil, err
 		}
-		rt.addNodePatternsLocked(source, scope.Key, owningFlowID, inputEvents, basePath, localEvents, scope.Nodes)
+		if err := rt.addNodePatternsLocked(source, scope.Key, owningFlowID, inputEvents, basePath, localEvents, scope.Nodes); err != nil {
+			return nil, err
+		}
 	}
 
 	for _, scope := range semanticview.FlowScopes(source) {
@@ -173,10 +254,14 @@ func DeriveRouteTable(source semanticview.Source) (*RouteTable, error) {
 		if err := rt.addAgentPatternsLocked(source, scope.PackageKey, scope.ID, scope.ID, scope.InputEvents, flowPath, flowPath, localEvents, scope.Agents); err != nil {
 			return nil, err
 		}
-		rt.addNodePatternsLocked(source, scope.PackageKey, scope.ID, scope.InputEvents, flowPath, localEvents, scope.Nodes)
+		if err := rt.addNodePatternsLocked(source, scope.PackageKey, scope.ID, scope.InputEvents, flowPath, localEvents, scope.Nodes); err != nil {
+			return nil, err
+		}
 	}
 
-	rt.addTopLevelRootInputNodeRoutesLocked(source)
+	if err := rt.addTopLevelRootInputNodeRoutesLocked(source); err != nil {
+		return nil, err
+	}
 	rt.addRootInputFlowNodeRoutesLocked(source)
 	rt.rebuildLocked()
 	return rt, nil
@@ -260,6 +345,52 @@ func (rt *RouteTable) Resolve(eventType string) []Subscriber {
 	return out
 }
 
+func (rt *RouteTable) EvaluateConnectSource(sourceEvent runtimepinrouting.SourceEvent) runtimepinrouting.ConnectRecipientEvaluation {
+	if rt == nil {
+		return runtimepinrouting.ConnectRecipientEvaluation{}
+	}
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	return rt.connectGraph.EvaluateSourceRecipients(sourceEvent, rt.connectRecipientAdmissionsLocked())
+}
+
+func (rt *RouteTable) evaluateConnectPlan(plan runtimepinrouting.ConnectRoutePlan, targets []events.RouteIdentity) runtimepinrouting.ConnectRecipientEvaluation {
+	if rt == nil {
+		return runtimepinrouting.ConnectRecipientEvaluation{}
+	}
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	return rt.connectGraph.EvaluateMaterializedRecipients(plan, targets, rt.connectRecipientAdmissionsLocked())
+}
+
+func (rt *RouteTable) connectRecipientAdmissionsLocked() []runtimepinrouting.ConnectRecipientRegistration {
+	out := make([]runtimepinrouting.ConnectRecipientRegistration, 0, len(rt.connectRecipients))
+	for _, registration := range rt.connectRecipients {
+		out = append(out, registration.registration)
+	}
+	return out
+}
+
+func connectRecipientSubscribers(evaluation runtimepinrouting.ConnectRecipientEvaluation) []Subscriber {
+	recipients := evaluation.Recipients()
+	out := make([]Subscriber, 0, len(recipients))
+	for _, recipient := range recipients {
+		typedRecipient, err := subscriberRecipient(subscriberNode, recipient.ID())
+		if recipient.Kind() == runtimepinrouting.ConnectRecipientAgent {
+			typedRecipient, err = subscriberRecipient(subscriberAgent, recipient.ID())
+		}
+		if err != nil {
+			continue
+		}
+		out = append(out, Subscriber{
+			Recipient: typedRecipient, Path: recipient.Path(),
+			LocalizedEvent: string(recipient.HandlerEvent()), AgentIdentity: recipient.AgentIdentity(),
+			routeSource: subscriberRouteSourceConnectRoutePlan,
+		})
+	}
+	return dedupeSubscribers(out)
+}
+
 func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
 	if rt == nil {
 		return fmt.Errorf("route table is required")
@@ -296,13 +427,13 @@ func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 	rt.materializeTemplateSourceObserversLocked(templateScope, instancePath)
 	vars := flowInstanceRouteMaterializationVars(req, templateDef.FlowID)
 	for _, subscriberTemplate := range templateDef.Subscribers {
-		subscriber := Subscriber{
-			ID:   routeRenderTemplate(subscriberTemplate.IDTemplate, vars),
-			Type: subscriberTemplate.Type,
-			Path: instancePath,
+		recipient, err := subscriberRecipient(subscriberTemplate.Kind, routeRenderTemplate(subscriberTemplate.IDTemplate, vars))
+		if err != nil {
+			return fmt.Errorf("materialize route subscriber: %w", err)
 		}
-		if subscriber.Type == "agent" {
-			name, err := agentidentity.DeclaredName(subscriber.ID, subscriberTemplate.AgentNameOwner)
+		subscriber := Subscriber{Recipient: recipient, Path: instancePath}
+		if subscriber.Recipient.IsAgent() {
+			name, err := agentidentity.DeclaredName(subscriber.Recipient.ID(), subscriberTemplate.AgentNameOwner)
 			if err != nil {
 				return fmt.Errorf("materialize route subscriber agent identity: %w", err)
 			}
@@ -316,22 +447,14 @@ func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 			}
 		}
 		for _, rawPattern := range subscriberTemplate.RawPatterns {
+			if err := rt.addConnectRecipientLocked(templateDef.FlowID, rawPattern, subscriber, instancePath); err != nil {
+				return err
+			}
 			for _, resolved := range routeResolveSubscriberPatterns(rt.source, templateDef.PackageKey, templateDef.FlowID, templateDef.InputEvents, instancePath, templateDef.LocalEvents, rawPattern) {
 				if strings.TrimSpace(resolved.EventPattern) == "" {
 					continue
 				}
 				rt.addResolvedPatternLocked(subscriber, resolved, instancePath)
-			}
-			if !routeFlowInputHasLoweredConnectReceiver(rt.source, templateDef.FlowID, rawPattern) {
-				continue
-			}
-			for _, resolved := range routeReceiverCarrierSubscriberPatterns(templateDef.InputEvents, instancePath, rawPattern) {
-				resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
-				rt.patterns = append(rt.patterns, routePattern{
-					EventPattern: resolved.EventPattern,
-					Subscriber:   resolvedSubscriber,
-					InstancePath: instancePath,
-				})
 			}
 		}
 	}
@@ -418,6 +541,14 @@ func (rt *RouteTable) removeFlowInstanceRoute(identity runtimeflowidentity.Route
 		filtered = append(filtered, pattern)
 	}
 	rt.patterns = filtered
+	filteredConnect := rt.connectRecipients[:0]
+	for _, registration := range rt.connectRecipients {
+		if registration.instancePath == instancePath {
+			continue
+		}
+		filteredConnect = append(filteredConnect, registration)
+	}
+	rt.connectRecipients = filteredConnect
 	for sourceTemplatePath, observers := range rt.templateObservers {
 		filteredObservers := observers[:0]
 		for _, observer := range observers {
@@ -453,7 +584,12 @@ func (rt *RouteTable) MaterializedRoutes(identity runtimeflowidentity.Route) []F
 		return nil
 	}
 
-	seen := make(map[string]struct{})
+	type materializedRouteIdentity struct {
+		instancePath string
+		eventPattern string
+		recipient    events.DeliveryRecipient
+	}
+	seen := make(map[materializedRouteIdentity]struct{})
 	out := make([]FlowInstanceRouteRecord, 0, 8)
 	for _, pattern := range rt.patterns {
 		if strings.Trim(strings.TrimSpace(pattern.InstancePath), "/") != instancePath {
@@ -462,16 +598,15 @@ func (rt *RouteTable) MaterializedRoutes(identity runtimeflowidentity.Route) []F
 		record := FlowInstanceRouteRecord{
 			Identity:       identity,
 			EventPattern:   strings.TrimSpace(pattern.EventPattern),
-			SubscriberType: strings.TrimSpace(pattern.Subscriber.Type),
-			SubscriberID:   strings.TrimSpace(pattern.Subscriber.ID),
+			SubscriberType: pattern.Subscriber.Recipient.Code(),
+			SubscriberID:   pattern.Subscriber.Recipient.ID(),
 			SourceFlow:     identity.ScopeKey,
 		}
-		key := strings.Join([]string{
-			record.Identity.InstancePath,
-			record.EventPattern,
-			record.SubscriberType,
-			record.SubscriberID,
-		}, "|")
+		key := materializedRouteIdentity{
+			instancePath: record.Identity.InstancePath,
+			eventPattern: record.EventPattern,
+			recipient:    pattern.Subscriber.Recipient,
+		}
 		if _, exists := seen[key]; exists {
 			continue
 		}
@@ -503,6 +638,7 @@ func newRouteTable(source semanticview.Source) *RouteTable {
 		instanceOwners:    make(map[string]runtimeflowidentity.Route),
 		instanceEventPath: make(map[string][]string),
 		templateObservers: make(map[string][]routeTemplateSourceObserver),
+		connectGraph:      runtimepinrouting.CompileConnectGraph(source),
 	}
 }
 
@@ -571,17 +707,17 @@ func (rt *RouteTable) removeFlowInstanceRouteForContext(ctx context.Context, ide
 	return rt.RemoveFlowInstanceRoute(identity)
 }
 
-func (rt *RouteTable) addTopLevelRootInputNodeRoutesLocked(source semanticview.Source) {
+func (rt *RouteTable) addTopLevelRootInputNodeRoutesLocked(source semanticview.Source) error {
 	if rt == nil || source == nil {
-		return
+		return nil
 	}
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil || len(bundle.Nodes) == 0 {
-		return
+		return nil
 	}
 	rootInputs := routeRootInputEventSet(source)
 	if len(rootInputs) == 0 {
-		return
+		return nil
 	}
 	for _, eventType := range sortedStringKeys(rootInputs) {
 		for _, key := range sortedStringKeys(bundle.Nodes) {
@@ -597,14 +733,18 @@ func (rt *RouteTable) addTopLevelRootInputNodeRoutesLocked(source semanticview.S
 			if rootInputFlowOwnsNodeRoute(source, semanticNodeID, eventType) {
 				continue
 			}
-			rt.rootInputRoutes[eventType] = appendUniqueRootInputSubscriber(rt.rootInputRoutes[eventType], Subscriber{
-				ID:           subscriberID,
-				Type:         "node",
+			subscriber := Subscriber{
+				Recipient:    events.MustNodeDeliveryRecipient(subscriberID),
 				MatchPattern: eventType,
-				RouteSource:  "root_input_project",
-			})
+				routeSource:  subscriberRouteSourceRootInputProject,
+			}
+			if err := rt.addConnectRecipientLocked("", eventType, subscriber, ""); err != nil {
+				return fmt.Errorf("admit root connect recipient %s for %s: %w", subscriberID, eventType, err)
+			}
+			rt.rootInputRoutes[eventType] = appendUniqueRootInputSubscriber(rt.rootInputRoutes[eventType], subscriber)
 		}
 	}
+	return nil
 }
 
 func rootInputFlowOwnsNodeRoute(source semanticview.Source, nodeID string, eventType string) bool {
@@ -654,11 +794,10 @@ func (rt *RouteTable) addRootInputFlowNodeRoutesLocked(source semanticview.Sourc
 					continue
 				}
 				rt.rootInputRoutes[eventType] = appendUniqueSubscriber(rt.rootInputRoutes[eventType], Subscriber{
-					ID:           subscriberID,
-					Type:         "node",
+					Recipient:    events.MustNodeDeliveryRecipient(subscriberID),
 					Path:         flowPath,
 					MatchPattern: eventType,
-					RouteSource:  "root_input_flow",
+					routeSource:  subscriberRouteSourceRootInputFlow,
 				})
 			}
 		}
@@ -802,15 +941,14 @@ func (rt *RouteTable) addAgentPatternsLocked(
 	for _, key := range sortedStringKeys(agents) {
 		entry := agents[key]
 		subscriber := Subscriber{
-			ID:   strings.TrimSpace(entry.ID),
-			Type: "agent",
-			Path: strings.Trim(strings.TrimSpace(agentPath), "/"),
+			Recipient: events.MustAgentDeliveryRecipient(strings.TrimSpace(entry.ID)),
+			Path:      strings.Trim(strings.TrimSpace(agentPath), "/"),
 		}
 		owner, ok := semanticview.AgentDeclarationOwner(source, agentFlowID, key)
 		if !ok {
 			return fmt.Errorf("route subscriber agent %s missing scoped declaration owner", key)
 		}
-		name, err := agentidentity.DeclaredName(subscriber.ID, owner)
+		name, err := agentidentity.DeclaredName(subscriber.Recipient.ID(), owner)
 		if err != nil {
 			return fmt.Errorf("route subscriber agent %s declaration identity: %w", key, err)
 		}
@@ -826,8 +964,8 @@ func (rt *RouteTable) addAgentPatternsLocked(
 			return fmt.Errorf("route subscriber agent %s concrete identity: %w", key, err)
 		}
 		for _, rawPattern := range normalizeStringList(entry.Subscriptions) {
-			if routeFlowInputHasLoweredConnectReceiver(source, routingFlowID, rawPattern) {
-				rt.addReceiverCarrierPatternsLocked(inputEvents, basePath, subscriber, rawPattern)
+			if err := rt.addConnectRecipientLocked(routingFlowID, rawPattern, subscriber, ""); err != nil {
+				return err
 			}
 			for _, resolved := range routeResolveSubscriberPatterns(source, packageKey, routingFlowID, inputEvents, basePath, localEvents, rawPattern) {
 				if strings.TrimSpace(resolved.EventPattern) == "" {
@@ -840,7 +978,7 @@ func (rt *RouteTable) addAgentPatternsLocked(
 	return nil
 }
 
-func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageKey, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, nodes map[string]runtimecontracts.SystemNodeContract) {
+func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageKey, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, nodes map[string]runtimecontracts.SystemNodeContract) error {
 	for _, key := range sortedStringKeys(nodes) {
 		entry := nodes[key]
 		semanticNodeID := strings.TrimSpace(key)
@@ -849,17 +987,16 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageK
 			subscriberID = semanticNodeID
 		}
 		subscriber := Subscriber{
-			ID:   subscriberID,
-			Type: "node",
-			Path: strings.Trim(strings.TrimSpace(basePath), "/"),
+			Recipient: events.MustNodeDeliveryRecipient(subscriberID),
+			Path:      strings.Trim(strings.TrimSpace(basePath), "/"),
 		}
 		patterns := runtimecontracts.EffectiveSystemNodeSubscriptions(entry)
 		if source != nil {
 			patterns = source.NodeRuntimeSubscriptions(semanticNodeID)
 		}
 		for _, rawPattern := range patterns {
-			if routeFlowInputHasLoweredConnectReceiver(source, flowID, rawPattern) {
-				rt.addReceiverCarrierPatternsLocked(inputEvents, basePath, subscriber, rawPattern)
+			if err := rt.addConnectRecipientLocked(flowID, rawPattern, subscriber, ""); err != nil {
+				return err
 			}
 			for _, resolved := range routeResolveSubscriberPatterns(source, packageKey, flowID, inputEvents, basePath, localEvents, rawPattern) {
 				if strings.TrimSpace(resolved.EventPattern) == "" {
@@ -872,12 +1009,30 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageK
 			}
 		}
 	}
+	return nil
 }
 
-func (rt *RouteTable) addReceiverCarrierPatternsLocked(inputEvents []string, basePath string, subscriber Subscriber, rawPattern string) {
-	for _, resolved := range routeReceiverCarrierSubscriberPatterns(inputEvents, basePath, rawPattern) {
-		rt.addResolvedPatternLocked(subscriber, resolved, "")
+func (rt *RouteTable) addConnectRecipientLocked(flowID, eventType string, subscriber Subscriber, instancePath string) error {
+	var recipient runtimepinrouting.ConnectRecipient
+	var err error
+	switch {
+	case subscriber.Recipient.IsNode():
+		recipient, err = runtimepinrouting.NewConnectNodeRecipient(subscriber.Recipient.ID(), subscriber.Path)
+	case subscriber.Recipient.IsAgent():
+		recipient, err = runtimepinrouting.NewConnectAgentRecipient(subscriber.Recipient.ID(), subscriber.Path, subscriber.AgentIdentity)
+	default:
+		return nil
 	}
+	if err != nil {
+		return err
+	}
+	for _, registration := range rt.connectGraph.AdmitReceiverRecipient(strings.TrimSpace(flowID), events.EventType(eventType), recipient) {
+		rt.connectRecipients = append(rt.connectRecipients, routeConnectRecipientRegistration{
+			registration: registration,
+			instancePath: strings.Trim(strings.TrimSpace(instancePath), "/"),
+		})
+	}
+	return nil
 }
 
 func (rt *RouteTable) addResolvedPatternLocked(subscriber Subscriber, resolved routeResolvedPattern, subscriberInstancePath string) {
@@ -958,43 +1113,60 @@ func (rt *RouteTable) materializeTemplateSourceObserverLocked(observer routeTemp
 	rt.patterns = append(rt.patterns, candidate)
 }
 
-func routeTemplateSourceObserverKey(observer routeTemplateSourceObserver) string {
-	return strings.Join([]string{
-		eventidentity.Normalize(observer.SourceTemplatePath),
-		eventidentity.Normalize(observer.SourceLocalEvent),
-		strings.TrimSpace(observer.Subscriber.Type),
-		strings.TrimSpace(observer.Subscriber.ID),
-		strings.TrimSpace(observer.Subscriber.Path),
-		strings.TrimSpace(observer.Subscriber.RouteSource),
-		eventidentity.Normalize(observer.Subscriber.LocalizedEvent),
-		strings.Trim(strings.TrimSpace(observer.SubscriberInstancePath), "/"),
-	}, "|")
+type routeTemplateSourceObserverIdentity struct {
+	sourceTemplatePath     string
+	sourceLocalEvent       string
+	recipient              events.DeliveryRecipient
+	subscriberPath         string
+	routeSource            subscriberRouteSource
+	localizedEvent         string
+	subscriberInstancePath string
 }
 
-func routePatternIdentity(pattern routePattern) string {
-	return strings.Join([]string{
-		eventidentity.Normalize(pattern.EventPattern),
-		strings.TrimSpace(pattern.Subscriber.Type),
-		strings.TrimSpace(pattern.Subscriber.ID),
-		strings.TrimSpace(pattern.Subscriber.Path),
-		strings.TrimSpace(pattern.Subscriber.RouteSource),
-		eventidentity.Normalize(pattern.Subscriber.LocalizedEvent),
-		strings.Trim(strings.TrimSpace(pattern.InstancePath), "/"),
-		strings.Trim(strings.TrimSpace(pattern.SourceInstancePath), "/"),
-	}, "|")
+func routeTemplateSourceObserverKey(observer routeTemplateSourceObserver) routeTemplateSourceObserverIdentity {
+	return routeTemplateSourceObserverIdentity{
+		sourceTemplatePath:     eventidentity.Normalize(observer.SourceTemplatePath),
+		sourceLocalEvent:       eventidentity.Normalize(observer.SourceLocalEvent),
+		recipient:              observer.Subscriber.Recipient,
+		subscriberPath:         strings.TrimSpace(observer.Subscriber.Path),
+		routeSource:            observer.Subscriber.routeSource,
+		localizedEvent:         eventidentity.Normalize(observer.Subscriber.LocalizedEvent),
+		subscriberInstancePath: strings.Trim(strings.TrimSpace(observer.SubscriberInstancePath), "/"),
+	}
+}
+
+type routePatternIdentityKey struct {
+	eventPattern       string
+	recipient          events.DeliveryRecipient
+	subscriberPath     string
+	routeSource        subscriberRouteSource
+	localizedEvent     string
+	instancePath       string
+	sourceInstancePath string
+}
+
+func routePatternIdentity(pattern routePattern) routePatternIdentityKey {
+	return routePatternIdentityKey{
+		eventPattern:       eventidentity.Normalize(pattern.EventPattern),
+		recipient:          pattern.Subscriber.Recipient,
+		subscriberPath:     strings.TrimSpace(pattern.Subscriber.Path),
+		routeSource:        pattern.Subscriber.routeSource,
+		localizedEvent:     eventidentity.Normalize(pattern.Subscriber.LocalizedEvent),
+		instancePath:       strings.Trim(strings.TrimSpace(pattern.InstancePath), "/"),
+		sourceInstancePath: strings.Trim(strings.TrimSpace(pattern.SourceInstancePath), "/"),
+	}
 }
 
 func routeApplyResolvedPattern(subscriber Subscriber, resolved routeResolvedPattern) Subscriber {
-	subscriber.RouteSource = strings.TrimSpace(resolved.RouteSource)
+	subscriber.routeSource = resolved.routeSource
 	subscriber.LocalizedEvent = eventidentity.Normalize(resolved.LocalizedEvent)
-	subscriber.receiverCarrier = resolved.receiverCarrier
 	if matchPattern := eventidentity.Normalize(resolved.MatchPattern); matchPattern != "" {
 		subscriber.MatchPattern = matchPattern
 	}
 	if subscriber.Path == "" {
 		if routePath := eventidentity.Normalize(resolved.RoutePath); routePath != "" {
 			subscriber.Path = routePath
-		} else if strings.HasPrefix(subscriber.RouteSource, "import_boundary_wildcard") {
+		} else if subscriber.routeSource.importBoundaryWildcard() {
 			subscriber.Path = routeStaticPrefixBeforeWildcard(resolved.EventPattern)
 		}
 	}
@@ -1034,7 +1206,7 @@ func routeResolveNodeCanonicalPattern(source semanticview.Source, basePath, node
 	}
 	return routeResolvedPattern{
 		EventPattern: resolved,
-		RouteSource:  "subscription",
+		routeSource:  subscriberRouteSourceSubscription,
 	}
 }
 
@@ -1119,17 +1291,6 @@ func routeFlowInputHasExternalProducer(source semanticview.Source, flowID, event
 	}
 }
 
-func routeFlowInputHasLoweredConnectReceiver(source semanticview.Source, flowID, eventType string) bool {
-	if source == nil || strings.TrimSpace(flowID) == "" {
-		return false
-	}
-	eventType = eventidentity.Normalize(eventType)
-	if eventType == "" {
-		return false
-	}
-	return runtimepinrouting.CompileConnectGraph(source).HasConsumer(strings.TrimSpace(flowID), events.EventType(eventType))
-}
-
 func routeEventKeys(events map[string]runtimecontracts.EventCatalogEntry) map[string]struct{} {
 	out := make(map[string]struct{}, len(events))
 	for _, eventType := range sortedStringKeys(events) {
@@ -1154,7 +1315,7 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 		}
 		out = append(out, routeSubscriberTemplate{
 			IDTemplate:     strings.TrimSpace(entry.ID),
-			Type:           "agent",
+			Kind:           subscriberAgent,
 			RawPatterns:    append([]string{}, patterns...),
 			AgentNameOwner: owner,
 		})
@@ -1175,7 +1336,7 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 		}
 		out = append(out, routeSubscriberTemplate{
 			IDTemplate:  subscriberID,
-			Type:        "node",
+			Kind:        subscriberNode,
 			RawPatterns: append([]string{}, patterns...),
 		})
 	}
@@ -1247,10 +1408,14 @@ func routeResolveSubscriberPatterns(source semanticview.Source, packageKey, flow
 					if eventPattern == "" {
 						continue
 					}
+					routeSource, ok := subscriberRouteSourceFromCode(pattern.RouteSource)
+					if !ok || !routeSource.importBoundaryWildcard() {
+						continue
+					}
 					out = append(out, routeResolvedPattern{
 						EventPattern:       eventPattern,
 						MatchPattern:       eventPattern,
-						RouteSource:        pattern.RouteSource,
+						routeSource:        routeSource,
 						LocalizedEvent:     pattern.LocalizedEvent,
 						RoutePath:          routeImportBoundarySubscriberPath(source, packageKey, flowID, basePath),
 						SourceTemplatePath: pattern.SourceTemplatePath,
@@ -1277,7 +1442,7 @@ func routeResolveSubscriberPatterns(source semanticview.Source, packageKey, flow
 	if pattern == "" {
 		return nil
 	}
-	return []routeResolvedPattern{{EventPattern: pattern, RouteSource: "subscription"}}
+	return []routeResolvedPattern{{EventPattern: pattern, routeSource: subscriberRouteSourceSubscription}}
 }
 
 func routeImportBoundarySubscriberPath(source semanticview.Source, packageKey, flowID, basePath string) string {
@@ -1302,24 +1467,6 @@ func routeImportBoundarySubscriberPath(source semanticview.Source, packageKey, f
 		}
 	}
 	return ""
-}
-
-func routeReceiverCarrierSubscriberPatterns(inputEvents []string, instancePath, raw string) []routeResolvedPattern {
-	raw = eventidentity.Normalize(raw)
-	instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
-	if raw == "" || strings.Contains(raw, "*") || instancePath == "" {
-		return nil
-	}
-	if !routeFlowHasInputEvent(inputEvents, raw) {
-		return nil
-	}
-	return []routeResolvedPattern{{
-		EventPattern:    instancePath + "/" + raw,
-		MatchPattern:    raw,
-		RouteSource:     "receiver_carrier",
-		LocalizedEvent:  raw,
-		receiverCarrier: true,
-	}}
 }
 
 func routeFlowHasInputEvent(inputEvents []string, eventType string) bool {
@@ -1355,7 +1502,7 @@ func routeInputProducerPatterns(resolution runtimecontracts.FlowInputAutoWireRes
 		}
 		out = append(out, routeResolvedPattern{
 			EventPattern: pattern,
-			RouteSource:  "pin_auto_wire",
+			routeSource:  subscriberRouteSourcePinAutoWire,
 		})
 	}
 	return out
@@ -1426,12 +1573,9 @@ func normalizedStringListContains(values []string, needle string) bool {
 }
 
 func appendUniqueSubscriber(in []Subscriber, subscriber Subscriber) []Subscriber {
-	for index, existing := range in {
-		if existing.ID == subscriber.ID && existing.Type == subscriber.Type && existing.Path == subscriber.Path &&
+	for _, existing := range in {
+		if existing.Recipient == subscriber.Recipient && existing.Path == subscriber.Path &&
 			existing.AgentIdentity == subscriber.AgentIdentity {
-			if subscriber.receiverCarrier {
-				in[index].receiverCarrier = true
-			}
 			return in
 		}
 	}
@@ -1440,11 +1584,11 @@ func appendUniqueSubscriber(in []Subscriber, subscriber Subscriber) []Subscriber
 
 func appendUniqueRootInputSubscriber(in []Subscriber, subscriber Subscriber) []Subscriber {
 	for idx, existing := range in {
-		if existing.ID == subscriber.ID && existing.Type == subscriber.Type && existing.Path == subscriber.Path &&
+		if existing.Recipient == subscriber.Recipient && existing.Path == subscriber.Path &&
 			existing.AgentIdentity == subscriber.AgentIdentity {
-			if strings.TrimSpace(subscriber.RouteSource) == "root_input_flow" {
+			if subscriber.routeSource == subscriberRouteSourceRootInputFlow {
 				in[idx].MatchPattern = subscriber.MatchPattern
-				in[idx].RouteSource = subscriber.RouteSource
+				in[idx].routeSource = subscriber.routeSource
 			}
 			return in
 		}

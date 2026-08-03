@@ -2436,23 +2436,23 @@ func encodeRoute(route events.DeliveryRoute) ([]byte, []byte, []byte, []byte, er
 
 func deliveryRouteAgentStorageFields(route events.DeliveryRoute) (agentidentity.StorageFields, error) {
 	route = route.Normalized()
-	switch route.SubscriberType {
-	case string(SubscriberNode):
+	switch {
+	case route.Recipient.IsNode():
 		if !route.AgentIdentity.IsZero() {
 			return agentidentity.StorageFields{}, fmt.Errorf("node delivery route cannot carry agent identity")
 		}
 		return agentidentity.StorageFields{}, nil
-	case string(SubscriberAgent):
+	case route.Recipient.IsAgent():
 		fields, err := route.AgentIdentity.StorageFields()
 		if err != nil {
 			return agentidentity.StorageFields{}, fmt.Errorf("agent delivery route identity fields: %w", err)
 		}
-		if fields.AgentID != route.SubscriberID {
+		if fields.AgentID != route.Recipient.ID() {
 			return agentidentity.StorageFields{}, fmt.Errorf("agent delivery route subscriber does not match identity")
 		}
 		return fields, nil
 	default:
-		return agentidentity.StorageFields{}, fmt.Errorf("delivery route subscriber type %q is unsupported", route.SubscriberType)
+		return agentidentity.StorageFields{}, fmt.Errorf("delivery route subscriber type %q is unsupported", route.Recipient.Code())
 	}
 }
 
@@ -2495,9 +2495,12 @@ func decodeRoute(
 			return events.DeliveryRoute{}, fmt.Errorf("node delivery row carries agent identity fields")
 		}
 	}
+	recipient, err := deliveryRecipientForClass(class, subscriberID)
+	if err != nil {
+		return events.DeliveryRoute{}, err
+	}
 	return events.DeliveryRoute{
-		SubscriberType:    string(class),
-		SubscriberID:      subscriberID,
+		Recipient:         recipient,
 		AgentIdentity:     identity,
 		Target:            target,
 		Context:           deliveryContext,

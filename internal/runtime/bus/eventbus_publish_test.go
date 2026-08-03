@@ -263,11 +263,7 @@ func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 		t.Fatalf("create run through lifecycle owner: %v", err)
 	}
 	evt := exactDuplicateEventBusEvent(runID)
-	route := events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   "agent-original",
-		AgentIdentity:  runtimebustest.Identity(t, "agent-original", ""),
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-original"), AgentIdentity: runtimebustest.Identity(t, "agent-original", "")}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeDirect)
 	assertEventBusExactDuplicateIsOperationNoOp(t, pg, evt, func() (eventBusExactDuplicateState, error) {
 		var state eventBusExactDuplicateState
@@ -315,11 +311,7 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 		t.Fatalf("create run through lifecycle owner: %v", err)
 	}
 	evt := exactDuplicateEventBusEvent(runID)
-	route := events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   "agent-original",
-		AgentIdentity:  runtimebustest.Identity(t, "agent-original", ""),
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-original"), AgentIdentity: runtimebustest.Identity(t, "agent-original", "")}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeDirect)
 	assertEventBusExactDuplicateIsOperationNoOp(t, sqliteStore, evt, func() (eventBusExactDuplicateState, error) {
 		var state eventBusExactDuplicateState
@@ -637,7 +629,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	agentID := "account-agent"
 	var agentIdentity runtimeagentidentity.Identity
 	for _, subscriber := range eb.RouteTable().Resolve("account/one/account.ready") {
-		if subscriber.Type == "agent" && subscriber.ID == agentID {
+		if subscriber.Recipient.IsAgent() && subscriber.Recipient.ID() == agentID {
 			agentIdentity = subscriber.AgentIdentity
 			break
 		}
@@ -669,7 +661,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	if err != nil {
 		t.Fatalf("CheckPublishRecipientPlan: %v", err)
 	}
-	if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].SubscriberType != "agent" || plan.DeliveryRoutes[0].SubscriberID != agentID {
+	if plan.TargetFailure != "" || len(plan.DeliveryRoutes) != 1 || !plan.DeliveryRoutes[0].Recipient.IsAgent() || plan.DeliveryRoutes[0].Recipient.ID() != agentID {
 		t.Fatalf("preflight failure/routes = %q/%#v, want agent-only connect route", plan.TargetFailure, plan.DeliveryRoutes)
 	}
 	if err := eb.Publish(ctx, evt); err != nil {
@@ -982,8 +974,8 @@ func (s *descriptorAwareEventStore) CommitPublish(ctx context.Context, plan runt
 		defer s.mu.Unlock()
 		s.deliveries = s.deliveries[:0]
 		for _, route := range req.DeliveryRoutes {
-			if route.SubscriberType == "agent" {
-				s.deliveries = append(s.deliveries, route.SubscriberID)
+			if route.Recipient.IsAgent() {
+				s.deliveries = append(s.deliveries, route.Recipient.ID())
 			}
 		}
 		return nil
@@ -1034,8 +1026,8 @@ func (s *replayCapableAtomicStoreMissingScope) CommitPublish(ctx context.Context
 		defer s.mu.Unlock()
 		s.deliveries = s.deliveries[:0]
 		for _, route := range req.DeliveryRoutes {
-			if route.SubscriberType == "agent" {
-				s.deliveries = append(s.deliveries, route.SubscriberID)
+			if route.Recipient.IsAgent() {
+				s.deliveries = append(s.deliveries, route.Recipient.ID())
 			}
 		}
 		return nil
@@ -1480,7 +1472,7 @@ func TestEventBusCheckDirectRoutes_PayloadValidatorFailureAbortsBeforeRecipientP
 	status, err := eb.CheckDirectRoutes(
 		context.Background(),
 		eventtest.RunCreatingRootIngress("", "task.completed", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
-		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-a", AgentIdentity: identity}},
+		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity}},
 	)
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload validator failure, got %v", err)
@@ -2978,11 +2970,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 				t.Fatalf("pre-receipt state for %s = delivery:%q run:%q, want pending/running", tc.eventType, deliveryStatus, runStatus)
 			}
 
-			route := events.DeliveryRoute{
-				SubscriberType: string(runtimedelivery.SubscriberAgent),
-				SubscriberID:   agentID,
-				AgentIdentity:  agentIdentity,
-			}
+			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: agentIdentity}
 			claimed, err := storetest.ClaimDelivery(ctx, pg, got, route)
 			if err != nil {
 				t.Fatalf("ClaimAgentDelivery(%s): %v", tc.eventType, err)
@@ -3378,17 +3366,11 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 	const eventType = "child/child.start"
 	const rootEntityID = "11111111-1111-1111-1111-222222222222"
 	const childEntityID = "11111111-1111-1111-1111-333333333333"
-	emptyRoute := events.DeliveryRoute{
-		SubscriberType: "node",
-		SubscriberID:   "project-observer",
-	}
-	targetRoute := events.DeliveryRoute{
-		SubscriberType: "node",
-		SubscriberID:   "child-intake",
-		Target: events.RouteIdentity{
-			FlowInstance: "child",
-			EntityID:     childEntityID,
-		},
+	emptyRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("project-observer")}
+	targetRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("child-intake"), Target: events.RouteIdentity{
+		FlowInstance: "child",
+		EntityID:     childEntityID,
+	},
 	}
 
 	var pc *runtimepipeline.PipelineCoordinator
@@ -3459,8 +3441,8 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 	if err := eb.WaitForQuiescence(ctx); err != nil {
 		t.Fatalf("WaitForQuiescence: %v", err)
 	}
-	assertNodeDeliveryStatus(t, db, evt.ID(), emptyRoute.SubscriberID, "delivered")
-	assertNodeDeliveryStatus(t, db, evt.ID(), targetRoute.SubscriberID, "delivered")
+	assertNodeDeliveryStatus(t, db, evt.ID(), emptyRoute.Recipient.ID(), "delivered")
+	assertNodeDeliveryStatus(t, db, evt.ID(), targetRoute.Recipient.ID(), "delivered")
 	select {
 	case got := <-live:
 		t.Fatalf("consumed mixed node route event leaked to workflow-runtime carrier: %#v", got)
@@ -3712,7 +3694,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	if rootConnectPlan.TargetFailure != "" || len(rootConnectPlan.DeliveryRoutes) == 0 {
 		t.Fatalf("root connect preflight failure=%q routes=%#v", rootConnectPlan.TargetFailure, rootConnectPlan.DeliveryRoutes)
 	}
-	if got := rootConnectPlan.DeliveryRoutes[0]; got.SubscriberID != "child-relay" {
+	if got := rootConnectPlan.DeliveryRoutes[0]; got.Recipient.ID() != "child-relay" {
 		t.Fatalf("root connect preflight route=%#v, want child-relay", got)
 	}
 	childTarget := rootConnectPlan.DeliveryRoutes[0].Target.Normalized()
@@ -3792,7 +3774,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	if rootReturnPlan.TargetFailure != "" || len(rootReturnPlan.DeliveryRoutes) == 0 {
 		t.Fatalf("root return preflight failure=%q routes=%#v", rootReturnPlan.TargetFailure, rootReturnPlan.DeliveryRoutes)
 	}
-	if got := rootReturnPlan.DeliveryRoutes[0].SubscriberID; got != "root-collector" {
+	if got := rootReturnPlan.DeliveryRoutes[0].Recipient.ID(); got != "root-collector" {
 		t.Fatalf("root return preflight subscriber = %q, want root-collector", got)
 	}
 

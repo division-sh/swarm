@@ -235,7 +235,7 @@ func compiledConnectClaimFixture(t testing.TB, mode canonicalrouting.TemplateIns
 	if selected.ReceiverEndpoint().Readback().Pin == "" {
 		t.Fatalf("compiled connect graph has no receiver pin %q", receiverPin)
 	}
-	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "claim-node"}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("claim-node")}
 	claim, err := runtimepinrouting.ConnectExecutionClaim(selected, route)
 	if err != nil {
 		t.Fatalf("mint connect execution claim: %v", err)

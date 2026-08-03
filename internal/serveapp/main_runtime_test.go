@@ -4545,11 +4545,7 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 	}
 	event := eventtest.PersistedProjection(eventID, "control.stop.pending", "test", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	storetest.CommitSemanticEventWithInitialFacts(t, ctx, selectedStore, event,
-		[]events.DeliveryRoute{{
-			SubscriberType: "agent",
-			SubscriberID:   "agent-pending",
-			AgentIdentity:  servedRuntimeRootIdentity(t, "agent-pending"),
-		}},
+		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("agent-pending"), AgentIdentity: servedRuntimeRootIdentity(t, "agent-pending")}},
 		runtimepipelineobligation.ScopeSubscribed,
 		storetest.AcknowledgedPipelineDisposition())
 	if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "platform", "pipeline", "success"); got != 1 {
@@ -4982,11 +4978,7 @@ func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourc
 		json.RawMessage(`{"marker":"replayed"}`), 0, runID, sourceEventID, envelope, createdAt,
 	)
 	storetest.CommitSemanticForkFrontier(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), event,
-		[]events.DeliveryRoute{{
-			SubscriberType: "agent",
-			SubscriberID:   "frontier-agent",
-			AgentIdentity:  servedRuntimeRootIdentity(t, "frontier-agent"),
-		}},
+		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("frontier-agent"), AgentIdentity: servedRuntimeRootIdentity(t, "frontier-agent")}},
 		storetest.AcknowledgedPipelineDisposition())
 	return eventID
 }
@@ -7515,11 +7507,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, sqliteStore.DB, runtimeauthoractivity.DialectSQLite,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
-	route := events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   "agent-a",
-		AgentIdentity:  servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a"),
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a")}
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, sqliteStore, event, []events.DeliveryRoute{route})
 	claimCtx := serveDeliveryLifecycleFixtureContext()
 	claimed, err := storetest.ClaimDelivery(claimCtx, sqliteStore, event, route)
@@ -7641,11 +7629,7 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
 		eventID, runID, events.EventType("startup."+source+".event"), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
-	route := events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   "agent-a",
-		AgentIdentity:  servedRuntimeFlowIdentity(t, "agent-a", "startup-recovery", "agent-a"),
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentity(t, "agent-a", "startup-recovery", "agent-a")}
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, runtimePG, event, []events.DeliveryRoute{route})
 	claimCtx := serveDeliveryLifecycleFixtureContext()
 	claimed, err := storetest.ClaimDelivery(claimCtx, runtimePG, event, route)
@@ -7974,7 +7958,7 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)),
 		events.EventEnvelope{EntityID: entityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity}, at)
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, &store.PostgresStore{DB: db}, event,
-		[]events.DeliveryRoute{{SubscriberType: "node", SubscriberID: subscriberID}})
+		[]events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(subscriberID)}})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
 			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
@@ -8880,11 +8864,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
-	route := events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   "agent-a",
-		AgentIdentity:  servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a"),
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a")}
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, runtimePG, event, []events.DeliveryRoute{route})
 	claimCtx := serveDeliveryLifecycleFixtureContext()
 	claimed, err := storetest.ClaimDelivery(claimCtx, runtimePG, event, route)

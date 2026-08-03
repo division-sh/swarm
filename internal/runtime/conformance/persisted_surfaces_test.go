@@ -270,7 +270,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 
 	for _, evt := range []events.Event{event1, event2} {
 		storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt,
-			[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-1", AgentIdentity: lifecycleToken.Identity}},
+			[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: lifecycleToken.Identity}},
 			runtimepipelineobligation.ScopeSubscribed)
 	}
 
@@ -337,11 +337,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 
 	conversation := runtimellm.NewConversation("agent-1", "", "system", nil, agentmemory.Authored(true), 10, runtime)
 	conversation.SetToolExecutor(conformanceToolExecutor{})
-	route := events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   lifecycleToken.Identity.AgentID(),
-		AgentIdentity:  lifecycleToken.Identity,
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(lifecycleToken.Identity.AgentID()), AgentIdentity: lifecycleToken.Identity}
 	firstClaim, err := storetest.ClaimDelivery(ctx, pg, event1, route)
 	if err != nil {
 		t.Fatalf("claim first delivery: %v", err)
@@ -454,7 +450,7 @@ func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 		"runtime", "", []byte(`{"turn":1}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt,
-		[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-1", AgentIdentity: lifecycleToken.Identity}},
+		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: lifecycleToken.Identity}},
 		runtimepipelineobligation.ScopeSubscribed)
 
 	dockerState := filepath.Join(t.TempDir(), "fake-docker-count")
@@ -547,11 +543,7 @@ printf '{"result":"ok"}'
 	conversation := runtimellm.NewConversation("agent-1", "", "system", nil, agentmemory.Authored(true), 10, runtime)
 	conversation.Session = session
 	conversation.SetToolExecutor(conformanceToolExecutor{})
-	claimed, err := storetest.ClaimDelivery(ctx, pg, evt, events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   lifecycleToken.Identity.AgentID(),
-		AgentIdentity:  lifecycleToken.Identity,
-	})
+	claimed, err := storetest.ClaimDelivery(ctx, pg, evt, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(lifecycleToken.Identity.AgentID()), AgentIdentity: lifecycleToken.Identity})
 	if err != nil {
 		t.Fatalf("claim delivery before provider launch: %v", err)
 	}
@@ -1552,7 +1544,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 	} {
 		storetest.CommitSemanticEventWithRoutes(t, ctx, pg,
 			eventtest.PersistedProjection(eventIDs[eventType], events.EventType(eventType), "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().Add(time.Duration(index-4)*time.Minute).UTC()),
-			[]events.DeliveryRoute{{SubscriberType: "agent", SubscriberID: "agent-a", AgentIdentity: managerReplayIdentity}},
+			[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: managerReplayIdentity}},
 			runtimepipelineobligation.ScopeSubscribed,
 		)
 		acknowledgeConformancePipelineEvent(t, ctx, pg.PipelineObligations(), eventIDs[eventType])
@@ -1653,11 +1645,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: replayRunID})
 	replayParentID := uuid.NewString()
 	replayChildID := uuid.NewString()
-	replayRoute := events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   replayRecipient,
-		AgentIdentity:  replayIdentity,
-	}
+	replayRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(replayRecipient), AgentIdentity: replayIdentity}
 	storetest.CommitSemanticEvent(t, ctx, pg, eventtest.PersistedProjection(replayParentID,
 		events.EventType("system.parent"),
 		"runtime", "", []byte(`{"ok":true}`), 0, replayRunID, "", events.EventEnvelope{}, time.Now().Add(-3*time.Minute).UTC()))

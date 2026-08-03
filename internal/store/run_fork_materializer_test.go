@@ -725,7 +725,7 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	`, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
 	}
-	seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "in-progress-node"}, runtimedelivery.StateLaunching, nil)
+	seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("in-progress-node")}, runtimedelivery.StateLaunching, nil)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
 	blocked, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
@@ -927,11 +927,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	sourceEvent = sourceAdmitted.Event()
 
 	safeAgentIdentity := runtimebustest.Identity(t, "safe-agent", "")
-	sourceDelivery := seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   safeAgentIdentity.AgentID(),
-		AgentIdentity:  safeAgentIdentity,
-	}, runtimedelivery.StateQueued, nil)
+	sourceDelivery := seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(safeAgentIdentity.AgentID()), AgentIdentity: safeAgentIdentity}, runtimedelivery.StateQueued, nil)
 	sourceDeliveryID := sourceDelivery.DeliveryID
 	captureRunForkTestRevision(t, db, sourceRunID)
 
@@ -1106,11 +1102,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	proof, err := pg.ProveHandoff(
 		ctx,
 		forkEventID,
-		events.DeliveryRoute{
-			SubscriberType: "agent",
-			SubscriberID:   safeAgentIdentity.AgentID(),
-			AgentIdentity:  safeAgentIdentity,
-		},
+		events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(safeAgentIdentity.AgentID()), AgentIdentity: safeAgentIdentity},
 	)
 	if err != nil {
 		t.Fatalf("prove fork replay delivery handoff: %v", err)
@@ -1226,7 +1218,7 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 				foreignEventID := uuid.NewString()
 				requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: foreignRunID, StartedAt: at.Add(-time.Minute)})
 				foreignEvent := seedPostgresSemanticEventRecordFixture(t, ctx, db, foreignEventID, foreignRunID, "foreign.ready", events.EventProducerPlatform, "test", "", "", at)
-				return seedDeliveryStateFixture(t, ctx, postgresDeliveryFixtureStore(db), foreignEvent, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "foreign-agent"}, runtimedelivery.StateQueued, nil).DeliveryID
+				return seedDeliveryStateFixture(t, ctx, postgresDeliveryFixtureStore(db), foreignEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("foreign-agent")}, runtimedelivery.StateQueued, nil).DeliveryID
 			},
 			work: func(req runfork.RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []runfork.RunForkHistoricalReplayExecutableWork {
 				item := req.PendingWork[0]
@@ -1240,7 +1232,7 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 			seed: func(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, eventID string, at time.Time) string {
 				t.Helper()
 				event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
-				return seedDeliveryStateFixture(t, ctx, postgresDeliveryFixtureStore(db), event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "done-agent"}, runtimedelivery.StateDelivered, nil).DeliveryID
+				return seedDeliveryStateFixture(t, ctx, postgresDeliveryFixtureStore(db), event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("done-agent")}, runtimedelivery.StateDelivered, nil).DeliveryID
 			},
 			work: func(req runfork.RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []runfork.RunForkHistoricalReplayExecutableWork {
 				return []runfork.RunForkHistoricalReplayExecutableWork{runForkHistoricalReplayWorkForDelivery(req, targetDeliveryID)}
@@ -1285,7 +1277,7 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 			seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
 
 			sourceEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
-			seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "safe-agent"}, runtimedelivery.StateQueued, nil)
+			seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("safe-agent")}, runtimedelivery.StateQueued, nil)
 			targetDeliveryID := tc.seed(t, ctx, db, sourceRunID, eventID, at)
 			captureRunForkTestRevision(t, db, sourceRunID)
 			materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
@@ -1471,7 +1463,7 @@ func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndUsesTypedOriginLi
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
 	sourceEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
-	seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "blocked-node"}, runtimedelivery.StateLaunching, nil)
+	seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("blocked-node")}, runtimedelivery.StateLaunching, nil)
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEventDeliveries)
 	blocked, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID})
 	if err == nil || !strings.Contains(err.Error(), "source_deliveries_advanced_after_fork_point") {

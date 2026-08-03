@@ -28,7 +28,7 @@ func TestRunDebugTracePageBoundsCanonicalHydrationParity(t *testing.T) {
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
 			filteredEvent, filteredDelivery := seedRunDebugTraceBoundedDelivery(t, ctx, selected, runID, "trace.filtered", "filtered-agent", base)
-			filteredClaim, err := claimDeliveryFixture(ctx, selected, filteredEvent, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "filtered-agent"})
+			filteredClaim, err := claimDeliveryFixture(ctx, selected, filteredEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("filtered-agent")})
 			if err != nil {
 				t.Fatalf("claim filtered delivery: %v", err)
 			}

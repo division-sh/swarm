@@ -196,8 +196,8 @@ func TestEventBusIdentityRouteAuthorityDominatesDuplicateExactSubscription(t *te
 		t.Fatalf("duplicate authority = %#v, want identity without an exact route handle", candidates[0])
 	}
 	planRecipients := normalizeRoutePlanLiveRecipients([]RoutePlanLiveRecipient{
-		{RecipientID: agentID, AgentIdentity: token.Identity, SubscriberType: routePlanSubscriberAgent, PersistAsDelivery: true, liveAuthority: liveRecipientAuthorityIdentity},
-		{RecipientID: agentID, AgentIdentity: token.Identity, SubscriberType: routePlanSubscriberAgent, PersistAsDelivery: true, liveAuthority: liveRecipientAuthorityAgentRoute, agentRoute: route},
+		{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: token.Identity, PersistAsDelivery: true, liveAuthority: liveRecipientAuthorityIdentity},
+		{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: token.Identity, PersistAsDelivery: true, liveAuthority: liveRecipientAuthorityAgentRoute, agentRoute: route},
 	})
 	if len(planRecipients) != 1 || planRecipients[0].liveAuthority != liveRecipientAuthorityIdentity || planRecipients[0].agentRoute != nil {
 		t.Fatalf("normalized route-plan recipients = %#v, want identity authority to dominate", planRecipients)

@@ -165,11 +165,7 @@ func TestNormalDeliveryContinuationAcceptCommittedIsAtomicOnSQLiteAndPostgres(t 
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newCompleteEventDispatchFixture(t, backend, false)
-			route := events.DeliveryRoute{
-				SubscriberType: string(runtimedelivery.SubscriberAgent),
-				SubscriberID:   fixture.agentID,
-				AgentIdentity:  fixture.identity,
-			}
+			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(fixture.agentID), AgentIdentity: fixture.identity}
 			proof, err := fixture.store.ProveHandoff(fixture.ctx, fixture.event.ID(), route)
 			if err != nil {
 				t.Fatalf("prove normal committed handoff: %v", err)
@@ -324,9 +320,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	), executionmode.Mock)
 	agentID := "complete-event-agent"
 	identity := agentidentitytest.RootRuntime(t, agentID, "complete-event-dispatch-fixture")
-	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{{
-		SubscriberType: "agent", SubscriberID: agentID, AgentIdentity: identity,
-	}}, runtimepipelineobligation.ScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity}}, runtimepipelineobligation.ScopeSubscribed)
 	fixture := completeEventDispatchFixture{
 		store: selected, db: db, dialect: backend, ctx: ctx, bus: bus, event: event, agentID: agentID, identity: identity,
 	}
@@ -589,11 +583,7 @@ func (f completeEventDispatchFixture) startDeliveryContinuations(
 	workOwner *worklifetime.RuntimeOccurrence,
 ) {
 	t.Helper()
-	route := events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberAgent),
-		SubscriberID:   f.agentID,
-		AgentIdentity:  f.identity,
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(f.agentID), AgentIdentity: f.identity}
 	deliveryID, err := runtimedelivery.DeliveryID(f.event.ID(), route)
 	if err != nil {
 		t.Fatalf("derive complete-event delivery identity: %v", err)

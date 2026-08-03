@@ -67,7 +67,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLa
 	for _, tc := range cases {
 		eventID := uuid.NewString()
 		identity := testAgentIdentity(t, tc.agentID, "lifecycle/"+tc.agentID)
-		route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: tc.agentID, AgentIdentity: identity}
+		route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(tc.agentID), AgentIdentity: identity}
 		event := seedAgentLifecycleEvent(t, ctx, pg, eventID, runID, route, time.Now().UTC())
 		if tc.activeSession != "" {
 			seedAgentLifecycleSession(t, ctx, db, runID, identity, tc.activeSession)
@@ -136,7 +136,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycl
 	activeEventID := uuid.NewString()
 	oldDeadLetterEventID := uuid.NewString()
 	identity := testAgentIdentity(t, "agent-1", "lifecycle/agent-1")
-	activeRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1", AgentIdentity: identity}
+	activeRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: identity}
 	activeEvent := seedAgentLifecycleEvent(t, ctx, pg, activeEventID, runID, activeRoute, time.Now().UTC())
 	deadLetterEvent := seedAgentLifecycleEvent(t, ctx, pg, oldDeadLetterEventID, runID, activeRoute, time.Now().UTC().Add(-time.Hour))
 	activeSessionID := uuid.NewString()
@@ -185,7 +185,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalTerminalLife
 	eventID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	identity := testAgentIdentity(t, "agent-1", "lifecycle/agent-1")
-	route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1", AgentIdentity: identity}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: identity}
 	event := seedAgentLifecycleEvent(t, ctx, pg, eventID, runID, route, time.Now().UTC())
 	claimed, err := claimDeliveryFixture(ctx, pg, event, route)
 	if err != nil {

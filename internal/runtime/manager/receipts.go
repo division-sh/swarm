@@ -44,7 +44,7 @@ func failureEnvelope(err error, component, operation string) *runtimefailures.En
 
 func (am *AgentManager) processEventDetailed(ctx context.Context, agent Agent, evt events.Event) eventProcessResult {
 	route, ok := runtimedelivery.RouteFromContext(ctx)
-	if !ok || route.SubscriberType != "agent" || route.SubscriberID != agent.ID() {
+	if !ok || !route.Recipient.IsAgent() || route.Recipient.ID() != agent.ID() {
 		err := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "delivery_route_identity_missing", "agent-manager", "process_event", map[string]any{
 			"agent_id": agent.ID(), "event_id": evt.ID(),
 		})
@@ -100,7 +100,7 @@ func (am *AgentManager) processEventDetailedOwned(ctx context.Context, agent Age
 		return eventProcessResult{record: record, err: err}
 	}
 	route, ok := runtimedelivery.RouteFromContext(ctx)
-	if !ok || route.SubscriberType != "agent" || route.SubscriberID != agent.ID() {
+	if !ok || !route.Recipient.IsAgent() || route.Recipient.ID() != agent.ID() {
 		err := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "delivery_route_identity_missing", "agent-manager", "process_event", map[string]any{
 			"agent_id": agent.ID(), "delivery_id": claim.DeliveryID(),
 		})
@@ -260,7 +260,7 @@ func (am *AgentManager) activeRunDeliveryQuiesced(ctx context.Context, eventID s
 				Component: "agent-manager",
 				Action:    "active_run_quiescence_check_failed",
 				EventID:   strings.TrimSpace(eventID),
-				AgentID:   route.SubscriberID,
+				AgentID:   route.Recipient.ID(),
 				Failure:   failureEnvelope(err, "agent-manager", "check_active_run_quiescence"),
 			})
 		}
@@ -422,7 +422,7 @@ func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, stat
 		return runtimedelivery.Snapshot{}, fmt.Errorf("delivery settlement requires store, event id, and exact route")
 	}
 	route = route.Normalized()
-	agentID := route.SubscriberID
+	agentID := route.Recipient.ID()
 	routeIdentity, err := route.Identity()
 	if err != nil {
 		return runtimedelivery.Snapshot{}, fmt.Errorf("delivery settlement route: %w", err)

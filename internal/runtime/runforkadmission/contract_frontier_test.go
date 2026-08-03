@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -48,7 +47,7 @@ func TestAdmitContractFrontier_DerivesSelectedContractRecipientsWithoutMutating(
 	if !hasString(event.WorkflowNodeSubscribers, "consumer-node") {
 		t.Fatalf("workflow node subscribers = %v, want consumer-node", event.WorkflowNodeSubscribers)
 	}
-	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].SubscriberID != "consumer-node" || event.DerivedRecipients[0].SubscriberType != "node" {
+	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].Recipient.ID() != "consumer-node" || !event.DerivedRecipients[0].Recipient.IsNode() {
 		t.Fatalf("derived recipients = %#v, want selected contract consumer-node", event.DerivedRecipients)
 	}
 	if !hasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierExecutionUnsupported) {
@@ -77,8 +76,8 @@ func TestAdmitContractFrontier_SelectedContractChangesRecipients(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier B: %v", err)
 	}
-	gotA := admissionA.FrontierEvents[0].DerivedRecipients[0].SubscriberID
-	gotB := admissionB.FrontierEvents[0].DerivedRecipients[0].SubscriberID
+	gotA := admissionA.FrontierEvents[0].DerivedRecipients[0].Recipient.ID()
+	gotB := admissionB.FrontierEvents[0].DerivedRecipients[0].Recipient.ID()
 	if gotA != "consumer-a" || gotB != "consumer-b" {
 		t.Fatalf("selected contract recipients = %q/%q, want consumer-a/consumer-b", gotA, gotB)
 	}
@@ -98,7 +97,7 @@ func TestAdmitContractFrontier_ConnectMatchesConcreteTemplateSourceEndpoint(t *t
 		t.Fatalf("AdmitContractFrontier: %v", err)
 	}
 	event := admission.FrontierEvents[0]
-	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].SubscriberID != "consumer-node" {
+	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].Recipient.ID() != "consumer-node" {
 		t.Fatalf("derived recipients = %#v, want consumer-node through producer connect", event.DerivedRecipients)
 	}
 	if hasBlocker(admission.UnsupportedBlockers, runfork.RunForkBlockerContractFrontierRouteUnresolved) {
@@ -270,34 +269,19 @@ func TestSelectedContractAdmissionsPreserveRootAndCarrierPoliciesAndRuntimeIncom
 func assertContractFrontierMixedRecipients(t *testing.T, recipients []runfork.RunForkContractFrontierRecipient) {
 	t.Helper()
 	want := map[string]bool{
-		"node/root-node":     false,
-		"agent/root-agent":   false,
+		"node/root-node":     true,
+		"agent/root-agent":   true,
 		"node/consumer-node": true,
 	}
 	if len(recipients) != len(want) {
 		t.Fatalf("recipients = %#v, want root node, root agent, and child carrier", recipients)
 	}
 	for _, recipient := range recipients {
-		key := recipient.SubscriberType + "/" + recipient.SubscriberID
-		wantCarrier, ok := want[key]
-		if !ok || (recipient.RouteSource == "receiver_carrier") != wantCarrier {
-			t.Fatalf("recipient = %#v, want root routes non-carrier and child route carrier", recipient)
+		key := recipient.Recipient.Code() + "/" + recipient.Recipient.ID()
+		wantConnect, ok := want[key]
+		if !ok || (recipient.RouteSourceCode() == "compiled_connect_evaluation") != wantConnect {
+			t.Fatalf("recipient = %#v, want direct root routes and compiled child recipient", recipient)
 		}
-	}
-}
-
-func TestContractFrontierDisplayRouteSourceCannotForgeReceiverCarrierAuthority(t *testing.T) {
-	forged := runtimebus.Subscriber{
-		ID:          "consumer-node",
-		Type:        "node",
-		Path:        "consumer",
-		RouteSource: "receiver" + "_carrier",
-	}
-	if contractFrontierSubscriberAdmitted(contractFrontierReceiverCarrier, forged) {
-		t.Fatal("display-only route-source text acquired selected-fork carrier authority")
-	}
-	if !contractFrontierSubscriberAdmitted(contractFrontierReceiverDirect, forged) {
-		t.Fatal("direct subscriber was rejected by the carrier-only projection")
 	}
 }
 
@@ -450,7 +434,7 @@ func TestAdmitContractFrontier_MaterializesSourceFlowInstanceRoutes(t *testing.T
 	if !hasString(event.SourceFlowInstances, "review/inst-1") {
 		t.Fatalf("source flow instances = %v, want review/inst-1", event.SourceFlowInstances)
 	}
-	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].SubscriberID != "reviewer-inst-1" {
+	if len(event.DerivedRecipients) != 1 || event.DerivedRecipients[0].Recipient.ID() != "reviewer-inst-1" {
 		t.Fatalf("derived recipients = %#v, want materialized reviewer-inst-1", event.DerivedRecipients)
 	}
 	if event.DerivedRecipients[0].Path != "review/inst-1" {

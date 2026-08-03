@@ -12,6 +12,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -370,12 +371,9 @@ func testSelectedRouteRecoveryEvidence(eventID string) (runfork.RunForkContractS
 		StaticRouteEvents: []runfork.RunForkSelectedContractRouteEvent{{
 			SourceEventID: eventID,
 			EventName:     "item.received",
-			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{{
-				SubscriberType: "node",
-				SubscriberID:   "node-a",
-				Path:           "flow-a/node-a",
-				RouteSource:    "selected_contracts",
-			}},
+			DerivedRecipients: []runfork.RunForkContractFrontierRecipient{
+				runfork.NewRunForkContractFrontierRecipient(events.MustNodeDeliveryRecipient("node-a"), "flow-a/node-a", "selected_contracts", agentidentity.Identity{}),
+			},
 			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},
 	}
@@ -394,12 +392,9 @@ func testSelectedRouteRecoveryEvidence(eventID string) (runfork.RunForkContractS
 		RecipientPlanEvents: []runfork.RunForkSelectedContractRecipientPlanEvent{{
 			SourceEventID: eventID,
 			EventName:     "item.received",
-			Recipients: []runfork.RunForkContractFrontierRecipient{{
-				SubscriberType: "node",
-				SubscriberID:   "node-a",
-				Path:           "flow-a/node-a",
-				RouteSource:    "selected_contracts",
-			}},
+			Recipients: []runfork.RunForkContractFrontierRecipient{
+				runfork.NewRunForkContractFrontierRecipient(events.MustNodeDeliveryRecipient("node-a"), "flow-a/node-a", "selected_contracts", agentidentity.Identity{}),
+			},
 			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},
 	}

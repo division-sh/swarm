@@ -176,8 +176,8 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (RoutePlan,
 	routePlan.AddDeliveryIntents(targetedRoutedNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(internalDeliveryIntentsForPlan(evt, recipients, persisted, routing.RoutedRecipients)...)
 	extraDetail := cloneAnyMap(routing.ExtraDetail)
-	if routePlan.TargetFailure != "" && hasInternalRoutedSubscriberForTarget(evt, routing.RoutedRecipients) {
-		routePlan.TargetFailure = ""
+	if !routePlan.TargetFailure.Empty() && hasInternalRoutedSubscriberForTarget(evt, routing.RoutedRecipients) {
+		routePlan.TargetFailure = 0
 	}
 	routePlan.RoutedRecipients = routing.RoutedRecipients
 	routePlan.SubscribedRecipients = routing.SubscribedRecipients
@@ -187,7 +187,7 @@ func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (RoutePlan,
 
 func routePlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRoutePlanDispatch) RoutePlan {
 	routePlan := newRoutePlan(evt)
-	if connectPlan.Failure != "" {
+	if !connectPlan.Failure.Empty() {
 		routePlan.MarkCanonicalRouteFailedClosed(routeIntentProducerConnectRoutePlan, connectPlan.Failure)
 	} else {
 		routePlan.MarkCanonicalRouteMatched(routeIntentProducerConnectRoutePlan)
@@ -240,11 +240,11 @@ func (p deliveryPlanner) PlanExactDirect(ctx context.Context, evt events.Event, 
 	}
 	candidates := make([]deliveryRecipientCandidate, 0, len(routes))
 	for _, route := range routes {
-		if route.SubscriberType != routePlanSubscriberAgent {
+		if !route.Recipient.IsAgent() {
 			return RoutePlan{}, fmt.Errorf("exact direct delivery route must identify an agent subscriber")
 		}
 		candidates = append(candidates, deliveryRecipientCandidate{
-			ID:                route.SubscriberID,
+			ID:                route.Recipient.ID(),
 			AgentIdentity:     route.AgentIdentity,
 			PersistAsDelivery: true,
 		})
@@ -413,15 +413,14 @@ func routedSubscriberCandidates(in []Subscriber) []deliveryRecipientCandidate {
 	}
 	out := make([]deliveryRecipientCandidate, 0, len(in))
 	for _, subscriber := range in {
-		id := strings.TrimSpace(subscriber.ID)
-		if id == "" {
+		if subscriber.Recipient.Empty() {
 			continue
 		}
-		if strings.TrimSpace(subscriber.Type) != "agent" {
+		if !subscriber.Recipient.IsAgent() {
 			continue
 		}
 		out = append(out, deliveryRecipientCandidate{
-			ID:                id,
+			ID:                subscriber.Recipient.ID(),
 			AgentIdentity:     subscriber.AgentIdentity,
 			PersistAsDelivery: true,
 		})
@@ -610,10 +609,9 @@ func filterDeliveryRecipientCandidates(
 				deliveryTargets[scoped.ID] = target
 			}
 			deliveryRoutes = append(deliveryRoutes, events.DeliveryRoute{
-				SubscriberType: "agent",
-				SubscriberID:   scoped.ID,
-				AgentIdentity:  scoped.AgentIdentity,
-				Target:         target,
+				Recipient:     events.MustAgentDeliveryRecipient(scoped.ID),
+				AgentIdentity: scoped.AgentIdentity,
+				Target:        target,
 			})
 		}
 	}
@@ -670,10 +668,9 @@ func agentDeliveryRoutesForCandidates(
 			continue
 		}
 		out = append(out, events.DeliveryRoute{
-			SubscriberType: "agent",
-			SubscriberID:   recipient.ID,
-			AgentIdentity:  recipient.AgentIdentity,
-			Target:         deliveryTargets[strings.TrimSpace(recipient.ID)],
+			Recipient:     events.MustAgentDeliveryRecipient(recipient.ID),
+			AgentIdentity: recipient.AgentIdentity,
+			Target:        deliveryTargets[strings.TrimSpace(recipient.ID)],
 		})
 	}
 	return events.NormalizeDeliveryRoutes(out)
@@ -692,9 +689,8 @@ func internalDeliveryIntentsForPlan(evt events.Event, recipients, persisted []st
 	for _, recipient := range internalRecipients {
 		for _, target := range targets {
 			out = append(out, events.DeliveryRoute{
-				SubscriberType: "node",
-				SubscriberID:   recipient,
-				Target:         target,
+				Recipient: events.MustNodeDeliveryRecipient(recipient),
+				Target:    target,
 			})
 		}
 	}
@@ -721,17 +717,15 @@ func targetedRoutedNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []e
 			continue
 		}
 		for _, subscriber := range routed {
-			subscriberID := strings.TrimSpace(subscriber.ID)
-			if subscriberID == "" || strings.TrimSpace(subscriber.Type) != "node" {
+			if !subscriber.Recipient.IsNode() {
 				continue
 			}
 			if !routeMatchesInternalSubscriber(target, subscriber) {
 				continue
 			}
 			out = append(out, events.DeliveryRoute{
-				SubscriberType: "node",
-				SubscriberID:   subscriberID,
-				Target:         target,
+				Recipient: subscriber.Recipient,
+				Target:    target,
 			})
 		}
 	}
@@ -778,8 +772,7 @@ func routedNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscr
 	out := make([]events.DeliveryRoute, 0, len(internalRecipients))
 	for _, recipient := range internalRecipients {
 		out = append(out, events.DeliveryRoute{
-			SubscriberType: "node",
-			SubscriberID:   recipient,
+			Recipient: events.MustNodeDeliveryRecipient(recipient),
 			Target: events.RouteIdentity{
 				FlowInstance: flowInstance,
 				EntityID:     routedNodeTargetEntityID(eventEntityID, flowInstance),
@@ -801,11 +794,10 @@ func routedConcreteNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscri
 		if !routedNodeMatchesConcreteEventTypeFlowInstance(evt, subscriber) {
 			continue
 		}
-		id := strings.TrimSpace(subscriber.ID)
-		if id == "" {
+		if !subscriber.Recipient.IsNode() {
 			continue
 		}
-		nodeIDs[id] = struct{}{}
+		nodeIDs[subscriber.Recipient.ID()] = struct{}{}
 	}
 	if len(nodeIDs) == 0 {
 		return nil
@@ -813,8 +805,7 @@ func routedConcreteNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscri
 	out := make([]events.DeliveryRoute, 0, len(nodeIDs))
 	for _, recipient := range sortedStringKeys(nodeIDs) {
 		out = append(out, events.DeliveryRoute{
-			SubscriberType: "node",
-			SubscriberID:   recipient,
+			Recipient: events.MustNodeDeliveryRecipient(recipient),
 			Target: events.RouteIdentity{
 				FlowInstance: flowInstance,
 				EntityID:     routedNodeTargetEntityID(eventEntityID, flowInstance),
@@ -844,8 +835,7 @@ func routedScopedNoTargetNodeDeliveryRoutes(evt events.Event, routed []Subscribe
 			continue
 		}
 		out = append(out, events.DeliveryRoute{
-			SubscriberType: "node",
-			SubscriberID:   strings.TrimSpace(subscriber.ID),
+			Recipient: subscriber.Recipient,
 			Target: events.RouteIdentity{
 				FlowInstance: targetFlowInstance,
 				EntityID:     routedNodeTargetEntityID(eventEntityID, targetFlowInstance),
@@ -866,8 +856,7 @@ func routedWildcardStaticServiceNoTargetNodeDeliveryRoutes(evt events.Event, rou
 	eventEntityID := strings.TrimSpace(evt.EntityID())
 	out := make([]events.DeliveryRoute, 0, len(routed))
 	for _, subscriber := range routed {
-		id := strings.TrimSpace(subscriber.ID)
-		if id == "" || strings.TrimSpace(subscriber.Type) != "node" {
+		if !subscriber.Recipient.IsNode() {
 			continue
 		}
 		path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
@@ -882,8 +871,7 @@ func routedWildcardStaticServiceNoTargetNodeDeliveryRoutes(evt events.Event, rou
 			continue
 		}
 		out = append(out, events.DeliveryRoute{
-			SubscriberType: "node",
-			SubscriberID:   id,
+			Recipient: subscriber.Recipient,
 			Target: events.RouteIdentity{
 				FlowInstance: path,
 				EntityID:     routedNodeTargetEntityID(eventEntityID, path),
@@ -894,7 +882,7 @@ func routedWildcardStaticServiceNoTargetNodeDeliveryRoutes(evt events.Event, rou
 }
 
 func routedScopedNoTargetNodeDeliveryFlowInstance(evt events.Event, subscriber Subscriber) (string, bool) {
-	if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) == "agent" {
+	if !subscriber.Recipient.IsNode() {
 		return "", false
 	}
 	if strings.Contains(strings.TrimSpace(subscriber.MatchPattern), "*") {
@@ -973,11 +961,10 @@ func routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt events.Event, 
 		if !routedNodeMatchesConcreteFlowInstanceEvent(evt, subscriber) {
 			continue
 		}
-		id := strings.TrimSpace(subscriber.ID)
-		if id == "" {
+		if !subscriber.Recipient.IsNode() {
 			continue
 		}
-		nodeIDs[id] = struct{}{}
+		nodeIDs[subscriber.Recipient.ID()] = struct{}{}
 	}
 	if len(nodeIDs) == 0 {
 		return nil
@@ -985,8 +972,7 @@ func routedNodeDeliveryIntentsForNoRecipientFlowInstanceEvent(evt events.Event, 
 	out := make([]events.DeliveryRoute, 0, len(nodeIDs))
 	for _, recipient := range sortedStringKeys(nodeIDs) {
 		out = append(out, events.DeliveryRoute{
-			SubscriberType: "node",
-			SubscriberID:   recipient,
+			Recipient: events.MustNodeDeliveryRecipient(recipient),
 			Target: events.RouteIdentity{
 				FlowInstance: flowInstance,
 				EntityID:     routedNodeTargetEntityID(eventEntityID, flowInstance),
@@ -1014,8 +1000,7 @@ func routedRootNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Su
 	out := make([]events.DeliveryRoute, 0, len(rootNodeIDs))
 	for _, recipient := range sortedStringKeys(rootNodeIDs) {
 		out = append(out, events.DeliveryRoute{
-			SubscriberType: "node",
-			SubscriberID:   recipient,
+			Recipient: events.MustNodeDeliveryRecipient(recipient),
 		})
 	}
 	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerRootNodeRoute)
@@ -1037,7 +1022,7 @@ func routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt events.Event, ro
 		if !routedRootInputFlowNodeMatchesNoTargetEvent(evt, subscriber) {
 			continue
 		}
-		nodeIDs[strings.TrimSpace(subscriber.ID)] = struct{}{}
+		nodeIDs[subscriber.Recipient.ID()] = struct{}{}
 	}
 	if len(nodeIDs) == 0 {
 		return nil
@@ -1045,20 +1030,17 @@ func routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt events.Event, ro
 	out := make([]events.DeliveryRoute, 0, len(nodeIDs))
 	for _, recipient := range sortedStringKeys(nodeIDs) {
 		out = append(out, events.DeliveryRoute{
-			SubscriberType: "node",
-			SubscriberID:   recipient,
+			Recipient: events.MustNodeDeliveryRecipient(recipient),
 		})
 	}
 	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerRootInputFlowNode)
 }
 
 func routedRootInputFlowNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber) bool {
-	if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) != "node" {
+	if !subscriber.Recipient.IsNode() {
 		return false
 	}
-	switch strings.TrimSpace(subscriber.RouteSource) {
-	case "root_input_flow":
-	default:
+	if subscriber.routeSource != subscriberRouteSourceRootInputFlow {
 		return false
 	}
 	if strings.Trim(strings.TrimSpace(subscriber.Path), "/") == "" {
@@ -1081,7 +1063,7 @@ func routedRootNodeSubscriberIDsForNoTargetEvent(evt events.Event, routed []Subs
 		if !routedRootNodeMatchesNoTargetEvent(evt, subscriber) {
 			continue
 		}
-		out[strings.TrimSpace(subscriber.ID)] = struct{}{}
+		out[subscriber.Recipient.ID()] = struct{}{}
 	}
 	if len(out) == 0 {
 		return nil
@@ -1090,7 +1072,7 @@ func routedRootNodeSubscriberIDsForNoTargetEvent(evt events.Event, routed []Subs
 }
 
 func routedRootNodeMatchesNoTargetEvent(evt events.Event, subscriber Subscriber) bool {
-	if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) != "node" {
+	if !subscriber.Recipient.IsNode() {
 		return false
 	}
 	if strings.Trim(strings.TrimSpace(subscriber.Path), "/") != "" {
@@ -1150,7 +1132,7 @@ func routedNodeMatchesConcreteFlowInstanceEvent(evt events.Event, subscriber Sub
 }
 
 func routedNodeMatchesScopedNoTargetEvent(evt events.Event, subscriber Subscriber) bool {
-	if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) == "agent" {
+	if !subscriber.Recipient.IsNode() {
 		return false
 	}
 	if strings.Contains(strings.TrimSpace(subscriber.MatchPattern), "*") {
@@ -1169,7 +1151,7 @@ func routedNodeMatchesScopedNoTargetEvent(evt events.Event, subscriber Subscribe
 }
 
 func routedNodeMatchesConcreteEventTypeFlowInstance(evt events.Event, subscriber Subscriber) bool {
-	if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) == "agent" {
+	if !subscriber.Recipient.IsNode() {
 		return false
 	}
 	instancePath := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
@@ -1182,7 +1164,7 @@ func routedNodeMatchesConcreteEventTypeFlowInstance(evt events.Event, subscriber
 }
 
 func routedNodeConcreteEventKey(evt events.Event, subscriber Subscriber) string {
-	if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) == "agent" {
+	if !subscriber.Recipient.IsNode() {
 		return ""
 	}
 	instancePath := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
@@ -1211,7 +1193,7 @@ func matchedInternalDeliveryTargets(evt events.Event, subscribers []Subscriber) 
 	out := make([]events.RouteIdentity, 0, len(targets))
 	for _, target := range targets {
 		for _, subscriber := range subscribers {
-			if strings.TrimSpace(subscriber.ID) == "" || strings.TrimSpace(subscriber.Type) == "agent" {
+			if !subscriber.Recipient.IsNode() {
 				continue
 			}
 			if routeMatchesInternalSubscriber(target, subscriber) {
@@ -1228,17 +1210,16 @@ func uniqueRouteIdentities(in []events.RouteIdentity) []events.RouteIdentity {
 		return nil
 	}
 	out := make([]events.RouteIdentity, 0, len(in))
-	seen := map[string]struct{}{}
+	seen := map[events.RouteIdentity]struct{}{}
 	for _, route := range in {
 		route = route.Normalized()
 		if route.Empty() {
 			continue
 		}
-		key := strings.Join([]string{route.FlowID, route.FlowInstance, route.EntityID}, "\x00")
-		if _, ok := seen[key]; ok {
+		if _, ok := seen[route]; ok {
 			continue
 		}
-		seen[key] = struct{}{}
+		seen[route] = struct{}{}
 		out = append(out, route)
 	}
 	return out
@@ -1247,10 +1228,7 @@ func uniqueRouteIdentities(in []events.RouteIdentity) []events.RouteIdentity {
 func hasInternalRoutedSubscriberForTarget(evt events.Event, subscribers []Subscriber) bool {
 	targets := eventDeliveryTargetRoutes(evt)
 	for _, subscriber := range subscribers {
-		if strings.TrimSpace(subscriber.ID) == "" {
-			continue
-		}
-		if strings.TrimSpace(subscriber.Type) == "agent" {
+		if !subscriber.Recipient.IsNode() {
 			continue
 		}
 		if len(targets) == 0 {
@@ -1280,7 +1258,7 @@ func routeMatchesInternalSubscriber(route events.RouteIdentity, subscriber Subsc
 func targetDeliveryFailure(evt events.Event, descriptors []ActiveTargetDescriptor) runtimepinrouting.TargetFailure {
 	targets := eventDeliveryTargetRoutes(evt)
 	if len(targets) == 0 {
-		return ""
+		return 0
 	}
 	if !allTargetsHaveLiveDescriptor(targets, descriptors) {
 		return runtimepinrouting.FailureTargetUnreachableTerminated

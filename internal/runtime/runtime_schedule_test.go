@@ -255,7 +255,7 @@ func TestAgentScheduleExecutesCompiledConnectRoute(t *testing.T) {
 			t.Fatalf("delivered routing source = %#v, want producer flow-owned control", sourceFact)
 		}
 		route := delivery.HandoffRoute()
-		if route.SubscriberID != "consumer-node" || route.ConnectClaim.Empty() {
+		if route.Recipient.ID() != "consumer-node" || route.ConnectClaim.Empty() {
 			t.Fatalf("delivery route = %#v, want consumer-node with stamped connect claim", route)
 		}
 		if err := delivery.Complete(); err != nil {

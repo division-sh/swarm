@@ -779,7 +779,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 	if err := insertCanonicalEventRecordFixture(ctx, pg, preservedSourceEvent); err != nil {
 		t.Fatalf("seed preserved source event: %v", err)
 	}
-	sourceRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	sourceRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a")}
 	cleanupDelivery := seedAgentDeliveryStateFixture(t, ctx, pg, preservedSourceEvent, sourceRoute, "queued", nil)
 	cleanupDeliveryID := cleanupDelivery.DeliveryID
 	if err := commitDeliveryReplayEventFixture(
@@ -1207,7 +1207,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	if err := commitDiagnosticRuntimeLogFixture(ctx, pg, noRunSemanticEvent); err != nil {
 		t.Fatalf("seed preserved runtime-log event: %v", err)
 	}
-	sourceRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}
+	sourceRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a")}
 	sourceFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "cleanup_source_exhausted", nil)
 	sourceDeliverySnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, sourceSemanticEvent, sourceRoute, "exhausted", &sourceFailure)
 	if err := commitDeliveryReplayEventFixture(

@@ -116,8 +116,8 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		}
 		var disposition *runtimepipelineobligation.Disposition
 		var deadLetter *runtimedeadletters.Record
-		if plan.TargetFailure != "" {
-			value := runtimepipelineobligation.DeadLetter(string(plan.TargetFailure), targetDeliveryFailureEnvelope(plan.TargetFailure))
+		if !plan.TargetFailure.Empty() {
+			value := runtimepipelineobligation.DeadLetter(plan.TargetFailure.Code(), targetDeliveryFailureEnvelope(plan.TargetFailure))
 			disposition = &value
 			_, _, record := targetDeliveryFailureRecord(intent.Event, plan, plan.TargetFailure)
 			deadLetter = &record
@@ -377,9 +377,9 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 	if len(recipients) > 0 && !deliveryRoutesCoverAgentRecipients(deliveryRoutes, recipients) {
 		return false, runtimepipelineobligation.Continue(), fmt.Errorf("event %s has persisted agent recipients without exact identity-bearing delivery routes", intent.Event.ID())
 	}
-	internalRecipients := deliveryRouteRecipientIDsByType(pendingInternalRoutes, "node")
+	internalRecipients := deliveryRouteNodeRecipientIDs(pendingInternalRoutes)
 	if len(internalRecipients) == 0 {
-		internalRecipients = deliveryRouteRecipientIDsByType(deliveryRoutes, "node")
+		internalRecipients = deliveryRouteNodeRecipientIDs(deliveryRoutes)
 	}
 	liveRecipients := uniqueStrings(append(append([]string(nil), recipients...), internalRecipients...))
 	if len(deliveryRoutes) > 0 && len(pendingInternalRoutes) == 0 {
@@ -392,7 +392,7 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 			plan.TargetFailure = runtimepinrouting.FailureTargetNotSubscribed
 			plan = plan.Normalized()
 			d.bus.recordTargetDeliveryFailure(ctx, intent.Event, plan)
-			return false, runtimepipelineobligation.DeadLetterExecution(string(plan.TargetFailure), targetDeliveryFailureEnvelope(plan.TargetFailure)), nil
+			return false, runtimepipelineobligation.DeadLetterExecution(plan.TargetFailure.Code(), targetDeliveryFailureEnvelope(plan.TargetFailure)), nil
 		}
 		return false, runtimepipelineobligation.Continue(), nil
 	}
