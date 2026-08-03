@@ -161,6 +161,9 @@ func completeHumanTaskOutcome(ctx context.Context, tx *sql.Tx, cardID, eventID s
 	if err != nil {
 		return decisioncard.HumanTaskContinuation{}, false, err
 	}
+	if err := current.Validate(card); err != nil {
+		return decisioncard.HumanTaskContinuation{}, false, err
+	}
 	eventID = strings.TrimSpace(eventID)
 	if current.OutcomeEventID != eventID {
 		return decisioncard.HumanTaskContinuation{}, false, fmt.Errorf("human-task continuation does not authorize outcome %s", eventID)
@@ -261,6 +264,9 @@ func expireHumanTaskCards(ctx context.Context, tx *sql.Tx, now time.Time, limit 
 		}
 		continuation, err := loadHumanTaskContinuation(ctx, tx, cardID, postgres, true)
 		if err != nil {
+			return nil, err
+		}
+		if err := continuation.Validate(card); err != nil {
 			return nil, err
 		}
 		if card.Status != decisioncard.StatusPending || continuation.State != decisioncard.HumanTaskContinuationPending || continuation.DeadlineAt.After(now) {
@@ -380,6 +386,9 @@ func commitHumanTaskContinuation(ctx context.Context, tx *sql.Tx, card decisionc
 	if err != nil {
 		return false, err
 	}
+	if err := continuation.Validate(card); err != nil {
+		return false, err
+	}
 	if continuation.State != decisioncard.HumanTaskContinuationPending {
 		return false, decisioncard.ErrAlreadyTerminal
 	}
@@ -440,14 +449,21 @@ func lockHumanTaskBudgetAdmission(ctx context.Context, tx *sql.Tx, continuation 
 	return nil
 }
 
-func deferHumanTaskContinuation(ctx context.Context, tx *sql.Tx, cardID string, until, now time.Time, postgres bool) error {
+func deferHumanTaskContinuation(ctx context.Context, tx *sql.Tx, card decisioncard.Card, until, now time.Time, postgres bool) error {
 	until = decisioncard.CanonicalTimestamp(until)
 	now = decisioncard.CanonicalTimestamp(now)
+	continuation, err := loadHumanTaskContinuation(ctx, tx, card.CardID, postgres, true)
+	if err != nil {
+		return err
+	}
+	if err := continuation.Validate(card); err != nil {
+		return err
+	}
 	query := `UPDATE human_task_continuations SET requeue_count = requeue_count + 1, defer_cause = 'operator_deferred', deferred_until = ?, updated_at = ? WHERE card_id = ? AND state = 'pending'`
 	if postgres {
 		query = `UPDATE human_task_continuations SET requeue_count = requeue_count + 1, defer_cause = 'operator_deferred', deferred_until = $1, updated_at = $2 WHERE card_id = $3 AND state = 'pending'`
 	}
-	result, err := tx.ExecContext(ctx, query, until, now, cardID)
+	result, err := tx.ExecContext(ctx, query, until, now, card.CardID)
 	if err != nil {
 		return err
 	}
@@ -457,8 +473,15 @@ func deferHumanTaskContinuation(ctx context.Context, tx *sql.Tx, cardID string, 
 	return nil
 }
 
-func supersedeHumanTaskContinuation(ctx context.Context, tx *sql.Tx, cardID string, now time.Time, includeCommitted bool, postgres bool) error {
+func supersedeHumanTaskContinuation(ctx context.Context, tx *sql.Tx, card decisioncard.Card, now time.Time, includeCommitted bool, postgres bool) error {
 	now = decisioncard.CanonicalTimestamp(now)
+	continuation, err := loadHumanTaskContinuation(ctx, tx, card.CardID, postgres, true)
+	if err != nil {
+		return err
+	}
+	if err := continuation.Validate(card); err != nil {
+		return err
+	}
 	states := `('pending')`
 	if includeCommitted {
 		states = `('pending', 'decision_committed', 'expired')`
@@ -467,7 +490,7 @@ func supersedeHumanTaskContinuation(ctx context.Context, tx *sql.Tx, cardID stri
 	if postgres {
 		query = `UPDATE human_task_continuations SET state = 'superseded', deferred_until = NULL, updated_at = $1 WHERE card_id = $2 AND state IN ` + states
 	}
-	result, err := tx.ExecContext(ctx, query, now, strings.TrimSpace(cardID))
+	result, err := tx.ExecContext(ctx, query, now, card.CardID)
 	if err != nil {
 		return err
 	}

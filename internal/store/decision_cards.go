@@ -614,7 +614,7 @@ func deferDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.DeferRe
 		return decisioncard.DecisionOutcome{}, decisioncard.ErrAlreadyTerminal
 	}
 	if card.Anchor.Kind() == decisioncard.AnchorKindHumanTask {
-		if err := deferHumanTaskContinuation(ctx, tx, card.CardID, until, now, postgres); err != nil {
+		if err := deferHumanTaskContinuation(ctx, tx, card, until, now, postgres); err != nil {
 			return decisioncard.DecisionOutcome{}, err
 		}
 	}
@@ -1019,7 +1019,7 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, runID, reason
 			return err
 		}
 		if card.Anchor.Kind() == decisioncard.AnchorKindHumanTask {
-			if err := supersedeHumanTaskContinuation(ctx, tx, card.CardID, now, includeCommitted, postgres); err != nil {
+			if err := supersedeHumanTaskContinuation(ctx, tx, card, now, includeCommitted, postgres); err != nil {
 				return err
 			}
 		}

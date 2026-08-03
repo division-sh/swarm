@@ -116,14 +116,16 @@ func TestStageGateOwnerRequiresAuthoritativeWorkflowInstance(t *testing.T) {
 	anchor := decisioncard.StageGateAnchor{
 		FlowID: "telegram-ingress", FlowInstance: instancePath, EntityID: entityID,
 	}
-	if err := validateStageGateInstanceOwner(anchor, instance); err != nil {
+	activation := gateruntime.Activation{FlowID: anchor.FlowID}
+	if err := validateStageGateInstanceOwner(anchor, instance, activation); err != nil {
 		t.Fatalf("exact workflow instance owner rejected: %v", err)
 	}
 	for _, hostile := range []decisioncard.StageGateAnchor{
+		{FlowID: "foreign-flow", FlowInstance: instancePath, EntityID: entityID},
 		{FlowID: anchor.FlowID, FlowInstance: "telegram-ingress/foreign", EntityID: entityID},
 		{FlowID: anchor.FlowID, FlowInstance: instancePath, EntityID: uuid.NewString()},
 	} {
-		if err := validateStageGateInstanceOwner(hostile, instance); err == nil {
+		if err := validateStageGateInstanceOwner(hostile, instance, activation); err == nil {
 			t.Fatalf("foreign stage-gate owner accepted: %#v", hostile)
 		}
 	}

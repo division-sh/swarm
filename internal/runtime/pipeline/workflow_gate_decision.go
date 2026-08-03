@@ -406,9 +406,6 @@ func (pc *PipelineCoordinator) loadStageGateRoute(ctx context.Context, card deci
 	if !found {
 		return gateruntime.Route{}, fmt.Errorf("decision card workflow instance is missing")
 	}
-	if err := validateStageGateInstanceOwner(anchor, instance); err != nil {
-		return gateruntime.Route{}, err
-	}
 	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 	if err != nil {
 		return gateruntime.Route{}, err
@@ -417,15 +414,22 @@ func (pc *PipelineCoordinator) loadStageGateRoute(ctx context.Context, card deci
 	if err != nil {
 		return gateruntime.Route{}, err
 	}
-	if !found || activation.ActivationID != anchor.StageActivationID || activation.CardID != card.CardID {
+	if !found {
+		return gateruntime.Route{}, fmt.Errorf("decision card activation is no longer authoritative")
+	}
+	if err := validateStageGateInstanceOwner(anchor, instance, activation); err != nil {
+		return gateruntime.Route{}, err
+	}
+	if activation.ActivationID != anchor.StageActivationID || activation.CardID != card.CardID {
 		return gateruntime.Route{}, fmt.Errorf("decision card activation is no longer authoritative")
 	}
 	return gateruntime.RouteFor(activation.RoutesJSON, card.Verdict)
 }
 
-func validateStageGateInstanceOwner(anchor decisioncard.StageGateAnchor, instance WorkflowInstance) error {
+func validateStageGateInstanceOwner(anchor decisioncard.StageGateAnchor, instance WorkflowInstance, activation gateruntime.Activation) error {
 	owner := StoredFlowInstance(nil, instance)
-	if strings.TrimSpace(anchor.FlowInstance) != strings.TrimSpace(owner.InstancePath) ||
+	if strings.TrimSpace(anchor.FlowID) != strings.TrimSpace(activation.FlowID) ||
+		strings.TrimSpace(anchor.FlowInstance) != strings.TrimSpace(owner.InstancePath) ||
 		strings.TrimSpace(anchor.EntityID) != strings.TrimSpace(owner.EntityID) {
 		return fmt.Errorf("stage_gate anchor does not match its authoritative workflow instance")
 	}
