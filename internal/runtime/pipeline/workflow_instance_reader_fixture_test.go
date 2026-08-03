@@ -218,3 +218,49 @@ func (r *recordingRuntimeMutationRunner) SelectActiveWorkflowInstances(ctx conte
 }
 
 var _ WorkflowInstancePersistenceReader = (*recordingRuntimeMutationRunner)(nil)
+
+func (s *workflowInstanceStore) mutate(ctx context.Context, route runtimeflowidentity.Route, fn func(*WorkflowInstance)) error {
+	if fn == nil {
+		return nil
+	}
+	return s.mutateE(ctx, route, func(instance *WorkflowInstance) error {
+		fn(instance)
+		return nil
+	})
+}
+
+func (s *workflowInstanceStore) mutateE(ctx context.Context, route runtimeflowidentity.Route, fn func(*WorkflowInstance) error) error {
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	requestedKey := strings.TrimSpace(route.InstancePath)
+	if !route.Valid() {
+		return &WorkflowInstanceLookupMiss{RequestedKey: requestedKey}
+	}
+	if s == nil || !s.enabled() || fn == nil {
+		return nil
+	}
+	if s.engineMutations == nil {
+		return fmt.Errorf("workflow instance mutation requires the selected workflow engine mutation owner")
+	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return err
+	}
+	instance, ok, err := s.Load(ctx, route)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return &WorkflowInstanceLookupMiss{RequestedKey: requestedKey}
+	}
+	expectedState := strings.TrimSpace(instance.CurrentState)
+	expectedRevision := instance.Revision
+	if err := fn(&instance); err != nil {
+		return err
+	}
+	record, err := workflowEngineStateRecord(runID, route, instance, expectedState, expectedRevision, false, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	_, err = s.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{State: record})
+	return err
+}

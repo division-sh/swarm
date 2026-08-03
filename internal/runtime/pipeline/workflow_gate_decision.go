@@ -258,17 +258,7 @@ func (pc *PipelineCoordinator) handleDecisionCardDeferredEvent(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	return nil, pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-		if continuation.ReplyContextID != "" {
-			delivery := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: continuation.ReplyContextID}}
-			txctx = events.WithDeliveryContext(txctx, delivery)
-		}
-		publisher := pc.directDecisionPublisher
-		if publisher == nil {
-			return fmt.Errorf("transactional direct event publisher is required for human-task defer")
-		}
-		return publisher.PublishDirectInMutation(txctx, product, []string{anchor.RequesterAgentID})
-	})
+	return nil, pc.commitHumanTaskRoute(ctx, product, []string{anchor.RequesterAgentID}, continuation.ReplyContextID, card.CardID, evt.ID(), evt.CreatedAt(), false)
 }
 
 func (pc *PipelineCoordinator) handleDecisionCardExpiredEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
@@ -317,21 +307,7 @@ func (pc *PipelineCoordinator) handleDecisionCardExpiredEvent(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	return nil, pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-		if continuation.ReplyContextID != "" {
-			delivery := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: continuation.ReplyContextID}}
-			txctx = events.WithDeliveryContext(txctx, delivery)
-		}
-		publisher := pc.directDecisionPublisher
-		if publisher == nil {
-			return fmt.Errorf("transactional direct event publisher is required for human-task expiry")
-		}
-		if err := publisher.PublishDirectInMutation(txctx, product, []string{anchor.RequesterAgentID}); err != nil {
-			return err
-		}
-		_, err = store.CompleteHumanTaskOutcome(txctx, card.CardID, evt.ID(), card.DecidedAt)
-		return err
-	})
+	return nil, pc.commitHumanTaskRoute(ctx, product, []string{anchor.RequesterAgentID}, continuation.ReplyContextID, card.CardID, evt.ID(), card.DecidedAt, true)
 }
 
 func decisionCardLifecycleEventCardID(evt events.Event) (string, error) {
@@ -451,34 +427,69 @@ func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	return nil, pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-		continuation, err := store.LoadHumanTaskContinuation(txctx, card.CardID)
-		if err != nil {
-			return err
-		}
-		if err := continuation.Validate(card); err != nil {
-			return err
-		}
-		productEventID := decisioncard.HumanTaskOutcomeEventID(card.CardID, evt.ID())
-		product, err := newWorkflowChildEvent(productEventID, eventType, "", payload, evt.ChainDepth()+1, anchor.Source, evt,
-			humanTaskRequesterOutcomeEnvelope(continuation), card.DecidedAt.UTC())
-		if err != nil {
-			return err
-		}
-		if continuation.ReplyContextID != "" {
-			delivery := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: continuation.ReplyContextID}}
-			txctx = events.WithDeliveryContext(txctx, delivery)
-		}
-		publisher := pc.directDecisionPublisher
-		if publisher == nil {
-			return fmt.Errorf("transactional direct event publisher is required for human-task outcome")
-		}
-		if err := publisher.PublishDirectInMutation(txctx, product, []string{anchor.RequesterAgentID}); err != nil {
-			return err
-		}
-		_, err = store.CompleteHumanTaskOutcome(txctx, card.CardID, evt.ID(), card.DecidedAt)
+	continuation, err := store.LoadHumanTaskContinuation(ctx, card.CardID)
+	if err != nil {
+		return nil, err
+	}
+	productEventID := decisioncard.HumanTaskOutcomeEventID(card.CardID, evt.ID())
+	product, err := newWorkflowChildEvent(productEventID, eventType, "", payload, evt.ChainDepth()+1, anchor.Source, evt,
+		humanTaskRequesterOutcomeEnvelope(continuation), card.DecidedAt.UTC())
+	if err != nil {
+		return nil, err
+	}
+	return nil, pc.commitHumanTaskRoute(ctx, product, []string{anchor.RequesterAgentID}, continuation.ReplyContextID, card.CardID, evt.ID(), card.DecidedAt, true)
+}
+
+func (pc *PipelineCoordinator) commitHumanTaskRoute(
+	ctx context.Context,
+	product events.Event,
+	recipients []string,
+	replyContextID string,
+	cardID string,
+	routeEventID string,
+	occurredAt time.Time,
+	completeOutcome bool,
+) error {
+	if pc == nil || pc.workflowStore == nil || pc.workflowStore.decisionRoutes == nil {
+		return fmt.Errorf("human-task route requires the selected-store decision route owner")
+	}
+	planner, ok := pc.bus.(EnginePublicationPlanner)
+	if !ok {
+		return fmt.Errorf("human-task route requires the publication planner")
+	}
+	intent := runtimeengine.EmitIntent{Event: product, Recipients: append([]string(nil), recipients...)}
+	if strings.TrimSpace(replyContextID) != "" {
+		intent.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: strings.TrimSpace(replyContextID)}}
+	}
+	plans, err := planner.PrepareEnginePublications(ctx, []runtimeengine.EmitIntent{intent})
+	if err != nil {
 		return err
-	})
+	}
+	if len(plans) != 1 {
+		releaseErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+		return errors.Join(fmt.Errorf("human-task route planner returned %d plans", len(plans)), releaseErr)
+	}
+	var committed CommittedHumanTaskRoute
+	if completeOutcome {
+		committed, err = pc.workflowStore.decisionRoutes.CommitHumanTaskOutcomeRoute(ctx, HumanTaskOutcomeRouteCommand{
+			CardID: cardID, RouteEventID: routeEventID, OccurredAt: occurredAt, Publication: plans[0],
+		})
+	} else {
+		committed, err = pc.workflowStore.decisionRoutes.CommitHumanTaskDeferredRoute(ctx, HumanTaskDeferredRouteCommand{
+			CardID: cardID, RouteEventID: routeEventID, OccurredAt: occurredAt, Publication: plans[0],
+		})
+	}
+	if err != nil {
+		return errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+	}
+	if err := planner.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{committed.Publication}); err != nil {
+		return err
+	}
+	dispatcher := pc.bus.EngineDispatcher()
+	if dispatcher == nil {
+		return fmt.Errorf("human-task route requires post-commit dispatcher")
+	}
+	return dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), []runtimeengine.EmitIntent{intent})
 }
 
 func (pc *PipelineCoordinator) routeWorkflowGateDecision(ctx context.Context, card decisioncard.Card, evt events.Event, route gateruntime.Route, emitted *events.Event) error {

@@ -50,24 +50,10 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 	immediate := make([]runtimeengine.ActivityIntent, 0, len(intents))
 	for _, intent := range intents {
 		intent = intent.Normalized()
-		if intent.ApprovalDecision == "" {
-			immediate = append(immediate, intent)
-			continue
+		if intent.ApprovalDecision != "" {
+			return fmt.Errorf("approved activity %s requires the selected workflow engine commit owner", intent.ActivityID)
 		}
-		if _, ok := PipelineSQLTxFromContext(ctx); !ok {
-			return fmt.Errorf("approved activity %s must be materialized in the workflow mutation", intent.ActivityID)
-		}
-		store := w.coordinator.proposedEffects
-		if store == nil {
-			return fmt.Errorf("proposed-effect continuation store is required for approved activity %s", intent.ActivityID)
-		}
-		card, continuation, err := w.coordinator.buildProposedEffectCard(ctx, intent)
-		if err != nil {
-			return err
-		}
-		if err := store.CreateProposedEffectCard(ctx, card, continuation); err != nil {
-			return err
-		}
+		immediate = append(immediate, intent)
 	}
 	requests, err := activityRequestEmitIntents(immediate)
 	if err != nil {
@@ -102,17 +88,7 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 			EntityID:  intent.EntityID.String(),
 			Detail:    detail,
 		}
-		logIntent := func(actionCtx context.Context) {
-			actionCtx = WithoutPipelineSQLTxContext(actionCtx)
-			_ = w.coordinator.bus.LogRuntime(actionCtx, entry)
-		}
-		if _, txActive := PipelineSQLTxFromContext(ctx); txActive {
-			if !QueuePipelinePostCommitAction(ctx, logIntent) {
-				return fmt.Errorf("activity intent runtime log requires a post-commit action queue")
-			}
-			continue
-		}
-		if err := w.coordinator.bus.LogRuntime(WithoutPipelineSQLTxContext(ctx), entry); err != nil {
+		if err := w.coordinator.bus.LogRuntime(ctx, entry); err != nil {
 			return err
 		}
 	}
@@ -451,26 +427,24 @@ func (d pipelineActivityDispatcher) admitReadOnlyActivityGeneration(ctx context.
 	if err != nil {
 		return fmt.Errorf("activity state route: %w", err)
 	}
-	return d.coordinator.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-		instance, ok, err := d.coordinator.workflowStore.Load(txctx, route)
-		if err != nil {
-			return err
-		}
-		current := false
-		if ok {
-			current, err = workflowLoopGenerationCurrent(&instance, intent.Generation, intent.LoopStage)
-		}
-		if err != nil {
-			return err
-		}
-		if !current {
-			return runtimefailures.New(runtimefailures.ClassStaleArrival, "activity_loop_generation_stale", "activity-runtime", "admit_read_only_activity", map[string]any{
-				"activity_id": intent.ActivityID, "loop_id": intent.Generation.LoopID,
-				"revision_id": intent.Generation.RevisionID, "expected_stage": intent.LoopStage,
-			})
-		}
-		return nil
-	})
+	instance, ok, err := d.coordinator.workflowStore.Load(ctx, route)
+	if err != nil {
+		return err
+	}
+	current := false
+	if ok {
+		current, err = workflowLoopGenerationCurrent(&instance, intent.Generation, intent.LoopStage)
+	}
+	if err != nil {
+		return err
+	}
+	if !current {
+		return runtimefailures.New(runtimefailures.ClassStaleArrival, "activity_loop_generation_stale", "activity-runtime", "admit_read_only_activity", map[string]any{
+			"activity_id": intent.ActivityID, "loop_id": intent.Generation.LoopID,
+			"revision_id": intent.Generation.RevisionID, "expected_stage": intent.LoopStage,
+		})
+	}
+	return nil
 }
 
 func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx context.Context, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry, mockResponse *providerconnectors.AdmittedMockResponse) error {

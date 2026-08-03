@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
@@ -166,6 +167,71 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 	r.mu.Unlock()
 	return result, nil
 }
+
+func (r *recordingRuntimeMutationRunner) CommitHumanTaskDeferredRoute(ctx context.Context, command HumanTaskDeferredRouteCommand) (CommittedHumanTaskRoute, error) {
+	if err := command.Validate(); err != nil {
+		return CommittedHumanTaskRoute{}, err
+	}
+	return r.commitHumanTaskRouteForTest(ctx, command.Publication, "", "", time.Time{})
+}
+
+func (r *recordingRuntimeMutationRunner) CommitProposedEffectRoute(ctx context.Context, command ProposedEffectRouteCommand) (CommittedProposedEffectRoute, error) {
+	if err := command.Validate(); err != nil {
+		return CommittedProposedEffectRoute{}, err
+	}
+	committed, err := r.commitHumanTaskRouteForTest(ctx, command.Publication, "", "", time.Time{})
+	if err != nil {
+		return CommittedProposedEffectRoute{}, err
+	}
+	return CommittedProposedEffectRoute{Publication: committed.Publication}, nil
+}
+
+func (r *recordingRuntimeMutationRunner) CommitHumanTaskOutcomeRoute(ctx context.Context, command HumanTaskOutcomeRouteCommand) (CommittedHumanTaskRoute, error) {
+	if err := command.Validate(); err != nil {
+		return CommittedHumanTaskRoute{}, err
+	}
+	return r.commitHumanTaskRouteForTest(ctx, command.Publication, command.CardID, command.RouteEventID, command.OccurredAt)
+}
+
+func (r *recordingRuntimeMutationRunner) commitHumanTaskRouteForTest(
+	ctx context.Context,
+	publication runtimeengine.DurablePublicationPlan,
+	cardID string,
+	routeEventID string,
+	occurredAt time.Time,
+) (CommittedHumanTaskRoute, error) {
+	plan, ok := publication.(pipelineTestPublicationPlan)
+	if !ok {
+		return CommittedHumanTaskRoute{}, fmt.Errorf("pipeline test human-task publication has unexpected type %T", publication)
+	}
+	var result CommittedHumanTaskRoute
+	err := r.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
+		tx, ok := sqlTxFromContext(txctx)
+		if !ok || tx == nil {
+			return fmt.Errorf("pipeline test human-task route requires its private transaction")
+		}
+		if err := eventfixture.Insert(txctx, tx, runtimeauthoractivity.Dialect(r.dialect), plan.intent.Event); err != nil {
+			return err
+		}
+		if cardID != "" {
+			store, ok := r.decisionCards.(decisioncard.HumanTaskStore)
+			if !ok {
+				return fmt.Errorf("pipeline test human-task route requires continuation store")
+			}
+			if _, err := store.CompleteHumanTaskOutcome(txctx, cardID, routeEventID, occurredAt); err != nil {
+				return err
+			}
+		}
+		result.Publication = pipelineTestCommittedPublication{eventID: plan.intent.Event.ID(), intent: plan.intent}
+		return nil
+	})
+	if err != nil {
+		return CommittedHumanTaskRoute{}, err
+	}
+	return result, result.Validate()
+}
+
+var _ WorkflowDecisionRouteOwner = (*recordingRuntimeMutationRunner)(nil)
 
 func (r *recordingRuntimeMutationRunner) CommitWorkflowInitialMaterialization(ctx context.Context, command WorkflowInitialMaterializationCommand) (CommittedWorkflowInitialMaterialization, error) {
 	if err := command.Validate(); err != nil {

@@ -20,6 +20,66 @@ import (
 var _ decisioncard.HumanTaskStore = (*PostgresStore)(nil)
 var _ decisioncard.HumanTaskStore = (*SQLiteRuntimeStore)(nil)
 
+func (s *PostgresStore) ListDueHumanTaskExpiryEvents(ctx context.Context, now time.Time, limit int) ([]events.Event, error) {
+	return listDueHumanTaskExpiryEvents(ctx, s.backend.db, now, limit, true)
+}
+
+func (s *SQLiteRuntimeStore) ListDueHumanTaskExpiryEvents(ctx context.Context, now time.Time, limit int) ([]events.Event, error) {
+	return listDueHumanTaskExpiryEvents(ctx, s.backend.db, now, limit, false)
+}
+
+func listDueHumanTaskExpiryEvents(ctx context.Context, db decisionCardSQL, now time.Time, limit int, postgres bool) ([]events.Event, error) {
+	now = decisioncard.CanonicalTimestamp(now)
+	if now.IsZero() {
+		return nil, fmt.Errorf("human-task expiry requires an authoritative timestamp")
+	}
+	if limit <= 0 || limit > 200 {
+		return nil, fmt.Errorf("human-task expiry limit must be between 1 and 200")
+	}
+	query := `SELECT h.card_id FROM human_task_continuations h JOIN decision_cards c ON c.card_id = h.card_id JOIN runs run ON run.run_id = h.run_id
+		WHERE h.state = 'pending' AND c.status = 'pending' AND run.status IN (` + runLifecycleActiveStateSQLValues + `) AND h.deadline_at <= ? ORDER BY h.deadline_at, h.card_id LIMIT ?`
+	if postgres {
+		query = `SELECT h.card_id FROM human_task_continuations h JOIN decision_cards c ON c.card_id = h.card_id JOIN runs run ON run.run_id = h.run_id
+			WHERE h.state = 'pending' AND c.status = 'pending' AND run.status IN (` + runLifecycleActiveStateSQLValues + `) AND h.deadline_at <= $1 ORDER BY h.deadline_at, h.card_id LIMIT $2`
+	}
+	rows, err := db.QueryContext(ctx, query, now, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cardIDs []string
+	for rows.Next() {
+		var cardID string
+		if err := rows.Scan(&cardID); err != nil {
+			return nil, err
+		}
+		cardIDs = append(cardIDs, strings.TrimSpace(cardID))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	eventsOut := make([]events.Event, 0, len(cardIDs))
+	for _, cardID := range cardIDs {
+		card, err := loadDecisionCard(ctx, db, cardID, postgres, false)
+		if err != nil {
+			return nil, err
+		}
+		continuation, err := loadHumanTaskContinuation(ctx, db, cardID, postgres, false)
+		if err != nil {
+			return nil, err
+		}
+		if card.Status != decisioncard.StatusPending || continuation.State != decisioncard.HumanTaskContinuationPending || continuation.DeadlineAt.After(now) {
+			continue
+		}
+		event, err := humanTaskExpiredEvent(card, continuation, now)
+		if err != nil {
+			return nil, err
+		}
+		eventsOut = append(eventsOut, event)
+	}
+	return eventsOut, nil
+}
+
 func (s *PostgresStore) CreateHumanTaskCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) error {
 	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
 		if err := requireActiveDecisionRun(ctx, tx, card.RunID, true); err != nil {
@@ -298,36 +358,44 @@ func expireHumanTaskCards(ctx context.Context, story runtimeauthoractivity.Mutat
 		}, now, postgres); err != nil {
 			return nil, err
 		}
-		payload, err := canonicaljson.Bytes(map[string]any{
-			"card_id": card.CardID, "anchor_kind": card.Anchor.Kind(), "cause": "deadline_elapsed",
-			"deadline_at": continuation.DeadlineAt.UTC().Format(time.RFC3339Nano),
-		})
-		if err != nil {
-			return nil, err
-		}
-		scope, err := card.Anchor.Scope()
-		if err != nil {
-			return nil, err
-		}
-		routingSource, err := card.Anchor.ControlRoutingSource()
-		if err != nil {
-			return nil, err
-		}
-		evt, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
-			Facts: events.EventFacts{
-				ID: eventID, Type: events.EventType("mailbox.card_expired"),
-				Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},
-				Payload:  payload, Envelope: events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance),
-				RoutingSource: routingSource, CreatedAt: now, ExecutionMode: executionmode.Live,
-			},
-			RunID: card.RunID,
-		})
+		evt, err := humanTaskExpiredEvent(card, continuation, now)
 		if err != nil {
 			return nil, err
 		}
 		expiredEvents = append(expiredEvents, evt)
 	}
 	return expiredEvents, nil
+}
+
+func humanTaskExpiredEvent(card decisioncard.Card, continuation decisioncard.HumanTaskContinuation, now time.Time) (events.Event, error) {
+	eventID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.human-task.expired.v1\x00"+card.CardID+"\x00"+continuation.DeadlineAt.UTC().Format(time.RFC3339Nano))).String()
+	payload, err := canonicaljson.Bytes(map[string]any{
+		"card_id": card.CardID, "anchor_kind": card.Anchor.Kind(), "cause": "deadline_elapsed",
+		"deadline_at": continuation.DeadlineAt.UTC().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		return events.Event{}, err
+	}
+	scope, err := card.Anchor.Scope()
+	if err != nil {
+		return events.Event{}, err
+	}
+	routingSource, err := card.Anchor.ControlRoutingSource()
+	if err != nil {
+		return events.Event{}, err
+	}
+	return events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
+		Facts: events.EventFacts{
+			ID: eventID, Type: events.EventType("mailbox.card_expired"),
+			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "platform"},
+			Payload:  payload,
+			Envelope: events.EnvelopeForFlowInstance(
+				events.EnvelopeForEntityID(events.EventEnvelope{}, scope.EntityID), scope.FlowInstance,
+			),
+			RoutingSource: routingSource, CreatedAt: now, ExecutionMode: executionmode.Live,
+		},
+		RunID: card.RunID,
+	})
 }
 
 func loadHumanTaskContinuation(ctx context.Context, db decisionCardSQL, cardID string, postgres, forUpdate bool) (decisioncard.HumanTaskContinuation, error) {

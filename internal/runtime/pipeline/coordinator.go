@@ -168,10 +168,6 @@ type DecisionCardDraftExpiry interface {
 	ExpireDecisionCardInputDrafts(context.Context, time.Time) (int, error)
 }
 
-type HumanTaskExpiry interface {
-	ExpireHumanTaskCardsInMutation(context.Context, time.Time, int) ([]events.Event, error)
-}
-
 type WorkflowDeliveryRuntime interface {
 	DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error)
 	AcquireDeliveryContinuation(string) (worklifetime.DeliveryContinuation, error)
@@ -391,22 +387,38 @@ func (pc *PipelineCoordinator) expireHumanTaskCards(ctx context.Context, expiry 
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return errors.New("human-task expiry requires the selected workflow store")
 	}
-	publisher := pc.gatePublisher
-	if publisher == nil {
-		return errors.New("human-task expiry requires transactional event publication")
+	planner, ok := pc.bus.(EnginePublicationPlanner)
+	if !ok {
+		return errors.New("human-task expiry requires the publication planner")
 	}
-	return pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-		expiredEvents, err := expiry.ExpireHumanTaskCardsInMutation(txctx, now, limit)
-		if err != nil {
-			return err
-		}
-		for _, evt := range expiredEvents {
-			if err := publisher.PublishInMutation(txctx, evt); err != nil {
-				return fmt.Errorf("publish human-task expiry event: %w", err)
-			}
-		}
-		return nil
-	})
+	expiredEvents, err := expiry.ListDueHumanTaskExpiryEvents(ctx, now, limit)
+	if err != nil || len(expiredEvents) == 0 {
+		return err
+	}
+	intents := make([]runtimeengine.EmitIntent, 0, len(expiredEvents))
+	for _, event := range expiredEvents {
+		intents = append(intents, runtimeengine.EmitIntent{Event: event})
+	}
+	plans, err := planner.PrepareEnginePublications(ctx, intents)
+	if err != nil {
+		return err
+	}
+	if len(plans) != len(intents) {
+		releaseErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+		return errors.Join(fmt.Errorf("human-task expiry planner returned %d plans for %d events", len(plans), len(intents)), releaseErr)
+	}
+	committed, err := expiry.CommitHumanTaskExpirations(ctx, HumanTaskExpiryCommand{ObservedAt: now, Limit: limit, Publications: plans})
+	if err != nil {
+		return errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+	}
+	if err := planner.FinalizeEnginePublications(ctx, committed.Publications); err != nil {
+		return err
+	}
+	dispatcher := pc.bus.EngineDispatcher()
+	if dispatcher == nil {
+		return errors.New("human-task expiry requires post-commit dispatcher")
+	}
+	return dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), intents)
 }
 
 func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {

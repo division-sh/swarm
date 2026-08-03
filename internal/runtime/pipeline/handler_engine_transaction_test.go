@@ -152,7 +152,18 @@ func (*recordingPipelineBus) SubscribeInternal(string, ...events.EventType) <-ch
 	return make(chan events.Event)
 }
 
-func (*recordingPipelineBus) PublishDirect(context.Context, events.Event, []string) error { return nil }
+func (b *recordingPipelineBus) PublishDirect(ctx context.Context, evt events.Event, recipients []string) error {
+	if b.publishErr != nil {
+		return b.publishErr
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.directPublishes = append(b.directPublishes, evt)
+	b.directRecipients = append(b.directRecipients, append([]string(nil), recipients...))
+	b.directContexts = append(b.directContexts, events.DeliveryContextFromContext(ctx))
+	b.directInMutation = append(b.directInMutation, false)
+	return nil
+}
 func (b *recordingPipelineBus) PublishDirectInMutation(ctx context.Context, evt events.Event, recipients []string) error {
 	_, inMutation := PipelineSQLTxFromContext(ctx)
 	if !inMutation {
@@ -201,13 +212,14 @@ func (d recordingPipelineDispatcher) DispatchPostCommit(ctx context.Context, int
 		return nil
 	}
 	for _, intent := range intents {
+		intentCtx := events.WithDeliveryContext(ctx, intent.Context)
 		if len(intent.Recipients) > 0 {
-			if err := d.bus.PublishDirect(ctx, intent.Event, intent.Recipients); err != nil {
+			if err := d.bus.PublishDirect(intentCtx, intent.Event, intent.Recipients); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := d.bus.Publish(ctx, intent.Event); err != nil {
+		if err := d.bus.Publish(intentCtx, intent.Event); err != nil {
 			return err
 		}
 	}

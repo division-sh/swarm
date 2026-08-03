@@ -8,45 +8,47 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/google/uuid"
 )
 
 type transactionProbeHumanTaskExpiry struct {
-	runID string
-	event events.Event
+	event       events.Event
+	commitCalls int
 }
 
-func (e *transactionProbeHumanTaskExpiry) ExpireHumanTaskCardsInMutation(ctx context.Context, _ time.Time, _ int) ([]events.Event, error) {
-	tx, ok := PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return nil, errors.New("pipeline transaction is required")
-	}
-	source, err := runtimecorrelation.NewEphemeralBundleSourceFact(
-		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-	)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := (testRunLifecycleMutation{tx: tx, dialect: workflowStoreDialectSQLite}).CreateRun(ctx, runtimerunlifecycle.CreateRequest{
-		RunID:     e.runID,
-		Origin:    runtimerunlifecycle.ScenarioSetupRunOrigin(),
-		Source:    source,
-		StartedAt: time.Now().UTC(),
-	}); err != nil {
-		return nil, err
-	}
+func (e *transactionProbeHumanTaskExpiry) ListDueHumanTaskExpiryEvents(context.Context, time.Time, int) ([]events.Event, error) {
 	return []events.Event{e.event}, nil
 }
 
-func TestHumanTaskExpiryPublishesInsideSelectedStoreMutation(t *testing.T) {
+func (e *transactionProbeHumanTaskExpiry) CommitHumanTaskExpirations(ctx context.Context, command HumanTaskExpiryCommand) (CommittedHumanTaskExpiry, error) {
+	if _, ok := PipelineSQLTxFromContext(ctx); ok {
+		return CommittedHumanTaskExpiry{}, errors.New("runtime received selected-store transaction authority")
+	}
+	if err := command.Validate(); err != nil {
+		return CommittedHumanTaskExpiry{}, err
+	}
+	e.commitCalls++
+	committed := make([]runtimeengine.CommittedDurablePublication, 0, len(command.Publications))
+	for index, publication := range command.Publications {
+		plan, ok := publication.(pipelineTestPublicationPlan)
+		if !ok {
+			return CommittedHumanTaskExpiry{}, errors.New("unexpected publication plan")
+		}
+		if plan.DurablePublicationEventID() != e.event.ID() || index != 0 {
+			return CommittedHumanTaskExpiry{}, errors.New("selected-store operation received the wrong expiry plan")
+		}
+		committed = append(committed, pipelineTestCommittedPublication{eventID: plan.DurablePublicationEventID(), intent: plan.intent})
+	}
+	return CommittedHumanTaskExpiry{Publications: committed}, nil
+}
+
+func TestHumanTaskExpiryUsesClosedSelectedStoreCommitEvidence(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
 	runner := &recordingRuntimeMutationRunner{db: db}
 	workflowStore := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
 	runID := uuid.NewString()
 	expiry := &transactionProbeHumanTaskExpiry{
-		runID: runID,
 		event: eventtest.RuntimeControl(
 			uuid.NewString(), events.EventType("mailbox.card_expired"), "platform", "", []byte(`{"card_id":"card-a"}`),
 			0, runID, "", events.EventEnvelope{}, time.Now().UTC(),
@@ -56,27 +58,20 @@ func TestHumanTaskExpiryPublishesInsideSelectedStoreMutation(t *testing.T) {
 	coordinator := &PipelineCoordinator{bus: bus, workflowStore: workflowStore, gatePublisher: bus}
 
 	if err := coordinator.expireHumanTaskCards(context.Background(), expiry, time.Now().UTC(), 10); err == nil {
-		t.Fatal("expiry succeeded when transactional publication failed")
+		t.Fatal("expiry succeeded when publication planning failed")
 	}
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM runs WHERE run_id = ?`, runID).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 0 {
-		t.Fatalf("expiry state rows after publication rollback = %d, want 0", count)
+	if expiry.commitCalls != 0 {
+		t.Fatalf("selected-store commits after planning failure = %d, want 0", expiry.commitCalls)
 	}
 
 	bus.publishErr = nil
 	if err := coordinator.expireHumanTaskCards(context.Background(), expiry, time.Now().UTC(), 10); err != nil {
-		t.Fatalf("expiry with transactional publication: %v", err)
+		t.Fatalf("expiry with selected-store commit evidence: %v", err)
 	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM runs WHERE run_id = ?`, runID).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 1 {
-		t.Fatalf("committed expiry state rows = %d, want 1", count)
+	if expiry.commitCalls != 1 {
+		t.Fatalf("selected-store commits = %d, want 1", expiry.commitCalls)
 	}
 	if len(bus.publishes) != 1 || bus.publishes[0].ID() != expiry.event.ID() {
-		t.Fatalf("transactional expiry publishes = %#v", bus.publishes)
+		t.Fatalf("post-commit expiry publishes = %#v", bus.publishes)
 	}
 }

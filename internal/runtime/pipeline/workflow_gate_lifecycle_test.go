@@ -25,6 +25,8 @@ import (
 	"github.com/google/uuid"
 )
 
+const gateLifecycleRequesterEntityID = "11111111-1111-4111-8111-111111111111"
+
 type gateLifecycleCardStore struct {
 	decisioncard.Store
 	createErr     error
@@ -41,6 +43,9 @@ func newGateLifecyclePipelineCoordinator(bus *recordingPipelineBus, db *sql.DB, 
 	opts.DirectDecisionPublisher = bus
 	if opts.Persistence.store != nil {
 		if runner, ok := opts.Persistence.store.engineMutations.(*recordingRuntimeMutationRunner); ok {
+			runner.decisionCards = opts.DecisionCards
+		}
+		if runner, ok := opts.Persistence.store.decisionRoutes.(*recordingRuntimeMutationRunner); ok {
 			runner.decisionCards = opts.DecisionCards
 		}
 	}
@@ -232,7 +237,7 @@ func TestHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStores(t *
 				if got := bus.directPublishes[0].TargetRoute().Normalized(); got != source.Route() {
 					t.Fatalf("direct requester route = %#v", got)
 				}
-				if len(bus.directContexts) != 1 || bus.directContexts[0].ReplyContextID() != "reply-context-a" || !bus.directInMutation[0] {
+				if len(bus.directContexts) != 1 || bus.directContexts[0].ReplyContextID() != "reply-context-a" || bus.directInMutation[0] {
 					t.Fatalf("direct delivery evidence = contexts:%#v transactions:%#v", bus.directContexts, bus.directInMutation)
 				}
 				continuation, err := cards.LoadHumanTaskContinuation(ctx, card.CardID)

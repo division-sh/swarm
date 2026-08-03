@@ -99,6 +99,7 @@ type gateRecoveryDecisionStore interface {
 	decisioncard.ProposedEffectStore
 	decisioncard.HumanTaskStore
 	decisioncard.HumanTaskExpiryStore
+	runtimepipeline.HumanTaskExpiry
 	ExpireDecisionCardInputDrafts(context.Context, time.Time) (int, error)
 }
 

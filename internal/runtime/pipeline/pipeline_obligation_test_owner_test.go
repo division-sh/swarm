@@ -149,8 +149,11 @@ func (*unavailablePipelineTestDecisionCardDraftExpiry) ExpireDecisionCardInputDr
 
 type unavailablePipelineTestHumanTaskExpiry struct{}
 
-func (*unavailablePipelineTestHumanTaskExpiry) ExpireHumanTaskCardsInMutation(context.Context, time.Time, int) ([]events.Event, error) {
+func (*unavailablePipelineTestHumanTaskExpiry) ListDueHumanTaskExpiryEvents(context.Context, time.Time, int) ([]events.Event, error) {
 	return nil, nil
+}
+func (*unavailablePipelineTestHumanTaskExpiry) CommitHumanTaskExpirations(context.Context, HumanTaskExpiryCommand) (CommittedHumanTaskExpiry, error) {
+	return CommittedHumanTaskExpiry{}, errors.New("human-task expiry is unavailable")
 }
 
 type unavailablePipelineTestGatePublisher struct{ WorkflowGateMutationPublisher }

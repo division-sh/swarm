@@ -39,33 +39,40 @@ func (s *workflowInstanceStore) commitGateDecision(ctx context.Context, card dec
 	if err != nil {
 		return err
 	}
-	return s.mutateE(ctx, anchor.Route, func(instance *WorkflowInstance) error {
-		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
-		if err != nil {
-			return err
-		}
-		activation, found, err := gateruntime.Load(carrier.StateBuckets, anchor.FlowID, card.Snapshot.Decision)
-		if err != nil {
-			return err
-		}
-		if !found {
-			return fmt.Errorf("decision card is superseded by the current stage activation")
-		}
-		if err := validateStageGateInstanceOwner(anchor, *instance, activation); err != nil {
-			return err
-		}
-		if activation.ActivationID != anchor.StageActivationID || activation.CardID != card.CardID || activation.Stage != anchor.Stage || instance.CurrentState != anchor.Stage {
-			return fmt.Errorf("decision card is superseded by the current stage activation")
-		}
-		if err := activation.CommitDecision(eventID, now); err != nil {
-			return err
-		}
-		if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
-			return err
-		}
-		instance.StateBuckets = carrier.PersistedStateBuckets()
-		return nil
-	})
+	if s.engineMutations == nil {
+		return fmt.Errorf("gate decision requires the selected workflow engine mutation owner")
+	}
+	instance, found, err := s.Load(ctx, anchor.Route)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return &WorkflowInstanceLookupMiss{RequestedKey: anchor.Route.InstancePath}
+	}
+	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
+	if err != nil {
+		return err
+	}
+	activation, found, err := gateruntime.Load(carrier.StateBuckets, anchor.FlowID, card.Snapshot.Decision)
+	if err != nil {
+		return err
+	}
+	if !found || activation.ActivationID != anchor.StageActivationID || activation.CardID != card.CardID || activation.Stage != anchor.Stage || instance.CurrentState != anchor.Stage {
+		return fmt.Errorf("decision card is superseded by the current stage activation")
+	}
+	if err := activation.CommitDecision(eventID, now); err != nil {
+		return err
+	}
+	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
+		return err
+	}
+	instance.StateBuckets = carrier.PersistedStateBuckets()
+	record, err := workflowEngineStateRecord(card.RunID, anchor.Route, instance, instance.CurrentState, instance.Revision, false, now.UTC())
+	if err != nil {
+		return err
+	}
+	_, err = s.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{State: record})
+	return err
 }
 
 func (s *workflowInstanceStore) RequireGateRouteAdmitted(ctx context.Context, runID string) error {
