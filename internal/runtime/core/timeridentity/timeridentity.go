@@ -227,6 +227,7 @@ type TimerHandle struct {
 }
 
 type JoinRef struct {
+	FlowID       string
 	NodeID       string
 	HandlerEvent string
 	Stage        string
@@ -433,8 +434,9 @@ func ParseTimerHandle(payload map[string]any) (TimerHandle, bool) {
 	}
 }
 
-func NewJoinRef(nodeID, handlerEvent, stage, joinID, window string) JoinRef {
+func NewJoinRef(flowID, nodeID, handlerEvent, stage, joinID, window string) JoinRef {
 	return JoinRef{
+		FlowID:       strings.TrimSpace(flowID),
 		NodeID:       strings.TrimSpace(nodeID),
 		HandlerEvent: strings.TrimSpace(handlerEvent),
 		Stage:        strings.TrimSpace(stage),
@@ -443,14 +445,14 @@ func NewJoinRef(nodeID, handlerEvent, stage, joinID, window string) JoinRef {
 	}
 }
 
-func NewJoinRefForGeneration(nodeID, handlerEvent, stage, joinID, window string, generation attemptgeneration.Generation) JoinRef {
-	ref := NewJoinRef(nodeID, handlerEvent, stage, joinID, window)
+func NewJoinRefForGeneration(flowID, nodeID, handlerEvent, stage, joinID, window string, generation attemptgeneration.Generation) JoinRef {
+	ref := NewJoinRef(flowID, nodeID, handlerEvent, stage, joinID, window)
 	ref.Generation = generation.Normalize()
 	return ref
 }
 
 func (r JoinRef) Normalize() JoinRef {
-	return NewJoinRefForGeneration(r.NodeID, r.HandlerEvent, r.Stage, r.JoinID, r.Window, r.Generation)
+	return NewJoinRefForGeneration(r.FlowID, r.NodeID, r.HandlerEvent, r.Stage, r.JoinID, r.Window, r.Generation)
 }
 
 func (r JoinRef) Valid() bool {
@@ -463,7 +465,7 @@ func (r JoinRef) Key() string {
 	if !r.Valid() {
 		return ""
 	}
-	parts := []string{r.NodeID, r.HandlerEvent, r.Stage, r.JoinID, r.Window}
+	parts := []string{r.FlowID, r.NodeID, r.HandlerEvent, r.Stage, r.JoinID, r.Window}
 	for i := range parts {
 		parts[i] = base64.RawURLEncoding.EncodeToString([]byte(parts[i]))
 	}
@@ -480,6 +482,7 @@ func (r JoinRef) PayloadValue() map[string]any {
 		return nil
 	}
 	payload := map[string]any{
+		"flow_id":       r.FlowID,
 		"node_id":       r.NodeID,
 		"handler_event": r.HandlerEvent,
 		"stage":         r.Stage,
@@ -505,8 +508,12 @@ func joinRefFromAny(value any) (JoinRef, bool) {
 	if !ok {
 		return JoinRef{}, false
 	}
+	flowID, hasFlowID := raw["flow_id"].(string)
+	if !hasFlowID {
+		return JoinRef{}, false
+	}
 	generation, _ := attemptgeneration.FromPayload(map[string]any{attemptgeneration.PayloadKey: raw[attemptgeneration.PayloadKey]})
-	ref := NewJoinRefForGeneration(asString(raw["node_id"]), asString(raw["handler_event"]), asString(raw["stage"]), asString(raw["join_id"]), asString(raw["window"]), generation)
+	ref := NewJoinRefForGeneration(flowID, asString(raw["node_id"]), asString(raw["handler_event"]), asString(raw["stage"]), asString(raw["join_id"]), asString(raw["window"]), generation)
 	return ref, ref.Valid()
 }
 

@@ -121,14 +121,23 @@ func TestParseAccumulatorBucketKey(t *testing.T) {
 	}
 }
 
-func TestJoinHandleRoundTripIncludesStageIdentity(t *testing.T) {
-	awaiting := JoinTimeoutHandle(NewJoinRef("join-node", "item.completed", "awaiting", "shared", "window-1"))
-	reviewing := JoinTimeoutHandle(NewJoinRef("join-node", "item.completed", "reviewing", "shared", "window-1"))
+func TestJoinHandleRoundTripIncludesOwningFlowAndStageIdentity(t *testing.T) {
+	awaiting := JoinTimeoutHandle(NewJoinRef("orders", "join-node", "item.completed", "awaiting", "shared", "window-1"))
+	reviewing := JoinTimeoutHandle(NewJoinRef("orders", "join-node", "item.completed", "reviewing", "shared", "window-1"))
+	foreignFlow := JoinTimeoutHandle(NewJoinRef("returns", "join-node", "item.completed", "awaiting", "shared", "window-1"))
 	if awaiting.TaskID() == reviewing.TaskID() {
 		t.Fatalf("join task ids collide across stages: %q", awaiting.TaskID())
 	}
+	if awaiting.TaskID() == foreignFlow.TaskID() {
+		t.Fatalf("join task ids collide across owning flows: %q", awaiting.TaskID())
+	}
 	parsed, ok := ParseTimerHandle(awaiting.PayloadMetadata())
-	if !ok || parsed.Join.Stage != "awaiting" || parsed.Join.JoinID != "shared" || parsed.Join.Window != "window-1" {
+	if !ok || parsed.Join.FlowID != "orders" || parsed.Join.Stage != "awaiting" || parsed.Join.JoinID != "shared" || parsed.Join.Window != "window-1" {
 		t.Fatalf("parsed join handle = %#v, %v", parsed, ok)
+	}
+	payload := awaiting.PayloadMetadata()
+	delete(payload["timer_handle"].(map[string]any)["join"].(map[string]any), "flow_id")
+	if parsed, ok := ParseTimerHandle(payload); ok {
+		t.Fatalf("join handle without explicit flow owner parsed as %#v", parsed)
 	}
 }

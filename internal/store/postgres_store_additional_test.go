@@ -1661,21 +1661,20 @@ func TestSchedules_LoadActiveSchedulesDoesNotReconstructTaskIDFromTimerName(t *t
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
-	entityID := uuid.NewString()
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO timers (
-			timer_name, entity_id, flow_instance, fire_event, fire_payload,
+			timer_name, fire_event, fire_payload,
 			routing_source, fire_at, recurring, recurrence_cron, recurrence_interval,
 			owner_node, owner_agent, owner_kind, task_type, status
 		)
 		VALUES (
-			$1, $2::uuid, $3, $4, $5::jsonb,
-			jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'review', 'flow_instance', $3::text, 'entity_id', $2::text)),
-			$6, false, NULL, NULL,
-			NULL, $7, 'system', 'timer', 'active'
+			$1, $2, $3::jsonb,
+			jsonb_build_object('kind', 'platform_control'),
+			$4, false, NULL, NULL,
+			NULL, $5, 'system', 'timer', 'active'
 		)
-	`, "timer-a", entityID, "review/inst-1", "timer.validation_timeout", `{"timer_id":"timer-a"}`, time.Now().Add(30*time.Minute).UTC(), "validation-orchestrator"); err != nil {
+	`, "timer-a", "timer.validation_timeout", `{"timer_id":"timer-a"}`, time.Now().Add(30*time.Minute).UTC(), "validation-orchestrator"); err != nil {
 		t.Fatalf("seed exact timer row: %v", err)
 	}
 
