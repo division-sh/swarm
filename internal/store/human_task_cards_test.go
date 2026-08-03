@@ -95,6 +95,65 @@ func TestHumanTaskDecisionAndBudgetLifecycleParity(t *testing.T) {
 	}
 }
 
+func TestHumanTaskMutationsRejectForeignRequesterOwnerBeforeStateChange(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
+			cardStore, runID := decisionCardTestStore(t, backend)
+			humanStore := cardStore.(decisioncard.HumanTaskStore)
+			expiryStore := cardStore.(decisioncard.HumanTaskExpiryStore)
+			db, postgres := decisionCardStoreDB(t, cardStore)
+			now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+			card, continuation := newHumanTaskDecisionCardTestFixture(t, runID, "foreign-requester-owner", now, 0, now.Add(time.Hour))
+			if err := humanStore.CreateHumanTaskCard(ctx, card, continuation); err != nil {
+				t.Fatalf("CreateHumanTaskCard: %v", err)
+			}
+
+			query := `UPDATE human_task_continuations SET requester_entity_id = ? WHERE card_id = ?`
+			if postgres {
+				query = `UPDATE human_task_continuations SET requester_entity_id = $1::uuid WHERE card_id = $2`
+			}
+			if _, err := db.ExecContext(ctx, query, uuid.NewString(), card.CardID); err != nil {
+				t.Fatalf("tamper requester owner: %v", err)
+			}
+
+			if _, err := cardStore.DecideDecisionCard(ctx, decisioncard.DecideRequest{
+				CardID: card.CardID, Verdict: "approve", ActorTokenID: "operator-a",
+				ObservedContentHash: card.CardContentHash, DecisionEventID: uuid.NewString(), Now: now.Add(2 * time.Hour),
+			}); err == nil || !strings.Contains(err.Error(), "requester owner") {
+				t.Fatalf("DecideDecisionCard foreign owner error = %v", err)
+			}
+			if _, err := cardStore.DeferDecisionCard(ctx, decisioncard.DeferRequest{
+				CardID: card.CardID, ActorTokenID: "operator-a", Until: now.Add(4 * time.Hour), Now: now.Add(2 * time.Hour),
+			}); err == nil || !strings.Contains(err.Error(), "requester owner") {
+				t.Fatalf("DeferDecisionCard foreign owner error = %v", err)
+			}
+			if err := runDecisionCardTestPipelineMutation(t, ctx, cardStore, func(txctx context.Context, _ *sql.Tx) error {
+				_, err := expiryStore.ExpireHumanTaskCardsInMutation(txctx, now.Add(2*time.Hour), 10)
+				return err
+			}); err == nil || !strings.Contains(err.Error(), "requester owner") {
+				t.Fatalf("ExpireHumanTaskCardsInMutation foreign owner error = %v", err)
+			}
+
+			persistedCard, err := cardStore.GetDecisionCard(ctx, card.CardID)
+			if err != nil {
+				t.Fatalf("GetDecisionCard: %v", err)
+			}
+			persistedContinuation, err := humanStore.LoadHumanTaskContinuation(ctx, card.CardID)
+			if err != nil {
+				t.Fatalf("LoadHumanTaskContinuation: %v", err)
+			}
+			if persistedCard.Status != decisioncard.StatusPending || persistedCard.DecisionEventID != "" || !persistedCard.DeferredUntil.IsZero() {
+				t.Fatalf("foreign owner changed card = %#v", persistedCard)
+			}
+			if persistedContinuation.State != decisioncard.HumanTaskContinuationPending || persistedContinuation.OutcomeEventID != "" ||
+				persistedContinuation.RequeueCount != 0 || !persistedContinuation.DeferredUntil.IsZero() {
+				t.Fatalf("foreign owner changed continuation = %#v", persistedContinuation)
+			}
+		})
+	}
+}
+
 func TestNormalRunCompletionRequiresSettledHumanTasksParity(t *testing.T) {
 	testCases := []struct {
 		name          string

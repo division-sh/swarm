@@ -37,9 +37,6 @@ func (s *workflowInstanceStore) commitGateDecision(ctx context.Context, card dec
 		return err
 	}
 	return s.mutateE(ctx, anchor.EntityID, func(instance *WorkflowInstance) error {
-		if err := validateStageGateInstanceOwner(anchor, *instance); err != nil {
-			return err
-		}
 		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 		if err != nil {
 			return err
@@ -48,7 +45,13 @@ func (s *workflowInstanceStore) commitGateDecision(ctx context.Context, card dec
 		if err != nil {
 			return err
 		}
-		if !found || activation.ActivationID != anchor.StageActivationID || activation.CardID != card.CardID || activation.Stage != anchor.Stage || instance.CurrentState != anchor.Stage {
+		if !found {
+			return fmt.Errorf("decision card is superseded by the current stage activation")
+		}
+		if err := validateStageGateInstanceOwner(anchor, *instance, activation); err != nil {
+			return err
+		}
+		if activation.ActivationID != anchor.StageActivationID || activation.CardID != card.CardID || activation.Stage != anchor.Stage || instance.CurrentState != anchor.Stage {
 			return fmt.Errorf("decision card is superseded by the current stage activation")
 		}
 		if err := activation.CommitDecision(eventID, now); err != nil {
