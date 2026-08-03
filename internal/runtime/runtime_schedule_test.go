@@ -80,7 +80,7 @@ func TestScheduleEventPayloadRejectsRetiredAccumulationTimeoutHandle(t *testing.
 }
 
 func TestScheduleEventPayloadPreservesJoinTimeoutHandle(t *testing.T) {
-	handle := timeridentity.JoinTimeoutHandle(timeridentity.NewJoinRef("collector", "item.arrived", "awaiting", "items", "window-1"))
+	handle := timeridentity.JoinTimeoutHandle(timeridentity.NewJoinRef("", "collector", "item.arrived", "awaiting", "items", "window-1"))
 	raw, err := json.Marshal(handle.PayloadMetadata())
 	if err != nil {
 		t.Fatalf("Marshal(join handle): %v", err)
@@ -714,8 +714,7 @@ func TestNewRuntime_SchedulerMarksSchedulesFiredThroughCanonicalTerminalHelper(t
 		Mode:          "once",
 		TaskID:        "check_timer",
 		At:            time.Now().Add(10 * time.Millisecond),
-		EntityID:      "ent-001",
-		RoutingSource: mustRuntimeRootScheduleSource(t, "ent-001"),
+		RoutingSource: events.NewPlatformControlRoutingSource(),
 	}
 	if err := rt.Scheduler.Register(context.Background(), sc); err != nil {
 		t.Fatalf("Register(schedule): %v", err)
@@ -746,7 +745,8 @@ func TestRuntime_StartRestoresExactSchedulesDistinctByFlowInstance(t *testing.T)
 		active: []runtimepipeline.Schedule{
 			{
 				AgentID:       "runtime",
-				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+				OwnerKind:     runtimepipeline.ScheduleOwnerAgent,
+				AgentIdentity: agentidentitytest.Runtime(t, "runtime", "schedule-restore", "review", "inst-1", "review/inst-1"),
 				EventType:     "timer.check",
 				Mode:          "once",
 				At:            time.Now().Add(25 * time.Millisecond),
@@ -758,7 +758,8 @@ func TestRuntime_StartRestoresExactSchedulesDistinctByFlowInstance(t *testing.T)
 			},
 			{
 				AgentID:       "runtime",
-				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+				OwnerKind:     runtimepipeline.ScheduleOwnerAgent,
+				AgentIdentity: agentidentitytest.Runtime(t, "runtime", "schedule-restore", "review", "inst-2", "review/inst-2"),
 				EventType:     "timer.check",
 				Mode:          "once",
 				At:            time.Now().Add(50 * time.Millisecond),

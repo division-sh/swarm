@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -1249,6 +1250,9 @@ func (sc Schedule) ValidateRoutingSource() error {
 		if route.EntityID != sc.EntityID || sc.FlowInstance != "" {
 			return errors.New("root-owned schedule routing source does not match its persisted entity scope")
 		}
+		if sc.OwnerKind == ScheduleOwnerSystem {
+			return sc.validateSystemJoinDeclaration()
+		}
 	case events.RoutingSourceFlowOwnedControl:
 		route := sc.RoutingSource.Route()
 		if route.FlowInstance != sc.FlowInstance || route.EntityID != sc.EntityID {
@@ -1259,6 +1263,8 @@ func (sc Schedule) ValidateRoutingSource() error {
 			if !present || route.FlowID != flowScopeKey {
 				return errors.New("flow-owned schedule routing source does not match its concrete agent flow scope")
 			}
+		} else if sc.OwnerKind == ScheduleOwnerSystem {
+			return sc.validateSystemJoinDeclaration()
 		}
 	case events.RoutingSourcePlatformControl:
 		if sc.OwnerKind != ScheduleOwnerSystem || sc.EntityID != "" || sc.FlowInstance != "" {
@@ -1266,6 +1272,36 @@ func (sc Schedule) ValidateRoutingSource() error {
 		}
 	default:
 		return errors.New("schedule requires an exact flow-owned or platform-control routing source")
+	}
+	return nil
+}
+
+func (sc Schedule) validateSystemJoinDeclaration() error {
+	var payload map[string]any
+	if err := json.Unmarshal(sc.Payload, &payload); err != nil || payload == nil {
+		return errors.New("flow- or root-owned system schedule requires a join timer handle")
+	}
+	ref, kind, ok := timeridentity.ParseJoinRef(payload)
+	if !ok {
+		return errors.New("flow- or root-owned system schedule requires a valid join timer handle")
+	}
+	handle := timeridentity.JoinTimeoutHandle(ref)
+	expectedEvent := joinTimeoutEvent
+	if kind == timeridentity.TimerHandleJoinComplete {
+		handle = timeridentity.JoinCompleteHandle(ref)
+		expectedEvent = joinCompleteEvent
+	}
+	if strings.TrimSpace(sc.TaskID) != handle.TaskID() {
+		return errors.New("system join schedule task identity does not match its timer handle")
+	}
+	if strings.TrimSpace(sc.AgentID) != runtimeWorkflowID {
+		return errors.New("system join schedule owner does not match the workflow runtime")
+	}
+	if strings.TrimSpace(sc.EventType) != expectedEvent {
+		return errors.New("system join schedule event does not match its timer handle")
+	}
+	if sc.RoutingSource.Route().FlowID != ref.FlowID {
+		return errors.New("system join schedule source flow does not match its timer handle")
 	}
 	return nil
 }

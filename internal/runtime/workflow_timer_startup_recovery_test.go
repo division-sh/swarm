@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -167,7 +168,8 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 			schedule := runtimepipeline.Schedule{
 				RunID:         runID,
 				AgentID:       "runtime",
-				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+				OwnerKind:     runtimepipeline.ScheduleOwnerAgent,
+				AgentIdentity: agentidentitytest.RootRuntime(t, "runtime", "generic-occurrence-proof"),
 				EventType:     "generic.tick",
 				Mode:          "once",
 				At:            occurrence.DueAt,

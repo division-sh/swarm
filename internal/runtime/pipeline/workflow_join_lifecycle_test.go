@@ -414,7 +414,9 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
 			now := time.Now().UTC()
-			activation, err := joinruntime.NewActivation("awaiting", "awaiting", "join-node", "item.completed", "", []string{"a"}, now, now.Add(time.Hour), "join-timeout", joinTimeoutEvent)
+			ref := timeridentity.NewJoinRef("", "join-node", "item.completed", "awaiting", "awaiting", "")
+			handle := timeridentity.JoinTimeoutHandle(ref)
+			activation, err := joinruntime.NewActivation("awaiting", "awaiting", "join-node", "item.completed", "", []string{"a"}, now, now.Add(time.Hour), handle.TaskID(), joinTimeoutEvent)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -427,8 +429,6 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			}
 			handler := bundle.Nodes["join-node"].EventHandlers["item.completed"]
 			member := eventtest.RunCreatingRootIngress("member-a", events.EventType("item.completed"), "", "", json.RawMessage(`{"member_id":"a","result":{"ok":true}}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now)
-			ref := timeridentity.NewJoinRef("join-node", "item.completed", "awaiting", "awaiting", "")
-			handle := timeridentity.JoinTimeoutHandle(ref)
 			timeout := eventtest.RunCreatingRootIngress("timeout-a", events.EventType(joinTimeoutEvent), "", handle.TaskID(), mustJSON(handle.PayloadMetadata()), 0, runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), now.Add(time.Hour))
 			triggerState := pc.currentWorkflowState(ctx, entityID)
 			type raceResult struct {

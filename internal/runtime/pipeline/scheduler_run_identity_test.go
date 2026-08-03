@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/google/uuid"
 )
@@ -17,16 +18,17 @@ func TestSchedulerKeysSchedulesByRunID(t *testing.T) {
 	runA := "11111111-1111-1111-1111-111111111111"
 	runB := "22222222-2222-2222-2222-222222222222"
 	base := Schedule{
-		AgentID:      "agent-a",
-		OwnerKind:    ScheduleOwnerSystem,
-		EventType:    "timer.fire",
-		Mode:         "once",
-		At:           time.Now().Add(time.Hour),
-		EntityID:     "33333333-3333-3333-3333-333333333333",
-		FlowInstance: "flow-a/1",
-		TaskID:       "task-a",
+		AgentID:       "agent-a",
+		OwnerKind:     ScheduleOwnerAgent,
+		AgentIdentity: agentidentitytest.Runtime(t, "agent-a", "schedule-test", "flow-a", "1", "flow-a/1"),
+		EventType:     "timer.fire",
+		Mode:          "once",
+		At:            time.Now().Add(time.Hour),
+		EntityID:      "33333333-3333-3333-3333-333333333333",
+		FlowInstance:  "flow-a/1",
+		TaskID:        "task-a",
 	}
-	base.RoutingSource = mustFlowOwnedScheduleSource(t, base.FlowInstance, base.EntityID)
+	base.RoutingSource = mustFlowOwnedScheduleSourceForFlow(t, "flow-a", base.FlowInstance, base.EntityID)
 	scA := base
 	scA.RunID = runA
 	scB := base
@@ -469,8 +471,10 @@ func TestScheduleRootRoutingSourceRequiresExactEntityScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	handle := timeridentity.JoinTimeoutHandle(timeridentity.NewJoinRef("", "join-node", "item.completed", "awaiting", "items", "window-1"))
 	schedule := Schedule{
-		AgentID: "runtime-workflow", OwnerKind: ScheduleOwnerSystem, EntityID: "entity-root", RoutingSource: source,
+		AgentID: runtimeWorkflowID, OwnerKind: ScheduleOwnerSystem, EventType: joinTimeoutEvent,
+		EntityID: "entity-root", TaskID: handle.TaskID(), Payload: mustJSON(handle.PayloadMetadata()), RoutingSource: source,
 	}
 	if err := schedule.ValidateRoutingSource(); err != nil {
 		t.Fatalf("exact root source: %v", err)
@@ -484,6 +488,54 @@ func TestScheduleRootRoutingSourceRequiresExactEntityScope(t *testing.T) {
 	schedule.FlowInstance = "flow/instance"
 	if err := schedule.ValidateRoutingSource(); err == nil {
 		t.Fatal("root source accepted a flow-scoped schedule")
+	}
+}
+
+func TestScheduleSystemJoinRequiresExactHandleDeclaration(t *testing.T) {
+	const (
+		flowID       = "orders"
+		flowInstance = "orders/instance-1"
+		entityID     = "entity-1"
+	)
+	handle := timeridentity.JoinTimeoutHandle(timeridentity.NewJoinRef(flowID, "join-node", "item.completed", "awaiting", "items", "window-1"))
+	schedule := Schedule{
+		AgentID: runtimeWorkflowID, OwnerKind: ScheduleOwnerSystem, EventType: joinTimeoutEvent,
+		Mode: "once", At: time.Now().Add(time.Hour), EntityID: entityID, FlowInstance: flowInstance,
+		TaskID: handle.TaskID(), Payload: mustJSON(handle.PayloadMetadata()),
+		RoutingSource: mustFlowOwnedScheduleSourceForFlow(t, flowID, flowInstance, entityID),
+	}
+	if _, _, err := validateSchedule(schedule); err != nil {
+		t.Fatalf("exact system join declaration: %v", err)
+	}
+	completeHandle := timeridentity.JoinCompleteHandle(handle.Join)
+	completeSchedule := schedule
+	completeSchedule.EventType = joinCompleteEvent
+	completeSchedule.TaskID = completeHandle.TaskID()
+	completeSchedule.Payload = mustJSON(completeHandle.PayloadMetadata())
+	if _, _, err := validateSchedule(completeSchedule); err != nil {
+		t.Fatalf("exact system join completion declaration: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*Schedule)
+	}{
+		{name: "foreign_flow", mutate: func(sc *Schedule) {
+			sc.RoutingSource = mustFlowOwnedScheduleSourceForFlow(t, "foreign", flowInstance, entityID)
+		}},
+		{name: "foreign_event", mutate: func(sc *Schedule) { sc.EventType = "foreign/work.ready" }},
+		{name: "foreign_task", mutate: func(sc *Schedule) { sc.TaskID = "foreign-task" }},
+		{name: "foreign_owner", mutate: func(sc *Schedule) { sc.AgentID = "foreign-runtime" }},
+		{name: "missing_handle", mutate: func(sc *Schedule) { sc.Payload = []byte(`{}`) }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := schedule
+			tc.mutate(&candidate)
+			if _, _, err := validateSchedule(candidate); err == nil {
+				t.Fatal("system join schedule accepted a declaration mismatch")
+			}
+		})
 	}
 }
 

@@ -117,6 +117,66 @@ func TestAgentScheduleRestoreRejectsForeignRoutingSourceOnBothStores(t *testing.
 	}
 }
 
+func TestSystemJoinScheduleRestoreRejectsForeignDeclarationOnBothStores(t *testing.T) {
+	for _, tc := range selectedScheduleStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, db, ctx := tc.open(t)
+			const (
+				flowID       = "orders"
+				flowInstance = "orders/instance-1"
+			)
+			entityID := uuid.NewString()
+			handle := timeridentity.JoinTimeoutHandle(timeridentity.NewJoinRef(flowID, "join-node", "item.completed", "awaiting", "items", "window-1"))
+			routingSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+				FlowID: flowID, FlowInstance: flowInstance, EntityID: entityID,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			schedule := runtimepipeline.Schedule{
+				RunID: runtimecorrelation.RunIDFromContext(ctx), AgentID: "workflow-runtime", OwnerKind: runtimepipeline.ScheduleOwnerSystem,
+				EventType: "platform.join_timeout", Mode: "once", At: time.Now().UTC().Add(time.Hour),
+				EntityID: entityID, FlowInstance: flowInstance, TaskID: handle.TaskID(), Payload: mustJSONForStoreTest(t, handle.PayloadMetadata()),
+				RoutingSource: routingSource,
+			}
+			if err := selected.UpsertSchedule(ctx, schedule); err != nil {
+				t.Fatalf("persist system join schedule: %v", err)
+			}
+
+			foreignSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+				FlowID: "foreign", FlowInstance: flowInstance, EntityID: entityID,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := json.Marshal(foreignSource)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := selected.(*SQLiteRuntimeStore); ok {
+				_, err = db.ExecContext(ctx, `UPDATE timers SET routing_source = ?, fire_event = ? WHERE run_id = ?`, raw, "foreign/work.ready", schedule.RunID)
+			} else {
+				_, err = db.ExecContext(ctx, `UPDATE timers SET routing_source = $1::jsonb, fire_event = $2 WHERE run_id = $3::uuid`, raw, "foreign/work.ready", schedule.RunID)
+			}
+			if err != nil {
+				t.Fatalf("install foreign join declaration: %v", err)
+			}
+			if active, err := selected.LoadActiveSchedules(ctx); err == nil {
+				t.Fatalf("restored foreign system join schedule = %#v, want rejection", active)
+			}
+		})
+	}
+}
+
+func mustJSONForStoreTest(t testing.TB, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal test value: %v", err)
+	}
+	return raw
+}
+
 func TestGenericScheduleAPIsCannotInterpretWorkflowTimerFamilyOnBothStores(t *testing.T) {
 	for _, tc := range selectedScheduleStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {

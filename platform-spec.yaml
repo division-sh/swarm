@@ -4965,7 +4965,11 @@ engine:
       the selected mutation can commit: either a durable generic schedule store or a process scheduler. If neither capability
       is present, generic schedule persistence fails closed and the containing join activation mutation rolls back. A
       durable-store-only path may commit for later canonical restoration; a process-scheduler-only path may own the local
-      occurrence. Missing ownership is never treated as successful scheduling.
+      occurrence. Missing ownership is never treated as successful scheduling. Every root- or flow-owned system join
+      schedule carries one canonical timer handle whose identity includes the owning flow (empty only for root), node,
+      handler event, stage, join, window, generation, and timeout/completion kind. Generic schedule admission and restoration
+      require the persisted task ID, workflow-runtime owner, fire event, and routing-source flow to agree exactly with that
+      handle; durable scope fields or a valid routing-source shape alone never authorize a join timer.
     recovery: >-
       Restart, replay, and fork consume persisted members/window/close/timer facts. They do not re-read mutable entity
       membership, synthesize an arrival-owned activation, or resurrect a closed timeout.

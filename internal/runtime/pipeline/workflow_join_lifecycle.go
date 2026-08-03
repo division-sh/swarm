@@ -96,7 +96,7 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, ent
 			if !ok {
 				return fmt.Errorf("join %s timeout.after %q did not resolve to a positive duration", plan.Spec.EffectiveID(), plan.Spec.Timeout.After)
 			}
-			ref := timeridentity.NewJoinRefForGeneration(plan.NodeID, plan.HandlerEvent, plan.Spec.Stage, plan.Spec.EffectiveID(), window, generation)
+			ref := timeridentity.NewJoinRefForGeneration(plan.FlowID, plan.NodeID, plan.HandlerEvent, plan.Spec.Stage, plan.Spec.EffectiveID(), window, generation)
 			handle := timeridentity.JoinTimeoutHandle(ref)
 			activation, err := joinruntime.NewActivation(
 				plan.Spec.EffectiveID(), plan.Spec.Stage, plan.NodeID, plan.HandlerEvent, window, members,
@@ -258,12 +258,21 @@ func joinTopLevelField(path, root string) string {
 }
 
 func joinSchedule(source semanticview.Source, flowID, entityID string, instance WorkflowInstance, activation joinruntime.Activation, kind timeridentity.TimerHandleKind) (Schedule, error) {
-	ref := timeridentity.NewJoinRefForGeneration(activation.NodeID, activation.HandlerEvent, activation.Stage, activation.JoinID, activation.Window, activation.Generation)
-	handle := timeridentity.JoinTimeoutHandle(ref)
-	eventType := joinTimeoutEvent
-	if kind == timeridentity.TimerHandleJoinComplete {
+	ref := timeridentity.NewJoinRefForGeneration(flowID, activation.NodeID, activation.HandlerEvent, activation.Stage, activation.JoinID, activation.Window, activation.Generation)
+	var handle timeridentity.TimerHandle
+	var eventType string
+	switch kind {
+	case timeridentity.TimerHandleJoinTimeout:
+		handle = timeridentity.JoinTimeoutHandle(ref)
+		eventType = joinTimeoutEvent
+	case timeridentity.TimerHandleJoinComplete:
 		handle = timeridentity.JoinCompleteHandle(ref)
 		eventType = joinCompleteEvent
+	default:
+		return Schedule{}, fmt.Errorf("join schedule handle kind %q is invalid", kind)
+	}
+	if activation.TimerTaskID != handle.TaskID() || activation.TimerEventType != eventType {
+		return Schedule{}, fmt.Errorf("join schedule declaration does not match persisted activation")
 	}
 	payload := handle.PayloadMetadata()
 	if generation := activation.Generation.Normalize(); generation.Valid() {
