@@ -23,6 +23,7 @@ import (
 
 func newTestWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 	store := NewPostgresWorkflowPersistence(db, &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectPostgres}).store
+	store.timerActivations = pipelineTestWorkflowTimerPersistence{store: store}
 	store.runLifecycle = &unavailablePipelineTestRunLifecycle{}
 	store.timerObligations = pipelineTestTimerObligationReader{db: db, dialect: timerobligationadapter.DialectPostgres}
 	return installPipelineTestActivityJournal(store)
@@ -31,6 +32,7 @@ func newTestWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 func newTestSQLiteWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 	reader := &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite}
 	store := NewSQLiteWorkflowPersistence(db, reader).store
+	store.timerActivations = pipelineTestWorkflowTimerPersistence{store: store}
 	store.runLifecycle = &unavailablePipelineTestRunLifecycle{}
 	store.timerObligations = pipelineTestTimerObligationReader{db: db, dialect: timerobligationadapter.DialectSQLite}
 	return installPipelineTestActivityJournal(store)
@@ -38,6 +40,11 @@ func newTestSQLiteWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 
 func newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, runner runtimeMutationRunner) *workflowInstanceStore {
 	store := NewSQLiteWorkflowPersistence(db, runner).store
+	if owner, ok := runner.(WorkflowTimerActivationPersistence); ok {
+		store.timerActivations = owner
+	} else {
+		store.timerActivations = pipelineTestWorkflowTimerPersistence{store: store}
+	}
 	if owner, ok := runner.(WorkflowInstancePersistenceReader); ok {
 		store.instanceReader = owner
 	} else {
@@ -56,6 +63,53 @@ func newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, run
 		store.runLifecycle = &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite}
 	}
 	return installPipelineTestActivityJournal(store)
+}
+
+type pipelineTestWorkflowTimerPersistence struct {
+	store *workflowInstanceStore
+}
+
+func (p pipelineTestWorkflowTimerPersistence) LoadWorkflowTimerActivation(ctx context.Context, activationID string) (WorkflowTimerActivation, bool, error) {
+	return p.store.loadWorkflowTimerActivation(ctx, activationID, false)
+}
+
+func (p pipelineTestWorkflowTimerPersistence) ListWorkflowTimerActivations(ctx context.Context, runID, entityID string, activeOnly bool) ([]WorkflowTimerActivation, error) {
+	return p.store.listWorkflowTimerActivations(ctx, runID, entityID, activeOnly)
+}
+
+func (p pipelineTestWorkflowTimerPersistence) CommitWorkflowTimerReconciliation(ctx context.Context, command WorkflowTimerReconciliationCommand) (CommittedWorkflowLifecycleMutation, error) {
+	if err := command.Validate(); err != nil {
+		return CommittedWorkflowLifecycleMutation{}, err
+	}
+	result := CommittedWorkflowLifecycleMutation{}
+	err := p.store.runPipelineMutation(ctx, func(txctx context.Context) error {
+		for _, mutation := range command.Plan.Timers {
+			switch mutation.Kind {
+			case WorkflowTimerMutationInsert:
+				persisted, _, err := p.store.insertWorkflowTimerActivation(txctx, mutation.Activation)
+				if err != nil {
+					return err
+				}
+				result.Wakeups = append(result.Wakeups, persisted.Ref)
+			case WorkflowTimerMutationCancel:
+				persisted, changed, err := p.store.cancelWorkflowTimerActivation(txctx, mutation.Activation.Ref)
+				if err != nil {
+					return err
+				}
+				if changed {
+					result.Cancellations = append(result.Cancellations, persisted.Ref)
+				}
+			}
+		}
+		if command.Plan.RequestCompletionCandidate {
+			return p.store.requestRunCompletionCandidate(txctx, command.RunID)
+		}
+		return nil
+	})
+	if err != nil {
+		return CommittedWorkflowLifecycleMutation{}, err
+	}
+	return result, result.Validate()
 }
 
 type pipelineTestTimerObligationReader struct {

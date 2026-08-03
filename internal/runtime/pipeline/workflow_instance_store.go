@@ -229,6 +229,7 @@ type workflowInstanceStore struct {
 	engineMutations  WorkflowEngineMutationOwner
 	cardMutations    DecisionCardMutationOwner
 	timerOccurrences WorkflowTimerOccurrenceOwner
+	timerActivations WorkflowTimerActivationPersistence
 	decisionRoutes   WorkflowDecisionRouteOwner
 	instanceReader   WorkflowInstancePersistenceReader
 	initialCommits   WorkflowInitialMaterializationCommitOwner
@@ -298,10 +299,11 @@ func NewPostgresWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) Wo
 	engineMutations, _ := runner.(WorkflowEngineMutationOwner)
 	cardMutations, _ := runner.(DecisionCardMutationOwner)
 	timerOccurrences, _ := runner.(WorkflowTimerOccurrenceOwner)
+	timerActivations, _ := runner.(WorkflowTimerActivationPersistence)
 	decisionRoutes, _ := runner.(WorkflowDecisionRouteOwner)
 	instanceReader, _ := runner.(WorkflowInstancePersistenceReader)
 	initialCommits, _ := runner.(WorkflowInitialMaterializationCommitOwner)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations, cardMutations: cardMutations, timerOccurrences: timerOccurrences, decisionRoutes: decisionRoutes, instanceReader: instanceReader, initialCommits: initialCommits}}
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations, cardMutations: cardMutations, timerOccurrences: timerOccurrences, timerActivations: timerActivations, decisionRoutes: decisionRoutes, instanceReader: instanceReader, initialCommits: initialCommits}}
 }
 
 func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) WorkflowPersistence {
@@ -314,10 +316,11 @@ func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) Work
 	engineMutations, _ := runner.(WorkflowEngineMutationOwner)
 	cardMutations, _ := runner.(DecisionCardMutationOwner)
 	timerOccurrences, _ := runner.(WorkflowTimerOccurrenceOwner)
+	timerActivations, _ := runner.(WorkflowTimerActivationPersistence)
 	decisionRoutes, _ := runner.(WorkflowDecisionRouteOwner)
 	instanceReader, _ := runner.(WorkflowInstancePersistenceReader)
 	initialCommits, _ := runner.(WorkflowInitialMaterializationCommitOwner)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations, cardMutations: cardMutations, timerOccurrences: timerOccurrences, decisionRoutes: decisionRoutes, instanceReader: instanceReader, initialCommits: initialCommits}}
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations, cardMutations: cardMutations, timerOccurrences: timerOccurrences, timerActivations: timerActivations, decisionRoutes: decisionRoutes, instanceReader: instanceReader, initialCommits: initialCommits}}
 }
 
 func (p WorkflowPersistence) empty() bool {
@@ -584,9 +587,7 @@ func (s *workflowInstanceStore) ReconcileInitialEntryTimers(ctx context.Context,
 	if !route.Valid() {
 		return fmt.Errorf("workflow initial timer reconciliation requires instance identity")
 	}
-	return s.runPipelineMutation(ctx, func(txctx context.Context) error {
-		return s.lifecycleOwner.ReconcileInitialEntryTimers(txctx, route)
-	})
+	return s.lifecycleOwner.ReconcileInitialEntryTimers(ctx, route)
 }
 
 // RetireInitialEntryTimerWakeups withdraws and joins the exact process-local

@@ -239,7 +239,7 @@ func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Conte
 	if runID == "" || entityID == "" {
 		return fmt.Errorf("loop artifact reconciliation requires exact run and entity identity")
 	}
-	active, err := pc.workflowStore.listWorkflowTimerActivations(ctx, runID, entityID, true)
+	active, err := pc.workflowStore.listPersistedWorkflowTimerActivations(ctx, runID, entityID, true)
 	if err != nil {
 		return err
 	}
@@ -348,7 +348,7 @@ func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, inst
 	if runID == "" {
 		return fmt.Errorf("workflow timer lifecycle requires run identity")
 	}
-	active, err := pc.workflowStore.listWorkflowTimerActivations(ctx, runID, entityID, true)
+	active, err := pc.workflowStore.listPersistedWorkflowTimerActivations(ctx, runID, entityID, true)
 	if err != nil {
 		return err
 	}

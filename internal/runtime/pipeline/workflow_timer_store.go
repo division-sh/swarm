@@ -47,6 +47,91 @@ type WorkflowTimerActivation struct {
 	ReconstructionOwner string
 }
 
+// WorkflowTimerActivationPersistenceRecord is the exact primitive record read
+// by a selected-store adapter. Semantic task identity is decoded only here,
+// not by SQL adapters.
+type WorkflowTimerActivationPersistenceRecord struct {
+	ActivationID        string
+	TaskID              string
+	RunID               string
+	EntityID            string
+	Route               runtimeflowidentity.Route
+	EventType           string
+	Payload             []byte
+	FireAt              time.Time
+	Recurring           bool
+	RecurrenceInterval  string
+	OwnerNode           string
+	OwnerAgent          string
+	TaskType            string
+	Status              string
+	FiredAt             time.Time
+	CreatedAt           time.Time
+	SourceTimerID       string
+	ForkedFromRunID     string
+	ForkedFromEventID   string
+	ReconstructionOwner string
+}
+
+func DecodeWorkflowTimerActivationPersistenceRecord(record WorkflowTimerActivationPersistenceRecord) (WorkflowTimerActivation, error) {
+	if strings.TrimSpace(record.TaskType) != workflowTimerTaskFamily {
+		return WorkflowTimerActivation{}, fmt.Errorf("timer row %s is not a workflow timer family", record.ActivationID)
+	}
+	ref, ok := timeridentity.ParseWorkflowTimerActivationTaskID(record.TaskID)
+	if !ok || ref.ActivationID != strings.TrimSpace(record.ActivationID) {
+		return WorkflowTimerActivation{}, fmt.Errorf("timer row %s has invalid workflow activation discriminator", record.ActivationID)
+	}
+	if strings.TrimSpace(record.OwnerNode) != "" || strings.TrimSpace(record.OwnerAgent) == "" {
+		return WorkflowTimerActivation{}, fmt.Errorf("workflow timer %s has invalid owner columns", record.ActivationID)
+	}
+	activation := WorkflowTimerActivation{
+		Ref: ref, RunID: record.RunID, EntityID: record.EntityID, Route: record.Route,
+		OwnerAgent: record.OwnerAgent, EventType: record.EventType, Payload: record.Payload,
+		FireAt: record.FireAt, Recurring: record.Recurring, Status: record.Status,
+		FiredAt: record.FiredAt, CreatedAt: record.CreatedAt, SourceTimerID: record.SourceTimerID,
+		ForkedFromRunID: record.ForkedFromRunID, ForkedFromEventID: record.ForkedFromEventID,
+		ReconstructionOwner: record.ReconstructionOwner,
+	}
+	if interval := strings.TrimSpace(record.RecurrenceInterval); interval != "" {
+		value, ok := timeridentity.ParseDelayDuration(interval)
+		if !ok {
+			return WorkflowTimerActivation{}, fmt.Errorf("workflow timer %s has invalid recurrence interval %q", record.ActivationID, interval)
+		}
+		activation.RecurrenceInterval = value
+	}
+	activation = activation.normalized()
+	if err := activation.validate(); err != nil {
+		return WorkflowTimerActivation{}, err
+	}
+	return activation, nil
+}
+
+// WorkflowTimerActivationPersistence is the selected-store owner for durable
+// timer activation readback and declaration reconciliation. It exposes no
+// transaction, query executor, or executable post-commit callback.
+type WorkflowTimerActivationPersistence interface {
+	LoadWorkflowTimerActivation(context.Context, string) (WorkflowTimerActivation, bool, error)
+	ListWorkflowTimerActivations(context.Context, string, string, bool) ([]WorkflowTimerActivation, error)
+	CommitWorkflowTimerReconciliation(context.Context, WorkflowTimerReconciliationCommand) (CommittedWorkflowLifecycleMutation, error)
+}
+
+type WorkflowTimerReconciliationCommand struct {
+	RunID    string
+	Route    runtimeflowidentity.Route
+	EntityID string
+	Plan     WorkflowLifecycleMutationPlan
+}
+
+func (c WorkflowTimerReconciliationCommand) Validate() error {
+	c.RunID = strings.TrimSpace(c.RunID)
+	c.EntityID = strings.TrimSpace(c.EntityID)
+	c.Route = runtimeflowidentity.StoredRoute(c.Route.ScopeKey, c.Route.InstanceID, c.Route.InstancePath)
+	if len(c.Plan.Schedules) != 0 || len(c.Plan.GateCards) != 0 {
+		return fmt.Errorf("workflow timer reconciliation may contain only timer mutations")
+	}
+	return c.Plan.Validate(c.RunID, c.Route, c.EntityID)
+}
+
 func (a WorkflowTimerActivation) Canonical() WorkflowTimerActivation { return a.normalized() }
 
 func (a WorkflowTimerActivation) Validate() error { return a.validate() }
@@ -172,6 +257,20 @@ func canonicalWorkflowTimerTime(value time.Time) time.Time {
 		return time.Time{}
 	}
 	return value.UTC().Truncate(time.Microsecond)
+}
+
+func (s *workflowInstanceStore) loadPersistedWorkflowTimerActivation(ctx context.Context, activationID string) (WorkflowTimerActivation, bool, error) {
+	if s == nil || s.timerActivations == nil {
+		return WorkflowTimerActivation{}, false, fmt.Errorf("workflow timer activation reader is required")
+	}
+	return s.timerActivations.LoadWorkflowTimerActivation(ctx, activationID)
+}
+
+func (s *workflowInstanceStore) listPersistedWorkflowTimerActivations(ctx context.Context, runID, entityID string, activeOnly bool) ([]WorkflowTimerActivation, error) {
+	if s == nil || s.timerActivations == nil {
+		return nil, fmt.Errorf("workflow timer activation reader is required")
+	}
+	return s.timerActivations.ListWorkflowTimerActivations(ctx, runID, entityID, activeOnly)
 }
 
 func (s *workflowInstanceStore) insertWorkflowTimerActivation(ctx context.Context, activation WorkflowTimerActivation) (WorkflowTimerActivation, bool, error) {
