@@ -10,8 +10,8 @@ import (
 	"time"
 
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
 
 type runLifecycleCandidateSinkRegistry struct {
@@ -53,9 +53,7 @@ func detachedRunLifecycleCandidateContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx = context.WithoutCancel(ctx)
-	ctx = runtimepipeline.WithoutPipelineSQLTxContext(ctx)
-	return runtimepipeline.WithoutPipelineSQLConnContext(ctx)
+	return context.WithoutCancel(ctx)
 }
 
 func reserveRunLifecycleCandidateHandoff(ctx context.Context) (*runLifecycleCandidateHandoffReservation, error) {
@@ -71,12 +69,52 @@ func reserveRunLifecycleCandidateHandoff(ctx context.Context) (*runLifecycleCand
 	return &runLifecycleCandidateHandoffReservation{lease: lease, ctx: detached}, nil
 }
 
+func withRunLifecycleCandidateHandoff(
+	ctx context.Context,
+	fn func(*runLifecycleCandidateHandoffReservation) error,
+) error {
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return err
+	}
+	defer handoff.rollback()
+	if fn != nil {
+		if err := fn(handoff); err != nil {
+			return err
+		}
+	}
+	return handoff.commit()
+}
+
+func withRunLifecycleCandidateHandoffResult[T any](
+	ctx context.Context,
+	fn func(*runLifecycleCandidateHandoffReservation) (T, error),
+) (T, error) {
+	var zero T
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return zero, err
+	}
+	defer handoff.rollback()
+	result, err := fn(handoff)
+	if err != nil {
+		return zero, err
+	}
+	if err := handoff.commit(); err != nil {
+		return zero, err
+	}
+	return result, nil
+}
+
 func (r *runLifecycleCandidateHandoffReservation) prepare(
 	sinks *runLifecycleCandidateSinkRegistry,
 	result runtimerunlifecycle.CandidateRequestResult,
 ) error {
-	if r == nil || !result.RequiresRepresentation() {
+	if !result.RequiresRepresentation() {
 		return nil
+	}
+	if r == nil {
+		return errors.New("completion candidate request requires explicit post-commit handoff ownership")
 	}
 	if err := result.Candidate.Validate(); err != nil {
 		return err
@@ -276,47 +314,19 @@ func (s *SQLiteRuntimeStore) RegisterCompletionCandidateSink(
 	return s.runLifecycleSinks.register(ctx, scope, sink)
 }
 
-func queueCompletionCandidateSignal(
-	ctx context.Context,
-	sinks *runLifecycleCandidateSinkRegistry,
-	candidate runtimerunlifecycle.Candidate,
-) error {
-	if err := candidate.Validate(); err != nil {
-		return err
-	}
-	sink, barrier := sinks.reserve(candidate.BundleHash)
-	if sink == nil {
-		if err := runtimepipeline.QueueRunLifecycleCandidateRegistrationBarrier(ctx, barrier); err != nil {
-			barrier.Settle()
-			return fmt.Errorf("settle completion candidate startup reconciliation: %w", err)
-		}
-		return nil
-	}
-	admission, err := sink.ReserveCompletionCandidate(detachedRunLifecycleCandidateContext(ctx))
-	if err != nil {
-		return fmt.Errorf("reserve completion candidate executor admission: %w", err)
-	}
-	if !runtimepipeline.QueueRunLifecycleCandidateHandoff(ctx, admission, candidate) {
-		_ = admission.Cancel()
-		return errors.New("completion candidate handoff could not reserve runtime work before commit")
-	}
-	return nil
-}
-
 func (s *PostgresStore) requestCompletionCandidateTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	runID string,
 	dueAt *time.Time,
+	handoff *runLifecycleCandidateHandoffReservation,
 ) (runtimerunlifecycle.CandidateRequestResult, error) {
 	result, err := requestPostgresCompletionCandidateTx(ctx, tx, runID, dueAt, false)
 	if err != nil {
 		return runtimerunlifecycle.CandidateRequestResult{}, err
 	}
-	if result.RequiresRepresentation() {
-		if err := queueCompletionCandidateSignal(ctx, &s.runLifecycleSinks, result.Candidate); err != nil {
-			return runtimerunlifecycle.CandidateRequestResult{}, err
-		}
+	if err := handoff.prepare(&s.runLifecycleSinks, result); err != nil {
+		return runtimerunlifecycle.CandidateRequestResult{}, err
 	}
 	return result, nil
 }
@@ -326,15 +336,14 @@ func (s *SQLiteRuntimeStore) requestCompletionCandidateTx(
 	tx *sql.Tx,
 	runID string,
 	dueAt *time.Time,
+	handoff *runLifecycleCandidateHandoffReservation,
 ) (runtimerunlifecycle.CandidateRequestResult, error) {
 	result, err := requestSQLiteCompletionCandidateTx(ctx, tx, runID, dueAt, s.now(), false)
 	if err != nil {
 		return runtimerunlifecycle.CandidateRequestResult{}, err
 	}
-	if result.RequiresRepresentation() {
-		if err := queueCompletionCandidateSignal(ctx, &s.runLifecycleSinks, result.Candidate); err != nil {
-			return runtimerunlifecycle.CandidateRequestResult{}, err
-		}
+	if err := handoff.prepare(&s.runLifecycleSinks, result); err != nil {
+		return runtimerunlifecycle.CandidateRequestResult{}, err
 	}
 	return result, nil
 }
@@ -346,19 +355,24 @@ func (s *PostgresStore) RequestCompletionCandidate(
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return "", errors.New("completion candidate request requires the current named mutation")
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return "", err
 	}
+	defer handoff.rollback()
 	var dueAt *time.Time
 	if request.Timing == runtimerunlifecycle.CandidateAt {
 		dueAt = &request.DueAt
 	}
-	result, err := s.requestCompletionCandidateTx(ctx, tx, request.RunID, dueAt)
+	var result runtimerunlifecycle.CandidateRequestResult
+	err = s.runPostgresRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		result, err = s.requestCompletionCandidateTx(txctx, tx, request.RunID, dueAt, handoff)
+		return err
+	})
 	if err != nil {
 		return "", err
 	}
-	return result.Disposition, nil
+	return result.Disposition, handoff.commit()
 }
 
 func (s *SQLiteRuntimeStore) RequestCompletionCandidate(
@@ -368,19 +382,24 @@ func (s *SQLiteRuntimeStore) RequestCompletionCandidate(
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return "", errors.New("completion candidate request requires the current named mutation")
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return "", err
 	}
+	defer handoff.rollback()
 	var dueAt *time.Time
 	if request.Timing == runtimerunlifecycle.CandidateAt {
 		dueAt = &request.DueAt
 	}
-	result, err := s.requestCompletionCandidateTx(ctx, tx, request.RunID, dueAt)
+	var result runtimerunlifecycle.CandidateRequestResult
+	err = s.runRuntimeMutation(ctx, "sqlite request completion candidate", func(txctx context.Context, tx *sql.Tx) error {
+		result, err = s.requestCompletionCandidateTx(txctx, tx, request.RunID, dueAt, handoff)
+		return err
+	})
 	if err != nil {
 		return "", err
 	}
-	return result.Disposition, nil
+	return result.Disposition, handoff.commit()
 }
 
 func requestPostgresCompletionCandidateTx(
@@ -715,9 +734,9 @@ func (s *PostgresStore) ExecuteCompletionCandidate(
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	var outcome runtimerunlifecycle.CompletionResult
-	err := s.runAuthorActivityMutation(ctx, "postgres execute run completion candidate", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
-		outcome, err = s.executeCompletionCandidateTx(txctx, tx, candidate, catalog)
+		outcome, err = s.executeCompletionCandidateTx(txctx, tx, story, candidate, catalog)
 		return err
 	})
 	return outcome, err
@@ -732,9 +751,9 @@ func (s *SQLiteRuntimeStore) ExecuteCompletionCandidate(
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	var outcome runtimerunlifecycle.CompletionResult
-	err := s.runAuthorActivityMutation(ctx, "sqlite execute run completion candidate", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite execute run completion candidate", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
-		outcome, err = s.executeCompletionCandidateTx(txctx, tx, candidate, catalog)
+		outcome, err = s.executeCompletionCandidateTx(txctx, tx, story, candidate, catalog)
 		return err
 	})
 	return outcome, err
@@ -743,6 +762,7 @@ func (s *SQLiteRuntimeStore) ExecuteCompletionCandidate(
 func (s *PostgresStore) executeCompletionCandidateTx(
 	ctx context.Context,
 	tx *sql.Tx,
+	story *privateauthoractivity.Mutation,
 	candidate runtimerunlifecycle.Candidate,
 	catalog runtimerunlifecycle.TerminalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
@@ -837,7 +857,7 @@ func (s *PostgresStore) executeCompletionCandidateTx(
 			return s.finishBlockedPostgresCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry))
 		}
 	}
-	if _, _, err := s.completeRunTx(ctx, tx, nil, candidate.RunID, selectedNow); err != nil {
+	if _, _, err := s.completeRunTx(ctx, tx, story, candidate.RunID, selectedNow); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeTerminallyEligible}, nil
@@ -868,6 +888,7 @@ func (s *PostgresStore) finishBlockedPostgresCandidate(
 func (s *SQLiteRuntimeStore) executeCompletionCandidateTx(
 	ctx context.Context,
 	tx *sql.Tx,
+	story *privateauthoractivity.Mutation,
 	candidate runtimerunlifecycle.Candidate,
 	catalog runtimerunlifecycle.TerminalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
@@ -963,7 +984,7 @@ func (s *SQLiteRuntimeStore) executeCompletionCandidateTx(
 			return s.finishBlockedSQLiteCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry), selectedNow)
 		}
 	}
-	if _, _, err := s.completeRunTx(ctx, tx, nil, candidate.RunID, selectedNow); err != nil {
+	if _, _, err := s.completeRunTx(ctx, tx, story, candidate.RunID, selectedNow); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeTerminallyEligible}, nil

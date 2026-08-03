@@ -85,6 +85,7 @@ func defaultClaudeAttemptProofSurface() claudeAttemptProofSurface {
 
 type claudeAttemptProofStore interface {
 	runtimebus.EventStore
+	runtimebus.CommitPublicationOwner
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimebus.FlowInstanceRoutePersistence

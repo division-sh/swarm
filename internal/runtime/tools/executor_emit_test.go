@@ -1749,6 +1749,7 @@ func emitRoutePlanTestBundle(flows []emitRoutePlanTestFlow, connects []runtimeco
 		},
 		FlowSchemas: flowSchemas,
 		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:                "root",
 			FlowInputs:          flowInputs,
 			FlowOutputs:         flowOutputs,
 			FlowInputEventPins:  flowInputPins,

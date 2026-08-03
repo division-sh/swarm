@@ -19,9 +19,9 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
@@ -437,11 +437,11 @@ func sourceMutationEvent() events.Event {
 	)
 }
 
-func sourceMutationContext(ctx context.Context, _ any) (context.Context, *[]runtimepipeline.OwnerAction) {
-	rollback := make([]runtimepipeline.OwnerAction, 0, 2)
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 2)
-	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
-	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
+func sourceMutationContext(ctx context.Context, _ any) (context.Context, *[]runtimepipelinefixture.OwnerAction) {
+	rollback := make([]runtimepipelinefixture.OwnerAction, 0, 2)
+	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 2)
+	ctx = runtimepipelinefixture.WithRollbackActions(ctx, &rollback)
+	ctx = runtimepipelinefixture.WithPostCommitActions(ctx, &postCommit)
 	return ctx, &postCommit
 }
 
@@ -517,11 +517,11 @@ func TestAdjacentDurableMutationRootsRejectForeignSourceBeforeMutation(t *testin
 		Identity: runtimeflowidentity.DeriveRoute("work", "instance-a"),
 	}
 
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
-	rollback := make([]runtimepipeline.OwnerAction, 0, 1)
-	routeCtx := runtimepipeline.WithPipelineSQLTxContext(foreignCtx, &sql.Tx{})
-	routeCtx = runtimepipeline.WithPipelinePostCommitActions(routeCtx, &postCommit)
-	routeCtx = runtimepipeline.WithPipelineRollbackActions(routeCtx, &rollback)
+	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
+	rollback := make([]runtimepipelinefixture.OwnerAction, 0, 1)
+	routeCtx := runtimepipelinefixture.WithSQLTx(foreignCtx, &sql.Tx{})
+	routeCtx = runtimepipelinefixture.WithPostCommitActions(routeCtx, &postCommit)
+	routeCtx = runtimepipelinefixture.WithRollbackActions(routeCtx, &rollback)
 	if err := bus.AddFlowInstanceRouteContext(routeCtx, req); err == nil ||
 		!strings.Contains(err.Error(), "bundle source fact conflicts") {
 		t.Fatalf("foreign route add error = %v, want source conflict", err)
@@ -788,12 +788,12 @@ func TestPostCommitDispatchIgnoresAmbientSQLContextAndPreservesBusOwnedSourceFac
 	owned := sourceMutationFact(t, "4")
 	owner := newSourceMutationProbeOwner()
 	bus := newSourceMutationProbeBusWithStore(t, newTargetRouteMemoryStore(), owned, owner)
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
-	rollback := make([]runtimepipeline.OwnerAction, 0, 1)
+	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
+	rollback := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 	ctx := context.Background()
-	ctx = runtimepipeline.WithPipelineSQLTxContext(ctx, &sql.Tx{})
-	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
-	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
+	ctx = runtimepipelinefixture.WithSQLTx(ctx, &sql.Tx{})
+	ctx = runtimepipelinefixture.WithPostCommitActions(ctx, &postCommit)
+	ctx = runtimepipelinefixture.WithRollbackActions(ctx, &rollback)
 
 	if err := bus.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{{Event: sourceMutationEvent()}}); err != nil {
 		t.Fatalf("DispatchPostCommit: %v", err)

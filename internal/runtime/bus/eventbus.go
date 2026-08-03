@@ -928,6 +928,21 @@ func (eb *EventBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) 
 	return eb.RemoveFlowInstanceRouteContext(context.Background(), identity)
 }
 
+// RetireCommittedFlowInstanceRoute applies selected-store commit evidence to
+// process-local routing. Durable route retirement has already committed.
+func (eb *EventBus) RetireCommittedFlowInstanceRoute(identity runtimeflowidentity.Route) error {
+	if eb == nil {
+		return errors.New("event bus is required")
+	}
+	eb.mu.RLock()
+	table := eb.routeTable
+	eb.mu.RUnlock()
+	if table == nil {
+		return errors.New("route table is not initialized")
+	}
+	return table.removeFlowInstanceRouteForContext(context.Background(), identity)
+}
+
 func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity runtimeflowidentity.Route) error {
 	if eb == nil {
 		return errors.New("event bus is required")

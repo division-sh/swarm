@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -20,7 +19,6 @@ type forkedDecisionConsumerSurface interface {
 	decisioncard.Store
 	CreateHumanTaskCard(context.Context, decisioncard.Card, decisioncard.HumanTaskContinuation) error
 	CompleteHumanTaskOutcome(context.Context, string, string, time.Time) (decisioncard.HumanTaskContinuation, error)
-	ExpireHumanTaskCardsInMutation(context.Context, time.Time, int) ([]events.Event, error)
 	CreateProposedEffectCard(context.Context, decisioncard.Card, decisioncard.ProposedEffectContinuation) error
 	CompleteProposedEffectRoute(context.Context, string, string, time.Time) (decisioncard.ProposedEffectContinuation, error)
 	SupersedeProposedEffectsForLoopGenerations(context.Context, string, string, []attemptgeneration.Generation, string, time.Time) error
@@ -101,17 +99,11 @@ func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *t
 				t.Fatalf("cancel frozen input error = %v, want draft-not-authority", err)
 			}
 
-			err = runDecisionCardTestPipelineMutation(t, ctx, surface, func(txctx context.Context, _ *sql.Tx) error {
-				_, err := surface.CompleteHumanTaskOutcome(txctx, humanCard.CardID, decisionEventID, now.Add(time.Minute))
-				return err
-			})
+			_, err = surface.CompleteHumanTaskOutcome(ctx, humanCard.CardID, decisionEventID, now.Add(time.Minute))
 			if !errors.Is(err, decisioncard.ErrAlreadyTerminal) {
 				t.Fatalf("complete frozen human outcome error = %v, want typed terminal refusal", err)
 			}
-			err = runDecisionCardTestPipelineMutation(t, ctx, surface, func(txctx context.Context, _ *sql.Tx) error {
-				_, err := surface.CompleteProposedEffectRoute(txctx, effectCard.CardID, uuid.NewString(), now.Add(time.Minute))
-				return err
-			})
+			_, err = surface.CompleteProposedEffectRoute(ctx, effectCard.CardID, uuid.NewString(), now.Add(time.Minute))
 			if !errors.Is(err, decisioncard.ErrAlreadyTerminal) {
 				t.Fatalf("complete frozen proposed effect error = %v, want typed terminal refusal", err)
 			}
@@ -124,12 +116,7 @@ func TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance(t *t
 				t.Fatalf("frozen decision-route selector = %#v, %t, %v", due, ok, err)
 			}
 
-			var expired []events.Event
-			err = runDecisionCardTestPipelineMutation(t, ctx, surface, func(txctx context.Context, _ *sql.Tx) error {
-				var err error
-				expired, err = surface.ExpireHumanTaskCardsInMutation(txctx, now.Add(48*time.Hour), 20)
-				return err
-			})
+			expired, err := expireHumanTaskCardsInTestMutationResult(ctx, surface, now.Add(48*time.Hour), 20)
 			if err != nil || len(expired) != 0 {
 				t.Fatalf("frozen human-task expiry = %#v, %v", expired, err)
 			}

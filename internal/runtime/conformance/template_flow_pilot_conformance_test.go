@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -338,8 +339,9 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		Durable: runtimebus.DurableDependencies{
-			ActiveAgents: store,
-			ActiveFlows:  store,
+			ActiveAgents:      store,
+			ActiveFlows:       store,
+			FlowRouteTopology: store,
 		},
 		TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 			t.Fatal("existing account route descriptors should satisfy fan-out delivery")
@@ -553,6 +555,15 @@ type fanOutPinRouteMemoryStore struct {
 	flowInstances  []runtimebus.ActiveFlowInstanceDescriptor
 	activeAgents   []runtimebus.ActiveAgentDescriptor
 	deliveryRoutes map[string][]events.DeliveryRoute
+}
+
+func (s *fanOutPinRouteMemoryStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []runtimebus.FlowInstanceRouteRecordSet) error {
+	for _, set := range sets {
+		if !set.Identity.Valid() {
+			return fmt.Errorf("invalid flow-instance route identity: %#v", set.Identity)
+		}
+	}
+	return nil
 }
 
 func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {

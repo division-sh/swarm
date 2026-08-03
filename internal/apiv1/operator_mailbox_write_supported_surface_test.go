@@ -14,6 +14,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -329,15 +330,55 @@ func waitForMailboxWriteLifecycleDeliveryStatus(t *testing.T, probe *runtimelife
 func waitForMailboxWriteNodeDeliveryStatus(t *testing.T, db *sql.DB, backend, eventID, nodeID, wantStatus string) {
 	t.Helper()
 	requireAPIV1Convergence(t, fmt.Sprintf("%s node delivery %s/%s status %s", backend, eventID, nodeID, wantStatus), func() (bool, error) {
-		status := mailboxWriteNodeDeliveryStatus(t, db, backend, eventID, nodeID)
+		status, reason, failure := mailboxWriteNodeDeliveryStatus(t, db, backend, eventID, nodeID)
 		if status == wantStatus {
 			return true, nil
+		}
+		if status == "dead_letter" {
+			return false, fmt.Errorf("delivery status = %q, want %q; reason=%q failure=%s; diagnostics=%s", status, wantStatus, reason, failure, mailboxWriteRuntimeDiagnostics(t, db, backend, eventID))
 		}
 		return false, fmt.Errorf("delivery status = %q, want %q", status, wantStatus)
 	})
 }
 
-func mailboxWriteNodeDeliveryStatus(t *testing.T, db *sql.DB, backend, eventID, nodeID string) string {
+func mailboxWriteRuntimeDiagnostics(t *testing.T, db *sql.DB, backend, eventID string) string {
+	t.Helper()
+	query := `
+		SELECT payload
+		FROM events
+		WHERE event_name = 'platform.runtime_log'
+		  AND run_id = (SELECT run_id FROM events WHERE event_id = ?)
+		ORDER BY created_at, event_id
+	`
+	if !strings.HasPrefix(backend, "sqlite") {
+		query = `
+			SELECT payload::text
+			FROM events
+			WHERE event_name = 'platform.runtime_log'
+			  AND run_id = (SELECT run_id FROM events WHERE event_id = $1::uuid)
+			ORDER BY created_at, event_id
+		`
+	}
+	rows, err := db.QueryContext(context.Background(), query, eventID)
+	if err != nil {
+		return err.Error()
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return err.Error()
+		}
+		out = append(out, payload)
+	}
+	if err := rows.Err(); err != nil {
+		return err.Error()
+	}
+	return strings.Join(out, " | ")
+}
+
+func mailboxWriteNodeDeliveryStatus(t *testing.T, db *sql.DB, backend, eventID, nodeID string) (string, string, string) {
 	t.Helper()
 	if strings.TrimSpace(eventID) == "" || strings.TrimSpace(nodeID) == "" {
 		t.Fatalf("%s node delivery status lookup requires event id and node id", backend)
@@ -345,15 +386,15 @@ func mailboxWriteNodeDeliveryStatus(t *testing.T, db *sql.DB, backend, eventID, 
 	sqlText := ""
 	args := []any{eventID, nodeID}
 	if strings.HasPrefix(backend, "sqlite") {
-		sqlText = `SELECT status FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
+		sqlText = `SELECT status, COALESCE(reason_code, ''), COALESCE(failure, '') FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
 	} else {
-		sqlText = `SELECT status FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
+		sqlText = `SELECT status, COALESCE(reason_code, ''), COALESCE(failure::text, '') FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
 	}
-	status := ""
-	if err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&status); err != nil {
+	status, reason, failure := "", "", ""
+	if err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&status, &reason, &failure); err != nil {
 		t.Fatalf("%s node delivery status lookup for %s/%s: %v", backend, eventID, nodeID, err)
 	}
-	return status
+	return status, reason, failure
 }
 
 func mailboxWriteNodeDeliverySubscriberID(t *testing.T, db *sql.DB, backend, eventID string) string {
@@ -688,7 +729,8 @@ func mailboxWriteDebugQuery(t *testing.T, db *sql.DB, backend, scope, runID, eve
 func assertConditionalRuleMailboxItem(t *testing.T, handler *Handler, item map[string]any, runID, eventID string) error {
 	t.Helper()
 	mailboxID := stringValue(t, item["mailbox_id"], "mailbox_id")
-	if item["type"] != "approval" || item["status"] != "pending" || item["priority"] != "normal" || item["source_event_id"] != eventID || item["source_entity_id"] != runID {
+	flowInstance := stringValue(t, item["source_flow"], "source_flow")
+	if item["type"] != "approval" || item["status"] != "pending" || item["priority"] != "normal" || item["source_event_id"] != eventID || item["source_entity_id"] != runtimeflowidentity.EntityID(flowInstance) {
 		return fmt.Errorf("mailbox.list item = %#v, want approval pending normal for source event/entity", item)
 	}
 	payload := asMap(t, item["payload"])
@@ -721,7 +763,8 @@ func assertMailboxListCount(t *testing.T, handler *Handler, runID string, want i
 func assertMailboxWriteSupportedSurfaceItem(t *testing.T, handler *Handler, item map[string]any, runID, eventID string) error {
 	t.Helper()
 	mailboxID := stringValue(t, item["mailbox_id"], "mailbox_id")
-	if item["type"] != "review_request" || item["status"] != "pending" || item["priority"] != "high" || item["source_event_id"] != eventID || item["source_entity_id"] != runID {
+	flowInstance := stringValue(t, item["source_flow"], "source_flow")
+	if item["type"] != "review_request" || item["status"] != "pending" || item["priority"] != "high" || item["source_event_id"] != eventID || item["source_entity_id"] != runtimeflowidentity.EntityID(flowInstance) {
 		return fmt.Errorf("mailbox.list item = %#v, want review_request pending high for source event/entity", item)
 	}
 	payload := asMap(t, item["payload"])

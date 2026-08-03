@@ -38,7 +38,6 @@ import (
 
 type nodeDeliveryRecoveryStore interface {
 	externalRuntimeTestDurableEventStore
-	externalRuntimeTestMutationOwner
 	runtimepipeline.WorkflowPersistenceOwner
 	PipelineObligations() runtimepipelineobligation.Store
 }

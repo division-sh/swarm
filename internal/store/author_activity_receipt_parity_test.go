@@ -14,6 +14,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	authoractivityadapter "github.com/division-sh/swarm/internal/store/authoractivityadapter"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -26,7 +27,7 @@ type authorActivityReceiptStore interface {
 type authorActivityReceiptFixture struct {
 	store   authorActivityReceiptStore
 	db      *sql.DB
-	dialect runtimeauthoractivity.Dialect
+	dialect authoractivityfixture.Dialect
 	stamp   func(context.Context, string, string) [2]string
 	advance func()
 }
@@ -151,7 +152,7 @@ func TestAuthoredNodeEventProducerTypeParity(t *testing.T) {
 func seedAuthorActivityReceiptRun(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, runID string) {
 	t.Helper()
 	startedAt := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
 		requireRunningPostgresRunForTest(t, ctx, fixture.db, runID, startedAt)
 	} else {
 		requireRunningSQLiteRunForTest(t, ctx, fixture.db, runID, startedAt)
@@ -161,7 +162,7 @@ func seedAuthorActivityReceiptRun(t *testing.T, fixture authorActivityReceiptFix
 func readEventProducerIdentity(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, eventID string) (string, string) {
 	t.Helper()
 	query := `SELECT COALESCE(produced_by, ''), COALESCE(produced_by_type, '') FROM events WHERE event_id = ?`
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
 		query = `SELECT COALESCE(produced_by, ''), COALESCE(produced_by_type, '') FROM events WHERE event_id = $1::uuid`
 	}
 	var producedBy, producedByType string
@@ -174,7 +175,7 @@ func readEventProducerIdentity(t *testing.T, fixture authorActivityReceiptFixtur
 func listAuthorActivityForReceiptParity(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context) []runtimeauthoractivity.Occurrence {
 	t.Helper()
 	readDialect := authoractivityadapter.DialectSQLite
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
 		readDialect = authoractivityadapter.DialectPostgres
 	}
 	page, err := authoractivityadapter.List(ctx, fixture.db, readDialect, runtimeauthoractivity.ListOptions{Limit: 10})
@@ -190,7 +191,7 @@ func openSQLiteAuthorActivityReceiptFixture(t *testing.T) authorActivityReceiptF
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	store.nowFn = func() time.Time { return now }
 	return authorActivityReceiptFixture{
-		store: store, db: store.backend.db, dialect: runtimeauthoractivity.DialectSQLite,
+		store: store, db: store.backend.db, dialect: authoractivityfixture.DialectSQLite,
 		stamp: func(ctx context.Context, eventID, agentID string) [2]string {
 			return readAuthorActivityReceiptStamps(t, ctx, store.backend.db, `
 				SELECT CAST(d.settled_at AS TEXT), CAST(o.settled_at AS TEXT)
@@ -210,7 +211,7 @@ func openPostgresAuthorActivityReceiptFixture(t *testing.T) authorActivityReceip
 	store := admitTestPostgresStore(t, db)
 	registerTestAuthorActivityCatalog(t, store)
 	return authorActivityReceiptFixture{
-		store: store, db: db, dialect: runtimeauthoractivity.DialectPostgres,
+		store: store, db: db, dialect: authoractivityfixture.DialectPostgres,
 		stamp: func(ctx context.Context, eventID, agentID string) [2]string {
 			return readAuthorActivityReceiptStamps(t, ctx, db, `
 				SELECT d.settled_at::text, o.settled_at::text

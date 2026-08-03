@@ -25,9 +25,6 @@ func (s *PostgresStore) ReadTimerObligations(ctx context.Context, scope runtimet
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimetimerobligation.Snapshot{}, err
 	}
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return timerobligationadapter.Read(ctx, tx, timerobligationadapter.DialectPostgres, scope, observedAt)
-	}
 	return timerobligationadapter.Read(ctx, s.backend.db, timerobligationadapter.DialectPostgres, scope, observedAt)
 }
 
@@ -483,9 +480,6 @@ func (s *PostgresStore) runScheduleMutation(ctx context.Context, runID, label st
 }
 
 func (s *PostgresStore) runScheduleTransaction(ctx context.Context, label string, mutate func(*sql.Tx) error) error {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return mutate(tx)
-	}
 	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin %s: %w", label, err)

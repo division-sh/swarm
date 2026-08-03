@@ -37,6 +37,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -1415,13 +1416,13 @@ func commitReadinessHandoffAuthorActivity(sqlitePath string, rt *runtimepkg.Runt
 	if err != nil {
 		return err
 	}
-	story, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	story, err := authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
 	}
 	identity := uuid.NewString()
-	if err := runtimeauthoractivity.Record(story, runtimeauthoractivity.Draft{
+	if err := authoractivityfixture.Record(story, runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindInboundReceived, Version: runtimeauthoractivity.Version, Transition: "received",
 		SourceOwner: "events", SourceIdentity: identity, DedupKey: "readiness-handoff:" + identity,
 		OccurredAt: time.Now().UTC(), Scope: scope, AuthorSafeSummary: "across head",
@@ -1433,7 +1434,7 @@ func commitReadinessHandoffAuthorActivity(sqlitePath string, rt *runtimepkg.Runt
 		_ = tx.Rollback()
 		return err
 	}
-	if err := runtimeauthoractivity.Finalize(story); err != nil {
+	if err := authoractivityfixture.Finalize(story); err != nil {
 		_ = tx.Rollback()
 		return err
 	}

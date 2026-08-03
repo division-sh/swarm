@@ -612,17 +612,14 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 		executionCtx = runtimecorrelation.WithInboundEvent(executionCtx, evt)
 		nodeFlowID := workflowNodeFlowID(source, nodeID)
 		instancePath := evt.FlowInstance()
-		if target := route.Target.Normalized(); !target.Empty() {
-			instancePath = target.FlowInstance
-		} else if source != nil && strings.TrimSpace(nodeFlowID) != strings.TrimSpace(source.WorkflowName()) {
+		if source != nil && strings.TrimSpace(nodeFlowID) == strings.TrimSpace(source.WorkflowName()) {
+			instancePath = evt.RunID()
+		} else if source != nil {
 			if schema, ok := source.FlowSchemaByID(nodeFlowID); ok && !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
 				instancePath = runtimeflowidentity.ScopeKey(source, nodeFlowID)
+			} else if target := route.Target.Normalized(); !target.Empty() {
+				instancePath = target.FlowInstance
 			}
-		}
-		rootScope := runtimeflowidentity.ScopeKey(source, nodeFlowID)
-		if source != nil && strings.TrimSpace(nodeFlowID) == strings.TrimSpace(source.WorkflowName()) &&
-			(strings.TrimSpace(instancePath) == "" || strings.Trim(strings.TrimSpace(instancePath), "/") == rootScope) {
-			instancePath = evt.RunID()
 		}
 		stateRoute, err := workflowInstanceRouteForExecution(source, nodeFlowID, instancePath)
 		if err != nil {
@@ -878,16 +875,11 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			*collector = append(*collector, emitted)
 			continue
 		}
-		publishDeadLetter := func(actionCtx context.Context) {
-			if err := pc.publish(actionCtx, "platform.dead_letter", entityID, deadLetterPayload); err != nil {
-				pc.logRuntimeWarn(actionCtx, "workflow-runtime", "intercepted_emit_dead_letter_publish_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
-					"intercepted_event_type": eventType,
-					"handler_node":           nodeID,
-				}, err)
-			}
-		}
-		if !queuePipelinePostCommitAction(ctx, publishDeadLetter) {
-			publishDeadLetter(ctx)
+		if err := pc.publish(ctx, "platform.dead_letter", entityID, deadLetterPayload); err != nil {
+			pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_publish_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
+				"intercepted_event_type": eventType,
+				"handler_node":           nodeID,
+			}, err)
 		}
 	}
 }

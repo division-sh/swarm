@@ -2122,11 +2122,10 @@ func (a *Adapter) recordTransition(ctx context.Context, story runtimeauthoractiv
 	var summary string
 	var found bool
 	var err error
-	if story != nil {
-		summary, found, err = story.PersistedAuthorSafeSummary(ctx, "emit:"+record.EventID)
-	} else {
-		summary, found, err = runtimeauthoractivity.PersistedAuthorSafeSummary(ctx, "emit:"+record.EventID)
+	if story == nil {
+		return fmt.Errorf("delivery transition requires private story ownership")
 	}
+	summary, found, err = story.PersistedAuthorSafeSummary(ctx, "emit:"+record.EventID)
 	if err != nil {
 		return fmt.Errorf("load delivery source author-safe summary: %w", err)
 	}
@@ -2148,11 +2147,7 @@ func (a *Adapter) recordTransition(ctx context.Context, story runtimeauthoractiv
 		Scope:             transitionScope,
 		AuthorSafeSummary: summary, Failure: runtimefailures.CloneEnvelope(failure),
 	}
-	if story != nil {
-		err = story.Record(ctx, draft)
-	} else {
-		err = runtimeauthoractivity.Record(ctx, draft)
-	}
+	err = story.Record(ctx, draft)
 	if err != nil {
 		return fmt.Errorf("record delivery lifecycle activity: %w", err)
 	}

@@ -105,7 +105,9 @@ func (pc *PipelineCoordinator) CommitStandingTargets(ctx context.Context, req St
 			if err := owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(operationCtx, observedAt); err != nil {
 				return nil, err
 			}
-			created, err := owner.EnsureFlowInstance(operationCtx, target.Activation)
+			activation := target.Activation
+			activation.StandingGenerationReplacement = reconciliation.Generation > 1
+			created, err := owner.EnsureFlowInstance(operationCtx, activation)
 			if err != nil {
 				return nil, err
 			}
@@ -129,7 +131,7 @@ func (pc *PipelineCoordinator) CommitFlowInstanceTermination(ctx context.Context
 	if !route.Valid() || runID == "" {
 		return FlowInstanceTermination{}, fmt.Errorf("flow instance termination requires an exact route and run_id")
 	}
-	instance, err := pc.commitWorkflowTermination(runtimecorrelation.WithRunID(ctx, runID), route, req.TerminatedAt)
+	instance, err := pc.commitWorkflowTermination(runtimecorrelation.WithRunID(ctx, runID), route, req.TerminatedAt, true)
 	if err != nil {
 		return FlowInstanceTermination{}, err
 	}
@@ -138,17 +140,15 @@ func (pc *PipelineCoordinator) CommitFlowInstanceTermination(ctx context.Context
 	if !canonicalRoute.Valid() {
 		return FlowInstanceTermination{}, fmt.Errorf("derive canonical route identity for flow path %s", canonicalRef)
 	}
-	if pc.flowRoutes == nil {
-		return FlowInstanceTermination{}, fmt.Errorf("flow instance termination requires route topology owner")
-	}
-	if err := pc.flowRoutes.RemoveFlowInstanceRouteContext(runtimecorrelation.WithRunID(ctx, runID), canonicalRoute); err != nil {
-		return FlowInstanceTermination{}, err
-	}
 	return FlowInstanceTermination{Instance: instance, Route: canonicalRoute}, nil
 }
 
 func (pc *PipelineCoordinator) Load(ctx context.Context, route runtimeflowidentity.Route) (WorkflowInstance, bool, error) {
 	return pc.workflowStore.Load(ctx, route)
+}
+
+func (pc *PipelineCoordinator) ListWorkflowInstances(ctx context.Context) ([]WorkflowInstance, error) {
+	return pc.workflowStore.list(ctx)
 }
 
 func (pc *PipelineCoordinator) StartActivityAttempt(ctx context.Context, record ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {
@@ -181,6 +181,21 @@ func (pc *PipelineCoordinator) LoadRouteRecoveryProjection(ctx context.Context, 
 
 func (pc *PipelineCoordinator) MaterializeInitialEntry(ctx context.Context, instance WorkflowInstance, occurredAt time.Time) (WorkflowInitialMaterializationResult, error) {
 	return pc.workflowStore.MaterializeInitialEntry(ctx, instance, occurredAt)
+}
+
+func (pc *PipelineCoordinator) PrepareInitialEntryLifecycle(ctx context.Context, instance WorkflowInstance, occurredAt time.Time) (WorkflowInstance, WorkflowLifecycleMutationPlan, error) {
+	if pc == nil || pc.workflowStore == nil {
+		return WorkflowInstance{}, WorkflowLifecycleMutationPlan{}, fmt.Errorf("workflow instance lifecycle store is required")
+	}
+	normalized, _, lifecycle, err := pc.workflowStore.prepareInitialEntryLifecycle(ctx, instance, occurredAt)
+	return normalized, lifecycle, err
+}
+
+func (pc *PipelineCoordinator) FinalizeInitialEntryLifecycle(ctx context.Context, committed CommittedWorkflowLifecycleMutation) error {
+	if pc == nil || pc.workflowStore == nil {
+		return fmt.Errorf("workflow instance lifecycle store is required")
+	}
+	return pc.workflowStore.finalizeInitialEntryLifecycle(ctx, committed)
 }
 
 func (pc *PipelineCoordinator) ArmInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error {
@@ -216,7 +231,7 @@ func (pc *PipelineCoordinator) MarkDynamicFlowRuntimeTopologyReady(ctx context.C
 }
 
 func (pc *PipelineCoordinator) MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, terminatedAt time.Time) error {
-	_, err := pc.commitWorkflowTermination(ctx, route, terminatedAt)
+	_, err := pc.commitWorkflowTermination(ctx, route, terminatedAt, false)
 	return err
 }
 

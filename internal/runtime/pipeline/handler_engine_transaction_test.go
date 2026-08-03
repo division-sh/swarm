@@ -382,7 +382,7 @@ func TestExecuteNodeContractHandlerLogsComputeModuleReplayEvidenceBeforeFailureR
 				"files":     []any{"main.go", "README.md", "service.yaml"},
 			}),
 			0,
-			"",
+			testPipelineRunID,
 			"",
 			events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
 			time.Time{},
@@ -474,7 +474,9 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 		}},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Paths: runtimecontracts.ContractPaths{ContractsRoot: root},
+		Paths:      runtimecontracts.ContractPaths{ContractsRoot: root},
+		RootSchema: &flow.Schema,
+		Semantics:  runtimecontracts.WorkflowSemanticView{Name: "render"},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &flow,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -836,12 +838,13 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 	})
 	const entityID = "11111111-1111-1111-1111-111111111111"
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      entityID,
-		StorageRef:      entityID,
+		InstanceID:      testPipelineRunID,
+		StorageRef:      testPipelineRunID,
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
 		Metadata: map[string]any{
+			"entity_id": entityID, "flow_path": testPipelineRunID, "instance_id": testPipelineRunID,
 			"revision_count": 0,
 		},
 	})); err != nil {
@@ -859,13 +862,13 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 		},
 	}, workflowTriggerContext{
 		Event: trigger,
-		State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(entityID), entityID),
+		State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(testPipelineRunID), entityID),
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
 
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID))
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(testPipelineRunID))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -913,12 +916,14 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 	})
 	const entityID = "11111111-1111-1111-1111-111111111111"
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      entityID,
-		StorageRef:      entityID,
+		InstanceID:      testPipelineRunID,
+		StorageRef:      testPipelineRunID,
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
-		Metadata:        map[string]any{},
+		Metadata: map[string]any{
+			"entity_id": entityID, "flow_path": testPipelineRunID, "instance_id": testPipelineRunID,
+		},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -934,7 +939,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 		},
 	}, workflowTriggerContext{
 		Event: trigger,
-		State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(entityID), entityID),
+		State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(testPipelineRunID), entityID),
 	}, false)
 	if err == nil {
 		t.Fatal("expected executeNodeContractHandler to fail on data accumulation CEL runtime error")
@@ -943,7 +948,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 		t.Fatalf("error = %v, want data_accumulation target context", err)
 	}
 
-	instance, ok, loadErr := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID))
+	instance, ok, loadErr := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(testPipelineRunID))
 	if loadErr != nil {
 		t.Fatalf("load workflow instance: %v", loadErr)
 	}
@@ -983,12 +988,14 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 	})
 	const entityID = "11111111-1111-1111-1111-111111111111"
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      entityID,
-		StorageRef:      entityID,
+		InstanceID:      testPipelineRunID,
+		StorageRef:      testPipelineRunID,
 		WorkflowName:    "validation",
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
-		Metadata:        map[string]any{},
+		Metadata: map[string]any{
+			"entity_id": entityID, "flow_path": testPipelineRunID, "instance_id": testPipelineRunID,
+		},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -1004,13 +1011,13 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 		},
 	}, workflowTriggerContext{
 		Event: trigger,
-		State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(entityID), entityID),
+		State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(testPipelineRunID), entityID),
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
 
-	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(entityID))
+	instance, ok, err := pc.workflowStore.Load(testPipelineCoordinatorRunContext(t, pc), testWorkflowInstanceRoute(testPipelineRunID))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -2350,7 +2357,7 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 	if handled {
 		t.Fatal("nested package-root delivery handled without a stamped connect claim")
 	}
-	child, found, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute(childEntityID))
+	child, found, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute("child/inst-1"))
 	if err != nil {
 		t.Fatalf("load child instance: %v", err)
 	}

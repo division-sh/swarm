@@ -7,9 +7,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -44,6 +44,7 @@ func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
+			runID := correlation.RunIDFromContext(ctx)
 			pc := &PipelineCoordinator{
 				bus:            &recordingPipelineBus{},
 				workflowStore:  store,
@@ -63,14 +64,14 @@ func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t
 				"",
 				[]byte(`{}`),
 				0,
-				correlation.RunIDFromContext(ctx),
+				runID,
 				"",
-				testWorkflowSourceEnvelope("first-event-transition", "first-event-transition", entityID),
+				testWorkflowSourceEnvelope("first-event-transition", runID, entityID),
 				occurredAt,
 			)
-			dialect := runtimeauthoractivity.DialectPostgres
+			dialect := authoractivityfixture.DialectPostgres
 			if store.isSQLite() {
-				dialect = runtimeauthoractivity.DialectSQLite
+				dialect = authoractivityfixture.DialectSQLite
 			}
 			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
 			engine := newCoordinatorHandlerExecutionEngine(pc, "acceptor")
@@ -84,7 +85,7 @@ func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t
 				t.Fatalf("first event outcome = %#v, want handled", outcome)
 			}
 
-			instance, found, err := store.Load(ctx, testWorkflowInstanceRoute("first-event-transition"))
+			instance, found, err := store.Load(ctx, testWorkflowInstanceRoute(runID))
 			if err != nil {
 				t.Fatalf("load first-event workflow instance: %v", err)
 			}

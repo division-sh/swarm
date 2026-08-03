@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -35,52 +34,12 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
-	runtimeworkflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
-	"github.com/division-sh/swarm/internal/testutil"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
-
-type flowActivationTestRunLifecycleOwner struct {
-	runtimepipeline.WorkflowPersistenceOwner
-	runtimerunlifecycle.OperationOwner
-	db *sql.DB
-}
-
-func (flowActivationTestRunLifecycleOwner) RequireActiveRun(ctx context.Context, runID string) error {
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return errors.New("flow activation lifecycle transaction is required")
-	}
-	return runlifecyclefixture.PostgresRequireActiveRunInMutation(ctx, tx, runID)
-}
-
-func (flowActivationTestRunLifecycleOwner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return runtimecorrelation.BundleSourceFact{}, errors.New("flow activation lifecycle transaction is required")
-	}
-	return runlifecyclefixture.PostgresRequireActiveRunSourceInMutation(ctx, tx, runID)
-}
-
-func (o flowActivationTestRunLifecycleOwner) LoadActiveWorkflowRoute(ctx context.Context, instancePath string) (runtimeworkflowroute.RecoveryRecord, error) {
-	if o.db == nil {
-		return runtimeworkflowroute.RecoveryRecord{}, errors.New("flow activation route recovery store is required")
-	}
-	var record runtimeworkflowroute.RecoveryRecord
-	if err := o.db.QueryRowContext(ctx, `
-		SELECT flow_template, config
-		FROM flow_instances
-		WHERE instance_id = $1 AND status = 'active' AND terminated_at IS NULL
-	`, strings.Trim(strings.TrimSpace(instancePath), "/")).Scan(&record.WorkflowName, &record.Config); err != nil {
-		return runtimeworkflowroute.RecoveryRecord{}, err
-	}
-	return record, nil
-}
 
 type unavailableFlowActivationDeliveryStore struct{ runtimedelivery.Store }
 type unavailableFlowActivationDecisionCards struct{ decisioncard.Store }
@@ -115,68 +74,6 @@ func completeFlowActivationWorkflowOptions(opts runtimepipeline.PipelineCoordina
 	opts.HumanTaskExpiry = &unavailableFlowActivationHumanTaskExpiry{}
 	opts.DeliveryRuntime = &unavailableFlowActivationDeliveryRuntime{}
 	return opts
-}
-
-func (o flowActivationTestRunLifecycleOwner) RunRuntimeMutationContext(
-	ctx context.Context,
-	fn func(context.Context) error,
-) error {
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 2)
-	rollback := make([]runtimepipeline.OwnerAction, 0, 2)
-	err := runlifecyclefixture.RunPostgresMutation(ctx, o.db, func(txctx context.Context, tx *sql.Tx, _ runlifecyclefixture.ActiveRunSourceOwner) error {
-		txctx = runtimepipeline.WithPipelineSQLTxContext(txctx, tx)
-		txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
-		txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollback)
-		return fn(txctx)
-	})
-	if err != nil {
-		runtimepipeline.FlushPipelineRollbackActions(rollback)
-		return err
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return nil
-}
-
-func (flowActivationTestRunLifecycleOwner) RequestCompletionCandidate(
-	ctx context.Context,
-	request runtimerunlifecycle.CandidateRequest,
-) (runtimerunlifecycle.CandidateRequestDisposition, error) {
-	if err := request.Validate(); err != nil {
-		return "", err
-	}
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return "", errors.New("flow activation lifecycle transaction is required")
-	}
-	return runlifecyclefixture.PostgresRequestCompletionCandidateInMutation(ctx, tx, request)
-}
-
-func (flowActivationTestRunLifecycleOwner) TransitionActiveRun(
-	ctx context.Context,
-	request runtimerunlifecycle.ActiveTransitionRequest,
-) (runtimerunlifecycle.MutationDisposition, error) {
-	if err := request.Validate(); err != nil {
-		return "", err
-	}
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return "", errors.New("flow activation lifecycle transaction is required")
-	}
-	return runlifecyclefixture.PostgresTransitionActiveRunInMutation(ctx, tx, request)
-}
-
-func (flowActivationTestRunLifecycleOwner) MarkTerminalRun(
-	ctx context.Context,
-	request runtimerunlifecycle.TerminalRequest,
-) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	if err := request.Validate(); err != nil {
-		return runtimerunlifecycle.Snapshot{}, "", err
-	}
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return runtimerunlifecycle.Snapshot{}, "", errors.New("flow activation lifecycle transaction is required")
-	}
-	return runlifecyclefixture.PostgresMarkTerminalRunInMutation(ctx, tx, request)
 }
 
 func TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSchema(t *testing.T) {
@@ -529,10 +426,10 @@ func activateFlowInstanceForTest(
 	return am.ActivateFlowInstance(ctx, req)
 }
 
-func withFlowActivationPostCommit(ctx context.Context, actions *[]runtimepipeline.OwnerAction) context.Context {
-	rollback := make([]runtimepipeline.OwnerAction, 0, 1)
-	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, actions)
-	return runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
+func withFlowActivationPostCommit(ctx context.Context, actions *[]runtimepipelinefixture.OwnerAction) context.Context {
+	rollback := make([]runtimepipelinefixture.OwnerAction, 0, 1)
+	ctx = runtimepipelinefixture.WithPostCommitActions(ctx, actions)
+	return runtimepipelinefixture.WithRollbackActions(ctx, &rollback)
 }
 
 func (s *flowActivationTestRouteStore) UpsertFlowInstanceRoute(_ context.Context, route runtimebus.FlowInstanceRouteRecord) error {
@@ -623,6 +520,16 @@ func (s *flowActivationTestInstanceStore) MaterializeInitialEntry(_ context.Cont
 		s.readinessMu.Unlock()
 	}
 	return runtimepipeline.WorkflowInitialMaterializationCreated, nil
+}
+
+func (s *flowActivationTestInstanceStore) PrepareInitialEntryLifecycle(_ context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInstance, runtimepipeline.WorkflowLifecycleMutationPlan, error) {
+	instance.CreatedAt = occurredAt.UTC()
+	instance.EnteredStageAt = occurredAt.UTC()
+	return instance, runtimepipeline.WorkflowLifecycleMutationPlan{}, nil
+}
+
+func (s *flowActivationTestInstanceStore) FinalizeInitialEntryLifecycle(context.Context, runtimepipeline.CommittedWorkflowLifecycleMutation) error {
+	return nil
 }
 
 func (s *flowActivationTestInstanceStore) ArmInitialEntryTimers(_ context.Context, route runtimeflowidentity.Route) error {
@@ -1180,11 +1087,11 @@ func (b *flowActivationTestBus) AddFlowInstanceRouteContext(ctx context.Context,
 	if b.addErr != nil {
 		return b.addErr
 	}
-	if _, transactional := runtimepipeline.PipelineSQLTxFromContext(ctx); transactional {
+	if _, transactional := runtimepipelinefixture.SQLTx(ctx); transactional {
 		if err := b.StageFlowInstanceRouteContext(ctx, req); err != nil {
 			return err
 		}
-		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(context.Context) {
+		if !runtimepipelinefixture.QueuePostCommitAction(ctx, func(context.Context) {
 			_ = b.PublishPersistedFlowInstanceRoute(req)
 		}) {
 			return errors.New("transactional route requires post-commit process publication")
@@ -1229,6 +1136,11 @@ func (b *flowActivationTestBus) RemoveFlowInstanceRoute(identity runtimeflowiden
 	return b.RemoveFlowInstanceRouteContext(context.Background(), identity)
 }
 
+func (b *flowActivationTestBus) RetireCommittedFlowInstanceRoute(identity runtimeflowidentity.Route) error {
+	b.removedPairs = append(b.removedPairs, identity.ScopeKey+"/"+identity.InstanceID)
+	return b.RetirePublishedFlowInstanceRoute(identity)
+}
+
 func (b *flowActivationTestBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity runtimeflowidentity.Route) error {
 	if b.removeErr != nil {
 		return b.removeErr
@@ -1241,7 +1153,7 @@ func (b *flowActivationTestBus) RemoveFlowInstanceRouteContext(ctx context.Conte
 	recordRemoval := func() {
 		b.removedPairs = append(b.removedPairs, identity.ScopeKey+"/"+identity.InstanceID)
 	}
-	if runtimepipeline.QueuePipelinePostCommitAction(ctx, func(context.Context) {
+	if runtimepipelinefixture.QueuePostCommitAction(ctx, func(context.Context) {
 		recordRemoval()
 	}) {
 		return nil
@@ -1557,8 +1469,8 @@ func TestActivateFlowInstanceDoesNotConsumeAmbientTransactionAuthority(t *testin
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("")
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
-	ctx := runtimepipeline.WithPipelineSQLTxContext(testAuthorActivityContext(context.Background()), &sql.Tx{})
+	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
+	ctx := runtimepipelinefixture.WithSQLTx(testAuthorActivityContext(context.Background()), &sql.Tx{})
 	ctx = withFlowActivationPostCommit(ctx, &postCommit)
 
 	if err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
@@ -1576,200 +1488,142 @@ func TestActivateFlowInstanceDoesNotConsumeAmbientTransactionAuthority(t *testin
 }
 
 func TestActivateFlowInstanceArmsInitialTimersOnlyAfterRuntimeInstallation(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		inMutation bool
-	}{
-		{name: "direct"},
-		{name: "post_commit", inMutation: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			bus := &flowActivationTestBus{}
-			instances := &flowActivationTestInstanceStore{}
-			var am *AgentManager
-			instances.armInitialEntry = func(instanceID string) error {
-				if instanceID != "review/inst-1" {
-					return fmt.Errorf("armed instance = %q, want review/inst-1", instanceID)
-				}
-				if len(bus.addedPaths) != 1 || bus.addedPaths[0] != "review/inst-1" {
-					return fmt.Errorf("timer armed before route installation: %#v", bus.addedPaths)
-				}
-				if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
-					return errors.New("timer armed before agent installation")
-				}
-				return nil
-			}
-			am = newFlowActivationManager(t, bus, instances)
-			ctx := testAuthorActivityContext(context.Background())
-			postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
-			if tc.inMutation {
-				ctx = runtimepipeline.WithPipelineSQLTxContext(ctx, &sql.Tx{})
-				ctx = withFlowActivationPostCommit(ctx, &postCommit)
-			}
-
-			if err := activateFlowInstanceForTest(am, ctx, testActivationRequest(testFlowBundle(""), "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
-				t.Fatalf("ActivateFlowInstance: %v", err)
-			}
-			if tc.inMutation {
-				if len(instances.armedEntries) != 0 {
-					t.Fatalf("armed entries before commit = %#v, want none", instances.armedEntries)
-				}
-				if len(postCommit) != 1 {
-					t.Fatalf("post-commit actions = %d, want one keyed readiness reconciliation", len(postCommit))
-				}
-				runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-			}
-			if len(instances.armedEntries) != 1 || instances.armedEntries[0] != "review/inst-1" {
-				t.Fatalf("armed entries = %#v, want [review/inst-1]", instances.armedEntries)
-			}
-			if len(bus.runtimeLogs) != 0 {
-				t.Fatalf("runtime logs = %#v, want no activation failure", bus.runtimeLogs)
-			}
-		})
+	bus := &flowActivationTestBus{}
+	instances := &flowActivationTestInstanceStore{}
+	var am *AgentManager
+	instances.armInitialEntry = func(instanceID string) error {
+		if instanceID != "review/inst-1" {
+			return fmt.Errorf("armed instance = %q, want review/inst-1", instanceID)
+		}
+		if len(bus.addedPaths) != 1 || bus.addedPaths[0] != "review/inst-1" {
+			return fmt.Errorf("timer armed before route installation: %#v", bus.addedPaths)
+		}
+		if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
+			return errors.New("timer armed before agent installation")
+		}
+		return nil
+	}
+	am = newFlowActivationManager(t, bus, instances)
+	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(testFlowBundle(""), "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	if len(instances.armedEntries) != 1 || instances.armedEntries[0] != "review/inst-1" {
+		t.Fatalf("armed entries = %#v, want [review/inst-1]", instances.armedEntries)
+	}
+	if len(bus.runtimeLogs) != 0 {
+		t.Fatalf("runtime logs = %#v, want no activation failure", bus.runtimeLogs)
 	}
 }
 
 func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing.T) {
-	for _, mode := range []struct {
-		name       string
-		postCommit bool
-	}{
-		{name: "direct"},
-		{name: "post_commit", postCommit: true},
+	for _, boundary := range []string{
+		"partial_agent",
+		"arm",
+		"topology_mark",
+		"topology_reload",
+		"creation_event",
+		"creation_commit",
 	} {
-		for _, boundary := range []string{
-			"partial_agent",
-			"route",
-			"arm",
-			"topology_mark",
-			"topology_reload",
-			"creation_event",
-			"creation_commit",
-		} {
-			t.Run(mode.name+"/"+boundary, func(t *testing.T) {
-				routeStore := &flowActivationTestRouteStore{}
-				bus := &flowActivationTestBus{routeStore: routeStore}
-				completed := make(chan struct{}, 1)
-				instances := &flowActivationTestInstanceStore{
-					creationMarked: func() {
-						select {
-						case completed <- struct{}{}:
-						default:
-						}
-					},
-				}
-				agentStore := &flowActivationTestStore{}
-				am := newFlowActivationManager(t, bus, instances, agentStore)
-				bundle := testFlowBundleWithTwoAgents("task.started")
-				setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
-				req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+		t.Run(boundary, func(t *testing.T) {
+			routeStore := &flowActivationTestRouteStore{}
+			bus := &flowActivationTestBus{routeStore: routeStore}
+			completed := make(chan struct{}, 1)
+			instances := &flowActivationTestInstanceStore{
+				creationMarked: func() {
+					select {
+					case completed <- struct{}{}:
+					default:
+					}
+				},
+			}
+			agentStore := &flowActivationTestStore{}
+			am := newFlowActivationManager(t, bus, instances, agentStore)
+			bundle := testFlowBundleWithTwoAgents("task.started")
+			setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+			req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 
-				switch boundary {
-				case "partial_agent":
-					agentStore.failAgentID = "writer"
-				case "route":
-					if mode.postCommit {
-						break
-					}
-					bus.addErr = errors.New("injected route failure")
-				case "arm":
-					instances.armInitialEntry = func(string) error { return errors.New("injected arm failure") }
-				case "topology_mark":
-					instances.topologyMarkErr = errors.New("injected topology mark failure")
-				case "topology_reload":
-					instances.afterTopologyMark = func(runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
-						instances.readinessLoadErr = errors.New("injected topology readback failure")
-					}
-				case "creation_event":
-					bus.publishErr = errors.New("injected creation event failure")
-				case "creation_commit":
-					instances.creationMarkErr = errors.New("injected completion mark failure")
+			switch boundary {
+			case "partial_agent":
+				agentStore.failAgentID = "writer"
+			case "arm":
+				instances.armInitialEntry = func(string) error { return errors.New("injected arm failure") }
+			case "topology_mark":
+				instances.topologyMarkErr = errors.New("injected topology mark failure")
+			case "topology_reload":
+				instances.afterTopologyMark = func(runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
+					instances.readinessLoadErr = errors.New("injected topology readback failure")
 				}
+			case "creation_event":
+				bus.publishErr = errors.New("injected creation event failure")
+			case "creation_commit":
+				instances.creationMarkErr = errors.New("injected completion mark failure")
+			}
 
-				ctx := testAuthorActivityContext(context.Background())
-				var postCommit []runtimepipeline.OwnerAction
-				if mode.postCommit {
-					postCommit = make([]runtimepipeline.OwnerAction, 0, 1)
-					ctx = runtimepipeline.WithPipelineSQLTxContext(ctx, &sql.Tx{})
-					ctx = withFlowActivationPostCommit(ctx, &postCommit)
-				}
-				err := activateFlowInstanceForTest(am, ctx, req)
-				if mode.postCommit {
-					if err != nil {
-						t.Fatalf("queued ActivateFlowInstance: %v", err)
-					}
-					if len(postCommit) != 1 {
-						t.Fatalf("post-commit actions = %d, want one keyed readiness reconciliation", len(postCommit))
-					}
-					if boundary == "route" {
-						bus.addErr = errors.New("injected route failure")
-					}
-					runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-				} else if err == nil {
-					t.Fatal("direct activation succeeded across injected finalization failure")
-				}
-				if len(bus.published) != 0 {
-					t.Fatalf(
-						"creation events before readiness recovery = %d, want %d",
-						len(bus.published),
-						0,
-					)
-				}
-				if bus.HasFlowInstanceRoute(req.Instance.Route()) {
-					t.Fatal("failed readiness attempt left the route process-visible")
-				}
-				wantTimerRetirements := 0
-				switch boundary {
-				case "arm", "topology_mark", "topology_reload", "creation_event", "creation_commit":
-					wantTimerRetirements = 1
-				}
-				if got := len(instances.retiredTimerEntries); got != wantTimerRetirements {
-					t.Fatalf(
-						"timer projection retirements after %s failure = %d, want %d: %#v",
-						boundary,
-						got,
-						wantTimerRetirements,
-						instances.retiredTimerEntries,
-					)
-				}
-				if boundary == "partial_agent" && len(agentStore.upserts) != 1 {
-					t.Fatalf("partial agent registrations = %d, want one", len(agentStore.upserts))
-				}
+			err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+			if err == nil {
+				t.Fatal("direct activation succeeded across injected finalization failure")
+			}
+			if len(bus.published) != 0 {
+				t.Fatalf(
+					"creation events before readiness recovery = %d, want %d",
+					len(bus.published),
+					0,
+				)
+			}
+			if bus.HasFlowInstanceRoute(req.Instance.Route()) {
+				t.Fatal("failed readiness attempt left the route process-visible")
+			}
+			wantTimerRetirements := 0
+			switch boundary {
+			case "arm", "topology_mark", "topology_reload", "creation_event", "creation_commit":
+				wantTimerRetirements = 1
+			}
+			if got := len(instances.retiredTimerEntries); got != wantTimerRetirements {
+				t.Fatalf(
+					"timer projection retirements after %s failure = %d, want %d: %#v",
+					boundary,
+					got,
+					wantTimerRetirements,
+					instances.retiredTimerEntries,
+				)
+			}
+			if boundary == "partial_agent" && len(agentStore.upserts) != 1 {
+				t.Fatalf("partial agent registrations = %d, want one", len(agentStore.upserts))
+			}
 
-				agentStore.failAgentID = ""
-				bus.addErr = nil
-				instances.armInitialEntry = nil
-				instances.topologyMarkErr = nil
-				instances.readinessLoadErr = nil
-				bus.publishErr = nil
-				instances.creationMarkErr = nil
-				if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
-					t.Fatalf("Run automatic readiness owner: %v", err)
-				}
-				select {
-				case <-completed:
-				case <-time.After(5 * time.Second):
-					t.Fatal("automatic readiness retry did not complete")
-				}
-				if len(bus.published) != 1 {
-					t.Fatalf("creation events after recovery = %d, want exactly one", len(bus.published))
-				}
-				if len(instances.armedEntries) == 0 {
-					t.Fatal("initial timers were not armed after readiness recovery")
-				}
-				recoveryCtx := testAuthorActivityContext(context.Background())
-				readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(recoveryCtx, req.TriggerEvent.RunID(), req.Instance.Route())
-				if err != nil || !found || readiness.TopologyReadyAt.IsZero() || readiness.CreationEventEmittedAt.IsZero() {
-					t.Fatalf("completed readiness: found=%v readiness=%#v err=%v", found, readiness, err)
-				}
-				if _, err := am.EnsureFlowInstance(recoveryCtx, req); err != nil {
-					t.Fatalf("second EnsureFlowInstance: %v", err)
-				}
-				if len(bus.published) != 1 {
-					t.Fatalf("creation events after exact replay = %d, want one", len(bus.published))
-				}
-			})
-		}
+			agentStore.failAgentID = ""
+			bus.addErr = nil
+			instances.armInitialEntry = nil
+			instances.topologyMarkErr = nil
+			instances.readinessLoadErr = nil
+			bus.publishErr = nil
+			instances.creationMarkErr = nil
+			if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+				t.Fatalf("Run automatic readiness owner: %v", err)
+			}
+			select {
+			case <-completed:
+			case <-time.After(5 * time.Second):
+				t.Fatal("automatic readiness retry did not complete")
+			}
+			if len(bus.published) != 1 {
+				t.Fatalf("creation events after recovery = %d, want exactly one", len(bus.published))
+			}
+			if len(instances.armedEntries) == 0 {
+				t.Fatal("initial timers were not armed after readiness recovery")
+			}
+			recoveryCtx := testAuthorActivityContext(context.Background())
+			readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(recoveryCtx, req.TriggerEvent.RunID(), req.Instance.Route())
+			if err != nil || !found || readiness.TopologyReadyAt.IsZero() || readiness.CreationEventEmittedAt.IsZero() {
+				t.Fatalf("completed readiness: found=%v readiness=%#v err=%v", found, readiness, err)
+			}
+			if _, err := am.EnsureFlowInstance(recoveryCtx, req); err != nil {
+				t.Fatalf("second EnsureFlowInstance: %v", err)
+			}
+			if len(bus.published) != 1 {
+				t.Fatalf("creation events after exact replay = %d, want one", len(bus.published))
+			}
+		})
 	}
 }
 
@@ -1796,16 +1650,11 @@ func TestDynamicFlowRuntimeReadinessAutomaticRetryCompletesWithoutEnsureOrRestar
 	bundle := testFlowBundleWithTwoAgents("task.started")
 	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
-	ctx := runtimepipeline.WithPipelineSQLTxContext(testAuthorActivityContext(context.Background()), &sql.Tx{})
-	ctx = withFlowActivationPostCommit(ctx, &postCommit)
-
-	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
-		t.Fatalf("ActivateFlowInstance: %v", err)
+	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err == nil {
+		t.Fatal("ActivateFlowInstance succeeded across injected first readiness failure")
 	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
 	if armCalls != 1 || len(bus.published) != 0 {
-		t.Fatalf("first post-commit attempt: arms=%d published=%d", armCalls, len(bus.published))
+		t.Fatalf("first committed readiness attempt: arms=%d published=%d", armCalls, len(bus.published))
 	}
 	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -2006,10 +1855,10 @@ func TestFlowActivationRejectsForeignSemanticSourceBeforeAnyMutation(t *testing.
 				armed := len(instances.armedEntries)
 				published := len(bus.published)
 				addedPaths := len(bus.addedPaths)
-				postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
+				postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 				attemptCtx := ctx
 				if transactional {
-					attemptCtx = runtimepipeline.WithPipelineSQLTxContext(attemptCtx, &sql.Tx{})
+					attemptCtx = runtimepipelinefixture.WithSQLTx(attemptCtx, &sql.Tx{})
 					attemptCtx = withFlowActivationPostCommit(attemptCtx, &postCommit)
 				}
 				foreignReq := testActivationRequest(
@@ -2238,41 +2087,17 @@ func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(
 		t.Fatalf("revised bundle source fact: %v", err)
 	}
 	setFlowActivationManagerSemanticSource(am, source, revisedFact)
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
 	revisedCtx := runtimecorrelation.WithRunID(
 		runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(context.Background()), revisedFact),
 		req.TriggerEvent.RunID(),
 	)
 	revisedCtx = worklifetime.WithOccurrence(revisedCtx, am.workOwner)
-	revisedCtx = runtimepipeline.WithPipelineSQLTxContext(revisedCtx, &sql.Tx{})
-	revisedCtx = withFlowActivationPostCommit(revisedCtx, &postCommit)
 	if err := am.ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 		revisedCtx,
 		time.Now().UTC(),
 	); err != nil {
 		t.Fatalf("reconcile same-version revised source: %v", err)
 	}
-	if len(postCommit) != 1 {
-		t.Fatalf("same-version revised source queued %d readiness actions, want 1", len(postCommit))
-	}
-	pending, found, err := instances.LoadDynamicFlowRuntimeReadiness(
-		revisedCtx,
-		req.TriggerEvent.RunID(),
-		req.Instance.Route(),
-	)
-	if err != nil || !found {
-		t.Fatalf("load pending revised source: found=%v err=%v", found, err)
-	}
-	revisedHash, revisedSource := revisedFact.StorageValues()
-	if pending.Plan.WorkflowVersion != initial.Plan.WorkflowVersion ||
-		pending.Plan.BundleHash != revisedHash ||
-		pending.Plan.BundleSource != revisedSource ||
-		!pending.TopologyReadyAt.IsZero() ||
-		!pending.Pending() {
-		t.Fatalf("same-version revised source did not invalidate readiness: %#v", pending)
-	}
-
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
 	completed, found, err := instances.LoadDynamicFlowRuntimeReadiness(
 		revisedCtx,
 		req.TriggerEvent.RunID(),
@@ -2281,7 +2106,9 @@ func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(
 	if err != nil || !found {
 		t.Fatalf("load completed revised source: found=%v err=%v", found, err)
 	}
-	if completed.Plan.BundleHash != revisedHash ||
+	revisedHash, revisedSource := revisedFact.StorageValues()
+	if completed.Plan.WorkflowVersion != initial.Plan.WorkflowVersion ||
+		completed.Plan.BundleHash != revisedHash ||
 		completed.Plan.BundleSource != revisedSource ||
 		completed.TopologyReadyAt.IsZero() ||
 		completed.Pending() {
@@ -2485,20 +2312,17 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 
-	stageEntered := make(chan struct{}, 1)
-	stageRelease := make(chan struct{})
-	var stageCalls atomic.Int32
-	bus.stageRoute = func(runtimebus.FlowInstanceRouteMaterializationRequest) error {
-		stageCalls.Add(1)
-		stageEntered <- struct{}{}
-		<-stageRelease
-		return nil
+	admissionEntered := make(chan struct{}, 1)
+	admissionRelease := make(chan struct{})
+	am.testAfterDynamicFlowReadinessAdmission = func() {
+		admissionEntered <- struct{}{}
+		<-admissionRelease
 	}
 	leaderErr := make(chan error, 1)
 	go func() {
 		leaderErr <- activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
 	}()
-	<-stageEntered
+	<-admissionEntered
 
 	followerErrs := make(chan error, 3)
 	ensureCtx, cancelEnsure := context.WithCancel(testAuthorActivityContext(context.Background()))
@@ -2523,14 +2347,14 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 			t.Fatalf("coalesced follower: %v, want context cancellation from in-flight attempt", err)
 		}
 	}
-	close(stageRelease)
+	close(admissionRelease)
 	if err := <-leaderErr; err != nil {
 		t.Fatalf("coalesced leader: %v", err)
 	}
-	if stageCalls.Load() != 1 || len(instances.armedEntries) != 1 || len(bus.published) != 1 {
+	if len(bus.addedPaths) != 1 || len(instances.armedEntries) != 1 || len(bus.published) != 1 {
 		t.Fatalf(
 			"coalesced side effects: stage=%d arm=%d publish=%d, want 1/1/1",
-			stageCalls.Load(),
+			len(bus.addedPaths),
 			len(instances.armedEntries),
 			len(bus.published),
 		)
@@ -2878,7 +2702,7 @@ func TestEnsureFlowInstanceReconcilesRevisedSemanticSourceIntoReadinessOwner(t *
 	}
 }
 
-func TestEnsureFlowInstanceDefersReadinessVerificationUntilMutationCommit(t *testing.T) {
+func TestEnsureFlowInstanceVerifiesReadinessAfterNamedMutationCommit(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
 	first := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
@@ -2891,24 +2715,15 @@ func TestEnsureFlowInstanceDefersReadinessVerificationUntilMutationCommit(t *tes
 	restartBus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
 	restarted := newFlowActivationManager(t, restartBus, instances, agents)
 	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 2)
-	ctx := runtimepipeline.WithPipelineSQLTxContext(testAuthorActivityContext(context.Background()), &sql.Tx{})
-	ctx = withFlowActivationPostCommit(ctx, &postCommit)
+	ctx := testAuthorActivityContext(context.Background())
 	ctx = worklifetime.WithOccurrence(ctx, restarted.workOwner)
 	if created, err := restarted.EnsureFlowInstance(ctx, req); err != nil {
 		t.Fatalf("EnsureFlowInstance: %v", err)
 	} else if created {
 		t.Fatal("EnsureFlowInstance reported a new instance")
 	}
-	if len(postCommit) != 1 {
-		t.Fatalf("post-commit actions = %d, want one keyed readiness reconciliation", len(postCommit))
-	}
-	if restartBus.HasFlowInstanceRoute(req.Instance.Route()) {
-		t.Fatal("flow route became process-ready before mutation commit")
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
 	if !restartBus.HasFlowInstanceRoute(req.Instance.Route()) {
-		t.Fatal("flow route was not process-ready before readiness verification")
+		t.Fatal("flow route was not process-ready after named mutation commit")
 	}
 	for _, agentID := range []string{"reviewer", "writer"} {
 		if _, ok := testAgentConfig(t, restarted, agentID, "review/inst-1"); !ok {
@@ -3159,7 +2974,7 @@ func TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative(t
 	}
 }
 
-func TestActivateFlowInstanceQueuedAutoEmitUsesProjectedConfigPayload(t *testing.T) {
+func TestActivateFlowInstanceCommittedAutoEmitUsesProjectedConfigPayload(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundleWithAutoEmitEntry("component.scaffold.start", runtimecontracts.EventCatalogEntry{
@@ -3170,18 +2985,13 @@ func TestActivateFlowInstanceQueuedAutoEmitUsesProjectedConfigPayload(t *testing
 		},
 		Required: []string{"component_id"},
 	})
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
-	ctx := withFlowActivationPostCommit(testAuthorActivityContext(context.Background()), &postCommit)
+	ctx := testAuthorActivityContext(context.Background())
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{"component_id": "component-1"}
 
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if len(bus.published) != 0 {
-		t.Fatalf("auto-emit published before post-commit flush: %#v", bus.published)
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
 	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/component.scaffold.start")
 	payload := decodeFlowActivationEventPayload(t, event)
 	if got := payload["component_id"]; got != "component-1" {
@@ -3218,15 +3028,13 @@ func TestActivateFlowInstanceAutoEmitAllowsDeclaredTemplateIDBusinessField(t *te
 	}
 }
 
-func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testing.T) {
+func TestActivateFlowInstancePublishesAutoEmitAfterNamedCommit(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("task.started")
 	const runID = "22222222-2222-2222-2222-222222222215"
 	const triggerEventID = "55555555-5555-5555-5555-555555555555"
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	ctx = withFlowActivationPostCommit(ctx, &postCommit)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID, runID)
 
@@ -3234,16 +3042,8 @@ func TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable(t *testi
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	if len(bus.published) != 0 {
-		t.Fatalf("auto-emit published before post-commit flush: %#v", bus.published)
-	}
-	if len(postCommit) != 1 {
-		t.Fatalf("post-commit actions = %d, want 1", len(postCommit))
-	}
-
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
 	if len(bus.published) != 1 {
-		t.Fatalf("published events after post-commit = %d, want 1", len(bus.published))
+		t.Fatalf("published events after named commit = %d, want 1", len(bus.published))
 	}
 	if got := string(bus.published[0].Type()); got != "review/inst-1/task.started" {
 		t.Fatalf("auto-emitted type = %q, want review/inst-1/task.started", got)
@@ -3290,57 +3090,6 @@ func TestActivateFlowInstanceFinalizesIdenticalReplayWithoutDuplicateCreationSid
 	}
 }
 
-func TestActivateFlowInstanceCanonicalStoreFinalizesIdenticalReplayWithoutDuplicateCreationSideEffects(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	const runID = "cccccccc-cccc-cccc-cccc-cccccccccccc"
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
-	if !ok {
-		t.Fatal("canonical readiness test context missing bundle source fact")
-	}
-	bundleHash, bundleSource := sourceFact.StorageValues()
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource})
-
-	routeStore := &flowActivationTestRouteStore{}
-	bus := &flowActivationTestBus{routeStore: routeStore}
-	agentStore := &flowActivationTestStore{}
-	workflowOwner := flowActivationTestRunLifecycleOwner{db: db}
-	bundle := testFlowBundle("task.started")
-	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, completeFlowActivationWorkflowOptions(runtimepipeline.PipelineCoordinatorOptions{
-		Module:              newFlowActivationWorkflowModule(t, bundle),
-		Persistence:         runtimepipeline.NewWorkflowPersistence(workflowOwner),
-		RunLifecycle:        workflowOwner,
-		PipelineObligations: bus.PipelineObligationOwner(),
-		FlowRoutes:          bus,
-		WorkOwner:           newTestManagerWorkOwner(t),
-	}))
-
-	am := newFlowActivationManager(t, bus, workflowStore, agentStore)
-	req := testActivationRequest(bundle, "review", "inst-1", "11111111-1111-1111-1111-111111111111", "review/inst-1")
-	req.TriggerEvent = testFlowActivationTriggerEvent(req.TriggerEvent.ID(), runID)
-
-	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
-		t.Fatalf("first ActivateFlowInstance: %v", err)
-	}
-	firstRoutes := len(bus.addedPaths)
-	firstPublished := len(bus.published)
-	firstAgents := len(agentStore.upserts)
-
-	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
-		t.Fatalf("identical replay ActivateFlowInstance: %v", err)
-	}
-	if len(bus.addedPaths) != firstRoutes {
-		t.Fatalf("added paths = %#v, want unchanged route side effects", bus.addedPaths)
-	}
-	if len(bus.published) != firstPublished {
-		t.Fatalf("published events = %#v, want unchanged auto-emit side effects", bus.published)
-	}
-	if len(agentStore.upserts) != firstAgents {
-		t.Fatalf("persisted agents = %#v, want unchanged agent side effects", agentStore.upserts)
-	}
-}
-
 func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
@@ -3380,7 +3129,7 @@ func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t 
 	instances := &flowActivationTestInstanceStore{}
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle("task.started")
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
+	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(testAuthorActivityContext(context.Background()), &postCommit)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{
@@ -3673,7 +3422,7 @@ func TestDeactivateFlowInstanceRemovesAgentsAndRoutes(t *testing.T) {
 	}
 }
 
-func TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvailable(t *testing.T) {
+func TestDeactivateFlowInstanceConsumesTerminalEvidenceAfterNamedCommit(t *testing.T) {
 	routeStore := &flowActivationTestRouteStore{}
 	bus := &flowActivationTestBus{routeStore: routeStore}
 	instances := &flowActivationTestInstanceStore{}
@@ -3689,38 +3438,15 @@ func TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvail
 	if err := am.lifecycle.waitForWork(quiescenceCtx); err != nil {
 		t.Fatalf("wait for activation backlog replay: %v", err)
 	}
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
-	ctx := withFlowActivationPostCommit(flowActivationRunContext(), &postCommit)
-	ctx = runtimepipeline.WithPipelineSQLTxContext(ctx, &sql.Tx{})
-	if err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
+	if err := am.DeactivateFlowInstance(flowActivationRunContext(), "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
 		t.Fatalf("DeactivateFlowInstance: %v", err)
 	}
 
-	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
-		t.Fatal("flow agent was torn down before post-commit flush")
-	}
-	if len(bus.unsubscribed) != 0 {
-		t.Fatalf("unsubscribed before post-commit flush = %#v, want none", bus.unsubscribed)
-	}
-	if len(managerStore.terminated) != 0 {
-		t.Fatalf("agent terminations before post-commit flush = %#v, want none", managerStore.terminated)
-	}
-	if len(bus.removedPairs) != 0 {
-		t.Fatalf("removed routes before post-commit flush = %#v, want none", bus.removedPairs)
-	}
-	if got := routeStore.statusByPath["review/inst-1"]; got != "inactive" {
-		t.Fatalf("route status before post-commit flush = %q, want transactionally inactive", got)
-	}
 	if len(instances.terminatedPaths) != 1 || instances.terminatedPaths[0] != "review/inst-1" {
 		t.Fatalf("flow instance terminal state = %#v, want committed owner entry", instances.terminatedPaths)
 	}
-	if len(postCommit) != 2 {
-		t.Fatalf("post-commit actions = %d, want route retirement and terminal side effects", len(postCommit))
-	}
-
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
 	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
-		t.Fatal("expected flow agent teardown after post-commit flush")
+		t.Fatal("expected flow agent teardown after named commit")
 	}
 	if len(bus.unsubscribed) != 0 {
 		t.Fatalf("generic unsubscribe used after post-commit flush: %#v", bus.unsubscribed)
@@ -3739,7 +3465,7 @@ func TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvail
 	}
 }
 
-func TestDeactivateFlowInstanceLogsPostCommitAgentFailureAfterRouteRetirement(t *testing.T) {
+func TestDeactivateFlowInstanceReportsPostCommitAgentFailureAfterRouteRetirement(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
 	managerStore := &flowActivationTestStore{terminateErr: errors.New("agent terminate failed")}
@@ -3749,14 +3475,9 @@ func TestDeactivateFlowInstanceLogsPostCommitAgentFailureAfterRouteRetirement(t 
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
-	ctx := withFlowActivationPostCommit(flowActivationRunContext(), &postCommit)
-	ctx = runtimepipeline.WithPipelineSQLTxContext(ctx, &sql.Tx{})
-	if err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1"); err != nil {
-		t.Fatalf("DeactivateFlowInstance returned pre-commit error: %v", err)
+	if err := am.DeactivateFlowInstance(flowActivationRunContext(), "review", "inst-1", "review/inst-1", "ent-1"); err == nil || !strings.Contains(err.Error(), "agent terminate failed") {
+		t.Fatalf("DeactivateFlowInstance error = %v, want committed teardown failure", err)
 	}
-
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
 	if len(bus.runtimeLogs) != 1 {
 		t.Fatalf("runtime logs = %#v, want one post-commit failure log", bus.runtimeLogs)
 	}
@@ -3785,14 +3506,14 @@ func TestDeactivateFlowInstanceFailsBeforePostCommitSideEffectsWhenRoutePersiste
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
+	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
 	ctx := withFlowActivationPostCommit(flowActivationRunContext(), &postCommit)
 	err := am.DeactivateFlowInstance(ctx, "review", "inst-1", "review/inst-1", "ent-1")
 	if err == nil || !strings.Contains(err.Error(), "persist flow instance terminalization") || !strings.Contains(err.Error(), "route removal failed") {
 		t.Fatalf("DeactivateFlowInstance error = %v, want exact route persistence failure", err)
 	}
 
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	runtimepipelinefixture.FlushPostCommitActions(postCommit)
 	if len(bus.runtimeLogs) != 0 {
 		t.Fatalf("runtime logs = %#v, want no post-commit side-effect failure", bus.runtimeLogs)
 	}
@@ -3832,203 +3553,6 @@ func TestDeactivateFlowInstanceUsesExactResolvedFlowPathForNestedTemplate(t *tes
 	}
 	if len(instances.terminatedPaths) != 1 || instances.terminatedPaths[0] != "child/grandchild/inst-1" {
 		t.Fatalf("terminated paths = %#v, want [child/grandchild/inst-1]", instances.terminatedPaths)
-	}
-}
-
-func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	const runID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
-
-	routeStore := &flowActivationTestRouteStore{}
-	bus := &flowActivationTestBus{routeStore: routeStore}
-	workflowOwner := flowActivationTestRunLifecycleOwner{db: db}
-	bundle := testFlowBundle("")
-	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, completeFlowActivationWorkflowOptions(runtimepipeline.PipelineCoordinatorOptions{
-		Module:              newFlowActivationWorkflowModule(t, bundle),
-		Persistence:         runtimepipeline.NewWorkflowPersistence(workflowOwner),
-		RunLifecycle:        workflowOwner,
-		PipelineObligations: bus.PipelineObligationOwner(),
-		FlowRoutes:          bus,
-		WorkOwner:           newTestManagerWorkOwner(t),
-	}))
-
-	am := newFlowActivationManager(t, bus, workflowStore)
-	ctx = worklifetime.WithOccurrence(ctx, am.workOwner)
-	const subjectID = "11111111-1111-1111-1111-111111111111"
-	req := testActivationRequest(bundle, "review", "inst-1", subjectID, "review/inst-1")
-	req.TriggerEvent = testFlowActivationTriggerEvent(req.TriggerEvent.ID(), runID)
-
-	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
-		t.Fatalf("ActivateFlowInstance: %v", err)
-	}
-	sharedAgent := flowActivationStubAgent{id: "shared-subject-agent"}
-	sharedConfig := models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "shared-subject-agent",
-		Identity: managerScopedRuntimeAgentIdentity(
-			"shared-subject-agent",
-			"test://flow-activation/shared-subject-agent",
-			"review",
-			"other-inst",
-			"review/other-inst",
-		),
-		EntityID: req.Instance.EntityID,
-		FlowPath: "review/other-inst",
-	}
-	if err := am.lifecycle.registerExecution(ctx, PersistedAgent{Config: sharedConfig, Status: "active", HiredBy: "test"}, false, sharedAgent, testManagerSubscriptionAdmission(t, sharedConfig)); err != nil {
-		t.Fatalf("register shared-subject-agent: %v", err)
-	}
-
-	if err := am.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
-		ContractBundle: semanticview.Wrap(bundle),
-		Instance:       req.Instance,
-		FinalState:     "completed",
-	}); err != nil {
-		t.Fatalf("DeactivateFlowInstanceModel: %v", err)
-	}
-
-	var (
-		status       string
-		terminatedAt time.Time
-	)
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
-		SELECT status, terminated_at
-		FROM flow_instances
-		WHERE instance_id = $1
-	`, "review/inst-1").Scan(&status, &terminatedAt); err != nil {
-		t.Fatalf("query flow_instances: %v", err)
-	}
-	if strings.TrimSpace(status) != "terminated" {
-		t.Fatalf("flow_instances.status = %q, want terminated", status)
-	}
-	if terminatedAt.IsZero() {
-		t.Fatal("flow_instances.terminated_at is zero")
-	}
-	routeStatus := routeStore.statusByPath["review/inst-1"]
-	if strings.TrimSpace(routeStatus) != "inactive" {
-		t.Fatalf("routing_rules.status = %q, want inactive", routeStatus)
-	}
-
-	instance, ok, err := workflowStore.Load(ctx, req.Instance.Route())
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if !ok {
-		t.Fatal("expected workflow instance")
-	}
-	if got := strings.TrimSpace(instance.CurrentState); got != "pending" {
-		t.Fatalf("current_state = %q, want pending", got)
-	}
-	if strings.TrimSpace(instance.Status) != "terminated" {
-		t.Fatalf("loaded workflow instance status = %q, want terminated", instance.Status)
-	}
-	if instance.TerminatedAt.IsZero() {
-		t.Fatal("loaded workflow instance terminated_at is zero")
-	}
-	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
-		t.Fatal("expected flow-scoped agent teardown")
-	}
-	if _, ok := testAgentConfig(t, am, "shared-subject-agent", ""); !ok {
-		t.Fatal("expected unrelated flow agent to remain active")
-	}
-}
-
-func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	const runID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
-
-	routeStore := &flowActivationTestRouteStore{}
-	bus := &flowActivationTestBus{routeStore: routeStore}
-	managerStore := &flowActivationTestStore{}
-	workflowOwner := flowActivationTestRunLifecycleOwner{db: db}
-	bundle := testFlowBundle("")
-	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, completeFlowActivationWorkflowOptions(runtimepipeline.PipelineCoordinatorOptions{
-		Module:              newFlowActivationWorkflowModule(t, bundle),
-		Persistence:         runtimepipeline.NewWorkflowPersistence(workflowOwner),
-		RunLifecycle:        workflowOwner,
-		PipelineObligations: bus.PipelineObligationOwner(),
-		FlowRoutes:          bus,
-		WorkOwner:           newTestManagerWorkOwner(t),
-	}))
-
-	am := newFlowActivationManager(t, bus, workflowStore, managerStore)
-	ctx = worklifetime.WithOccurrence(ctx, am.workOwner)
-	const subjectID = "22222222-2222-2222-2222-222222222222"
-	req := testActivationRequest(bundle, "review", "inst-1", subjectID, "review/inst-1")
-	req.TriggerEvent = testFlowActivationTriggerEvent(req.TriggerEvent.ID(), runID)
-
-	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
-		t.Fatalf("ActivateFlowInstance: %v", err)
-	}
-	if err := workflowOwner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		if err := am.DeactivateFlowInstanceModel(txctx, runtimepipeline.FlowInstanceDeactivationRequest{
-			ContractBundle: semanticview.Wrap(bundle),
-			Instance:       req.Instance,
-			FinalState:     "completed",
-		}); err != nil {
-			return err
-		}
-		if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
-			return errors.New("flow agent was torn down before terminal transaction commit")
-		}
-		if len(managerStore.terminated) != 0 || len(bus.unsubscribed) != 0 || len(bus.removedPairs) != 0 {
-			return fmt.Errorf(
-				"side effects before commit: terminated=%#v unsubscribed=%#v routes=%#v",
-				managerStore.terminated,
-				bus.unsubscribed,
-				bus.removedPairs,
-			)
-		}
-		if got := routeStore.statusByPath["review/inst-1"]; got != "inactive" {
-			return fmt.Errorf("route status inside terminal mutation = %q, want inactive", got)
-		}
-		var externalStatus string
-		if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
-			SELECT status
-			FROM flow_instances
-			WHERE instance_id = $1
-		`, "review/inst-1").Scan(&externalStatus); err != nil {
-			return fmt.Errorf("external flow_instances status before commit: %w", err)
-		}
-		if strings.TrimSpace(externalStatus) != "active" {
-			return fmt.Errorf("external flow_instances status before commit = %q, want active", externalStatus)
-		}
-		return nil
-	}); err != nil {
-		t.Fatalf("RunRuntimeMutationContext: %v", err)
-	}
-
-	var status string
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
-		SELECT status
-		FROM flow_instances
-		WHERE instance_id = $1
-	`, "review/inst-1").Scan(&status); err != nil {
-		t.Fatalf("external flow_instances status after commit: %v", err)
-	}
-	if strings.TrimSpace(status) != "terminated" {
-		t.Fatalf("external flow_instances status after commit = %q, want terminated", status)
-	}
-	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
-		t.Fatal("expected flow agent teardown after terminal transaction commit")
-	}
-	if len(managerStore.terminated) != 1 || managerStore.terminated[0] != "reviewer" {
-		t.Fatalf("agent terminations after commit = %#v, want reviewer", managerStore.terminated)
-	}
-	if len(bus.unsubscribed) != 0 {
-		t.Fatalf("generic unsubscribe used after commit: %#v", bus.unsubscribed)
-	}
-	if len(bus.removedPairs) != 1 || bus.removedPairs[0] != "review/inst-1" {
-		t.Fatalf("removed routes after commit = %#v, want review/inst-1", bus.removedPairs)
-	}
-	if got := routeStore.statusByPath["review/inst-1"]; got != "inactive" {
-		t.Fatalf("route status after commit = %q, want inactive", got)
 	}
 }
 

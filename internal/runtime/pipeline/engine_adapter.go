@@ -152,9 +152,12 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 				return runtimeengine.CommittedEngineMutation{}, err
 			}
 		}
+		postCommit := WorkflowEnginePostCommitPlan{FlowDeactivation: &WorkflowEngineFlowDeactivation{
+			Route: mutation.Address.Route, EntityID: mutation.Address.EntityID.String(), NextState: state.CurrentState,
+		}}
 		committed, err := o.store.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
 			State: state, Lifecycle: lifecycle.Commit,
-			ProposedEffects: proposedEffects, Publications: publications,
+			ProposedEffects: proposedEffects, Publications: publications, PostCommit: postCommit,
 		})
 		if err != nil {
 			if o.publication != nil {
@@ -169,6 +172,11 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 		}
 		if err := o.state.coordinator.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle); err != nil {
 			return runtimeengine.CommittedEngineMutation{}, err
+		}
+		if deactivation := committed.PostCommit.FlowDeactivation; deactivation != nil {
+			if err := o.state.coordinator.maybeDeactivateTerminalFlowInstance(ctx, deactivation.Route, deactivation.EntityID, deactivation.NextState); err != nil {
+				return runtimeengine.CommittedEngineMutation{}, err
+			}
 		}
 		if len(committed.Publications) < len(mutation.EmitIntents) {
 			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("committed engine publications = %d, want at least %d emitted events", len(committed.Publications), len(mutation.EmitIntents))

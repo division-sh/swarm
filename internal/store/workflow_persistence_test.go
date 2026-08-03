@@ -22,7 +22,6 @@ import (
 
 type workflowTestSelectedStore interface {
 	runtimepipeline.WorkflowPersistenceOwner
-	storeTestRuntimeMutationOwner
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
 	decisioncard.Store

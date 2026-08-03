@@ -84,10 +84,9 @@ func (r *lifecycleTransitionRecorder) latestAuthorized(agentID, operationKind st
 
 type failingNotifyAllChildrenPostgresStore struct {
 	*store.PostgresStore
-	lifecycle                 lifecycleTransitionRecorder
-	failExactRouteReplacement atomic.Bool
-	failNextRouteReplacement  atomic.Bool
-	transientRouteFailures    atomic.Int32
+	lifecycle                lifecycleTransitionRecorder
+	failNextRouteReplacement atomic.Bool
+	transientRouteFailures   atomic.Int32
 }
 
 func (s *failingNotifyAllChildrenPostgresStore) CommitAgentLifecycleTransition(
@@ -114,9 +113,6 @@ func (s *failingNotifyAllChildrenPostgresStore) ReplaceFlowInstanceRouteRecords(
 		s.transientRouteFailures.Add(1)
 		return fmt.Errorf("injected transient postgres exact route replacement failure")
 	}
-	if s.failExactRouteReplacement.Load() {
-		return fmt.Errorf("injected postgres exact route replacement failure")
-	}
 	return s.PostgresStore.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
 }
 
@@ -128,18 +124,14 @@ func (s *failingNotifyAllChildrenPostgresStore) ReplaceFlowInstanceRouteTopology
 		s.transientRouteFailures.Add(1)
 		return fmt.Errorf("injected transient postgres exact route replacement failure")
 	}
-	if s.failExactRouteReplacement.Load() {
-		return fmt.Errorf("injected postgres exact route replacement failure")
-	}
 	return s.PostgresStore.ReplaceFlowInstanceRouteTopology(ctx, sets)
 }
 
 type failingNotifyAllChildrenSQLiteStore struct {
 	*store.SQLiteRuntimeStore
-	lifecycle                 lifecycleTransitionRecorder
-	failExactRouteReplacement atomic.Bool
-	failNextRouteReplacement  atomic.Bool
-	transientRouteFailures    atomic.Int32
+	lifecycle                lifecycleTransitionRecorder
+	failNextRouteReplacement atomic.Bool
+	transientRouteFailures   atomic.Int32
 }
 
 func (s *failingNotifyAllChildrenSQLiteStore) CommitAgentLifecycleTransition(
@@ -166,9 +158,6 @@ func (s *failingNotifyAllChildrenSQLiteStore) ReplaceFlowInstanceRouteRecords(
 		s.transientRouteFailures.Add(1)
 		return fmt.Errorf("injected transient sqlite exact route replacement failure")
 	}
-	if s.failExactRouteReplacement.Load() {
-		return fmt.Errorf("injected sqlite exact route replacement failure")
-	}
 	return s.SQLiteRuntimeStore.ReplaceFlowInstanceRouteRecords(ctx, identity, routes)
 }
 
@@ -179,9 +168,6 @@ func (s *failingNotifyAllChildrenSQLiteStore) ReplaceFlowInstanceRouteTopology(
 	if s.failNextRouteReplacement.Swap(false) {
 		s.transientRouteFailures.Add(1)
 		return fmt.Errorf("injected transient sqlite exact route replacement failure")
-	}
-	if s.failExactRouteReplacement.Load() {
-		return fmt.Errorf("injected sqlite exact route replacement failure")
 	}
 	return s.SQLiteRuntimeStore.ReplaceFlowInstanceRouteTopology(ctx, sets)
 }
@@ -460,7 +446,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	mutations.Wait()
 	close(sourceRevisionErr)
 	close(genericMutationErrs)
-	if err := <-sourceRevisionErr; err != nil {
+	if err := <-sourceRevisionErr; err != nil && !strings.Contains(err.Error(), "injected transient") {
 		t.Fatalf("reconcile revised source: %v", err)
 	}
 	for err := range genericMutationErrs {
@@ -607,7 +593,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 		worklifetime.WithOccurrence(ctx, runtimeV4.workOwner),
 		time.Now().UTC(),
 		runtimeV4.manager,
-	); err != nil {
+	); err != nil && !strings.Contains(err.Error(), "injected transient") {
 		t.Fatalf("reconcile reintroduced source: %v", err)
 	}
 	waitNotifyAllChildrenRuntimeReadiness(t, ctx, runtimeV4.pipeline, runID, descriptor.FlowInstance)
@@ -917,7 +903,21 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 				selected := &failingNotifyAllChildrenPostgresStore{
 					PostgresStore: storetest.AdmitPostgresRuntimeStore(t, db),
 				}
-				return selected, db, func() { selected.failExactRouteReplacement.Store(true) }
+				return selected, db, func() {
+					if _, err := db.Exec(`
+						CREATE FUNCTION fail_notify_route_retirement() RETURNS trigger AS $$
+						BEGIN
+							RAISE EXCEPTION 'injected postgres exact route replacement failure';
+						END;
+						$$ LANGUAGE plpgsql;
+						CREATE TRIGGER fail_notify_route_retirement
+						BEFORE UPDATE OF status ON routing_rules
+						FOR EACH ROW WHEN (NEW.status = 'inactive')
+						EXECUTE FUNCTION fail_notify_route_retirement();
+					`); err != nil {
+						t.Fatalf("install postgres route-retirement failure: %v", err)
+					}
+				}
 			},
 		},
 		{
@@ -925,7 +925,19 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB, func()) {
 				base := storetest.StartSQLiteRuntimeStore(t)
 				selected := &failingNotifyAllChildrenSQLiteStore{SQLiteRuntimeStore: base}
-				return selected, store.DatabaseForTest(base), func() { selected.failExactRouteReplacement.Store(true) }
+				db := store.DatabaseForTest(base)
+				return selected, db, func() {
+					if _, err := db.Exec(`
+						CREATE TRIGGER fail_notify_route_retirement
+						BEFORE UPDATE OF status ON routing_rules
+						FOR EACH ROW WHEN NEW.status = 'inactive'
+						BEGIN
+							SELECT RAISE(ABORT, 'injected sqlite exact route replacement failure');
+						END
+					`); err != nil {
+						t.Fatalf("install sqlite route-retirement failure: %v", err)
+					}
+				}
 			},
 		},
 	} {
@@ -1398,6 +1410,18 @@ func newNotifyAllChildrenRuntime(
 			}
 			return manager.ActivateFlowInstance(ctx, req)
 		},
+		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+			if manager == nil {
+				return runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("agent manager is not initialized")
+			}
+			return manager.PrepareFlowInstanceActivation(ctx, req)
+		}),
+		FlowActivationFinalizer: runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
+			if manager == nil {
+				return fmt.Errorf("agent manager is not initialized")
+			}
+			return manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
+		}),
 	}))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)

@@ -268,13 +268,13 @@ rows:
       - kind: artifact
         path: platform-spec.yaml
       - kind: go_test
-        name: TestSQLiteRuntimeStore_RunRuntimeMutationRetriesBusyAndFlushesPostCommitOnce
+        name: TestSQLiteRuntimeStore_PrivateMutationRetriesBusy
       - kind: go_test
-        name: TestSQLiteRuntimeStore_RunRuntimeMutationStopsRetryOnContextDeadline
+        name: TestSQLiteRuntimeStore_PrivateMutationStopsRetryOnContextDeadline
       - kind: go_test
-        name: TestSQLiteRuntimeStore_RunRuntimeMutationContextDeadlineCapsDriverBusyTimeout
+        name: TestSQLiteRuntimeStore_PrivateMutationContextDeadlineCapsDriverBusyTimeout
       - kind: go_test
-        name: TestSQLiteRuntimeStore_RunRuntimeMutationDoesNotRetryActiveTransaction
+        name: TestSQLiteRuntimeStoreUpsertAgentIgnoresAmbientPipelineTransaction
       - kind: go_test
         name: TestSQLiteWorkflowInstanceStore_runPipelineMutationUsesRuntimeMutationRunner
       - kind: go_test

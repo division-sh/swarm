@@ -505,18 +505,7 @@ func runMutation(
 			_ = tx.Rollback()
 		}
 	}()
-	authorDialect := runtimeauthoractivity.DialectPostgres
-	if dialect == DialectSQLite {
-		authorDialect = runtimeauthoractivity.DialectSQLite
-	}
-	txctx, err := runtimeauthoractivity.Begin(ctx, tx, authorDialect)
-	if err != nil {
-		return err
-	}
-	if err := fn(txctx, tx); err != nil {
-		return err
-	}
-	if err := runtimeauthoractivity.Finalize(txctx); err != nil {
+	if err := fn(ctx, tx); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -595,21 +584,10 @@ func Materialize(ctx context.Context, db *sql.DB, dialect Dialect, fixture Fixtu
 			_ = tx.Rollback()
 		}
 	}()
-	authorDialect := runtimeauthoractivity.DialectPostgres
-	if dialect == DialectSQLite {
-		authorDialect = runtimeauthoractivity.DialectSQLite
-	}
-	txctx, err := runtimeauthoractivity.Begin(ctx, tx, authorDialect)
-	if err != nil {
-		return err
-	}
-	if _, err := (sqlMutation{tx: tx, dialect: dialect}).Create(txctx, runtimerunlifecycle.CreateRequest{
+	if _, err := (sqlMutation{tx: tx, dialect: dialect}).Create(ctx, runtimerunlifecycle.CreateRequest{
 		RunID: fixture.RunID, Origin: fixture.Origin,
 		Source: source, StartedAt: fixture.StartedAt.UTC(),
 	}); err != nil {
-		return err
-	}
-	if err := runtimeauthoractivity.Finalize(txctx); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

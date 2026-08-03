@@ -43,7 +43,7 @@ func commitHumanTaskExpirations(
 			if strings.TrimSpace(expired[index].ID()) != strings.TrimSpace(plan.DurablePublicationEventID()) {
 				return fmt.Errorf("human-task expiry authority changed before commit at index %d", index)
 			}
-			committed, err := commitPublicationTx(txctx, tx, story, store, postgres, plan.PublicationCommand(), publicationCommitOptions{})
+			committed, err := commitPublicationTx(txctx, tx, story, store, postgres, plan.PublicationCommand(), nil)
 			if err != nil {
 				return fmt.Errorf("commit human-task expiry publication %d: %w", index, err)
 			}

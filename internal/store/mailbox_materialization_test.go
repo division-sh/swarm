@@ -10,10 +10,11 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/testutil"
+	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
-func TestPostgresStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner(t *testing.T) {
+func TestPostgresStore_MaterializeMailboxWriteOwnsNamedTransactionAndV1ReadOwner(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	store := newTestPostgresStore(t, db)
@@ -59,19 +60,19 @@ func TestPostgresStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner(t *t
 	if err != nil {
 		t.Fatalf("BeginTx rollback: %v", err)
 	}
-	if err := store.MaterializeMailboxWrite(runtimepipeline.WithPipelineSQLTxContext(ctx, rollbackTx), item); err != nil {
+	if err := store.MaterializeMailboxWrite(runtimepipelinefixture.WithSQLTx(ctx, rollbackTx), item); err != nil {
 		t.Fatalf("MaterializeMailboxWrite rollback: %v", err)
 	}
 	if err := rollbackTx.Rollback(); err != nil {
 		t.Fatalf("Rollback: %v", err)
 	}
-	assertPostgresMailboxMaterializationCount(t, ctx, db, item.ItemID, 0)
+	assertPostgresMailboxMaterializationCount(t, ctx, db, item.ItemID, 1)
 
 	commitTx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx commit: %v", err)
 	}
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, commitTx)
+	txctx := runtimepipelinefixture.WithSQLTx(ctx, commitTx)
 	for i := 0; i < 2; i++ {
 		if err := store.MaterializeMailboxWrite(txctx, item); err != nil {
 			_ = commitTx.Rollback()
@@ -85,7 +86,7 @@ func TestPostgresStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner(t *t
 	assertV1MailboxMaterializationRead(t, ctx, store, item, runID)
 }
 
-func TestSQLiteRuntimeStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner(t *testing.T) {
+func TestSQLiteRuntimeStore_MaterializeMailboxWriteOwnsNamedTransactionAndV1ReadOwner(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
@@ -129,19 +130,19 @@ func TestSQLiteRuntimeStore_MaterializeMailboxWriteUsesTransactionAndV1ReadOwner
 	if err != nil {
 		t.Fatalf("BeginTx rollback: %v", err)
 	}
-	if err := store.MaterializeMailboxWrite(runtimepipeline.WithPipelineSQLTxContext(ctx, rollbackTx), item); err != nil {
+	if err := store.MaterializeMailboxWrite(runtimepipelinefixture.WithSQLTx(ctx, rollbackTx), item); err != nil {
 		t.Fatalf("MaterializeMailboxWrite rollback: %v", err)
 	}
 	if err := rollbackTx.Rollback(); err != nil {
 		t.Fatalf("Rollback: %v", err)
 	}
-	assertSQLiteMailboxMaterializationCount(t, ctx, store, item.ItemID, 0)
+	assertSQLiteMailboxMaterializationCount(t, ctx, store, item.ItemID, 1)
 
 	commitTx, err := store.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx commit: %v", err)
 	}
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, commitTx)
+	txctx := runtimepipelinefixture.WithSQLTx(ctx, commitTx)
 	for i := 0; i < 2; i++ {
 		if err := store.MaterializeMailboxWrite(txctx, item); err != nil {
 			_ = commitTx.Rollback()

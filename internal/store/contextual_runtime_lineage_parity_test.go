@@ -8,10 +8,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -72,9 +72,9 @@ func TestContextualRuntimeProducerLineageReadbackParity(t *testing.T) {
 						}
 						event = eventtest.InExecutionMode(event, mode)
 						if manifestation.directWrite {
-							dialect := runtimeauthoractivity.DialectSQLite
+							dialect := authoractivityfixture.DialectSQLite
 							if backend.name == "postgres" {
-								dialect = runtimeauthoractivity.DialectPostgres
+								dialect = authoractivityfixture.DialectPostgres
 							}
 							storetest.InsertCanonicalEventRecord(t, ctx, selectedDatabase(t, selectedStore), dialect, event)
 						} else {

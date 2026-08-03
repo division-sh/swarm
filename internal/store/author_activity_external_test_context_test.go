@@ -100,10 +100,6 @@ type externalStoreTestDurableEventBusStore interface {
 	PipelineObligations() runtimepipelineobligation.Store
 }
 
-type externalStoreTestMutationOwner interface {
-	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
-}
-
 func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBusStore, options ...runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
 	t.Helper()
 	var opts runtimebus.EventBusOptions

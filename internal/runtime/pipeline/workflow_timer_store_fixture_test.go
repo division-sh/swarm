@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
 func (s *workflowInstanceStore) insertWorkflowTimerActivation(ctx context.Context, activation WorkflowTimerActivation) (WorkflowTimerActivation, bool, error) {
@@ -19,7 +19,7 @@ func (s *workflowInstanceStore) insertWorkflowTimerActivation(ctx context.Contex
 		return WorkflowTimerActivation{}, false, err
 	}
 	tx, ok := sqlTxFromContext(ctx)
-	if !ok || tx == nil || !authoractivity.InMutation(ctx, tx) {
+	if !ok || tx == nil || !authoractivityfixture.InMutation(ctx, tx) {
 		return WorkflowTimerActivation{}, false, fmt.Errorf("workflow timer activation requires the pipeline mutation owner")
 	}
 	runID, err := s.requireActiveWorkflowRun(ctx, tx)

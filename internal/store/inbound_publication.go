@@ -31,7 +31,7 @@ func commitInboundPublicationTx(
 	publicationStore inboundPublicationTransactionStore,
 	postgres bool,
 	command runtimeinbound.CommitCommand,
-	allowStandingGenerationRebind bool,
+	handoff *runLifecycleCandidateHandoffReservation,
 ) (runtimeinbound.CommitResult, error) {
 	if tx == nil || story == nil {
 		return runtimeinbound.CommitResult{}, fmt.Errorf("inbound publication requires private transaction and story owners")
@@ -44,9 +44,7 @@ func commitInboundPublicationTx(
 	children := make([]runtimeinbound.EventRecord, len(command.Finalization.Events))
 	for index, publication := range command.Publications {
 		var err error
-		committed[index], err = commitPublicationTx(ctx, tx, story, eventStore, postgres, publication, publicationCommitOptions{
-			allowStandingGenerationRebind: allowStandingGenerationRebind,
-		})
+		committed[index], err = commitPublicationTx(ctx, tx, story, eventStore, postgres, publication, handoff)
 		if err != nil {
 			return runtimeinbound.CommitResult{}, fmt.Errorf("commit inbound publication event %d: %w", index, err)
 		}
@@ -91,9 +89,14 @@ func (s *PostgresStore) CommitInboundPublication(ctx context.Context, command ru
 	if err := command.Validate(); err != nil {
 		return runtimeinbound.CommitResult{}, err
 	}
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return runtimeinbound.CommitResult{}, err
+	}
+	defer handoff.rollback()
 	request := command.Request.Normalized()
 	var result runtimeinbound.CommitResult
-	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	err = s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		identityKey := inboundEventIdempotencyKey(request.ProviderEventID, request.EntityID, request.Provider)
 		if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, identityKey); err != nil {
 			return fmt.Errorf("lock inbound publication identity: %w", err)
@@ -118,13 +121,13 @@ func (s *PostgresStore) CommitInboundPublication(ctx context.Context, command ru
 		if err := insertPostgresInboundPublicationPreparedTx(txctx, tx, request); err != nil {
 			return err
 		}
-		result, err = commitInboundPublicationTx(txctx, tx, story, s, s, true, command, request.ExpectedGeneration > 1)
+		result, err = commitInboundPublicationTx(txctx, tx, story, s, s, true, command, handoff)
 		return err
 	})
 	if err != nil {
 		return runtimeinbound.CommitResult{}, err
 	}
-	return result, nil
+	return result, handoff.commit()
 }
 
 func (s *PostgresStore) LoadInboundPublicationByIdentity(ctx context.Context, provider, entityID, providerEventID string) (runtimeinbound.Record, bool, error) {

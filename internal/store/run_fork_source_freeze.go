@@ -14,7 +14,7 @@ import (
 
 // applyRunForkSourceFreeze is the only writer of the terminal forked source
 // state. The caller owns the surrounding serializable transaction.
-func (s *PostgresStore) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, lineage runForkActivationLineage, now time.Time, confirmed bool) error {
+func (s *PostgresStore) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, lineage runForkActivationLineage, now time.Time, confirmed bool, handoff *runLifecycleCandidateHandoffReservation) error {
 	if tx == nil {
 		return fmt.Errorf("run fork source freeze transaction is required")
 	}
@@ -39,7 +39,7 @@ func (s *PostgresStore) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx
 	}); err != nil {
 		return fmt.Errorf("freeze source run lifecycle: %w", err)
 	}
-	if _, err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+	if _, err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story, handoff: handoff}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
 		RunID: lineage.ForkRunID,
 		State: runtimerunlifecycle.StateRunning,
 	}); err != nil {

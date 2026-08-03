@@ -11,13 +11,14 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	"github.com/division-sh/swarm/internal/store/testutil/mutationlogfixture"
 )
 
 type pipelineTestPublicationPlan struct {
@@ -135,9 +136,9 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 			if !ok {
 				return fmt.Errorf("pipeline test publication has unexpected type %T", value)
 			}
-			dialect := runtimeauthoractivity.DialectSQLite
+			dialect := authoractivityfixture.DialectSQLite
 			if r.dialect == workflowStoreDialectPostgres {
-				dialect = runtimeauthoractivity.DialectPostgres
+				dialect = authoractivityfixture.DialectPostgres
 			}
 			tx, ok := sqlTxFromContext(txctx)
 			if !ok || tx == nil {
@@ -210,7 +211,7 @@ func (r *recordingRuntimeMutationRunner) commitHumanTaskRouteForTest(
 		if !ok || tx == nil {
 			return fmt.Errorf("pipeline test human-task route requires its private transaction")
 		}
-		if err := eventfixture.Insert(txctx, tx, runtimeauthoractivity.Dialect(r.dialect), plan.intent.Event); err != nil {
+		if err := eventfixture.Insert(txctx, tx, authoractivityfixture.Dialect(r.dialect), plan.intent.Event); err != nil {
 			return err
 		}
 		if cardID != "" {
@@ -518,9 +519,9 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowTimerOccurrence(ctx conte
 		if !ok || tx == nil {
 			return fmt.Errorf("pipeline test timer commit requires its private transaction")
 		}
-		dialect := runtimeauthoractivity.DialectSQLite
+		dialect := authoractivityfixture.DialectSQLite
 		if r.dialect == workflowStoreDialectPostgres {
-			dialect = runtimeauthoractivity.DialectPostgres
+			dialect = authoractivityfixture.DialectPostgres
 		}
 		if plan.commitHook != nil {
 			if err := plan.commitHook(txctx, plan.intent.Event); err != nil {
@@ -787,7 +788,7 @@ func commitPipelineTestWorkflowMutationLog(
 		HandlerStep: map[bool]string{true: "create", false: "mutate"}[record.Create],
 	}
 	if store.testDialect() == workflowStoreDialectPostgres {
-		return runtimemutationlog.InsertEntityStateDiff(ctx, tx, store.runLifecycle, record.EntityID, before, after, writer)
+		return mutationlogfixture.InsertEntityStateDiff(ctx, tx, store.runLifecycle, record.EntityID, before, after, writer)
 	}
 	return insertSQLiteEntityStateDiff(ctx, tx, store.runLifecycle, record.EntityID, before, after, writer)
 }

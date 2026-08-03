@@ -75,8 +75,13 @@ func (s *PostgresStore) runControlTransition(ctx context.Context, req runtimerun
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimeruncontrol.State{}, err
 	}
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return runtimeruncontrol.State{}, err
+	}
+	defer handoff.rollback()
 	var state runtimeruncontrol.State
-	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	err = s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
 		state, err = lockRunControlState(txctx, tx, runID)
 		if err != nil {
@@ -93,9 +98,9 @@ func (s *PostgresStore) runControlTransition(ctx context.Context, req runtimerun
 			}
 			state, err = s.stopRunControlTx(txctx, tx, story, state, req)
 		case "pause":
-			state, err = s.pauseRunControlTx(txctx, tx, state, req)
+			state, err = s.pauseRunControlTx(txctx, tx, state, req, handoff)
 		case "continue":
-			state, err = s.continueRunControlTx(txctx, tx, state, req)
+			state, err = s.continueRunControlTx(txctx, tx, state, req, handoff)
 		default:
 			err = fmt.Errorf("unsupported run control action %q", action)
 		}
@@ -121,7 +126,10 @@ func (s *PostgresStore) runControlTransition(ctx context.Context, req runtimerun
 		}
 		return nil
 	})
-	return state, err
+	if err != nil {
+		return runtimeruncontrol.State{}, err
+	}
+	return state, handoff.commit()
 }
 
 func lockRunControlState(ctx context.Context, tx *sql.Tx, runID string) (runtimeruncontrol.State, error) {
@@ -160,7 +168,7 @@ func lockRunControlState(ctx context.Context, tx *sql.Tx, runID string) (runtime
 	return state, nil
 }
 
-func (s *PostgresStore) pauseRunControlTx(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+func (s *PostgresStore) pauseRunControlTx(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest, handoff *runLifecycleCandidateHandoffReservation) (runtimeruncontrol.State, error) {
 	lifecycleState, err := runtimerunlifecycle.ParseState(state.Status)
 	if err != nil {
 		return runtimeruncontrol.State{}, err
@@ -172,7 +180,7 @@ func (s *PostgresStore) pauseRunControlTx(ctx context.Context, tx *sql.Tx, state
 	default:
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: state.RunID, CurrentStatus: state.Status}
 	}
-	if _, err := (postgresRunLifecycleMutation{store: s, tx: tx}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+	if _, err := (postgresRunLifecycleMutation{store: s, tx: tx, handoff: handoff}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
 		RunID: state.RunID,
 		State: runtimerunlifecycle.StatePaused,
 	}); err != nil {
@@ -199,7 +207,7 @@ func (s *PostgresStore) pauseRunControlTx(ctx context.Context, tx *sql.Tx, state
 	return state, nil
 }
 
-func (s *PostgresStore) continueRunControlTx(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+func (s *PostgresStore) continueRunControlTx(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest, handoff *runLifecycleCandidateHandoffReservation) (runtimeruncontrol.State, error) {
 	lifecycleState, err := runtimerunlifecycle.ParseState(state.Status)
 	if err != nil {
 		return runtimeruncontrol.State{}, err
@@ -207,7 +215,7 @@ func (s *PostgresStore) continueRunControlTx(ctx context.Context, tx *sql.Tx, st
 	if lifecycleState != runtimerunlifecycle.StatePaused || state.ControlStatus != "paused" {
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrNotPaused, RunID: state.RunID, CurrentStatus: state.Status}
 	}
-	if _, err := (postgresRunLifecycleMutation{store: s, tx: tx}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+	if _, err := (postgresRunLifecycleMutation{store: s, tx: tx, handoff: handoff}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
 		RunID: state.RunID,
 		State: runtimerunlifecycle.StateRunning,
 	}); err != nil {

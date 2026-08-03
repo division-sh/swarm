@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/entityquery"
@@ -21,6 +20,7 @@ import (
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	runtimeworkflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	timerobligationadapter "github.com/division-sh/swarm/internal/store/timerobligationadapter"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
@@ -281,16 +281,16 @@ func workflowPersistenceForTest(store *workflowInstanceStore) WorkflowPersistenc
 const testPipelineRunID = "77777777-7777-7777-7777-777777777777"
 
 func seedPipelineEventRecord(t testing.TB, ctx context.Context, db *sql.DB, event events.Event) {
-	seedPipelineEventRecordForDialect(t, ctx, db, runtimeauthoractivity.DialectPostgres, event)
+	seedPipelineEventRecordForDialect(t, ctx, db, authoractivityfixture.DialectPostgres, event)
 }
 
-func seedPipelineEventRecordForDialect(t testing.TB, ctx context.Context, db *sql.DB, dialect runtimeauthoractivity.Dialect, event events.Event) {
+func seedPipelineEventRecordForDialect(t testing.TB, ctx context.Context, db *sql.DB, dialect authoractivityfixture.Dialect, event events.Event) {
 	t.Helper()
 	if runID := strings.TrimSpace(event.RunID()); runID != "" {
 		switch dialect {
-		case runtimeauthoractivity.DialectPostgres:
+		case authoractivityfixture.DialectPostgres:
 			runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
-		case runtimeauthoractivity.DialectSQLite:
+		case authoractivityfixture.DialectSQLite:
 			runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 		default:
 			t.Fatalf("seed canonical pipeline event %s: unsupported dialect %q", event.ID(), dialect)

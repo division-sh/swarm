@@ -350,7 +350,12 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	entityID, evt = resolvedEntityID, resolvedEvent
 	ctx = withPipelineFlowScope(ctx, flowID)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
-	stateRoute, err := workflowInstanceRouteForExecution(source, flowID, firstNonEmptyString(asString(selectedState.Metadata["flow_path"]), evt.FlowInstance()))
+	stateRoute, err := canonicalHandlerRoute(
+		source,
+		flowID,
+		firstNonEmptyString(asString(selectedState.Metadata["flow_path"]), evt.FlowInstance()),
+		evt,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -463,11 +468,11 @@ func canonicalHandlerRoute(source semanticview.Source, flowID, statePath string,
 	flowID = strings.TrimSpace(flowID)
 	statePath = strings.Trim(strings.TrimSpace(statePath), "/")
 	if flowID != "" {
-		if statePath != "" {
-			return workflowInstanceRouteForExecution(source, flowID, statePath)
-		}
 		if source != nil && flowID == strings.TrimSpace(source.WorkflowName()) {
 			return workflowInstanceRouteForExecution(source, flowID, evt.RunID())
+		}
+		if statePath != "" {
+			return workflowInstanceRouteForExecution(source, flowID, statePath)
 		}
 		if source != nil {
 			if schema, ok := source.FlowSchemaByID(flowID); ok && strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {

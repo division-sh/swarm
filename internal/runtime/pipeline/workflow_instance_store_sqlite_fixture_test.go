@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -330,7 +330,7 @@ func insertSQLiteEntityMutationRecord(ctx context.Context, tx *sql.Tx, runID str
 		return runtimemutationlog.ErrInvalidMutationLogWriter("entity_id, field, writer_type, and writer_id are required")
 	}
 	if field == "current_state" {
-		if err := runtimeauthoractivity.Require(ctx); err != nil {
+		if err := authoractivityfixture.Require(ctx); err != nil {
 			return runtimemutationlog.ErrInvalidMutationLogWriter(err.Error())
 		}
 	}
@@ -369,7 +369,7 @@ func insertSQLiteEntityMutationRecord(ctx context.Context, tx *sql.Tx, runID str
 	if !admitted {
 		return nil
 	}
-	return runtimeauthoractivity.Record(ctx, draft)
+	return authoractivityfixture.Record(ctx, draft)
 }
 
 func sqliteWorkflowJSONBytes(raw any) []byte {

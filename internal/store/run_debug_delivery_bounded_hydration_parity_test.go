@@ -9,9 +9,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -114,7 +114,7 @@ func seedBoundedRunDebugDelivery(
 		failurePtr = &failure
 	}
 	snapshot := seedDeliveryStateFixture(t, ctx, store, event, route, state, failurePtr)
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
 		setPostgresDeliveryFixtureTimes(t, ctx, fixture.db, snapshot, occurredAt.Add(-time.Minute), occurredAt)
 	} else {
 		setSQLiteDeliveryFixtureTimes(t, ctx, fixture.db, snapshot, occurredAt.Add(-time.Minute), occurredAt)

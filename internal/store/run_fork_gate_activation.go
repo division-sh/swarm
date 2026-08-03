@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -17,7 +18,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
 
-func materializeRunForkDecisionCards(ctx context.Context, tx *sql.Tx, forkRunID, entityID string, bindings []runForkGateActivationBinding, now time.Time) error {
+func materializeRunForkDecisionCards(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, forkRunID, entityID string, bindings []runForkGateActivationBinding, now time.Time) error {
+	if story == nil {
+		return fmt.Errorf("fork decision-card materialization requires private story ownership")
+	}
 	for _, binding := range bindings {
 		sourceCard, err := loadDecisionCard(ctx, tx, binding.Source.CardID, true, false)
 		if err != nil {
@@ -80,7 +84,7 @@ func materializeRunForkDecisionCards(ctx context.Context, tx *sql.Tx, forkRunID,
 		if err != nil {
 			return fmt.Errorf("construct fork decision card: %w", err)
 		}
-		if err := insertDecisionCard(ctx, tx, forkCard, true); err != nil {
+		if err := insertDecisionCardWithStory(ctx, story, tx, forkCard, true); err != nil {
 			return fmt.Errorf("insert fork decision card: %w", err)
 		}
 		switch binding.Fork.Status {
@@ -89,7 +93,7 @@ func materializeRunForkDecisionCards(ctx context.Context, tx *sql.Tx, forkRunID,
 			if strings.TrimSpace(sourceVerdict) == "" || strings.TrimSpace(binding.Fork.DecisionEventID) == "" {
 				return fmt.Errorf("source decision card %s lacks committed verdict evidence", sourceCard.CardID)
 			}
-			if _, err := decideDecisionCard(ctx, tx, decisioncard.DecideRequest{
+			if _, err := decideDecisionCardWithStory(ctx, story, tx, decisioncard.DecideRequest{
 				CardID: forkCard.CardID, Verdict: sourceVerdict, Fields: sourceFields, ActorTokenID: sourceActor,
 				ObservedContentHash: forkCard.CardContentHash, DeliveryReceiptID: sourceReceipt, DeliveryRenderHash: sourceRenderHash,
 				DecisionEventID: binding.Fork.DecisionEventID, Now: now,
@@ -97,7 +101,7 @@ func materializeRunForkDecisionCards(ctx context.Context, tx *sql.Tx, forkRunID,
 				return fmt.Errorf("restore committed fork decision card: %w", err)
 			}
 		case gateruntime.StatusSuperseded:
-			if _, err := supersedeDecisionCardsForStage(ctx, tx, forkRunID, entityID, binding.Fork.ActivationID, binding.Fork.SupersededReason, now, true); err != nil {
+			if _, err := supersedeDecisionCardsForStageWithStory(ctx, story, tx, forkRunID, entityID, binding.Fork.ActivationID, binding.Fork.SupersededReason, now, true); err != nil {
 				return fmt.Errorf("restore superseded fork decision card: %w", err)
 			}
 		}
@@ -105,7 +109,10 @@ func materializeRunForkDecisionCards(ctx context.Context, tx *sql.Tx, forkRunID,
 	return nil
 }
 
-func materializeRunForkProposedEffectCards(ctx context.Context, tx *sql.Tx, sourceRunID, forkRunID, entityID string, forkPoint runfork.RunForkPoint, now time.Time) error {
+func materializeRunForkProposedEffectCards(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, sourceRunID, forkRunID, entityID string, forkPoint runfork.RunForkPoint, now time.Time) error {
+	if story == nil {
+		return fmt.Errorf("fork proposed-effect materialization requires private story ownership")
+	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT p.card_id
 		FROM proposed_effect_continuations p
@@ -163,7 +170,7 @@ func materializeRunForkProposedEffectCards(ctx context.Context, tx *sql.Tx, sour
 		if err != nil {
 			return err
 		}
-		if err := insertProposedEffectCard(ctx, tx, forkCard, forkContinuation, true); err != nil {
+		if err := insertProposedEffectCardWithStory(ctx, story, tx, forkCard, forkContinuation, true); err != nil {
 			return fmt.Errorf("insert fork-local proposed effect: %w", err)
 		}
 	}

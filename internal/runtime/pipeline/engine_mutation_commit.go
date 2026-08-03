@@ -101,6 +101,26 @@ type WorkflowEngineMutationCommand struct {
 	Lifecycle               WorkflowLifecycleMutationPlan
 	ProposedEffects         []WorkflowEngineProposedEffect
 	Publications            []runtimeengine.DurablePublicationPlan
+	RouteRetirement         *WorkflowEngineRouteRetirement
+	PostCommit              WorkflowEnginePostCommitPlan
+}
+
+// WorkflowEngineRouteRetirement declares that the exact persisted route must
+// be retired in the same selected-store transaction as terminal workflow state.
+type WorkflowEngineRouteRetirement struct {
+	Route runtimeflowidentity.Route
+}
+
+// WorkflowEnginePostCommitPlan carries semantic work that is legal only after
+// the selected-store mutation commits. It contains data, never callbacks.
+type WorkflowEnginePostCommitPlan struct {
+	FlowDeactivation *WorkflowEngineFlowDeactivation
+}
+
+type WorkflowEngineFlowDeactivation struct {
+	Route     runtimeflowidentity.Route
+	EntityID  string
+	NextState string
 }
 
 type WorkflowEngineProposedEffect struct {
@@ -146,6 +166,18 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 			return fmt.Errorf("workflow engine publication repeats event %s", eventID)
 		}
 		seen[eventID] = struct{}{}
+	}
+	if retirement := c.RouteRetirement; retirement != nil {
+		route := runtimeflowidentity.StoredRoute(retirement.Route.ScopeKey, retirement.Route.InstanceID, retirement.Route.InstancePath)
+		if !route.Valid() || route != c.State.Route || c.State.Create || strings.TrimSpace(c.State.Status) != "terminated" {
+			return fmt.Errorf("workflow engine route retirement requires the exact terminal state route")
+		}
+	}
+	if deactivation := c.PostCommit.FlowDeactivation; deactivation != nil {
+		route := runtimeflowidentity.StoredRoute(deactivation.Route.ScopeKey, deactivation.Route.InstanceID, deactivation.Route.InstancePath)
+		if !route.Valid() || route != c.State.Route || strings.TrimSpace(deactivation.EntityID) != c.State.EntityID || strings.TrimSpace(deactivation.NextState) == "" {
+			return fmt.Errorf("workflow engine post-commit flow deactivation requires exact state identity")
+		}
 	}
 	return nil
 }
@@ -221,8 +253,10 @@ func canonicalWorkflowInstanceOptionalPersistedTime(value time.Time) time.Time {
 }
 
 type CommittedWorkflowEngineMutation struct {
-	Publications []runtimeengine.CommittedDurablePublication
-	Lifecycle    CommittedWorkflowLifecycleMutation
+	Publications    []runtimeengine.CommittedDurablePublication
+	Lifecycle       CommittedWorkflowLifecycleMutation
+	RouteRetirement *WorkflowEngineRouteRetirement
+	PostCommit      WorkflowEnginePostCommitPlan
 }
 
 func (r CommittedWorkflowEngineMutation) Validate() error {
@@ -236,6 +270,18 @@ func (r CommittedWorkflowEngineMutation) Validate() error {
 	}
 	if err := r.Lifecycle.Validate(); err != nil {
 		return fmt.Errorf("committed workflow engine lifecycle: %w", err)
+	}
+	if retirement := r.RouteRetirement; retirement != nil {
+		route := runtimeflowidentity.StoredRoute(retirement.Route.ScopeKey, retirement.Route.InstanceID, retirement.Route.InstancePath)
+		if !route.Valid() {
+			return fmt.Errorf("committed workflow engine route retirement requires exact identity")
+		}
+	}
+	if deactivation := r.PostCommit.FlowDeactivation; deactivation != nil {
+		route := runtimeflowidentity.StoredRoute(deactivation.Route.ScopeKey, deactivation.Route.InstanceID, deactivation.Route.InstancePath)
+		if !route.Valid() || strings.TrimSpace(deactivation.EntityID) == "" || strings.TrimSpace(deactivation.NextState) == "" {
+			return fmt.Errorf("committed workflow engine flow deactivation requires exact identity and state")
+		}
 	}
 	return nil
 }

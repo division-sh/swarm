@@ -383,7 +383,7 @@ func (s *Scheduler) registerProjection(ctx context.Context, projection scheduled
 	if contextual, ok := worklifetime.OccurrenceFromContext(ctx); ok {
 		owner = contextual
 	}
-	lease, err := owner.Begin(ownerActionAdmissionContext(ctx))
+	lease, err := owner.Begin(context.WithoutCancel(ctx))
 	if err != nil {
 		s.mu.Unlock()
 		return fmt.Errorf("admit scheduled task: %w", err)
@@ -792,7 +792,7 @@ func prepareParkedSet(ctx context.Context, scheduler *Scheduler, bindings []park
 			if err != nil {
 				return fail(fmt.Errorf("validate parked scheduled projection: %w", err))
 			}
-			lease, err := executionOwner.Begin(ownerActionAdmissionContext(ctx))
+			lease, err := executionOwner.Begin(context.WithoutCancel(ctx))
 			if err != nil {
 				return fail(fmt.Errorf("admit parked schedule successor: %w", err))
 			}

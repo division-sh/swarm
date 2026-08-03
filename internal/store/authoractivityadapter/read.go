@@ -3,10 +3,13 @@ package authoractivityadapter
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type Dialect uint8
@@ -113,7 +116,7 @@ func List(ctx context.Context, db Queryer, dialect Dialect, opts runtimeauthorac
 	defer rows.Close()
 	result := runtimeauthoractivity.ListResult{Occurrences: make([]runtimeauthoractivity.Occurrence, 0, opts.Limit)}
 	for rows.Next() {
-		occurrence, err := runtimeauthoractivity.ScanOccurrence(rows)
+		occurrence, err := ScanOccurrence(rows)
 		if err != nil {
 			return runtimeauthoractivity.ListResult{}, err
 		}
@@ -124,6 +127,78 @@ func List(ctx context.Context, db Queryer, dialect Dialect, opts runtimeauthorac
 		return runtimeauthoractivity.ListResult{}, fmt.Errorf("list author activity: %w", err)
 	}
 	return result, nil
+}
+
+type RowScanner interface {
+	Scan(...any) error
+}
+
+func ScanOccurrence(row RowScanner) (runtimeauthoractivity.Occurrence, error) {
+	var occurrence runtimeauthoractivity.Occurrence
+	var projectionRaw []byte
+	var failureRaw []byte
+	var occurredAtRaw any
+	if err := row.Scan(
+		&occurrence.OccurrenceID, &occurrence.Sequence, &occurrence.Kind, &occurrence.Version,
+		&occurrence.Transition, &occurrence.SourceOwner, &occurrence.SourceIdentity, &occurrence.DedupKey,
+		&occurrence.RunID, &occurrence.EntityID, &occurrence.AgentID, &occurrence.FlowID,
+		&occurrence.Scope.Kind, &occurrence.Scope.RuntimeInstanceID, &occurrence.Scope.BundleHash,
+		&occurrence.AuthorSafeSummary, &projectionRaw, &failureRaw, &occurredAtRaw,
+	); err != nil {
+		return runtimeauthoractivity.Occurrence{}, err
+	}
+	if err := json.Unmarshal(projectionRaw, &occurrence.Projection); err != nil {
+		return runtimeauthoractivity.Occurrence{}, fmt.Errorf("decode author activity projection: %w", err)
+	}
+	if len(failureRaw) > 0 && string(failureRaw) != "null" {
+		var failure runtimefailures.Envelope
+		if err := json.Unmarshal(failureRaw, &failure); err != nil {
+			return runtimeauthoractivity.Occurrence{}, fmt.Errorf("decode author activity failure: %w", err)
+		}
+		if err := runtimefailures.ValidateEnvelope(failure); err != nil {
+			return runtimeauthoractivity.Occurrence{}, fmt.Errorf("validate author activity failure: %w", err)
+		}
+		occurrence.Failure = &failure
+	}
+	occurredAt, err := decodeTime(occurredAtRaw)
+	if err != nil {
+		return runtimeauthoractivity.Occurrence{}, fmt.Errorf("decode author activity occurred_at: %w", err)
+	}
+	occurrence.OccurredAt = occurredAt
+	if err := runtimeauthoractivity.ValidateDraft(runtimeauthoractivity.Draft{
+		Kind: occurrence.Kind, Version: occurrence.Version, Transition: occurrence.Transition,
+		SourceOwner: occurrence.SourceOwner, SourceIdentity: occurrence.SourceIdentity,
+		DedupKey: occurrence.DedupKey, OccurredAt: occurrence.OccurredAt, Scope: occurrence.Scope,
+		AuthorSafeSummary: occurrence.AuthorSafeSummary, Projection: occurrence.Projection, Failure: occurrence.Failure,
+	}); err != nil {
+		return runtimeauthoractivity.Occurrence{}, fmt.Errorf("invalid persisted author activity %s: %w", occurrence.OccurrenceID, err)
+	}
+	return occurrence, nil
+}
+
+func decodeTime(raw any) (time.Time, error) {
+	switch value := raw.(type) {
+	case time.Time:
+		return value.UTC(), nil
+	case string:
+		return parseStoredTime(value)
+	case []byte:
+		return parseStoredTime(string(value))
+	default:
+		return time.Time{}, fmt.Errorf("unsupported time value %T", raw)
+	}
+}
+
+func parseStoredTime(value string) (time.Time, error) {
+	var lastErr error
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05.999999999 -0700 MST", "2006-01-02 15:04:05 -0700 MST"} {
+		parsed, err := time.Parse(layout, strings.TrimSpace(value))
+		if err == nil {
+			return parsed.UTC(), nil
+		}
+		lastErr = err
+	}
+	return time.Time{}, lastErr
 }
 
 func normalizedUniqueStrings(values []string) []string {

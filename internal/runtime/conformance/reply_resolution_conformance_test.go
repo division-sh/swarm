@@ -79,7 +79,11 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 	store := newReplyConformanceStore()
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
 		ContractBundle: source,
-		Durable:        bus.DurableDependencies{ReplyContext: store},
+		Durable: bus.DurableDependencies{
+			ReplyContext:      store,
+			ActiveFlows:       store,
+			FlowRouteTopology: store,
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -141,7 +145,11 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 	store := newReplyConformanceStore()
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
 		ContractBundle: source,
-		Durable:        bus.DurableDependencies{ReplyContext: store},
+		Durable: bus.DurableDependencies{
+			ReplyContext:      store,
+			ActiveFlows:       store,
+			FlowRouteTopology: store,
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1057,11 +1065,64 @@ func (s *replyConformanceStore) CommitPublication(ctx context.Context, command b
 	return runtimebustest.CommitPublish(ctx, command, nil, func(_ context.Context, req bus.CommitPublishRequest) error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		for _, candidate := range req.ReplyCreations {
+			record := candidate.Normalized()
+			if err := record.Validate(); err != nil {
+				return err
+			}
+			if existing, ok := s.contexts[record.ID]; ok {
+				if !existing.SameIdentity(record) {
+					return errors.New("reply context identity collision")
+				}
+				continue
+			}
+			s.contexts[record.ID] = record
+			s.createCalls++
+		}
+		for _, candidate := range req.ReplyClaims {
+			claim := candidate.Normalized()
+			if err := claim.Validate(); err != nil {
+				return err
+			}
+			record, ok := s.contexts[claim.Expected.ID]
+			if !ok {
+				return runtimereplycontext.ErrNotFound
+			}
+			if !record.SameIdentity(claim.Expected) {
+				return errors.New("reply context identity changed before claim")
+			}
+			if record.State == runtimereplycontext.StateTerminal {
+				if record.AcceptedReplyEventID != claim.ReplyEventID {
+					return errors.New("reply context is already terminal")
+				}
+				continue
+			}
+			now := time.Now().UTC()
+			record.State = runtimereplycontext.StateTerminal
+			record.AcceptedReplyEventID = claim.ReplyEventID
+			record.TerminalAt = &now
+			record.UpdatedAt = now
+			s.contexts[record.ID] = record
+			s.claimCalls++
+		}
 		s.events[req.Event.ID()] = req.Event.Event()
 		s.routes[req.Event.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
 		s.scopes[req.Event.ID()] = req.ReplayScope
 		return nil
 	})
+}
+
+func (s *replyConformanceStore) ListActiveFlowInstanceDescriptors(context.Context) ([]bus.ActiveFlowInstanceDescriptor, error) {
+	return nil, nil
+}
+
+func (s *replyConformanceStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []bus.FlowInstanceRouteRecordSet) error {
+	for _, set := range sets {
+		if !set.Identity.Valid() {
+			return fmt.Errorf("invalid flow-instance route identity: %#v", set.Identity)
+		}
+	}
+	return nil
 }
 
 func (s *replyConformanceStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {

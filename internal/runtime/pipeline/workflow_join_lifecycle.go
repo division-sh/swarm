@@ -96,7 +96,7 @@ func (pc *PipelineCoordinator) reconcileClosedJoinSchedules(ctx context.Context,
 		if activation.TimerEventType == joinCompleteEvent {
 			kind = timeridentity.TimerHandleJoinComplete
 		}
-		schedule, err := joinSchedule(pc.SemanticSource(), pipelineFlowScope(ctx), entityID, instance, activation, kind)
+		schedule, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, instance, activation, kind)
 		if err != nil {
 			return err
 		}
@@ -209,7 +209,10 @@ func joinSchedule(source semanticview.Source, flowID, entityID string, instance 
 		return Schedule{}, fmt.Errorf("join schedule handle kind %q is invalid", kind)
 	}
 	if activation.TimerTaskID != handle.TaskID() || activation.TimerEventType != eventType {
-		return Schedule{}, fmt.Errorf("join schedule declaration does not match persisted activation")
+		return Schedule{}, fmt.Errorf(
+			"join schedule declaration does not match persisted activation (task=%q want=%q event=%q want=%q)",
+			activation.TimerTaskID, handle.TaskID(), activation.TimerEventType, eventType,
+		)
 	}
 	payload := handle.PayloadMetadata()
 	if generation := activation.Generation.Normalize(); generation.Valid() {

@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
@@ -175,7 +176,7 @@ func TestSQLiteRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 		t.Fatalf("snapshot entity_count = %d, want entity_state count 1 despite stale run/event overcount", snap.EntityCount)
 	}
 
-	if err := store.runAuthorActivityMutation(ctx, "test synchronize SQLite lifecycle counters", func(txctx context.Context, tx *sql.Tx) error {
+	if err := store.runPrivateAuthorActivityMutation(ctx, "test synchronize SQLite lifecycle counters", func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
 		return (sqliteRunLifecycleMutation{store: store, tx: tx}).SyncCounters(txctx, runID)
 	}); err != nil {
 		t.Fatalf("SyncCounters: %v", err)

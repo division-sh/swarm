@@ -9,11 +9,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
 )
 
@@ -131,18 +131,18 @@ func (s *pipelineTestDeliveryOwner) mutate(ctx context.Context, fn func(context.
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	storyDialect := runtimeauthoractivity.DialectPostgres
+	storyDialect := authoractivityfixture.DialectPostgres
 	if s.dialect == deliveryfixture.DialectSQLite {
-		storyDialect = runtimeauthoractivity.DialectSQLite
+		storyDialect = authoractivityfixture.DialectSQLite
 	}
-	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, storyDialect)
+	storyctx, err := authoractivityfixture.Begin(ctx, tx, storyDialect)
 	if err != nil {
 		return err
 	}
 	if err := fn(storyctx, tx); err != nil {
 		return err
 	}
-	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
+	if err := authoractivityfixture.Finalize(storyctx); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -180,9 +180,9 @@ func (s *pipelineTestDeliveryOwner) commitNode(ctx context.Context, event events
 }
 
 func (s *pipelineTestDeliveryOwner) loadEvent(ctx context.Context, eventID string) (events.Event, error) {
-	dialect := runtimeauthoractivity.DialectPostgres
+	dialect := authoractivityfixture.DialectPostgres
 	if s.dialect == deliveryfixture.DialectSQLite {
-		dialect = runtimeauthoractivity.DialectSQLite
+		dialect = authoractivityfixture.DialectSQLite
 	}
 	return eventfixture.Load(ctx, s.db, dialect, eventID)
 }

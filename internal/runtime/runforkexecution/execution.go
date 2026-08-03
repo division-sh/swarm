@@ -172,6 +172,10 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 			AgentRuntimeMaterialization: &agentRuntime.Proof,
 		}, err
 	}
+	workflowStates, err := selectedContractWorkflowStateProjection(plan, loadedSource.Source, *model.RecipientPlanning)
+	if err != nil {
+		return SelectedContractExecutionResult{}, err
+	}
 	sourceEventIDs := selectedContractExecutionFrontierEventIDs(frontier.FrontierEvents)
 	materialization, err := ports.fork.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID:       plan.SourceRunID,
@@ -181,6 +185,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		FrontierAdmission: frontier,
 		RouteTopology:     routeTopology,
 		RecipientPlanning: *model.RecipientPlanning,
+		WorkflowStates:    workflowStates,
 	})
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err
@@ -210,6 +215,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		ForkRunID:             materialization.ForkRunID,
 		ForkEventID:           plan.ForkPoint.EventID,
 		SourceEvents:          sourceEventIDs,
+		WorkflowStates:        workflowStates,
 		ExecutionOwner:        runfork.RunForkSelectedContractExecutionOwner,
 		DeferredWorkAdmission: deferredWorkAdmission,
 	})
@@ -325,6 +331,7 @@ type publishSelectedContractForkEventsRequest struct {
 	ForkRunID             string
 	ForkEventID           string
 	SourceEvents          []string
+	WorkflowStates        []runfork.RunForkSelectedContractWorkflowState
 	ExecutionOwner        string
 	RuntimeInstanceID     string
 	DeferredWorkAdmission selectedContractDeferredWorkAdmission

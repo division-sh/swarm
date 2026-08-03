@@ -13232,6 +13232,12 @@
           "flow_instance": {
             "type": "string"
           },
+          "flow_instance_id": {
+            "type": "string"
+          },
+          "flow_scope_key": {
+            "type": "string"
+          },
           "routing_source": {
             "$ref": "#/components/schemas/DecisionCardRoutingSource"
           },
@@ -13243,6 +13249,8 @@
           }
         },
         "required": [
+          "flow_scope_key",
+          "flow_instance_id",
           "flow_instance",
           "entity_id",
           "routing_source",

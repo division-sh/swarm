@@ -9,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -50,12 +49,8 @@ func (s *PostgresStore) RuntimeLogLineageParentEventID(ctx context.Context, runI
 	if _, err := uuid.Parse(subjectEventID); err != nil {
 		return "", nil
 	}
-	queryer := rowQueryer(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		queryer = tx
-	}
 	var exists bool
-	if err := queryer.QueryRowContext(ctx, `
+	if err := s.backend.db.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM events
@@ -89,10 +84,6 @@ func (s *PostgresStore) PersistRuntimeLog(ctx context.Context, record runtimepkg
 	if err != nil {
 		return err
 	}
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		_, err := s.appendAdmittedEventTxOutcome(ctx, tx, nil, evt)
-		return err
-	}
 	_, err = s.commitRuntimeLogEvent(ctx, evt)
 	return err
 }
@@ -113,12 +104,8 @@ func (s *SQLiteRuntimeStore) RuntimeLogLineageParentEventID(ctx context.Context,
 	if _, err := uuid.Parse(subjectEventID); err != nil {
 		return "", nil
 	}
-	queryer := rowQueryer(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		queryer = tx
-	}
 	var exists bool
-	if err := queryer.QueryRowContext(ctx, `
+	if err := s.backend.db.QueryRowContext(ctx, `
 		SELECT EXISTS (
 			SELECT 1
 			FROM events
@@ -150,10 +137,6 @@ func (s *SQLiteRuntimeStore) PersistRuntimeLog(ctx context.Context, record runti
 	}
 	evt, err := events.AdmitForPersistence(constructed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
-		return err
-	}
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		_, err := s.appendAdmittedEventTxOutcome(ctx, tx, nil, evt)
 		return err
 	}
 	_, err = s.commitRuntimeLogEvent(ctx, evt)

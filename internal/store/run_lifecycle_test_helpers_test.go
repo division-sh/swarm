@@ -13,8 +13,9 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
 const semanticRunFixtureFlow = "semantic-run-fixture"
@@ -22,7 +23,6 @@ const semanticRunFixtureFlow = "semantic-run-fixture"
 type runLifecycleTerminalTestStore interface {
 	runtimerunlifecycle.OperationOwner
 	runtimerunlifecycle.CandidateStore
-	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
 }
 
 type runLifecycleFixtureMutation interface {
@@ -110,22 +110,16 @@ func materializeRunFixtureForTest(
 	if err != nil {
 		return err
 	}
-	err = owner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		if err := materializeRunFixtureInCurrentMutationForTest(txctx, owner, fixture, source); err != nil {
-			return err
-		}
-		if fixture.State != runtimerunlifecycle.StateCompleted {
-			return nil
-		}
-		if err := materializeCompletedRunEntityForTest(txctx, selected, fixture.RunID); err != nil {
-			return err
-		}
-		_, err := owner.RequestCompletionCandidate(
-			txctx,
+	err = materializeRunFixtureInCurrentMutationForTest(ctx, owner, fixture, source)
+	if err == nil && fixture.State == runtimerunlifecycle.StateCompleted {
+		err = materializeCompletedRunEntityForTest(ctx, selected, fixture.RunID)
+	}
+	if err == nil && fixture.State == runtimerunlifecycle.StateCompleted {
+		_, err = owner.RequestCompletionCandidate(
+			ctx,
 			runtimerunlifecycle.ImmediateCandidate(fixture.RunID),
 		)
-		return err
-	})
+	}
 	if err != nil || fixture.State != runtimerunlifecycle.StateCompleted {
 		return err
 	}
@@ -157,27 +151,27 @@ func materializeCompletedRunEntityForTest(
 	selected any,
 	runID string,
 ) error {
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return errors.New("completed semantic run fixture requires current named transaction")
-	}
-	switch selected.(type) {
+	switch store := selected.(type) {
 	case *PostgresStore:
-		_, err := tx.ExecContext(ctx, `
+		return store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
+			_, err := tx.ExecContext(txctx, `
 			INSERT INTO entity_state (
 				run_id, entity_id, flow_instance, entity_type, current_state
 			)
 			VALUES ($1::uuid, $1::uuid, $2, 'semantic-run-fixture', 'completed')
 		`, runID, semanticRunFixtureFlow)
-		return err
+			return err
+		})
 	case *SQLiteRuntimeStore:
-		_, err := tx.ExecContext(ctx, `
+		return store.runPrivateAuthorActivityMutation(ctx, "materialize completed SQLite run fixture", func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
+			_, err := tx.ExecContext(txctx, `
 			INSERT INTO entity_state (
 				run_id, entity_id, flow_instance, entity_type, current_state
 			)
 			VALUES (?, ?, ?, 'semantic-run-fixture', 'completed')
 		`, runID, runID, semanticRunFixtureFlow)
-		return err
+			return err
+		})
 	default:
 		return fmt.Errorf("completed semantic run fixture requires selected store, got %T", selected)
 	}
@@ -313,10 +307,14 @@ func requirePostgresRunFixtureTxForTest(
 	fixture semanticRunFixture,
 ) {
 	t.Helper()
+	story, ok := authoractivityfixture.Mutation(ctx)
+	if !ok {
+		t.Fatal("semantic PostgreSQL run fixture requires private story ownership")
+	}
 	requireRunFixtureInCurrentMutationForTest(
 		t,
 		ctx,
-		postgresRunLifecycleFixtureMutation{postgresRunLifecycleMutation{tx: tx}},
+		postgresRunLifecycleFixtureMutation{postgresRunLifecycleMutation{tx: tx, story: story}},
 		fixture,
 	)
 }
@@ -328,16 +326,16 @@ func requirePostgresRunFixtureInRawTxForTest(
 	fixture semanticRunFixture,
 ) {
 	t.Helper()
-	txctx, err := runtimeauthoractivity.Begin(
+	txctx, err := authoractivityfixture.Begin(
 		ctx,
 		tx,
-		runtimeauthoractivity.DialectPostgres,
+		authoractivityfixture.DialectPostgres,
 	)
 	if err != nil {
 		t.Fatalf("begin semantic run fixture author activity: %v", err)
 	}
 	requirePostgresRunFixtureTxForTest(t, txctx, tx, fixture)
-	if err := runtimeauthoractivity.Finalize(txctx); err != nil {
+	if err := authoractivityfixture.Finalize(txctx); err != nil {
 		t.Fatalf("finalize semantic run fixture author activity: %v", err)
 	}
 }
@@ -349,10 +347,14 @@ func requireSQLiteRunFixtureTxForTest(
 	fixture semanticRunFixture,
 ) {
 	t.Helper()
+	story, ok := authoractivityfixture.Mutation(ctx)
+	if !ok {
+		t.Fatal("semantic SQLite run fixture requires private story ownership")
+	}
 	requireRunFixtureInCurrentMutationForTest(
 		t,
 		ctx,
-		sqliteRunLifecycleFixtureMutation{sqliteRunLifecycleMutation{tx: tx}},
+		sqliteRunLifecycleFixtureMutation{sqliteRunLifecycleMutation{tx: tx, story: story}},
 		fixture,
 	)
 }
@@ -364,16 +366,16 @@ func requireSQLiteRunFixtureInRawTxForTest(
 	fixture semanticRunFixture,
 ) {
 	t.Helper()
-	txctx, err := runtimeauthoractivity.Begin(
+	txctx, err := authoractivityfixture.Begin(
 		ctx,
 		tx,
-		runtimeauthoractivity.DialectSQLite,
+		authoractivityfixture.DialectSQLite,
 	)
 	if err != nil {
 		t.Fatalf("begin SQLite semantic run fixture author activity: %v", err)
 	}
 	requireSQLiteRunFixtureTxForTest(t, txctx, tx, fixture)
-	if err := runtimeauthoractivity.Finalize(txctx); err != nil {
+	if err := authoractivityfixture.Finalize(txctx); err != nil {
 		t.Fatalf("finalize SQLite semantic run fixture author activity: %v", err)
 	}
 }
@@ -493,17 +495,12 @@ func markRunTerminalStatusForTest(
 	if endedAt.IsZero() {
 		endedAt = time.Now().UTC()
 	}
-	var snapshot runtimerunlifecycle.Snapshot
-	err = owner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		var mutationErr error
-		snapshot, _, mutationErr = owner.MarkTerminalRun(
-			txctx,
-			runtimerunlifecycle.TerminalRequest{
-				RunID: strings.TrimSpace(runID), State: state, Failure: failure, EndedAt: endedAt,
-			},
-		)
-		return mutationErr
-	})
+	snapshot, _, err := owner.MarkTerminalRun(
+		ctx,
+		runtimerunlifecycle.TerminalRequest{
+			RunID: strings.TrimSpace(runID), State: state, Failure: failure, EndedAt: endedAt,
+		},
+	)
 	if err != nil {
 		return runtimebus.RunLifecycleSnapshot{}, err
 	}
@@ -519,13 +516,7 @@ func transitionRunForTest(
 	if !ok || owner == nil {
 		return "", fmt.Errorf("test run lifecycle owner is required, got %T", selected)
 	}
-	var disposition runtimerunlifecycle.MutationDisposition
-	err := owner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		var mutationErr error
-		disposition, mutationErr = owner.TransitionActiveRun(txctx, request)
-		return mutationErr
-	})
-	return disposition, err
+	return owner.TransitionActiveRun(ctx, request)
 }
 
 func forkRunForTest(
@@ -540,16 +531,7 @@ func forkRunForTest(
 			selected,
 		)
 	}
-	var (
-		snapshot    runtimerunlifecycle.Snapshot
-		disposition runtimerunlifecycle.MutationDisposition
-	)
-	err := owner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		var mutationErr error
-		snapshot, disposition, mutationErr = owner.ForkRunSource(txctx, request)
-		return mutationErr
-	})
-	return snapshot, disposition, err
+	return owner.ForkRunSource(ctx, request)
 }
 
 func reviseRunSourceForTest(
@@ -561,13 +543,7 @@ func reviseRunSourceForTest(
 	if !ok || owner == nil {
 		return "", fmt.Errorf("test run lifecycle owner is required, got %T", selected)
 	}
-	var disposition runtimerunlifecycle.MutationDisposition
-	err := owner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		var mutationErr error
-		disposition, mutationErr = owner.ReviseRunSource(txctx, request)
-		return mutationErr
-	})
-	return disposition, err
+	return owner.ReviseRunSource(ctx, request)
 }
 
 func syncRunCountersForTest(
@@ -579,9 +555,7 @@ func syncRunCountersForTest(
 	if !ok || owner == nil {
 		return fmt.Errorf("test run lifecycle owner is required, got %T", selected)
 	}
-	return owner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		return owner.SyncRunCounters(txctx, strings.TrimSpace(runID))
-	})
+	return owner.SyncRunCounters(ctx, strings.TrimSpace(runID))
 }
 
 func executeRunCompletionCandidateForEvent(
@@ -609,7 +583,7 @@ func executeRunCompletionCandidateForEvent(
 		`, eventID).Scan(&runID); err != nil {
 			return fmt.Errorf("load PostgreSQL completion candidate run: %w", err)
 		}
-		if err := owner.runAuthorActivityMutation(ctx, "test request PostgreSQL completion candidate", func(txctx context.Context, tx *sql.Tx) error {
+		if err := owner.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
 			var err error
 			request, err = requestPostgresCompletionCandidateTx(txctx, tx, runID, nil, false)
 			return err
@@ -624,7 +598,7 @@ func executeRunCompletionCandidateForEvent(
 		`, eventID).Scan(&runID); err != nil {
 			return fmt.Errorf("load SQLite completion candidate run: %w", err)
 		}
-		if err := owner.runAuthorActivityMutation(ctx, "test request SQLite completion candidate", func(txctx context.Context, tx *sql.Tx) error {
+		if err := owner.runPrivateAuthorActivityMutation(ctx, "test request SQLite completion candidate", func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
 			var err error
 			request, err = requestSQLiteCompletionCandidateTx(txctx, tx, runID, nil, owner.now(), false)
 			return err

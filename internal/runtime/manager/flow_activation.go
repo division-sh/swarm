@@ -27,6 +27,8 @@ import (
 
 type flowInstancePersistence interface {
 	MaterializeInitialEntry(ctx context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error)
+	PrepareInitialEntryLifecycle(ctx context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInstance, runtimepipeline.WorkflowLifecycleMutationPlan, error)
+	FinalizeInitialEntryLifecycle(ctx context.Context, committed runtimepipeline.CommittedWorkflowLifecycleMutation) error
 	ArmInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error
 	ReconcileInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error
 	RetireInitialEntryTimerWakeups(ctx context.Context, route runtimeflowidentity.Route) error
@@ -110,7 +112,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if committed.Plan.Identity.Route() != plan.Identity.Route() {
 		return fmt.Errorf("committed flow instance activation identity does not match plan")
 	}
-	if err := am.FinalizeCommittedFlowInstanceActivation(ctx, committed.Plan); err != nil {
+	if err := am.FinalizeCommittedFlowInstanceActivation(ctx, committed); err != nil {
 		am.signalDynamicFlowRuntimeReadiness()
 		return err
 	}
@@ -131,13 +133,19 @@ func (am *AgentManager) PrepareFlowInstanceActivation(
 
 func (am *AgentManager) FinalizeCommittedFlowInstanceActivation(
 	ctx context.Context,
-	plan runtimepipeline.FlowInstanceActivationPlan,
+	committed runtimepipeline.CommittedFlowInstanceActivation,
 ) error {
 	if am == nil {
 		return fmt.Errorf("agent manager is required")
 	}
-	if err := plan.Validate(); err != nil {
+	if err := committed.Validate(); err != nil {
 		return err
+	}
+	plan := committed.Plan
+	if committed.Created {
+		if err := am.workflowInstances.FinalizeInitialEntryLifecycle(ctx, committed.Lifecycle); err != nil {
+			return fmt.Errorf("finalize flow instance initial lifecycle: %w", err)
+		}
 	}
 	err := am.reconcileCommittedDynamicFlowRuntimeReadinessPlan(ctx, plan.Readiness, am.semanticReadinessSource.source)
 	if err != nil {
@@ -152,6 +160,9 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 ) (runtimepipeline.FlowInstanceActivationRequest, runtimepipeline.FlowInstanceActivationPlan, error) {
 	if am == nil {
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("agent manager is required")
+	}
+	if am.workflowInstances == nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("workflow instance store is required")
 	}
 	if req.Context.Empty() {
 		req.Context = events.DeliveryContextFromContext(ctx)
@@ -246,10 +257,15 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 			EnteredStageAt:   occurredAt,
 			CreatedAt:        occurredAt,
 		},
-		Identity:            instance,
-		Readiness:           readinessPlan,
-		ActivationVariables: flowActivationVars(req),
-		OccurredAt:          occurredAt,
+		Identity:                      instance,
+		Readiness:                     readinessPlan,
+		ActivationVariables:           flowActivationVars(req),
+		OccurredAt:                    occurredAt,
+		StandingGenerationReplacement: req.StandingGenerationReplacement,
+	}
+	plan.Instance, plan.Lifecycle, err = am.workflowInstances.PrepareInitialEntryLifecycle(ctx, plan.Instance, occurredAt)
+	if err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
 	plan, err = plan.Normalized()
 	if err != nil {
@@ -763,7 +779,11 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 	if err != nil {
 		return err
 	}
-	return am.applyTerminalFlowInstanceSideEffects(ctx, plan)
+	if err := am.applyTerminalFlowInstanceSideEffects(ctx, plan); err != nil {
+		am.logTerminalFlowInstanceSideEffectFailure(plan, err)
+		return err
+	}
+	return nil
 }
 
 func (am *AgentManager) terminalFlowInstanceSideEffectPlan(

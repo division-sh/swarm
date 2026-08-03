@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 const (
@@ -16,32 +14,6 @@ const (
 	sqliteRuntimeMutationBaseDelay   = 10 * time.Millisecond
 	sqliteRuntimeMutationMaxDelay    = 100 * time.Millisecond
 )
-
-// RunRuntimeMutation is the canonical selected-store write boundary for the
-// SQLite runtime backend. It owns process-local write serialization, bounded
-// SQLITE_BUSY/database-locked retry, transaction context propagation, and
-// post-commit action flushing for runtime mutation producers.
-func (s *SQLiteRuntimeStore) RunRuntimeMutation(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
-	return s.runRuntimeMutation(ctx, "sqlite runtime mutation", fn)
-}
-
-func (s *SQLiteRuntimeStore) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
-	if fn == nil {
-		return nil
-	}
-	return s.runAuthorActivityMutation(ctx, "sqlite pipeline mutation", func(txctx context.Context, _ *sql.Tx) error {
-		return fn(txctx)
-	})
-}
-
-func (s *PostgresStore) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
-	if fn == nil {
-		return nil
-	}
-	return s.runAuthorActivityMutation(ctx, "postgres pipeline mutation", func(txctx context.Context, _ *sql.Tx) error {
-		return fn(txctx)
-	})
-}
 
 func (s *PostgresStore) runPostgresRuntimeMutation(ctx context.Context, fn func(context.Context, *sql.Tx) error) (err error) {
 	if fn == nil {
@@ -56,46 +28,15 @@ func (s *PostgresStore) runPostgresRuntimeMutation(ctx context.Context, fn func(
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	session, borrowed, err := postgresSessionAuthorityFromContext(ctx)
+	conn, err := s.backend.db.Conn(ctx)
 	if err != nil {
 		return err
 	}
-	if !borrowed {
-		conn, connErr := s.backend.db.Conn(ctx)
-		if connErr != nil {
-			return connErr
-		}
-		session = newPostgresSessionAuthority(conn)
-		defer func() {
-			err = errors.Join(err, session.release())
-		}()
-	}
-	ctx, err = session.bindContext(ctx)
-	if err != nil {
-		return err
-	}
-	tx, err := session.beginTx(ctx)
-	if err != nil {
-		return err
-	}
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
-	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
-	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
-	if runErr := fn(txctx, tx); runErr != nil {
-		rollbackErr := rollbackPostgresSessionTransaction(tx, session)
-		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
-		return errors.Join(runErr, rollbackErr)
-	}
-	if commitErr := tx.Commit(); commitErr != nil {
-		rollbackErr := rollbackPostgresSessionTransaction(tx, session)
-		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
-		return errors.Join(commitErr, rollbackErr)
-	}
-	endErr := session.endTx(tx)
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return endErr
+	session := newPostgresSessionAuthority(conn)
+	defer func() {
+		err = errors.Join(err, session.release())
+	}()
+	return runPostgresAuthorityTransaction(ctx, session, fn)
 }
 
 func rollbackPostgresSessionTransaction(tx *sql.Tx, session *postgresSessionAuthority) error {
@@ -110,33 +51,17 @@ func rollbackPostgresSessionTransaction(tx *sql.Tx, session *postgresSessionAuth
 }
 
 func (s *SQLiteRuntimeStore) runRuntimeMutation(ctx context.Context, label string, fn func(context.Context, *sql.Tx) error) error {
-	postCommit, err := s.runRuntimeMutationCommitted(ctx, label, fn)
-	if err != nil {
-		return err
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return nil
-}
-
-func (s *SQLiteRuntimeStore) runRuntimeMutationCommitted(
-	ctx context.Context,
-	label string,
-	fn func(context.Context, *sql.Tx) error,
-) ([]runtimepipeline.OwnerAction, error) {
 	if fn == nil {
-		return nil, nil
+		return nil
 	}
 	if s == nil || s.backend.db == nil {
-		return nil, fmt.Errorf("sqlite runtime store is required")
+		return fmt.Errorf("sqlite runtime store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
-		return nil, err
+		return err
 	}
 	if ctx == nil {
 		ctx = context.Background()
-	}
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return nil, fn(ctx, tx)
 	}
 	retryDeadline := time.Now().Add(sqliteRuntimeMutationRetryBudget)
 	ctxDeadline, hasCtxDeadline := ctx.Deadline()
@@ -146,52 +71,52 @@ func (s *SQLiteRuntimeStore) runRuntimeMutationCommitted(
 	var lastErr error
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
 		if time.Until(retryDeadline) <= 0 {
 			if hasCtxDeadline && !time.Now().Before(ctxDeadline) {
-				return nil, context.DeadlineExceeded
+				return context.DeadlineExceeded
 			}
-			return nil, sqliteRuntimeMutationRetryBudgetError(label, lastErr)
+			return sqliteRuntimeMutationRetryBudgetError(label, lastErr)
 		}
 		attemptCtx, cancel := context.WithDeadline(ctx, retryDeadline)
-		postCommit, err := s.runRuntimeMutationOnceLocked(attemptCtx, fn)
+		err := s.runRuntimeMutationOnceLocked(attemptCtx, fn)
 		attemptErr := attemptCtx.Err()
 		cancel()
 		if err == nil {
 			if attemptErr != nil {
 				if err := ctx.Err(); err != nil {
-					return nil, err
+					return err
 				}
 				if hasCtxDeadline && errors.Is(attemptErr, context.DeadlineExceeded) && !time.Now().Before(ctxDeadline) {
-					return nil, context.DeadlineExceeded
+					return context.DeadlineExceeded
 				}
-				return nil, sqliteRuntimeMutationRetryBudgetError(label, lastErr)
+				return sqliteRuntimeMutationRetryBudgetError(label, lastErr)
 			}
-			return postCommit, nil
+			return nil
 		}
 		if attemptErr != nil {
 			if err := ctx.Err(); err != nil {
-				return nil, err
+				return err
 			}
 			if hasCtxDeadline && errors.Is(attemptErr, context.DeadlineExceeded) && !time.Now().Before(ctxDeadline) {
-				return nil, context.DeadlineExceeded
+				return context.DeadlineExceeded
 			}
-			return nil, sqliteRuntimeMutationRetryBudgetError(label, lastErr)
+			return sqliteRuntimeMutationRetryBudgetError(label, lastErr)
 		}
 		if !sqliteRuntimeMutationBusyError(err) {
-			return nil, err
+			return err
 		}
 		lastErr = err
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
 		delay := sqliteRuntimeMutationRetryDelay(attempt)
 		if remaining := time.Until(retryDeadline); remaining <= 0 {
 			if hasCtxDeadline && !time.Now().Before(ctxDeadline) {
-				return nil, context.DeadlineExceeded
+				return context.DeadlineExceeded
 			}
-			return nil, sqliteRuntimeMutationRetryBudgetError(label, lastErr)
+			return sqliteRuntimeMutationRetryBudgetError(label, lastErr)
 		} else if delay > remaining {
 			delay = remaining
 		}
@@ -199,36 +124,29 @@ func (s *SQLiteRuntimeStore) runRuntimeMutationCommitted(
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return nil, ctx.Err()
+			return ctx.Err()
 		case <-timer.C:
 		}
 	}
 }
 
-func (s *SQLiteRuntimeStore) runRuntimeMutationOnceLocked(ctx context.Context, fn func(context.Context, *sql.Tx) error) ([]runtimepipeline.OwnerAction, error) {
+func (s *SQLiteRuntimeStore) runRuntimeMutationOnceLocked(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
 	s.mutationMu.Lock()
 	defer s.mutationMu.Unlock()
 
 	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
-	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
-	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
-	if err := fn(txctx, tx); err != nil {
+	if err := fn(ctx, tx); err != nil {
 		rollbackErr := rollbackSQLTransaction(tx)
-		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
-		return nil, errors.Join(err, rollbackErr)
+		return errors.Join(err, rollbackErr)
 	}
 	if err := tx.Commit(); err != nil {
 		rollbackErr := rollbackSQLTransaction(tx)
-		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
-		return nil, errors.Join(err, rollbackErr)
+		return errors.Join(err, rollbackErr)
 	}
-	return postCommit, nil
+	return nil
 }
 
 func rollbackSQLTransaction(tx *sql.Tx) error {

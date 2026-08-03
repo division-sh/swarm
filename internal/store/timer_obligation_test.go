@@ -72,14 +72,13 @@ func TestTimerObligationSnapshotObservationBoundaryOnBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatalf("begin timer obligation proof transaction: %v", err)
 			}
-			txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-			insertTimerObligationProofRowTx(t, txctx, tx, selected, runID, "scheduled_task", observedAt)
-			during, err := reader.ReadTimerObligations(txctx, scope, observedAt)
+			insertTimerObligationProofRowTx(t, ctx, tx, selected, runID, "scheduled_task", observedAt)
+			during, err := reader.ReadTimerObligations(ctx, scope, observedAt)
 			if err != nil {
 				_ = tx.Rollback()
-				t.Fatalf("read transaction-aware timer obligations: %v", err)
+				t.Fatalf("read timer obligations while ambient transaction is open: %v", err)
 			}
-			assertTimerFamilyObligation(t, mustTimerRun(t, during, runID).Families, runtimetimerobligation.FamilyScheduledTask, 1, 1, 1)
+			assertTimerFamilyObligation(t, mustTimerRun(t, during, runID).Families, runtimetimerobligation.FamilyScheduledTask, 0, 0, 0)
 			if err := tx.Rollback(); err != nil {
 				t.Fatalf("rollback timer obligation proof transaction: %v", err)
 			}

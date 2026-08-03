@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 )
 
 func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
@@ -42,16 +42,20 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 	if err := terminalConn.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&terminalPID); err != nil {
 		t.Fatalf("load terminal connection pid: %v", err)
 	}
-	terminalCtx := runtimepipeline.WithPipelineSQLConnContext(ctx, terminalConn)
+	terminalCtx := runtimepipelinefixture.WithSQLConn(ctx, terminalConn)
 	terminalTx, err := terminalConn.BeginTx(terminalCtx, nil)
 	if err != nil {
 		t.Fatalf("begin terminal transaction: %v", err)
 	}
 	defer terminalTx.Rollback()
-	terminalCtx = runtimepipeline.WithPipelineSQLTxContext(terminalCtx, terminalTx)
-	storyCtx, err := runtimeauthoractivity.Begin(terminalCtx, terminalTx, runtimeauthoractivity.DialectPostgres)
+	terminalCtx = runtimepipelinefixture.WithSQLTx(terminalCtx, terminalTx)
+	storyCtx, err := authoractivityfixture.Begin(terminalCtx, terminalTx, authoractivityfixture.DialectPostgres)
 	if err != nil {
 		t.Fatalf("begin terminal author activity mutation: %v", err)
+	}
+	story, ok := authoractivityfixture.Mutation(storyCtx)
+	if !ok {
+		t.Fatal("terminal author activity owner is unavailable")
 	}
 
 	runLocked := make(chan struct{})
@@ -94,14 +98,14 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 	}
 	terminalDone := make(chan terminalResult, 1)
 	go func() {
-		snapshot, _, err := terminalStore.markRunTerminalTx(storyCtx, terminalTx, nil, runtimerunlifecycle.TerminalRequest{
+		snapshot, _, err := terminalStore.markRunTerminalTx(storyCtx, terminalTx, story, runtimerunlifecycle.TerminalRequest{
 			RunID: fixture.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
 		})
 		if err == nil {
 			_, err = privaterunforkrevision.CaptureCurrentTransaction(storyCtx, terminalTx)
 		}
 		if err == nil {
-			err = runtimeauthoractivity.Finalize(storyCtx)
+			err = authoractivityfixture.Finalize(storyCtx)
 		}
 		if err == nil {
 			err = terminalTx.Commit()

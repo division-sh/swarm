@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 const apiIdempotencyLockNamespace = "swarm:api-idempotency:"
@@ -78,10 +76,6 @@ func (s *PostgresStore) WithAPIIdempotency(
 	if req.Now.IsZero() {
 		req.Now = time.Now().UTC()
 	}
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return withPostgresAPIIdempotencyTx(ctx, tx, req, execute)
-	}
-
 	conn, err := s.backend.db.Conn(ctx)
 	if err != nil {
 		return APIIdempotencyCompletion{}, false, fmt.Errorf("acquire api idempotency connection: %w", err)

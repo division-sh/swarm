@@ -30,7 +30,9 @@ import (
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/division-sh/swarm/internal/testutil"
+	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
@@ -239,8 +241,8 @@ func TestPostgresRunLifecycleEntityCountUsesEntityState(t *testing.T) {
 		t.Fatalf("snapshot entity_count = %d, want entity_state count 1 despite stale run/event overcount", snap.EntityCount)
 	}
 
-	if err := pg.runAuthorActivityMutation(ctx, "test synchronize PostgreSQL lifecycle counters", func(txctx context.Context, tx *sql.Tx) error {
-		return (postgresRunLifecycleMutation{store: pg, tx: tx}).SyncCounters(txctx, runID)
+	if err := pg.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		return (postgresRunLifecycleMutation{store: pg, tx: tx, story: story}).SyncCounters(txctx, runID)
 	}); err != nil {
 		t.Fatalf("SyncCounts: %v", err)
 	}
@@ -1294,7 +1296,7 @@ func TestSchedules_UpsertLoadCancelAndMarkFired(t *testing.T) {
 	}
 }
 
-func TestSchedules_RunScopedWritesUsePipelineTransaction(t *testing.T) {
+func TestSchedules_RunScopedWritesOwnNamedTransactions(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	runID := uuid.NewString()
@@ -1306,7 +1308,7 @@ func TestSchedules_RunScopedWritesUsePipelineTransaction(t *testing.T) {
 		t.Fatalf("begin pipeline transaction: %v", err)
 	}
 	defer tx.Rollback()
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
 	schedule := runtimepipeline.Schedule{
 		RunID: runID, AgentID: "scheduler", EventType: "timer.pipeline", TaskID: "pipeline-timer",
 		Mode: "once", At: time.Now().UTC().Add(time.Hour), Payload: []byte(`{}`),
@@ -1332,8 +1334,8 @@ func TestSchedules_RunScopedWritesUsePipelineTransaction(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM timers WHERE run_id = $1::uuid`, runID).Scan(&rows); err != nil {
 		t.Fatalf("count rolled-back timers: %v", err)
 	}
-	if rows != 0 {
-		t.Fatalf("rolled-back timer rows = %d, want 0", rows)
+	if rows != 1 {
+		t.Fatalf("named-operation timer rows after unrelated rollback = %d, want 1", rows)
 	}
 }
 

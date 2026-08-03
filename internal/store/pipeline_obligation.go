@@ -13,7 +13,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -685,7 +684,12 @@ func (s *sqlitePipelineObligationStore) MarkDecisionProcessed(ctx context.Contex
 		return err
 	}
 	defer state.operationMu.Unlock()
-	return s.runRuntimeMutation(ctx, "mark sqlite decision route processed", func(txctx context.Context, tx *sql.Tx) error {
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return err
+	}
+	defer handoff.rollback()
+	err = s.runRuntimeMutation(ctx, "mark sqlite decision route processed", func(txctx context.Context, tx *sql.Tx) error {
 		if current, err := s.sqlitePipelineClaimState(claim); err != nil || current != state {
 			if err != nil {
 				return err
@@ -700,12 +704,16 @@ func (s *sqlitePipelineObligationStore) MarkDecisionProcessed(ctx context.Contex
 			return err
 		}
 		if runID != "" {
-			if _, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil); err != nil {
+			if _, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil, handoff); err != nil {
 				return err
 			}
 		}
 		return sqliteDeliveryAdapter.CommitPipelineHandoff(txctx, tx, claim.EventID())
 	})
+	if err != nil {
+		return err
+	}
+	return handoff.commit()
 }
 
 func markDecisionRouteProcessedTx(ctx context.Context, tx pipelineExecer, eventID string, postgres bool, now time.Time) error {
@@ -758,7 +766,7 @@ func (s *PostgresStore) claimPostgresPipelineEvent(ctx context.Context, eventID 
 			registry.mu.Unlock()
 		}
 	}()
-	claimCtx, releaseReservation, err := s.reservePostgresPipelineClaimConnection(ctx)
+	claimSession, releaseReservation, err := s.reservePostgresPipelineClaimConnection(ctx)
 	if err != nil {
 		return runtimepipelineobligation.Claim{}, err
 	}
@@ -768,7 +776,11 @@ func (s *PostgresStore) claimPostgresPipelineEvent(ctx context.Context, eventID 
 			err = errors.Join(err, releaseReservation())
 		}
 	}()
-	lease, acquired, err := acquireAdvisoryLockLease(claimCtx, s.backend.db, replayClaimLockKey(eventID))
+	releaseLeaseSession, retained := claimSession.retain()
+	if !retained {
+		return runtimepipelineobligation.Claim{}, runtimepipelineobligation.ErrStaleClaim
+	}
+	lease, acquired, err := acquireAdvisoryLockLeaseOnSession(ctx, claimSession, replayClaimLockKey(eventID), nil, releaseLeaseSession)
 	if err != nil {
 		return runtimepipelineobligation.Claim{}, err
 	}
@@ -782,14 +794,14 @@ func (s *PostgresStore) claimPostgresPipelineEvent(ctx context.Context, eventID 
 	if err != nil {
 		return runtimepipelineobligation.Claim{}, errors.Join(
 			err,
-			lease.Release(context.WithoutCancel(claimCtx)),
+			lease.Release(context.WithoutCancel(ctx)),
 		)
 	}
 	token, err := registry.issuer.Token(claim)
 	if err != nil {
 		return runtimepipelineobligation.Claim{}, errors.Join(
 			err,
-			lease.Release(context.WithoutCancel(claimCtx)),
+			lease.Release(context.WithoutCancel(ctx)),
 		)
 	}
 	state := &pipelineClaimState{claim: claim, postgresLease: lease}
@@ -811,7 +823,7 @@ func (s *PostgresStore) claimPostgresPipelineEvent(ctx context.Context, eventID 
 	if releaseErr := releaseReservation(); releaseErr != nil {
 		return runtimepipelineobligation.Claim{}, errors.Join(
 			releaseErr,
-			s.releasePostgresPipelineClaim(context.WithoutCancel(claimCtx), claim),
+			s.releasePostgresPipelineClaim(context.WithoutCancel(ctx), claim),
 		)
 	}
 	if purpose == runtimepipelineobligation.PurposePublication {
@@ -819,10 +831,10 @@ func (s *PostgresStore) claimPostgresPipelineEvent(ctx context.Context, eventID 
 	}
 	eligible, err := postgresPipelineEligible(ctx, lease.session, eventID, purpose)
 	if err != nil {
-		return runtimepipelineobligation.Claim{}, errors.Join(err, s.releasePostgresPipelineClaim(context.WithoutCancel(claimCtx), claim))
+		return runtimepipelineobligation.Claim{}, errors.Join(err, s.releasePostgresPipelineClaim(context.WithoutCancel(ctx), claim))
 	}
 	if !eligible {
-		return runtimepipelineobligation.Claim{}, errors.Join(runtimepipelineobligation.ErrIneligible, s.releasePostgresPipelineClaim(context.WithoutCancel(claimCtx), claim))
+		return runtimepipelineobligation.Claim{}, errors.Join(runtimepipelineobligation.ErrIneligible, s.releasePostgresPipelineClaim(context.WithoutCancel(ctx), claim))
 	}
 	return claim, nil
 }
@@ -867,29 +879,16 @@ func (r *postgresPipelineClaimRegistry) retainPostgresPipelineClaimCapacity(db *
 	}
 }
 
-func (s *PostgresStore) reservePostgresPipelineClaimConnection(ctx context.Context) (context.Context, func() error, error) {
+func (s *PostgresStore) reservePostgresPipelineClaimConnection(ctx context.Context) (*postgresSessionAuthority, func() error, error) {
 	if ctx == nil {
 		ctx = context.Background()
-	}
-	if session, borrowed, err := postgresSessionAuthorityFromContext(ctx); err != nil {
-		return nil, nil, fmt.Errorf("reserve PostgreSQL pipeline claim connection: %w", err)
-	} else if borrowed {
-		bound, bindErr := session.bindContext(ctx)
-		if bindErr != nil {
-			return nil, nil, fmt.Errorf("reserve PostgreSQL pipeline claim connection: %w", bindErr)
-		}
-		return bound, func() error { return nil }, nil
 	}
 	conn, err := s.backend.db.Conn(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reserve PostgreSQL pipeline claim connection: %w", err)
 	}
 	session := newPostgresSessionAuthority(conn)
-	bound, bindErr := session.bindContext(ctx)
-	if bindErr != nil {
-		return nil, nil, errors.Join(bindErr, session.release())
-	}
-	return bound, session.release, nil
+	return session, session.release, nil
 }
 
 func (s *SQLiteRuntimeStore) claimSQLitePipelineEvent(ctx context.Context, eventID string, purpose runtimepipelineobligation.Purpose) (runtimepipelineobligation.Claim, error) {
@@ -900,10 +899,8 @@ func (s *SQLiteRuntimeStore) claimSQLitePipelineEvent(ctx context.Context, event
 	if _, err := uuid.Parse(eventID); err != nil {
 		return runtimepipelineobligation.Claim{}, fmt.Errorf("claim sqlite pipeline event: %w", err)
 	}
-	if _, mutationActive := runtimepipeline.PipelineSQLTxFromContext(ctx); !mutationActive {
-		s.mutationMu.Lock()
-		defer s.mutationMu.Unlock()
-	}
+	s.mutationMu.Lock()
+	defer s.mutationMu.Unlock()
 	s.pipelineClaimMu.Lock()
 	issuer, claims := s.pipelineClaimOwner()
 	for _, state := range claims {
@@ -1642,7 +1639,12 @@ func (s *sqlitePipelineObligationStore) Settle(ctx context.Context, claim runtim
 		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
 	defer state.operationMu.Unlock()
-	postCommit, err := s.runRuntimeMutationCommitted(ctx, "settle sqlite pipeline obligation", func(txctx context.Context, tx *sql.Tx) error {
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return runtimepipelineobligation.SettlementOutcome{}, err
+	}
+	defer handoff.rollback()
+	err = s.runRuntimeMutation(ctx, "settle sqlite pipeline obligation", func(txctx context.Context, tx *sql.Tx) error {
 		if current, err := s.sqlitePipelineClaimState(claim); err != nil || current != state {
 			if err != nil {
 				return err
@@ -1657,7 +1659,7 @@ func (s *sqlitePipelineObligationStore) Settle(ctx context.Context, claim runtim
 			return err
 		}
 		if runID != "" {
-			if _, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil); err != nil {
+			if _, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil, handoff); err != nil {
 				return err
 			}
 		}
@@ -1671,8 +1673,7 @@ func (s *sqlitePipelineObligationStore) Settle(ctx context.Context, claim runtim
 	}
 	outcome := runtimepipelineobligation.CommittedSettlement(disposition.Successful())
 	releaseErr := s.releaseSQLitePipelineClaimLocked(claim, state)
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return outcome, releaseErr
+	return outcome, errors.Join(releaseErr, handoff.commit())
 }
 
 type pipelineExecer interface {
@@ -2292,45 +2293,11 @@ func (s *sqlitePipelineObligationStore) GlobalWorkPresence(ctx context.Context) 
 }
 
 func (s *postgresPipelineObligationStore) SummarizeRun(ctx context.Context, runID string) (runtimepipelineobligation.RunSummary, error) {
-	var queryer pipelineQueryer = s.backend.db
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		queryer = tx
-	}
-	return summarizePipelineRun(ctx, queryer, runID, true)
+	return summarizePipelineRun(ctx, s.backend.db, runID, true)
 }
 
 func (s *sqlitePipelineObligationStore) SummarizeRun(ctx context.Context, runID string) (runtimepipelineobligation.RunSummary, error) {
-	var queryer pipelineQueryer = s.backend.db
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		queryer = tx
-	}
-	return summarizePipelineRun(ctx, queryer, runID, false)
-}
-
-func (s *postgresPipelineObligationStore) TerminalizeRun(
-	ctx context.Context,
-	runID string,
-	disposition runtimepipelineobligation.Disposition,
-	at time.Time,
-) (int, error) {
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return 0, errors.New("pipeline parent terminalization requires the named PostgreSQL transaction")
-	}
-	return s.terminalizePostgresPipelineRunTx(ctx, tx, runID, disposition, at)
-}
-
-func (s *sqlitePipelineObligationStore) TerminalizeRun(
-	ctx context.Context,
-	runID string,
-	disposition runtimepipelineobligation.Disposition,
-	at time.Time,
-) (int, error) {
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return 0, errors.New("pipeline parent terminalization requires the named SQLite transaction")
-	}
-	return s.terminalizeSQLitePipelineRunTx(ctx, tx, runID, disposition, at)
+	return summarizePipelineRun(ctx, s.backend.db, runID, false)
 }
 
 func (s *PostgresStore) terminalizePostgresPipelineRunTx(

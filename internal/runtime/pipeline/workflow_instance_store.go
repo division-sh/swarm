@@ -15,6 +15,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/entityquery"
@@ -414,36 +415,14 @@ func (s *workflowInstanceStore) MaterializeInitialEntry(ctx context.Context, ins
 	if s == nil || s.initialCommits == nil {
 		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow instance lifecycle store is required")
 	}
+	normalized, identity, lifecycle, err := s.prepareInitialEntryLifecycle(ctx, instance, occurredAt)
+	if err != nil {
+		return WorkflowInitialMaterializationUnknown, err
+	}
 	occurredAt = canonicalWorkflowInstancePersistedTime(occurredAt)
-	if occurredAt.IsZero() {
-		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow initial materialization requires an exact occurrence time")
-	}
-	if s.lifecycleOwner == nil {
-		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow instance lifecycle owner is required")
-	}
-	instance.EnteredStageAt = occurredAt
-	instance.CreatedAt = occurredAt
-	normalized, identity, ok, err := normalizeWorkflowInstanceForPersistence(instance)
-	if err != nil {
-		return WorkflowInitialMaterializationUnknown, err
-	}
-	if !ok {
-		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow initial materialization requires canonical instance identity")
-	}
-	effect, err := runtimeworkflowlifecycle.NewInitialEntry(identity.Instance.Route(), identity.RowID(), normalized.CurrentState, occurredAt)
-	if err != nil {
-		return WorkflowInitialMaterializationUnknown, err
-	}
 	initialProjection, err := newWorkflowInitialMaterializationProjection(ctx, identity, normalized, occurredAt)
 	if err != nil {
 		return WorkflowInitialMaterializationUnknown, err
-	}
-	prepared, err := s.lifecycleOwner.PrepareWorkflowLifecycleMutation(ctx, &normalized, []runtimeworkflowlifecycle.Effect{effect}, false)
-	if err != nil {
-		return WorkflowInitialMaterializationUnknown, err
-	}
-	if len(prepared.Emissions) != 0 {
-		return WorkflowInitialMaterializationUnknown, fmt.Errorf("workflow initial materialization cannot leave %d lifecycle emissions outside its atomic commit", len(prepared.Emissions))
 	}
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
@@ -457,7 +436,7 @@ func (s *workflowInstanceStore) MaterializeInitialEntry(ctx context.Context, ins
 	if err != nil {
 		return WorkflowInitialMaterializationUnknown, err
 	}
-	committed, err := s.initialCommits.CommitWorkflowInitialMaterialization(ctx, WorkflowInitialMaterializationCommand{Record: record, Lifecycle: prepared.Commit})
+	committed, err := s.initialCommits.CommitWorkflowInitialMaterialization(ctx, WorkflowInitialMaterializationCommand{Record: record, Lifecycle: lifecycle})
 	if err != nil {
 		return WorkflowInitialMaterializationUnknown, err
 	}
@@ -465,14 +444,59 @@ func (s *workflowInstanceStore) MaterializeInitialEntry(ctx context.Context, ins
 		return WorkflowInitialMaterializationUnknown, err
 	}
 	if committed.Result == WorkflowInitialMaterializationCreated {
-		postCommit := committed.Lifecycle
-		postCommit.Wakeups = nil
-		postCommit.Cancellations = nil
-		if err := s.lifecycleOwner.FinalizeWorkflowLifecycleMutation(ctx, postCommit); err != nil {
+		if err := s.finalizeInitialEntryLifecycle(ctx, committed.Lifecycle); err != nil {
 			return WorkflowInitialMaterializationUnknown, err
 		}
 	}
 	return committed.Result, nil
+}
+
+func (s *workflowInstanceStore) prepareInitialEntryLifecycle(
+	ctx context.Context,
+	instance WorkflowInstance,
+	occurredAt time.Time,
+) (WorkflowInstance, runtimeflowidentity.Persisted, WorkflowLifecycleMutationPlan, error) {
+	occurredAt = canonicalWorkflowInstancePersistedTime(occurredAt)
+	if occurredAt.IsZero() {
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, fmt.Errorf("workflow initial materialization requires an exact occurrence time")
+	}
+	if s == nil || s.lifecycleOwner == nil {
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, fmt.Errorf("workflow instance lifecycle owner is required")
+	}
+	instance.EnteredStageAt = occurredAt
+	instance.CreatedAt = occurredAt
+	normalized, identity, ok, err := normalizeWorkflowInstanceForPersistence(instance)
+	if err != nil {
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, err
+	}
+	if !ok {
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, fmt.Errorf("workflow initial materialization requires canonical instance identity")
+	}
+	effect, err := runtimeworkflowlifecycle.NewInitialEntry(identity.Instance.Route(), identity.RowID(), normalized.CurrentState, occurredAt)
+	if err != nil {
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, err
+	}
+	prepared, err := s.lifecycleOwner.PrepareWorkflowLifecycleMutation(ctx, &normalized, []runtimeworkflowlifecycle.Effect{effect}, false)
+	if err != nil {
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, err
+	}
+	if len(prepared.Emissions) != 0 {
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, fmt.Errorf("workflow initial materialization cannot leave %d lifecycle emissions outside its atomic commit", len(prepared.Emissions))
+	}
+	if err := prepared.Commit.Validate(runtimecorrelation.RunIDFromContext(ctx), identity.Instance.Route(), identity.RowID()); err != nil {
+		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, WorkflowLifecycleMutationPlan{}, err
+	}
+	return normalized, identity, prepared.Commit, nil
+}
+
+func (s *workflowInstanceStore) finalizeInitialEntryLifecycle(ctx context.Context, committed CommittedWorkflowLifecycleMutation) error {
+	if s == nil || s.lifecycleOwner == nil {
+		return fmt.Errorf("workflow instance lifecycle owner is required")
+	}
+	postCommit := committed
+	postCommit.Wakeups = nil
+	postCommit.Cancellations = nil
+	return s.lifecycleOwner.FinalizeWorkflowLifecycleMutation(ctx, postCommit)
 }
 
 // ArmInitialEntryTimers projects the durable initial-entry timer facts only

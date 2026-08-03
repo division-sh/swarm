@@ -266,7 +266,7 @@ func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Conte
 		if activation.TimerEventType == joinCompleteEvent {
 			kind = timeridentity.TimerHandleJoinComplete
 		}
-		schedule, err := joinSchedule(pc.SemanticSource(), pipelineFlowScope(ctx), entityID, *instance, activation, kind)
+		schedule, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, *instance, activation, kind)
 		if err != nil {
 			return err
 		}
@@ -435,7 +435,7 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 		if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 			return fmt.Errorf("close join %s on stage exit: %w", activation.Key(), err)
 		}
-		schedule, err := joinSchedule(pc.SemanticSource(), pipelineFlowScope(ctx), entityID, *instance, activation, kind)
+		schedule, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, *instance, activation, kind)
 		if err != nil {
 			return err
 		}

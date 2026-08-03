@@ -9,13 +9,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/delivery"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -193,7 +193,7 @@ func eventProducerIdentityReadbacks(t testing.TB, surface eventProducerIdentityL
 			name:         "inbound_publication_readback",
 			runtimeEvent: true,
 			load: func() (events.Event, error) {
-				if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+				if fixture.dialect == authoractivityfixture.DialectPostgres {
 					return loadPostgresInboundPublicationEvent(ctx, fixture.db, eventID)
 				}
 				return loadSQLiteInboundPublicationEvent(ctx, fixture.db, eventID)
@@ -234,7 +234,7 @@ func assertPersistedNodeProducerEvent(t *testing.T, event events.Event, eventID,
 func setPersistedEventProducerIdentity(fixture authorActivityReceiptFixture, ctx context.Context, eventID, producerID, producerType string) error {
 	query := `UPDATE events SET produced_by = NULLIF(?, ''), produced_by_type = NULLIF(?, '') WHERE event_id = ?`
 	args := []any{producerID, producerType, eventID}
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
 		query = `UPDATE events SET produced_by = NULLIF($1, ''), produced_by_type = NULLIF($2, '') WHERE event_id = $3::uuid`
 	}
 	_, err := fixture.db.ExecContext(ctx, query, args...)
@@ -242,7 +242,7 @@ func setPersistedEventProducerIdentity(fixture authorActivityReceiptFixture, ctx
 }
 
 func loadEventProducerIdentityRecord(ctx context.Context, fixture authorActivityReceiptFixture, eventID string) (persistedEventIdentity, bool, error) {
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
 		return loadPostgresEventIdentity(ctx, fixture.db, eventID)
 	}
 	return loadSQLiteEventIdentity(ctx, fixture.db, eventID)
@@ -256,7 +256,7 @@ func insertProducerIdentityDecisionObligation(t *testing.T, fixture authorActivi
 		eventID,
 		cardID,
 	)
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
 		if _, err := fixture.db.ExecContext(ctx, `
 			INSERT INTO decision_cards (
 				card_id, run_id, anchor_kind, anchor, status, execution_mode, snapshot,

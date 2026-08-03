@@ -5,7 +5,6 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
@@ -90,7 +89,7 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsAllowsUnscopedEmptyC
 	}
 }
 
-func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsReadsPipelineTransaction(t *testing.T) {
+func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsIgnoresAmbientPipelineTransaction(t *testing.T) {
 	const runID = "11111111-1111-4111-8111-111111111111"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
@@ -120,11 +119,11 @@ func TestSQLiteRuntimeStoreListActiveFlowInstanceDescriptorsReadsPipelineTransac
 		t.Fatalf("seed entity state in tx: %v", err)
 	}
 
-	descriptors, err := sqliteStore.ListActiveFlowInstanceDescriptors(runtimepipeline.WithPipelineSQLTxContext(ctx, tx))
+	descriptors, err := sqliteStore.ListActiveFlowInstanceDescriptors(ctx)
 	if err != nil {
 		t.Fatalf("ListActiveFlowInstanceDescriptors: %v", err)
 	}
-	if len(descriptors) != 1 || descriptors[0].FlowInstance != "component-scaffold/uncommitted" {
-		t.Fatalf("descriptors = %#v, want uncommitted tx flow instance", descriptors)
+	if len(descriptors) != 0 {
+		t.Fatalf("descriptors = %#v, want ambient uncommitted flow instance hidden", descriptors)
 	}
 }

@@ -45,8 +45,7 @@ func TestNormalRunCompletionRequiresExactDecisionOutcomeEventIDParity(t *testing
 						t.Fatalf("CreateHumanTaskCard: %v", err)
 					}
 					if testCase.verdict == "expired" {
-						expiryStore := cards.(decisioncard.HumanTaskExpiryStore)
-						if eventsOut := expireHumanTaskCardsInTestMutation(t, ctx, cards, expiryStore, now.Add(2*time.Hour), 1); len(eventsOut) != 1 {
+						if eventsOut := expireHumanTaskCardsInTestMutation(t, ctx, cards, now.Add(2*time.Hour), 1); len(eventsOut) != 1 {
 							t.Fatalf("expired events = %d, want 1", len(eventsOut))
 						}
 						expired, err := humanStore.LoadHumanTaskContinuation(ctx, card.CardID)
@@ -112,12 +111,10 @@ func TestNormalRunCompletionRequiresExactDecisionOutcomeEventIDParity(t *testing
 				}
 				wrongEvent := eventtest.PersistedProjection(wrongEventID, events.EventType(eventName), "test", "", []byte(`{}`), 1,
 					runID, sourceEventID, events.EventEnvelope{}, now.Add(2*time.Hour+time.Minute))
-				if err := runDecisionCardTestPipelineMutation(t, ctx, cards, func(txctx context.Context, tx *sql.Tx) error {
-					if err := appendDecisionCardTestParent(t, txctx, cards, tx, runID, sourceEventID, now.Add(2*time.Hour)); err != nil {
-						return err
-					}
-					return appendDecisionCardTestEvent(t, txctx, cards, tx, wrongEvent)
-				}); err != nil {
+				if err := commitSemanticParentFixture(ctx, cards, runID, sourceEventID, now.Add(2*time.Hour)); err != nil {
+					t.Fatalf("append wrong-ID outcome parent: %v", err)
+				}
+				if err := commitSemanticPipelineProcessedEventFixture(ctx, cards, wrongEvent); err != nil {
 					t.Fatalf("append wrong-ID outcome event: %v", err)
 				}
 

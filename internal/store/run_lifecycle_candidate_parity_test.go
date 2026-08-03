@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -22,7 +23,6 @@ const runLifecycleCandidateParityReplacementHash = "bundle-v1:sha256:fffffffffff
 type runLifecycleCandidateParityStore interface {
 	runtimerunlifecycle.CandidateStore
 	runtimerunlifecycle.OperationOwner
-	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
 	LoadRunLifecycleSnapshot(context.Context, string) (runtimebus.RunLifecycleSnapshot, error)
 }
 
@@ -182,15 +182,11 @@ func TestRunLifecycleCandidateTimestampPrecisionParity(t *testing.T) {
 				t.Fatalf("listed candidate = %#v, want %#v", listed, first)
 			}
 
-			var duplicate runtimerunlifecycle.CandidateRequestDisposition
-			if err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-				var err error
-				duplicate, err = fixture.store.RequestCompletionCandidate(
-					txctx,
-					runtimerunlifecycle.CandidateAtTime(runID, rawDueAt),
-				)
-				return err
-			}); err != nil {
+			duplicate, err := fixture.store.RequestCompletionCandidate(
+				ctx,
+				runtimerunlifecycle.CandidateAtTime(runID, rawDueAt),
+			)
+			if err != nil {
 				t.Fatalf("request exact candidate duplicate: %v", err)
 			}
 			if duplicate != runtimerunlifecycle.CandidateAlreadyCurrent {
@@ -218,10 +214,7 @@ func TestRunLifecycleCandidateTimestampPrecisionParity(t *testing.T) {
 			noncanonicalRequest := runtimerunlifecycle.CandidateRequest{
 				RunID: runID, Timing: runtimerunlifecycle.CandidateAt, DueAt: rawDueAt,
 			}
-			if err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-				_, err := fixture.store.RequestCompletionCandidate(txctx, noncanonicalRequest)
-				return err
-			}); err == nil {
+			if _, err := fixture.store.RequestCompletionCandidate(ctx, noncanonicalRequest); err == nil {
 				t.Fatal("noncanonical scheduled candidate request was accepted")
 			}
 			afterRejected := loadRunLifecycleCandidate(t, fixture, ctx, runID)
@@ -425,17 +418,15 @@ func TestRunLifecycleTerminalAbsorbsCandidatePostgres(t *testing.T) {
 		snapshot    runtimerunlifecycle.Snapshot
 		disposition runtimerunlifecycle.MutationDisposition
 	)
-	if err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		var err error
-		snapshot, disposition, err = fixture.store.ForkRunSource(
-			txctx,
-			runtimerunlifecycle.ForkSourceRequest{
-				RunID: sourceRunID, ContinuedAsRunID: childRunID,
-				EndedAt: startedAt.Add(time.Minute),
-			},
-		)
-		return err
-	}); err != nil {
+	var err error
+	snapshot, disposition, err = fixture.store.ForkRunSource(
+		ctx,
+		runtimerunlifecycle.ForkSourceRequest{
+			RunID: sourceRunID, ContinuedAsRunID: childRunID,
+			EndedAt: startedAt.Add(time.Minute),
+		},
+	)
+	if err != nil {
 		t.Fatalf("fork source lifecycle transition: %v", err)
 	}
 	if disposition != runtimerunlifecycle.MutationApplied ||
@@ -560,15 +551,11 @@ func TestRunLifecycleEligibilityOriginParity(t *testing.T) {
 				); err != nil || got != runtimerunlifecycle.MutationApplied {
 					t.Fatalf("pause = %s/%v", got, err)
 				}
-				var disposition runtimerunlifecycle.CandidateRequestDisposition
-				if err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-					var err error
-					disposition, err = fixture.store.RequestCompletionCandidate(
-						txctx,
-						runtimerunlifecycle.ImmediateCandidate(runID),
-					)
-					return err
-				}); err != nil {
+				disposition, err := fixture.store.RequestCompletionCandidate(
+					ctx,
+					runtimerunlifecycle.ImmediateCandidate(runID),
+				)
+				if err != nil {
 					t.Fatalf("request paused candidate: %v", err)
 				}
 				if disposition != runtimerunlifecycle.CandidateDeferredPaused {
@@ -690,12 +677,9 @@ func ensureRunLifecycleCandidateParityRun(
 			runtimeauthoractivity.BundleScope(uuid.NewString(), runLifecycleCandidateParityBundleHash),
 		)
 	}
-	if err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		_, err := fixture.store.CreateRun(txctx, runtimerunlifecycle.CreateRequest{
-			RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
-			Source: source, StartedAt: startedAt,
-		})
-		return err
+	if _, err := fixture.store.CreateRun(ctx, runtimerunlifecycle.CreateRequest{
+		RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
+		Source: source, StartedAt: startedAt,
 	}); err != nil {
 		t.Fatalf("ensure run %s: %v", runID, err)
 	}
@@ -706,13 +690,7 @@ func createRunLifecycleParity(
 	ctx context.Context,
 	request runtimerunlifecycle.CreateRequest,
 ) (runtimerunlifecycle.MutationDisposition, error) {
-	var disposition runtimerunlifecycle.MutationDisposition
-	err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		var err error
-		disposition, err = fixture.store.CreateRun(txctx, request)
-		return err
-	})
-	return disposition, err
+	return fixture.store.CreateRun(ctx, request)
 }
 
 func transitionRunLifecycleParity(
@@ -721,15 +699,9 @@ func transitionRunLifecycleParity(
 	runID string,
 	state runtimerunlifecycle.State,
 ) (runtimerunlifecycle.MutationDisposition, error) {
-	var disposition runtimerunlifecycle.MutationDisposition
-	err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		var err error
-		disposition, err = fixture.store.TransitionActiveRun(txctx, runtimerunlifecycle.ActiveTransitionRequest{
-			RunID: runID, State: state,
-		})
-		return err
+	return fixture.store.TransitionActiveRun(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+		RunID: runID, State: state,
 	})
-	return disposition, err
 }
 
 func reviseRunLifecycleSourceParity(
@@ -738,15 +710,9 @@ func reviseRunLifecycleSourceParity(
 	runID string,
 	source runtimecorrelation.BundleSourceFact,
 ) (runtimerunlifecycle.MutationDisposition, error) {
-	var disposition runtimerunlifecycle.MutationDisposition
-	err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		var err error
-		disposition, err = fixture.store.ReviseRunSource(txctx, runtimerunlifecycle.SourceRevisionRequest{
-			RunID: runID, Source: source,
-		})
-		return err
+	return fixture.store.ReviseRunSource(ctx, runtimerunlifecycle.SourceRevisionRequest{
+		RunID: runID, Source: source,
 	})
-	return disposition, err
 }
 
 func requestRunLifecycleCandidateParity(
@@ -756,15 +722,11 @@ func requestRunLifecycleCandidateParity(
 	runID string,
 ) runtimerunlifecycle.CandidateRequestResult {
 	t.Helper()
-	var disposition runtimerunlifecycle.CandidateRequestDisposition
-	if err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		var err error
-		disposition, err = fixture.store.RequestCompletionCandidate(
-			txctx,
-			runtimerunlifecycle.ImmediateCandidate(runID),
-		)
-		return err
-	}); err != nil {
+	disposition, err := fixture.store.RequestCompletionCandidate(
+		ctx,
+		runtimerunlifecycle.ImmediateCandidate(runID),
+	)
+	if err != nil {
 		t.Fatalf("request completion candidate: %v", err)
 	}
 	if disposition == runtimerunlifecycle.CandidateAbsorbedTerminal {
@@ -786,12 +748,12 @@ func forceRunLifecycleCandidateParity(
 	var err error
 	switch store := fixture.store.(type) {
 	case *PostgresStore:
-		err = store.runAuthorActivityMutation(ctx, "test force completion candidate revision", func(txctx context.Context, tx *sql.Tx) error {
+		err = store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
 			result, err = requestPostgresCompletionCandidateTx(txctx, tx, runID, &dueAt, true)
 			return err
 		})
 	case *SQLiteRuntimeStore:
-		err = store.runAuthorActivityMutation(ctx, "test force sqlite completion candidate revision", func(txctx context.Context, tx *sql.Tx) error {
+		err = store.runPrivateAuthorActivityMutation(ctx, "test force sqlite completion candidate revision", func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
 			result, err = requestSQLiteCompletionCandidateTx(txctx, tx, runID, &dueAt, store.now(), true)
 			return err
 		})
@@ -859,20 +821,13 @@ func terminalizeRunLifecycleCandidateParity(
 	if state == runtimerunlifecycle.StateCompleted {
 		return completeRunLifecycleCandidateParity(fixture, ctx, runID, endedAt)
 	}
-	var snapshot runtimerunlifecycle.Snapshot
-	var disposition runtimerunlifecycle.MutationDisposition
-	err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		var err error
-		failure := (*runtimefailures.Envelope)(nil)
-		if state == runtimerunlifecycle.StateFailed {
-			failure = testRetryableFailure()
-		}
-		snapshot, disposition, err = fixture.store.MarkTerminalRun(txctx, runtimerunlifecycle.TerminalRequest{
-			RunID: runID, State: state, Failure: failure, EndedAt: endedAt,
-		})
-		return err
+	failure := (*runtimefailures.Envelope)(nil)
+	if state == runtimerunlifecycle.StateFailed {
+		failure = testRetryableFailure()
+	}
+	return fixture.store.MarkTerminalRun(ctx, runtimerunlifecycle.TerminalRequest{
+		RunID: runID, State: state, Failure: failure, EndedAt: endedAt,
 	})
-	return snapshot, disposition, err
 }
 
 func completeRunLifecycleCandidateParity(
@@ -886,14 +841,14 @@ func completeRunLifecycleCandidateParity(
 	var inner error
 	switch store := fixture.store.(type) {
 	case *PostgresStore:
-		err := store.runAuthorActivityMutation(ctx, "test successful completion", func(txctx context.Context, tx *sql.Tx) error {
-			snapshot, disposition, inner = store.completeRunTx(txctx, tx, nil, runID, endedAt)
+		err := store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			snapshot, disposition, inner = store.completeRunTx(txctx, tx, story, runID, endedAt)
 			return inner
 		})
 		return snapshot, disposition, err
 	case *SQLiteRuntimeStore:
-		err := store.runAuthorActivityMutation(ctx, "test successful completion", func(txctx context.Context, tx *sql.Tx) error {
-			snapshot, disposition, inner = store.completeRunTx(txctx, tx, nil, runID, endedAt)
+		err := store.runPrivateAuthorActivityMutation(ctx, "test successful completion", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			snapshot, disposition, inner = store.completeRunTx(txctx, tx, story, runID, endedAt)
 			return inner
 		})
 		return snapshot, disposition, err
@@ -910,14 +865,24 @@ func runLifecycleCandidateRollback(
 	endedAt time.Time,
 	injected error,
 ) error {
-	return fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		if _, _, err := fixture.store.MarkTerminalRun(txctx, runtimerunlifecycle.TerminalRequest{
-			RunID: runID, State: state, EndedAt: endedAt,
-		}); err != nil {
-			return err
-		}
-		return injected
-	})
+	switch store := fixture.store.(type) {
+	case *PostgresStore:
+		return store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			if _, _, err := store.markRunTerminalStateTx(txctx, tx, story, terminalRunMutation{RunID: runID, State: state, EndedAt: endedAt}); err != nil {
+				return err
+			}
+			return injected
+		})
+	case *SQLiteRuntimeStore:
+		return store.runPrivateAuthorActivityMutation(ctx, "test terminal lifecycle rollback", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			if _, _, err := store.markRunTerminalStateTx(txctx, tx, story, terminalRunMutation{RunID: runID, State: state, EndedAt: endedAt}); err != nil {
+				return err
+			}
+			return injected
+		})
+	default:
+		return errors.New("unsupported run lifecycle candidate parity store")
+	}
 }
 
 func loadRunLifecycleCandidateFacts(

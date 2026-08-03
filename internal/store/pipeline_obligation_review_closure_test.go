@@ -12,13 +12,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -981,7 +980,7 @@ func TestPostgresPipelineClaimLeaseExcludesIndependentStoreUntilRelease(t *testi
 	fixture := authorActivityReceiptFixture{
 		store:   primary,
 		db:      db,
-		dialect: runtimeauthoractivity.DialectPostgres,
+		dialect: authoractivityfixture.DialectPostgres,
 	}
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
@@ -1158,7 +1157,7 @@ func commitReviewClosureEvent(
 func reviewClosureEventExists(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, eventID string) bool {
 	t.Helper()
 	query := `SELECT EXISTS (SELECT 1 FROM events WHERE event_id = ?)`
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
 		query = `SELECT EXISTS (SELECT 1 FROM events WHERE event_id = $1::uuid)`
 	}
 	var exists bool
@@ -1171,17 +1170,13 @@ func reviewClosureEventExists(t *testing.T, ctx context.Context, fixture authorA
 func terminalizeReviewClosureRun(
 	ctx context.Context,
 	fixture authorActivityReceiptFixture,
-	owner runtimepipelineobligation.Store,
+	_ runtimepipelineobligation.Store,
 	runID string,
 ) error {
-	tx, err := fixture.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
+	selected, ok := fixture.store.(pipelineObligationParityStore)
+	if !ok {
+		return fmt.Errorf("unexpected pipeline store %T", fixture.store)
 	}
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	if _, err := owner.TerminalizeRun(txctx, runID, runtimepipelineobligation.DeadLetter("run_stopped", nil), time.Now().UTC()); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
+	_, err := terminalizePipelineRunForTest(ctx, selected, runID, runtimepipelineobligation.DeadLetter("run_stopped", nil), time.Now().UTC())
+	return err
 }

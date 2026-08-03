@@ -110,22 +110,23 @@ func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, rou
 }
 
 func workflowGateSupersededEvent(card decisioncard.Card, activation gateruntime.Activation, instance WorkflowInstance, now time.Time) (events.Event, error) {
+	var noEvent events.Event
 	payload, err := canonicaljson.Bytes(map[string]any{
 		"card_id": activation.CardID, "anchor_kind": decisioncard.AnchorKindStageGate, "stage_activation_id": activation.ActivationID, "reason": activation.SupersededReason,
 	})
 	if err != nil {
-		return events.Event{}, err
+		return noEvent, err
 	}
 	anchor, err := card.Anchor.StageGate()
 	if err != nil {
-		return events.Event{}, err
+		return noEvent, err
 	}
 	if err := validateStageGateInstanceOwner(anchor, instance, activation); err != nil {
-		return events.Event{}, err
+		return noEvent, err
 	}
 	routingSource, err := card.Anchor.ControlRoutingSource()
 	if err != nil {
-		return events.Event{}, err
+		return noEvent, err
 	}
 	evt, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
 		Facts: events.EventFacts{
@@ -137,7 +138,7 @@ func workflowGateSupersededEvent(card decisioncard.Card, activation gateruntime.
 		RunID: card.RunID,
 	})
 	if err != nil {
-		return events.Event{}, err
+		return noEvent, err
 	}
 	return evt, nil
 }

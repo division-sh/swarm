@@ -328,7 +328,10 @@ func TestExecuteNodeContractHandlerSelectOrCreateEntityFeedsEntityIDToArtifactRe
 	payload := map[string]any{"artifact_key": "case-1", "request_id": "44444444-4444-4444-4444-444444444444", "namespace": "tenant-alpha", "partition_key": "project-42", "display_slug": "Demo Artifact", "mvp_yaml": "name: Demo\n"}
 	sourceEvent := handlerTestRootIngress(sourceEventID,
 		events.EventType("spec_repo.commit_requested"), "test", "", mustJSON(payload), 0, testPipelineRunID, "",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "22222222-2222-2222-2222-222222222222"), "source/case-1"),
+		events.EnvelopeForSourceRoute(
+			events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "22222222-2222-2222-2222-222222222222"), "treasury/case-1"),
+			events.RouteIdentity{FlowID: "treasury", FlowInstance: "treasury/case-1", EntityID: "22222222-2222-2222-2222-222222222222"},
+		),
 		time.Unix(1_700_000_000, 0).UTC())
 	seedPipelineEventRecord(t, ctx, db, sourceEvent)
 
@@ -508,6 +511,16 @@ treasury-orchestrator:
 
 func persistedSelectEntityIngress(t *testing.T, ctx context.Context, db *sql.DB, payload map[string]any, envelope events.EventEnvelope) events.Event {
 	t.Helper()
+	const sourceEntityID = "22222222-2222-2222-2222-222222222222"
+	entityID := strings.TrimSpace(envelope.EntityID)
+	if entityID == "" {
+		entityID = sourceEntityID
+	}
+	envelope = events.EnvelopeForFlowInstance(envelope, "treasury/orchestrator")
+	envelope = events.EnvelopeForEntityID(envelope, entityID)
+	envelope = events.EnvelopeForSourceRoute(envelope, events.RouteIdentity{
+		FlowID: "treasury", FlowInstance: "treasury/orchestrator", EntityID: entityID,
+	})
 	event := handlerTestRootIngress(
 		"",
 		events.EventType("opco.spend_recorded"),

@@ -13,6 +13,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
+	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/mutationlog"
 )
 
 type ScenarioSetupRequest struct {
@@ -95,7 +96,7 @@ func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req ScenarioS
 				}
 				continue
 			}
-			if err := runtimemutationlog.InsertEntityStateDiffWithStory(txctx, tx, postgresActiveRunSourceOwner(s, tx), story, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+			if err := privatemutationlog.InsertEntityStateDiffWithStory(txctx, tx, postgresActiveRunSourceOwner(s, tx), story, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
 				CurrentState: entity.CurrentState,
 				Fields:       fieldsAny,
 				Gates:        gatesAny,

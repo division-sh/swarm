@@ -12,10 +12,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -232,7 +232,7 @@ func TestNewRunDirectiveOperationCarriesCreationAuthorityParity(t *testing.T) {
 				t,
 				ctx,
 				fixture.db,
-				fixture.dialect == runtimeauthoractivity.DialectPostgres,
+				fixture.dialect == authoractivityfixture.DialectPostgres,
 				req.Operation.AgentIdentity,
 				"active",
 			)
@@ -338,8 +338,8 @@ func newRunDispositionDirectiveRequest(t *testing.T, resolution string) runtimea
 	}
 }
 
-func directiveEventIDPlaceholder(dialect runtimeauthoractivity.Dialect) string {
-	if dialect == runtimeauthoractivity.DialectPostgres {
+func directiveEventIDPlaceholder(dialect authoractivityfixture.Dialect) string {
+	if dialect == authoractivityfixture.DialectPostgres {
 		return "$1::uuid"
 	}
 	return "?"

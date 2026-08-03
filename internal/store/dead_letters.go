@@ -285,7 +285,7 @@ func recordDeadLetterAuthorActivity(ctx context.Context, story runtimeauthoracti
 	if story != nil {
 		return story.Record(ctx, draft)
 	}
-	return runtimeauthoractivity.Record(ctx, draft)
+	return fmt.Errorf("dead letter activity requires private story ownership")
 }
 
 func deadLetterOccurredAt(raw string) time.Time {

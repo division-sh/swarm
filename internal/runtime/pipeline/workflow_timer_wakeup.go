@@ -81,7 +81,7 @@ func (l *WorkflowTimerLifecycle) registerWakeup(ctx context.Context, wakeup Work
 }
 
 func (l *WorkflowTimerLifecycle) handleWakeup(ctx context.Context, wakeup WorkflowTimerWakeup) {
-	callbackCtx, cancel := context.WithTimeout(ctx, l.wakeupCallbackTimeout)
+	callbackCtx, cancel := context.WithTimeout(withoutPipelineEmitCollectors(ctx), l.wakeupCallbackTimeout)
 	defer cancel()
 
 	outcome, recurrenceCommitted, err := l.fireWakeup(callbackCtx, wakeup)
@@ -94,7 +94,7 @@ func (l *WorkflowTimerLifecycle) handleWakeup(ctx context.Context, wakeup Workfl
 	}
 	if outcome == WorkflowTimerFireCommitted && recurrenceCommitted {
 		ref := wakeup.Occurrence().Activation
-		if err := l.ReconcileWakeup(ownerActionAdmissionContext(callbackCtx), ref); err != nil {
+		if err := l.ReconcileWakeup(context.WithoutCancel(callbackCtx), ref); err != nil {
 			l.logFailure(callbackCtx, "workflow_timer_recurrence_reconcile_failed", ref, err)
 			l.startWakeupRecovery(ref)
 		}

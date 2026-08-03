@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -81,41 +80,33 @@ func listDueHumanTaskExpiryEvents(ctx context.Context, db decisionCardSQL, now t
 }
 
 func (s *PostgresStore) CreateHumanTaskCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) error {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		if err := requireActiveDecisionRun(ctx, tx, card.RunID, true); err != nil {
-			return err
-		}
-		return insertHumanTaskCard(ctx, tx, card, continuation, true)
-	}
-	return runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
+	return runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
 			return err
 		}
-		return insertHumanTaskCard(txctx, tx, card, continuation, true)
+		return insertHumanTaskCardWithStory(txctx, story, tx, card, continuation, true)
 	})
 }
 
 func (s *SQLiteRuntimeStore) CreateHumanTaskCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation) error {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		if err := requireActiveDecisionRun(ctx, tx, card.RunID, false); err != nil {
-			return err
-		}
-		return insertHumanTaskCard(ctx, tx, card, continuation, false)
-	}
-	return s.runDecisionCardMutation(ctx, "sqlite create human-task card", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runDecisionCardMutation(ctx, "sqlite create human-task card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		if err := requireActiveDecisionRun(txctx, tx, card.RunID, false); err != nil {
 			return err
 		}
-		return insertHumanTaskCard(txctx, tx, card, continuation, false)
+		return insertHumanTaskCardWithStory(txctx, story, tx, card, continuation, false)
 	})
 }
 
 func insertHumanTaskCard(ctx context.Context, tx *sql.Tx, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation, postgres bool) error {
+	return insertHumanTaskCardWithStory(ctx, nil, tx, card, continuation, postgres)
+}
+
+func insertHumanTaskCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation, postgres bool) error {
 	continuation = continuation.Canonical()
 	if err := continuation.Validate(card); err != nil {
 		return err
 	}
-	if err := insertDecisionCard(ctx, tx, card, postgres); err != nil {
+	if err := insertDecisionCardWithStory(ctx, story, tx, card, postgres); err != nil {
 		return err
 	}
 	query := `INSERT INTO human_task_continuations (
@@ -177,33 +168,53 @@ func (s *SQLiteRuntimeStore) LoadHumanTaskContinuation(ctx context.Context, card
 }
 
 func (s *PostgresStore) CompleteHumanTaskOutcome(ctx context.Context, cardID, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, error) {
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return decisioncard.HumanTaskContinuation{}, fmt.Errorf("human-task outcome completion requires an active pipeline transaction")
-	}
-	continuation, changed, err := completeHumanTaskOutcome(ctx, tx, cardID, eventID, at, true)
-	if err != nil || !changed {
-		return continuation, err
-	}
-	if _, err := s.requestCompletionCandidateTx(ctx, tx, continuation.RunID, nil); err != nil {
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
 		return decisioncard.HumanTaskContinuation{}, err
 	}
-	return continuation, nil
+	defer handoff.rollback()
+	var continuation decisioncard.HumanTaskContinuation
+	err = runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+		var changed bool
+		continuation, changed, err = completeHumanTaskOutcome(txctx, tx, cardID, eventID, at, true)
+		if err != nil || !changed {
+			return err
+		}
+		request, err := requestPostgresCompletionCandidateTx(txctx, tx, continuation.RunID, nil, false)
+		if err != nil {
+			return err
+		}
+		return handoff.prepare(&s.runLifecycleSinks, request)
+	})
+	if err != nil {
+		return decisioncard.HumanTaskContinuation{}, err
+	}
+	return continuation, handoff.commit()
 }
 
 func (s *SQLiteRuntimeStore) CompleteHumanTaskOutcome(ctx context.Context, cardID, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, error) {
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return decisioncard.HumanTaskContinuation{}, fmt.Errorf("human-task outcome completion requires an active pipeline transaction")
-	}
-	continuation, changed, err := completeHumanTaskOutcome(ctx, tx, cardID, eventID, at, false)
-	if err != nil || !changed {
-		return continuation, err
-	}
-	if _, err := s.requestCompletionCandidateTx(ctx, tx, continuation.RunID, nil); err != nil {
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
 		return decisioncard.HumanTaskContinuation{}, err
 	}
-	return continuation, nil
+	defer handoff.rollback()
+	var continuation decisioncard.HumanTaskContinuation
+	err = s.runDecisionCardMutation(ctx, "sqlite complete human-task outcome", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+		var changed bool
+		continuation, changed, err = completeHumanTaskOutcome(txctx, tx, cardID, eventID, at, false)
+		if err != nil || !changed {
+			return err
+		}
+		request, err := requestSQLiteCompletionCandidateTx(txctx, tx, continuation.RunID, nil, s.now(), false)
+		if err != nil {
+			return err
+		}
+		return handoff.prepare(&s.runLifecycleSinks, request)
+	})
+	if err != nil {
+		return decisioncard.HumanTaskContinuation{}, err
+	}
+	return continuation, handoff.commit()
 }
 
 func completeHumanTaskOutcome(ctx context.Context, tx *sql.Tx, cardID, eventID string, at time.Time, postgres bool) (decisioncard.HumanTaskContinuation, bool, error) {
@@ -266,22 +277,6 @@ func completeHumanTaskOutcome(ctx context.Context, tx *sql.Tx, cardID, eventID s
 	current.State = decisioncard.HumanTaskContinuationOutcomeDispatched
 	current.UpdatedAt = at
 	return current, true, nil
-}
-
-func (s *PostgresStore) ExpireHumanTaskCardsInMutation(ctx context.Context, now time.Time, limit int) ([]events.Event, error) {
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return nil, fmt.Errorf("human-task expiry requires an active pipeline transaction")
-	}
-	return expireHumanTaskCards(ctx, nil, tx, now, limit, true)
-}
-
-func (s *SQLiteRuntimeStore) ExpireHumanTaskCardsInMutation(ctx context.Context, now time.Time, limit int) ([]events.Event, error) {
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return nil, fmt.Errorf("human-task expiry requires an active pipeline transaction")
-	}
-	return expireHumanTaskCards(ctx, nil, tx, now, limit, false)
 }
 
 func expireHumanTaskCards(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, now time.Time, limit int, postgres bool) ([]events.Event, error) {
@@ -368,21 +363,22 @@ func expireHumanTaskCards(ctx context.Context, story runtimeauthoractivity.Mutat
 }
 
 func humanTaskExpiredEvent(card decisioncard.Card, continuation decisioncard.HumanTaskContinuation, now time.Time) (events.Event, error) {
+	var noEvent events.Event
 	eventID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.human-task.expired.v1\x00"+card.CardID+"\x00"+continuation.DeadlineAt.UTC().Format(time.RFC3339Nano))).String()
 	payload, err := canonicaljson.Bytes(map[string]any{
 		"card_id": card.CardID, "anchor_kind": card.Anchor.Kind(), "cause": "deadline_elapsed",
 		"deadline_at": continuation.DeadlineAt.UTC().Format(time.RFC3339Nano),
 	})
 	if err != nil {
-		return events.Event{}, err
+		return noEvent, err
 	}
 	scope, err := card.Anchor.Scope()
 	if err != nil {
-		return events.Event{}, err
+		return noEvent, err
 	}
 	routingSource, err := card.Anchor.ControlRoutingSource()
 	if err != nil {
-		return events.Event{}, err
+		return noEvent, err
 	}
 	return events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
 		Facts: events.EventFacts{

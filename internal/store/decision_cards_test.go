@@ -25,6 +25,7 @@ import (
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -1056,48 +1057,6 @@ func decisionCardStoreDB(t *testing.T, cards decisioncard.Store) (*sql.DB, bool)
 	}
 }
 
-func runDecisionCardTestPipelineMutation(t *testing.T, ctx context.Context, cards decisioncard.Store, fn func(context.Context, *sql.Tx) error) error {
-	t.Helper()
-	switch selected := cards.(type) {
-	case *PostgresStore:
-		return selected.runEventTransaction(ctx, fn)
-	case *SQLiteRuntimeStore:
-		return selected.runEventTransaction(ctx, fn)
-	default:
-		return fmt.Errorf("unexpected decision card store %T", cards)
-	}
-}
-
-func appendDecisionCardTestEvent(t *testing.T, ctx context.Context, cards decisioncard.Store, tx *sql.Tx, evt events.Event) error {
-	t.Helper()
-	switch selected := cards.(type) {
-	case *PostgresStore:
-		if err := commitSemanticEventFixtureTx(ctx, selected, tx, evt); err != nil {
-			return err
-		}
-		return writePipelineDispositionTx(ctx, tx, evt.ID(), runtimepipelineobligation.PurposeRecovery, runtimepipelineobligation.Acknowledged("pipeline_persisted"), true, time.Now().UTC())
-	case *SQLiteRuntimeStore:
-		if err := commitSemanticEventFixtureTx(ctx, selected, tx, evt); err != nil {
-			return err
-		}
-		return writePipelineDispositionTx(ctx, tx, evt.ID(), runtimepipelineobligation.PurposeRecovery, runtimepipelineobligation.Acknowledged("pipeline_persisted"), false, time.Now().UTC())
-	default:
-		return fmt.Errorf("unexpected decision card store %T", cards)
-	}
-}
-
-func appendDecisionCardTestParent(t *testing.T, ctx context.Context, cards decisioncard.Store, tx *sql.Tx, runID, parentEventID string, at time.Time) error {
-	t.Helper()
-	switch selected := cards.(type) {
-	case *PostgresStore:
-		return commitSemanticParentFixtureTx(ctx, selected, tx, runID, parentEventID, at)
-	case *SQLiteRuntimeStore:
-		return commitSemanticParentFixtureTx(ctx, selected, tx, runID, parentEventID, at)
-	default:
-		return fmt.Errorf("unexpected decision card store %T", cards)
-	}
-}
-
 func completeHumanTaskOutcomeInTestMutation(t *testing.T, ctx context.Context, cards decisioncard.Store, cardID, outcomeEventID string, at time.Time) decisioncard.HumanTaskContinuation {
 	t.Helper()
 	human := cards.(decisioncard.HumanTaskStore)
@@ -1124,18 +1083,14 @@ func completeHumanTaskOutcomeInTestMutation(t *testing.T, ctx context.Context, c
 		decisioncard.HumanTaskOutcomeEventID(cardID, outcomeEventID), events.EventType(eventName), "test", "", []byte(`{}`),
 		1, continuation.RunID, outcomeEventID, events.EventEnvelope{}, at,
 	)
-	var completed decisioncard.HumanTaskContinuation
-	if err := runDecisionCardTestPipelineMutation(t, ctx, cards, func(txctx context.Context, tx *sql.Tx) error {
-		if err := appendDecisionCardTestParent(t, txctx, cards, tx, continuation.RunID, outcomeEventID, at.Add(-time.Microsecond)); err != nil {
-			return err
-		}
-		if err := appendDecisionCardTestEvent(t, txctx, cards, tx, evt); err != nil {
-			return err
-		}
-		var err error
-		completed, err = human.CompleteHumanTaskOutcome(txctx, cardID, outcomeEventID, at)
-		return err
-	}); err != nil {
+	if err := commitSemanticParentFixture(ctx, cards, continuation.RunID, outcomeEventID, at.Add(-time.Microsecond)); err != nil {
+		t.Fatalf("commit human-task outcome parent: %v", err)
+	}
+	if err := commitSemanticPipelineProcessedEventFixture(ctx, cards, evt); err != nil {
+		t.Fatalf("commit human-task outcome event: %v", err)
+	}
+	completed, err := human.CompleteHumanTaskOutcome(ctx, cardID, outcomeEventID, at)
+	if err != nil {
 		t.Fatalf("complete human-task outcome in test mutation: %v", err)
 	}
 	requireDecisionCardPipelineReceipt(t, ctx, cards, "parent", outcomeEventID)
@@ -1162,18 +1117,14 @@ func completeProposedEffectRouteInTestMutation(t *testing.T, ctx context.Context
 	}
 	evt := eventtest.PersistedProjection(expectedID, events.EventType(expectedName), "test", "", []byte(`{}`), 1,
 		continuation.RunID, parentID, events.EventEnvelope{}, at)
-	var completed decisioncard.ProposedEffectContinuation
-	if err := runDecisionCardTestPipelineMutation(t, ctx, cards, func(txctx context.Context, tx *sql.Tx) error {
-		if err := appendDecisionCardTestParent(t, txctx, cards, tx, continuation.RunID, parentID, at.Add(-time.Microsecond)); err != nil {
-			return err
-		}
-		if err := appendDecisionCardTestEvent(t, txctx, cards, tx, evt); err != nil {
-			return err
-		}
-		var err error
-		completed, err = proposed.CompleteProposedEffectRoute(txctx, cardID, decisionEventID, at)
-		return err
-	}); err != nil {
+	if err := commitSemanticParentFixture(ctx, cards, continuation.RunID, parentID, at.Add(-time.Microsecond)); err != nil {
+		t.Fatalf("commit proposed-effect route parent: %v", err)
+	}
+	if err := commitSemanticPipelineProcessedEventFixture(ctx, cards, evt); err != nil {
+		t.Fatalf("commit proposed-effect route event: %v", err)
+	}
+	completed, err := proposed.CompleteProposedEffectRoute(ctx, cardID, decisionEventID, at)
+	if err != nil {
 		t.Fatalf("complete proposed-effect route in test mutation: %v", err)
 	}
 	requireDecisionCardPipelineReceipt(t, ctx, cards, "parent", parentID)
@@ -1189,13 +1140,13 @@ func requireDecisionCardPipelineReceipt(t *testing.T, ctx context.Context, cards
 		fixture = authorActivityReceiptFixture{
 			store:   selected,
 			db:      selected.backend.db,
-			dialect: runtimeauthoractivity.DialectSQLite,
+			dialect: authoractivityfixture.DialectSQLite,
 		}
 	case *PostgresStore:
 		fixture = authorActivityReceiptFixture{
 			store:   selected,
 			db:      selected.backend.db,
-			dialect: runtimeauthoractivity.DialectPostgres,
+			dialect: authoractivityfixture.DialectPostgres,
 		}
 	default:
 		t.Fatalf("decision card store %T has no selected-store receipt fixture", cards)
@@ -1208,10 +1159,10 @@ func requireDecisionCardPipelineReceipt(t *testing.T, ctx context.Context, cards
 
 func appendDecisionCardChangeInStore(ctx context.Context, cards decisioncard.Store, runID, cardID, changeType string, payload semanticvalue.Value, now time.Time) (int64, error) {
 	var changeID int64
-	appendChange := func(postgres bool) func(context.Context, *sql.Tx) error {
-		return func(txctx context.Context, tx *sql.Tx) error {
+	appendChange := func(postgres bool) func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation) error {
+		return func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 			var err error
-			changeID, err = appendDecisionCardChange(txctx, tx, runID, cardID, changeType, payload, now, postgres)
+			changeID, err = appendDecisionCardChangeWithStory(txctx, story, tx, runID, cardID, changeType, payload, now, postgres)
 			return err
 		}
 	}

@@ -141,42 +141,46 @@ func commitWorkflowEngineScheduleMutation(ctx context.Context, tx *sql.Tx, postg
 	if err != nil {
 		return err
 	}
+	routingSource, err := persistedScheduleRoutingSource(sc)
+	if err != nil {
+		return err
+	}
 	if postgres {
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO timers (
-				run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+				run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, routing_source,
 				fire_at, recurring, recurrence_cron, recurrence_interval,
 				owner_node, owner_agent, owner_kind, agent_name_owner, agent_name_source,
 				agent_route_presence, agent_flow_scope_key, agent_flow_instance_id,
 				reply_context_id, task_type, status
 			) VALUES (
-				NULLIF($1,'')::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb,
-				$7, $8, NULLIF($9,''), NULL,
-				NULL, $10, $11, NULLIF($12, ''), NULLIF($13, ''),
-				NULLIF($14, ''), NULLIF($15, ''), NULLIF($16, ''),
-				NULLIF($17, ''), $18, 'active'
+				NULLIF($1,'')::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb, $7::jsonb,
+				$8, $9, NULLIF($10,''), NULL,
+				NULL, $11, $12, NULLIF($13, ''), NULLIF($14, ''),
+				NULLIF($15, ''), NULLIF($16, ''), NULLIF($17, ''),
+				NULLIF($18, ''), $19, 'active'
 			)
-		`, sc.RunID, timerName, sc.EntityID, sc.FlowInstance, sc.EventType, string(persistedSchedulePayload(sc)), fireAt,
+		`, sc.RunID, timerName, sc.EntityID, sc.FlowInstance, sc.EventType, string(persistedSchedulePayload(sc)), string(routingSource), fireAt,
 			recurring, sc.Cron, sc.AgentID, sc.OwnerKind, identity.NameOwner, identity.NameSource, identity.RoutePresence,
 			identity.FlowScopeKey, identity.FlowInstanceID, sc.Context.ReplyContextID(), taskType)
 	} else {
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO timers (
-				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
+				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload, routing_source,
 				fire_at, recurring, recurrence_cron, owner_agent, owner_kind, agent_name_owner,
 				agent_name_source, agent_route_presence, agent_flow_scope_key, agent_flow_instance_id,
 				reply_context_id, task_type, status, created_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''),
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''),
 			          NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, 'active', ?)
 		`, uuid.NewString(), sqliteNullUUID(sc.RunID), timerName, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance),
-			sc.EventType, string(persistedSchedulePayload(sc)), fireAt, recurring, sqliteNullString(sc.Cron), sc.AgentID, sc.OwnerKind,
+			sc.EventType, string(persistedSchedulePayload(sc)), string(routingSource), fireAt, recurring, sqliteNullString(sc.Cron), sc.AgentID, sc.OwnerKind,
 			identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID,
 			sc.Context.ReplyContextID(), taskType, time.Now().UTC())
 	}
 	if err != nil {
 		return fmt.Errorf("insert workflow schedule: %w", err)
 	}
-	if strings.TrimSpace(sc.RunID) != "" {
+	if postgres && strings.TrimSpace(sc.RunID) != "" {
 		if _, err := privaterunforkrevision.Capture(ctx, tx, sc.RunID, privaterunforkrevision.FamilyTimers); err != nil {
 			return err
 		}

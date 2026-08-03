@@ -98,7 +98,8 @@ func (o *externalTestFlowInstanceActivationOwner) PrepareFlowInstanceActivation(
 	return plan, nil
 }
 
-func (o *externalTestFlowInstanceActivationOwner) FinalizeCommittedFlowInstanceActivation(ctx context.Context, plan runtimepipeline.FlowInstanceActivationPlan) error {
+func (o *externalTestFlowInstanceActivationOwner) FinalizeCommittedFlowInstanceActivation(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
+	plan := committed.Plan
 	o.mu.Lock()
 	req, ok := o.pending[plan.Identity.Route()]
 	if ok {
@@ -113,10 +114,6 @@ func (o *externalTestFlowInstanceActivationOwner) FinalizeCommittedFlowInstanceA
 
 type testAuthorActivityCatalogRegistrar interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
-}
-
-type externalRuntimeTestMutationOwner interface {
-	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
 }
 
 type externalRuntimeTestWorkflowOwner interface {

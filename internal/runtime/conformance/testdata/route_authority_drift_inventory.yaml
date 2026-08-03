@@ -620,7 +620,6 @@ seam_families:
     classification: canonical_owner
     paths:
       - internal/events/types.go
-      - internal/runtime/deliverylifecycle/adapter.go
       - internal/runtime/deliverylifecycle/model.go
       - internal/runtime/pipeline/workflow_nodes.go
       - internal/store/event_record_contract_test.go
@@ -893,6 +892,7 @@ seam_families:
       - internal/runtime/bus/delivery_planner_test.go
       - internal/runtime/bus/eventbus_publish.go
       - internal/runtime/bus/eventbus_publish_test.go
+      - internal/runtime/bus/outbox_test.go
       - internal/runtime/bus/event_authority_contract_test.go
       - internal/runtime/conformance/delivery_lifecycle_conformance_test.go
       - internal/runtime/conformance/agent_memory_conformance_test.go

@@ -42,6 +42,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
@@ -53,7 +54,7 @@ type retainedConnectionCommitStore struct {
 }
 
 func (s *retainedConnectionCommitStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
-	ctx = runtimepipeline.WithPipelineSQLConnContext(ctx, s.conn)
+	ctx = runtimepipelinefixture.WithSQLConn(ctx, s.conn)
 	return s.InMemoryEventStore.CommitPublication(ctx, command)
 }
 
@@ -67,10 +68,10 @@ func (o *dispatchContextObserver) NotifyLifecycle(ctx context.Context, signal ru
 		return
 	}
 	o.called = true
-	if _, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
+	if _, ok := runtimepipelinefixture.SQLConn(ctx); ok {
 		o.t.Error("post-commit dispatch retained the transaction-owned SQL connection")
 	}
-	if _, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok {
+	if _, ok := runtimepipelinefixture.SQLTx(ctx); ok {
 		o.t.Error("post-commit dispatch retained the completed SQL transaction")
 	}
 }
@@ -753,7 +754,7 @@ type nonTransactionalPersistedBeforeInterceptor struct {
 
 func (i nonTransactionalPersistedBeforeInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.t.Helper()
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+	if tx, ok := runtimepipelinefixture.SQLTx(ctx); ok && tx != nil {
 		i.t.Fatal("non-transactional interceptor unexpectedly ran with sql tx")
 	}
 	for _, got := range i.store.eventTypes() {
@@ -776,7 +777,7 @@ type postCommitTxAbsentInterceptor struct {
 
 func (i postCommitTxAbsentInterceptor) Intercept(ctx context.Context, _ events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.t.Helper()
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+	if tx, ok := runtimepipelinefixture.SQLTx(ctx); ok && tx != nil {
 		i.t.Fatal("post-commit interceptor ran with sql tx still in context")
 	}
 	ok, err := i.store.EventExists(ctx, i.eventID)
@@ -828,7 +829,7 @@ type postCommitErrorInterceptor struct {
 
 func (i postCommitErrorInterceptor) Intercept(ctx context.Context, _ events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.t.Helper()
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+	if tx, ok := runtimepipelinefixture.SQLTx(ctx); ok && tx != nil {
 		i.t.Fatal("post-commit error interceptor ran with sql tx still in context")
 	}
 	ok, err := i.store.EventExists(ctx, i.eventID)
@@ -858,7 +859,7 @@ func (i deferredEventVisibleInterceptor) Intercept(ctx context.Context, evt even
 	if evt.Type() != i.checkFor {
 		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+	if tx, ok := runtimepipelinefixture.SQLTx(ctx); ok && tx != nil {
 		i.t.Fatal("deferred event interceptor ran with sql tx still in context")
 	}
 	ok, err := i.store.EventExists(ctx, i.eventID)

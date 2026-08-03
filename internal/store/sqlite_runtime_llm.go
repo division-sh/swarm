@@ -149,7 +149,7 @@ func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec runtime
 	if err != nil {
 		return err
 	}
-	return s.runAuthorActivityMutation(ctx, "sqlite upsert exact conversation", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runRuntimeMutation(ctx, "sqlite upsert exact conversation", func(txctx context.Context, tx *sql.Tx) error {
 		if err := requireSQLiteRunActive(txctx, tx, identity.RunID); err != nil {
 			return err
 		}

@@ -2,11 +2,9 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 var _ runtimebus.ActiveFlowInstanceDescriptorLister = (*PostgresStore)(nil)
@@ -31,15 +29,7 @@ func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context) ([]runti
 		WHERE COALESCE(status, '') <> 'terminated'
 		ORDER BY agent_id ASC
 	`
-	var queryer interface {
-		QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-	} = s.backend.db
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		queryer = tx
-	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
-		queryer = conn
-	}
-	rows, err := queryer.QueryContext(ctx, query)
+	rows, err := s.backend.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -70,11 +60,7 @@ func (s *SQLiteRuntimeStore) ListActiveAgentDescriptors(ctx context.Context) ([]
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	q := flowInstanceDescriptorQueryer(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		q = tx
-	}
-	rows, err := q.QueryContext(ctx, `
+	rows, err := s.backend.db.QueryContext(ctx, `
 		SELECT agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 		       flow_scope_key, flow_instance_id, flow_instance, COALESCE(entity_id, '')
 		FROM agents

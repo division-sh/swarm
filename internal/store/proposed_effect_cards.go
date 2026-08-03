@@ -15,7 +15,6 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
 
@@ -23,32 +22,20 @@ var _ decisioncard.ProposedEffectStore = (*PostgresStore)(nil)
 var _ decisioncard.ProposedEffectStore = (*SQLiteRuntimeStore)(nil)
 
 func (s *PostgresStore) CreateProposedEffectCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation) error {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		if err := requireActiveDecisionRun(ctx, tx, card.RunID, true); err != nil {
-			return err
-		}
-		return insertProposedEffectCard(ctx, tx, card, continuation, true)
-	}
-	return runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
+	return runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
 			return err
 		}
-		return insertProposedEffectCard(txctx, tx, card, continuation, true)
+		return insertProposedEffectCardWithStory(txctx, story, tx, card, continuation, true)
 	})
 }
 
 func (s *SQLiteRuntimeStore) CreateProposedEffectCard(ctx context.Context, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation) error {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		if err := requireActiveDecisionRun(ctx, tx, card.RunID, false); err != nil {
-			return err
-		}
-		return insertProposedEffectCard(ctx, tx, card, continuation, false)
-	}
-	return s.runDecisionCardMutation(ctx, "sqlite create proposed-effect card", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runDecisionCardMutation(ctx, "sqlite create proposed-effect card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		if err := requireActiveDecisionRun(txctx, tx, card.RunID, false); err != nil {
 			return err
 		}
-		return insertProposedEffectCard(txctx, tx, card, continuation, false)
+		return insertProposedEffectCardWithStory(txctx, story, tx, card, continuation, false)
 	})
 }
 
@@ -103,35 +90,19 @@ func insertProposedEffectCardWithStory(ctx context.Context, story runtimeauthora
 }
 
 func (s *PostgresStore) LoadProposedEffectContinuation(ctx context.Context, cardID string) (decisioncard.ProposedEffectContinuation, error) {
-	db := decisionCardSQL(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		db = tx
-	}
-	return loadProposedEffectContinuation(ctx, db, cardID, true, false)
+	return loadProposedEffectContinuation(ctx, s.backend.db, cardID, true, false)
 }
 
 func (s *SQLiteRuntimeStore) LoadProposedEffectContinuation(ctx context.Context, cardID string) (decisioncard.ProposedEffectContinuation, error) {
-	db := decisionCardSQL(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		db = tx
-	}
-	return loadProposedEffectContinuation(ctx, db, cardID, false, false)
+	return loadProposedEffectContinuation(ctx, s.backend.db, cardID, false, false)
 }
 
 func (s *PostgresStore) ProposedEffectReadback(ctx context.Context, cardID string) (decisioncard.ProposedEffectReadback, error) {
-	db := decisionCardSQL(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		db = tx
-	}
-	return proposedEffectReadback(ctx, db, cardID, true)
+	return proposedEffectReadback(ctx, s.backend.db, cardID, true)
 }
 
 func (s *SQLiteRuntimeStore) ProposedEffectReadback(ctx context.Context, cardID string) (decisioncard.ProposedEffectReadback, error) {
-	db := decisionCardSQL(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		db = tx
-	}
-	return proposedEffectReadback(ctx, db, cardID, false)
+	return proposedEffectReadback(ctx, s.backend.db, cardID, false)
 }
 
 func proposedEffectReadback(ctx context.Context, db decisionCardSQL, cardID string, postgres bool) (decisioncard.ProposedEffectReadback, error) {
@@ -312,33 +283,53 @@ func commitProposedEffectDecision(ctx context.Context, tx *sql.Tx, card decision
 }
 
 func (s *PostgresStore) CompleteProposedEffectRoute(ctx context.Context, cardID, routeEventID string, at time.Time) (decisioncard.ProposedEffectContinuation, error) {
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return decisioncard.ProposedEffectContinuation{}, fmt.Errorf("proposed-effect route completion requires an active pipeline transaction")
-	}
-	continuation, changed, err := completeProposedEffectRoute(ctx, tx, cardID, routeEventID, at, true)
-	if err != nil || !changed {
-		return continuation, err
-	}
-	if _, err := s.requestCompletionCandidateTx(ctx, tx, continuation.RunID, nil); err != nil {
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
 		return decisioncard.ProposedEffectContinuation{}, err
 	}
-	return continuation, nil
+	defer handoff.rollback()
+	var continuation decisioncard.ProposedEffectContinuation
+	err = runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+		var changed bool
+		continuation, changed, err = completeProposedEffectRoute(txctx, tx, cardID, routeEventID, at, true)
+		if err != nil || !changed {
+			return err
+		}
+		request, err := requestPostgresCompletionCandidateTx(txctx, tx, continuation.RunID, nil, false)
+		if err != nil {
+			return err
+		}
+		return handoff.prepare(&s.runLifecycleSinks, request)
+	})
+	if err != nil {
+		return decisioncard.ProposedEffectContinuation{}, err
+	}
+	return continuation, handoff.commit()
 }
 
 func (s *SQLiteRuntimeStore) CompleteProposedEffectRoute(ctx context.Context, cardID, routeEventID string, at time.Time) (decisioncard.ProposedEffectContinuation, error) {
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	if !ok || tx == nil {
-		return decisioncard.ProposedEffectContinuation{}, fmt.Errorf("proposed-effect route completion requires an active pipeline transaction")
-	}
-	continuation, changed, err := completeProposedEffectRoute(ctx, tx, cardID, routeEventID, at, false)
-	if err != nil || !changed {
-		return continuation, err
-	}
-	if _, err := s.requestCompletionCandidateTx(ctx, tx, continuation.RunID, nil); err != nil {
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
 		return decisioncard.ProposedEffectContinuation{}, err
 	}
-	return continuation, nil
+	defer handoff.rollback()
+	var continuation decisioncard.ProposedEffectContinuation
+	err = s.runDecisionCardMutation(ctx, "sqlite complete proposed-effect route", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+		var changed bool
+		continuation, changed, err = completeProposedEffectRoute(txctx, tx, cardID, routeEventID, at, false)
+		if err != nil || !changed {
+			return err
+		}
+		request, err := requestSQLiteCompletionCandidateTx(txctx, tx, continuation.RunID, nil, s.now(), false)
+		if err != nil {
+			return err
+		}
+		return handoff.prepare(&s.runLifecycleSinks, request)
+	})
+	if err != nil {
+		return decisioncard.ProposedEffectContinuation{}, err
+	}
+	return continuation, handoff.commit()
 }
 
 func completeProposedEffectRoute(ctx context.Context, tx *sql.Tx, cardID, routeEventID string, at time.Time, postgres bool) (decisioncard.ProposedEffectContinuation, bool, error) {
@@ -410,44 +401,52 @@ func completeProposedEffectRoute(ctx context.Context, tx *sql.Tx, cardID, routeE
 }
 
 func (s *PostgresStore) SupersedeProposedEffectsForLoopGenerations(ctx context.Context, runID, entityID string, current []attemptgeneration.Generation, reason string, at time.Time) error {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		changed, err := supersedeProposedEffectsForLoopGenerations(ctx, tx, runID, entityID, current, reason, at, true)
-		if err != nil || !changed {
-			return err
-		}
-		_, err = s.requestCompletionCandidateTx(ctx, tx, runID, nil)
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
 		return err
 	}
-	return runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
-		changed, err := supersedeProposedEffectsForLoopGenerations(txctx, tx, runID, entityID, current, reason, at, true)
+	defer handoff.rollback()
+	err = runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+		changed, err := supersedeProposedEffectsForLoopGenerations(txctx, story, tx, runID, entityID, current, reason, at, true)
 		if err != nil || !changed {
 			return err
 		}
-		_, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil)
-		return err
+		request, err := requestPostgresCompletionCandidateTx(txctx, tx, runID, nil, false)
+		if err != nil {
+			return err
+		}
+		return handoff.prepare(&s.runLifecycleSinks, request)
 	})
+	if err != nil {
+		return err
+	}
+	return handoff.commit()
 }
 
 func (s *SQLiteRuntimeStore) SupersedeProposedEffectsForLoopGenerations(ctx context.Context, runID, entityID string, current []attemptgeneration.Generation, reason string, at time.Time) error {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		changed, err := supersedeProposedEffectsForLoopGenerations(ctx, tx, runID, entityID, current, reason, at, false)
-		if err != nil || !changed {
-			return err
-		}
-		_, err = s.requestCompletionCandidateTx(ctx, tx, runID, nil)
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
 		return err
 	}
-	return s.runDecisionCardMutation(ctx, "sqlite supersede proposed effects for loop generation", func(txctx context.Context, tx *sql.Tx) error {
-		changed, err := supersedeProposedEffectsForLoopGenerations(txctx, tx, runID, entityID, current, reason, at, false)
+	defer handoff.rollback()
+	err = s.runDecisionCardMutation(ctx, "sqlite supersede proposed effects for loop generation", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+		changed, err := supersedeProposedEffectsForLoopGenerations(txctx, story, tx, runID, entityID, current, reason, at, false)
 		if err != nil || !changed {
 			return err
 		}
-		_, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil)
-		return err
+		request, err := requestSQLiteCompletionCandidateTx(txctx, tx, runID, nil, s.now(), false)
+		if err != nil {
+			return err
+		}
+		return handoff.prepare(&s.runLifecycleSinks, request)
 	})
+	if err != nil {
+		return err
+	}
+	return handoff.commit()
 }
 
-func supersedeProposedEffectsForLoopGenerations(ctx context.Context, tx *sql.Tx, runID, entityID string, current []attemptgeneration.Generation, reason string, at time.Time, postgres bool) (bool, error) {
+func supersedeProposedEffectsForLoopGenerations(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, runID, entityID string, current []attemptgeneration.Generation, reason string, at time.Time, postgres bool) (bool, error) {
 	runID = strings.TrimSpace(runID)
 	entityID = strings.TrimSpace(entityID)
 	reason = strings.TrimSpace(reason)
@@ -506,7 +505,7 @@ func supersedeProposedEffectsForLoopGenerations(ctx context.Context, tx *sql.Tx,
 		if affected, _ := result.RowsAffected(); affected != 1 {
 			return false, decisioncard.ErrAlreadyTerminal
 		}
-		if _, err := appendDecisionCardChangeDTO(ctx, tx, runID, cardID, decisioncard.ChangeSuperseded, map[string]any{"reason": reason}, at, postgres); err != nil {
+		if _, err := appendDecisionCardChangeDTOWithStory(ctx, story, tx, runID, cardID, decisioncard.ChangeSuperseded, map[string]any{"reason": reason}, at, postgres); err != nil {
 			return false, err
 		}
 		changed = true

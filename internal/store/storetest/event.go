@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -22,6 +21,7 @@ import (
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/eventrecord/sqlite"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -37,7 +37,7 @@ func InsertCanonicalEventRecord(
 	t testing.TB,
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	event events.Event,
 ) runtimebus.EventAppendOutcome {
 	t.Helper()
@@ -61,12 +61,12 @@ func InsertCanonicalEventRecord(
 		found    bool
 	)
 	switch dialect {
-	case runtimeauthoractivity.DialectPostgres:
+	case authoractivityfixture.DialectPostgres:
 		inserted, err = eventrecordpostgres.Insert(ctx, db, record)
 		if err == nil && !inserted {
 			existing, found, err = eventrecordpostgres.Load(ctx, db, record.EventID)
 		}
-	case runtimeauthoractivity.DialectSQLite:
+	case authoractivityfixture.DialectSQLite:
 		inserted, err = eventrecordsqlite.Insert(ctx, db, record)
 		if err == nil && !inserted {
 			existing, found, err = eventrecordsqlite.Load(ctx, db, record.EventID)
@@ -192,7 +192,7 @@ func InsertExistingRunRootEventRecord(
 	t testing.TB,
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	eventID string,
 	runID string,
 	eventType events.EventType,
@@ -213,7 +213,7 @@ func InsertChildEventRecord(
 	t testing.TB,
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	eventID string,
 	runID string,
 	parentEventID string,
@@ -235,7 +235,7 @@ func InsertDiagnosticDirectEventRecord(
 	t testing.TB,
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	eventID string,
 	producerID string,
 	payload []byte,
@@ -253,7 +253,7 @@ func InsertDiagnosticDirectEventRecordForRun(
 	t testing.TB,
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	eventID string,
 	runID string,
 	parentEventID string,

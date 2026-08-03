@@ -9,52 +9,51 @@ import (
 	"testing"
 	"time"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
-func TestPostgresAdvisoryClaimRejectsUnownedBorrowedConnectionAndTransaction(t *testing.T) {
+func TestPostgresAdvisoryClaimIgnoresBorrowedConnectionAndTransaction(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	selected := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 
-	t.Run("borrowed connection without private authority", func(t *testing.T) {
-		eventID := uuid.NewString()
-		conn, err := db.Conn(ctx)
-		if err != nil {
-			t.Fatalf("open borrowed connection: %v", err)
-		}
-		defer conn.Close()
-		borrowedCtx := runtimepipeline.WithPipelineSQLConnContext(ctx, conn)
-		if _, err := selected.PipelineObligations().ClaimPublication(borrowedCtx, eventID); err == nil ||
-			!strings.Contains(err.Error(), "lacks private session authority") {
-			t.Fatalf("borrowed connection claim error = %v, want private-authority rejection", err)
-		}
-		assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventID))
-	})
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("open borrowed connection: %v", err)
+	}
+	defer conn.Close()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin foreign transaction: %v", err)
+	}
+	defer tx.Rollback()
 
-	t.Run("transaction without private authority", func(t *testing.T) {
-		eventID := uuid.NewString()
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			t.Fatalf("begin foreign transaction: %v", err)
-		}
-		defer tx.Rollback()
-		txCtx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-		if _, err := selected.PipelineObligations().ClaimPublication(txCtx, eventID); err == nil ||
-			!strings.Contains(err.Error(), "lacks private session authority") {
-			t.Fatalf("transaction-only claim error = %v, want private-authority rejection", err)
-		}
-		assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventID))
-	})
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+	}{
+		{name: "borrowed connection", ctx: runtimepipelinefixture.WithSQLConn(ctx, conn)},
+		{name: "foreign transaction", ctx: runtimepipelinefixture.WithSQLTx(ctx, tx)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eventID := uuid.NewString()
+			claim, err := selected.PipelineObligations().ClaimPublication(tc.ctx, eventID)
+			if err != nil {
+				t.Fatalf("claim through context carrying unrelated SQL authority: %v", err)
+			}
+			if err := selected.PipelineObligations().Release(tc.ctx, claim); err != nil {
+				t.Fatalf("release privately owned claim: %v", err)
+			}
+			assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventID))
+		})
+	}
 }
-
-func TestPostgresDetachedWorkContextCannotReviveClosedSessionAuthority(t *testing.T) {
+func TestPostgresRuntimeMutationCannotReviveClosedSessionAuthority(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	selected := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
@@ -63,18 +62,13 @@ func TestPostgresDetachedWorkContextCannotReviveClosedSessionAuthority(t *testin
 		t.Fatalf("open session connection: %v", err)
 	}
 	session := newPostgresSessionAuthority(conn)
-	bound, err := session.bindContext(ctx)
-	if err != nil {
-		t.Fatalf("bind session context: %v", err)
-	}
-	detached := runtimepipeline.WithoutPipelineSQLConnContext(bound)
 	if err := session.release(); err != nil {
 		t.Fatalf("close parent session: %v", err)
 	}
-	if err := selected.runPostgresRuntimeMutation(detached, func(context.Context, *sql.Tx) error {
+	if err := selected.runPostgresRuntimeMutation(ctx, func(context.Context, *sql.Tx) error {
 		return nil
 	}); err != nil {
-		t.Fatalf("detached work reused closed parent authority: %v", err)
+		t.Fatalf("runtime mutation failed to acquire independent authority: %v", err)
 	}
 }
 
@@ -98,7 +92,7 @@ func TestPostgresAdvisoryClaimReleaseIgnoresForeignTransactionAndUnlocksExactSes
 		t.Fatalf("begin foreign transaction: %v", err)
 	}
 	defer foreignTx.Rollback()
-	foreignCtx := runtimepipeline.WithPipelineSQLTxContext(ctx, foreignTx)
+	foreignCtx := runtimepipelinefixture.WithSQLTx(ctx, foreignTx)
 	if err := selected.PipelineObligations().Release(foreignCtx, claim); err != nil {
 		t.Fatalf("release through exact retained session: %v", err)
 	}
@@ -319,7 +313,7 @@ func TestPostgresPipelineScanCloseFailureIsTerminalAndReclaimable(t *testing.T) 
 			fixture := authorActivityReceiptFixture{
 				store:   selected,
 				db:      db,
-				dialect: runtimeauthoractivity.DialectPostgres,
+				dialect: authoractivityfixture.DialectPostgres,
 			}
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
@@ -414,23 +408,17 @@ func TestPostgresPipelineClaimUsesExactSessionAcrossCommitAndRollback(t *testing
 	}
 }
 
-func TestPostgresSharedClaimSessionSerializesSiblingTransactionsAndRelease(t *testing.T) {
+func TestPostgresPipelineClaimsOwnIndependentPrivateSessions(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	selected := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
-	eventIDs := []string{uuid.NewString(), uuid.NewString()}
-	claims := make([]runtimepipelineobligation.Claim, 0, len(eventIDs))
-	if err := selected.runPostgresRuntimeMutation(ctx, func(txctx context.Context, _ *sql.Tx) error {
-		for _, eventID := range eventIDs {
-			claim, err := selected.PipelineObligations().ClaimPublication(txctx, eventID)
-			if err != nil {
-				return err
-			}
-			claims = append(claims, claim)
+	claims := make([]runtimepipelineobligation.Claim, 0, 2)
+	for range 2 {
+		claim, err := selected.PipelineObligations().ClaimPublication(ctx, uuid.NewString())
+		if err != nil {
+			t.Fatalf("claim publication: %v", err)
 		}
-		return nil
-	}); err != nil {
-		t.Fatalf("claim sibling publications: %v", err)
+		claims = append(claims, claim)
 	}
 	first, err := selected.postgresPipelineClaimState(claims[0])
 	if err != nil {
@@ -440,417 +428,16 @@ func TestPostgresSharedClaimSessionSerializesSiblingTransactionsAndRelease(t *te
 	if err != nil {
 		t.Fatalf("load second claim: %v", err)
 	}
-	session := first.postgresLease.session
-	if session == nil || second.postgresLease.session != session {
-		t.Fatal("sibling claims did not retain the same transaction-owned session")
-	}
-
-	tx, err := session.beginTx(ctx)
-	if err != nil {
-		t.Fatalf("begin first sibling transaction: %v", err)
-	}
-	secondTx := make(chan *sql.Tx, 1)
-	secondErr := make(chan error, 1)
-	secondStarted := make(chan struct{})
-	go func() {
-		close(secondStarted)
-		tx, err := session.beginTx(ctx)
-		secondTx <- tx
-		secondErr <- err
-	}()
-	<-secondStarted
-	select {
-	case err := <-secondErr:
-		_ = tx.Rollback()
-		_ = session.endTx(tx)
-		t.Fatalf("sibling transaction returned before predecessor unwind: %v", err)
-	case <-time.After(50 * time.Millisecond):
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit first sibling transaction: %v", err)
-	}
-	if err := session.endTx(tx); err != nil {
-		t.Fatalf("end first sibling transaction: %v", err)
-	}
-	nextTx := <-secondTx
-	if err := <-secondErr; err != nil {
-		t.Fatalf("begin second sibling transaction after unwind: %v", err)
-	}
-	if err := nextTx.Rollback(); err != nil {
-		t.Fatalf("rollback second sibling transaction: %v", err)
-	}
-	if err := session.endTx(nextTx); err != nil {
-		t.Fatalf("end second sibling transaction: %v", err)
-	}
-
-	heldTx, err := session.beginTx(ctx)
-	if err != nil {
-		t.Fatalf("begin release predecessor transaction: %v", err)
-	}
-	releaseDone := make(chan error, 1)
-	go func() {
-		releaseDone <- selected.PipelineObligations().Release(ctx, claims[0])
-	}()
-	select {
-	case err := <-releaseDone:
-		_ = heldTx.Rollback()
-		_ = session.endTx(heldTx)
-		t.Fatalf("sibling release returned before transaction unwind: %v", err)
-	case <-time.After(50 * time.Millisecond):
-	}
-	if err := heldTx.Commit(); err != nil {
-		t.Fatalf("commit release predecessor transaction: %v", err)
-	}
-	if err := session.endTx(heldTx); err != nil {
-		t.Fatalf("end release predecessor transaction: %v", err)
-	}
-	if err := <-releaseDone; err != nil {
-		t.Fatalf("release sibling after transaction unwind: %v", err)
-	}
-	if err := selected.PipelineObligations().Release(ctx, claims[1]); err != nil {
-		t.Fatalf("release final sibling: %v", err)
-	}
-}
-
-func TestPostgresSessionPoisonDrainsConcurrentSiblingReleaseWithoutLockInversion(t *testing.T) {
-	for _, tc := range []struct {
-		name              string
-		unlocked          bool
-		unlockErr         error
-		releaseSessionErr error
-		wantDetail        string
-	}{
-		{
-			name:       "false_unlock",
-			wantDetail: "did not own the lock",
-		},
-		{
-			name:       "unlock_query_error",
-			unlockErr:  errors.New("injected concurrent unlock query failure"),
-			wantDetail: "injected concurrent unlock query failure",
-		},
-		{
-			name:              "session_close_error",
-			unlocked:          true,
-			releaseSessionErr: errors.New("injected concurrent session close failure"),
-			wantDetail:        "injected concurrent session close failure",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dsn, db, _ := testutil.StartPostgres(t)
-			selected := newTestPostgresStore(t, db)
-			db.SetMaxOpenConns(2)
-			db.SetMaxIdleConns(2)
-			ctx := testAuthorActivityContext()
-			eventIDs := []string{uuid.NewString(), uuid.NewString()}
-			claims := make([]runtimepipelineobligation.Claim, 0, len(eventIDs))
-
-			if err := selected.runPostgresRuntimeMutation(ctx, func(txctx context.Context, _ *sql.Tx) error {
-				for _, eventID := range eventIDs {
-					claim, err := selected.PipelineObligations().ClaimPublication(txctx, eventID)
-					if err != nil {
-						return err
-					}
-					claims = append(claims, claim)
-				}
-				return nil
-			}); err != nil {
-				t.Fatalf("claim sibling publications: %v", err)
-			}
-			states := make([]*pipelineClaimState, 0, len(claims))
-			for _, claim := range claims {
-				state, err := selected.postgresPipelineClaimState(claim)
-				if err != nil {
-					t.Fatalf("load sibling claim: %v", err)
-				}
-				states = append(states, state)
-			}
-			if states[0].postgresLease.session != states[1].postgresLease.session {
-				t.Fatal("sibling claims did not retain one physical session")
-			}
-			scan, err := selected.PipelineObligations().OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest())
-			if err != nil {
-				t.Fatalf("open scan: %v", err)
-			}
-			for _, claim := range claims {
-				if err := selected.associatePostgresPipelineClaim(scan, claim); err != nil {
-					t.Fatalf("associate sibling claim with scan: %v", err)
-				}
-			}
-
-			triggerOwnsOperation := make(chan struct{})
-			siblingOwnsLease := make(chan struct{})
-			states[0].postgresLease.testUnlock = func(context.Context, *postgresSessionAuthority, string) (bool, error) {
-				close(triggerOwnsOperation)
-				<-siblingOwnsLease
-				return tc.unlocked, tc.unlockErr
-			}
-			if tc.releaseSessionErr != nil {
-				states[0].postgresLease.releaseSession = func() error {
-					return tc.releaseSessionErr
-				}
-			}
-			states[1].postgresLease.testBeforeBeginOperation = func() {
-				close(siblingOwnsLease)
-			}
-			triggerDone := make(chan error, 1)
-			siblingDone := make(chan error, 1)
-			go func() {
-				triggerDone <- selected.PipelineObligations().Release(ctx, claims[0])
-			}()
-			select {
-			case <-triggerOwnsOperation:
-			case <-time.After(5 * time.Second):
-				t.Fatal("poisoning release did not acquire the session operation boundary")
-			}
-			go func() {
-				siblingDone <- selected.PipelineObligations().Release(ctx, claims[1])
-			}()
-
-			select {
-			case err := <-triggerDone:
-				if err == nil || !strings.Contains(err.Error(), tc.wantDetail) {
-					t.Fatalf("poisoning release error = %v, want %q evidence", err, tc.wantDetail)
-				}
-			case <-time.After(5 * time.Second):
-				t.Fatal("poisoning release deadlocked against sibling lease retirement")
-			}
-			select {
-			case err := <-siblingDone:
-				if err == nil || !strings.Contains(err.Error(), "session authority is closed") {
-					t.Fatalf("concurrent sibling release error = %v, want terminal session evidence", err)
-				}
-			case <-time.After(5 * time.Second):
-				t.Fatal("sibling release deadlocked against session poison")
-			}
-
-			for index, claim := range claims {
-				if _, err := selected.postgresPipelineClaimState(claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
-					t.Fatalf("sibling claim %d after concurrent poison = %v, want ErrStaleClaim", index, err)
-				}
-				assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventIDs[index]))
-				reclaimed, err := selected.PipelineObligations().ClaimPublication(ctx, eventIDs[index])
-				if err != nil {
-					t.Fatalf("local reclaim %d after concurrent poison: %v", index, err)
-				}
-				if err := selected.PipelineObligations().Release(ctx, reclaimed); err != nil {
-					t.Fatalf("release reclaimed sibling %d: %v", index, err)
-				}
-			}
-			scanState, err := selected.postgresPipelineScanState(scan)
-			if err != nil {
-				t.Fatalf("load retained scan: %v", err)
-			}
-			if got := len(scanState.openClaims); got != 0 {
-				t.Fatalf("scan memberships after concurrent poison = %d, want 0", got)
-			}
-			if got := db.Stats().MaxOpenConnections; got != 2 {
-				t.Fatalf("capacity after concurrent poison = %d, want 2", got)
-			}
-			if err := selected.PipelineObligations().CloseScan(ctx, scan); err != nil {
-				t.Fatalf("close scan after concurrent poison: %v", err)
-			}
-		})
-	}
-}
-
-func TestPostgresSessionDiscardTerminalizesSiblingPipelineClaims(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
-	selected := newTestPostgresStore(t, db)
-	db.SetMaxOpenConns(2)
-	db.SetMaxIdleConns(2)
-	ctx := testAuthorActivityContext()
-	runID := uuid.NewString()
-	seedAuthorActivityReceiptRun(t, authorActivityReceiptFixture{
-		store:   selected,
-		db:      db,
-		dialect: runtimeauthoractivity.DialectPostgres,
-	}, ctx, runID)
-	eventIDs := []string{
-		commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-2*time.Minute)),
-		commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute)),
-	}
-	claims := make([]runtimepipelineobligation.Claim, 0, len(eventIDs))
-	if err := selected.runPostgresRuntimeMutation(ctx, func(txctx context.Context, _ *sql.Tx) error {
-		for _, eventID := range eventIDs {
-			claim, err := selected.PipelineObligations().ClaimPublication(txctx, eventID)
-			if err != nil {
-				return err
-			}
-			claims = append(claims, claim)
-		}
-		return nil
-	}); err != nil {
-		t.Fatalf("claim sibling publications: %v", err)
-	}
-	states := make([]*pipelineClaimState, 0, len(claims))
-	leases := make([]*sqlAdvisoryLockLease, 0, len(claims))
-	for _, claim := range claims {
-		state, err := selected.postgresPipelineClaimState(claim)
-		if err != nil {
-			t.Fatalf("load sibling claim: %v", err)
-		}
-		states = append(states, state)
-		leases = append(leases, state.postgresLease)
-	}
-	if states[0].postgresLease.session != states[1].postgresLease.session {
-		t.Fatal("sibling claims did not retain one physical session")
-	}
-
-	scan, err := selected.PipelineObligations().OpenScan(ctx, runtimepipelineobligation.GlobalScanRequest())
-	if err != nil {
-		t.Fatalf("open scan: %v", err)
+	if first.postgresLease.session == nil || second.postgresLease.session == nil ||
+		first.postgresLease.session == second.postgresLease.session {
+		t.Fatal("each claim must retain its own private session")
 	}
 	for _, claim := range claims {
-		if err := selected.associatePostgresPipelineClaim(scan, claim); err != nil {
-			t.Fatalf("associate sibling claim with scan: %v", err)
+		if err := selected.PipelineObligations().Release(ctx, claim); err != nil {
+			t.Fatalf("release private claim: %v", err)
 		}
-	}
-	states[0].postgresLease.testUnlock = func(context.Context, *postgresSessionAuthority, string) (bool, error) {
-		return false, nil
-	}
-	if err := selected.PipelineObligations().Release(ctx, claims[0]); err == nil ||
-		!strings.Contains(err.Error(), "did not own the lock") {
-		t.Fatalf("poisoning release error = %v, want false-unlock evidence", err)
-	}
-
-	for index, claim := range claims {
-		if _, err := selected.postgresPipelineClaimState(claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
-			t.Fatalf("sibling claim %d after shared-session discard = %v, want ErrStaleClaim", index, err)
-		}
-		if !leases[index].released {
-			t.Fatalf("sibling lease %d remained current after shared-session discard", index)
-		}
-		assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventIDs[index]))
-	}
-	scanState, err := selected.postgresPipelineScanState(scan)
-	if err != nil {
-		t.Fatalf("load retained scan: %v", err)
-	}
-	if got := len(scanState.openClaims); got != 0 {
-		t.Fatalf("scan memberships after session discard = %d, want 0", got)
-	}
-	if got := db.Stats().MaxOpenConnections; got != 2 {
-		t.Fatalf("capacity after session discard = %d, want 2", got)
-	}
-
-	if _, err := commitSelectedForkEventOutcome(ctx, selected, runtimebus.CommitSelectedForkEventRequest{
-		Commit: runtimebus.CommitPublishRequest{PipelineClaim: claims[1]},
-	}); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
-		t.Fatalf("selected-fork commit with discarded-session claim = %v, want ErrStaleClaim", err)
-	}
-	if err := selected.runPostgresRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		return selected.terminalizePipelineObligationTx(
-			txctx,
-			tx,
-			eventIDs[1],
-			runtimepipelineobligation.DeadLetter("session_discarded", nil),
-			time.Now().UTC(),
-		)
-	}); err != nil {
-		t.Fatalf("parent terminalization after group retirement: %v", err)
-	}
-
-	for _, eventID := range eventIDs {
-		reclaimed, err := selected.PipelineObligations().ClaimPublication(ctx, eventID)
-		if err != nil {
-			t.Fatalf("local reclaim %s after session discard: %v", eventID, err)
-		}
-		if err := selected.PipelineObligations().Release(ctx, reclaimed); err != nil {
-			t.Fatalf("release reclaimed publication %s: %v", eventID, err)
-		}
-	}
-	if err := selected.PipelineObligations().CloseScan(ctx, scan); err != nil {
-		t.Fatalf("close scan after group retirement: %v", err)
 	}
 }
-
-func TestPostgresAmbiguousBorrowedAcquireTerminalizesEverySiblingClaim(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
-	selected := newTestPostgresStore(t, db)
-	db.SetMaxOpenConns(2)
-	db.SetMaxIdleConns(2)
-	ctx := testAuthorActivityContext()
-	eventIDs := []string{uuid.NewString(), uuid.NewString()}
-	claims := make([]runtimepipelineobligation.Claim, 0, len(eventIDs))
-	injected := errors.New("injected ambiguous sibling acquire")
-	siblingOwnsLease := make(chan struct{})
-	siblingDone := make(chan error, 1)
-	mutationDone := make(chan error, 1)
-
-	go func() {
-		mutationDone <- selected.runPostgresRuntimeMutation(ctx, func(txctx context.Context, _ *sql.Tx) error {
-			for _, eventID := range eventIDs {
-				claim, err := selected.PipelineObligations().ClaimPublication(txctx, eventID)
-				if err != nil {
-					return err
-				}
-				claims = append(claims, claim)
-			}
-			state, err := selected.postgresPipelineClaimState(claims[0])
-			if err != nil {
-				return err
-			}
-			state.postgresLease.testBeforeBeginOperation = func() {
-				close(siblingOwnsLease)
-			}
-			go func() {
-				siblingDone <- selected.PipelineObligations().Release(ctx, claims[0])
-			}()
-			<-siblingOwnsLease
-			_, _, err = acquireAdvisoryLockLeaseWith(
-				txctx,
-				db,
-				"test:ambiguous-sibling-acquire:"+uuid.NewString(),
-				func(ctx context.Context, authority *postgresSessionAuthority, key string) (bool, error) {
-					var acquired bool
-					if err := authority.queryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtext($1))`, key).Scan(&acquired); err != nil {
-						return false, err
-					}
-					if !acquired {
-						return false, errors.New("test advisory lock was unexpectedly busy")
-					}
-					return false, injected
-				},
-			)
-			return err
-		})
-	}()
-	var err error
-	select {
-	case err = <-mutationDone:
-	case <-time.After(5 * time.Second):
-		t.Fatal("ambiguous borrowed poison deadlocked before transaction unwind")
-	}
-	if !errors.Is(err, injected) {
-		t.Fatalf("ambiguous acquire error = %v, want injected failure", err)
-	}
-	select {
-	case err := <-siblingDone:
-		if err == nil || !strings.Contains(err.Error(), "session authority is closed") {
-			t.Fatalf("concurrent sibling release error = %v, want terminal session evidence", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("ambiguous borrowed poison did not drain sibling after transaction unwind")
-	}
-	for index, claim := range claims {
-		if _, err := selected.postgresPipelineClaimState(claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
-			t.Fatalf("sibling claim %d after ambiguous acquire = %v, want ErrStaleClaim", index, err)
-		}
-		assertIndependentAdvisoryLockAvailable(t, dsn, replayClaimLockKey(eventIDs[index]))
-		reclaimed, err := selected.PipelineObligations().ClaimPublication(ctx, eventIDs[index])
-		if err != nil {
-			t.Fatalf("local reclaim %d after ambiguous acquire: %v", index, err)
-		}
-		if err := selected.PipelineObligations().Release(ctx, reclaimed); err != nil {
-			t.Fatalf("release reclaimed sibling %d: %v", index, err)
-		}
-	}
-	if got := db.Stats().MaxOpenConnections; got != 2 {
-		t.Fatalf("capacity after ambiguous acquire = %d, want 2", got)
-	}
-}
-
 func TestPostgresPipelineClaimPoisonBetweenLeaseAttachAndRegistryPublicationIsTerminal(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	selected := newTestPostgresStore(t, db)
@@ -994,7 +581,7 @@ func TestPostgresDestructiveResetLockReleasesExactSession(t *testing.T) {
 		t.Fatalf("begin foreign transaction: %v", err)
 	}
 	defer foreignTx.Rollback()
-	if err := lease.Release(runtimepipeline.WithPipelineSQLTxContext(ctx, foreignTx)); err != nil {
+	if err := lease.Release(runtimepipelinefixture.WithSQLTx(ctx, foreignTx)); err != nil {
 		t.Fatalf("release destructive reset lease: %v", err)
 	}
 	assertIndependentAdvisoryLockAvailable(t, dsn, lockKey)

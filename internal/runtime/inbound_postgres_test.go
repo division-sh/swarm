@@ -38,6 +38,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -720,7 +721,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	requireInboundPostCommitSnapshot(t, requireInboundBusEvent(t, ch, "Telegram PostgreSQL post-commit dispatch"), inboundPublicationEvent(t, record, eventID))
 	waitForInboundBusQuiescence(t, bus)
 
-	eventtestsql.CorruptEventStore(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventtestsql.EventCorruptionClaim{
+	eventtestsql.CorruptEventStore(t, ctx, db, authoractivityfixture.DialectPostgres, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.duplicate_integrity",
 		Reason:    "prove inbound duplicate comparison rejects a schema-valid durable payload conflict",
 	}, "", `UPDATE events SET payload = '{"corrupt":true}'::jsonb WHERE event_id = $1::uuid`, eventID)
@@ -730,7 +731,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 		t.Fatalf("corrupt duplicate status = %d, want 503 body=%s", duplicate.Code, duplicate.Body.String())
 	}
 	requireNoInboundBusEvent(t, ch, "corrupt Telegram PostgreSQL duplicate")
-	eventtestsql.RequireEventRowCount(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, 1)
+	eventtestsql.RequireEventRowCount(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, 1)
 }
 
 func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
@@ -789,7 +790,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	requireInboundPostCommitSnapshot(t, requireInboundBusEvent(t, ch, "Telegram SQLite post-commit dispatch"), inboundPublicationEvent(t, record, eventID))
 	waitForInboundBusQuiescence(t, bus)
 
-	eventtestsql.CorruptEventStore(t, ctx, store.DatabaseForTest(sqliteStore), runtimeauthoractivity.DialectSQLite, eventtestsql.EventCorruptionClaim{
+	eventtestsql.CorruptEventStore(t, ctx, store.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.duplicate_integrity",
 		Reason:    "prove inbound duplicate comparison rejects a schema-valid durable payload conflict",
 	}, `UPDATE events SET payload = '{"corrupt":true}' WHERE event_id = ?`, "", eventID)
@@ -799,7 +800,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 		t.Fatalf("corrupt duplicate status = %d, want 503 body=%s", duplicate.Code, duplicate.Body.String())
 	}
 	requireNoInboundBusEvent(t, ch, "corrupt Telegram SQLite duplicate")
-	eventtestsql.RequireEventRowCount(t, ctx, store.DatabaseForTest(sqliteStore), runtimeauthoractivity.DialectSQLite, eventID, 1)
+	eventtestsql.RequireEventRowCount(t, ctx, store.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite, eventID, 1)
 }
 
 func inboundPublicationEvent(t testing.TB, record runtimeinbound.Record, eventID string) events.Event {

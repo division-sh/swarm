@@ -16,7 +16,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -25,6 +24,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -543,7 +543,7 @@ func activityBoringFullFlowBundle(serverURL string) *runtimecontracts.WorkflowCo
 	}
 	return &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:         "research",
+			Name:         "activity-boring-proof",
 			Version:      "v-test",
 			InitialStage: "pending",
 			FlowInitial:  map[string]string{"research": "pending"},
@@ -782,15 +782,15 @@ func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBor
 		return err
 	}
 	var (
-		dialect        runtimeauthoractivity.Dialect
+		dialect        authoractivityfixture.Dialect
 		fixtureDialect runlifecyclefixture.Dialect
 	)
 	switch kind {
 	case activityBoringStoreSQLite:
-		dialect = runtimeauthoractivity.DialectSQLite
+		dialect = authoractivityfixture.DialectSQLite
 		fixtureDialect = runlifecyclefixture.DialectSQLite
 	case activityBoringStorePostgres:
-		dialect = runtimeauthoractivity.DialectPostgres
+		dialect = authoractivityfixture.DialectPostgres
 		fixtureDialect = runlifecyclefixture.DialectPostgres
 	default:
 		return nil
@@ -883,7 +883,7 @@ func loadActivityBoringPersistedEvent(t *testing.T, db *sql.DB, kind activityBor
 	if kind != activityBoringStorePostgres {
 		t.Fatalf("persisted crash readback proof requires Postgres, got %s", kind)
 	}
-	event, err := eventfixture.Load(context.Background(), db, runtimeauthoractivity.DialectPostgres, eventID)
+	event, err := eventfixture.Load(context.Background(), db, authoractivityfixture.DialectPostgres, eventID)
 	if err != nil {
 		t.Fatalf("load persisted event %s: %v", eventID, err)
 	}

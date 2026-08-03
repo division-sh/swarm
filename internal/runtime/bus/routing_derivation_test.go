@@ -15,8 +15,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"time"
 )
 
@@ -213,7 +213,7 @@ func TestEventBusStageFlowInstanceRouteKeepsPublicationManifestInvisibleUntilRea
 			"vertical_id": "11111111-1111-4111-8111-111111111111",
 		},
 	}
-	stageCtx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{})
+	stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
 	if err := eb.StageFlowInstanceRouteContext(stageCtx, req); err != nil {
 		t.Fatalf("StageFlowInstanceRouteContext: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestEventBusStageFlowInstanceRoutePersistsCompleteCrossInstanceObserverTopo
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	stageCtx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{})
+	stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
 	if err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{
 		Identity: sourceIdentity,
 	}); err != nil {
@@ -334,7 +334,7 @@ func TestEventBusExactFlowInstanceRouteTopologyRemovesObsoleteObserverRows(t *te
 			if err := eb.RouteTable().AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: consumerIdentity}); err != nil {
 				t.Fatalf("publish consumer route: %v", err)
 			}
-			stageCtx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{})
+			stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
 			if err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: sourceIdentity}); err != nil {
 				t.Fatalf("stage complete topology: %v", err)
 			}
@@ -391,7 +391,7 @@ func TestEventBusStageFlowInstanceRouteRejectsForeignSemanticSourceDescriptorsBe
 		SubscriberType: "agent", SubscriberID: "prior-agent", SourceFlow: "producer",
 	}
 	store.routes = map[string]runtimebus.FlowInstanceRouteRecord{"prior": prior}
-	stageCtx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{})
+	stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
 	err = eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: current})
 	if err == nil || !strings.Contains(err.Error(), "semantic source does not match") {
 		t.Fatalf("StageFlowInstanceRouteContext error = %v, want foreign semantic-source rejection", err)
@@ -415,7 +415,7 @@ func TestEventBusStageFlowInstanceRouteAcceptsExactEmptyRouteSet(t *testing.T) {
 	req := runtimebus.FlowInstanceRouteMaterializationRequest{
 		Identity: identity,
 	}
-	stageCtx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{})
+	stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
 	if err := eb.StageFlowInstanceRouteContext(stageCtx, req); err != nil {
 		t.Fatalf("StageFlowInstanceRouteContext: %v", err)
 	}
@@ -1415,7 +1415,7 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	second := runtimeflowidentity.DeriveRoute("child/grandchild", "inst-2")
-	stageCtx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), &sql.Tx{})
+	stageCtx := runtimepipelinefixture.WithSQLTx(context.Background(), &sql.Tx{})
 	if err := eb.StageFlowInstanceRouteContext(stageCtx, runtimebus.FlowInstanceRouteMaterializationRequest{
 		Identity: second,
 	}); err != nil {

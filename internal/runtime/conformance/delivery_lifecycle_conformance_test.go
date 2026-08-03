@@ -12,7 +12,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -20,6 +19,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -423,7 +423,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					if err := tx.QueryRowContext(ctx, `SELECT CURRENT_TIMESTAMP`).Scan(&transactionStartedAt); err != nil {
 						t.Fatalf("read PostgreSQL transaction timestamp: %v", err)
 					}
-					txctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectPostgres)
+					txctx, err := authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectPostgres)
 					if err != nil {
 						t.Fatalf("begin long-transaction author activity: %v", err)
 					}
@@ -516,7 +516,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					if delay := longRetry.NextEligibleAt.Sub(longRetry.UpdatedAt); delay != 10*time.Second {
 						t.Fatalf("long-transaction retry delay = %s, want exact 10s from current database time", delay)
 					}
-					if err := runtimeauthoractivity.Finalize(txctx); err != nil {
+					if err := authoractivityfixture.Finalize(txctx); err != nil {
 						t.Fatalf("finalize long-transaction author activity: %v", err)
 					}
 					if err := tx.Commit(); err != nil {

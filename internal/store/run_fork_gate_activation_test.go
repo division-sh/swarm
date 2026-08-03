@@ -52,8 +52,8 @@ func TestMaterializeRunForkDecisionCardsCreatesForkLocalPendingAuthority(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cardStore.runAuthorActivityMutation(ctx, "test materialize fork decision cards", func(txctx context.Context, tx *sql.Tx) error {
-		return materializeRunForkDecisionCards(txctx, tx, forkRunID, entityID, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(time.Minute))
+	if err := cardStore.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		return materializeRunForkDecisionCards(txctx, tx, story, forkRunID, entityID, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(time.Minute))
 	}); err != nil {
 		t.Fatalf("materialize fork cards: %v", err)
 	}
@@ -129,8 +129,8 @@ func TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields(t *test
 	if err := forkActivation.CommitDecision(decisionEventID, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if err := cardStore.runAuthorActivityMutation(ctx, "test materialize committed fork decision card", func(txctx context.Context, tx *sql.Tx) error {
-		return materializeRunForkDecisionCards(txctx, tx, forkRunID, entityID, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(2*time.Minute))
+	if err := cardStore.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		return materializeRunForkDecisionCards(txctx, tx, story, forkRunID, entityID, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now.Add(2*time.Minute))
 	}); err != nil {
 		t.Fatalf("materialize committed fork card: %v", err)
 	}
@@ -170,8 +170,8 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 		t.Fatal(err)
 	}
 	point := runfork.RunForkPoint{EventID: uuid.NewString(), Timestamp: now.Add(time.Minute)}
-	if err := cards.runAuthorActivityMutation(ctx, "test materialize fork proposed-effect card", func(txctx context.Context, tx *sql.Tx) error {
-		return materializeRunForkProposedEffectCards(txctx, tx, sourceRunID, forkRunID, sourceContinuation.EntityID, point, now.Add(2*time.Minute))
+	if err := cards.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		return materializeRunForkProposedEffectCards(txctx, tx, story, sourceRunID, forkRunID, sourceContinuation.EntityID, point, now.Add(2*time.Minute))
 	}); err != nil {
 		t.Fatal(err)
 	}

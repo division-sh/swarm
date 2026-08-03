@@ -32,9 +32,6 @@ func (s *SQLiteRuntimeStore) ReadTimerObligations(ctx context.Context, scope run
 	if s == nil || s.backend.db == nil {
 		return runtimetimerobligation.Snapshot{}, fmt.Errorf("timer obligation reader requires SQLite store")
 	}
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return timerobligationadapter.Read(ctx, tx, timerobligationadapter.DialectSQLite, scope, observedAt)
-	}
 	return timerobligationadapter.Read(ctx, s.backend.db, timerobligationadapter.DialectSQLite, scope, observedAt)
 }
 
@@ -279,7 +276,7 @@ func (s *SQLiteRuntimeStore) UpsertSchedule(ctx context.Context, sc runtimepipel
 				return err
 			}
 		}
-		if err := s.CancelScheduleExact(txctx, sc); err != nil {
+		if err := cancelSQLiteScheduleExactInTx(txctx, tx, sc); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(txctx, `
@@ -319,17 +316,25 @@ func (s *SQLiteRuntimeStore) cancelSQLiteScheduleExact(ctx context.Context, sc r
 	if err != nil {
 		return err
 	}
-	identityFields, err := scheduleAgentIdentityFields(sc)
-	if err != nil {
-		return err
-	}
 	if err := s.runRuntimeMutation(ctx, "sqlite schedule cancel", func(txctx context.Context, tx *sql.Tx) error {
 		if requireActive && strings.TrimSpace(sc.RunID) != "" {
 			if err := requireSQLiteRunActive(txctx, tx, sc.RunID); err != nil {
 				return err
 			}
 		}
-		_, err := tx.ExecContext(txctx, `
+		return cancelSQLiteScheduleExactInTx(txctx, tx, sc)
+	}); err != nil {
+		return fmt.Errorf("cancel sqlite timer exact: %w", err)
+	}
+	return nil
+}
+
+func cancelSQLiteScheduleExactInTx(ctx context.Context, tx *sql.Tx, sc runtimepipeline.Schedule) error {
+	identityFields, err := scheduleAgentIdentityFields(sc)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
 			UPDATE timers
 			SET status = 'cancelled'
 			WHERE COALESCE(run_id, '') = COALESCE(?, '')
@@ -347,13 +352,9 @@ func (s *SQLiteRuntimeStore) cancelSQLiteScheduleExact(ctx context.Context, sc r
 			  AND task_type IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')
 			  AND status = 'active'
 		`, sqliteNullUUID(sc.RunID), sc.AgentID, sc.OwnerKind, identityFields.NameOwner, identityFields.NameSource,
-			identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID,
-			sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID))
-		return err
-	}); err != nil {
-		return fmt.Errorf("cancel sqlite timer exact: %w", err)
-	}
-	return nil
+		identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID,
+		sc.EventType, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance), strings.TrimSpace(sc.TaskID))
+	return err
 }
 
 func (s *SQLiteRuntimeStore) CancelScheduleExactTerminal(ctx context.Context, sc runtimepipeline.Schedule) error {
@@ -361,7 +362,7 @@ func (s *SQLiteRuntimeStore) CancelScheduleExactTerminal(ctx context.Context, sc
 }
 
 func (s *SQLiteRuntimeStore) LoadActiveSchedules(ctx context.Context) ([]runtimepipeline.Schedule, error) {
-	exec := sqliteScheduleDBExecutor(ctx, s.backend.db)
+	exec := sqliteScheduleExecutor(s.backend.db)
 	rows, err := exec.QueryContext(ctx, `
 		SELECT COALESCE(t.run_id, ''), COALESCE(t.owner_agent, ''), t.owner_kind,
 		       COALESCE(t.agent_name_owner, ''), COALESCE(t.agent_name_source, ''),
@@ -507,7 +508,7 @@ func (s *SQLiteRuntimeStore) ClaimSchedule(ctx context.Context, sc runtimepipeli
 		return false, err
 	}
 	var active bool
-	exec := sqliteScheduleDBExecutor(ctx, s.backend.db)
+	exec := sqliteScheduleExecutor(s.backend.db)
 	if strings.TrimSpace(sc.RunID) != "" {
 		if err := requireSQLiteRunActiveQuery(ctx, exec, sc.RunID); err != nil {
 			if errors.Is(err, runtimerunlifecycle.ErrRunNotActive) {
@@ -552,13 +553,6 @@ func (s *SQLiteRuntimeStore) ReleaseSchedule(context.Context, runtimepipeline.Sc
 
 func (s *SQLiteRuntimeStore) ReleaseScheduleClaims(context.Context) error {
 	return nil
-}
-
-func sqliteScheduleDBExecutor(ctx context.Context, db *sql.DB) sqliteScheduleExecutor {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return tx
-	}
-	return db
 }
 
 func scheduleTaskIDFromPayload(payload []byte) string {
@@ -612,7 +606,7 @@ func sqliteLoadRunControlState(ctx context.Context, tx *sql.Tx, runID string) (r
 	return state, nil
 }
 
-func (s *SQLiteRuntimeStore) sqlitePauseRunControl(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+func (s *SQLiteRuntimeStore) sqlitePauseRunControl(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest, handoff *runLifecycleCandidateHandoffReservation) (runtimeruncontrol.State, error) {
 	lifecycleState, err := runtimerunlifecycle.ParseState(state.Status)
 	if err != nil {
 		return runtimeruncontrol.State{}, err
@@ -624,7 +618,7 @@ func (s *SQLiteRuntimeStore) sqlitePauseRunControl(ctx context.Context, tx *sql.
 	default:
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: state.RunID, CurrentStatus: state.Status}
 	}
-	if _, err := (sqliteRunLifecycleMutation{store: s, tx: tx}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+	if _, err := (sqliteRunLifecycleMutation{store: s, tx: tx, handoff: handoff}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
 		RunID: state.RunID,
 		State: runtimerunlifecycle.StatePaused,
 	}); err != nil {
@@ -648,7 +642,7 @@ func (s *SQLiteRuntimeStore) sqlitePauseRunControl(ctx context.Context, tx *sql.
 	return state, nil
 }
 
-func (s *SQLiteRuntimeStore) sqliteContinueRunControl(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+func (s *SQLiteRuntimeStore) sqliteContinueRunControl(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest, handoff *runLifecycleCandidateHandoffReservation) (runtimeruncontrol.State, error) {
 	lifecycleState, err := runtimerunlifecycle.ParseState(state.Status)
 	if err != nil {
 		return runtimeruncontrol.State{}, err
@@ -656,7 +650,7 @@ func (s *SQLiteRuntimeStore) sqliteContinueRunControl(ctx context.Context, tx *s
 	if lifecycleState != runtimerunlifecycle.StatePaused {
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrNotPaused, RunID: state.RunID, CurrentStatus: state.Status}
 	}
-	if _, err := (sqliteRunLifecycleMutation{store: s, tx: tx}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+	if _, err := (sqliteRunLifecycleMutation{store: s, tx: tx, handoff: handoff}).TransitionActive(ctx, runtimerunlifecycle.ActiveTransitionRequest{
 		RunID: state.RunID,
 		State: runtimerunlifecycle.StateRunning,
 	}); err != nil {

@@ -17,7 +17,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
@@ -80,13 +79,7 @@ func requireActiveRunForEventMode(ctx context.Context, tx *sql.Tx, eventID strin
 	return requireSQLiteRunActive(ctx, tx, runID)
 }
 
-func eventReadQueryerFromContext(ctx context.Context, db *sql.DB) eventReadQueryer {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return tx
-	}
-	if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
-		return conn
-	}
+func eventReadQueryerFromDB(db *sql.DB) eventReadQueryer {
 	return db
 }
 
@@ -164,7 +157,7 @@ func (s *PostgresStore) EventExists(ctx context.Context, eventID string) (bool, 
 	}
 	var exists bool
 	query := `SELECT EXISTS(SELECT 1 FROM events WHERE event_id = $1::uuid)`
-	if err := eventReadQueryerFromContext(ctx, s.backend.db).QueryRowContext(ctx, query, eventID).Scan(&exists); err != nil {
+	if err := eventReadQueryerFromDB(s.backend.db).QueryRowContext(ctx, query, eventID).Scan(&exists); err != nil {
 		return false, fmt.Errorf("event exists lookup: %w", err)
 	}
 	return exists, nil
@@ -179,7 +172,7 @@ func (s *SQLiteRuntimeStore) EventExists(ctx context.Context, eventID string) (b
 		return false, nil
 	}
 	var exists bool
-	if err := eventReadQueryerFromContext(ctx, s.backend.db).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE event_id = ?)`, eventID).Scan(&exists); err != nil {
+	if err := eventReadQueryerFromDB(s.backend.db).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE event_id = ?)`, eventID).Scan(&exists); err != nil {
 		return false, fmt.Errorf("event exists lookup: %w", err)
 	}
 	return exists, nil
@@ -286,8 +279,6 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, story r
 	var recordExec eventrecordpostgres.Execer = s.backend.db
 	if tx != nil {
 		recordExec = tx
-	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
-		recordExec = conn
 	}
 	var ensureErr error
 	switch admitted.RunDisposition() {
@@ -352,17 +343,6 @@ func (s *PostgresStore) appendEventSpec(ctx context.Context, tx *sql.Tx, story r
 	}
 	if err := recordPersistedEventAuthorActivity(ctx, story, s, admitted, wantIdentity.ProducedBy, string(wantIdentity.ProducedByType)); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
-	}
-	if admitted.RunDisposition() == events.AdmittedRunCreateAuthorized {
-		rec, found, err := loadStandaloneRuntimePlatformRunRecord(ctx, chooseExecQueryer(s.backend.db, tx), wantIdentity.EventID)
-		if err != nil {
-			return runtimebus.EventAppendOutcomeUnknown, err
-		}
-		if found && isStandaloneRuntimePlatformRunRecord(rec) {
-			if _, err := s.requestCompletionCandidateTx(ctx, tx, wantIdentity.RunID, nil); err != nil {
-				return runtimebus.EventAppendOutcomeUnknown, err
-			}
-		}
 	}
 	return runtimebus.EventAppendInserted, nil
 }

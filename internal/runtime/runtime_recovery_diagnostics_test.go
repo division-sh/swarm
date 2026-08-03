@@ -51,6 +51,22 @@ func (o startupRecoveryWorkflowOwner) ReadTimerObligations(ctx context.Context, 
 	return runtimetimerobligation.Snapshot{ObservedAt: observedAt.UTC()}, nil
 }
 
+func (startupRecoveryWorkflowOwner) ListDynamicFlowRuntimeReadiness(context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
+	return nil, nil
+}
+
+func (startupRecoveryWorkflowOwner) ListDynamicFlowRuntimeReadinessKeys(context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadinessKey, error) {
+	return nil, nil
+}
+
+func (startupRecoveryWorkflowOwner) ListWorkflowTimerActivations(context.Context, string, string, bool) ([]runtimepipeline.WorkflowTimerActivation, error) {
+	return nil, nil
+}
+
+func (startupRecoveryWorkflowOwner) StandingRunUsesIntrinsicRecovery(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func startupRecoveryWorkflowPersistence(db *sql.DB, timers runtimetimerobligation.Reader) runtimepipeline.WorkflowPersistence {
 	return runtimepipeline.NewWorkflowPersistence(startupRecoveryWorkflowOwner{timers: timers})
 }
@@ -335,6 +351,21 @@ func (*startupReadinessFinalizationStore) MaterializeInitialEntry(
 	time.Time,
 ) (runtimepipeline.WorkflowInitialMaterializationResult, error) {
 	return 0, errors.New("unexpected readiness materialization")
+}
+
+func (*startupReadinessFinalizationStore) PrepareInitialEntryLifecycle(
+	context.Context,
+	runtimepipeline.WorkflowInstance,
+	time.Time,
+) (runtimepipeline.WorkflowInstance, runtimepipeline.WorkflowLifecycleMutationPlan, error) {
+	return runtimepipeline.WorkflowInstance{}, runtimepipeline.WorkflowLifecycleMutationPlan{}, errors.New("unexpected readiness lifecycle preparation")
+}
+
+func (*startupReadinessFinalizationStore) FinalizeInitialEntryLifecycle(
+	context.Context,
+	runtimepipeline.CommittedWorkflowLifecycleMutation,
+) error {
+	return errors.New("unexpected readiness lifecycle finalization")
 }
 
 func (*startupReadinessFinalizationStore) ArmInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {

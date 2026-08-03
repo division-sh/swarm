@@ -16,7 +16,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -29,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -1311,7 +1311,7 @@ accounts:
 		{id: stateEventID, eventType: "fork.state_entry", createdAt: at},
 		{id: forkEventID, eventType: "fork.field_only", createdAt: forkAt},
 	} {
-		storetest.InsertCanonicalEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventtest.PersistedProjectionForProducer(
+		storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
 			fixture.id, fixture.eventType, eventtest.Producer(events.EventProducerPlatform, "test"),
 			"", []byte(`{}`), 0, sourceRunID, "",
 			events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, fixture.createdAt,
@@ -1409,7 +1409,7 @@ accounts:
 		{id: stateEventID, eventType: "fork.state_entry", createdAt: at},
 		{id: forkEventID, eventType: "fork.field_only", createdAt: forkAt},
 	} {
-		storetest.InsertCanonicalEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventtest.PersistedProjectionForProducer(
+		storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
 			fixture.id, fixture.eventType, eventtest.Producer(events.EventProducerPlatform, "test"),
 			"", []byte(`{}`), 0, sourceRunID, "",
 			events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, fixture.createdAt,

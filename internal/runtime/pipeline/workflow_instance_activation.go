@@ -17,43 +17,57 @@ import (
 )
 
 type FlowInstanceActivationRequest struct {
-	Context        events.DeliveryContext
-	ContractBundle semanticview.Source
-	Instance       runtimeflowidentity.Instance
-	InitialState   string
-	Config         map[string]any
-	Metadata       map[string]any
-	TriggerEvent   events.Event
-	OccurredAt     time.Time
+	Context                       events.DeliveryContext
+	ContractBundle                semanticview.Source
+	Instance                      runtimeflowidentity.Instance
+	InitialState                  string
+	Config                        map[string]any
+	Metadata                      map[string]any
+	TriggerEvent                  events.Event
+	OccurredAt                    time.Time
+	StandingGenerationReplacement bool
 }
 
 // FlowInstanceActivationPlan is the exact durable command derived from one
 // admitted activation request. It contains semantic facts only: selected-store
 // adapters own persistence and return post-commit evidence separately.
 type FlowInstanceActivationPlan struct {
-	Instance            WorkflowInstance
-	Identity            runtimeflowidentity.Instance
-	Readiness           DynamicFlowRuntimeReadinessPlan
-	ActivationVariables map[string]string
-	OccurredAt          time.Time
+	Instance                      WorkflowInstance
+	Identity                      runtimeflowidentity.Instance
+	Readiness                     DynamicFlowRuntimeReadinessPlan
+	Lifecycle                     WorkflowLifecycleMutationPlan
+	ActivationVariables           map[string]string
+	OccurredAt                    time.Time
+	StandingGenerationReplacement bool
 }
 
 // CommittedFlowInstanceActivation is exact selected-store evidence that the
 // planned activation is durable. Process-local topology and readiness may be
 // published only after this value is returned.
 type CommittedFlowInstanceActivation struct {
-	Plan    FlowInstanceActivationPlan
-	Created bool
+	Plan      FlowInstanceActivationPlan
+	Created   bool
+	Lifecycle CommittedWorkflowLifecycleMutation
 }
 
 func (a CommittedFlowInstanceActivation) Validate() error {
-	return a.Plan.Validate()
+	if err := a.Plan.Validate(); err != nil {
+		return err
+	}
+	if err := a.Lifecycle.Validate(); err != nil {
+		return fmt.Errorf("committed flow instance activation lifecycle: %w", err)
+	}
+	if !a.Created && !emptyCommittedWorkflowLifecycleMutation(a.Lifecycle) {
+		return fmt.Errorf("replayed flow instance activation cannot carry new lifecycle evidence")
+	}
+	return nil
 }
 
 // FlowInstanceActivationRecord is the exact immutable persistence projection
 // for one planned activation. Runtime derives semantic facts; selected-store
 // adapters decide only how those facts are represented by their backend.
 type FlowInstanceActivationRecord struct {
+	State                  WorkflowEngineStateRecord
 	RunID                  string
 	Route                  runtimeflowidentity.Route
 	EntityID               string
@@ -75,9 +89,18 @@ type FlowInstanceActivationRecord struct {
 }
 
 func (r FlowInstanceActivationRecord) Validate() error {
+	if err := r.State.Validate(); err != nil {
+		return fmt.Errorf("flow instance activation state: %w", err)
+	}
+	if !r.State.Create {
+		return fmt.Errorf("flow instance activation requires a creating state record")
+	}
 	r.Route = runtimeflowidentity.StoredRoute(r.Route.ScopeKey, r.Route.InstanceID, r.Route.InstancePath)
 	if strings.TrimSpace(r.RunID) == "" || !r.Route.Valid() || strings.TrimSpace(r.EntityID) == "" {
 		return fmt.Errorf("flow instance activation record requires exact run, route, and entity identity")
+	}
+	if r.State.RunID != r.RunID || r.State.Route != r.Route || r.State.EntityID != r.EntityID {
+		return fmt.Errorf("flow instance activation state identity disagrees with activation record")
 	}
 	if strings.TrimSpace(r.WorkflowName) == "" || strings.TrimSpace(r.WorkflowVersion) == "" || strings.TrimSpace(r.CurrentState) == "" {
 		return fmt.Errorf("flow instance activation record requires exact workflow and initial state")
@@ -156,7 +179,12 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
+	state, err := workflowEngineStateRecord(normalized.Readiness.RunID, normalized.Identity.Route(), instance, "", 0, true, normalized.OccurredAt)
+	if err != nil {
+		return FlowInstanceActivationRecord{}, err
+	}
 	record := FlowInstanceActivationRecord{
+		State: state,
 		RunID: normalized.Readiness.RunID, Route: normalized.Identity.Route(), EntityID: identity.RowID(),
 		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion, Mode: workflowInstanceMode(instance),
 		CurrentState: instance.CurrentState, EntityType: projection.Control.EntityType, Slug: projection.Control.Slug, Name: projection.Control.Name,
@@ -201,6 +229,12 @@ func (p FlowInstanceActivationPlan) Validate() error {
 	if p.OccurredAt.IsZero() {
 		return fmt.Errorf("flow instance activation plan requires exact occurrence time")
 	}
+	if err := p.Lifecycle.Validate(p.Readiness.RunID, p.Identity.Route(), p.Identity.EntityID); err != nil {
+		return fmt.Errorf("flow instance activation lifecycle: %w", err)
+	}
+	if p.Lifecycle.RequestCompletionCandidate {
+		return fmt.Errorf("flow instance activation cannot request run completion")
+	}
 	return nil
 }
 
@@ -225,16 +259,16 @@ type FlowInstanceActivationPlanner interface {
 // evidence. It owns process-local topology installation and readiness retry;
 // persistence remains entirely inside the selected-store operation.
 type CommittedFlowInstanceActivationFinalizer interface {
-	FinalizeCommittedFlowInstanceActivation(context.Context, FlowInstanceActivationPlan) error
+	FinalizeCommittedFlowInstanceActivation(context.Context, CommittedFlowInstanceActivation) error
 }
 
-type CommittedFlowInstanceActivationFinalizerFunc func(context.Context, FlowInstanceActivationPlan) error
+type CommittedFlowInstanceActivationFinalizerFunc func(context.Context, CommittedFlowInstanceActivation) error
 
-func (fn CommittedFlowInstanceActivationFinalizerFunc) FinalizeCommittedFlowInstanceActivation(ctx context.Context, plan FlowInstanceActivationPlan) error {
+func (fn CommittedFlowInstanceActivationFinalizerFunc) FinalizeCommittedFlowInstanceActivation(ctx context.Context, committed CommittedFlowInstanceActivation) error {
 	if fn == nil {
 		return fmt.Errorf("committed flow instance activation finalizer is required")
 	}
-	return fn(ctx, plan)
+	return fn(ctx, committed)
 }
 
 type FlowInstanceActivationPlannerFunc func(context.Context, FlowInstanceActivationRequest) (FlowInstanceActivationPlan, error)

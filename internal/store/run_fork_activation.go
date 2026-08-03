@@ -10,7 +10,6 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
@@ -48,6 +47,11 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req runfork.RunFork
 	if err := s.requireCurrentSchema(); err != nil {
 		return runfork.RunForkActivation{}, err
 	}
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return runfork.RunForkActivation{}, err
+	}
+	defer handoff.rollback()
 
 	tx, err := s.backend.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
@@ -63,16 +67,6 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req runfork.RunFork
 	if err != nil {
 		return runfork.RunForkActivation{}, err
 	}
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 2)
-	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 2)
-	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
-	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollbackActions)
-	defer func() {
-		if !committed {
-			runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
-		}
-	}()
-
 	lineage, err := loadRunForkActivationLineage(ctx, tx, forkRunID)
 	if err != nil {
 		return runfork.RunForkActivation{}, err
@@ -154,14 +148,16 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req runfork.RunFork
 			return result, err
 		}
 	}
-	if err := s.applyRunForkSourceFreeze(ctx, tx, story, lineage, now, req.ConfirmSourceFreeze); err != nil {
+	if err := s.applyRunForkSourceFreeze(ctx, tx, story, lineage, now, req.ConfirmSourceFreeze, handoff); err != nil {
 		return result, err
 	}
 	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story); err != nil {
 		return result, fmt.Errorf("commit fork activation: %w", err)
 	}
 	committed = true
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	if err := handoff.commit(); err != nil {
+		return result, err
+	}
 	result.ForkRunStatus = runfork.RunForkActivatedStatus
 	result.SourceRunStatus = runfork.RunForkSourceFrozenStatus
 	result.Activated = true

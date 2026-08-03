@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -197,7 +197,7 @@ func (s *managerDeliveryTestStore) seedAgentDeliveries(t *testing.T, agentID str
 		if _, err := uuid.Parse(evt.ID()); err != nil {
 			t.Fatalf("manager delivery fixture event id %q is not durable: %v", evt.ID(), err)
 		}
-		if err := eventfixture.Insert(context.Background(), s.db, runtimeauthoractivity.DialectSQLite, evt); err != nil {
+		if err := eventfixture.Insert(context.Background(), s.db, authoractivityfixture.DialectSQLite, evt); err != nil {
 			t.Fatalf("seed manager delivery event %s: %v", evt.ID(), err)
 		}
 		tx, err := s.db.BeginTx(context.Background(), nil)
@@ -240,7 +240,7 @@ func (s *managerDeliveryTestStore) ensureDelivery(
 	if _, err := uuid.Parse(runID); err != nil {
 		runID = uuid.NewSHA1(uuid.NameSpaceOID, []byte("manager-delivery-test-run:"+evt.ID())).String()
 	}
-	if err := eventfixture.Insert(context.Background(), s.db, runtimeauthoractivity.DialectSQLite, evt); err != nil {
+	if err := eventfixture.Insert(context.Background(), s.db, authoractivityfixture.DialectSQLite, evt); err != nil {
 		return fmt.Errorf("seed manager delivery event %s: %w", evt.ID(), err)
 	}
 	tx, err := s.db.BeginTx(context.Background(), nil)
@@ -268,7 +268,7 @@ func (s *managerDeliveryTestStore) mutate(ctx context.Context, fn func(context.C
 	if err != nil {
 		return err
 	}
-	story, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	story, err := authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -277,7 +277,7 @@ func (s *managerDeliveryTestStore) mutate(ctx context.Context, fn func(context.C
 		_ = tx.Rollback()
 		return err
 	}
-	if err := runtimeauthoractivity.Finalize(story); err != nil {
+	if err := authoractivityfixture.Finalize(story); err != nil {
 		_ = tx.Rollback()
 		return err
 	}

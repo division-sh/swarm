@@ -10,8 +10,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/testutil"
+	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
@@ -158,7 +158,7 @@ func TestPostgresStoreFlowInstanceRoutes(t *testing.T) {
 	}
 }
 
-func TestPostgresStoreUpsertFlowInstanceRouteUsesPipelineTransaction(t *testing.T) {
+func TestPostgresStoreUpsertFlowInstanceRouteOwnsNamedTransaction(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
@@ -171,19 +171,19 @@ func TestPostgresStoreUpsertFlowInstanceRouteUsesPipelineTransaction(t *testing.
 		SubscriberID:   "reviewer-inst-1",
 		SourceFlow:     "review",
 	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES ($1, 'review', 'template', '{}'::jsonb, 'active', NOW())
+	`, route.Identity.InstancePath); err != nil {
+		t.Fatalf("seed flow_instances: %v", err)
+	}
+	ctx = seedFlowRouteTestAuthority(t, ctx, db, true, route.Identity.InstancePath)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES ($1, 'review', 'template', '{}'::jsonb, 'active', NOW())
-	`, route.Identity.InstancePath); err != nil {
-		t.Fatalf("seed flow_instances in tx: %v", err)
-	}
-	ctx = seedFlowRouteTestAuthority(t, ctx, tx, true, route.Identity.InstancePath)
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
 	if err := pg.UpsertFlowInstanceRoute(txctx, route); err != nil {
 		t.Fatalf("UpsertFlowInstanceRoute in tx: %v", err)
 	}
@@ -212,8 +212,8 @@ func TestPostgresStoreUpsertFlowInstanceRouteUsesPipelineTransaction(t *testing.
 	`, route.Identity.InstancePath).Scan(&leaked); err != nil {
 		t.Fatalf("count routing_rules after rollback: %v", err)
 	}
-	if leaked != 0 {
-		t.Fatalf("routing_rules leaked after rollback = %d, want 0", leaked)
+	if leaked != 1 {
+		t.Fatalf("named-operation routing rules after unrelated rollback = %d, want 1", leaked)
 	}
 }
 
@@ -258,7 +258,7 @@ func TestPostgresStoreReplaceFlowInstanceRouteRecordsIsExactAndTransactional(t *
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
 	if err := pg.ReplaceFlowInstanceRouteRecords(txctx, identity, nil); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("ReplaceFlowInstanceRouteRecords rollback mutation: %v", err)
@@ -267,12 +267,12 @@ func TestPostgresStoreReplaceFlowInstanceRouteRecordsIsExactAndTransactional(t *
 		t.Fatalf("Rollback: %v", err)
 	}
 	got, err = pg.ListFlowInstanceRouteRecords(ctx, identity)
-	if err != nil || len(got) != 1 || got[0].SubscriberID != "reviewer" {
-		t.Fatalf("route set after rollback: routes=%#v err=%v", got, err)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("named-operation route set after unrelated rollback: routes=%#v err=%v", got, err)
 	}
 }
 
-func TestSQLiteRuntimeStoreUpsertFlowInstanceRouteUsesPipelineTransaction(t *testing.T) {
+func TestSQLiteRuntimeStoreUpsertFlowInstanceRouteOwnsNamedTransaction(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	route := runtimebus.FlowInstanceRouteRecord{
@@ -282,19 +282,19 @@ func TestSQLiteRuntimeStoreUpsertFlowInstanceRouteUsesPipelineTransaction(t *tes
 		SubscriberID:   "reviewer-inst-1",
 		SourceFlow:     "review",
 	}
+	if _, err := store.backend.db.ExecContext(ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES (?, 'review', 'template', '{}', 'active', ?)
+	`, route.Identity.InstancePath, time.Now().UTC()); err != nil {
+		t.Fatalf("seed sqlite flow_instances: %v", err)
+	}
+	ctx = seedFlowRouteTestAuthority(t, ctx, store.backend.db, false, route.Identity.InstancePath)
 	tx, err := store.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES (?, 'review', 'template', '{}', 'active', ?)
-	`, route.Identity.InstancePath, time.Now().UTC()); err != nil {
-		t.Fatalf("seed sqlite flow_instances in tx: %v", err)
-	}
-	ctx = seedFlowRouteTestAuthority(t, ctx, tx, false, route.Identity.InstancePath)
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
 	if err := store.UpsertFlowInstanceRoute(txctx, route); err != nil {
 		t.Fatalf("UpsertFlowInstanceRoute in sqlite tx: %v", err)
 	}
@@ -318,12 +318,12 @@ func TestSQLiteRuntimeStoreUpsertFlowInstanceRouteUsesPipelineTransaction(t *tes
 	`, route.Identity.InstancePath).Scan(&leaked); err != nil {
 		t.Fatalf("count sqlite routing_rules after rollback: %v", err)
 	}
-	if leaked != 0 {
-		t.Fatalf("sqlite routing_rules leaked after rollback = %d, want 0", leaked)
+	if leaked != 1 {
+		t.Fatalf("sqlite named-operation routing rules after unrelated rollback = %d, want 1", leaked)
 	}
 }
 
-func TestSQLiteRuntimeStoreReplaceFlowInstanceRouteRecordsIsExactAndTransactional(t *testing.T) {
+func TestSQLiteRuntimeStoreReplaceFlowInstanceRouteRecordsOwnsNamedTransaction(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	identity := runtimeflowidentity.DeriveRoute("review", "inst-exact")
@@ -362,7 +362,7 @@ func TestSQLiteRuntimeStoreReplaceFlowInstanceRouteRecordsIsExactAndTransactiona
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
 	if err := store.ReplaceFlowInstanceRouteRecords(txctx, identity, nil); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("ReplaceFlowInstanceRouteRecords rollback mutation: %v", err)
@@ -371,8 +371,8 @@ func TestSQLiteRuntimeStoreReplaceFlowInstanceRouteRecordsIsExactAndTransactiona
 		t.Fatalf("Rollback: %v", err)
 	}
 	got, err = store.ListFlowInstanceRouteRecords(ctx, identity)
-	if err != nil || len(got) != 1 || got[0].SubscriberID != "reviewer" {
-		t.Fatalf("route set after rollback: routes=%#v err=%v", got, err)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("named-operation route set after unrelated rollback: routes=%#v err=%v", got, err)
 	}
 }
 
@@ -524,7 +524,7 @@ func assertFlowRouteTopologySubscribers(
 	}
 }
 
-func TestPostgresStoreDeleteFlowInstanceRouteUsesPipelineTransaction(t *testing.T) {
+func TestPostgresStoreDeleteFlowInstanceRouteOwnsNamedTransaction(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
@@ -552,7 +552,7 @@ func TestPostgresStoreDeleteFlowInstanceRouteUsesPipelineTransaction(t *testing.
 		t.Fatalf("BeginTx: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
 	if err := pg.DeleteFlowInstanceRoute(txctx, route.Identity); err != nil {
 		t.Fatalf("DeleteFlowInstanceRoute in tx: %v", err)
 	}
@@ -578,12 +578,12 @@ func TestPostgresStoreDeleteFlowInstanceRouteUsesPipelineTransaction(t *testing.
 	`, route.Identity.InstancePath).Scan(&status); err != nil {
 		t.Fatalf("query routing_rules after rollback: %v", err)
 	}
-	if strings.TrimSpace(status) != "active" {
-		t.Fatalf("routing_rules status after rollback = %q, want active", status)
+	if strings.TrimSpace(status) != "inactive" {
+		t.Fatalf("named-operation routing_rules status after unrelated rollback = %q, want inactive", status)
 	}
 }
 
-func TestPostgresStoreRollbackFlowInstanceRouteUsesPipelineTransaction(t *testing.T) {
+func TestPostgresStoreRollbackFlowInstanceRouteOwnsNamedTransaction(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
@@ -611,7 +611,7 @@ func TestPostgresStoreRollbackFlowInstanceRouteUsesPipelineTransaction(t *testin
 		t.Fatalf("BeginTx: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
 	if err := pg.RollbackFlowInstanceRoute(txctx, route.Identity); err != nil {
 		t.Fatalf("RollbackFlowInstanceRoute in tx: %v", err)
 	}
@@ -637,8 +637,8 @@ func TestPostgresStoreRollbackFlowInstanceRouteUsesPipelineTransaction(t *testin
 	`, route.Identity.InstancePath).Scan(&status); err != nil {
 		t.Fatalf("query routing_rules after rollback: %v", err)
 	}
-	if strings.TrimSpace(status) != "active" {
-		t.Fatalf("routing_rules status after rollback = %q, want active", status)
+	if strings.TrimSpace(status) != "inactive" {
+		t.Fatalf("named-operation routing_rules status after unrelated rollback = %q, want inactive", status)
 	}
 }
 
@@ -925,7 +925,7 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsAllowsUnscopedEmptyCensus
 	}
 }
 
-func TestPostgresStoreListActiveFlowInstanceDescriptorsReadsPipelineTransaction(t *testing.T) {
+func TestPostgresStoreListActiveFlowInstanceDescriptorsDoesNotReadAmbientTransaction(t *testing.T) {
 	const runID = "11111111-1111-4111-8111-111111111111"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	_, db, _ := testutil.StartPostgres(t)
@@ -957,11 +957,11 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsReadsPipelineTransaction(
 		t.Fatalf("seed entity state in tx: %v", err)
 	}
 
-	descriptors, err := pg.ListActiveFlowInstanceDescriptors(runtimepipeline.WithPipelineSQLTxContext(ctx, tx))
+	descriptors, err := pg.ListActiveFlowInstanceDescriptors(runtimepipelinefixture.WithSQLTx(ctx, tx))
 	if err != nil {
 		t.Fatalf("ListActiveFlowInstanceDescriptors: %v", err)
 	}
-	if len(descriptors) != 1 || descriptors[0].FlowInstance != "component-scaffold/uncommitted" {
-		t.Fatalf("descriptors = %#v, want uncommitted tx flow instance", descriptors)
+	if len(descriptors) != 0 {
+		t.Fatalf("descriptors = %#v, want no ambient uncommitted rows", descriptors)
 	}
 }

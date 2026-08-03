@@ -304,7 +304,7 @@ func (eb *EventBus) finalizeCommittedFlowInstanceActivations(
 		return errors.New("committed flow activation finalizer is unavailable")
 	}
 	for index, activation := range activations {
-		if err := finalizer.FinalizeCommittedFlowInstanceActivation(ctx, activation.Plan); err != nil {
+		if err := finalizer.FinalizeCommittedFlowInstanceActivation(ctx, activation); err != nil {
 			return fmt.Errorf("finalize committed flow activation %d for %s: %w", index, activation.Plan.Identity.Route().InstancePath, err)
 		}
 	}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -171,7 +172,12 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	entityID, triggerCtx.Event = resolvedEntityID, resolvedEvent
 	if !handler.CreateEntity && entityID != "" && originalStateEntityID != "" && originalStateEntityID != entityID {
-		stateRoute, err := workflowInstanceRouteForExecution(source, flowID, firstNonEmptyString(asString(triggerCtx.State.Metadata["flow_path"]), triggerCtx.Event.FlowInstance()))
+		stateRoute, err := canonicalHandlerRoute(
+			source,
+			flowID,
+			firstNonEmptyString(asString(triggerCtx.State.Metadata["flow_path"]), triggerCtx.Event.FlowInstance()),
+			triggerCtx.Event,
+		)
 		if err != nil {
 			return contractHandlerExecutionResult{}, err
 		}
@@ -239,7 +245,12 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
-	stateRoute, err := workflowInstanceRouteForExecution(source, flowID, firstNonEmptyString(asString(triggerCtx.State.Metadata["flow_path"]), triggerCtx.Event.FlowInstance()))
+	stateRoute, err := canonicalHandlerRoute(
+		source,
+		flowID,
+		firstNonEmptyString(asString(triggerCtx.State.Metadata["flow_path"]), triggerCtx.Event.FlowInstance()),
+		triggerCtx.Event,
+	)
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
@@ -334,6 +345,20 @@ func resolveHandlerEntityIDForFlow(
 		sourceEntityID := strings.TrimSpace(firstNonEmptyString(entityID, evt.EntityID()))
 		instanceID := canonicalHandlerInstanceID(flowID, evt)
 		instance := deriveFlowInstanceIdentity(source, flowID, instanceID)
+		if source != nil && strings.TrimSpace(flowID) == strings.TrimSpace(source.WorkflowName()) {
+			route, err := canonicalHandlerRoute(source, flowID, "", evt)
+			if err != nil {
+				return "", evt, err
+			}
+			instance = FlowInstanceIdentity{Instance: runtimeflowidentity.Instance{
+				TemplateID:    strings.TrimSpace(flowID),
+				ScopeKey:      route.ScopeKey,
+				InstanceID:    route.InstanceID,
+				InstancePath:  route.InstancePath,
+				EntityID:      runtimeflowidentity.EntityID(route.InstancePath),
+				HasStoredPath: true,
+			}}
+		}
 		if !instance.Route().Valid() {
 			return "", evt, fmt.Errorf("create_entity requires an exact workflow instance route")
 		}

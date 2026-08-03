@@ -14,6 +14,7 @@ import (
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
+	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/mutationlog"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -146,7 +147,7 @@ func (s *PostgresStore) SaveEntityField(ctx context.Context, update runtimetools
 	`, entityID, pathArray, string(valueJSON), runID).Scan(&revision); err != nil {
 			return fmt.Errorf("update postgres entity field: %w", err)
 		}
-		if err := runtimemutationlog.InsertEntityStateDiffWithStory(txctx, tx, postgresActiveRunSourceOwner(s, tx), story, entityID, runtimemutationlog.EntityStateProjection{
+		if err := privatemutationlog.InsertEntityStateDiffWithStory(txctx, tx, postgresActiveRunSourceOwner(s, tx), story, entityID, runtimemutationlog.EntityStateProjection{
 			Fields: map[string]any{update.FieldPath: toolNullableJSONBytes(oldValue)},
 		}, runtimemutationlog.EntityStateProjection{
 			Fields: map[string]any{update.FieldPath: json.RawMessage(valueJSON)},
@@ -254,7 +255,7 @@ func (s *PostgresStore) CreateEntity(ctx context.Context, rec runtimetools.Entit
 	`, rec.RunID, rec.EntityID, rec.FlowInstance, rec.EntityType, rec.Name, rec.CurrentState, string(rec.FieldsJSON), rec.CreatedAt); err != nil {
 			return fmt.Errorf("insert postgres entity: %w", err)
 		}
-		if err := runtimemutationlog.InsertEntityStateDiffWithStory(txctx, tx, postgresActiveRunSourceOwner(s, tx), story, rec.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+		if err := privatemutationlog.InsertEntityStateDiffWithStory(txctx, tx, postgresActiveRunSourceOwner(s, tx), story, rec.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
 			CurrentState: rec.CurrentState,
 			Fields:       fields,
 		}, mutationWriter(rec.Writer)); err != nil {

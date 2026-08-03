@@ -244,17 +244,6 @@ func (s *SQLiteRuntimeStore) appendAdmittedEventTxOutcome(ctx context.Context, t
 	if err := recordPersistedEventAuthorActivity(ctx, story, s, admitted, wantIdentity.ProducedBy, string(wantIdentity.ProducedByType)); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	if admitted.RunDisposition() == events.AdmittedRunCreateAuthorized {
-		rec, found, err := sqliteLoadStandaloneRuntimePlatformRunRecord(ctx, tx, wantIdentity.EventID)
-		if err != nil {
-			return runtimebus.EventAppendOutcomeUnknown, err
-		}
-		if found && isStandaloneRuntimePlatformRunRecord(rec) {
-			if _, err := s.requestCompletionCandidateTx(ctx, tx, wantIdentity.RunID, nil); err != nil {
-				return runtimebus.EventAppendOutcomeUnknown, err
-			}
-		}
-	}
 	return runtimebus.EventAppendInserted, nil
 }
 
@@ -549,6 +538,11 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 	if req.ControlledBy = strings.TrimSpace(req.ControlledBy); req.ControlledBy == "" {
 		req.ControlledBy = "api.v1"
 	}
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return runtimeruncontrol.State{}, err
+	}
+	defer handoff.rollback()
 	var state runtimeruncontrol.State
 	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite run control transition", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
@@ -562,9 +556,9 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 		}
 		switch action {
 		case "pause":
-			state, err = s.sqlitePauseRunControl(txctx, tx, state, req)
+			state, err = s.sqlitePauseRunControl(txctx, tx, state, req, handoff)
 		case "continue":
-			state, err = s.sqliteContinueRunControl(txctx, tx, state, req)
+			state, err = s.sqliteContinueRunControl(txctx, tx, state, req, handoff)
 		case "stop":
 			if err := rejectSQLiteStandingRunStopTx(txctx, tx, runID); err != nil {
 				return err
@@ -597,7 +591,7 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 	}); err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	return state, nil
+	return state, handoff.commit()
 }
 
 func rejectSQLiteStandingRunStopTx(ctx context.Context, tx *sql.Tx, runID string) error {
@@ -640,10 +634,6 @@ func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req APIIdem
 	if req.TTL <= 0 {
 		req.TTL = 24 * time.Hour
 	}
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return withSQLiteAPIIdempotencyTx(ctx, tx, req, execute)
-	}
-
 	// SQLite is local-dev only here: serialize idempotent callbacks in-process
 	// per database file, but never keep a SQLite write transaction open while
 	// the callback writes through the selected runtime store.

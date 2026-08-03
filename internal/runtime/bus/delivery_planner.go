@@ -1258,7 +1258,10 @@ func routeMatchesInternalSubscriber(route events.RouteIdentity, subscriber Subsc
 	if path == "" {
 		return exactRootTarget(route) || entityOnlyRootTarget(route)
 	}
-	return route.FlowInstance != "" && route.FlowInstance == path
+	if route.FlowInstance == "" {
+		return false
+	}
+	return route.FlowInstance == path || runtimeflowidentity.SemanticScopeFromInstancePath(route.FlowInstance) == path
 }
 
 func exactRootTarget(route events.RouteIdentity) bool {

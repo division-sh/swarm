@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -24,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -248,15 +248,19 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 		t.Fatalf("begin delivery start: %v", err)
 	}
 	defer func() { _ = deliveryTx.Rollback() }()
-	deliveryTxCtx, err := runtimeauthoractivity.Begin(ctx, deliveryTx, runtimeauthoractivity.DialectPostgres)
+	deliveryTxCtx, err := authoractivityfixture.Begin(ctx, deliveryTx, authoractivityfixture.DialectPostgres)
 	if err != nil {
 		t.Fatalf("begin delivery author activity: %v", err)
+	}
+	story, ok := authoractivityfixture.Mutation(deliveryTxCtx)
+	if !ok {
+		t.Fatal("delivery author activity owner is unavailable")
 	}
 	snapshot, err := postgresDeliveryAdapter.SnapshotExact(deliveryTxCtx, deliveryTx, seedEvent, route)
 	if err != nil {
 		t.Fatalf("load delivery authority: %v", err)
 	}
-	result, err := postgresDeliveryAdapter.ClaimExactResult(deliveryTxCtx, deliveryTx, nil, snapshot.Authority, seedEvent, route, runtimedelivery.DefaultLeaseTTL)
+	result, err := postgresDeliveryAdapter.ClaimExactResult(deliveryTxCtx, deliveryTx, story, snapshot.Authority, seedEvent, route, runtimedelivery.DefaultLeaseTTL)
 	if err != nil {
 		t.Fatalf("stage delivery start: %v", err)
 	}

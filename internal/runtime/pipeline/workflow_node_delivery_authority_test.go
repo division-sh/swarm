@@ -11,13 +11,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -276,22 +276,22 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			runID := runtimecorrelation.RunIDFromContext(ctx)
 			evt := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), events.EventType("source.evt"), "src", "", []byte(`{}`), 0,
-				runID, "", handlerTestWorkflowEnvelope("delivery-retry", "delivery-retry", entityID), time.Now().UTC(),
+				runID, "", handlerTestWorkflowEnvelope("delivery-retry", runID, entityID), time.Now().UTC(),
 			)
-			dialect := runtimeauthoractivity.DialectPostgres
+			dialect := authoractivityfixture.DialectPostgres
 			if workflowStore.isSQLite() {
-				dialect = runtimeauthoractivity.DialectSQLite
+				dialect = authoractivityfixture.DialectSQLite
 			}
 			seedPipelineEventRecordForDialect(t, ctx, workflowStore.testDB(), dialect, evt)
 			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID: entityID, StorageRef: entityID, WorkflowName: "delivery-retry", WorkflowVersion: "v-test", CurrentState: "queued",
+				InstanceID: runID, StorageRef: runID, WorkflowName: "delivery-retry", WorkflowVersion: "v-test", CurrentState: "queued",
 				EnteredStageAt: evt.CreatedAt(), CreatedAt: evt.CreatedAt(),
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 			route := events.DeliveryRoute{
 				Recipient: events.MustNodeDeliveryRecipient("node-a"), Target: events.RouteIdentity{
-					FlowID: "delivery-retry", FlowInstance: "delivery-retry", EntityID: entityID,
+					FlowID: "delivery-retry", FlowInstance: runID, EntityID: entityID,
 				},
 			}
 			if err := owner.commitInitial(ctx, evt, route); err != nil {

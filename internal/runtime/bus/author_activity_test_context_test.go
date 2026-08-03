@@ -129,7 +129,8 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(_ contex
 	return plan, nil
 }
 
-func (o *testFlowInstanceActivationOwner) FinalizeCommittedFlowInstanceActivation(ctx context.Context, plan runtimepipeline.FlowInstanceActivationPlan) error {
+func (o *testFlowInstanceActivationOwner) FinalizeCommittedFlowInstanceActivation(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
+	plan := committed.Plan
 	o.mu.Lock()
 	req, ok := o.pending[plan.Identity.Route()]
 	if ok {

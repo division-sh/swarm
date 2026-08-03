@@ -913,7 +913,7 @@ func (l *WorkflowTimerLifecycle) fireWakeup(ctx context.Context, wakeup Workflow
 	})
 	if err != nil {
 		err = errors.Join(err, l.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
-		recoveryCtx := withoutSQLTxContext(ctx)
+		recoveryCtx := ctx
 		if registerErr := l.reconcileWakeupImmediately(recoveryCtx, occurrence.Activation); registerErr != nil {
 			l.logFailure(recoveryCtx, "workflow_timer_register_failed", occurrence.Activation, registerErr)
 			l.startWakeupRecovery(occurrence.Activation)

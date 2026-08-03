@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/store/authoractivityadapter"
 )
 
 type Dialect string
@@ -177,7 +178,7 @@ func (m *Mutation) loadByDedup(ctx context.Context, key string) (runtimeauthorac
 	if m.dialect == DialectSQLite {
 		query = occurrenceSelect + ` WHERE dedup_key = ?`
 	}
-	occurrence, err := runtimeauthoractivity.ScanOccurrence(m.tx.QueryRowContext(ctx, query, key))
+	occurrence, err := authoractivityadapter.ScanOccurrence(m.tx.QueryRowContext(ctx, query, key))
 	if err == sql.ErrNoRows {
 		return runtimeauthoractivity.Occurrence{}, false, nil
 	}

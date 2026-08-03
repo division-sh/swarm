@@ -174,12 +174,8 @@ func (s *PostgresStore) CommitSelectedForkEvent(ctx context.Context, req runtime
 		return runtimebus.CommittedSelectedForkEvent{}, err
 	}
 	defer state.operationMu.Unlock()
-	claimCtx, err := state.postgresLease.BindContext(ctx)
-	if err != nil {
-		return runtimebus.CommittedSelectedForkEvent{}, runtimepipelineobligation.ErrStaleClaim
-	}
-	return commitSelectedForkEvent(claimCtx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, fn)
+	return commitSelectedForkEvent(ctx, s, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		return runPostgresLeaseAuthorActivityMutation(ctx, state.postgresLease, fn)
 	}, insertPostgresSelectedForkExecutionLineageTx, req)
 }
 
@@ -219,11 +215,14 @@ func commitPublication(
 		}
 	}
 	_, postgres := store.(*PostgresStore)
-	result := runtimebus.CommittedPublication{}
-	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		var err error
-		result, err = commitPublicationTx(txctx, tx, story, store, postgres, command, publicationCommitOptions{})
-		return err
+	result, err := withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error) {
+		result := runtimebus.CommittedPublication{}
+		err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			var err error
+			result, err = commitPublicationTx(txctx, tx, story, store, postgres, command, handoff)
+			return err
+		})
+		return result, err
 	})
 	if err != nil {
 		return runtimebus.CommittedPublication{}, err
@@ -241,7 +240,7 @@ func commitPublicationTx(
 	store eventCommitTxStore,
 	postgres bool,
 	command runtimebus.PublicationCommand,
-	options publicationCommitOptions,
+	handoff *runLifecycleCandidateHandoffReservation,
 ) (runtimebus.CommittedPublication, error) {
 	if tx == nil || story == nil {
 		return runtimebus.CommittedPublication{}, fmt.Errorf("publication commit requires private transaction and story owners")
@@ -283,7 +282,7 @@ func commitPublicationTx(
 		if command.DynamicFlowCreation != nil && !creationAlreadyCommitted {
 			return runtimebus.CommittedPublication{}, fmt.Errorf("dynamic flow creation event exists before readiness completion")
 		}
-		result.Activations, err = commitFlowInstanceActivations(ctx, tx, story, postgres, command.Activations, options)
+		result.Activations, err = commitFlowInstanceActivations(ctx, tx, story, store, postgres, command.Activations)
 		if err != nil {
 			return runtimebus.CommittedPublication{}, err
 		}
@@ -296,10 +295,37 @@ func commitPublicationTx(
 	if outcome != runtimebus.EventAppendInserted {
 		return runtimebus.CommittedPublication{}, fmt.Errorf("publication commit returned invalid append outcome")
 	}
+	if request.Event.RunDisposition() == events.AdmittedRunCreateAuthorized {
+		var standalone bool
+		switch selected := store.(type) {
+		case *PostgresStore:
+			record, found, loadErr := loadStandaloneRuntimePlatformRunRecord(ctx, tx, request.Event.Event().ID())
+			if loadErr != nil {
+				return runtimebus.CommittedPublication{}, loadErr
+			}
+			standalone = found && isStandaloneRuntimePlatformRunRecord(record)
+			if standalone {
+				if _, err := selected.requestCompletionCandidateTx(ctx, tx, request.Event.Event().RunID(), nil, handoff); err != nil {
+					return runtimebus.CommittedPublication{}, err
+				}
+			}
+		case *SQLiteRuntimeStore:
+			record, found, loadErr := sqliteLoadStandaloneRuntimePlatformRunRecord(ctx, tx, request.Event.Event().ID())
+			if loadErr != nil {
+				return runtimebus.CommittedPublication{}, loadErr
+			}
+			standalone = found && isStandaloneRuntimePlatformRunRecord(record)
+			if standalone {
+				if _, err := selected.requestCompletionCandidateTx(ctx, tx, request.Event.Event().RunID(), nil, handoff); err != nil {
+					return runtimebus.CommittedPublication{}, err
+				}
+			}
+		}
+	}
 	if command.DynamicFlowCreation != nil && creationAlreadyCommitted {
 		return runtimebus.CommittedPublication{}, fmt.Errorf("dynamic flow readiness is complete without its creation event")
 	}
-	result.Activations, err = commitFlowInstanceActivations(ctx, tx, story, postgres, command.Activations, options)
+	result.Activations, err = commitFlowInstanceActivations(ctx, tx, story, store, postgres, command.Activations)
 	if err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}

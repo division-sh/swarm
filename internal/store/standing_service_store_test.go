@@ -11,7 +11,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
@@ -21,6 +20,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/delivery"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -50,21 +50,21 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 				selected      workflowTestSelectedStore
 				deliveryStore runtimedelivery.Store
 				workflowStore *runtimepipeline.PipelineCoordinator
-				dialect       runtimeauthoractivity.Dialect
+				dialect       authoractivityfixture.Dialect
 				adapter       *deliveryadapter.Adapter
 			)
 			if backend == "sqlite" {
 				sqliteSelected := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				db, deliveryStore = sqliteSelected.backend.db, sqliteSelected
 				selected = sqliteSelected
-				dialect, adapter = runtimeauthoractivity.DialectSQLite, sqliteDeliveryAdapter
+				dialect, adapter = authoractivityfixture.DialectSQLite, sqliteDeliveryAdapter
 			} else {
 				_, opened, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				postgresSelected := admitTestPostgresStore(t, opened)
 				db, deliveryStore = opened, postgresSelected
 				selected = postgresSelected
-				dialect, adapter = runtimeauthoractivity.DialectPostgres, postgresDeliveryAdapter
+				dialect, adapter = authoractivityfixture.DialectPostgres, postgresDeliveryAdapter
 			}
 			if backend == "sqlite" {
 				workflowStore = newSQLiteWorkflowTestCoordinator(t, db, selected)

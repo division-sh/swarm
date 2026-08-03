@@ -805,6 +805,7 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryTargetFlowInstanceMatches(sou
 type FlowInstanceRouteOwner interface {
 	HasFlowInstanceRoute(runtimeflowidentity.Route) bool
 	RemoveFlowInstanceRouteContext(context.Context, runtimeflowidentity.Route) error
+	RetireCommittedFlowInstanceRoute(runtimeflowidentity.Route) error
 }
 
 func (pc *PipelineCoordinator) hasMaterializedFlowInstanceRoute(source semanticview.Source, flowID, instancePath string) bool {

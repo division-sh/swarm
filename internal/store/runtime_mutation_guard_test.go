@@ -300,8 +300,12 @@ func TestSelectedRuntimeConstructionUsesOpaqueWorkflowPersistence(t *testing.T) 
 			t.Fatalf("operator mailbox decision publish must consume typed event mutation API, found %s", forbidden)
 		}
 	}
-	if !strings.Contains(operatorMailboxText, "PublishInMutation") {
-		t.Fatal("operator mailbox decision publish must consume EventBus.PublishInMutation")
+	publishOperatorData, err := os.ReadFile(filepath.Join(root, "internal", "apiv1", "operator_event_publish.go"))
+	if err != nil {
+		t.Fatalf("read internal/apiv1/operator_event_publish.go: %v", err)
+	}
+	if !strings.Contains(string(publishOperatorData), "publisher.Publish(") {
+		t.Fatal("operator mailbox decision publish must consume the typed EventPublisher operation")
 	}
 
 	pipelineData, err := os.ReadFile(filepath.Join(root, "internal", "runtime", "pipeline", "workflow_instance_store.go"))
@@ -706,7 +710,7 @@ func classifyRuntimeWriterCallSite(site runtimeWriterCallSite) (runtimeWriterCla
 		case "RunRuntimeMutation", "RunRuntimeMutationContext", "runRuntimeMutation", "runAuthorActivityMutation", "runPrivateAuthorActivityMutation", "runDecisionCardMutation", "runEventTransaction", "RunEventPublication":
 			return classConsumesCanonical, "canonical runtime mutation/event transaction boundary", true
 		case "runInPipelineTransaction":
-			return classConsumesCanonical, "private workflow persistence transaction owner delegates SQLite writes to RunRuntimeMutationContext", true
+			return classConsumesCanonical, "private selected-store operation owns its complete transaction", true
 		case "PipelineSQLTxFromContext", "sqlTxFromContext":
 			return classActiveTxHelper, "active transaction context probe; not a writer by itself", true
 		}
@@ -913,6 +917,48 @@ func sqliteActiveTxHelper(site runtimeWriterCallSite) bool {
 
 func runtimeWriterRules() []runtimeWriterRule {
 	return []runtimeWriterRule{
+		{
+			name:           "dynamic flow readiness named mutations",
+			path:           rx(`^internal/store/dynamic_flow_readiness\.go$`),
+			function:       rx(`^(reconcileDynamicFlowRuntimeReadinessPlan|markDynamicFlowRuntimeTopologyReady)$`),
+			kinds:          kinds(primitiveRead, primitiveWrite),
+			classification: classConsumesCanonical,
+			reason:         "closed dynamic-flow readiness operations own the selected-store transaction and exact topology transition",
+		},
+		{
+			name:           "standing service named mutations",
+			path:           rx(`^internal/store/standing_service\.go$`),
+			function:       rx(`^(SuspendStandingService|ResumeStandingService|ResetStandingService|PublishStandingService)$`),
+			receiver:       rx(`^standingServiceAdapter$`),
+			kinds:          kinds(primitiveRead, primitiveWrite),
+			classification: classConsumesCanonical,
+			reason:         "closed standing-service operations own their complete selected-store transaction",
+		},
+		{
+			name:           "standing service private transaction helpers",
+			path:           rx(`^internal/store/standing_service\.go$`),
+			function:       rx(`.*Tx$`),
+			receiver:       rx(`^standingServiceAdapter$`),
+			kinds:          kinds(primitiveRead, primitiveWrite),
+			classification: classActiveTxHelper,
+			reason:         "private standing-service SQL helpers execute only through a named operation's transaction",
+		},
+		{
+			name:           "workflow initial materialization named mutation",
+			path:           rx(`^internal/store/workflow_initial_materialization_commit\.go$`),
+			function:       rx(`^commitWorkflowInitialMaterialization$`),
+			kinds:          kinds(primitiveRead, primitiveWrite),
+			classification: classConsumesCanonical,
+			reason:         "the closed workflow-initial-materialization operation owns its complete selected-store transaction",
+		},
+		{
+			name:           "private author activity test fixture",
+			path:           rx(`^internal/store/testutil/authoractivityfixture/fixture\.go$`),
+			function:       rx(`^Begin$`),
+			kinds:          kinds(primitiveBegin),
+			classification: classDifferentConcept,
+			reason:         "test-only fixture opens an isolated transaction to exercise the private adapter",
+		},
 		{
 			name:           "closed selected runtime named mutations",
 			path:           rx(`^internal/store/(agent_directive_operations|completion_settlement|runtime_external_effects|scenario_setup|sqlite_runtime_llm|tool_persistence)\.go$`),

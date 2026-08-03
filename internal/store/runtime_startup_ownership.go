@@ -33,14 +33,10 @@ func (s *PostgresStore) AcquireRuntimeStartupOwnership(ctx context.Context, req 
 	if err != nil {
 		return nil, errors.Join(err, lease.Release(ctx))
 	}
-	leaseCtx, err := lease.BindContext(ctx)
-	if err != nil {
-		return nil, errors.Join(err, lease.Release(ctx))
-	}
-	if err := s.RecordRuntimeStartupAuthorityTransition(leaseCtx, nil, authority); err != nil {
-		return nil, errors.Join(err, lease.Release(ctx))
-	}
 	ownedRecorder := postgresStartupOwnershipRecorder{store: s, lease: lease}
+	if err := ownedRecorder.RecordRuntimeStartupAuthorityTransition(ctx, nil, authority); err != nil {
+		return nil, errors.Join(err, lease.Release(ctx))
+	}
 	ownedLease, err := runtimestartupownership.NewLease(authority, ownedRecorder, lease.Release)
 	if err != nil {
 		return nil, errors.Join(err, lease.Release(ctx))
@@ -56,9 +52,23 @@ func (s *PostgresStore) RecordRuntimeStartupAuthorityTransition(ctx context.Cont
 		return err
 	}
 	return runPostgresSessionTransaction(ctx, s.backend.db, func(txctx context.Context, tx *sql.Tx) error {
+		return recordPostgresRuntimeStartupAuthorityTransitionTx(txctx, tx, previous, next...)
+	})
+}
+
+func recordPostgresRuntimeStartupAuthorityTransitionTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	previous *runtimestartupownership.Authority,
+	next ...runtimestartupownership.Authority,
+) error {
+	if err := runtimestartupownership.ValidateTransitionChain(previous, next...); err != nil {
+		return err
+	}
+	return func() error {
 		leaseID := next[0].LeaseAuthorityID
 		var persistedRaw []byte
-		headErr := tx.QueryRowContext(txctx, `
+		headErr := tx.QueryRowContext(ctx, `
 			SELECT snapshot FROM runtime_startup_authority_facts
 			WHERE lease_authority_id=$1::uuid
 			ORDER BY transition_ordinal DESC LIMIT 1 FOR UPDATE
@@ -71,7 +81,7 @@ func (s *PostgresStore) RecordRuntimeStartupAuthorityTransition(ctx context.Cont
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(txctx, `
+			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO runtime_startup_authority_facts (
 					fact_id,authority_id,lease_authority_id,transition_ordinal,generation,state_version,state,owner_id,boot_id,
 					bundle_hash,backend,handoff_id,snapshot,created_at
@@ -82,7 +92,7 @@ func (s *PostgresStore) RecordRuntimeStartupAuthorityTransition(ctx context.Cont
 			}
 		}
 		return nil
-	})
+	}()
 }
 
 type postgresStartupOwnershipRecorder struct {
@@ -98,11 +108,9 @@ func (r postgresStartupOwnershipRecorder) RecordRuntimeStartupAuthorityTransitio
 	if r.store == nil || r.lease == nil {
 		return errors.New("PostgreSQL startup ownership recorder is missing")
 	}
-	leaseCtx, err := r.lease.BindContext(ctx)
-	if err != nil {
-		return err
-	}
-	return r.store.RecordRuntimeStartupAuthorityTransition(leaseCtx, previous, next...)
+	return r.lease.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return recordPostgresRuntimeStartupAuthorityTransitionTx(txctx, tx, previous, next...)
+	})
 }
 
 func validatePersistedStartupAuthorityHead(raw []byte, queryErr error, previous *runtimestartupownership.Authority) error {

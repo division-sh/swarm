@@ -37,7 +37,7 @@ func commitProposedEffectRoute(
 
 	var result runtimepipeline.CommittedProposedEffectRoute
 	err = run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		committed, err := commitPublicationTx(txctx, tx, story, store, postgres, plan.PublicationCommand(), publicationCommitOptions{})
+		committed, err := commitPublicationTx(txctx, tx, story, store, postgres, plan.PublicationCommand(), handoff)
 		if err != nil {
 			return fmt.Errorf("commit proposed-effect route publication: %w", err)
 		}
@@ -86,7 +86,7 @@ func commitHumanTaskRoute(
 ) (runtimepipeline.CommittedHumanTaskRoute, error) {
 	var result runtimepipeline.CommittedHumanTaskRoute
 	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		committed, err := commitPublicationTx(txctx, tx, story, store, postgres, plan.PublicationCommand(), publicationCommitOptions{})
+		committed, err := commitPublicationTx(txctx, tx, story, store, postgres, plan.PublicationCommand(), nil)
 		if err != nil {
 			return fmt.Errorf("commit human-task route publication: %w", err)
 		}

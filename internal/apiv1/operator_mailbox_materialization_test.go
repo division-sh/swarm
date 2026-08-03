@@ -11,6 +11,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	storepkg "github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
@@ -38,7 +39,7 @@ func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
 	for i := 0; i < 2; i++ {
 		if err := sqliteStore.MaterializeMailboxWrite(txctx, runtimepipeline.MailboxWriteMaterialization{
 			ItemID:        itemID,

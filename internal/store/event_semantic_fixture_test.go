@@ -44,6 +44,14 @@ func commitSemanticEventFixture(ctx context.Context, store any, event events.Eve
 	return err
 }
 
+func commitSemanticPipelineProcessedEventFixture(ctx context.Context, store any, event events.Event) error {
+	disposition := runtimepipelineobligation.Acknowledged("pipeline_persisted")
+	_, err := commitSemanticEventFixtureOutcomeWithDisposition(
+		ctx, store, event, nil, runtimepipelineobligation.ScopeDirect, &disposition,
+	)
+	return err
+}
+
 func commitSemanticEventFixtureWithAgents(ctx context.Context, store any, event events.Event, agentIDs []string) error {
 	routes := make([]events.DeliveryRoute, 0, len(agentIDs))
 	for _, agentID := range agentIDs {
@@ -76,19 +84,7 @@ func commitSemanticParentFixture(ctx context.Context, store any, runID, parentEv
 		parentEventID, "test.fixture_parent", "fixture", "", []byte(`{}`), 0,
 		runID, events.EventEnvelope{}, createdAt,
 	)
-	if err := commitSemanticEventFixture(ctx, store, parent); err != nil {
-		return err
-	}
-	owner, err := pipelineObligationFixtureOwner(store)
-	if err != nil {
-		return err
-	}
-	work, err := owner.ClaimEvent(ctx, parentEventID, runtimepipelineobligation.PurposeRecovery)
-	if err != nil {
-		return err
-	}
-	_, err = owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted"))
-	return err
+	return commitSemanticPipelineProcessedEventFixture(ctx, store, parent)
 }
 
 func commitSemanticParentFixtureTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, runID, parentEventID string, createdAt time.Time) error {
@@ -300,11 +296,22 @@ func commitSemanticEventFixtureOutcome(
 	routes []events.DeliveryRoute,
 	scope runtimepipelineobligation.CommittedScope,
 ) (runtimebus.EventAppendOutcome, error) {
+	return commitSemanticEventFixtureOutcomeWithDisposition(ctx, store, event, routes, scope, nil)
+}
+
+func commitSemanticEventFixtureOutcomeWithDisposition(
+	ctx context.Context,
+	store any,
+	event events.Event,
+	routes []events.DeliveryRoute,
+	scope runtimepipelineobligation.CommittedScope,
+	disposition *runtimepipelineobligation.Disposition,
+) (runtimebus.EventAppendOutcome, error) {
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
-	return commitAdmittedSemanticEventFixtureOutcome(ctx, store, admitted, routes, scope)
+	return commitAdmittedSemanticEventFixtureOutcomeWithDisposition(ctx, store, admitted, routes, scope, disposition)
 }
 
 func commitAdmittedSemanticEventFixtureOutcome(
@@ -313,6 +320,17 @@ func commitAdmittedSemanticEventFixtureOutcome(
 	admitted events.AdmittedEvent,
 	routes []events.DeliveryRoute,
 	scope runtimepipelineobligation.CommittedScope,
+) (outcome runtimebus.EventAppendOutcome, err error) {
+	return commitAdmittedSemanticEventFixtureOutcomeWithDisposition(ctx, store, admitted, routes, scope, nil)
+}
+
+func commitAdmittedSemanticEventFixtureOutcomeWithDisposition(
+	ctx context.Context,
+	store any,
+	admitted events.AdmittedEvent,
+	routes []events.DeliveryRoute,
+	scope runtimepipelineobligation.CommittedScope,
+	disposition *runtimepipelineobligation.Disposition,
 ) (outcome runtimebus.EventAppendOutcome, err error) {
 	if admitted.Class() == events.EventAdmissionSelectedForkReplay {
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("selected-fork replay events require their closed named persistence operation")
@@ -327,6 +345,7 @@ func commitAdmittedSemanticEventFixtureOutcome(
 	}()
 	req := runtimebus.CommitPublishRequest{
 		Event: admitted, DeliveryRoutes: events.NormalizeDeliveryRoutes(routes), ReplayScope: scope, PipelineClaim: claim,
+		Disposition: disposition,
 	}
 	ctx, release, err := semanticEventFixtureContext(ctx, store, admitted.Event())
 	if err != nil {

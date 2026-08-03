@@ -1063,11 +1063,11 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			return runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow instance activation planner is required")
 		}
 		return managerRef.PrepareFlowInstanceActivation(ctx, req)
-	}), runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, plan runtimepipeline.FlowInstanceActivationPlan) error {
+	}), runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
 		if managerRef == nil {
 			return fmt.Errorf("flow instance activation finalizer is required")
 		}
-		return managerRef.FinalizeCommittedFlowInstanceActivation(ctx, plan)
+		return managerRef.FinalizeCommittedFlowInstanceActivation(ctx, committed)
 	}), opts.ProviderTriggerCatalog, opts.TestLifecycleProbe)
 	if err != nil {
 		return nil, fmt.Errorf("build event bus: %w", err)

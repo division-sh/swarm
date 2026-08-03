@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -34,6 +33,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
@@ -349,7 +349,7 @@ func assertParentTerminalizationFailure(t *testing.T, raw []byte, reason string)
 	}
 }
 
-func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testing.T) {
+func TestSQLiteRuntimeStoreUpsertAgentIgnoresAmbientPipelineTransaction(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), uuid.NewString())
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 
@@ -357,21 +357,8 @@ func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testi
 	if err != nil {
 		t.Fatalf("begin sqlite tx: %v", err)
 	}
-	committed := false
-	t.Cleanup(func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	})
-
 	now := time.Now().UTC()
-	storyctx, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
-	if err != nil {
-		t.Fatalf("begin SQLite pipeline transaction author activity: %v", err)
-	}
-	requireSQLiteRunFixtureTxForTest(t, storyctx, tx, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runtimecorrelation.RunIDFromContext(ctx), StartedAt: now})
-
-	txctx := runtimepipeline.WithPipelineSQLTxContext(storyctx, tx)
+	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
 	if err := store.UpsertAgent(txctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:            "agent-in-pipeline-tx",
@@ -387,15 +374,12 @@ func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testi
 		Status:    "active",
 		StartedAt: now,
 	}); err != nil {
-		t.Fatalf("UpsertAgent with active pipeline transaction: %v", err)
+		_ = tx.Rollback()
+		t.Fatalf("UpsertAgent with ambient pipeline transaction: %v", err)
 	}
-	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
-		t.Fatalf("finalize SQLite pipeline transaction author activity: %v", err)
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback ambient sqlite tx: %v", err)
 	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit sqlite tx: %v", err)
-	}
-	committed = true
 
 	agents, err := store.LoadAgents(ctx)
 	if err != nil {
@@ -1715,7 +1699,7 @@ func TestSQLiteRuntimeStoreClaimScheduleRequiresActiveRow(t *testing.T) {
 	}
 }
 
-func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForCommitVisibility(t *testing.T) {
+func TestSQLiteRuntimeStoreScheduleNamedOperationsIgnoreAmbientPipelineTransaction(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
@@ -1726,30 +1710,26 @@ func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForCommitVisibility(t 
 	if err != nil {
 		t.Fatalf("BeginTx(upsert): %v", err)
 	}
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
 	if err := store.UpsertSchedule(txctx, schedule); err != nil {
 		t.Fatalf("UpsertSchedule(tx): %v", err)
 	}
-	assertSQLiteScheduleClaimed(t, store, txctx, schedule, true)
-	assertSQLiteActiveScheduleCount(t, store, txctx, 1)
-	assertSQLiteScheduleClaimed(t, store, ctx, schedule, false)
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit(upsert): %v", err)
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback ambient upsert tx: %v", err)
 	}
+	assertSQLiteActiveScheduleCount(t, store, ctx, 1)
 	assertSQLiteScheduleClaimed(t, store, ctx, schedule, true)
 
 	tx, err = store.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx(cancel): %v", err)
 	}
-	txctx = runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx = runtimepipelinefixture.WithSQLTx(ctx, tx)
 	if err := store.CancelScheduleExact(txctx, schedule); err != nil {
 		t.Fatalf("CancelScheduleExact(tx): %v", err)
 	}
-	assertSQLiteScheduleClaimed(t, store, txctx, schedule, false)
-	assertSQLiteScheduleClaimed(t, store, ctx, schedule, true)
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit(cancel): %v", err)
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback ambient cancel tx: %v", err)
 	}
 	assertSQLiteScheduleClaimed(t, store, ctx, schedule, false)
 
@@ -1760,56 +1740,14 @@ func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForCommitVisibility(t 
 	if err != nil {
 		t.Fatalf("BeginTx(complete): %v", err)
 	}
-	txctx = runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx = runtimepipelinefixture.WithSQLTx(ctx, tx)
 	if err := store.CompleteScheduleFireExact(txctx, schedule); err != nil {
 		t.Fatalf("CompleteScheduleFireExact(tx): %v", err)
 	}
-	assertSQLiteScheduleClaimed(t, store, txctx, schedule, false)
-	assertSQLiteScheduleClaimed(t, store, ctx, schedule, true)
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit(complete): %v", err)
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback ambient complete tx: %v", err)
 	}
 	assertSQLiteScheduleClaimed(t, store, ctx, schedule, false)
-}
-
-func TestSQLiteRuntimeStoreScheduleUsesPipelineTransactionForRollbackVisibility(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
-	seedSQLiteScheduleRun(t, store, ctx, runID)
-	schedule := sqliteScheduleTransactionTestSchedule(t, runID, "task-rollback")
-
-	tx, err := store.backend.db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("BeginTx(upsert rollback): %v", err)
-	}
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	if err := store.UpsertSchedule(txctx, schedule); err != nil {
-		t.Fatalf("UpsertSchedule(tx): %v", err)
-	}
-	assertSQLiteScheduleClaimed(t, store, txctx, schedule, true)
-	if err := tx.Rollback(); err != nil {
-		t.Fatalf("Rollback(upsert): %v", err)
-	}
-	assertSQLiteScheduleClaimed(t, store, ctx, schedule, false)
-
-	if err := store.UpsertSchedule(ctx, schedule); err != nil {
-		t.Fatalf("UpsertSchedule(seed active): %v", err)
-	}
-	tx, err = store.backend.db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("BeginTx(cancel rollback): %v", err)
-	}
-	txctx = runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	if err := store.CancelScheduleExact(txctx, schedule); err != nil {
-		t.Fatalf("CancelScheduleExact(tx): %v", err)
-	}
-	assertSQLiteScheduleClaimed(t, store, txctx, schedule, false)
-	assertSQLiteScheduleClaimed(t, store, ctx, schedule, true)
-	if err := tx.Rollback(); err != nil {
-		t.Fatalf("Rollback(cancel): %v", err)
-	}
-	assertSQLiteScheduleClaimed(t, store, ctx, schedule, true)
 }
 
 func seedSQLiteScheduleRun(t *testing.T, store *SQLiteRuntimeStore, ctx context.Context, runID string) {

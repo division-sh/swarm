@@ -120,14 +120,14 @@ func (s conversationForkStore) conversationQuerySources() []string {
 
 func (s conversationForkStore) runMutation(ctx context.Context, serializable bool, fn func(context.Context, *sql.Tx) error) error {
 	if s.dialect == conversationForkSQLite {
-		return s.sqlite.RunRuntimeMutation(ctx, fn)
+		return s.sqlite.runRuntimeMutation(ctx, "sqlite conversation fork mutation", fn)
 	}
 	return s.runPostgresMutation(ctx, s.db, serializable, fn)
 }
 
 func (s conversationForkStore) runForkMutation(ctx context.Context, forkID string, serializable bool, fn func(context.Context, *sql.Tx) error) (err error) {
 	if s.dialect == conversationForkSQLite {
-		return s.sqlite.RunRuntimeMutation(ctx, fn)
+		return s.sqlite.runRuntimeMutation(ctx, "sqlite conversation fork mutation", fn)
 	}
 	conn, err := s.db.Conn(ctx)
 	if err != nil {

@@ -19,6 +19,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -59,7 +60,7 @@ func (s *exactHandoffProofStore) BindAgentSession(ctx context.Context, claim run
 	if err != nil {
 		return runtimedelivery.Snapshot{}, err
 	}
-	ctx, err = runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	ctx, err = authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
 	if err != nil {
 		_ = tx.Rollback()
 		return runtimedelivery.Snapshot{}, err
@@ -69,7 +70,7 @@ func (s *exactHandoffProofStore) BindAgentSession(ctx context.Context, claim run
 		_ = tx.Rollback()
 		return runtimedelivery.Snapshot{}, err
 	}
-	if err := runtimeauthoractivity.Finalize(ctx); err != nil {
+	if err := authoractivityfixture.Finalize(ctx); err != nil {
 		_ = tx.Rollback()
 		return runtimedelivery.Snapshot{}, err
 	}
@@ -244,7 +245,7 @@ func (s *exactHandoffProofStore) seed(t *testing.T, eventID, runID string, route
 	t.Helper()
 	ctx := context.Background()
 	evt := eventtest.RuntimeControl(eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-	if err := eventfixture.Insert(ctx, s.db, runtimeauthoractivity.DialectSQLite, evt); err != nil {
+	if err := eventfixture.Insert(ctx, s.db, authoractivityfixture.DialectSQLite, evt); err != nil {
 		t.Fatalf("seed exact handoff event: %v", err)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -289,7 +290,7 @@ func (s *exactHandoffProofStore) claim(t *testing.T, eventID, runID string, rout
 	if err != nil {
 		t.Fatalf("begin exact delivery claim: %v", err)
 	}
-	ctx, err = runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	ctx, err = authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
 	if err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("begin exact claim author activity: %v", err)
@@ -304,7 +305,7 @@ func (s *exactHandoffProofStore) claim(t *testing.T, eventID, runID string, rout
 		_ = tx.Rollback()
 		t.Fatalf("claim exact delivery disposition = %s", result.Disposition)
 	}
-	if err := runtimeauthoractivity.Finalize(ctx); err != nil {
+	if err := authoractivityfixture.Finalize(ctx); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("finalize exact claim author activity: %v", err)
 	}

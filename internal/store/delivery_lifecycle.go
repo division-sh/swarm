@@ -13,7 +13,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
@@ -261,94 +260,102 @@ func (s *SQLiteRuntimeStore) BindAgentSession(ctx context.Context, claim runtime
 }
 
 func (s *PostgresStore) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration) (runtimedelivery.Snapshot, error) {
-	return postgresDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) (runtimedelivery.Snapshot, error) {
-		if err := requirePostgresRunActive(txctx, tx, claim.RunID()); err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
-		snapshot, err := postgresDeliveryAdapter.SettleSuccess(txctx, tx, story, claim, sideEffects, duration)
-		if err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
-		if _, err := s.requestCompletionCandidateTx(txctx, tx, claim.RunID(), nil); err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
-		return snapshot, nil
+	return withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (runtimedelivery.Snapshot, error) {
+		return postgresDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) (runtimedelivery.Snapshot, error) {
+			if err := requirePostgresRunActive(txctx, tx, claim.RunID()); err != nil {
+				return runtimedelivery.Snapshot{}, err
+			}
+			snapshot, err := postgresDeliveryAdapter.SettleSuccess(txctx, tx, story, claim, sideEffects, duration)
+			if err != nil {
+				return runtimedelivery.Snapshot{}, err
+			}
+			if _, err := s.requestCompletionCandidateTx(txctx, tx, claim.RunID(), nil, handoff); err != nil {
+				return runtimedelivery.Snapshot{}, err
+			}
+			return snapshot, nil
+		})
 	})
 }
 
 func (s *SQLiteRuntimeStore) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration) (runtimedelivery.Snapshot, error) {
-	return sqliteDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) (runtimedelivery.Snapshot, error) {
-		if err := requireSQLiteRunActive(txctx, tx, claim.RunID()); err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
-		snapshot, err := sqliteDeliveryAdapter.SettleSuccess(txctx, tx, story, claim, sideEffects, duration)
-		if err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
-		if _, err := s.requestCompletionCandidateTx(txctx, tx, claim.RunID(), nil); err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
-		return snapshot, nil
+	return withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (runtimedelivery.Snapshot, error) {
+		return sqliteDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) (runtimedelivery.Snapshot, error) {
+			if err := requireSQLiteRunActive(txctx, tx, claim.RunID()); err != nil {
+				return runtimedelivery.Snapshot{}, err
+			}
+			snapshot, err := sqliteDeliveryAdapter.SettleSuccess(txctx, tx, story, claim, sideEffects, duration)
+			if err != nil {
+				return runtimedelivery.Snapshot{}, err
+			}
+			if _, err := s.requestCompletionCandidateTx(txctx, tx, claim.RunID(), nil, handoff); err != nil {
+				return runtimedelivery.Snapshot{}, err
+			}
+			return snapshot, nil
+		})
 	})
 }
 
 func (s *PostgresStore) SettleFailure(ctx context.Context, claim runtimedelivery.Claim, settlement runtimedelivery.Settlement) (runtimedelivery.Snapshot, error) {
-	return postgresDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) (runtimedelivery.Snapshot, error) {
-		if err := requirePostgresRunActive(txctx, tx, claim.RunID()); err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
-		snapshot, err := postgresDeliveryAdapter.SettleFailure(txctx, tx, story, claim, settlement)
-		if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
-			return snapshot, err
-		}
-		record, found, err := eventrecordpostgres.Load(txctx, tx, snapshot.EventID)
-		if err != nil || !found {
-			if err == nil {
-				err = eventrecord.Missing(snapshot.EventID)
+	return withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (runtimedelivery.Snapshot, error) {
+		return postgresDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) (runtimedelivery.Snapshot, error) {
+			if err := requirePostgresRunActive(txctx, tx, claim.RunID()); err != nil {
+				return runtimedelivery.Snapshot{}, err
 			}
-			return runtimedelivery.Snapshot{}, err
-		}
-		diagnostic, err := deliveryDeadLetterRecord(record, snapshot)
-		if err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
-		if err := s.recordDeadLetterTx(txctx, tx, story, diagnostic, true); err != nil {
-			return runtimedelivery.Snapshot{}, fmt.Errorf("commit terminal delivery diagnostic: %w", err)
-		}
-		if _, err := s.requestCompletionCandidateTx(txctx, tx, claim.RunID(), nil); err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
-		return snapshot, nil
+			snapshot, err := postgresDeliveryAdapter.SettleFailure(txctx, tx, story, claim, settlement)
+			if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
+				return snapshot, err
+			}
+			record, found, err := eventrecordpostgres.Load(txctx, tx, snapshot.EventID)
+			if err != nil || !found {
+				if err == nil {
+					err = eventrecord.Missing(snapshot.EventID)
+				}
+				return runtimedelivery.Snapshot{}, err
+			}
+			diagnostic, err := deliveryDeadLetterRecord(record, snapshot)
+			if err != nil {
+				return runtimedelivery.Snapshot{}, err
+			}
+			if err := s.recordDeadLetterTx(txctx, tx, story, diagnostic, true); err != nil {
+				return runtimedelivery.Snapshot{}, fmt.Errorf("commit terminal delivery diagnostic: %w", err)
+			}
+			if _, err := s.requestCompletionCandidateTx(txctx, tx, claim.RunID(), nil, handoff); err != nil {
+				return runtimedelivery.Snapshot{}, err
+			}
+			return snapshot, nil
+		})
 	})
 }
 
 func (s *SQLiteRuntimeStore) SettleFailure(ctx context.Context, claim runtimedelivery.Claim, settlement runtimedelivery.Settlement) (runtimedelivery.Snapshot, error) {
-	return sqliteDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) (runtimedelivery.Snapshot, error) {
-		if err := requireSQLiteRunActive(txctx, tx, claim.RunID()); err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
-		snapshot, err := sqliteDeliveryAdapter.SettleFailure(txctx, tx, story, claim, settlement)
-		if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
-			return snapshot, err
-		}
-		record, found, err := eventrecordsqlite.Load(txctx, tx, snapshot.EventID)
-		if err != nil || !found {
-			if err == nil {
-				err = eventrecord.Missing(snapshot.EventID)
+	return withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (runtimedelivery.Snapshot, error) {
+		return sqliteDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) (runtimedelivery.Snapshot, error) {
+			if err := requireSQLiteRunActive(txctx, tx, claim.RunID()); err != nil {
+				return runtimedelivery.Snapshot{}, err
 			}
-			return runtimedelivery.Snapshot{}, err
-		}
-		diagnostic, err := deliveryDeadLetterRecord(record, snapshot)
-		if err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
-		if err := s.recordDeadLetterTx(txctx, tx, story, diagnostic, true); err != nil {
-			return runtimedelivery.Snapshot{}, fmt.Errorf("commit terminal delivery diagnostic: %w", err)
-		}
-		if _, err := s.requestCompletionCandidateTx(txctx, tx, claim.RunID(), nil); err != nil {
-			return runtimedelivery.Snapshot{}, err
-		}
-		return snapshot, nil
+			snapshot, err := sqliteDeliveryAdapter.SettleFailure(txctx, tx, story, claim, settlement)
+			if err != nil || snapshot.Status != runtimedelivery.StatusDeadLetter {
+				return snapshot, err
+			}
+			record, found, err := eventrecordsqlite.Load(txctx, tx, snapshot.EventID)
+			if err != nil || !found {
+				if err == nil {
+					err = eventrecord.Missing(snapshot.EventID)
+				}
+				return runtimedelivery.Snapshot{}, err
+			}
+			diagnostic, err := deliveryDeadLetterRecord(record, snapshot)
+			if err != nil {
+				return runtimedelivery.Snapshot{}, err
+			}
+			if err := s.recordDeadLetterTx(txctx, tx, story, diagnostic, true); err != nil {
+				return runtimedelivery.Snapshot{}, fmt.Errorf("commit terminal delivery diagnostic: %w", err)
+			}
+			if _, err := s.requestCompletionCandidateTx(txctx, tx, claim.RunID(), nil, handoff); err != nil {
+				return runtimedelivery.Snapshot{}, err
+			}
+			return snapshot, nil
+		})
 	})
 }
 
@@ -400,64 +407,61 @@ func (s *PostgresStore) Snapshot(ctx context.Context, deliveryID string) (runtim
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimedelivery.Snapshot{}, err
 	}
-	return postgresDeliveryAdapter.Snapshot(ctx, eventReadQueryerFromContext(ctx, s.backend.db), deliveryID)
+	return postgresDeliveryAdapter.Snapshot(ctx, eventReadQueryerFromDB(s.backend.db), deliveryID)
 }
 
 func (s *SQLiteRuntimeStore) Snapshot(ctx context.Context, deliveryID string) (runtimedelivery.Snapshot, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimedelivery.Snapshot{}, err
 	}
-	return sqliteDeliveryAdapter.Snapshot(ctx, eventReadQueryerFromContext(ctx, s.backend.db), deliveryID)
+	return sqliteDeliveryAdapter.Snapshot(ctx, eventReadQueryerFromDB(s.backend.db), deliveryID)
 }
 
 func (s *PostgresStore) Outcomes(ctx context.Context, deliveryID string) ([]runtimedelivery.Outcome, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	return postgresDeliveryAdapter.Outcomes(ctx, eventReadQueryerFromContext(ctx, s.backend.db), deliveryID)
+	return postgresDeliveryAdapter.Outcomes(ctx, eventReadQueryerFromDB(s.backend.db), deliveryID)
 }
 
 func (s *SQLiteRuntimeStore) Outcomes(ctx context.Context, deliveryID string) ([]runtimedelivery.Outcome, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	return sqliteDeliveryAdapter.Outcomes(ctx, eventReadQueryerFromContext(ctx, s.backend.db), deliveryID)
+	return sqliteDeliveryAdapter.Outcomes(ctx, eventReadQueryerFromDB(s.backend.db), deliveryID)
 }
 
 func (s *PostgresStore) ProveHandoff(ctx context.Context, eventID string, route events.DeliveryRoute) (runtimedelivery.DurableHandoffProof, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimedelivery.DurableHandoffProof{}, err
 	}
-	return postgresDeliveryAdapter.ProveHandoff(ctx, eventReadQueryerFromContext(ctx, s.backend.db), eventID, route)
+	return postgresDeliveryAdapter.ProveHandoff(ctx, eventReadQueryerFromDB(s.backend.db), eventID, route)
 }
 
 func (s *SQLiteRuntimeStore) ProveHandoff(ctx context.Context, eventID string, route events.DeliveryRoute) (runtimedelivery.DurableHandoffProof, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimedelivery.DurableHandoffProof{}, err
 	}
-	return sqliteDeliveryAdapter.ProveHandoff(ctx, eventReadQueryerFromContext(ctx, s.backend.db), eventID, route)
+	return sqliteDeliveryAdapter.ProveHandoff(ctx, eventReadQueryerFromDB(s.backend.db), eventID, route)
 }
 
 func (s *PostgresStore) SummarizeRun(ctx context.Context, runID string) (runtimedelivery.RunSummary, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimedelivery.RunSummary{}, err
 	}
-	return postgresDeliveryAdapter.SummarizeRun(ctx, eventReadQueryerFromContext(ctx, s.backend.db), runID)
+	return postgresDeliveryAdapter.SummarizeRun(ctx, eventReadQueryerFromDB(s.backend.db), runID)
 }
 
 func (s *SQLiteRuntimeStore) SummarizeRun(ctx context.Context, runID string) (runtimedelivery.RunSummary, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimedelivery.RunSummary{}, err
 	}
-	return sqliteDeliveryAdapter.SummarizeRun(ctx, eventReadQueryerFromContext(ctx, s.backend.db), runID)
+	return sqliteDeliveryAdapter.SummarizeRun(ctx, eventReadQueryerFromDB(s.backend.db), runID)
 }
 
 func (s *PostgresStore) TerminalizeRun(ctx context.Context, runID, reason string) ([]runtimedelivery.Terminalization, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
-	}
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return s.terminalizeRunDeliveriesTx(ctx, tx, nil, runID, reason)
 	}
 	var out []runtimedelivery.Terminalization
 	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
@@ -472,9 +476,6 @@ func (s *SQLiteRuntimeStore) TerminalizeRun(ctx context.Context, runID, reason s
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return s.terminalizeRunDeliveriesTx(ctx, tx, nil, runID, reason)
-	}
 	var out []runtimedelivery.Terminalization
 	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite terminalize deliveries", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
@@ -485,59 +486,59 @@ func (s *SQLiteRuntimeStore) TerminalizeRun(ctx context.Context, runID, reason s
 }
 
 func (s *PostgresStore) deliverySnapshotsForEvent(ctx context.Context, eventID string) ([]runtimedelivery.Snapshot, error) {
-	return postgresDeliveryAdapter.SnapshotsForEvent(ctx, eventReadQueryerFromContext(ctx, s.backend.db), eventID)
+	return postgresDeliveryAdapter.SnapshotsForEvent(ctx, eventReadQueryerFromDB(s.backend.db), eventID)
 }
 
 func (s *SQLiteRuntimeStore) deliverySnapshotsForEvent(ctx context.Context, eventID string) ([]runtimedelivery.Snapshot, error) {
-	return sqliteDeliveryAdapter.SnapshotsForEvent(ctx, eventReadQueryerFromContext(ctx, s.backend.db), eventID)
+	return sqliteDeliveryAdapter.SnapshotsForEvent(ctx, eventReadQueryerFromDB(s.backend.db), eventID)
 }
 
 func (s *PostgresStore) deliveryRunDiagnosticCounts(ctx context.Context, runID string) ([]runtimedelivery.RunDiagnosticCount, error) {
-	return postgresDeliveryAdapter.RunDiagnosticCounts(ctx, eventReadQueryerFromContext(ctx, s.backend.db), runID)
+	return postgresDeliveryAdapter.RunDiagnosticCounts(ctx, eventReadQueryerFromDB(s.backend.db), runID)
 }
 
 func (s *SQLiteRuntimeStore) deliveryRunDiagnosticCounts(ctx context.Context, runID string) ([]runtimedelivery.RunDiagnosticCount, error) {
-	return sqliteDeliveryAdapter.RunDiagnosticCounts(ctx, eventReadQueryerFromContext(ctx, s.backend.db), runID)
+	return sqliteDeliveryAdapter.RunDiagnosticCounts(ctx, eventReadQueryerFromDB(s.backend.db), runID)
 }
 
 func (s *PostgresStore) deliveryRunDiagnosticFailures(ctx context.Context, runID string, limit int) ([]runtimedelivery.Snapshot, error) {
-	return postgresDeliveryAdapter.RunDiagnosticFailures(ctx, eventReadQueryerFromContext(ctx, s.backend.db), runID, limit)
+	return postgresDeliveryAdapter.RunDiagnosticFailures(ctx, eventReadQueryerFromDB(s.backend.db), runID, limit)
 }
 
 func (s *SQLiteRuntimeStore) deliveryRunDiagnosticFailures(ctx context.Context, runID string, limit int) ([]runtimedelivery.Snapshot, error) {
-	return sqliteDeliveryAdapter.RunDiagnosticFailures(ctx, eventReadQueryerFromContext(ctx, s.backend.db), runID, limit)
+	return sqliteDeliveryAdapter.RunDiagnosticFailures(ctx, eventReadQueryerFromDB(s.backend.db), runID, limit)
 }
 
 func (s *PostgresStore) deliveryRunTraceReferencePage(ctx context.Context, query runtimedelivery.RunTracePageQuery) (runtimedelivery.RunTraceReferencePage, error) {
-	return postgresDeliveryAdapter.RunTraceReferencePage(ctx, eventReadQueryerFromContext(ctx, s.backend.db), query)
+	return postgresDeliveryAdapter.RunTraceReferencePage(ctx, eventReadQueryerFromDB(s.backend.db), query)
 }
 
 func (s *SQLiteRuntimeStore) deliveryRunTraceReferencePage(ctx context.Context, query runtimedelivery.RunTracePageQuery) (runtimedelivery.RunTraceReferencePage, error) {
-	return sqliteDeliveryAdapter.RunTraceReferencePage(ctx, eventReadQueryerFromContext(ctx, s.backend.db), query)
+	return sqliteDeliveryAdapter.RunTraceReferencePage(ctx, eventReadQueryerFromDB(s.backend.db), query)
 }
 
 func (s *PostgresStore) deliveryLifecycleSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error) {
-	return postgresDeliveryAdapter.LifecycleSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.backend.db), query)
+	return postgresDeliveryAdapter.LifecycleSnapshotPageForAgent(ctx, eventReadQueryerFromDB(s.backend.db), query)
 }
 
 func (s *SQLiteRuntimeStore) deliveryLifecycleSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error) {
-	return sqliteDeliveryAdapter.LifecycleSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.backend.db), query)
+	return sqliteDeliveryAdapter.LifecycleSnapshotPageForAgent(ctx, eventReadQueryerFromDB(s.backend.db), query)
 }
 
 func (s *PostgresStore) deliveryDiagnosticSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error) {
-	return postgresDeliveryAdapter.DiagnosticSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.backend.db), query)
+	return postgresDeliveryAdapter.DiagnosticSnapshotPageForAgent(ctx, eventReadQueryerFromDB(s.backend.db), query)
 }
 
 func (s *SQLiteRuntimeStore) deliveryDiagnosticSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error) {
-	return sqliteDeliveryAdapter.DiagnosticSnapshotPageForAgent(ctx, eventReadQueryerFromContext(ctx, s.backend.db), query)
+	return sqliteDeliveryAdapter.DiagnosticSnapshotPageForAgent(ctx, eventReadQueryerFromDB(s.backend.db), query)
 }
 
 func (s *PostgresStore) deliveryDiagnosticCountsForAgentSince(ctx context.Context, identity agentidentity.Identity, since time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
-	return postgresDeliveryAdapter.DiagnosticCountsForAgentSince(ctx, eventReadQueryerFromContext(ctx, s.backend.db), identity, since)
+	return postgresDeliveryAdapter.DiagnosticCountsForAgentSince(ctx, eventReadQueryerFromDB(s.backend.db), identity, since)
 }
 
 func (s *SQLiteRuntimeStore) deliveryDiagnosticCountsForAgentSince(ctx context.Context, identity agentidentity.Identity, since time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
-	return sqliteDeliveryAdapter.DiagnosticCountsForAgentSince(ctx, eventReadQueryerFromContext(ctx, s.backend.db), identity, since)
+	return sqliteDeliveryAdapter.DiagnosticCountsForAgentSince(ctx, eventReadQueryerFromDB(s.backend.db), identity, since)
 }
 
 func (s *PostgresStore) terminalizeRunDeliveriesTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID, reason string) ([]runtimedelivery.Terminalization, error) {

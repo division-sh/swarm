@@ -41,9 +41,6 @@ type completeEventDispatchStore interface {
 	runtimepipeline.WorkflowPersistenceOwner
 	runtimedelivery.Store
 	runtimemanager.ManagerPersistence
-	interface {
-		RunRuntimeMutationContext(context.Context, func(context.Context) error) error
-	}
 	runtimerunlifecycle.OperationOwner
 	decisioncard.Store
 	decisioncard.ProposedEffectStore

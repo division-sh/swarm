@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -32,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -47,7 +47,7 @@ func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 	type fixture struct {
 		store   canonicalEventPublishProofStore
 		db      *sql.DB
-		dialect runtimeauthoractivity.Dialect
+		dialect authoractivityfixture.Dialect
 	}
 	for _, backend := range []struct {
 		name string
@@ -57,14 +57,14 @@ func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 			name: "sqlite",
 			open: func(t *testing.T, ctx context.Context) fixture {
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return fixture{store: sqliteStore, db: store.DatabaseForTest(sqliteStore), dialect: runtimeauthoractivity.DialectSQLite}
+				return fixture{store: sqliteStore, db: store.DatabaseForTest(sqliteStore), dialect: authoractivityfixture.DialectSQLite}
 			},
 		},
 		{
 			name: "postgres",
 			open: func(t *testing.T, _ context.Context) fixture {
 				_, db, _ := testutil.StartPostgres(t)
-				return fixture{store: storetest.AdmitPostgresRuntimeStore(t, db), db: db, dialect: runtimeauthoractivity.DialectPostgres}
+				return fixture{store: storetest.AdmitPostgresRuntimeStore(t, db), db: db, dialect: authoractivityfixture.DialectPostgres}
 			},
 		},
 	} {
@@ -1264,6 +1264,11 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 		{
 			name:     "bad target entity uuid",
 			body:     fmt.Sprintf(`{"jsonrpc":"2.0","id":"publish","method":"event.publish","params":{"bundle_hash":%q,"event_name":"operating/opco.product_initialization_requested","payload":{},"run_id":%q,"target":{"flow_instance":"operating/inst-1","entity_id":"not-a-uuid"},"idempotency_key":"idem-target-bad-uuid"}}`, runStartTestBundleHash, runID),
+			wantCode: "INVALID_PARAMS",
+		},
+		{
+			name:     "entity id is not a flow instance address",
+			body:     fmt.Sprintf(`{"jsonrpc":"2.0","id":"publish","method":"event.publish","params":{"bundle_hash":%q,"event_name":"operating/opco.product_initialization_requested","payload":{},"run_id":%q,"target":{"flow_instance":%q,"entity_id":%q},"idempotency_key":"idem-target-entity-address"}}`, runStartTestBundleHash, runID, targetEntityID, targetEntityID),
 			wantCode: "INVALID_PARAMS",
 		},
 		{

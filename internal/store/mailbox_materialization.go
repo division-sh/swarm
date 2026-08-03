@@ -13,10 +13,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type mailboxMaterializationExecutor interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}
-
 func (s *PostgresStore) MaterializeMailboxWrite(ctx context.Context, item runtimepipeline.MailboxWriteMaterialization) error {
 	if s == nil || s.backend.db == nil {
 		return fmt.Errorf("postgres store is required")
@@ -28,8 +24,7 @@ func (s *PostgresStore) MaterializeMailboxWrite(ctx context.Context, item runtim
 	if err != nil {
 		return err
 	}
-	exec := mailboxMaterializationDBExecutor(ctx, s.backend.db)
-	_, err = exec.ExecContext(ctx, `
+	_, err = s.backend.db.ExecContext(ctx, `
 		INSERT INTO mailbox (
 			item_id, entity_id, flow_instance, scope, item_type, source_event_id,
 			from_agent, severity, summary, payload, status, notified, reply_context_id, created_at
@@ -72,13 +67,6 @@ func (s *SQLiteRuntimeStore) MaterializeMailboxWrite(ctx context.Context, item r
 		}
 		return nil
 	})
-}
-
-func mailboxMaterializationDBExecutor(ctx context.Context, db *sql.DB) mailboxMaterializationExecutor {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return tx
-	}
-	return db
 }
 
 func normalizeMailboxWriteMaterialization(item runtimepipeline.MailboxWriteMaterialization) (runtimepipeline.MailboxWriteMaterialization, error) {

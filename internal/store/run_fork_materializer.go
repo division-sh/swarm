@@ -10,10 +10,11 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
+	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/mutationlog"
 	"github.com/google/uuid"
 )
 
@@ -369,7 +370,7 @@ func stringFieldValue(fields map[string]any, key string) string {
 	return ""
 }
 
-func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runLifecycle mutationlog.ActiveRunSourceOwner, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time) error {
+func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runLifecycle privatemutationlog.ActiveRunSourceOwner, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time) error {
 	entityID := strings.TrimSpace(entity.EntityID)
 	currentState := strings.TrimSpace(entity.CurrentState)
 	if currentState == "" {
@@ -413,18 +414,18 @@ func materializeRunForkEntityState(ctx context.Context, tx *sql.Tx, story runtim
 		currentState, gatesJSON, fieldsJSON, accJSON, entity.EnteredStateAt, now); err != nil {
 		return fmt.Errorf("insert fork entity_state %s: %w", entityID, err)
 	}
-	if err := materializeRunForkDecisionCards(ctx, tx, forkRunID, entityID, gateBindings, now); err != nil {
+	if err := materializeRunForkDecisionCards(ctx, tx, story, forkRunID, entityID, gateBindings, now); err != nil {
 		return err
 	}
-	if err := materializeRunForkProposedEffectCards(ctx, tx, plan.SourceRunID, forkRunID, entityID, plan.ForkPoint, now); err != nil {
+	if err := materializeRunForkProposedEffectCards(ctx, tx, story, plan.SourceRunID, forkRunID, entityID, plan.ForkPoint, now); err != nil {
 		return err
 	}
-	return mutationlog.InsertEntityStateDiffWithStory(ctx, tx, runLifecycle, story, entityID, mutationlog.EntityStateProjection{}, mutationlog.EntityStateProjection{
+	return privatemutationlog.InsertEntityStateDiffWithStory(ctx, tx, runLifecycle, story, entityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
 		CurrentState: currentState,
 		Fields:       entity.Fields,
 		Gates:        entity.Gates,
 		Accumulator:  forkAccumulator,
-	}, mutationlog.Writer{
+	}, runtimemutationlog.Writer{
 		Type:        "platform",
 		ID:          "run_fork_materializer",
 		HandlerStep: "materialize_snapshot",

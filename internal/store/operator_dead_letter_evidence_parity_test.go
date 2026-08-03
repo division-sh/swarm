@@ -25,7 +25,6 @@ type operatorDeadLetterEvidenceStore interface {
 	LoadOperatorEvent(context.Context, string) (OperatorEventFull, error)
 	LoadRunDebugReport(context.Context, string, RunDebugQueryOptions) (RunDebugReport, error)
 	runtimerunlifecycle.OperationOwner
-	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
 }
 
 func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {

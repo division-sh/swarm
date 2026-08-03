@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
 type workflowStoreDialect string
@@ -97,10 +97,10 @@ func (s *workflowInstanceStore) runInPipelineTransaction(ctx context.Context, fn
 		return nil
 	}
 	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
-		if runtimeauthoractivity.InMutation(ctx, tx) {
+		if authoractivityfixture.InMutation(ctx, tx) {
 			return fn(ctx, tx)
 		}
-		if !runtimeauthoractivity.FinalizedMutation(ctx, tx) {
+		if !authoractivityfixture.FinalizedMutation(ctx, tx) {
 			return fmt.Errorf("pipeline fixture entered from a raw transaction without author activity ownership")
 		}
 		ctx = WithoutPipelineSQLTxContext(ctx)

@@ -220,15 +220,6 @@ func (s *PostgresStore) applyScheduleTerminalTransition(
 	if !release {
 		return nil
 	}
-	if _, activeTx := runtimepipeline.PipelineSQLTxFromContext(ctx); activeTx {
-		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
-			actionCtx = runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
-			_ = s.ReleaseSchedule(actionCtx, sc)
-		}) {
-			return fmt.Errorf("schedule claim release requires post-commit ownership")
-		}
-		return nil
-	}
 	if err := s.ReleaseSchedule(ctx, sc); err != nil {
 		return &runtimepipeline.ScheduleTerminalError{
 			Stage:             "release_claim",
@@ -291,12 +282,8 @@ func (s *PostgresStore) persistedScheduleRecurring(ctx context.Context, sc runti
 	if err != nil {
 		return false, err
 	}
-	queryer := scheduleRecurringQueryer(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		queryer = tx
-	}
 	var recurring bool
-	err = queryer.QueryRowContext(ctx, fmt.Sprintf(`
+	err = s.backend.db.QueryRowContext(ctx, fmt.Sprintf(`
 		SELECT recurring
 		FROM timers
 		WHERE run_id IS NOT DISTINCT FROM NULLIF($1,'')::uuid
@@ -324,8 +311,4 @@ func (s *PostgresStore) persistedScheduleRecurring(ctx context.Context, sc runti
 		return false, fmt.Errorf("load schedule recurrence: %w", err)
 	}
 	return recurring, nil
-}
-
-type scheduleRecurringQueryer interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
 }

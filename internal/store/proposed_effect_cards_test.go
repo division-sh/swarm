@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -78,19 +77,10 @@ func TestProposedEffectCardLifecycleParity(t *testing.T) {
 					t.Fatalf("committed continuation = %#v, %v", committed, err)
 				}
 				assertProposedEffectAuthorActivity(t, cards, runID, card.CardID, continuation.RequestEventID, []string{"created", "decided"}, verdict, "")
-				if _, err := store.CompleteProposedEffectRoute(ctx, card.CardID, decisionEventID, now.Add(2*time.Minute)); err == nil || !strings.Contains(err.Error(), "active pipeline transaction") {
+				if _, err := store.CompleteProposedEffectRoute(ctx, card.CardID, decisionEventID, now.Add(2*time.Minute)); err == nil || !strings.Contains(err.Error(), "outcome event is not persisted") {
 					t.Fatalf("standalone CompleteProposedEffectRoute error = %v", err)
 				}
-				if err := runDecisionCardTestPipelineMutation(t, ctx, cards, func(txctx context.Context, _ *sql.Tx) error {
-					_, err := store.CompleteProposedEffectRoute(txctx, card.CardID, decisionEventID, now.Add(2*time.Minute))
-					return err
-				}); err == nil || !strings.Contains(err.Error(), "outcome event is not persisted") {
-					t.Fatalf("eventless CompleteProposedEffectRoute error = %v", err)
-				}
-				if err := runDecisionCardTestPipelineMutation(t, ctx, cards, func(txctx context.Context, _ *sql.Tx) error {
-					_, err := store.CompleteProposedEffectRoute(txctx, card.CardID, uuid.NewString(), now.Add(2*time.Minute))
-					return err
-				}); err == nil {
+				if _, err := store.CompleteProposedEffectRoute(ctx, card.CardID, uuid.NewString(), now.Add(2*time.Minute)); err == nil {
 					t.Fatal("mismatched proposed-effect route identity was accepted")
 				}
 				completeProposedEffectRouteInTestMutation(t, ctx, cards, card.CardID, decisionEventID, now.Add(2*time.Minute))
@@ -177,10 +167,7 @@ func TestNormalRunCompletionRequiresSettledProposedEffectsParity(t *testing.T) {
 						if _, err := db.ExecContext(ctx, query, uuid.NewString(), card.CardID); err != nil {
 							t.Fatal(err)
 						}
-						if err := runDecisionCardTestPipelineMutation(t, ctx, cards, func(txctx context.Context, _ *sql.Tx) error {
-							_, err := store.CompleteProposedEffectRoute(txctx, card.CardID, decisionEventID, now.Add(3*time.Minute))
-							return err
-						}); err == nil || !strings.Contains(err.Error(), "inconsistent route identity") {
+						if _, err := store.CompleteProposedEffectRoute(ctx, card.CardID, decisionEventID, now.Add(3*time.Minute)); err == nil || !strings.Contains(err.Error(), "inconsistent route identity") {
 							t.Fatalf("inconsistent persisted route identity error = %v", err)
 						}
 					} else if testCase.state != decisioncard.ProposedEffectDecisionCommitted {

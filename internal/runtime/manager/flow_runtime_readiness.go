@@ -242,6 +242,7 @@ func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 	if err != nil {
 		return err
 	}
+	changedPlans := make([]runtimepipeline.DynamicFlowRuntimeReadinessPlan, 0, len(items))
 	for _, item := range items {
 		if item.Plan.RunID != runID {
 			continue
@@ -307,6 +308,9 @@ func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 		if !changed {
 			continue
 		}
+		changedPlans = append(changedPlans, expected)
+	}
+	for _, expected := range changedPlans {
 		if err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, source); err != nil {
 			am.signalDynamicFlowRuntimeReadiness()
 			return err

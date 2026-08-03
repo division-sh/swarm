@@ -13,7 +13,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
@@ -25,6 +24,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -163,7 +163,7 @@ func (s *runtimeShutdownDeliveryStore) mutate(ctx context.Context, fn func(conte
 	if err != nil {
 		return err
 	}
-	story, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	story, err := authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -172,7 +172,7 @@ func (s *runtimeShutdownDeliveryStore) mutate(ctx context.Context, fn func(conte
 		_ = tx.Rollback()
 		return err
 	}
-	if err := runtimeauthoractivity.Finalize(story); err != nil {
+	if err := authoractivityfixture.Finalize(story); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -187,7 +187,7 @@ func (s *runtimeShutdownDeliveryStore) ClaimDelivery(
 ) (result runtimedelivery.ClaimResult, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := eventfixture.Insert(ctx, s.db, runtimeauthoractivity.DialectSQLite, evt); err != nil {
+	if err := eventfixture.Insert(ctx, s.db, authoractivityfixture.DialectSQLite, evt); err != nil {
 		return runtimedelivery.ClaimResult{}, err
 	}
 	s.events[evt.ID()] = evt
@@ -210,7 +210,7 @@ func (s *runtimeShutdownDeliveryStore) seedAgentDelivery(
 	t.Helper()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := eventfixture.Insert(ctx, s.db, runtimeauthoractivity.DialectSQLite, evt); err != nil {
+	if err := eventfixture.Insert(ctx, s.db, authoractivityfixture.DialectSQLite, evt); err != nil {
 		t.Fatalf("seed runtime delivery event: %v", err)
 	}
 	s.events[evt.ID()] = evt

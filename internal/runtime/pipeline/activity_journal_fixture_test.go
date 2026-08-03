@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
 type pipelineTestActivityJournal struct {
@@ -104,7 +104,7 @@ func (j pipelineTestActivityJournal) startTx(ctx context.Context, tx *sql.Tx, re
 	if err := ValidateActivityAttemptClaimIdentity(actual, record); err != nil {
 		return ActivityAttemptRecord{}, false, err
 	}
-	if err := runtimeauthoractivity.Record(ctx, ActivityAttemptStoryDraft(actual, ActivityAttemptStatusStarted)); err != nil {
+	if err := authoractivityfixture.Record(ctx, ActivityAttemptStoryDraft(actual, ActivityAttemptStatusStarted)); err != nil {
 		return ActivityAttemptRecord{}, false, err
 	}
 	return actual, rows > 0, nil
@@ -156,7 +156,7 @@ func (j pipelineTestActivityJournal) CompleteActivityAttempt(ctx context.Context
 		if rows == 0 && out.Status == ActivityAttemptStatusStarted {
 			return fmt.Errorf("activity attempt %s remained started after terminal update", record.RequestEventID)
 		}
-		return runtimeauthoractivity.Record(txctx, ActivityAttemptStoryDraft(out, out.Status))
+		return authoractivityfixture.Record(txctx, ActivityAttemptStoryDraft(out, out.Status))
 	})
 	return
 }
@@ -197,7 +197,7 @@ func (j pipelineTestActivityJournal) MarkActivityAttemptUncertain(ctx context.Co
 		if err := ValidateActivityAttemptTerminalMode(out, record); err != nil {
 			return err
 		}
-		return runtimeauthoractivity.Record(txctx, ActivityAttemptStoryDraft(out, ActivityAttemptStatusUncertain))
+		return authoractivityfixture.Record(txctx, ActivityAttemptStoryDraft(out, ActivityAttemptStatusUncertain))
 	})
 	return
 }

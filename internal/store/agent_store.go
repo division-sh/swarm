@@ -42,7 +42,7 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec runtimemanager.Pers
 	if !rec.StartedAt.IsZero() {
 		startedAt = rec.StartedAt
 	}
-	return s.runAuthorActivityMutation(ctx, "postgres agent upsert", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runPostgresRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "swarm:agent-lifecycle:"+identityFingerprint); err != nil {
 			return err
 		}

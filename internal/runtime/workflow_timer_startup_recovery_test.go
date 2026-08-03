@@ -33,7 +33,6 @@ import (
 
 type workflowTimerStartupStore interface {
 	externalRuntimeTestDurableEventStore
-	externalRuntimeTestMutationOwner
 	runtimepipeline.WorkflowPersistenceOwner
 	swarmruntime.EventPayloadValidationBinder
 	swarmruntime.AuthorActivityCatalogRegistrar

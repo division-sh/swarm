@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -13,11 +14,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -372,7 +372,7 @@ func provePipelineMalformedRecoveryPreclassification(
 		t.Fatalf("commit malformed recovery fixture: %v", err)
 	}
 	query := `UPDATE events SET run_id = NULL WHERE event_id = ?`
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
 		query = `UPDATE events SET run_id = NULL WHERE event_id = $1::uuid`
 	}
 	if _, err := fixture.db.ExecContext(ctx, query, eventID); err != nil {
@@ -551,34 +551,16 @@ func provePipelineParentTerminalizationFence(
 		t.Fatalf("claim parent terminalization target: %v", err)
 	}
 
-	tx, err := fixture.db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin fenced terminalization: %v", err)
-	}
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	if _, err := owner.TerminalizeRun(txctx, runID, runtimepipelineobligation.DeadLetter("run_stopped", nil), time.Now().UTC()); !errors.Is(err, runtimepipelineobligation.ErrBusy) {
-		_ = tx.Rollback()
+	if _, err := terminalizePipelineRunForTest(ctx, selected, runID, runtimepipelineobligation.DeadLetter("run_stopped", nil), time.Now().UTC()); !errors.Is(err, runtimepipelineobligation.ErrBusy) {
 		t.Fatalf("terminalization during claim error = %v, want ErrBusy", err)
-	}
-	if err := tx.Rollback(); err != nil {
-		t.Fatalf("rollback fenced terminalization: %v", err)
 	}
 	if err := owner.Release(ctx, work.Claim); err != nil {
 		t.Fatalf("release active claim: %v", err)
 	}
 
-	tx, err = fixture.db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin terminalization: %v", err)
-	}
-	txctx = runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
-	count, err := owner.TerminalizeRun(txctx, runID, runtimepipelineobligation.DeadLetter("run_stopped", nil), time.Now().UTC())
+	count, err := terminalizePipelineRunForTest(ctx, selected, runID, runtimepipelineobligation.DeadLetter("run_stopped", nil), time.Now().UTC())
 	if err != nil || count != 1 {
-		_ = tx.Rollback()
 		t.Fatalf("TerminalizeRun count=%d err=%v", count, err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit terminalization: %v", err)
 	}
 	if _, err := owner.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("late_success")); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
 		t.Fatalf("late success error = %v, want ErrStaleClaim", err)
@@ -587,6 +569,32 @@ func provePipelineParentTerminalizationFence(
 	if outcome != "dead_letter" || reason != "run_stopped" {
 		t.Fatalf("parent terminal receipt outcome=%q reason=%q", outcome, reason)
 	}
+}
+
+func terminalizePipelineRunForTest(
+	ctx context.Context,
+	selected pipelineObligationParityStore,
+	runID string,
+	disposition runtimepipelineobligation.Disposition,
+	at time.Time,
+) (int, error) {
+	var count int
+	var err error
+	switch store := selected.(type) {
+	case *PostgresStore:
+		err = store.runPostgresRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
+			count, err = store.terminalizePostgresPipelineRunTx(txctx, tx, runID, disposition, at)
+			return err
+		})
+	case *SQLiteRuntimeStore:
+		err = store.runRuntimeMutation(ctx, "sqlite pipeline terminalization fixture", func(txctx context.Context, tx *sql.Tx) error {
+			count, err = store.terminalizeSQLitePipelineRunTx(txctx, tx, runID, disposition, at)
+			return err
+		})
+	default:
+		err = fmt.Errorf("unexpected pipeline store %T", selected)
+	}
+	return count, err
 }
 
 func provePipelineSettlementRollback(
@@ -736,7 +744,7 @@ func settlePipelineParityEvent(
 func updatePipelineScopeRaw(ctx context.Context, fixture authorActivityReceiptFixture, eventID, scope string) error {
 	query := `UPDATE committed_replay_scopes SET scope = ? WHERE event_id = ?`
 	args := []any{scope, eventID}
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
 		query = `UPDATE committed_replay_scopes SET scope = $1 WHERE event_id = $2::uuid`
 	}
 	_, err := fixture.db.ExecContext(ctx, query, args...)
@@ -745,7 +753,7 @@ func updatePipelineScopeRaw(ctx context.Context, fixture authorActivityReceiptFi
 
 func deletePipelineScope(ctx context.Context, fixture authorActivityReceiptFixture, eventID string) error {
 	query := `DELETE FROM committed_replay_scopes WHERE event_id = ?`
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
 		query = `DELETE FROM committed_replay_scopes WHERE event_id = $1::uuid`
 	}
 	_, err := fixture.db.ExecContext(ctx, query, eventID)
@@ -758,7 +766,7 @@ func readExactPipelineReceipt(t *testing.T, ctx context.Context, fixture authorA
 		SELECT COUNT(*), COALESCE(MAX(outcome), ''), COALESCE(MAX(reason_code), '')
 		FROM event_receipts
 		WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
 		query = `
 			SELECT COUNT(*), COALESCE(MAX(outcome), ''), COALESCE(MAX(reason_code), '')
 			FROM event_receipts
@@ -780,7 +788,7 @@ func readDeliveryContinuationHandoffCounts(
 ) (int, int) {
 	t.Helper()
 	query := `SELECT COUNT(*), COUNT(continuation_handoff_at) FROM event_deliveries WHERE event_id = ?`
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
 		query = `SELECT COUNT(*), COUNT(continuation_handoff_at) FROM event_deliveries WHERE event_id = $1::uuid`
 	}
 	var total, handoff int
@@ -793,7 +801,7 @@ func readDeliveryContinuationHandoffCounts(
 func readDecisionRouteStatus(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, eventID string) string {
 	t.Helper()
 	query := `SELECT status FROM decision_card_route_obligations WHERE event_id = ?`
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
 		query = `SELECT status FROM decision_card_route_obligations WHERE event_id = $1::uuid`
 	}
 	var status string
@@ -816,7 +824,7 @@ func insertWorkflowTransitionReceipt(t *testing.T, ctx context.Context, fixture 
 		       'success', 'transition_processed', 'null', '{}', ?
 		FROM events e WHERE e.event_id = ?`
 	args := []any{receiptID, now, eventID}
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
 		query = `
 			INSERT INTO event_receipts (
 				receipt_id, event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
@@ -833,7 +841,7 @@ func insertWorkflowTransitionReceipt(t *testing.T, ctx context.Context, fixture 
 
 func installPipelineReceiptInsertFault(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture) func() {
 	t.Helper()
-	if fixture.dialect == runtimeauthoractivity.DialectPostgres {
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
 		if _, err := fixture.db.ExecContext(ctx, `
 			CREATE OR REPLACE FUNCTION fail_pipeline_obligation_receipt_insert() RETURNS trigger AS $$
 			BEGIN

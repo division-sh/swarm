@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
 )
@@ -23,9 +22,6 @@ var _ runtimereplycontext.Store = (*PostgresStore)(nil)
 var _ runtimereplycontext.Store = (*SQLiteRuntimeStore)(nil)
 
 func (s *PostgresStore) CreateReplyContext(ctx context.Context, record runtimereplycontext.Record) error {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return createPostgresReplyContext(ctx, tx, record)
-	}
 	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin reply context create: %w", err)
@@ -94,9 +90,6 @@ func (s *PostgresStore) createReplyContextTx(ctx context.Context, tx *sql.Tx, re
 }
 
 func (s *SQLiteRuntimeStore) CreateReplyContext(ctx context.Context, record runtimereplycontext.Record) error {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return createSQLiteReplyContextTx(ctx, tx, record)
-	}
 	return s.runRuntimeMutation(ctx, "sqlite reply context create", func(txctx context.Context, tx *sql.Tx) error {
 		return createSQLiteReplyContextTx(txctx, tx, record)
 	})
@@ -163,9 +156,6 @@ func resolveReplyContextCreateConflict(record, existing runtimereplycontext.Reco
 }
 
 func (s *PostgresStore) LoadReplyContext(ctx context.Context, id string) (runtimereplycontext.Record, error) {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return loadPostgresReplyContext(ctx, tx, id, false)
-	}
 	return loadPostgresReplyContext(ctx, s.backend.db, id, false)
 }
 
@@ -178,9 +168,6 @@ func loadPostgresReplyContext(ctx context.Context, db replyContextSQL, id string
 }
 
 func (s *SQLiteRuntimeStore) LoadReplyContext(ctx context.Context, id string) (runtimereplycontext.Record, error) {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return loadSQLiteReplyContext(ctx, tx, id)
-	}
 	return loadSQLiteReplyContext(ctx, s.backend.db, id)
 }
 
@@ -189,9 +176,6 @@ func loadSQLiteReplyContext(ctx context.Context, db replyContextSQL, id string) 
 }
 
 func (s *PostgresStore) ClaimReplyContext(ctx context.Context, id, replyEventID string) (runtimereplycontext.Record, runtimereplycontext.ClaimOutcome, error) {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return claimPostgresReplyContext(ctx, tx, id, replyEventID)
-	}
 	tx, err := s.backend.db.BeginTx(ctx, nil)
 	if err != nil {
 		return runtimereplycontext.Record{}, "", err
@@ -219,13 +203,6 @@ func claimPostgresReplyContext(ctx context.Context, tx *sql.Tx, id, replyEventID
 }
 
 func (s *SQLiteRuntimeStore) ClaimReplyContext(ctx context.Context, id, replyEventID string) (runtimereplycontext.Record, runtimereplycontext.ClaimOutcome, error) {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		record, err := loadSQLiteReplyContext(ctx, tx, id)
-		if err != nil {
-			return runtimereplycontext.Record{}, "", err
-		}
-		return claimLoadedReplyContextTx(ctx, tx, record, replyEventID, false)
-	}
 	var record runtimereplycontext.Record
 	var outcome runtimereplycontext.ClaimOutcome
 	err := s.runRuntimeMutation(ctx, "sqlite reply context claim", func(txctx context.Context, tx *sql.Tx) error {

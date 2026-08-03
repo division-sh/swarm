@@ -9,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
 )
@@ -339,13 +338,7 @@ func (s *PostgresStore) listUnnotifiedCriticalMailboxItemsSpec(ctx context.Conte
 }
 
 func (s *PostgresStore) markMailboxItemNotifiedSpec(ctx context.Context, id string) error {
-	db := interface {
-		ExecContext(context.Context, string, ...any) (sql.Result, error)
-	}(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		db = tx
-	}
-	result, err := db.ExecContext(ctx, `
+	result, err := s.backend.db.ExecContext(ctx, `
 		UPDATE mailbox
 		SET notified = true
 		WHERE item_id = $1::uuid

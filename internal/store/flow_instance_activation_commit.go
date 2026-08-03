@@ -10,22 +10,20 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
-
-type publicationCommitOptions struct {
-	allowStandingGenerationRebind bool
-}
 
 func commitFlowInstanceActivations(
 	ctx context.Context,
 	tx *sql.Tx,
 	story *privateauthoractivity.Mutation,
+	store eventCommitTxStore,
 	postgres bool,
 	plans []runtimepipeline.FlowInstanceActivationPlan,
-	options publicationCommitOptions,
 ) ([]runtimepipeline.CommittedFlowInstanceActivation, error) {
 	if len(plans) == 0 {
 		return nil, nil
@@ -45,11 +43,11 @@ func commitFlowInstanceActivations(
 			return nil, fmt.Errorf("flow activation %d repeats route %q", index, record.Route.InstancePath)
 		}
 		seen[key] = struct{}{}
-		created, err := commitFlowInstanceActivation(ctx, tx, story, postgres, record, options)
+		created, lifecycle, err := commitFlowInstanceActivation(ctx, tx, story, store, postgres, plan, record)
 		if err != nil {
 			return nil, fmt.Errorf("commit flow activation %s: %w", record.Route.InstancePath, err)
 		}
-		committed = append(committed, runtimepipeline.CommittedFlowInstanceActivation{Plan: plan, Created: created})
+		committed = append(committed, runtimepipeline.CommittedFlowInstanceActivation{Plan: plan, Created: created, Lifecycle: lifecycle})
 	}
 	return committed, nil
 }
@@ -57,6 +55,7 @@ func commitFlowInstanceActivations(
 func commitOneFlowInstanceActivation(
 	ctx context.Context,
 	command runtimebus.FlowInstanceActivationCommand,
+	store eventCommitTxStore,
 	postgres bool,
 	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
 ) (runtimepipeline.CommittedFlowInstanceActivation, error) {
@@ -65,7 +64,7 @@ func commitOneFlowInstanceActivation(
 	}
 	var result runtimepipeline.CommittedFlowInstanceActivation
 	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		committed, err := commitFlowInstanceActivations(txctx, tx, story, postgres, []runtimepipeline.FlowInstanceActivationPlan{command.Plan}, publicationCommitOptions{})
+		committed, err := commitFlowInstanceActivations(txctx, tx, story, store, postgres, []runtimepipeline.FlowInstanceActivationPlan{command.Plan})
 		if err != nil {
 			return err
 		}
@@ -83,13 +82,13 @@ func commitOneFlowInstanceActivation(
 }
 
 func (s *PostgresStore) CommitFlowInstanceActivation(ctx context.Context, command runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error) {
-	return commitOneFlowInstanceActivation(ctx, command, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+	return commitOneFlowInstanceActivation(ctx, command, s, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 		return s.runPrivateAuthorActivityMutation(ctx, fn)
 	})
 }
 
 func (s *SQLiteRuntimeStore) CommitFlowInstanceActivation(ctx context.Context, command runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error) {
-	return commitOneFlowInstanceActivation(ctx, command, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+	return commitOneFlowInstanceActivation(ctx, command, s, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 		return s.runPrivateAuthorActivityMutation(ctx, "sqlite commit flow instance activation", fn)
 	})
 }
@@ -101,32 +100,35 @@ func commitFlowInstanceActivation(
 	ctx context.Context,
 	tx *sql.Tx,
 	story *privateauthoractivity.Mutation,
+	store eventCommitTxStore,
 	postgres bool,
+	plan runtimepipeline.FlowInstanceActivationPlan,
 	record runtimepipeline.FlowInstanceActivationRecord,
-	options publicationCommitOptions,
-) (bool, error) {
+) (bool, runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
 	if err := record.Validate(); err != nil {
-		return false, err
+		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
+	ctx = runtimecorrelation.WithRunID(ctx, record.RunID)
+	allowStandingGenerationRebind := plan.StandingGenerationReplacement
 	if postgres {
 		if err := requirePostgresRunActive(ctx, tx, record.RunID); err != nil {
-			return false, err
+			return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 		}
 		lockIdentity := fmt.Sprintf("%d:%s%s", len(record.RunID), record.RunID, record.Route.InstancePath)
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockIdentity); err != nil {
-			return false, fmt.Errorf("lock flow activation route: %w", err)
+			return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("lock flow activation route: %w", err)
 		}
 	} else if err := requireSQLiteRunActive(ctx, tx, record.RunID); err != nil {
-		return false, err
+		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
 
-	equal, found, err := loadFlowInstanceActivationEqual(ctx, tx, postgres, record, options)
+	equal, found, err := loadFlowInstanceActivationEqual(ctx, tx, postgres, record, allowStandingGenerationRebind)
 	if err != nil {
-		return false, err
+		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
 	if found {
 		if !equal {
-			return false, runtimefailures.New(
+			return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, runtimefailures.New(
 				runtimefailures.ClassConflictingDuplicate,
 				"flow_instance_already_exists",
 				"flow-instance-activation",
@@ -134,12 +136,13 @@ func commitFlowInstanceActivation(
 				map[string]any{"flow_instance": record.Route.InstancePath},
 			)
 		}
-		return false, nil
+		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, nil
 	}
-	if err := insertFlowInstanceActivation(ctx, tx, story, postgres, record, options); err != nil {
-		return false, err
+	lifecycle, err := insertFlowInstanceActivation(ctx, tx, story, store, postgres, plan, record, allowStandingGenerationRebind)
+	if err != nil {
+		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
-	return true, nil
+	return true, lifecycle, nil
 }
 
 func loadFlowInstanceActivationEqual(
@@ -147,7 +150,7 @@ func loadFlowInstanceActivationEqual(
 	tx *sql.Tx,
 	postgres bool,
 	want runtimepipeline.FlowInstanceActivationRecord,
-	options publicationCommitOptions,
+	allowStandingGenerationRebind bool,
 ) (bool, bool, error) {
 	query := `
 		SELECT
@@ -222,7 +225,7 @@ func loadFlowInstanceActivationEqual(
 	}
 	err := tx.QueryRowContext(ctx, query, want.RunID, want.EntityID, want.Route.InstancePath).Scan(destinations...)
 	if err == sql.ErrNoRows {
-		occupied, occupiedErr := flowInstanceActivationIdentityOccupied(ctx, tx, postgres, want, options)
+		occupied, occupiedErr := flowInstanceActivationIdentityOccupied(ctx, tx, postgres, want, allowStandingGenerationRebind)
 		return false, occupied, occupiedErr
 	}
 	if err != nil {
@@ -280,7 +283,7 @@ func loadFlowInstanceActivationEqual(
 	return equal, true, nil
 }
 
-func flowInstanceActivationIdentityOccupied(ctx context.Context, tx *sql.Tx, postgres bool, record runtimepipeline.FlowInstanceActivationRecord, options publicationCommitOptions) (bool, error) {
+func flowInstanceActivationIdentityOccupied(ctx context.Context, tx *sql.Tx, postgres bool, record runtimepipeline.FlowInstanceActivationRecord, allowStandingGenerationRebind bool) (bool, error) {
 	query := `
 		SELECT EXISTS (SELECT 1 FROM flow_instances WHERE instance_id = $1),
 		       COALESCE((SELECT flow_template FROM flow_instances WHERE instance_id = $1), ''),
@@ -317,7 +320,7 @@ func flowInstanceActivationIdentityOccupied(ctx context.Context, tx *sql.Tx, pos
 	if entity || initial || readiness {
 		return true, nil
 	}
-	if flow && options.allowStandingGenerationRebind && strings.TrimSpace(flowTemplate) == strings.TrimSpace(record.WorkflowName) {
+	if flow && allowStandingGenerationRebind && strings.TrimSpace(flowTemplate) == strings.TrimSpace(record.WorkflowName) {
 		return false, nil
 	}
 	return flow, nil
@@ -327,99 +330,66 @@ func insertFlowInstanceActivation(
 	ctx context.Context,
 	tx *sql.Tx,
 	story *privateauthoractivity.Mutation,
+	store eventCommitTxStore,
 	postgres bool,
+	plan runtimepipeline.FlowInstanceActivationPlan,
 	record runtimepipeline.FlowInstanceActivationRecord,
-	options publicationCommitOptions,
-) error {
+	allowStandingGenerationRebind bool,
+) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
+	if err := commitWorkflowEngineState(ctx, tx, postgres, record.State, allowStandingGenerationRebind); err != nil {
+		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
+	}
 	if postgres {
-		flowInsert := `
-			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-			VALUES ($1, $2, $3, $4::jsonb, 'active', $5)
-		`
-		if options.allowStandingGenerationRebind {
-			flowInsert += `
-				ON CONFLICT (instance_id) DO UPDATE SET
-					flow_template = EXCLUDED.flow_template,
-					mode = EXCLUDED.mode,
-					config = EXCLUDED.config,
-					status = 'active',
-					terminated_at = NULL
-			`
-		}
-		if _, err := tx.ExecContext(ctx, flowInsert, record.Route.InstancePath, record.WorkflowName, record.Mode, record.Config, record.CreatedAt); err != nil {
-			return fmt.Errorf("insert flow instance: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO entity_state (
-				run_id, entity_id, flow_instance, entity_type, slug, name,
-				current_state, gates, fields, accumulator, revision,
-				entered_state_at, created_at, updated_at
-			) VALUES (
-				$1::uuid, $2::uuid, $3, $4, NULLIF($5, ''), NULLIF($6, ''),
-				$7, $8::jsonb, $9::jsonb, $10::jsonb, 1, $11, $12, $12
-			)
-		`, record.RunID, record.EntityID, record.Route.InstancePath, record.EntityType, record.Slug, record.Name,
-			record.CurrentState, record.Gates, record.Fields, record.Accumulator, record.EnteredStageAt, record.CreatedAt); err != nil {
-			return fmt.Errorf("insert flow instance entity state: %w", err)
-		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO workflow_instance_initial_materializations (
 				run_id, entity_id, instance_id, projection_version, projection, occurred_at
 			) VALUES ($1::uuid, $2::uuid, $3, 1, $4::jsonb, $5)
 		`, record.RunID, record.EntityID, record.Route.InstancePath, record.InitialMaterialization, record.CreatedAt); err != nil {
-			return fmt.Errorf("insert flow initial materialization: %w", err)
+			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert flow initial materialization: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO flow_instance_runtime_readiness (
 				run_id, instance_id, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
 			) VALUES ($1::uuid, $2, $3::jsonb, NULL, NULL, $4, $4)
 		`, record.RunID, record.Route.InstancePath, record.Readiness, record.CreatedAt); err != nil {
-			return fmt.Errorf("insert flow runtime readiness: %w", err)
+			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert flow runtime readiness: %w", err)
 		}
-		return nil
+	} else {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO workflow_instance_initial_materializations (
+				run_id, entity_id, instance_id, projection_version, projection, occurred_at
+			) VALUES (?, ?, ?, 1, ?, ?)
+		`, record.RunID, record.EntityID, record.Route.InstancePath, record.InitialMaterialization, record.CreatedAt); err != nil {
+			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert sqlite flow initial materialization: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO flow_instance_runtime_readiness (
+				run_id, instance_id, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
+			) VALUES (?, ?, ?, NULL, NULL, ?, ?)
+		`, record.RunID, record.Route.InstancePath, record.Readiness, record.CreatedAt, record.CreatedAt); err != nil {
+			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert sqlite flow runtime readiness: %w", err)
+		}
 	}
-	flowInsert := `
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES (?, ?, ?, ?, 'active', ?)
-	`
-	if options.allowStandingGenerationRebind {
-		flowInsert += `
-			ON CONFLICT(instance_id) DO UPDATE SET
-				flow_template = excluded.flow_template,
-				mode = excluded.mode,
-				config = excluded.config,
-				status = 'active',
-				terminated_at = NULL
-		`
+	before, err := commitWorkflowEngineInitialValues(
+		ctx,
+		tx,
+		story,
+		store,
+		postgres,
+		record.State,
+		runtimemutationlog.EntityStateProjection{},
+	)
+	if err != nil {
+		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
-	if _, err := tx.ExecContext(ctx, flowInsert, record.Route.InstancePath, record.WorkflowName, record.Mode, record.Config, record.CreatedAt); err != nil {
-		return fmt.Errorf("insert sqlite flow instance: %w", err)
+	lifecycle, err := commitWorkflowEngineLifecycle(ctx, tx, runtimeAuthorActivityMutation(story), postgres, plan.Lifecycle)
+	if err != nil {
+		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, 1, ?, ?, ?)
-	`, record.RunID, record.EntityID, record.Route.InstancePath, record.EntityType, record.Slug, record.Name,
-		record.CurrentState, record.Gates, record.Fields, record.Accumulator, record.EnteredStageAt, record.CreatedAt, record.CreatedAt); err != nil {
-		return fmt.Errorf("insert sqlite flow instance entity state: %w", err)
+	if err := commitWorkflowEngineMutationLog(ctx, tx, story, store, postgres, record.State, before); err != nil {
+		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO workflow_instance_initial_materializations (
-			run_id, entity_id, instance_id, projection_version, projection, occurred_at
-		) VALUES (?, ?, ?, 1, ?, ?)
-	`, record.RunID, record.EntityID, record.Route.InstancePath, record.InitialMaterialization, record.CreatedAt); err != nil {
-		return fmt.Errorf("insert sqlite flow initial materialization: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO flow_instance_runtime_readiness (
-			run_id, instance_id, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
-		) VALUES (?, ?, ?, NULL, NULL, ?, ?)
-	`, record.RunID, record.Route.InstancePath, record.Readiness, record.CreatedAt, record.CreatedAt); err != nil {
-		return fmt.Errorf("insert sqlite flow runtime readiness: %w", err)
-	}
-	return nil
+	return lifecycle, nil
 }
 
 func canonicalActivationTime(value time.Time) time.Time {

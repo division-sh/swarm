@@ -122,30 +122,40 @@ func TestWorkflowInstanceStoreAddressesRowsOnlyByExactRouteOnBothStores(t *testi
 		setup := setup
 		t.Run(setup.name, func(t *testing.T) {
 			store, ctx := setup.open(t)
-			instancePath := "scout-" + uuid.NewString()
-			entityID := uuid.NewString()
-			if err := store.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-				InstanceID:      instancePath,
-				StorageRef:      instancePath,
-				WorkflowName:    instancePath,
-				WorkflowVersion: "v1",
-				CurrentState:    "active",
-				EnteredStageAt:  time.Now().UTC(),
-				Metadata: map[string]any{
-					"entity_id": entityID,
-					"flow_path": instancePath,
-				},
-			})); err != nil {
-				t.Fatalf("create workflow instance: %v", err)
+			cases := []struct {
+				name         string
+				instancePath string
+			}{
+				{name: "singleton", instancePath: "scout"},
+				{name: "template_instance", instancePath: "review/" + uuid.NewString()},
 			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					entityID := uuid.NewString()
+					if err := store.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+						InstanceID:      tc.instancePath,
+						StorageRef:      tc.instancePath,
+						WorkflowName:    tc.instancePath,
+						WorkflowVersion: "v1",
+						CurrentState:    "active",
+						EnteredStageAt:  time.Now().UTC(),
+						Metadata: map[string]any{
+							"entity_id": entityID,
+							"flow_path": tc.instancePath,
+						},
+					})); err != nil {
+						t.Fatalf("create workflow instance: %v", err)
+					}
 
-			if _, found, err := store.Load(ctx, testWorkflowInstanceRoute(instancePath)); err != nil || !found {
-				t.Fatalf("load exact route = found %v err %v", found, err)
-			}
-			if _, found, err := store.Load(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
-				t.Fatalf("load entity identity: %v", err)
-			} else if found {
-				t.Fatalf("entity identity %q addressed workflow route %q", entityID, instancePath)
+					if _, found, err := store.Load(ctx, testWorkflowInstanceRoute(tc.instancePath)); err != nil || !found {
+						t.Fatalf("load exact route = found %v err %v", found, err)
+					}
+					if _, found, err := store.Load(ctx, testWorkflowInstanceRoute(entityID)); err != nil {
+						t.Fatalf("load entity identity: %v", err)
+					} else if found {
+						t.Fatalf("entity identity %q addressed workflow route %q", entityID, tc.instancePath)
+					}
+				})
 			}
 		})
 	}

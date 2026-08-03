@@ -94,7 +94,7 @@ func TestUnacceptedSelectedStoreEventMutationBoundariesFailBeforeSQL(t *testing.
 						})
 					}},
 					{name: "run_runtime_mutation", call: func() error {
-						return store.RunRuntimeMutation(context.Background(), func(context.Context, *sql.Tx) error {
+						return store.runRuntimeMutation(context.Background(), "schema admission proof", func(context.Context, *sql.Tx) error {
 							callbackCalled = true
 							return nil
 						})

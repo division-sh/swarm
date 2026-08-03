@@ -33,7 +33,6 @@ import (
 
 type dynamicFlowCreationAtomicityStore interface {
 	externalStoreTestDurableEventBusStore
-	externalStoreTestMutationOwner
 	runtimepipeline.WorkflowPersistenceOwner
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store

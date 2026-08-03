@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -64,7 +64,7 @@ func TestSQLiteEntityStateDiffRequiresExistingCanonicalRunBeforeMutation(t *test
 	t.Cleanup(func() { _ = tx.Rollback() })
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
-	ctx, err = runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	ctx, err = authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
 	if err != nil {
 		t.Fatalf("begin author activity: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestSQLiteInitialValueMutationRequiresExistingCanonicalRunBeforeMutation(t 
 	t.Cleanup(func() { _ = tx.Rollback() })
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
-	ctx, err = runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	ctx, err = authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
 	if err != nil {
 		t.Fatalf("begin author activity: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestSQLiteWorkflowInstanceStore_runPipelineMutationDoesNotRetryActiveTransa
 
 	busyErr := errors.New("SQLITE_BUSY: database is locked")
 	var attempts int32
-	txctx, err := runtimeauthoractivity.Begin(WithPipelineSQLTxContext(ctx, tx), tx, runtimeauthoractivity.DialectSQLite)
+	txctx, err := authoractivityfixture.Begin(WithPipelineSQLTxContext(ctx, tx), tx, authoractivityfixture.DialectSQLite)
 	if err != nil {
 		t.Fatalf("begin author activity story: %v", err)
 	}
@@ -473,13 +473,13 @@ func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.C
 	txctx := withPipelinePostCommitActions(WithPipelineSQLTxContext(ctx, tx), &postCommit)
 	txctx = withPipelineRollbackActions(txctx, &rollbackActions)
 	dialect := r.dialect
-	authorDialect := runtimeauthoractivity.DialectSQLite
+	authorDialect := authoractivityfixture.DialectSQLite
 	if dialect == workflowStoreDialectPostgres {
-		authorDialect = runtimeauthoractivity.DialectPostgres
+		authorDialect = authoractivityfixture.DialectPostgres
 	} else {
 		dialect = workflowStoreDialectSQLite
 	}
-	storyctx, err := runtimeauthoractivity.Begin(txctx, tx, authorDialect)
+	storyctx, err := authoractivityfixture.Begin(txctx, tx, authorDialect)
 	if err != nil {
 		flushPipelineRollbackActions(rollbackActions)
 		return err
@@ -488,7 +488,7 @@ func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.C
 		flushPipelineRollbackActions(rollbackActions)
 		return err
 	}
-	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
+	if err := authoractivityfixture.Finalize(storyctx); err != nil {
 		flushPipelineRollbackActions(rollbackActions)
 		return err
 	}

@@ -248,9 +248,7 @@ func seedCompletionBlockerRun(t *testing.T, fixture runLifecycleCandidateParityF
 	if _, err := fixture.db.ExecContext(ctx, query, semanticRunFixtureFlow, semanticRunFixtureFlow); err != nil {
 		t.Fatalf("seed completion blocker flow instance: %v", err)
 	}
-	if err := fixture.store.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		return materializeCompletedRunEntityForTest(txctx, fixture.store, runID)
-	}); err != nil {
+	if err := materializeCompletedRunEntityForTest(ctx, fixture.store, runID); err != nil {
 		t.Fatalf("seed completion blocker entity: %v", err)
 	}
 	return runID

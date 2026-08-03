@@ -11,11 +11,10 @@ import (
 	"testing"
 	"time"
 
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
-func TestSQLiteRuntimeStore_RunRuntimeMutationRetriesBusyAndFlushesPostCommitOnce(t *testing.T) {
+func TestSQLiteRuntimeStore_PrivateMutationRetriesBusy(t *testing.T) {
 	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond)
 	ctx, cancel := context.WithTimeout(storeTestWorkContext(t, testAuthorActivityContext()), 2*time.Second)
 	defer cancel()
@@ -37,19 +36,13 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationRetriesBusyAndFlushesPostCommitOnc
 	busySeen := make(chan struct{})
 	var closeBusy sync.Once
 	var attempts int32
-	var postCommitActions int32
 	done := make(chan error, 1)
 	go func() {
-		done <- store.RunRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		done <- store.runRuntimeMutation(ctx, "sqlite runtime mutation proof", func(txctx context.Context, tx *sql.Tx) error {
 			if tx == nil {
 				return errors.New("runtime mutation transaction is required")
 			}
 			atomic.AddInt32(&attempts, 1)
-			if !runtimepipeline.QueuePipelinePostCommitAction(txctx, func(context.Context) {
-				atomic.AddInt32(&postCommitActions, 1)
-			}) {
-				return errors.New("queue pipeline post-commit action")
-			}
 			err := writeRuntimeMutationTestMarker(txctx, tx)
 			if sqliteRuntimeMutationBusyError(err) {
 				closeBusy.Do(func() { close(busySeen) })
@@ -71,7 +64,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationRetriesBusyAndFlushesPostCommitOnc
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("RunRuntimeMutation after lock release: %v", err)
+			t.Fatalf("private mutation after lock release: %v", err)
 		}
 	case <-ctx.Done():
 		t.Fatalf("wait for retried runtime mutation: %v", ctx.Err())
@@ -79,12 +72,9 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationRetriesBusyAndFlushesPostCommitOnc
 	if got := atomic.LoadInt32(&attempts); got < 2 {
 		t.Fatalf("attempts = %d, want retry after busy", got)
 	}
-	if got := atomic.LoadInt32(&postCommitActions); got != 1 {
-		t.Fatalf("post-commit actions = %d, want only successful attempt flushed", got)
-	}
 }
 
-func TestSQLiteRuntimeStore_RunRuntimeMutationStopsRetryOnContextDeadline(t *testing.T) {
+func TestSQLiteRuntimeStore_PrivateMutationStopsRetryOnContextDeadline(t *testing.T) {
 	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, time.Millisecond)
 	baseCtx := testAuthorActivityContext()
 
@@ -105,7 +95,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationStopsRetryOnContextDeadline(t *tes
 	ctx, cancel := context.WithTimeout(baseCtx, sqliteRuntimeMutationRetryBudget/20)
 	defer cancel()
 	var attempts int32
-	err = store.RunRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err = store.runRuntimeMutation(ctx, "sqlite runtime mutation deadline proof", func(txctx context.Context, tx *sql.Tx) error {
 		atomic.AddInt32(&attempts, 1)
 		return writeRuntimeMutationTestMarker(txctx, tx)
 	})
@@ -117,7 +107,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationStopsRetryOnContextDeadline(t *tes
 	}
 }
 
-func TestSQLiteRuntimeStore_RunRuntimeMutationContextDeadlineCapsDriverBusyTimeout(t *testing.T) {
+func TestSQLiteRuntimeStore_PrivateMutationContextDeadlineCapsDriverBusyTimeout(t *testing.T) {
 	store, lockStore := newSQLiteRuntimeMutationBusyStores(t, 50*time.Millisecond)
 	baseCtx := testAuthorActivityContext()
 
@@ -133,7 +123,7 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationContextDeadlineCapsDriverBusyTimeo
 	ctx, cancel := context.WithTimeout(baseCtx, 80*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	err = store.RunRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err = store.runRuntimeMutation(ctx, "sqlite runtime mutation deadline proof", func(txctx context.Context, tx *sql.Tx) error {
 		return writeRuntimeMutationTestMarker(txctx, tx)
 	})
 	elapsed := time.Since(start)
@@ -142,75 +132,6 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationContextDeadlineCapsDriverBusyTimeo
 	}
 	if elapsed >= time.Second {
 		t.Fatalf("elapsed = %s, want context deadline to cap sqlite busy_timeout", elapsed)
-	}
-}
-
-func TestSQLiteRuntimeStore_RunRuntimeMutationDoesNotRetryActiveTransaction(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	ctx := testAuthorActivityContext()
-	tx, err := store.backend.db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin active tx: %v", err)
-	}
-	t.Cleanup(func() { _ = tx.Rollback() })
-
-	busyErr := errors.New("SQLITE_BUSY: database is locked")
-	var attempts int32
-	err = store.RunRuntimeMutation(runtimepipeline.WithPipelineSQLTxContext(ctx, tx), func(_ context.Context, gotTx *sql.Tx) error {
-		atomic.AddInt32(&attempts, 1)
-		if gotTx != tx {
-			t.Fatalf("transaction = %#v, want active transaction", gotTx)
-		}
-		return busyErr
-	})
-	if !errors.Is(err, busyErr) {
-		t.Fatalf("RunRuntimeMutation error = %v, want sentinel busy error", err)
-	}
-	if got := atomic.LoadInt32(&attempts); got != 1 {
-		t.Fatalf("attempts = %d, want no retry inside active transaction", got)
-	}
-}
-
-func TestSQLiteRuntimeStore_RunRuntimeMutationPostCommitCanReenterRuntimeMutation(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	ctx, cancel := context.WithTimeout(storeTestWorkContext(t, testAuthorActivityContext()), 2*time.Second)
-	defer cancel()
-
-	innerDone := make(chan error, 1)
-	done := make(chan error, 1)
-	go func() {
-		done <- store.RunRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			if err := writeRuntimeMutationTestMarker(txctx, tx); err != nil {
-				return err
-			}
-			if !runtimepipeline.QueuePipelinePostCommitAction(txctx, func(context.Context) {
-				innerCtx := runtimepipeline.WithoutPipelineSQLTxContext(ctx)
-				innerDone <- store.RunRuntimeMutation(innerCtx, func(innerTxCtx context.Context, innerTx *sql.Tx) error {
-					return writeRuntimeMutationTestMarker(innerTxCtx, innerTx)
-				})
-			}) {
-				return errors.New("queue pipeline post-commit action")
-			}
-			return nil
-		})
-	}()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("RunRuntimeMutation with re-entrant post-commit action: %v", err)
-		}
-	case <-ctx.Done():
-		t.Fatalf("post-commit runtime mutation re-entry did not complete before context deadline: %v", ctx.Err())
-	}
-
-	select {
-	case err := <-innerDone:
-		if err != nil {
-			t.Fatalf("re-entrant RunRuntimeMutation from post-commit action: %v", err)
-		}
-	default:
-		t.Fatal("post-commit action did not run")
 	}
 }
 

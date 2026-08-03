@@ -9,9 +9,9 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -29,7 +29,7 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 
 		events.EventType("workflow.executable"),
 		"runtime", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, now.Add(3*time.Second)))
-	eventtestsql.CorruptEventStore(t, ctx, store.backend.db, runtimeauthoractivity.DialectSQLite, eventtestsql.EventCorruptionClaim{
+	eventtestsql.CorruptEventStore(t, ctx, store.backend.db, authoractivityfixture.DialectSQLite, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.named_operation_atomicity",
 		Reason:    "prove recovery fails closed when durable replay-scope evidence is missing",
 	}, `DELETE FROM committed_replay_scopes WHERE event_id = ?`, "", executableID)
@@ -92,7 +92,7 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 
 		events.EventType("workflow.executable"),
 		"runtime", "", json.RawMessage(`{"ok":true}`), 0, runID, "", events.EventEnvelope{}, now.Add(3*time.Second)))
-	eventtestsql.CorruptEventStore(t, ctx, pg.backend.db, runtimeauthoractivity.DialectPostgres, eventtestsql.EventCorruptionClaim{
+	eventtestsql.CorruptEventStore(t, ctx, pg.backend.db, authoractivityfixture.DialectPostgres, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.named_operation_atomicity",
 		Reason:    "prove recovery fails closed when durable replay-scope evidence is missing",
 	}, "", `DELETE FROM committed_replay_scopes WHERE event_id = $1::uuid`, executableID)

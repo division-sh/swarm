@@ -23,52 +23,54 @@ var _ runtimeeffects.CompletionStore = (*SQLiteRuntimeStore)(nil)
 func (s *PostgresStore) SettleCompletion(ctx context.Context, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) (runtimeeffects.CompletionSettlementResult, error) {
 	var providerHeadErr error
 	var spendRecorded bool
-	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		providerHeadErr = nil
-		spendRecorded = false
-		attemptSettlement := settlement
-		if err := requireExternalEffectAuthorityPostgres(txctx, tx, attempt.Authority, false); err != nil {
-			return err
-		}
-		if err := requireCompletionAttemptPostgres(txctx, tx, attempt, attemptSettlement); err != nil {
-			return err
-		}
-		if attemptSettlement.ProviderHead != nil {
-			req := completionProviderHeadSettlement(attempt, attemptSettlement)
-			if providerHeadErr = requireProviderHeadLifecyclePostgres(txctx, tx, req); providerHeadErr == nil {
-				providerHeadErr = promoteProviderHeadPostgres(txctx, tx, req)
-			}
-			if providerHeadErr != nil {
-				attemptSettlement = completionProviderHeadUncertainty(attemptSettlement, providerHeadErr)
-			}
-		}
-		if err := insertCompletionTargetPostgres(txctx, tx, attempt, attemptSettlement); err != nil {
-			return err
-		}
-		if err := recordCompletionTurnAuthorActivity(txctx, story, attempt, attemptSettlement); err != nil {
-			return err
-		}
-		var err error
-		spendRecorded, err = insertCompletionSpendPostgres(txctx, tx, attempt, attemptSettlement)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(txctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=$1::uuid`, attempt.AttemptID); err != nil {
-			return fmt.Errorf("release completion budget reservations: %w", err)
-		}
-		changed, err := settleExternalAttemptPostgres(txctx, tx, attemptSettlement.Settlement)
-		if err != nil {
-			return err
-		}
-		if changed && strings.TrimSpace(attempt.Authority.Target.RunID) != "" {
-			if _, err := s.requestCompletionCandidateTx(txctx, tx, attempt.Authority.Target.RunID, nil); err != nil {
+	err := withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
+		return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			providerHeadErr = nil
+			spendRecorded = false
+			attemptSettlement := settlement
+			if err := requireExternalEffectAuthorityPostgres(txctx, tx, attempt.Authority, false); err != nil {
 				return err
 			}
-		}
-		if err := recordExternalEffectStory(txctx, story, externalEffectStorySourceFromAttempt(attempt), attemptSettlement.Settlement.State, attemptSettlement.Settlement.Failure, attemptSettlement.Now.UTC()); err != nil {
-			return err
-		}
-		return nil
+			if err := requireCompletionAttemptPostgres(txctx, tx, attempt, attemptSettlement); err != nil {
+				return err
+			}
+			if attemptSettlement.ProviderHead != nil {
+				req := completionProviderHeadSettlement(attempt, attemptSettlement)
+				if providerHeadErr = requireProviderHeadLifecyclePostgres(txctx, tx, req); providerHeadErr == nil {
+					providerHeadErr = promoteProviderHeadPostgres(txctx, tx, req)
+				}
+				if providerHeadErr != nil {
+					attemptSettlement = completionProviderHeadUncertainty(attemptSettlement, providerHeadErr)
+				}
+			}
+			if err := insertCompletionTargetPostgres(txctx, tx, attempt, attemptSettlement); err != nil {
+				return err
+			}
+			if err := recordCompletionTurnAuthorActivity(txctx, story, attempt, attemptSettlement); err != nil {
+				return err
+			}
+			var err error
+			spendRecorded, err = insertCompletionSpendPostgres(txctx, tx, attempt, attemptSettlement)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(txctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=$1::uuid`, attempt.AttemptID); err != nil {
+				return fmt.Errorf("release completion budget reservations: %w", err)
+			}
+			changed, err := settleExternalAttemptPostgres(txctx, tx, attemptSettlement.Settlement)
+			if err != nil {
+				return err
+			}
+			if changed && strings.TrimSpace(attempt.Authority.Target.RunID) != "" {
+				if _, err := s.requestCompletionCandidateTx(txctx, tx, attempt.Authority.Target.RunID, nil, handoff); err != nil {
+					return err
+				}
+			}
+			if err := recordExternalEffectStory(txctx, story, externalEffectStorySourceFromAttempt(attempt), attemptSettlement.Settlement.State, attemptSettlement.Settlement.Failure, attemptSettlement.Now.UTC()); err != nil {
+				return err
+			}
+			return nil
+		})
 	})
 	if err != nil {
 		return runtimeeffects.CompletionSettlementResult{}, err
@@ -81,52 +83,54 @@ func (s *PostgresStore) SettleCompletion(ctx context.Context, attempt runtimeeff
 func (s *SQLiteRuntimeStore) SettleCompletion(ctx context.Context, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) (runtimeeffects.CompletionSettlementResult, error) {
 	var providerHeadErr error
 	var spendRecorded bool
-	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite settle completion", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		providerHeadErr = nil
-		spendRecorded = false
-		attemptSettlement := settlement
-		if err := requireExternalEffectAuthoritySQLite(txctx, tx, attempt.Authority, false); err != nil {
-			return err
-		}
-		if err := requireCompletionAttemptSQLite(txctx, tx, attempt, attemptSettlement); err != nil {
-			return err
-		}
-		if attemptSettlement.ProviderHead != nil {
-			req := completionProviderHeadSettlement(attempt, attemptSettlement)
-			if providerHeadErr = requireProviderHeadLifecycleSQLiteTx(txctx, tx, req); providerHeadErr == nil {
-				providerHeadErr = promoteProviderHeadSQLiteTx(txctx, tx, req)
-			}
-			if providerHeadErr != nil {
-				attemptSettlement = completionProviderHeadUncertainty(attemptSettlement, providerHeadErr)
-			}
-		}
-		if err := insertCompletionTargetSQLite(txctx, tx, attempt, attemptSettlement); err != nil {
-			return err
-		}
-		if err := recordCompletionTurnAuthorActivity(txctx, story, attempt, attemptSettlement); err != nil {
-			return err
-		}
-		var err error
-		spendRecorded, err = insertCompletionSpendSQLite(txctx, tx, attempt, attemptSettlement)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(txctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=?`, attempt.AttemptID); err != nil {
-			return fmt.Errorf("release sqlite completion budget reservations: %w", err)
-		}
-		changed, err := settleExternalAttemptSQLiteTx(txctx, tx, attemptSettlement.Settlement)
-		if err != nil {
-			return err
-		}
-		if changed && strings.TrimSpace(attempt.Authority.Target.RunID) != "" {
-			if _, err := s.requestCompletionCandidateTx(txctx, tx, attempt.Authority.Target.RunID, nil); err != nil {
+	err := withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
+		return s.runPrivateAuthorActivityMutation(ctx, "sqlite settle completion", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			providerHeadErr = nil
+			spendRecorded = false
+			attemptSettlement := settlement
+			if err := requireExternalEffectAuthoritySQLite(txctx, tx, attempt.Authority, false); err != nil {
 				return err
 			}
-		}
-		if err := recordExternalEffectStory(txctx, story, externalEffectStorySourceFromAttempt(attempt), attemptSettlement.Settlement.State, attemptSettlement.Settlement.Failure, attemptSettlement.Now.UTC()); err != nil {
-			return err
-		}
-		return nil
+			if err := requireCompletionAttemptSQLite(txctx, tx, attempt, attemptSettlement); err != nil {
+				return err
+			}
+			if attemptSettlement.ProviderHead != nil {
+				req := completionProviderHeadSettlement(attempt, attemptSettlement)
+				if providerHeadErr = requireProviderHeadLifecycleSQLiteTx(txctx, tx, req); providerHeadErr == nil {
+					providerHeadErr = promoteProviderHeadSQLiteTx(txctx, tx, req)
+				}
+				if providerHeadErr != nil {
+					attemptSettlement = completionProviderHeadUncertainty(attemptSettlement, providerHeadErr)
+				}
+			}
+			if err := insertCompletionTargetSQLite(txctx, tx, attempt, attemptSettlement); err != nil {
+				return err
+			}
+			if err := recordCompletionTurnAuthorActivity(txctx, story, attempt, attemptSettlement); err != nil {
+				return err
+			}
+			var err error
+			spendRecorded, err = insertCompletionSpendSQLite(txctx, tx, attempt, attemptSettlement)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(txctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=?`, attempt.AttemptID); err != nil {
+				return fmt.Errorf("release sqlite completion budget reservations: %w", err)
+			}
+			changed, err := settleExternalAttemptSQLiteTx(txctx, tx, attemptSettlement.Settlement)
+			if err != nil {
+				return err
+			}
+			if changed && strings.TrimSpace(attempt.Authority.Target.RunID) != "" {
+				if _, err := s.requestCompletionCandidateTx(txctx, tx, attempt.Authority.Target.RunID, nil, handoff); err != nil {
+					return err
+				}
+			}
+			if err := recordExternalEffectStory(txctx, story, externalEffectStorySourceFromAttempt(attempt), attemptSettlement.Settlement.State, attemptSettlement.Settlement.Failure, attemptSettlement.Now.UTC()); err != nil {
+				return err
+			}
+			return nil
+		})
 	})
 	if err != nil {
 		return runtimeeffects.CompletionSettlementResult{}, err

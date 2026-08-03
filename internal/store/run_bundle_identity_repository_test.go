@@ -168,7 +168,7 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 		prohibited []string
 	}{
 		{
-			path: "internal/runtime/mutationlog/mutationlog.go",
+			path: "internal/store/internal/mutationlog/adapter.go",
 			required: []string{
 				"runLifecycle.RequireActiveRunSource",
 				"runFact.Matches(contextFact)",
@@ -216,13 +216,11 @@ func TestRepositoryBundleSourceOwnershipHandoffsRequireExactOpaqueFacts(t *testi
 		{
 			path: "internal/runtime/bus/outbox.go",
 			required: []string{
-				"func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.EmitIntent) error",
-				"ctx, lease, err := o.bus.beginRuntimeWork(ctx)",
 				"func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error",
 				"ctx, lease, err := d.bus.beginRuntimeWork(ctx)",
 				"func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fallback runtimeengine.EmitIntent)",
 				"ctx, err = d.bus.admitBundleSourceFact(ctx)",
-				"dispatchCtx = runtimecorrelation.WithBundleSourceFact(dispatchCtx, sourceFact)",
+				"func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimeengine.EmitIntent, publicationClaim *pipelinePublicationClaim)",
 				"func (eb *EventBus) clearPendingOutboxOperation(ctx context.Context, eventID string) error",
 			},
 		},
@@ -336,7 +334,6 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"DispatchPreparedPublishAsync":               operationMutation,
 		"DispatchDeliveryContinuation":               operationMutation,
 		"EngineDispatcher":                           operationRetained,
-		"EngineOutbox":                               operationRetained,
 		"ApplyInboundDeliveryCommit":                 operationMutation,
 		"CommitDynamicFlowRuntimeCreationOccurrence": operationMutation,
 		"FinalizeEnginePublications":                 operationMutation,
@@ -353,15 +350,12 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"PrepareAgentRoute":                          operationRetained,
 		"PrepareEnginePublications":                  operationMutation,
 		"PrepareInboundDeliveryBatch":                operationMutation,
-		"PreparePublishInMutation":                   operationMutation,
 		"PrepareSelectedForkPublish":                 operationMutation,
 		"Publish":                                    operationMutation,
 		"PublishAcknowledged":                        operationMutation,
 		"PublishAndWait":                             operationMutation,
 		"PublishDirect":                              operationMutation,
-		"PublishDirectInMutation":                    operationMutation,
 		"PublishDirectRoutes":                        operationMutation,
-		"PublishInMutation":                          operationAdmittedChild,
 		"RecoverPersistedPipeline":                   operationMutation,
 		"RegisterRuntimeActiveAgentDescriptor":       operationRetained,
 		"ReleaseRunQueue":                            operationMutation,
@@ -375,6 +369,7 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"ResolveSubscribedRecipients":                operationPureRead,
 		"PublishPersistedFlowInstanceRoute":          operationMutation,
 		"RetirePublishedFlowInstanceRoute":           operationMutation,
+		"RetireCommittedFlowInstanceRoute":           operationAdmittedChild,
 		"RouteTable":                                 operationRetained,
 		"RunLifecycleCandidateOwner":                 operationRetained,
 		"SetDeliveryAuthority":                       operationRetained,

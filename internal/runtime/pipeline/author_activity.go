@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -9,10 +8,6 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
-
-func recordActivityAttemptStory(ctx context.Context, rec ActivityAttemptRecord, transition string) error {
-	return runtimeauthoractivity.Record(ctx, ActivityAttemptStoryDraft(rec, transition))
-}
 
 func ActivityAttemptStoryDraft(rec ActivityAttemptRecord, transition string) runtimeauthoractivity.Draft {
 	retry := rec.Attempt

@@ -11,7 +11,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
@@ -20,6 +19,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -261,7 +261,7 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 	var deliveryAuthority runtimedelivery.ExecutionAuthority
 	if persistSource {
 		bindingID := uuid.NewString()
-		if fixture.dialect == runtimeauthoractivity.DialectSQLite {
+		if fixture.dialect == authoractivityfixture.DialectSQLite {
 			if _, err := fixture.db.ExecContext(ctx, `
 				INSERT INTO run_fork_selected_contract_bindings (
 					binding_id,fork_run_id,source_run_id,fork_event_id,mode,

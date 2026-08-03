@@ -156,7 +156,7 @@ func TestHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStores(t *
 				ensurePipelineTestRun(t, workflowStore, runID)
 				now := time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
 				decisionEventID := uuid.NewString()
-				source := eventtest.ConcreteTemplateRoutingSource("provider", "provider/instance-a", "requester-entity")
+				source := eventtest.ConcreteTemplateRoutingSource("provider", "provider/instance-a", "11111111-1111-1111-1111-111111111111")
 				anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
 					RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
 					Scope: scopeCase.scope, Source: source,
@@ -265,7 +265,7 @@ func TestHumanTaskDeferredAndExpiredOutcomesUseRequesterRouteOnBothStores(t *tes
 				ensurePipelineTestRun(t, workflowStore, runID)
 				now := time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
 				lifecycleEventID := uuid.NewString()
-				source := eventtest.ConcreteTemplateRoutingSource("provider", "provider/instance-a", "requester-entity")
+				source := eventtest.ConcreteTemplateRoutingSource("provider", "provider/instance-a", "11111111-1111-1111-1111-111111111111")
 				anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
 					RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
 					Scope: decisioncard.Scope{Kind: decisioncard.ScopeGlobal}, Source: source,

@@ -16,10 +16,9 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/runforkrevision"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	"github.com/google/uuid"
 )
 
@@ -33,32 +32,20 @@ var _ decisioncard.Store = (*PostgresStore)(nil)
 var _ decisioncard.Store = (*SQLiteRuntimeStore)(nil)
 
 func (s *PostgresStore) CreateDecisionCard(ctx context.Context, card decisioncard.Card) error {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		if err := requireActiveDecisionRun(ctx, tx, card.RunID, true); err != nil {
-			return err
-		}
-		return insertDecisionCard(ctx, tx, card, true)
-	}
-	return runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
+	return runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		if err := requireActiveDecisionRun(txctx, tx, card.RunID, true); err != nil {
 			return err
 		}
-		return insertDecisionCard(txctx, tx, card, true)
+		return insertDecisionCardWithStory(txctx, story, tx, card, true)
 	})
 }
 
 func (s *SQLiteRuntimeStore) CreateDecisionCard(ctx context.Context, card decisioncard.Card) error {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		if err := requireActiveDecisionRun(ctx, tx, card.RunID, false); err != nil {
-			return err
-		}
-		return insertDecisionCard(ctx, tx, card, false)
-	}
-	return s.runDecisionCardMutation(ctx, "sqlite create decision card", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runDecisionCardMutation(ctx, "sqlite create decision card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		if err := requireActiveDecisionRun(txctx, tx, card.RunID, false); err != nil {
 			return err
 		}
-		return insertDecisionCard(txctx, tx, card, false)
+		return insertDecisionCardWithStory(txctx, story, tx, card, false)
 	})
 }
 
@@ -68,9 +55,7 @@ func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisionca
 
 func insertDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, db decisionCardSQL, card decisioncard.Card, postgres bool) error {
 	if story == nil {
-		if err := runtimeauthoractivity.Require(ctx); err != nil {
-			return err
-		}
+		return fmt.Errorf("decision card creation requires private story ownership")
 	}
 	card.CreatedAt = decisioncard.CanonicalTimestamp(card.CreatedAt)
 	card.UpdatedAt = decisioncard.CanonicalTimestamp(card.UpdatedAt)
@@ -135,19 +120,11 @@ func insertDecisionCardWithStory(ctx context.Context, story runtimeauthoractivit
 }
 
 func (s *PostgresStore) GetDecisionCard(ctx context.Context, id string) (decisioncard.Card, error) {
-	db := decisionCardSQL(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		db = tx
-	}
-	return loadDecisionCard(ctx, db, id, true, false)
+	return loadDecisionCard(ctx, s.backend.db, id, true, false)
 }
 
 func (s *SQLiteRuntimeStore) GetDecisionCard(ctx context.Context, id string) (decisioncard.Card, error) {
-	db := decisionCardSQL(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		db = tx
-	}
-	return loadDecisionCard(ctx, db, id, false, false)
+	return loadDecisionCard(ctx, s.backend.db, id, false, false)
 }
 
 const decisionCardSelect = `SELECT
@@ -431,26 +408,20 @@ func listDecisionCards(ctx context.Context, db decisionCardSQL, opts decisioncar
 }
 
 func (s *PostgresStore) DecideDecisionCard(ctx context.Context, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return decideDecisionCard(ctx, tx, req, true)
-	}
 	var out decisioncard.DecisionOutcome
-	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
+	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
-		out, err = decideDecisionCard(txctx, tx, req, true)
+		out, err = decideDecisionCardWithStory(txctx, story, tx, req, true)
 		return err
 	})
 	return out, err
 }
 
 func (s *SQLiteRuntimeStore) DecideDecisionCard(ctx context.Context, req decisioncard.DecideRequest) (decisioncard.DecisionOutcome, error) {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return decideDecisionCard(ctx, tx, req, false)
-	}
 	var out decisioncard.DecisionOutcome
-	err := s.runDecisionCardMutation(ctx, "sqlite decide decision card", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runDecisionCardMutation(ctx, "sqlite decide decision card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
-		out, err = decideDecisionCard(txctx, tx, req, false)
+		out, err = decideDecisionCardWithStory(txctx, story, tx, req, false)
 		return err
 	})
 	return out, err
@@ -462,9 +433,7 @@ func decideDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.Decide
 
 func decideDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, req decisioncard.DecideRequest, postgres bool) (decisioncard.DecisionOutcome, error) {
 	if story == nil {
-		if err := runtimeauthoractivity.Require(ctx); err != nil {
-			return decisioncard.DecisionOutcome{}, err
-		}
+		return decisioncard.DecisionOutcome{}, fmt.Errorf("decision card decision requires private story ownership")
 	}
 	now := decisioncard.CanonicalTimestamp(req.Now)
 	if now.IsZero() {
@@ -582,26 +551,20 @@ func decideDecisionCardWithStory(ctx context.Context, story runtimeauthoractivit
 }
 
 func (s *PostgresStore) DeferDecisionCard(ctx context.Context, req decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return deferDecisionCard(ctx, tx, req, true)
-	}
 	var out decisioncard.DecisionOutcome
-	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
+	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
-		out, err = deferDecisionCard(txctx, tx, req, true)
+		out, err = deferDecisionCardWithStory(txctx, story, tx, req, true)
 		return err
 	})
 	return out, err
 }
 
 func (s *SQLiteRuntimeStore) DeferDecisionCard(ctx context.Context, req decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error) {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return deferDecisionCard(ctx, tx, req, false)
-	}
 	var out decisioncard.DecisionOutcome
-	err := s.runDecisionCardMutation(ctx, "sqlite defer decision card", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runDecisionCardMutation(ctx, "sqlite defer decision card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
-		out, err = deferDecisionCard(txctx, tx, req, false)
+		out, err = deferDecisionCardWithStory(txctx, story, tx, req, false)
 		return err
 	})
 	return out, err
@@ -613,9 +576,7 @@ func deferDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.DeferRe
 
 func deferDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, req decisioncard.DeferRequest, postgres bool) (decisioncard.DecisionOutcome, error) {
 	if story == nil {
-		if err := runtimeauthoractivity.Require(ctx); err != nil {
-			return decisioncard.DecisionOutcome{}, err
-		}
+		return decisioncard.DecisionOutcome{}, fmt.Errorf("decision card deferral requires private story ownership")
 	}
 	now := decisioncard.CanonicalTimestamp(req.Now)
 	if now.IsZero() {
@@ -654,11 +615,8 @@ func deferDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity
 }
 
 func (s *PostgresStore) BeginDecisionCardInput(ctx context.Context, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return beginDecisionCardInput(ctx, tx, req, true)
-	}
 	var draft decisioncard.InputDraft
-	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
+	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
 		draft, err = beginDecisionCardInput(txctx, tx, req, true)
 		return err
@@ -667,11 +625,8 @@ func (s *PostgresStore) BeginDecisionCardInput(ctx context.Context, req decision
 }
 
 func (s *SQLiteRuntimeStore) BeginDecisionCardInput(ctx context.Context, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return beginDecisionCardInput(ctx, tx, req, false)
-	}
 	var draft decisioncard.InputDraft
-	err := s.runDecisionCardMutation(ctx, "sqlite begin decision card input", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runDecisionCardMutation(ctx, "sqlite begin decision card input", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
 		draft, err = beginDecisionCardInput(txctx, tx, req, false)
 		return err
@@ -735,11 +690,8 @@ func beginDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.Be
 }
 
 func (s *PostgresStore) CancelDecisionCardInput(ctx context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return cancelDecisionCardInput(ctx, tx, req, true)
-	}
 	var draft decisioncard.InputDraft
-	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
+	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
 		draft, err = cancelDecisionCardInput(txctx, tx, req, true)
 		return err
@@ -748,11 +700,8 @@ func (s *PostgresStore) CancelDecisionCardInput(ctx context.Context, req decisio
 }
 
 func (s *SQLiteRuntimeStore) CancelDecisionCardInput(ctx context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		return cancelDecisionCardInput(ctx, tx, req, false)
-	}
 	var draft decisioncard.InputDraft
-	err := s.runDecisionCardMutation(ctx, "sqlite cancel decision card input", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runDecisionCardMutation(ctx, "sqlite cancel decision card input", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
 		draft, err = cancelDecisionCardInput(txctx, tx, req, false)
 		return err
@@ -931,24 +880,28 @@ func transitionDecisionCardDrafts(ctx context.Context, tx *sql.Tx, filter draftT
 }
 
 func (s *PostgresStore) SupersedeDecisionCardsForStage(ctx context.Context, runID, entityID, activationID, reason string, now time.Time) error {
-	return runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
-		changed, err := supersedeDecisionCardsForStage(txctx, tx, runID, entityID, activationID, reason, now, true)
-		if err != nil || !changed {
+	return withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
+		return runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+			changed, err := supersedeDecisionCardsForStageWithStory(txctx, story, tx, runID, entityID, activationID, reason, now, true)
+			if err != nil || !changed {
+				return err
+			}
+			_, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil, handoff)
 			return err
-		}
-		_, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil)
-		return err
+		})
 	})
 }
 
 func (s *SQLiteRuntimeStore) SupersedeDecisionCardsForStage(ctx context.Context, runID, entityID, activationID, reason string, now time.Time) error {
-	return s.runDecisionCardMutation(ctx, "sqlite supersede decision card", func(txctx context.Context, tx *sql.Tx) error {
-		changed, err := supersedeDecisionCardsForStage(txctx, tx, runID, entityID, activationID, reason, now, false)
-		if err != nil || !changed {
+	return withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
+		return s.runDecisionCardMutation(ctx, "sqlite supersede decision card", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
+			changed, err := supersedeDecisionCardsForStageWithStory(txctx, story, tx, runID, entityID, activationID, reason, now, false)
+			if err != nil || !changed {
+				return err
+			}
+			_, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil, handoff)
 			return err
-		}
-		_, err = s.requestCompletionCandidateTx(txctx, tx, runID, nil)
-		return err
+		})
 	})
 }
 
@@ -958,9 +911,7 @@ func supersedeDecisionCardsForStage(ctx context.Context, tx *sql.Tx, runID, enti
 
 func supersedeDecisionCardsForStageWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, runID, entityID, activationID, reason string, now time.Time, postgres bool) (bool, error) {
 	if story == nil {
-		if err := runtimeauthoractivity.Require(ctx); err != nil {
-			return false, err
-		}
+		return false, fmt.Errorf("decision card supersession requires private story ownership")
 	}
 	now = decisioncard.CanonicalTimestamp(now)
 	if now.IsZero() {
@@ -995,9 +946,7 @@ func supersedeDecisionCardsForStageWithStory(ctx context.Context, story runtimea
 
 func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
 	if story == nil {
-		if err := runtimeauthoractivity.Require(ctx); err != nil {
-			return err
-		}
+		return fmt.Errorf("run decision-card supersession requires private story ownership")
 	}
 	runID = strings.TrimSpace(runID)
 	reason = strings.TrimSpace(reason)
@@ -1086,7 +1035,7 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, story runtime
 
 func (s *PostgresStore) ExpireDecisionCardInputDrafts(ctx context.Context, now time.Time) (int, error) {
 	count := 0
-	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx) error {
+	err := runPostgresDecisionCardMutation(ctx, s, func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
 		count, err = transitionDecisionCardDrafts(txctx, tx, draftTransitionFilter{}, now.UTC(), true, true)
 		return err
@@ -1096,7 +1045,7 @@ func (s *PostgresStore) ExpireDecisionCardInputDrafts(ctx context.Context, now t
 
 func (s *SQLiteRuntimeStore) ExpireDecisionCardInputDrafts(ctx context.Context, now time.Time) (int, error) {
 	count := 0
-	err := s.runDecisionCardMutation(ctx, "sqlite expire decision card input drafts", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runDecisionCardMutation(ctx, "sqlite expire decision card input drafts", func(txctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation) error {
 		var err error
 		count, err = transitionDecisionCardDrafts(txctx, tx, draftTransitionFilter{}, now.UTC(), true, false)
 		return err
@@ -1265,9 +1214,7 @@ func appendDecisionCardChange(ctx context.Context, db decisionCardSQL, runID, ca
 func appendDecisionCardChangeWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, db decisionCardSQL, runID, cardID, changeType string, payload semanticvalue.Value, now time.Time, postgres bool) (int64, error) {
 	if cardChangeRegistered(changeType) {
 		if story == nil {
-			if err := runtimeauthoractivity.Require(ctx); err != nil {
-				return 0, err
-			}
+			return 0, fmt.Errorf("registered decision card change requires private story ownership")
 		}
 	}
 	now = decisioncard.CanonicalTimestamp(now)
@@ -1308,9 +1255,7 @@ func cardChangeRegistered(changeType string) bool {
 
 func recordDecisionCardChangeAuthorActivity(ctx context.Context, story runtimeauthoractivity.Mutation, db decisionCardSQL, changeID int64, runID, cardID, changeType string, now time.Time, postgres bool) error {
 	if story == nil {
-		if err := runtimeauthoractivity.Require(ctx); err != nil {
-			return err
-		}
+		return fmt.Errorf("decision card change story owner is required")
 	}
 	card, err := loadDecisionCard(ctx, db, cardID, postgres, false)
 	if err != nil {
@@ -1342,10 +1287,7 @@ func recordDecisionCardChangeAuthorActivity(ctx context.Context, story runtimeau
 		OccurredAt: now.UTC(), RunID: strings.TrimSpace(runID), EntityID: entityID, FlowID: flowID,
 		Projection: projection,
 	}
-	if story != nil {
-		return story.Record(ctx, draft)
-	}
-	return runtimeauthoractivity.Record(ctx, draft)
+	return story.Record(ctx, draft)
 }
 
 func decisionCardAuthorActivityIdentity(anchor decisioncard.Anchor) (anchorID, entityID, flowID string, err error) {
@@ -1373,67 +1315,19 @@ func decisionCardAuthorActivityIdentity(anchor decisioncard.Anchor) (anchorID, e
 	}
 }
 
-func runPostgresDecisionCardMutation(ctx context.Context, selected *PostgresStore, fn func(context.Context, *sql.Tx) error) error {
+func runPostgresDecisionCardMutation(ctx context.Context, selected *PostgresStore, fn func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation) error) error {
 	if selected == nil || selected.backend == nil || selected.backend.db == nil {
 		return errors.New("PostgreSQL decision card mutation requires selected store")
 	}
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		if !runtimeauthoractivity.InMutation(ctx, tx) {
-			return fmt.Errorf("decision card mutation entered from a raw transaction without author activity ownership")
-		}
-		return fn(ctx, tx)
-	}
-	conn, borrowed := runtimepipeline.PipelineSQLConnFromContext(ctx)
-	if !borrowed {
-		var err error
-		conn, err = selected.backend.db.Conn(ctx)
-		if err != nil {
-			return err
-		}
-		defer conn.Close()
-	}
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
-	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
-	txctx := runtimepipeline.WithPipelineSQLConnContext(ctx, conn)
-	txctx = runtimepipeline.WithPipelineSQLTxContext(txctx, tx)
-	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
-	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
-	storyctx, err := runtimeauthoractivity.Begin(txctx, tx, runtimeauthoractivity.DialectPostgres)
-	if err != nil {
-		return errors.Join(err, rollbackSQLTransaction(tx))
-	}
-	if err := fn(storyctx, tx); err != nil {
-		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
-		return errors.Join(err, rollbackSQLTransaction(tx))
-	}
-	if _, err := privaterunforkrevision.CaptureCurrentTransaction(storyctx, tx); err != nil {
-		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
-		return errors.Join(err, rollbackSQLTransaction(tx))
-	}
-	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
-		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
-		return errors.Join(err, rollbackSQLTransaction(tx))
-	}
-	if err := tx.Commit(); err != nil {
-		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
-		return errors.Join(err, rollbackSQLTransaction(tx))
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return nil
+	return selected.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		return fn(txctx, tx, runtimeAuthorActivityMutation(story))
+	})
 }
 
-func (s *SQLiteRuntimeStore) runDecisionCardMutation(ctx context.Context, label string, fn func(context.Context, *sql.Tx) error) error {
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		if !runtimeauthoractivity.InMutation(ctx, tx) {
-			return fmt.Errorf("%s entered from a raw transaction without author activity ownership", label)
-		}
-		return fn(ctx, tx)
-	}
-	return s.runAuthorActivityMutation(ctx, label, fn)
+func (s *SQLiteRuntimeStore) runDecisionCardMutation(ctx context.Context, label string, fn func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation) error) error {
+	return s.runPrivateAuthorActivityMutation(ctx, label, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		return fn(txctx, tx, runtimeAuthorActivityMutation(story))
+	})
 }
 
 func numberPostgresPlaceholders(query string) string {

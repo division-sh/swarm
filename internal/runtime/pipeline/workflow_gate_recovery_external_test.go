@@ -98,7 +98,6 @@ type gateRecoveryDecisionStore interface {
 	decisioncard.Store
 	decisioncard.ProposedEffectStore
 	decisioncard.HumanTaskStore
-	decisioncard.HumanTaskExpiryStore
 	runtimepipeline.HumanTaskExpiry
 	ExpireDecisionCardInputDrafts(context.Context, time.Time) (int, error)
 }
@@ -393,9 +392,9 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 			enteredAt := time.Now().UTC()
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-				InstanceID: "support", StorageRef: "support", WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
+				InstanceID: runID, StorageRef: runID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
 				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
-				Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "support", "instance_id": "support"},
+				Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
 			}, enteredAt); err != nil {
 				t.Fatal(err)
 			}
@@ -472,7 +471,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			}
 			decisionPayload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
 			decisionEvent := eventtest.RuntimeControl(decisionEventID, events.EventType("mailbox.card_decided"), "platform", "", decisionPayload, 0, runID, "",
-				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "support"), time.Now().UTC())
+				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), runID), time.Now().UTC())
 			storetest.CommitSemanticEvent(t, ctx, selected.events, decisionEvent)
 			forward, emitted, outcome, err := newCoordinator(otherGateBundle).Intercept(ctx, decisionEvent)
 			if err != nil || !gateRecoveryDeferred(outcome) {
@@ -597,7 +596,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				}
 				payload, _ := json.Marshal(map[string]any{"card_id": pendingCard.CardID})
 				decision := eventtest.RuntimeControl(decisionID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
-					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "support"), time.Now().UTC())
+					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), runID), time.Now().UTC())
 				storetest.CommitSemanticEvent(t, ctx, selected.events, decision)
 				consumed, _, _, routeErr = coordinator.Intercept(ctx, decision)
 				if routeErr != nil || consumed {
@@ -656,7 +655,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					SuccessEvent: "send_support_reply.succeeded", FailureEvent: "send_support_reply.failed",
 					RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
 					RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
-					EntityID: entityID, NodeID: "support", FlowID: "support", FlowInstance: "support", HandlerEventKey: "support.reply_drafted",
+					EntityID: entityID, NodeID: "support", FlowID: "support", FlowInstance: runID, HandlerEventKey: "support.reply_drafted",
 					SourceEventID: sourceEventID, SourceRunID: runID, SourceTaskID: "task-1",
 					ExecutionMode: executionmode.Live, ReplyContextID: "reply-context-route-proof", State: decisioncard.ProposedEffectPending,
 					CreatedAt: now, UpdatedAt: now,
@@ -671,7 +670,8 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				}
 				anchor, err := decisioncard.NewProposedEffectAnchor(decisioncard.ProposedEffectAnchor{
 					RequestEventID: requestEventID, ActivityID: continuation.ActivityID, Decision: "support_reply",
-					Scope: decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: "root", EntityID: entityID}, Source: eventtest.RootRoutingSource(entityID),
+					Scope:  decisioncard.Scope{Kind: decisioncard.ScopeEntity, FlowInstance: runID, EntityID: entityID},
+					Source: eventtest.StaticFlowRoutingSource("support", runID, entityID),
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -712,7 +712,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				}
 				payload, _ := canonicaljson.Bytes(map[string]any{"card_id": card.CardID})
 				decisionEvent := eventtest.RuntimeControl(decisionEventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
-					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "support"), now.Add(time.Minute))
+					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), runID), now.Add(time.Minute))
 				storetest.CommitSemanticEvent(t, ctx, selected.events, decisionEvent)
 				source := semanticview.Wrap(proposedEffectProofBundle("http://127.0.0.1:1"))
 				canonicalBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source},
@@ -814,9 +814,9 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			ctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))
 			enteredAt := time.Now().UTC()
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-				InstanceID: "support", StorageRef: "support", WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
+				InstanceID: runID, StorageRef: runID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
 				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
-				Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "support", "instance_id": "support"},
+				Metadata: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
 			}, enteredAt); err != nil {
 				t.Fatal(err)
 			}
@@ -839,7 +839,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 				t.Fatalf("proposal failure disposition = %#v, present=%v; want typed dead letter", disposition, disposed)
 			}
 
-			instance, ok, err := coordinator.Load(ctx, testWorkflowInstanceRoute("support"))
+			instance, ok, err := coordinator.Load(ctx, testWorkflowInstanceRoute(runID))
 			if err != nil || !ok || instance.CurrentState != "drafting" {
 				t.Fatalf("workflow after rollback = %#v, %v, %v", instance, ok, err)
 			}
@@ -1530,7 +1530,7 @@ func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCas
 	t.Helper()
 	ctx := testAuthorActivityContext(t, context.Background())
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: events.RouteIdentity{
-		FlowInstance: "support", EntityID: evt.EntityID(),
+		FlowID: "support", FlowInstance: evt.RunID(), EntityID: evt.EntityID(),
 	}}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected.events, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	proof, err := selected.events.ProveHandoff(ctx, evt.ID(), route)

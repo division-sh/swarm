@@ -107,7 +107,6 @@ type terminalEventAdmissionState struct {
 type terminalEventAdmissionHarness struct {
 	statuses         []string
 	append           func(context.Context, events.Event) error
-	appendTx         func(context.Context, events.Event) error
 	appendDiagnostic func(context.Context, events.Event) error
 	markTerminal     func(context.Context, string, string, string) error
 	loadState        func(context.Context, string, string) (terminalEventAdmissionState, error)
@@ -210,11 +209,6 @@ func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 		append: func(ctx context.Context, evt events.Event) error {
 			return commitSemanticEventFixture(ctx, pg, evt)
 		},
-		appendTx: func(ctx context.Context, evt events.Event) error {
-			return pg.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-				return commitSemanticEventFixtureTx(txctx, pg, tx, evt)
-			})
-		},
 		markTerminal: func(ctx context.Context, runID, eventID, status string) error {
 			if status == "forked" {
 				return seedCanonicalForkedRunForAdmissionTest(ctx, pg, runID)
@@ -256,11 +250,6 @@ func TestSQLiteTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 		statuses: []string{"completed", "cancelled", "failed"},
 		append: func(ctx context.Context, evt events.Event) error {
 			return commitSemanticEventFixture(ctx, sqliteStore, evt)
-		},
-		appendTx: func(ctx context.Context, evt events.Event) error {
-			return sqliteStore.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-				return commitSemanticEventFixtureTx(txctx, sqliteStore, tx, evt)
-			})
 		},
 		markTerminal: func(ctx context.Context, runID, eventID, status string) error {
 			if status == "forked" {
@@ -571,32 +560,23 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 			if err := harness.append(ctx, original); err != nil {
 				t.Fatalf("exact duplicate direct append: %v", err)
 			}
-			if err := harness.appendTx(ctx, original); err != nil {
-				t.Fatalf("exact duplicate transactional append: %v", err)
-			}
 
 			conflicting := terminalEventAdmissionEvent(original.ID(), runID, `{"value":"changed"}`, createdAt)
 			if err := harness.append(ctx, conflicting); !errors.Is(err, ErrEventIdentityConflict) {
 				t.Fatalf("conflicting direct duplicate error = %v, want event identity conflict", err)
-			}
-			if err := harness.appendTx(ctx, conflicting); !errors.Is(err, ErrEventIdentityConflict) {
-				t.Fatalf("conflicting transactional duplicate error = %v, want event identity conflict", err)
 			}
 			taskConflict := terminalEventAdmissionEventWithFacts(original.ID(), runID, "different-task", executionmode.Live, `{"value":"original"}`, createdAt)
 			if err := harness.append(ctx, taskConflict); !errors.Is(err, ErrEventIdentityConflict) {
 				t.Fatalf("different-task duplicate error = %v, want event identity conflict", err)
 			}
 			modeConflict := terminalEventAdmissionEventWithFacts(original.ID(), runID, "", executionmode.Mock, `{"value":"original"}`, createdAt)
-			if err := harness.appendTx(ctx, modeConflict); !errors.Is(err, ErrEventIdentityConflict) {
+			if err := harness.append(ctx, modeConflict); !errors.Is(err, ErrEventIdentityConflict) {
 				t.Fatalf("different-mode duplicate error = %v, want event identity conflict", err)
 			}
 
 			newEvent := terminalEventAdmissionEvent(uuid.NewString(), runID, `{"value":"new"}`, createdAt.Add(time.Second))
 			if err := harness.append(ctx, newEvent); !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
 				t.Fatalf("new direct event error = %v, want inactive-run rejection", err)
-			}
-			if err := harness.appendTx(ctx, newEvent); !errors.Is(err, storerunlifecycle.ErrRunNotActive) {
-				t.Fatalf("new transactional event error = %v, want inactive-run rejection", err)
 			}
 
 			state, err := harness.loadState(ctx, runID, newEvent.ID())

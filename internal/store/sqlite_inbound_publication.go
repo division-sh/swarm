@@ -18,9 +18,14 @@ func (s *SQLiteRuntimeStore) CommitInboundPublication(ctx context.Context, comma
 	if err := command.Validate(); err != nil {
 		return runtimeinbound.CommitResult{}, err
 	}
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return runtimeinbound.CommitResult{}, err
+	}
+	defer handoff.rollback()
 	request := command.Request.Normalized()
 	var result runtimeinbound.CommitResult
-	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite inbound publication", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	err = s.runPrivateAuthorActivityMutation(ctx, "sqlite inbound publication", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		existing, found, err := loadSQLiteInboundPublicationTx(txctx, tx, request.Provider, request.EntityID, request.ProviderEventID)
 		if err != nil {
 			return err
@@ -41,13 +46,13 @@ func (s *SQLiteRuntimeStore) CommitInboundPublication(ctx context.Context, comma
 		if err := insertSQLiteInboundPublicationPreparedTx(txctx, tx, request); err != nil {
 			return err
 		}
-		result, err = commitInboundPublicationTx(txctx, tx, story, s, s, false, command, request.ExpectedGeneration > 1)
+		result, err = commitInboundPublicationTx(txctx, tx, story, s, s, false, command, handoff)
 		return err
 	})
 	if err != nil {
 		return runtimeinbound.CommitResult{}, err
 	}
-	return result, nil
+	return result, handoff.commit()
 }
 
 func (s *SQLiteRuntimeStore) LoadInboundPublicationByIdentity(ctx context.Context, provider, entityID, providerEventID string) (runtimeinbound.Record, bool, error) {

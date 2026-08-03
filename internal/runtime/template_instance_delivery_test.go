@@ -870,7 +870,6 @@ auto_emit_on_create:
 type providerRollbackBackend interface {
 	runtimebus.EventStore
 	runtimeinbound.Runner
-	externalRuntimeTestMutationOwner
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
 	PipelineObligations() runtimepipelineobligation.Store
@@ -882,10 +881,6 @@ type routeMaterializationDBProofStore struct {
 
 func (s routeMaterializationDBProofStore) PipelineObligations() runtimepipelineobligation.Store {
 	return s.pg.PipelineObligations()
-}
-
-func (s routeMaterializationDBProofStore) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
-	return s.pg.RunRuntimeMutationContext(ctx, fn)
 }
 
 func (s routeMaterializationDBProofStore) RegisterAuthorActivityEventCatalog(scope runtimeauthoractivity.Scope, descriptors []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error) {

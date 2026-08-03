@@ -10,21 +10,22 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
 
 type postgresRunLifecycleMutation struct {
-	store *PostgresStore
-	tx    *sql.Tx
-	story runtimeauthoractivity.Mutation
+	store   *PostgresStore
+	tx      *sql.Tx
+	story   runtimeauthoractivity.Mutation
+	handoff *runLifecycleCandidateHandoffReservation
 }
 
 type sqliteRunLifecycleMutation struct {
-	store *SQLiteRuntimeStore
-	tx    *sql.Tx
-	story runtimeauthoractivity.Mutation
+	store   *SQLiteRuntimeStore
+	tx      *sql.Tx
+	story   runtimeauthoractivity.Mutation
+	handoff *runLifecycleCandidateHandoffReservation
 }
 
 type activeRunSourceOwnerFunc func(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
@@ -61,47 +62,80 @@ func requireSQLiteRunActive(ctx context.Context, tx *sql.Tx, runID string) error
 	return (sqliteRunLifecycleMutation{tx: tx}).RequireActive(ctx, runID)
 }
 
-func (s *PostgresStore) TransitionActiveRun(
+func runPostgresLifecycleOperation[T any](
 	ctx context.Context,
-	request runtimerunlifecycle.ActiveTransitionRequest,
-) (runtimerunlifecycle.MutationDisposition, error) {
-	tx, ok := runtimepipelineSQLTx(ctx)
-	if !ok {
-		return "", errors.New("PostgreSQL active run lifecycle transition requires the current named mutation")
-	}
-	return (postgresRunLifecycleMutation{store: s, tx: tx}).TransitionActive(ctx, request)
+	store *PostgresStore,
+	fn func(context.Context, postgresRunLifecycleMutation) (T, error),
+) (T, error) {
+	return withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (T, error) {
+		var result T
+		err := store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			var err error
+			result, err = fn(txctx, postgresRunLifecycleMutation{
+				store: store, tx: tx, story: runtimeAuthorActivityMutation(story), handoff: handoff,
+			})
+			return err
+		})
+		return result, err
+	})
+}
+
+func runSQLiteLifecycleOperation[T any](
+	ctx context.Context,
+	store *SQLiteRuntimeStore,
+	fn func(context.Context, sqliteRunLifecycleMutation) (T, error),
+) (T, error) {
+	return withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (T, error) {
+		var result T
+		err := store.runPrivateAuthorActivityMutation(ctx, "sqlite run lifecycle operation", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			var err error
+			result, err = fn(txctx, sqliteRunLifecycleMutation{
+				store: store, tx: tx, story: runtimeAuthorActivityMutation(story), handoff: handoff,
+			})
+			return err
+		})
+		return result, err
+	})
+}
+
+func (s *PostgresStore) TransitionActiveRun(ctx context.Context, request runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	return runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimerunlifecycle.MutationDisposition, error) {
+		return mutation.TransitionActive(ctx, request)
+	})
+}
+
+func (s *SQLiteRuntimeStore) TransitionActiveRun(ctx context.Context, request runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	return runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (runtimerunlifecycle.MutationDisposition, error) {
+		return mutation.TransitionActive(ctx, request)
+	})
 }
 
 func (s *PostgresStore) RequirePresentRun(ctx context.Context, runID string) error {
-	tx, err := requireRunLifecycleOperationTx(ctx, "PostgreSQL require run")
-	if err != nil {
-		return err
-	}
-	return (postgresRunLifecycleMutation{store: s, tx: tx}).RequirePresent(ctx, runID)
+	_, err := runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (struct{}, error) {
+		return struct{}{}, mutation.RequirePresent(ctx, runID)
+	})
+	return err
 }
 
 func (s *SQLiteRuntimeStore) RequirePresentRun(ctx context.Context, runID string) error {
-	tx, err := requireRunLifecycleOperationTx(ctx, "SQLite require run")
-	if err != nil {
-		return err
-	}
-	return (sqliteRunLifecycleMutation{store: s, tx: tx}).RequirePresent(ctx, runID)
+	_, err := runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (struct{}, error) {
+		return struct{}{}, mutation.RequirePresent(ctx, runID)
+	})
+	return err
 }
 
 func (s *PostgresStore) RequireActiveRun(ctx context.Context, runID string) error {
-	tx, err := requireRunLifecycleOperationTx(ctx, "PostgreSQL require active run")
-	if err != nil {
-		return err
-	}
-	return (postgresRunLifecycleMutation{store: s, tx: tx}).RequireActive(ctx, runID)
+	_, err := runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (struct{}, error) {
+		return struct{}{}, mutation.RequireActive(ctx, runID)
+	})
+	return err
 }
 
 func (s *SQLiteRuntimeStore) RequireActiveRun(ctx context.Context, runID string) error {
-	tx, err := requireRunLifecycleOperationTx(ctx, "SQLite require active run")
-	if err != nil {
-		return err
-	}
-	return (sqliteRunLifecycleMutation{store: s, tx: tx}).RequireActive(ctx, runID)
+	_, err := runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (struct{}, error) {
+		return struct{}{}, mutation.RequireActive(ctx, runID)
+	})
+	return err
 }
 
 // RequirePublicationRunActive performs the closed preflight used before route
@@ -121,121 +155,81 @@ func (s *SQLiteRuntimeStore) RequirePublicationRunActive(ctx context.Context, ru
 }
 
 func (s *PostgresStore) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-	tx, err := requireRunLifecycleOperationTx(ctx, "PostgreSQL require run source")
-	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
-	}
-	return (postgresRunLifecycleMutation{store: s, tx: tx}).RequirePresentSource(ctx, runID)
+	return runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimecorrelation.BundleSourceFact, error) {
+		return mutation.RequirePresentSource(ctx, runID)
+	})
 }
 
 func (s *SQLiteRuntimeStore) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-	tx, err := requireRunLifecycleOperationTx(ctx, "SQLite require run source")
-	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
-	}
-	return (sqliteRunLifecycleMutation{store: s, tx: tx}).RequirePresentSource(ctx, runID)
+	return runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (runtimecorrelation.BundleSourceFact, error) {
+		return mutation.RequirePresentSource(ctx, runID)
+	})
 }
 
 func (s *PostgresStore) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-	tx, err := requireRunLifecycleOperationTx(ctx, "PostgreSQL require active run source")
-	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
-	}
-	return (postgresRunLifecycleMutation{store: s, tx: tx}).RequireActiveSource(ctx, runID)
+	return runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimecorrelation.BundleSourceFact, error) {
+		return mutation.RequireActiveSource(ctx, runID)
+	})
 }
 
 func (s *SQLiteRuntimeStore) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-	tx, err := requireRunLifecycleOperationTx(ctx, "SQLite require active run source")
-	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
-	}
-	return (sqliteRunLifecycleMutation{store: s, tx: tx}).RequireActiveSource(ctx, runID)
+	return runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (runtimecorrelation.BundleSourceFact, error) {
+		return mutation.RequireActiveSource(ctx, runID)
+	})
 }
 
 func (s *PostgresStore) CreateRun(ctx context.Context, request runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error) {
-	tx, err := requireRunLifecycleOperationTx(ctx, "PostgreSQL create run")
-	if err != nil {
-		return "", err
-	}
-	return (postgresRunLifecycleMutation{store: s, tx: tx}).Create(ctx, request)
+	return runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimerunlifecycle.MutationDisposition, error) {
+		return mutation.Create(ctx, request)
+	})
 }
 
 func (s *SQLiteRuntimeStore) CreateRun(ctx context.Context, request runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error) {
-	tx, err := requireRunLifecycleOperationTx(ctx, "SQLite create run")
-	if err != nil {
-		return "", err
-	}
-	return (sqliteRunLifecycleMutation{store: s, tx: tx}).Create(ctx, request)
+	return runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (runtimerunlifecycle.MutationDisposition, error) {
+		return mutation.Create(ctx, request)
+	})
 }
 
 func (s *PostgresStore) ForkRunSource(ctx context.Context, request runtimerunlifecycle.ForkSourceRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	tx, err := requireRunLifecycleOperationTx(ctx, "PostgreSQL fork run source")
-	if err != nil {
-		return runtimerunlifecycle.Snapshot{}, "", err
+	type result struct {
+		snapshot    runtimerunlifecycle.Snapshot
+		disposition runtimerunlifecycle.MutationDisposition
 	}
-	return (postgresRunLifecycleMutation{store: s, tx: tx}).ForkSource(ctx, request)
+	value, err := runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (result, error) {
+		snapshot, disposition, err := mutation.ForkSource(ctx, request)
+		return result{snapshot: snapshot, disposition: disposition}, err
+	})
+	return value.snapshot, value.disposition, err
 }
 
 func (s *SQLiteRuntimeStore) ForkRunSource(ctx context.Context, request runtimerunlifecycle.ForkSourceRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	tx, err := requireRunLifecycleOperationTx(ctx, "SQLite fork run source")
-	if err != nil {
-		return runtimerunlifecycle.Snapshot{}, "", err
-	}
-	return (sqliteRunLifecycleMutation{store: s, tx: tx}).ForkSource(ctx, request)
+	return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf("%w: backend=sqlite run_id=%s", runtimerunlifecycle.ErrForkSourceUnsupported, strings.TrimSpace(request.RunID))
 }
 
 func (s *PostgresStore) ReviseRunSource(ctx context.Context, request runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error) {
-	tx, err := requireRunLifecycleOperationTx(ctx, "PostgreSQL revise run source")
-	if err != nil {
-		return "", err
-	}
-	return (postgresRunLifecycleMutation{store: s, tx: tx}).ReviseSource(ctx, request)
+	return runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimerunlifecycle.MutationDisposition, error) {
+		return mutation.ReviseSource(ctx, request)
+	})
 }
 
 func (s *SQLiteRuntimeStore) ReviseRunSource(ctx context.Context, request runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error) {
-	tx, err := requireRunLifecycleOperationTx(ctx, "SQLite revise run source")
-	if err != nil {
-		return "", err
-	}
-	return (sqliteRunLifecycleMutation{store: s, tx: tx}).ReviseSource(ctx, request)
+	return runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (runtimerunlifecycle.MutationDisposition, error) {
+		return mutation.ReviseSource(ctx, request)
+	})
 }
 
 func (s *PostgresStore) SyncRunCounters(ctx context.Context, runID string) error {
-	tx, err := requireRunLifecycleOperationTx(ctx, "PostgreSQL sync run counters")
-	if err != nil {
-		return err
-	}
-	return (postgresRunLifecycleMutation{store: s, tx: tx}).SyncCounters(ctx, runID)
+	_, err := runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (struct{}, error) {
+		return struct{}{}, mutation.SyncCounters(ctx, runID)
+	})
+	return err
 }
 
 func (s *SQLiteRuntimeStore) SyncRunCounters(ctx context.Context, runID string) error {
-	tx, err := requireRunLifecycleOperationTx(ctx, "SQLite sync run counters")
-	if err != nil {
-		return err
-	}
-	return (sqliteRunLifecycleMutation{store: s, tx: tx}).SyncCounters(ctx, runID)
-}
-
-func requireRunLifecycleOperationTx(ctx context.Context, operation string) (*sql.Tx, error) {
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return nil, fmt.Errorf("%s requires author activity ownership: %w", operation, err)
-	}
-	tx, ok := runtimepipelineSQLTx(ctx)
-	if !ok {
-		return nil, fmt.Errorf("%s requires the current named mutation", operation)
-	}
-	return tx, nil
-}
-
-func (s *SQLiteRuntimeStore) TransitionActiveRun(
-	ctx context.Context,
-	request runtimerunlifecycle.ActiveTransitionRequest,
-) (runtimerunlifecycle.MutationDisposition, error) {
-	tx, ok := runtimepipelineSQLTx(ctx)
-	if !ok {
-		return "", errors.New("SQLite active run lifecycle transition requires the current named mutation")
-	}
-	return (sqliteRunLifecycleMutation{store: s, tx: tx}).TransitionActive(ctx, request)
+	_, err := runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (struct{}, error) {
+		return struct{}{}, mutation.SyncCounters(ctx, runID)
+	})
+	return err
 }
 
 func requirePostgresRunActiveQuery(ctx context.Context, queryer rowQueryer, runID string) error {
@@ -724,7 +718,7 @@ func (m postgresRunLifecycleMutation) TransitionActive(
 		if m.store == nil {
 			return "", errors.New("PostgreSQL run lifecycle resume requires selected-store candidate owner")
 		}
-		if _, err := m.store.requestCompletionCandidateTx(ctx, m.tx, request.RunID, nil); err != nil {
+		if _, err := m.store.requestCompletionCandidateTx(ctx, m.tx, request.RunID, nil, m.handoff); err != nil {
 			return "", err
 		}
 	}
@@ -774,7 +768,7 @@ func (m sqliteRunLifecycleMutation) TransitionActive(
 		if m.store == nil {
 			return "", errors.New("SQLite run lifecycle resume requires selected-store candidate owner")
 		}
-		if _, err := m.store.requestCompletionCandidateTx(ctx, m.tx, request.RunID, nil); err != nil {
+		if _, err := m.store.requestCompletionCandidateTx(ctx, m.tx, request.RunID, nil, m.handoff); err != nil {
 			return "", err
 		}
 	}
@@ -909,7 +903,7 @@ func recordRunStartedWithStory(ctx context.Context, story runtimeauthoractivity.
 	if story != nil {
 		return story.Record(ctx, draft)
 	}
-	return runtimeauthoractivity.Record(ctx, draft)
+	return errors.New("run lifecycle creation requires private story ownership")
 }
 
 func (m postgresRunLifecycleMutation) ReviseSource(
@@ -939,7 +933,7 @@ func (m postgresRunLifecycleMutation) ReviseSource(
 	if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
 		return "", errors.Join(fmt.Errorf("revise PostgreSQL run lifecycle source affected %d rows", rows), rowsErr)
 	}
-	if _, err := m.store.requestCompletionCandidateTx(ctx, m.tx, request.RunID, nil); err != nil {
+	if _, err := m.store.requestCompletionCandidateTx(ctx, m.tx, request.RunID, nil, m.handoff); err != nil {
 		return "", err
 	}
 	return runtimerunlifecycle.MutationApplied, nil
@@ -972,7 +966,7 @@ func (m sqliteRunLifecycleMutation) ReviseSource(
 	if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
 		return "", errors.Join(fmt.Errorf("revise SQLite run lifecycle source affected %d rows", rows), rowsErr)
 	}
-	if _, err := m.store.requestCompletionCandidateTx(ctx, m.tx, request.RunID, nil); err != nil {
+	if _, err := m.store.requestCompletionCandidateTx(ctx, m.tx, request.RunID, nil, m.handoff); err != nil {
 		return "", err
 	}
 	return runtimerunlifecycle.MutationApplied, nil
@@ -1064,9 +1058,4 @@ func normalizedRunLifecycleTime(value time.Time) time.Time {
 		value = time.Now().UTC()
 	}
 	return runtimerunlifecycle.CanonicalTimestamp(value)
-}
-
-func runtimepipelineSQLTx(ctx context.Context) (*sql.Tx, bool) {
-	tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx)
-	return tx, ok && tx != nil
 }

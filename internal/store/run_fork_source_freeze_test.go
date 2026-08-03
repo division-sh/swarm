@@ -15,7 +15,6 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
@@ -73,13 +72,10 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 func TestRunForkMutationUnsupportedSQLite(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := testAuthorActivityBundleSourceContext()
-	err := store.runAuthorActivityMutation(ctx, "sqlite fork source rejection", func(txctx context.Context, _ *sql.Tx) error {
-		_, _, err := store.ForkRunSource(txctx, storerunlifecycle.ForkSourceRequest{
-			RunID:            uuid.NewString(),
-			ContinuedAsRunID: uuid.NewString(),
-			EndedAt:          time.Now().UTC(),
-		})
-		return err
+	_, _, err := store.ForkRunSource(ctx, storerunlifecycle.ForkSourceRequest{
+		RunID:            uuid.NewString(),
+		ContinuedAsRunID: uuid.NewString(),
+		EndedAt:          time.Now().UTC(),
 	})
 	if !errors.Is(err, storerunlifecycle.ErrForkSourceUnsupported) {
 		t.Fatalf("fork source mutation error = %v, want typed unsupported", err)
@@ -497,25 +493,18 @@ func commitRunForkSourceFreezeForTest(ctx context.Context, store *PostgresStore,
 	if err != nil {
 		return err
 	}
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
-	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 1)
-	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
-	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollbackActions)
-	committed := false
-	defer func() {
-		if !committed {
-			runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
-		}
-	}()
-	if err := store.applyRunForkSourceFreeze(ctx, tx, story, lineage, now, confirmed); err != nil {
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return err
+	}
+	defer handoff.rollback()
+	if err := store.applyRunForkSourceFreeze(ctx, tx, story, lineage, now, confirmed, handoff); err != nil {
 		return err
 	}
 	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story); err != nil {
 		return err
 	}
-	committed = true
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return nil
+	return handoff.commit()
 }
 
 func assertRunForkSourceFreezeLifecycleUnchanged(t *testing.T, db *sql.DB, lineage runForkActivationLineage, sourceStatus, childStatus string) {

@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
@@ -497,15 +498,15 @@ func connectReceiverPinLegalSource(shape string) semanticview.Source {
 }
 
 func runConnectRoutePlanCommitScope(ctx context.Context, _ any, fn func(context.Context) error) error {
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 2)
-	rollback := make([]runtimepipeline.OwnerAction, 0, 2)
-	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
-	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
+	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 2)
+	rollback := make([]runtimepipelinefixture.OwnerAction, 0, 2)
+	ctx = runtimepipelinefixture.WithPostCommitActions(ctx, &postCommit)
+	ctx = runtimepipelinefixture.WithRollbackActions(ctx, &rollback)
 	if err := fn(ctx); err != nil {
-		runtimepipeline.FlushPipelineRollbackActions(rollback)
+		runtimepipelinefixture.FlushRollbackActions(rollback)
 		return err
 	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	runtimepipelinefixture.FlushPostCommitActions(postCommit)
 	return nil
 }
 

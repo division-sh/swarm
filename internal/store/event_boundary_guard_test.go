@@ -19,20 +19,19 @@ type eventBoundaryCallsite struct {
 }
 
 var admittedEventCallsites = map[eventBoundaryCallsite]int{
-	{path: "internal/runtime/bus/eventbus_publish.go", scope: "admitEventForPublish", name: "AdmitForPublish"}:                                          1,
-	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.publishClaimedPipeline", name: "RevalidatePersistedEvent"}:                      1,
-	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.PrepareSelectedForkPublish", name: "AdmitForPersistence"}:                       1,
-	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.prepareClosedPublication", name: "AdmitForPersistence"}:                         1,
-	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.resolveCanonicalSubscribedEventBeforePersistence", name: "AdmitForPersistence"}: 1,
-	{path: "internal/runtime/bus/eventbus_publish.go", scope: "reuseDurableSubscribedEventRouteFacts", name: "AdmitForPersistence"}:                     1,
-	{path: "internal/runtime/manager/runtime.go", scope: "AgentManager.SendDirective", name: "AdmitForPersistence"}:                                     1,
-	{path: "internal/store/eventfixture/event.go", scope: "Insert", name: "AdmitForPersistence"}:                                                        1,
-	{path: "internal/store/inbound_publication.go", scope: "commitInboundPublicationTx", name: "AdmitForPersistence"}:                                   1,
-	{path: "internal/store/run_fork_delivery_event_replay.go", scope: "projectRunForkReplayEvent", name: "AdmitForPersistence"}:                         1,
-	{path: "internal/store/runtime_log_persistence.go", scope: "PostgresStore.PersistRuntimeLog", name: "AdmitForPersistence"}:                          1,
-	{path: "internal/store/runtime_log_persistence.go", scope: "SQLiteRuntimeStore.PersistRuntimeLog", name: "AdmitForPersistence"}:                     1,
-	{path: "internal/store/storetest/event.go", scope: "InsertCanonicalEventRecord", name: "AdmitForPersistence"}:                                       1,
-	{path: "internal/store/storetest/event.go", scope: "commitSemanticEventWithInitialFacts", name: "AdmitForPublish"}:                                  1,
+	{path: "internal/runtime/bus/eventbus_publish.go", scope: "admitEventForPublish", name: "AdmitForPublish"}:                      1,
+	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.publishClaimedPipeline", name: "RevalidatePersistedEvent"}:  1,
+	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.PrepareSelectedForkPublish", name: "AdmitForPersistence"}:   1,
+	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.prepareClosedPublication", name: "AdmitForPersistence"}:     1,
+	{path: "internal/runtime/bus/eventbus_publish.go", scope: "reuseDurableSubscribedEventRouteFacts", name: "AdmitForPersistence"}: 1,
+	{path: "internal/runtime/manager/runtime.go", scope: "AgentManager.SendDirective", name: "AdmitForPersistence"}:                 1,
+	{path: "internal/store/eventfixture/event.go", scope: "Insert", name: "AdmitForPersistence"}:                                    1,
+	{path: "internal/store/inbound_publication.go", scope: "commitInboundPublicationTx", name: "AdmitForPersistence"}:               1,
+	{path: "internal/store/run_fork_delivery_event_replay.go", scope: "projectRunForkReplayEvent", name: "AdmitForPersistence"}:     1,
+	{path: "internal/store/runtime_log_persistence.go", scope: "PostgresStore.PersistRuntimeLog", name: "AdmitForPersistence"}:      1,
+	{path: "internal/store/runtime_log_persistence.go", scope: "SQLiteRuntimeStore.PersistRuntimeLog", name: "AdmitForPersistence"}: 1,
+	{path: "internal/store/storetest/event.go", scope: "InsertCanonicalEventRecord", name: "AdmitForPersistence"}:                   1,
+	{path: "internal/store/storetest/event.go", scope: "commitSemanticEventWithInitialFacts", name: "AdmitForPublish"}:              1,
 }
 
 var eventRecordImportFiles = map[string]struct{}{

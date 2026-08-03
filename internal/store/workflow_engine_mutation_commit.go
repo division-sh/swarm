@@ -16,6 +16,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 	gaterouteadapter "github.com/division-sh/swarm/internal/store/internal/gateroute"
+	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/mutationlog"
 )
 
 func commitWorkflowEngineState(
@@ -129,12 +130,11 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record r
 	result, err = tx.ExecContext(ctx, `
 		UPDATE flow_instances
 		SET flow_template = $1,
-		    mode = $2,
-		    config = $3::jsonb,
-		    status = $4,
-		    terminated_at = CASE WHEN $4 = 'terminated' THEN COALESCE(terminated_at, $5) ELSE NULL END
-		WHERE instance_id = $6
-	`, record.WorkflowName, record.Mode, string(record.Config), record.Status, nullableWorkflowTerminationTime(record.TerminatedAt), record.Route.InstancePath)
+		    config = $2::jsonb,
+		    status = $3,
+		    terminated_at = CASE WHEN $3 = 'terminated' THEN COALESCE(terminated_at, $4) ELSE NULL END
+		WHERE instance_id = $5
+	`, record.WorkflowName, string(record.Config), record.Status, nullableWorkflowTerminationTime(record.TerminatedAt), record.Route.InstancePath)
 	if err != nil {
 		return fmt.Errorf("update workflow engine flow instance: %w", err)
 	}
@@ -227,12 +227,11 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 	result, err = tx.ExecContext(ctx, `
 		UPDATE flow_instances
 		SET flow_template = ?,
-		    mode = ?,
 		    config = ?,
 		    status = ?,
 		    terminated_at = CASE WHEN ? = 'terminated' THEN COALESCE(terminated_at, ?) ELSE NULL END
 		WHERE instance_id = ?
-	`, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.Status, nullableWorkflowTerminationTime(record.TerminatedAt), record.Route.InstancePath)
+	`, record.WorkflowName, string(record.Config), record.Status, record.Status, nullableWorkflowTerminationTime(record.TerminatedAt), record.Route.InstancePath)
 	if err != nil {
 		return fmt.Errorf("update workflow engine flow instance: %w", err)
 	}
@@ -370,7 +369,7 @@ func commitWorkflowEngineMutationLog(
 		if !ok {
 			return fmt.Errorf("workflow engine PostgreSQL mutation requires PostgreSQL selected store")
 		}
-		return runtimemutationlog.InsertEntityStateDiffWithStory(
+		return privatemutationlog.InsertEntityStateDiffWithStory(
 			ctx, tx, postgresActiveRunSourceOwner(selected, tx), runtimeAuthorActivityMutation(story),
 			record.EntityID, before, after, writer,
 		)
@@ -424,7 +423,7 @@ func commitWorkflowEngineInitialValues(
 			if !ok {
 				return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("workflow engine initial values require PostgreSQL selected store")
 			}
-			if err := runtimemutationlog.InsertEntityStateDiffWithStory(ctx, tx, postgresActiveRunSourceOwner(selected, tx), runtimeAuthorActivityMutation(story), record.EntityID, adjusted, next, writer); err != nil {
+			if err := privatemutationlog.InsertEntityStateDiffWithStory(ctx, tx, postgresActiveRunSourceOwner(selected, tx), runtimeAuthorActivityMutation(story), record.EntityID, adjusted, next, writer); err != nil {
 				return runtimemutationlog.EntityStateProjection{}, err
 			}
 		} else if err := insertSQLiteEntityStateDiff(ctx, runtimeAuthorActivityMutation(story), tx, record.RunID, record.EntityID, adjusted, next, writer, record.UpdatedAt); err != nil {
@@ -461,7 +460,10 @@ func commitWorkflowEngineMutation(
 		return runtimepipeline.CommittedWorkflowEngineMutation{}, err
 	}
 	defer handoff.rollback()
-	result := runtimepipeline.CommittedWorkflowEngineMutation{Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Publications))}
+	result := runtimepipeline.CommittedWorkflowEngineMutation{
+		Publications: make([]runtimeengine.CommittedDurablePublication, 0, len(command.Publications)),
+		PostCommit:   command.PostCommit,
+	}
 	err = run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if runID := strings.TrimSpace(command.GateRouteAdmissionRunID); runID != "" {
 			if postgres {
@@ -479,6 +481,14 @@ func commitWorkflowEngineMutation(
 		}
 		if err := commitWorkflowEngineState(txctx, tx, postgres, command.State, false); err != nil {
 			return err
+		}
+		if command.RouteRetirement != nil {
+			sets := []runtimebus.FlowInstanceRouteRecordSet{{Identity: command.RouteRetirement.Route}}
+			if _, err := replaceFlowInstanceRouteTopologyTx(txctx, tx, postgres, sets); err != nil {
+				return fmt.Errorf("retire terminal workflow route: %w", err)
+			}
+			retirement := *command.RouteRetirement
+			result.RouteRetirement = &retirement
 		}
 		before, err = commitWorkflowEngineInitialValues(txctx, tx, story, store, postgres, command.State, before)
 		if err != nil {
@@ -511,7 +521,7 @@ func commitWorkflowEngineMutation(
 			if !ok {
 				return fmt.Errorf("workflow engine publication %d has unexpected type %T", index, value)
 			}
-			committed, err := commitPublicationTx(txctx, tx, story, store, postgres, plan.PublicationCommand(), publicationCommitOptions{})
+			committed, err := commitPublicationTx(txctx, tx, story, store, postgres, plan.PublicationCommand(), handoff)
 			if err != nil {
 				return fmt.Errorf("commit workflow engine publication %d: %w", index, err)
 			}

@@ -13,7 +13,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
 
@@ -31,18 +30,7 @@ func runPostgresFlowInstanceRouteMutation(ctx context.Context, db *sql.DB, fn fu
 	if err != nil {
 		return err
 	}
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		if err := requirePostgresRunActive(ctx, tx, runID); err != nil {
-			return err
-		}
-		return fn(tx)
-	}
-	var tx *sql.Tx
-	if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
-		tx, err = conn.BeginTx(ctx, nil)
-	} else {
-		tx, err = db.BeginTx(ctx, nil)
-	}
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -581,11 +569,6 @@ func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimefl
 		return nil, fmt.Errorf("postgres store is required for flow instance routes")
 	}
 	q := flowInstanceDescriptorQueryer(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		q = tx
-	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
-		q = conn
-	}
 	rows, err := q.QueryContext(ctx, `
 			SELECT
 				COALESCE(NULLIF(source_flow, ''), ''),
@@ -627,9 +610,6 @@ func (s *SQLiteRuntimeStore) ListFlowInstanceRoutes(ctx context.Context) ([]runt
 		return nil, fmt.Errorf("sqlite runtime store is required for flow instance routes")
 	}
 	q := flowInstanceDescriptorQueryer(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		q = tx
-	}
 	rows, err := q.QueryContext(ctx, `
 		SELECT COALESCE(NULLIF(source_flow, ''), ''), flow_instance
 		FROM routing_rules
@@ -671,11 +651,6 @@ func (s *PostgresStore) ListFlowInstanceRouteRecords(ctx context.Context, identi
 		return nil, fmt.Errorf("flow instance route identity is required")
 	}
 	q := flowInstanceDescriptorQueryer(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		q = tx
-	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
-		q = conn
-	}
 	return listFlowInstanceRouteRecords(ctx, q, identity, `
 		SELECT event_pattern, subscriber_type, subscriber_id, COALESCE(source_flow, '')
 		FROM routing_rules
@@ -697,9 +672,6 @@ func (s *SQLiteRuntimeStore) ListFlowInstanceRouteRecords(ctx context.Context, i
 		return nil, fmt.Errorf("flow instance route identity is required")
 	}
 	q := flowInstanceDescriptorQueryer(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		q = tx
-	}
 	return listFlowInstanceRouteRecords(ctx, q, identity, `
 		SELECT event_pattern, subscriber_type, subscriber_id, COALESCE(source_flow, '')
 		FROM routing_rules
@@ -746,11 +718,6 @@ func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) (
 		return nil, fmt.Errorf("postgres store is required for active flow instance descriptors")
 	}
 	q := flowInstanceDescriptorQueryer(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		q = tx
-	} else if conn, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
-		q = conn
-	}
 	runID, hasRunID, err := activeFlowInstanceDescriptorRunID(ctx)
 	if err != nil {
 		return nil, err
@@ -819,9 +786,6 @@ func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Conte
 		return nil, fmt.Errorf("sqlite runtime store is required for active flow instance descriptors")
 	}
 	q := flowInstanceDescriptorQueryer(s.backend.db)
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		q = tx
-	}
 	runID, hasRunID, err := activeFlowInstanceDescriptorRunID(ctx)
 	if err != nil {
 		return nil, err

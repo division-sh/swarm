@@ -8,6 +8,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -38,6 +39,7 @@ func commitDecisionCardOperation(
 				return err
 			}
 			result.Outcome = outcome
+			txctx = runtimecorrelation.WithRunID(txctx, outcome.Card.RunID)
 			if outcome.ForcedDeferred {
 				if command.GateState != nil {
 					return fmt.Errorf("forced decision-card deferral cannot commit gate state")
@@ -67,6 +69,7 @@ func commitDecisionCardOperation(
 				return err
 			}
 			result.Outcome = outcome
+			txctx = runtimecorrelation.WithRunID(txctx, outcome.Card.RunID)
 			selected = command.Publication
 		case runtimepipeline.DecisionCardMutationBeginInput:
 			req, _, ok := command.Mutation.InputBegin()
@@ -98,7 +101,7 @@ func commitDecisionCardOperation(
 		if !ok {
 			return fmt.Errorf("decision-card publication has unexpected type %T", selected)
 		}
-		committed, err := commitPublicationTx(txctx, tx, story, store, postgres, plan.PublicationCommand(), publicationCommitOptions{})
+		committed, err := commitPublicationTx(txctx, tx, story, store, postgres, plan.PublicationCommand(), nil)
 		if err != nil {
 			return err
 		}

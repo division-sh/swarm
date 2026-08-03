@@ -79,6 +79,7 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 	ctx context.Context,
 	route runtimeflowidentity.Route,
 	terminatedAt time.Time,
+	retireRoute bool,
 ) (WorkflowInstance, error) {
 	if pc == nil || pc.workflowStore == nil || pc.workflowStore.engineMutations == nil {
 		return WorkflowInstance{}, fmt.Errorf("workflow termination requires the selected workflow engine mutation owner")
@@ -132,9 +133,11 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 			return WorkflowInstance{}, errors.Join(fmt.Errorf("workflow termination planner returned %d plans for %d emissions", len(publications), len(prepared.Emissions)), releaseErr)
 		}
 	}
-	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
-		State: state, Lifecycle: prepared.Commit, Publications: publications,
-	})
+	command := WorkflowEngineMutationCommand{State: state, Lifecycle: prepared.Commit, Publications: publications}
+	if retireRoute {
+		command.RouteRetirement = &WorkflowEngineRouteRetirement{Route: route}
+	}
+	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, command)
 	if err != nil {
 		if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
 			err = errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
@@ -148,6 +151,14 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 	}
 	if err := pc.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle); err != nil {
 		return WorkflowInstance{}, err
+	}
+	if committed.RouteRetirement != nil {
+		if pc.flowRoutes == nil {
+			return WorkflowInstance{}, fmt.Errorf("committed flow route retirement requires process route owner")
+		}
+		if err := pc.flowRoutes.RetireCommittedFlowInstanceRoute(committed.RouteRetirement.Route); err != nil {
+			return WorkflowInstance{}, err
+		}
 	}
 	if len(prepared.Emissions) > 0 {
 		dispatcher := pc.bus.EngineDispatcher()
