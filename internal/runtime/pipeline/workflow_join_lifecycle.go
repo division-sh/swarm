@@ -11,10 +11,10 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 const (
@@ -26,6 +26,10 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, rou
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.SemanticSource() == nil {
 		return nil
 	}
+	if pc.workflowStore.engineMutations == nil {
+		return fmt.Errorf("workflow join lifecycle requires the selected workflow engine mutation owner")
+	}
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
 	entityID = strings.TrimSpace(entityID)
 	currentStage = strings.TrimSpace(currentStage)
 	nextStage = strings.TrimSpace(nextStage)
@@ -33,120 +37,39 @@ func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, rou
 		return nil
 	}
 
-	toSchedule := make([]Schedule, 0, 2)
-	toCancel := make([]Schedule, 0, 2)
 	now := occurredAt.UTC()
 	if now.IsZero() {
 		return fmt.Errorf("workflow join lifecycle requires an exact occurrence time")
 	}
-	err := pc.workflowStore.mutateE(ctx, route, func(instance *WorkflowInstance) error {
-		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
-		if err != nil {
-			return fmt.Errorf("decode join state: %w", err)
-		}
-		activations, err := joinruntime.List(carrier.StateBuckets)
-		if err != nil {
-			return fmt.Errorf("list join state: %w", err)
-		}
-		for _, activation := range activations {
-			if activation.Stage != currentStage || activation.Stage == nextStage || !activation.CloseForStageExit() {
-				continue
-			}
-			kind := timeridentity.TimerHandleJoinTimeout
-			if activation.TimerEventType == joinCompleteEvent {
-				kind = timeridentity.TimerHandleJoinComplete
-			}
-			activation.TimerCancelled = true
-			if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
-				return fmt.Errorf("close join %s on stage exit: %w", activation.Key(), err)
-			}
-			schedule, err := joinSchedule(pc.SemanticSource(), pipelineFlowScope(ctx), entityID, *instance, activation, kind)
-			if err != nil {
-				return err
-			}
-			toCancel = append(toCancel, schedule)
-		}
-
-		for _, plan := range workflowJoinPlansForStage(pc.SemanticSource(), instance.WorkflowName, nextStage) {
-			if plan.ResultType.Empty() {
-				return fmt.Errorf("join %s has no resolved output type in the semantic plan", plan.Spec.EffectiveID())
-			}
-			members, ok := joinMemberSnapshot(instance.Metadata, plan.Spec.Members.From)
-			if !ok {
-				return fmt.Errorf("join %s members source %s is not a unique list of non-empty text", plan.Spec.EffectiveID(), plan.Spec.Members.From)
-			}
-			window := ""
-			if plan.Spec.Window != nil {
-				window = strings.TrimSpace(asString(instance.Metadata[joinTopLevelField(plan.Spec.Window.From, "entity")]))
-				if window == "" {
-					return fmt.Errorf("join %s window source %s resolved empty", plan.Spec.EffectiveID(), plan.Spec.Window.From)
-				}
-			}
-			generation, _, generationErr := workflowLoopGenerationForStage(pc.SemanticSource(), instance, nextStage)
-			if generationErr != nil {
-				return generationErr
-			}
-			key := joinruntime.ActivationKeyForGeneration(plan.Spec.Stage, plan.Spec.EffectiveID(), window, generation)
-			if _, found, err := joinruntime.Load(carrier.StateBuckets, plan.NodeID, key); err != nil {
-				return fmt.Errorf("load join %s: %w", key, err)
-			} else if found {
-				continue
-			}
-			delay := workflowTimerRenderedDelay(plan.Spec.Timeout.After, workflowTimerPolicy(pc.SemanticSource(), plan.FlowID))
-			interval, ok := timeridentity.ParseDelayDuration(delay)
-			if !ok {
-				return fmt.Errorf("join %s timeout.after %q did not resolve to a positive duration", plan.Spec.EffectiveID(), plan.Spec.Timeout.After)
-			}
-			ref := timeridentity.NewJoinRefForGeneration(plan.FlowID, plan.NodeID, plan.HandlerEvent, plan.Spec.Stage, plan.Spec.EffectiveID(), window, generation)
-			handle := timeridentity.JoinTimeoutHandle(ref)
-			activation, err := joinruntime.NewActivation(
-				plan.Spec.EffectiveID(), plan.Spec.Stage, plan.NodeID, plan.HandlerEvent, window, members,
-				now, now.Add(interval), handle.TaskID(), joinTimeoutEvent, generation,
-			)
-			if err != nil {
-				return fmt.Errorf("arm join %s: %w", plan.Spec.EffectiveID(), err)
-			}
-			kind := timeridentity.TimerHandleJoinTimeout
-			complete, err := joinruntime.CompletionSatisfied(activation, plan.Spec.CompleteWhen, func(expression string, joinContext map[string]any) (bool, error) {
-				return workflowexpr.EvalJoinBool(expression, joinContext, plan.ResultType)
-			})
-			if err != nil {
-				return fmt.Errorf("evaluate join %s completion at arm: %w", plan.Spec.EffectiveID(), err)
-			}
-			if complete {
-				activation.Close(joinruntime.CloseReasonComplete, true, false)
-				kind = timeridentity.TimerHandleJoinComplete
-				completionHandle := timeridentity.JoinCompleteHandle(ref)
-				activation.FireAt = now
-				activation.TimerTaskID = completionHandle.TaskID()
-				activation.TimerEventType = joinCompleteEvent
-			}
-			if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
-				return fmt.Errorf("persist join %s: %w", activation.Key(), err)
-			}
-			schedule, err := joinSchedule(pc.SemanticSource(), plan.FlowID, entityID, *instance, activation, kind)
-			if err != nil {
-				return err
-			}
-			toSchedule = append(toSchedule, schedule)
-		}
-		instance.StateBuckets = carrier.PersistedStateBuckets()
-		return nil
-	})
+	instance, found, err := pc.workflowStore.Load(ctx, route)
 	if err != nil {
 		return err
 	}
-	for _, schedule := range toCancel {
-		if err := pc.cancelGenericSchedule(ctx, schedule); err != nil {
-			return err
-		}
+	if !found {
+		return &WorkflowInstanceLookupMiss{RequestedKey: route.InstancePath}
 	}
-	for _, schedule := range toSchedule {
-		if err := pc.persistGenericSchedule(ctx, schedule); err != nil {
-			return err
-		}
+	expectedState, expectedRevision := strings.TrimSpace(instance.CurrentState), instance.Revision
+	plan := WorkflowLifecycleMutationPlan{}
+	if err := pc.planWorkflowJoinEffect(ctx, &instance, entityID, currentStage, nextStage, now, &plan); err != nil {
+		return err
 	}
-	return nil
+	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	if runID == "" {
+		return fmt.Errorf("workflow join lifecycle requires run identity")
+	}
+	updatedAt := time.Now().UTC()
+	if updatedAt.Before(instance.CreatedAt) {
+		updatedAt = instance.CreatedAt
+	}
+	state, err := workflowEngineStateRecord(runID, route, instance, expectedState, expectedRevision, false, updatedAt)
+	if err != nil {
+		return err
+	}
+	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{State: state, Lifecycle: plan})
+	if err != nil {
+		return err
+	}
+	return pc.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle)
 }
 
 func (pc *PipelineCoordinator) reconcileClosedJoinSchedules(ctx context.Context, route runtimeflowidentity.Route, entityID string, carrier runtimeengine.StateCarrier) error {
@@ -187,9 +110,19 @@ func (pc *PipelineCoordinator) reconcileClosedJoinSchedules(ctx context.Context,
 		changed = true
 	}
 	if changed {
-		return pc.workflowStore.mutate(ctx, route, func(instance *WorkflowInstance) {
-			instance.StateBuckets = carrier.PersistedStateBuckets()
-		})
+		expectedState, expectedRevision := strings.TrimSpace(instance.CurrentState), instance.Revision
+		instance.StateBuckets = carrier.PersistedStateBuckets()
+		runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+		updatedAt := time.Now().UTC()
+		if updatedAt.Before(instance.CreatedAt) {
+			updatedAt = instance.CreatedAt
+		}
+		state, err := workflowEngineStateRecord(runID, route, instance, expectedState, expectedRevision, false, updatedAt)
+		if err != nil {
+			return err
+		}
+		_, err = pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{State: state})
+		return err
 	}
 	return nil
 }

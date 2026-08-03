@@ -102,9 +102,6 @@ func (pc *PipelineCoordinator) CommitStandingTargets(ctx context.Context, req St
 			operationCtx := runtimecorrelation.WithRunID(ctx, reconciliation.RunID)
 			operationCtx = runtimecorrelation.WithBundleSourceFact(operationCtx, target.Candidate.Source)
 			operationCtx = runtimeeffects.WithExecutionMode(operationCtx, executionmode.Live)
-			if reconciliation.Generation > 1 {
-				operationCtx = WithStandingGenerationRebind(operationCtx)
-			}
 			if err := owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(operationCtx, observedAt); err != nil {
 				return nil, err
 			}
@@ -128,43 +125,26 @@ func (pc *PipelineCoordinator) CommitFlowInstanceTermination(ctx context.Context
 		return FlowInstanceTermination{}, fmt.Errorf("flow instance termination requires workflow persistence")
 	}
 	route := runtimeflowidentity.StoredRoute(req.Route.ScopeKey, req.Route.InstanceID, req.Route.InstancePath)
-	storageRef := strings.TrimSpace(route.InstancePath)
 	runID := strings.TrimSpace(req.RunID)
 	if !route.Valid() || runID == "" {
 		return FlowInstanceTermination{}, fmt.Errorf("flow instance termination requires an exact route and run_id")
 	}
-	var result FlowInstanceTermination
-	err := pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-		if err := pc.workflowStore.MarkTerminated(txctx, route, req.TerminatedAt); err != nil {
-			return err
-		}
-		route, err := workflowInstanceRouteForPath(storageRef)
-		if err != nil {
-			return err
-		}
-		instance, ok, err := pc.workflowStore.Load(txctx, route)
-		if err != nil {
-			return err
-		}
-		if !ok || strings.TrimSpace(instance.Status) != "terminated" || instance.TerminatedAt.IsZero() {
-			return fmt.Errorf("canonical terminal flow instance %s was not persisted", storageRef)
-		}
-		canonicalRef := strings.TrimSpace(instance.StorageRef)
-		canonicalRoute := runtimeflowidentity.RouteForInstancePath(canonicalRef)
-		if !canonicalRoute.Valid() {
-			return fmt.Errorf("derive canonical route identity for flow path %s", canonicalRef)
-		}
-		if pc.flowRoutes == nil {
-			return fmt.Errorf("flow instance termination requires route topology owner")
-		}
-		txctx = runtimecorrelation.WithRunID(txctx, runID)
-		if err := pc.flowRoutes.RemoveFlowInstanceRouteContext(txctx, canonicalRoute); err != nil {
-			return err
-		}
-		result = FlowInstanceTermination{Instance: instance, Route: canonicalRoute}
-		return nil
-	})
-	return result, err
+	instance, err := pc.commitWorkflowTermination(runtimecorrelation.WithRunID(ctx, runID), route, req.TerminatedAt)
+	if err != nil {
+		return FlowInstanceTermination{}, err
+	}
+	canonicalRef := strings.TrimSpace(instance.StorageRef)
+	canonicalRoute := runtimeflowidentity.RouteForInstancePath(canonicalRef)
+	if !canonicalRoute.Valid() {
+		return FlowInstanceTermination{}, fmt.Errorf("derive canonical route identity for flow path %s", canonicalRef)
+	}
+	if pc.flowRoutes == nil {
+		return FlowInstanceTermination{}, fmt.Errorf("flow instance termination requires route topology owner")
+	}
+	if err := pc.flowRoutes.RemoveFlowInstanceRouteContext(runtimecorrelation.WithRunID(ctx, runID), canonicalRoute); err != nil {
+		return FlowInstanceTermination{}, err
+	}
+	return FlowInstanceTermination{Instance: instance, Route: canonicalRoute}, nil
 }
 
 func (pc *PipelineCoordinator) Load(ctx context.Context, route runtimeflowidentity.Route) (WorkflowInstance, bool, error) {
@@ -236,7 +216,8 @@ func (pc *PipelineCoordinator) MarkDynamicFlowRuntimeTopologyReady(ctx context.C
 }
 
 func (pc *PipelineCoordinator) MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, terminatedAt time.Time) error {
-	return pc.workflowStore.MarkTerminated(ctx, route, terminatedAt)
+	_, err := pc.commitWorkflowTermination(ctx, route, terminatedAt)
+	return err
 }
 
 func (pc *PipelineCoordinator) CommitDecision(ctx context.Context, card decisioncard.Card, decision string, decidedAt time.Time) error {

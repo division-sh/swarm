@@ -10,7 +10,6 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -18,156 +17,6 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
-
-func (s *workflowInstanceStore) loadSQLite(ctx context.Context, route runtimeflowidentity.Route) (WorkflowInstance, bool, error) {
-	instancePath := strings.Trim(strings.TrimSpace(route.InstancePath), "/")
-	if instancePath == "" {
-		return WorkflowInstance{}, false, nil
-	}
-	runID, err := runtimecurrentstate.RequireRunID(ctx)
-	if err != nil {
-		return WorkflowInstance{}, false, err
-	}
-	rows, err := dbQueryContext(ctx, s.db, `
-		SELECT
-			es.entity_id,
-			COALESCE(fi.flow_template, ''),
-			COALESCE(json_extract(fi.config, '$.workflow_version'), ''),
-			COALESCE(fi.status, ''),
-			fi.terminated_at,
-			es.current_state,
-			es.revision,
-			es.entered_state_at,
-			COALESCE(es.gates, '{}'),
-			COALESCE(es.fields, '{}'),
-			COALESCE(es.accumulator, '{}'),
-			COALESCE(fi.config, '{}'),
-			COALESCE(es.flow_instance, ''),
-			COALESCE(es.entity_type, ''),
-			es.slug,
-			es.name,
-			es.created_at,
-			es.updated_at
-		FROM entity_state es
-		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-		WHERE es.flow_instance = ?
-		  AND es.run_id = ?
-		ORDER BY es.created_at DESC, es.entity_id DESC
-		LIMIT 1
-	`, instancePath, runID)
-	if err != nil {
-		return WorkflowInstance{}, false, err
-	}
-	defer rows.Close()
-	items, err := s.scanSQLiteWorkflowInstances(ctx, rows, runID)
-	if err != nil {
-		return WorkflowInstance{}, false, err
-	}
-	if len(items) == 0 {
-		return WorkflowInstance{}, false, nil
-	}
-	return items[0], true, nil
-}
-
-func (s *workflowInstanceStore) listSQLite(ctx context.Context) ([]WorkflowInstance, error) {
-	runID, err := runtimecurrentstate.RequireRunID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := dbQueryContext(ctx, s.db, `
-		SELECT
-			es.entity_id,
-			COALESCE(fi.flow_template, ''),
-			COALESCE(json_extract(fi.config, '$.workflow_version'), ''),
-			COALESCE(fi.status, ''),
-			fi.terminated_at,
-			es.current_state,
-			es.revision,
-			es.entered_state_at,
-			COALESCE(es.gates, '{}'),
-			COALESCE(es.fields, '{}'),
-			COALESCE(es.accumulator, '{}'),
-			COALESCE(fi.config, '{}'),
-			COALESCE(es.flow_instance, ''),
-			COALESCE(es.entity_type, ''),
-			es.slug,
-			es.name,
-			es.created_at,
-			es.updated_at
-		FROM entity_state es
-		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-		WHERE es.run_id = ?
-		ORDER BY es.created_at ASC
-	`, runID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return s.scanSQLiteWorkflowInstances(ctx, rows, runID)
-}
-
-func (s *workflowInstanceStore) selectActiveByFieldsSQLite(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
-	runID, err := runtimecurrentstate.RequireRunID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var active bool
-	activeStates := runtimerunlifecycle.ActiveStates()
-	if err := dbQueryRowContext(
-		ctx,
-		s.db,
-		`SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = ? AND status IN (?, ?))`,
-		runID,
-		string(activeStates[0]),
-		string(activeStates[1]),
-	).Scan(&active); err != nil {
-		return nil, err
-	}
-	if !active {
-		return nil, nil
-	}
-	scopeKey = strings.Trim(strings.TrimSpace(scopeKey), "/")
-	if scopeKey == "" {
-		return nil, nil
-	}
-	selectors = normalizeWorkflowInstanceFieldSelectors(selectors)
-	if len(selectors) == 0 {
-		return nil, nil
-	}
-	items, err := s.listSQLite(ctx)
-	if err != nil {
-		return nil, err
-	}
-	terminalStates := map[string]struct{}{}
-	for _, state := range normalizeWorkflowInstanceExcludedStates(excludedStates) {
-		terminalStates[state] = struct{}{}
-	}
-	out := make([]WorkflowInstance, 0, len(items))
-	for _, item := range items {
-		storageRef := strings.Trim(strings.TrimSpace(item.StorageRef), "/")
-		if storageRef != scopeKey && !strings.HasPrefix(storageRef, scopeKey+"/") {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(item.Status), "terminated") || !item.TerminatedAt.IsZero() {
-			continue
-		}
-		if _, terminal := terminalStates[strings.ToLower(strings.TrimSpace(item.CurrentState))]; terminal {
-			continue
-		}
-		matches := true
-		for _, selector := range selectors {
-			value, ok := workflowMetadataValue(item.Metadata, selector.Field)
-			if !ok || !workflowJSONValuesEqual(value, selector.Value) {
-				matches = false
-				break
-			}
-		}
-		if matches {
-			out = append(out, item)
-		}
-	}
-	return out, nil
-}
 
 func (s *workflowInstanceStore) upsertSQLite(ctx context.Context, instance WorkflowInstance) error {
 	instance, identity, ok, err := normalizeWorkflowInstanceForPersistence(instance)
@@ -191,61 +40,6 @@ func (s *workflowInstanceStore) createSQLite(ctx context.Context, instance Workf
 	return s.writeSQLite(ctx, identity.RowID(), identity.StorageRef, instance, true)
 }
 
-func (s *workflowInstanceStore) mutateSQLite(ctx context.Context, route runtimeflowidentity.Route, fn func(*WorkflowInstance)) error {
-	if fn == nil {
-		return nil
-	}
-	return s.mutateSQLiteE(ctx, route, route.InstancePath, func(instance *WorkflowInstance) error {
-		fn(instance)
-		return nil
-	})
-}
-
-func (s *workflowInstanceStore) mutateSQLiteE(ctx context.Context, route runtimeflowidentity.Route, requestedKey string, fn func(*WorkflowInstance) error) error {
-	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if _, err := s.requireActiveWorkflowRun(txctx, tx); err != nil {
-			return err
-		}
-		instance, ok, err := s.loadSQLite(txctx, route)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return &WorkflowInstanceLookupMiss{RequestedKey: requestedKey}
-		}
-		if err := fn(&instance); err != nil {
-			return err
-		}
-		return s.upsert(txctx, instance)
-	})
-}
-
-func (s *workflowInstanceStore) markTerminatedSQLiteTx(ctx context.Context, tx *sql.Tx, storageRef string, terminatedAt time.Time) error {
-	storageRef = strings.TrimSpace(storageRef)
-	if storageRef == "" {
-		return fmt.Errorf("workflow instance storage_ref is required")
-	}
-	if tx == nil {
-		return fmt.Errorf("sqlite workflow instance transaction is required")
-	}
-	if terminatedAt.IsZero() {
-		terminatedAt = time.Now().UTC()
-	}
-	res, err := tx.ExecContext(ctx, `
-		UPDATE flow_instances
-		SET status = 'terminated',
-		    terminated_at = COALESCE(terminated_at, ?)
-		WHERE instance_id = ?
-	`, terminatedAt.UTC(), storageRef)
-	if err != nil {
-		return err
-	}
-	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
-		return fmt.Errorf("flow instance not found: %s", storageRef)
-	}
-	return nil
-}
-
 func (s *workflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageRef string, instance WorkflowInstance, createOnly bool) error {
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
@@ -256,18 +50,12 @@ func (s *workflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 			return err
 		}
 		if createOnly {
-			allowRebind := standingGenerationRebindAllowed(txctx)
 			exists, err := workflowInstanceSQLiteCreateTargetExists(txctx, tx, runID, rowID, storageRef)
 			if err != nil {
 				return err
 			}
-			if exists && !allowRebind {
+			if exists {
 				return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-store", "create", map[string]any{"flow_instance": storageRef})
-			}
-			if allowRebind {
-				if err := admitStandingGenerationRebindSQLite(txctx, tx, runID, rowID, storageRef, instance.WorkflowName); err != nil {
-					return err
-				}
 			}
 		}
 		previous, err := s.loadTrackedEntityStateProjectionSQLite(txctx, tx, runID, rowID)
@@ -308,16 +96,6 @@ func (s *workflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 				)
 				VALUES (?, ?, ?, ?, 'active', ?)
 			`
-			if standingGenerationRebindAllowed(txctx) {
-				flowInstanceInsert += `
-					ON CONFLICT(instance_id) DO UPDATE SET
-						flow_template = excluded.flow_template,
-						mode = excluded.mode,
-						config = excluded.config,
-						status = 'active',
-						terminated_at = NULL
-				`
-			}
 			if _, err := tx.ExecContext(txctx, flowInstanceInsert, storageRef, instance.WorkflowName, mode, jsonOrDefault(configJSON, "{}"), now); err != nil {
 				return err
 			}
@@ -343,7 +121,7 @@ func (s *workflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 					flow_template = excluded.flow_template,
 					config = excluded.config,
 					status = CASE WHEN flow_instances.status = 'terminated' THEN flow_instances.status ELSE 'active' END
-			`, storageRef, instance.WorkflowName, mode, jsonOrDefault(configJSON, "{}"), now); err != nil {
+			`, storageRef, instance.WorkflowName, mode, jsonOrDefault(configJSON, "{}"), instance.CreatedAt.UTC()); err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(txctx, `
@@ -367,7 +145,7 @@ func (s *workflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 					updated_at = excluded.updated_at
 			`, runID, rowID, storageRef, projection.Control.EntityType, projection.Control.Slug, projection.Control.Name,
 				instance.CurrentState, jsonOrDefault(gatesJSON, "{}"), jsonOrDefault(fieldsJSON, "{}"), jsonOrDefault(accumulatorState, "{}"),
-				instance.EnteredStageAt.UTC(), now, now); err != nil {
+				instance.EnteredStageAt.UTC(), instance.CreatedAt.UTC(), now); err != nil {
 				return err
 			}
 		}
@@ -392,133 +170,11 @@ func (s *workflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 		}); err != nil {
 			return err
 		}
-		if !createOnly || standingGenerationRebindAllowed(txctx) {
+		if !createOnly {
 			return s.requestRunCompletionCandidate(txctx, runID)
 		}
 		return nil
 	})
-}
-
-func admitStandingGenerationRebindSQLite(ctx context.Context, tx *sql.Tx, runID, rowID, storageRef, workflowName string) error {
-	var sameRunExists bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM entity_state WHERE run_id = ? AND entity_id = ?)`, runID, rowID).Scan(&sameRunExists); err != nil {
-		return err
-	}
-	if sameRunExists {
-		return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-store", "create", map[string]any{"flow_instance": storageRef})
-	}
-	var existingTemplate string
-	err := tx.QueryRowContext(ctx, `SELECT flow_template FROM flow_instances WHERE instance_id = ?`, storageRef).Scan(&existingTemplate)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(existingTemplate) != strings.TrimSpace(workflowName) {
-		return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-store", "create", map[string]any{"flow_instance": storageRef})
-	}
-	return nil
-}
-
-func (s *workflowInstanceStore) scanSQLiteWorkflowInstances(ctx context.Context, rows *sql.Rows, runID string) ([]WorkflowInstance, error) {
-	out := make([]WorkflowInstance, 0, 32)
-	for rows.Next() {
-		var (
-			item            WorkflowInstance
-			entityID        string
-			gatesRaw        any
-			fieldsRaw       any
-			configRaw       any
-			accRaw          any
-			flowInstance    string
-			entityType      string
-			slug            sql.NullString
-			name            sql.NullString
-			status          sql.NullString
-			terminatedAtRaw any
-			enteredAtRaw    any
-			createdAtRaw    any
-			updatedAtRaw    any
-		)
-		if err := rows.Scan(
-			&entityID,
-			&item.WorkflowName,
-			&item.WorkflowVersion,
-			&status,
-			&terminatedAtRaw,
-			&item.CurrentState,
-			&item.Revision,
-			&enteredAtRaw,
-			&gatesRaw,
-			&fieldsRaw,
-			&accRaw,
-			&configRaw,
-			&flowInstance,
-			&entityType,
-			&slug,
-			&name,
-			&createdAtRaw,
-			&updatedAtRaw,
-		); err != nil {
-			return nil, err
-		}
-		var err error
-		item.EnteredStageAt, _, err = sqliteWorkflowTimeValue(enteredAtRaw)
-		if err != nil {
-			return nil, err
-		}
-		item.CreatedAt, _, err = sqliteWorkflowTimeValue(createdAtRaw)
-		if err != nil {
-			return nil, err
-		}
-		item.UpdatedAt, _, err = sqliteWorkflowTimeValue(updatedAtRaw)
-		if err != nil {
-			return nil, err
-		}
-		if terminatedAt, ok, err := sqliteWorkflowTimeValue(terminatedAtRaw); err != nil {
-			return nil, err
-		} else if ok {
-			item.TerminatedAt = terminatedAt
-		}
-		item.Status = strings.TrimSpace(status.String)
-		projection, err := decodeWorkflowInstancePersistedProjection(sqliteWorkflowJSONBytes(fieldsRaw), sqliteWorkflowJSONBytes(gatesRaw), sqliteWorkflowJSONBytes(accRaw), sqliteWorkflowJSONBytes(configRaw), workflowInstancePersistedControl{
-			StorageRef: strings.TrimSpace(flowInstance),
-			EntityID:   strings.TrimSpace(entityID),
-			Slug:       slug.String,
-			Name:       name.String,
-			EntityType: entityType,
-		})
-		if err != nil {
-			return nil, err
-		}
-		item.StateBuckets = projection.Accumulator
-		item.Config = projection.Config
-		item.Metadata = projection.Metadata()
-		persistedIdentity, err := workflowInstancePersistedIdentity(nil, WorkflowInstance{
-			InstanceID:   item.InstanceID,
-			StorageRef:   projection.Control.StorageRef,
-			WorkflowName: item.WorkflowName,
-			Metadata:     item.Metadata,
-		})
-		if err != nil {
-			return nil, err
-		}
-		item.StorageRef = persistedIdentity.StorageRef
-		item.InstanceID = persistedIdentity.InstanceID
-		item.TransitionHistory = append([]WorkflowTransitionRecord{}, projection.Control.TransitionHistory...)
-		if item.StateBuckets == nil {
-			item.StateBuckets = map[string]any{}
-		}
-		if item.Metadata == nil {
-			item.Metadata = map[string]any{}
-		}
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func workflowInstanceSQLiteCreateTargetExists(ctx context.Context, tx *sql.Tx, runID, rowID, storageRef string) (bool, error) {

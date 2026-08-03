@@ -2,37 +2,41 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
 
 func (pc *PipelineCoordinator) persistWorkflowStateForTest(ctx context.Context, route runtimeflowidentity.Route, entityID, nextState, sourceEvent string) error {
-	if _, ok := PipelineSQLTxFromContext(ctx); !ok {
-		return pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-			return pc.persistWorkflowStateForTest(txctx, route, entityID, nextState, sourceEvent)
-		})
-	}
 	inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
 	if !ok {
 		return fmt.Errorf("test transition requires an inbound event")
 	}
-	var currentState string
-	if err := pc.workflowStore.mutateE(ctx, route, func(instance *WorkflowInstance) error {
-		currentState = strings.TrimSpace(instance.CurrentState)
-		instance.CurrentState = strings.TrimSpace(nextState)
-		instance.EnteredStageAt = inbound.CreatedAt()
-		instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(
-			pc.WorkflowDefinition(), currentState, nextState, inbound.ID(), sourceEvent, inbound.CreatedAt(),
-		))
-		return nil
-	}); err != nil {
+	instance, found, err := pc.workflowStore.Load(ctx, route)
+	if err != nil {
 		return err
 	}
-	return pc.applyAcceptedWorkflowEvent(ctx, route, entityID, inbound, currentState, nextState)
+	if !found {
+		return &WorkflowInstanceLookupMiss{RequestedKey: route.InstancePath}
+	}
+	currentState := strings.TrimSpace(instance.CurrentState)
+	instance.CurrentState = strings.TrimSpace(nextState)
+	instance.EnteredStageAt = inbound.CreatedAt()
+	instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(
+		pc.WorkflowDefinition(), currentState, nextState, inbound.ID(), sourceEvent, inbound.CreatedAt(),
+	))
+	effect, err := (pipelineWorkflowLifecycleOwner{coordinator: pc}).AcceptedEventEffect(route, identity.NormalizeEntityID(entityID), inbound, currentState, nextState)
+	if err != nil {
+		return err
+	}
+	return commitTestWorkflowLifecycleMutation(ctx, pc, route, instance, currentState, []runtimeworkflowlifecycle.Effect{effect})
 }
 
 func (pc *PipelineCoordinator) applyWorkflowGateForTest(ctx context.Context, route runtimeflowidentity.Route, _ string, setGate string, clearAll bool) error {
@@ -68,11 +72,6 @@ func fireTypedWorkflowTimerTestWakeup(ctx context.Context, pc *PipelineCoordinat
 }
 
 func applyTestInitialEntryEffect(ctx context.Context, pc *PipelineCoordinator, route runtimeflowidentity.Route, entityID string) error {
-	if _, ok := PipelineSQLTxFromContext(ctx); !ok {
-		return pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-			return applyTestInitialEntryEffect(txctx, pc, route, entityID)
-		})
-	}
 	instance, found, err := pc.workflowStore.Load(ctx, route)
 	if err != nil {
 		return err
@@ -84,5 +83,67 @@ func applyTestInitialEntryEffect(ctx context.Context, pc *PipelineCoordinator, r
 	if err != nil {
 		return err
 	}
-	return pipelineWorkflowLifecycleOwner{coordinator: pc}.ApplyWorkflowLifecycleEffects(ctx, []runtimeworkflowlifecycle.Effect{effect})
+	return commitTestWorkflowLifecycleMutation(ctx, pc, route, instance, instance.CurrentState, []runtimeworkflowlifecycle.Effect{effect})
+}
+
+func commitTestWorkflowLifecycleMutation(
+	ctx context.Context,
+	pc *PipelineCoordinator,
+	route runtimeflowidentity.Route,
+	instance WorkflowInstance,
+	expectedState string,
+	effects []runtimeworkflowlifecycle.Effect,
+) error {
+	if pc == nil || pc.workflowStore == nil || pc.workflowStore.engineMutations == nil {
+		return fmt.Errorf("test workflow lifecycle requires the selected workflow engine mutation owner")
+	}
+	prepared, err := pc.prepareWorkflowLifecycleMutation(ctx, &instance, effects, len(effects) > 0)
+	if err != nil {
+		return err
+	}
+	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	updatedAt := time.Now().UTC()
+	if updatedAt.Before(instance.CreatedAt) {
+		updatedAt = instance.CreatedAt
+	}
+	state, err := workflowEngineStateRecord(runID, route, instance, expectedState, instance.Revision, false, updatedAt)
+	if err != nil {
+		return err
+	}
+	var publications []runtimeengine.DurablePublicationPlan
+	if len(prepared.Emissions) > 0 {
+		planner, ok := pc.bus.(EnginePublicationPlanner)
+		if !ok {
+			return fmt.Errorf("test workflow lifecycle requires publication planner")
+		}
+		publications, err = planner.PrepareEnginePublications(ctx, prepared.Emissions)
+		if err != nil {
+			return err
+		}
+	}
+	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
+		State: state, Lifecycle: prepared.Commit, Publications: publications,
+	})
+	if err != nil {
+		if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
+			err = errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
+		}
+		return err
+	}
+	if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
+		if err := planner.FinalizeEnginePublications(ctx, committed.Publications); err != nil {
+			return err
+		}
+	}
+	if err := pc.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle); err != nil {
+		return err
+	}
+	if len(prepared.Emissions) > 0 {
+		dispatcher := pc.bus.EngineDispatcher()
+		if dispatcher == nil {
+			return fmt.Errorf("test workflow lifecycle requires post-commit dispatcher")
+		}
+		return dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), prepared.Emissions)
+	}
+	return nil
 }

@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -29,150 +30,89 @@ type DecisionCardDirectMutationPublisher interface {
 	PublishDirectInMutation(context.Context, events.Event, []string) error
 }
 
-type workflowGateIntent struct {
-	activation gateruntime.Activation
-	card       decisioncard.Card
-}
-
 func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, route runtimeflowidentity.Route, entityID, currentStage, nextStage, sourceEvent string, occurredAt time.Time) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() || pc.SemanticSource() == nil {
 		return nil
 	}
+	if pc.workflowStore.engineMutations == nil {
+		return fmt.Errorf("workflow gate lifecycle requires the selected workflow engine mutation owner")
+	}
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
 	entityID = strings.TrimSpace(entityID)
 	currentStage = strings.TrimSpace(currentStage)
 	nextStage = strings.TrimSpace(nextStage)
-	if entityID == "" || nextStage == "" || currentStage == nextStage {
+	if !route.Valid() || entityID == "" || nextStage == "" || currentStage == nextStage {
 		return nil
 	}
-	if _, ok := PipelineSQLTxFromContext(ctx); !ok {
-		return pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-			return pc.applyWorkflowGateIntents(txctx, route, entityID, currentStage, nextStage, sourceEvent, occurredAt)
-		})
-	}
-
-	var create *workflowGateIntent
-	superseded := []gateruntime.Activation{}
-	var lifecycleOwner WorkflowInstance
 	now := occurredAt.UTC()
 	if now.IsZero() {
 		return fmt.Errorf("workflow gate lifecycle requires an exact occurrence time")
 	}
-	err := pc.workflowStore.mutateE(ctx, route, func(instance *WorkflowInstance) error {
-		lifecycleOwner = *instance
-		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
-		if err != nil {
-			return fmt.Errorf("decode gate state: %w", err)
-		}
-		activations, err := gateruntime.List(carrier.StateBuckets)
-		if err != nil {
-			return fmt.Errorf("list gate activations: %w", err)
-		}
-		for _, activation := range activations {
-			if activation.Stage != currentStage || activation.Stage == nextStage {
-				continue
-			}
-			if activation.Status == gateruntime.StatusDecisionCommitted {
-				return fmt.Errorf("stage %s cannot exit while decision card %s has a committed verdict awaiting its frozen route", currentStage, activation.CardID)
-			}
-			if activation.Supersede(firstNonEmptyString(sourceEvent, "stage_exited"), now) {
-				if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
-					return err
-				}
-				superseded = append(superseded, activation)
-			}
-		}
-
-		flowID, plan, ok := workflowGatePlanForInstance(pc, *instance, nextStage)
+	instance, found, err := pc.workflowStore.Load(ctx, route)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return &WorkflowInstanceLookupMiss{RequestedKey: route.InstancePath}
+	}
+	expectedState := strings.TrimSpace(instance.CurrentState)
+	expectedRevision := instance.Revision
+	var prepared PreparedWorkflowLifecycleMutation
+	if err := pc.planWorkflowGateEffect(ctx, &instance, entityID, currentStage, nextStage, sourceEvent, now, &prepared); err != nil {
+		return err
+	}
+	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	if runID == "" {
+		return fmt.Errorf("workflow gate lifecycle requires run identity")
+	}
+	updatedAt := time.Now().UTC()
+	if updatedAt.Before(instance.CreatedAt) {
+		updatedAt = instance.CreatedAt
+	}
+	state, err := workflowEngineStateRecord(runID, route, instance, expectedState, expectedRevision, false, updatedAt)
+	if err != nil {
+		return err
+	}
+	var publications []runtimeengine.DurablePublicationPlan
+	if len(prepared.Emissions) > 0 {
+		planner, ok := pc.bus.(EnginePublicationPlanner)
 		if !ok {
-			instance.StateBuckets = carrier.PersistedStateBuckets()
-			return nil
+			return fmt.Errorf("workflow gate lifecycle requires the publication planner")
 		}
-		if pc.decisionCards == nil {
-			return fmt.Errorf("decision card store is required before entering gated stage %s", nextStage)
-		}
-		if existing, found, err := gateruntime.Load(carrier.StateBuckets, flowID, plan.Decision); err != nil {
-			return err
-		} else if found && existing.Stage == nextStage && (existing.Status == gateruntime.StatusOpen || existing.Status == gateruntime.StatusDecisionCommitted) {
-			instance.StateBuckets = carrier.PersistedStateBuckets()
-			return nil
-		}
-
-		runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-		if runID == "" {
-			runID = strings.TrimSpace(asString(instance.Metadata["run_id"]))
-		}
-		if runID == "" {
-			return fmt.Errorf("run identity is required before entering gated stage %s", nextStage)
-		}
-		bundleHash := workflowGateBundleHash(ctx, pc)
-		if bundleHash == "" {
-			return fmt.Errorf("bundle identity is required before entering gated stage %s", nextStage)
-		}
-		enteredAt := instance.EnteredStageAt.UTC()
-		if enteredAt.IsZero() {
-			enteredAt = now
-		}
-		identity := StoredFlowInstance(pc.SemanticSource(), *instance)
-		frozenOutcomes, err := pc.resolvedWorkflowGateOutcomes(plan)
+		publications, err = planner.PrepareEnginePublications(ctx, prepared.Emissions)
 		if err != nil {
 			return err
 		}
-		routesJSON, err := gateruntime.FreezeRoutes(frozenOutcomes)
-		if err != nil {
-			return fmt.Errorf("freeze gate %s continuation routes: %w", plan.Decision, err)
+		if len(publications) != len(prepared.Emissions) {
+			releaseErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), publications)
+			return errors.Join(fmt.Errorf("workflow gate lifecycle planner returned %d plans for %d emissions", len(publications), len(prepared.Emissions)), releaseErr)
 		}
-		activation, err := gateruntime.New(runID, identity.InstancePath, entityID, flowID, nextStage, plan.Decision, bundleHash, routesJSON, sourceEvent, enteredAt)
-		if err != nil {
-			return err
-		}
-		if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
-			return err
-		}
-		card, err := pc.buildWorkflowDecisionCard(ctx, entityID, *instance, identity.InstancePath, activation, plan, frozenOutcomes)
-		if err != nil {
-			return err
-		}
-		instance.StateBuckets = carrier.PersistedStateBuckets()
-		create = &workflowGateIntent{activation: activation, card: card}
-		return nil
+	}
+	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
+		State: state, Lifecycle: prepared.Commit, Publications: publications,
 	})
 	if err != nil {
+		if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
+			err = errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
+		}
 		return err
 	}
-	for _, activation := range superseded {
-		if pc.decisionCards == nil {
-			return fmt.Errorf("decision card store is required to supersede gate activation %s", activation.ActivationID)
-		}
-		card, err := pc.decisionCards.GetDecisionCard(ctx, activation.CardID)
-		if err != nil {
-			return fmt.Errorf("load decision card %s for supersession: %w", activation.CardID, err)
-		}
-		if err := pc.decisionCards.SupersedeDecisionCardsForStage(ctx, runtimecorrelation.RunIDFromContext(ctx), entityID, activation.ActivationID, activation.SupersededReason, now); err != nil {
-			return err
-		}
-		if err := pc.publishWorkflowGateSuperseded(ctx, card, activation, lifecycleOwner, now); err != nil {
+	if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
+		if err := planner.FinalizeEnginePublications(ctx, committed.Publications); err != nil {
 			return err
 		}
 	}
-	if create != nil {
-		if err := pc.decisionCards.CreateDecisionCard(ctx, create.card); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (pc *PipelineCoordinator) publishWorkflowGateSuperseded(ctx context.Context, card decisioncard.Card, activation gateruntime.Activation, instance WorkflowInstance, now time.Time) error {
-	publisher := pc.gatePublisher
-	if publisher == nil {
-		return fmt.Errorf("transactional event publisher is required to supersede decision card %s", activation.CardID)
-	}
-	evt, err := workflowGateSupersededEvent(card, activation, instance, now)
-	if err != nil {
+	if err := pc.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle); err != nil {
 		return err
 	}
-	if err := publisher.PublishInMutation(ctx, evt); err != nil {
-		return fmt.Errorf("publish decision card superseded event: %w", err)
+	if len(prepared.Emissions) > 0 {
+		dispatcher := pc.bus.EngineDispatcher()
+		if dispatcher == nil {
+			return fmt.Errorf("workflow gate lifecycle requires the post-commit dispatcher")
+		}
+		if err := dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), prepared.Emissions); err != nil {
+			return err
+		}
 	}
 	return nil
 }

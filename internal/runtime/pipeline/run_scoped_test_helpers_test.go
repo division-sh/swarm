@@ -30,20 +30,25 @@ func newTestWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 
 func newTestSQLiteWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 	reader := &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite}
-	store := &workflowInstanceStore{
-		db:               db,
-		dialect:          workflowStoreDialectSQLite,
-		entityQuery:      reader,
-		routeRecovery:    reader,
-		activityResults:  reader,
-		runLifecycle:     &unavailablePipelineTestRunLifecycle{},
-		timerObligations: pipelineTestTimerObligationReader{db: db, dialect: timerobligationadapter.DialectSQLite},
-	}
+	store := NewSQLiteWorkflowPersistence(db, reader).store
+	store.runLifecycle = &unavailablePipelineTestRunLifecycle{}
+	store.timerObligations = pipelineTestTimerObligationReader{db: db, dialect: timerobligationadapter.DialectSQLite}
 	return installPipelineTestActivityJournal(store)
 }
 
 func newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, runner runtimeMutationRunner) *workflowInstanceStore {
 	store := NewSQLiteWorkflowPersistence(db, runner).store
+	if owner, ok := runner.(WorkflowInstancePersistenceReader); ok {
+		store.instanceReader = owner
+	} else {
+		store.instanceReader = pipelineTestWorkflowInstanceReader{db: db, dialect: workflowStoreDialectSQLite}
+	}
+	if owner, ok := runner.(WorkflowEngineMutationOwner); ok {
+		store.engineMutations = owner
+	}
+	if owner, ok := runner.(WorkflowInitialMaterializationCommitOwner); ok {
+		store.initialCommits = owner
+	}
 	store.timerObligations = pipelineTestTimerObligationReader{db: db, dialect: timerobligationadapter.DialectSQLite}
 	if owner, ok := runner.(runtimerunlifecycle.OperationOwner); ok {
 		store.runLifecycle = owner

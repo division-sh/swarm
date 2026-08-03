@@ -45,6 +45,7 @@ type WorkflowEngineStateRecord struct {
 	EnteredStageAt   time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	TerminatedAt     time.Time
 	ExpectedState    string
 	ExpectedRevision int64
 	Create           bool
@@ -73,6 +74,16 @@ func (r WorkflowEngineStateRecord) Validate() error {
 	}
 	if r.UpdatedAt.Before(r.CreatedAt) {
 		return fmt.Errorf("workflow engine state record update time %s cannot precede creation %s", r.UpdatedAt.Format(time.RFC3339Nano), r.CreatedAt.Format(time.RFC3339Nano))
+	}
+	if strings.TrimSpace(r.Status) == "terminated" {
+		if r.TerminatedAt.IsZero() {
+			return fmt.Errorf("terminated workflow engine state requires exact termination time")
+		}
+		if r.TerminatedAt.Before(r.CreatedAt) || r.UpdatedAt.Before(r.TerminatedAt) {
+			return fmt.Errorf("workflow termination time must be between creation and update time")
+		}
+	} else if !r.TerminatedAt.IsZero() {
+		return fmt.Errorf("non-terminal workflow engine state cannot carry termination time")
 	}
 	if r.Create {
 		if r.ExpectedRevision != 0 || strings.TrimSpace(r.ExpectedState) != "" {
@@ -193,12 +204,20 @@ func workflowEngineStateRecord(
 		EnteredStageAt: canonicalWorkflowInstancePersistedTime(instance.EnteredStageAt),
 		CreatedAt:      canonicalWorkflowInstancePersistedTime(instance.CreatedAt),
 		UpdatedAt:      canonicalWorkflowInstancePersistedTime(updatedAt),
+		TerminatedAt:   canonicalWorkflowInstanceOptionalPersistedTime(instance.TerminatedAt),
 		ExpectedState:  strings.TrimSpace(expectedState), ExpectedRevision: expectedRevision, Create: create,
 	}
 	if err := record.Validate(); err != nil {
 		return WorkflowEngineStateRecord{}, err
 	}
 	return record, nil
+}
+
+func canonicalWorkflowInstanceOptionalPersistedTime(value time.Time) time.Time {
+	if value.IsZero() {
+		return time.Time{}
+	}
+	return canonicalWorkflowInstancePersistedTime(value)
 }
 
 type CommittedWorkflowEngineMutation struct {

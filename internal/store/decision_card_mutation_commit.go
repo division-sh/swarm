@@ -152,7 +152,7 @@ func commitDecisionCardGateState(
 	if err != nil {
 		return err
 	}
-	if err := commitWorkflowEngineState(ctx, tx, postgres, record); err != nil {
+	if err := commitWorkflowEngineState(ctx, tx, postgres, record, false); err != nil {
 		return err
 	}
 	before, err = commitWorkflowEngineInitialValues(ctx, tx, story, store, postgres, record, before)

@@ -160,7 +160,7 @@ func workflowInstanceRowCount(t *testing.T, ctx context.Context, db *sql.DB) int
 	return count
 }
 
-func TestWorkflowInstanceStoreMutate_SerializesOverlappingMutations(t *testing.T) {
+func TestWorkflowInstanceStoreMutate_RejectsOverlappingStaleSnapshots(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -193,17 +193,13 @@ func TestWorkflowInstanceStoreMutate_SerializesOverlappingMutations(t *testing.T
 		})
 	}()
 
-	select {
-	case <-secondEntered:
-		t.Fatal("second mutation entered callback before first mutation committed")
-	case <-time.After(150 * time.Millisecond):
+	<-secondEntered
+	if err := <-errCh; err != nil {
+		t.Fatalf("second mutation commit: %v", err)
 	}
-
 	close(releaseFirst)
-	for i := 0; i < 2; i++ {
-		if err := <-errCh; err != nil {
-			t.Fatalf("mutate[%d]: %v", i, err)
-		}
+	if err := <-errCh; err == nil || !strings.Contains(err.Error(), "changed before commit") {
+		t.Fatalf("stale first mutation error = %v, want optimistic conflict", err)
 	}
 
 	instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute("mutation-flow"))
@@ -217,16 +213,16 @@ func TestWorkflowInstanceStoreMutate_SerializesOverlappingMutations(t *testing.T
 		t.Fatalf("current_state = %q, want done", got)
 	}
 	gates := workflowStateGatesAsBools(instance.Metadata)
-	if !gates["g_first"] || !gates["g_second"] {
-		t.Fatalf("gates = %#v, want both concurrent mutations preserved", gates)
+	if gates["g_first"] || !gates["g_second"] {
+		t.Fatalf("gates = %#v, want only the committed snapshot", gates)
 	}
 	evidence := workflowEvidenceEntries(t, instance, "audit")
-	if len(evidence) != 2 {
-		t.Fatalf("evidence entries = %d, want 2 (%#v)", len(evidence), evidence)
+	if len(evidence) != 1 {
+		t.Fatalf("evidence entries = %d, want 1 (%#v)", len(evidence), evidence)
 	}
 }
 
-func TestUpdateEntityState_PreservesMutationCommittedWhileTransitionWaits(t *testing.T) {
+func TestUpdateEntityState_RejectsCompetingStaleCallbackSnapshot(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -244,10 +240,11 @@ func TestUpdateEntityState_PreservesMutationCommittedWhileTransitionWaits(t *tes
 	transitionCtx := testPersistedWorkflowStateTransitionContext(t, store, ctx, testWorkflowInstanceRoute("mutation-flow"), entityID, "workflow.completed")
 	firstEntered := make(chan struct{})
 	releaseFirst := make(chan struct{})
-	errCh := make(chan error, 2)
+	callbackErr := make(chan error, 1)
+	transitionErr := make(chan error, 1)
 
 	go func() {
-		errCh <- store.mutate(ctx, testWorkflowInstanceRoute("mutation-flow"), func(instance *WorkflowInstance) {
+		callbackErr <- store.mutate(ctx, testWorkflowInstanceRoute("mutation-flow"), func(instance *WorkflowInstance) {
 			setWorkflowGate(instance, "g_ready")
 			close(firstEntered)
 			<-releaseFirst
@@ -256,15 +253,15 @@ func TestUpdateEntityState_PreservesMutationCommittedWhileTransitionWaits(t *tes
 
 	<-firstEntered
 	go func() {
-		errCh <- pc.persistWorkflowStateForTest(transitionCtx, testWorkflowInstanceRoute("mutation-flow"), entityID, "done", "workflow.completed")
+		transitionErr <- pc.persistWorkflowStateForTest(transitionCtx, testWorkflowInstanceRoute("mutation-flow"), entityID, "done", "workflow.completed")
 	}()
 
-	time.Sleep(100 * time.Millisecond)
+	if err := <-transitionErr; err != nil {
+		t.Fatalf("closed transition commit: %v", err)
+	}
 	close(releaseFirst)
-	for i := 0; i < 2; i++ {
-		if err := <-errCh; err != nil {
-			t.Fatalf("update[%d]: %v", i, err)
-		}
+	if err := <-callbackErr; err == nil || !strings.Contains(err.Error(), "changed before commit") {
+		t.Fatalf("stale callback commit error = %v, want optimistic conflict", err)
 	}
 
 	instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute("mutation-flow"))
@@ -278,8 +275,8 @@ func TestUpdateEntityState_PreservesMutationCommittedWhileTransitionWaits(t *tes
 		t.Fatalf("current_state = %q, want done", got)
 	}
 	gates := workflowStateGatesAsBools(instance.Metadata)
-	if !gates["g_ready"] {
-		t.Fatalf("gates = %#v, want concurrent gate mutation preserved", gates)
+	if gates["g_ready"] {
+		t.Fatalf("gates = %#v, stale callback mutation survived", gates)
 	}
 	if len(instance.TransitionHistory) == 0 {
 		t.Fatal("expected transition history to be recorded")

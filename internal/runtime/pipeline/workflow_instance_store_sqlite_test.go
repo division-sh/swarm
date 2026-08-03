@@ -12,6 +12,7 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -164,19 +165,21 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 
 func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	runner := &recordingRuntimeMutationRunner{db: db}
+	runner := &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite}
 	store := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	ensurePipelineTestRun(t, store, runID)
 	storageRef := "root/terminated"
+	entityID := uuid.NewString()
 	terminatedAt := time.Now().UTC().Truncate(time.Millisecond)
-	if _, err := db.Exec(`
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES (?, 'root', 'workflow', '{}', 'running', ?)
-	`, storageRef, time.Now().UTC()); err != nil {
-		t.Fatalf("seed flow instance: %v", err)
+	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+		InstanceID: entityID, StorageRef: storageRef, WorkflowName: "root", WorkflowVersion: "1",
+		CurrentState: "running", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID},
+	})); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
 	}
+	atomic.StoreInt32(&runner.calls, 0)
 
 	if err := store.MarkTerminated(ctx, testWorkflowInstanceRoute(storageRef), terminatedAt); err != nil {
 		t.Fatalf("MarkTerminated: %v", err)
@@ -196,24 +199,6 @@ func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *
 	}
 	if status != "terminated" || hasTerminatedAt != 1 {
 		t.Fatalf("flow instance status=%q hasTerminatedAt=%d, want terminated/1", status, hasTerminatedAt)
-	}
-}
-
-func TestSQLiteWorkflowInstanceStore_runPipelineMutationRequiresRuntimeMutationRunner(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	store := newTestSQLiteWorkflowInstanceStore(db)
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), uuid.NewString())
-	called := false
-
-	err := store.runPipelineMutation(ctx, func(context.Context) error {
-		called = true
-		return nil
-	})
-	if !errors.Is(err, errSQLiteWorkflowMutationOwnerRequired) {
-		t.Fatalf("runPipelineMutation error = %v, want runtime mutation runner required", err)
-	}
-	if called {
-		t.Fatal("runPipelineMutation callback ran without runtime mutation runner")
 	}
 }
 
@@ -363,6 +348,7 @@ func TestWorkflowInstanceStore_runPipelineMutationDoesNotRetryPostgresDialect(t 
 type recordingRuntimeMutationRunner struct {
 	db                             *sql.DB
 	dialect                        workflowStoreDialect
+	decisionCards                  decisioncard.Store
 	mu                             sync.Mutex
 	calls                          int32
 	committedScheduleUpserts       []Schedule

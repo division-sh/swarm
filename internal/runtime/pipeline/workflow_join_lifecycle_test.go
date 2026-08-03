@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"strings"
 	"sync"
@@ -47,7 +46,7 @@ func TestWorkflowLifecycleOwnerIsConstructedBeforeDurableStoreReachabilityOnBoth
 	}
 }
 
-func TestWorkflowJoinRequiresGenericScheduleOwnerBeforeMutationOnBothStores(t *testing.T) {
+func TestWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStores(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
@@ -65,9 +64,8 @@ func TestWorkflowJoinRequiresGenericScheduleOwnerBeforeMutationOnBothStores(t *t
 				t.Fatal(err)
 			}
 
-			err := applyTestInitialEntryEffect(ctx, pc, testWorkflowInstanceRoute(path), entityID)
-			if !errors.Is(err, errGenericScheduleOwnerRequired) {
-				t.Fatalf("arm ownerless join error = %v, want %v", err, errGenericScheduleOwnerRequired)
+			if err := applyTestInitialEntryEffect(ctx, pc, testWorkflowInstanceRoute(path), entityID); err != nil {
+				t.Fatalf("arm selected-store join: %v", err)
 			}
 			instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(path))
 			if err != nil || !ok {
@@ -77,8 +75,12 @@ func TestWorkflowJoinRequiresGenericScheduleOwnerBeforeMutationOnBothStores(t *t
 			if err != nil {
 				t.Fatal(err)
 			}
-			if activation, found, loadErr := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey()); loadErr != nil || found {
-				t.Fatalf("ownerless join activation = %#v, found=%v error=%v, want rollback", activation, found, loadErr)
+			if activation, found, loadErr := joinruntime.Load(carrier.StateBuckets, "join-node", workflowJoinActivationKey()); loadErr != nil || !found {
+				t.Fatalf("selected-store join activation = %#v, found=%v error=%v", activation, found, loadErr)
+			}
+			upserts, _ := committedWorkflowSchedulesForTest(t, store)
+			if len(upserts) != 1 || upserts[0].EventType != joinTimeoutEvent {
+				t.Fatalf("selected-store join schedules = %#v, want one timeout", upserts)
 			}
 		})
 	}
@@ -134,19 +136,17 @@ func TestArmWorkflowJoinPersistsActivationAndScheduleAtomically(t *testing.T) {
 			if activation.Status != tc.wantStatus || activation.CloseReason != tc.wantReason {
 				t.Fatalf("activation status = %s/%s, want %s/%s", activation.Status, activation.CloseReason, tc.wantStatus, tc.wantReason)
 			}
-			if got := len(schedules.schedules); got != 1 {
+			upserts, _ := committedWorkflowSchedulesForTest(t, store)
+			if got := len(upserts); got != 1 {
 				t.Fatalf("schedules = %d, want 1", got)
 			}
-			schedule := schedules.schedules[0]
+			schedule := upserts[0]
 			if schedule.EventType != tc.wantEvent || schedule.EntityID != entityID {
 				t.Fatalf("schedule = %#v", schedule)
 			}
 			handle, ok := timeridentity.ParseTimerHandle(parsePayloadMap(schedule.Payload))
 			if !ok || handle.Kind != tc.wantKind || handle.Join.JoinID != "awaiting" {
 				t.Fatalf("timer handle = %#v, %v", handle, ok)
-			}
-			if len(schedules.upsertTx) != 1 || !schedules.upsertTx[0] {
-				t.Fatalf("schedule persistence transaction flags = %#v, want [true]", schedules.upsertTx)
 			}
 		})
 	}
@@ -191,8 +191,9 @@ func TestArmWorkflowJoinPostgresParity(t *testing.T) {
 			if err != nil || !ok || activation.Status != tc.wantStatus {
 				t.Fatalf("activation = %#v, %v, %v", activation, ok, err)
 			}
-			if len(schedules.schedules) != 1 || schedules.schedules[0].EventType != tc.wantEvent || len(schedules.upsertTx) != 1 || !schedules.upsertTx[0] {
-				t.Fatalf("schedule parity = schedules:%#v tx:%#v", schedules.schedules, schedules.upsertTx)
+			upserts, _ := committedWorkflowSchedulesForTest(t, store)
+			if len(upserts) != 1 || upserts[0].EventType != tc.wantEvent {
+				t.Fatalf("schedule parity = schedules:%#v", upserts)
 			}
 		})
 	}
@@ -243,8 +244,9 @@ func TestWorkflowJoinCustomCompletionControlsExpectedZeroOnBothStores(t *testing
 			if err != nil || !ok || activation.Status != joinruntime.StatusOpen || activation.CloseReason != "" {
 				t.Fatalf("custom zero activation = %#v, %v, %v, want open", activation, ok, err)
 			}
-			if len(schedules.schedules) != 1 || schedules.schedules[0].EventType != joinTimeoutEvent {
-				t.Fatalf("custom zero schedules = %#v, want timeout", schedules.schedules)
+			upserts, _ := committedWorkflowSchedulesForTest(t, store)
+			if len(upserts) != 1 || upserts[0].EventType != joinTimeoutEvent {
+				t.Fatalf("custom zero schedules = %#v, want timeout", upserts)
 			}
 		})
 	}
@@ -351,8 +353,9 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 			if err != nil || !ok || reviewing.Status != joinruntime.StatusOpen || reviewing.Stage != "reviewing" {
 				t.Fatalf("reviewing activation = %#v, %v, %v", reviewing, ok, err)
 			}
-			if awaiting.Key() == reviewing.Key() || len(schedules.schedules) != 2 {
-				t.Fatalf("stage identities/schedules = awaiting:%q reviewing:%q schedules:%#v", awaiting.Key(), reviewing.Key(), schedules.schedules)
+			upserts, _ := committedWorkflowSchedulesForTest(t, store)
+			if awaiting.Key() == reviewing.Key() || len(upserts) != 2 {
+				t.Fatalf("stage identities/schedules = awaiting:%q reviewing:%q schedules:%#v", awaiting.Key(), reviewing.Key(), upserts)
 			}
 		})
 	}
@@ -361,6 +364,17 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 type workflowJoinStoreCase struct {
 	name string
 	open func(*testing.T) (*workflowInstanceStore, context.Context)
+}
+
+func committedWorkflowSchedulesForTest(t *testing.T, store *workflowInstanceStore) ([]Schedule, []Schedule) {
+	t.Helper()
+	runner, ok := store.engineMutations.(*recordingRuntimeMutationRunner)
+	if !ok || runner == nil {
+		t.Fatalf("workflow test store has unexpected engine mutation owner %T", store.engineMutations)
+	}
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	return append([]Schedule(nil), runner.committedScheduleUpserts...), append([]Schedule(nil), runner.committedScheduleCancellations...)
 }
 
 func workflowJoinStoreCases() []workflowJoinStoreCase {
@@ -559,8 +573,9 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 			if (err == nil) != (activation.Completed() == 1) {
 				t.Fatalf("arrival err=%v completed=%d; want exact early/admitted alternatives", err, activation.Completed())
 			}
-			if len(schedules.schedules) != 1 {
-				t.Fatalf("schedule intents = %d, want 1", len(schedules.schedules))
+			upserts, _ := committedWorkflowSchedulesForTest(t, store)
+			if len(upserts) != 1 {
+				t.Fatalf("schedule intents = %d, want 1", len(upserts))
 			}
 		})
 	}
@@ -797,16 +812,18 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 			if err := applyTestInitialEntryEffect(ctx, pc, testWorkflowInstanceRoute(path), entityID); err != nil {
 				t.Fatalf("arm zero join: %v", err)
 			}
-			if len(schedules.schedules) != 1 || schedules.schedules[0].EventType != joinCompleteEvent {
-				t.Fatalf("completion schedules = %#v", schedules.schedules)
+			upserts, _ := committedWorkflowSchedulesForTest(t, store)
+			if len(upserts) != 1 || upserts[0].EventType != joinCompleteEvent {
+				t.Fatalf("completion schedules = %#v", upserts)
 			}
-			completion := schedules.schedules[0]
+			completion := upserts[0]
 			transitionCtx := testPersistedWorkflowStateTransitionContext(t, store, ctx, testWorkflowInstanceRoute(path), entityID, "manual.abort")
 			if err := pc.persistWorkflowStateForTest(transitionCtx, testWorkflowInstanceRoute(path), entityID, "dispatching", "manual.abort"); err != nil {
 				t.Fatalf("exit join stage: %v", err)
 			}
-			if schedules.cancelOwned != 1 || len(schedules.cancels) != 1 || schedules.cancels[0].EventType != joinCompleteEvent || len(schedules.cancelTx) != 1 || !schedules.cancelTx[0] {
-				t.Fatalf("completion cancellation = count:%d cancels:%#v tx:%#v", schedules.cancelOwned, schedules.cancels, schedules.cancelTx)
+			_, cancellations := committedWorkflowSchedulesForTest(t, store)
+			if len(cancellations) != 1 || cancellations[0].EventType != joinCompleteEvent {
+				t.Fatalf("completion cancellations = %#v", cancellations)
 			}
 
 			instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(path))
@@ -831,8 +848,9 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 			if err != nil || !ok || instance.CurrentState != "dispatching" || len(instance.TransitionHistory) != 1 {
 				t.Fatalf("lifecycle after late completion = instance:%#v found:%v err:%v", instance, ok, err)
 			}
-			if schedules.cancelOwned != 1 {
-				t.Fatalf("late completion repeated cancellation: %d", schedules.cancelOwned)
+			_, afterLateCancellations := committedWorkflowSchedulesForTest(t, store)
+			if len(afterLateCancellations) != 1 {
+				t.Fatalf("late completion repeated cancellation: %#v", afterLateCancellations)
 			}
 		})
 	}

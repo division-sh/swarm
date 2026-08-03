@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -22,6 +23,7 @@ func commitWorkflowEngineState(
 	tx *sql.Tx,
 	postgres bool,
 	record runtimepipeline.WorkflowEngineStateRecord,
+	rebindExistingRoute bool,
 ) error {
 	if tx == nil {
 		return fmt.Errorf("workflow engine state commit requires private transaction")
@@ -36,20 +38,31 @@ func commitWorkflowEngineState(
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, record.RunID+":"+record.Route.InstancePath); err != nil {
 			return fmt.Errorf("lock workflow engine state route: %w", err)
 		}
-		return commitPostgresWorkflowEngineState(ctx, tx, record)
+		return commitPostgresWorkflowEngineState(ctx, tx, record, rebindExistingRoute)
 	}
 	if err := requireSQLiteRunActive(ctx, tx, record.RunID); err != nil {
 		return err
 	}
-	return commitSQLiteWorkflowEngineState(ctx, tx, record)
+	return commitSQLiteWorkflowEngineState(ctx, tx, record, rebindExistingRoute)
 }
 
-func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record runtimepipeline.WorkflowEngineStateRecord) error {
+func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record runtimepipeline.WorkflowEngineStateRecord, rebindExistingRoute bool) error {
 	if record.Create {
-		if _, err := tx.ExecContext(ctx, `
+		query := `
 			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 			VALUES ($1, $2, $3, $4::jsonb, $5, $6)
-		`, record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt); err != nil {
+		`
+		if rebindExistingRoute {
+			query += `
+				ON CONFLICT (instance_id) DO UPDATE SET
+					flow_template = EXCLUDED.flow_template,
+					mode = EXCLUDED.mode,
+					config = EXCLUDED.config,
+					status = EXCLUDED.status,
+					terminated_at = NULL
+			`
+		}
+		if _, err := tx.ExecContext(ctx, query, record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt); err != nil {
 			return fmt.Errorf("insert workflow engine flow instance: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -101,9 +114,13 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record r
 	}
 	result, err = tx.ExecContext(ctx, `
 		UPDATE flow_instances
-		SET flow_template = $1, mode = $2, config = $3::jsonb, status = $4
-		WHERE instance_id = $5
-	`, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.Route.InstancePath)
+		SET flow_template = $1,
+		    mode = $2,
+		    config = $3::jsonb,
+		    status = $4,
+		    terminated_at = CASE WHEN $4 = 'terminated' THEN COALESCE(terminated_at, $5) ELSE NULL END
+		WHERE instance_id = $6
+	`, record.WorkflowName, record.Mode, string(record.Config), record.Status, nullableWorkflowTerminationTime(record.TerminatedAt), record.Route.InstancePath)
 	if err != nil {
 		return fmt.Errorf("update workflow engine flow instance: %w", err)
 	}
@@ -117,12 +134,23 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record r
 	return nil
 }
 
-func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record runtimepipeline.WorkflowEngineStateRecord) error {
+func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record runtimepipeline.WorkflowEngineStateRecord, rebindExistingRoute bool) error {
 	if record.Create {
-		if _, err := tx.ExecContext(ctx, `
+		query := `
 			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 			VALUES (?, ?, ?, ?, ?, ?)
-		`, record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt); err != nil {
+		`
+		if rebindExistingRoute {
+			query += `
+				ON CONFLICT(instance_id) DO UPDATE SET
+					flow_template = excluded.flow_template,
+					mode = excluded.mode,
+					config = excluded.config,
+					status = excluded.status,
+					terminated_at = NULL
+			`
+		}
+		if _, err := tx.ExecContext(ctx, query, record.Route.InstancePath, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.CreatedAt); err != nil {
 			return fmt.Errorf("insert workflow engine flow instance: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -170,9 +198,13 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 	}
 	result, err = tx.ExecContext(ctx, `
 		UPDATE flow_instances
-		SET flow_template = ?, mode = ?, config = ?, status = ?
+		SET flow_template = ?,
+		    mode = ?,
+		    config = ?,
+		    status = ?,
+		    terminated_at = CASE WHEN ? = 'terminated' THEN COALESCE(terminated_at, ?) ELSE NULL END
 		WHERE instance_id = ?
-	`, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.Route.InstancePath)
+	`, record.WorkflowName, record.Mode, string(record.Config), record.Status, record.Status, nullableWorkflowTerminationTime(record.TerminatedAt), record.Route.InstancePath)
 	if err != nil {
 		return fmt.Errorf("update workflow engine flow instance: %w", err)
 	}
@@ -184,6 +216,13 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 		return fmt.Errorf("workflow engine flow instance is missing: %s", record.Route.InstancePath)
 	}
 	return nil
+}
+
+func nullableWorkflowTerminationTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value.UTC()
 }
 
 func workflowEngineStateProjection(record runtimepipeline.WorkflowEngineStateRecord) (runtimemutationlog.EntityStateProjection, error) {
@@ -385,7 +424,7 @@ func commitWorkflowEngineMutation(
 		if err != nil {
 			return err
 		}
-		if err := commitWorkflowEngineState(txctx, tx, postgres, command.State); err != nil {
+		if err := commitWorkflowEngineState(txctx, tx, postgres, command.State, false); err != nil {
 			return err
 		}
 		before, err = commitWorkflowEngineInitialValues(txctx, tx, story, store, postgres, command.State, before)

@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -264,21 +265,23 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 			}
 			sourceAByDeclaration := workflowTimerActivationsByDeclaration(sourceARows)
 			transitionAt := createdAt.Add(time.Minute)
-			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
-				if err := store.mutateE(txctx, testWorkflowInstanceRoute(entityID), func(instance *WorkflowInstance) error {
-					instance.CurrentState = "done"
-					instance.EnteredStageAt = transitionAt
-					return nil
-				}); err != nil {
-					return err
-				}
-				return pcA.workflowTimers.Reconcile(txctx, testWorkflowInstanceRoute(entityID), entityID, "waiting", "done", workflowTimerCause{
-					Kind: workflowTimerCauseTransition, EventID: uuid.NewString(),
-					OccurredAt: transitionAt, TransitionID: "waiting->done",
-					FromState: "waiting", ToState: "done",
-				})
-			}); err != nil {
-				t.Fatalf("progress workflow instance: %v", err)
+			route := testWorkflowInstanceRoute("workflow-timer-progressed-revision")
+			progressed, found, err := store.Load(ctx, route)
+			if err != nil || !found {
+				t.Fatalf("load workflow instance before progress: found=%v err=%v", found, err)
+			}
+			progressed.CurrentState = "done"
+			progressed.EnteredStageAt = transitionAt
+			transition, err := runtimeworkflowlifecycle.NewTransition("waiting", "done", "waiting->done")
+			if err != nil {
+				t.Fatalf("build progressed transition: %v", err)
+			}
+			effect, err := runtimeworkflowlifecycle.NewAcceptedEvent(route, entityID, uuid.NewString(), "test.workflow_progressed", transitionAt, &transition)
+			if err != nil {
+				t.Fatalf("build progressed lifecycle effect: %v", err)
+			}
+			if err := commitTestWorkflowLifecycleMutation(ctx, pcA, route, progressed, "waiting", []runtimeworkflowlifecycle.Effect{effect}); err != nil {
+				t.Fatalf("commit progressed workflow instance: %v", err)
 			}
 			if active := listWorkflowTimerOwnerActivations(t, store, ctx, entityID, true); len(active) != 3 {
 				t.Fatalf("progressed active timers = %d, want 3 before source revision: %#v", len(active), active)

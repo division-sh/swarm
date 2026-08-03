@@ -494,112 +494,10 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimee
 }
 
 func (r pipelineEngineStateRepo) SaveState(ctx context.Context, address runtimeengine.StateAddress, mutation runtimeengine.StateMutation) error {
-	if r.coordinator == nil {
+	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.enabled() {
 		return nil
 	}
-	entityID := identity.NormalizeEntityID(address.EntityID.String())
-	if entityID.IsZero() {
-		return nil
-	}
-	flowID := strings.TrimSpace(address.FlowID.String())
-	currentState := ""
-	nextState := strings.TrimSpace(mutation.NextState)
-	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.enabled() {
-		if !address.Route.Valid() {
-			return fmt.Errorf("engine state mutation requires an exact workflow instance route")
-		}
-		if err := r.ensureFlowOwnsEntity(ctx, address); err != nil {
-			return err
-		}
-		_, hadState, err := r.coordinator.workflowStore.Load(ctx, address.Route)
-		if err != nil {
-			return err
-		}
-		if !hadState {
-			if mutation.TriggeredAt.IsZero() {
-				return fmt.Errorf("workflow initial materialization requires exact accepted event time")
-			}
-			initialMetadata := mutation.StateCarrier.PersistedMetadata()
-			if initialMetadata == nil {
-				initialMetadata = map[string]any{}
-			}
-			exactFacts := map[string]string{
-				"flow_path":   address.Route.InstancePath,
-				"instance_id": address.Route.InstanceID,
-				"entity_id":   entityID.String(),
-			}
-			for key, value := range exactFacts {
-				if existing := strings.TrimSpace(asString(initialMetadata[key])); existing != "" && existing != value {
-					return fmt.Errorf("engine state %s %q disagrees with exact value %q", key, existing, value)
-				}
-				initialMetadata[key] = value
-			}
-			source := r.coordinator.SemanticSource()
-			workflowName := flowID
-			workflowVersion := ""
-			if source != nil {
-				workflowName = firstNonEmptyString(workflowName, source.WorkflowName())
-				workflowVersion = source.WorkflowVersion()
-			}
-			initialState := strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
-			materialization, err := r.coordinator.workflowStore.MaterializeInitialEntry(ctx, WorkflowInstance{
-				InstanceID:         address.Route.InstanceID,
-				StorageRef:         address.Route.InstancePath,
-				WorkflowName:       workflowName,
-				WorkflowVersion:    workflowVersion,
-				CurrentState:       initialState,
-				Metadata:           workflowMaterializeEntityMetadata(source, flowID, initialMetadata),
-				StateBuckets:       mutation.StateCarrier.PersistedStateBuckets(),
-				InitialFieldValues: cloneStringAnyMap(mutation.InitialFieldValues),
-			}, mutation.TriggeredAt)
-			if err != nil {
-				return fmt.Errorf("materialize exact workflow state route %s: %w", address.Route.InstancePath, err)
-			}
-			if materialization != WorkflowInitialMaterializationCreated && materialization != WorkflowInitialMaterializationAlreadyExists {
-				return fmt.Errorf("workflow initial materialization returned unknown result %d", materialization)
-			}
-			if err := r.coordinator.workflowStore.ArmInitialEntryTimers(ctx, address.Route); err != nil {
-				return err
-			}
-		}
-		allowedFields := workflowEntitySchemaFields(r.coordinator.SemanticSource(), flowID)
-		if err := r.coordinator.workflowStore.mutateE(ctx, address.Route, func(instance *WorkflowInstance) error {
-			currentState = strings.TrimSpace(instance.CurrentState)
-			if err := applyEngineStateMutation(instance, mutation, allowedFields, r.coordinator.SemanticSource(), flowID); err != nil {
-				return err
-			}
-			if nextState == "" || nextState == currentState {
-				return nil
-			}
-			if strings.TrimSpace(mutation.TriggerEventID) == "" || strings.TrimSpace(mutation.TriggerEventType) == "" || mutation.TriggeredAt.IsZero() {
-				return fmt.Errorf("workflow state transition requires exact trigger event identity")
-			}
-			instance.CurrentState = nextState
-			instance.EnteredStageAt = mutation.TriggeredAt.UTC()
-			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(
-				r.coordinator.WorkflowDefinition(), currentState, nextState,
-				mutation.TriggerEventID, mutation.TriggerEventType, mutation.TriggeredAt,
-			))
-			return nil
-		}); err != nil {
-			return err
-		}
-		if err := r.coordinator.reconcileSupersededLoopSchedules(ctx, address.Route, entityID.String()); err != nil {
-			return err
-		}
-		if mutation.StateCarrier.StateBuckets != nil {
-			if err := r.coordinator.reconcileClosedJoinSchedules(ctx, address.Route, entityID.String(), mutation.StateCarrier); err != nil {
-				return err
-			}
-		}
-	}
-	if nextState != "" {
-		r.coordinator.notifyTestEntityStateUpdated(entityID.String(), nextState)
-		if err := r.coordinator.maybeDeactivateTerminalFlowInstance(ctx, address.Route, entityID.String(), nextState); err != nil {
-			return err
-		}
-	}
-	return nil
+	return fmt.Errorf("direct workflow state persistence is unsupported; use the workflow engine mutation owner")
 }
 
 func (r pipelineEngineStateRepo) VerifyEmitPersistence(ctx context.Context, address runtimeengine.StateAddress, prerequisites runtimeengine.EmitPersistencePrerequisites) error {
@@ -783,10 +681,18 @@ func workflowMetadataValue(metadata map[string]any, target string) (any, bool) {
 	return current, true
 }
 
+func WorkflowMetadataValue(metadata map[string]any, target string) (any, bool) {
+	return workflowMetadataValue(metadata, target)
+}
+
 func workflowJSONValuesEqual(left, right any) bool {
 	leftJSON, leftErr := json.Marshal(left)
 	rightJSON, rightErr := json.Marshal(right)
 	return leftErr == nil && rightErr == nil && string(leftJSON) == string(rightJSON)
+}
+
+func WorkflowJSONValuesEqual(left, right any) bool {
+	return workflowJSONValuesEqual(left, right)
 }
 
 func workflowMaxChainDepthPolicy(source semanticview.Source) int {

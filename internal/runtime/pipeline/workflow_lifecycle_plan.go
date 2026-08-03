@@ -537,7 +537,7 @@ func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, insta
 		if err != nil {
 			return fmt.Errorf("load decision card %s for supersession: %w", activation.CardID, err)
 		}
-		evt, err := workflowGateSupersededEvent(card, activation, now)
+		evt, err := workflowGateSupersededEvent(card, activation, *instance, now)
 		if err != nil {
 			return err
 		}

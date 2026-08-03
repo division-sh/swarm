@@ -665,7 +665,7 @@ func TestUpdateEntityState_ReturnsWorkflowStoreMutationError(t *testing.T) {
 	}
 }
 
-func TestPipelineEngineStateRepoSaveStateRejectsForeignFlowWrite(t *testing.T) {
+func TestPipelineEngineMutationOwnerRejectsForeignFlowWrite(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := newPostgresWorkflowInstanceStoreForTest(db)
 	entityID := "11111111-1111-1111-1111-111111111111"
@@ -696,7 +696,10 @@ func TestPipelineEngineStateRepoSaveStateRejectsForeignFlowWrite(t *testing.T) {
 		},
 	}
 	ctx := withPipelineFlowScope(testWorkflowStoreRunContext(t, store), "flow-b")
-	err := repo.SaveState(ctx, testEngineStateAddress("flow-b", "flow-a", entityID), testEngineStateMutation(map[string]any{"note": "bad write"}, nil, nil))
+	_, err := (pipelineEngineMutationOwner{store: store, state: repo}).CommitEngineMutation(ctx, runtimeengine.EngineMutation{
+		Address: testEngineStateAddress("flow-b", "flow-a", entityID),
+		State:   testEngineStateMutation(map[string]any{"note": "bad write"}, nil, nil),
+	})
 	if err == nil || !strings.Contains(err.Error(), "cross_flow_write_forbidden") {
 		t.Fatalf("expected cross_flow_write_forbidden, got %v", err)
 	}
@@ -749,7 +752,7 @@ review_entity:
 	}
 }
 
-func TestPipelineEngineStateRepoRoundTripsTypedCarrier(t *testing.T) {
+func TestPipelineEngineMutationOwnerRoundTripsTypedCarrier(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 
@@ -778,8 +781,11 @@ func TestPipelineEngineStateRepoRoundTripsTypedCarrier(t *testing.T) {
 	)
 
 	address := testEngineStateAddress("root", "root", entityID.String())
-	if err := repo.SaveState(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), address, mutation); err != nil {
-		t.Fatalf("SaveState: %v", err)
+	if _, err := (pipelineEngineMutationOwner{store: store, state: repo}).CommitEngineMutation(
+		testWorkflowStoreRunContext(t, repo.coordinator.workflowStore),
+		runtimeengine.EngineMutation{Address: address, State: mutation},
+	); err != nil {
+		t.Fatalf("CommitEngineMutation: %v", err)
 	}
 	loaded, ok, err := repo.LoadState(testWorkflowStoreRunContext(t, repo.coordinator.workflowStore), address)
 	if err != nil {

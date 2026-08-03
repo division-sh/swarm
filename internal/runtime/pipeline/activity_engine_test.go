@@ -1591,12 +1591,29 @@ func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *t
 	if err := (pipelineActivityDispatcher{coordinator: pc}).executeActivityIntent(ctx, intent); err != nil {
 		t.Fatalf("execute after commit acknowledgment loss: %v", err)
 	}
+	if !runner.ackLost.Load() {
+		callbackErr, _ := runner.callbackErr.Load().(string)
+		t.Fatalf("commit acknowledgment loss was not reached; callback error=%q", callbackErr)
+	}
 	if calls.Load() != 0 {
 		t.Fatalf("provider calls = %d, want no blind dispatch", calls.Load())
 	}
 	record, ok, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent))
 	if err != nil || !ok || record.Status != ActivityAttemptStatusStarted || !record.Generation.Equal(intent.Generation) {
-		t.Fatalf("reconciled claim = %#v found=%v err=%v", record, ok, err)
+		rows, queryErr := db.QueryContext(ctx, `SELECT request_event_id, status FROM activity_attempts ORDER BY request_event_id`)
+		if queryErr != nil {
+			t.Fatalf("reconciled claim = %#v found=%v err=%v; inspect journal: %v", record, ok, err, queryErr)
+		}
+		defer rows.Close()
+		var journalRows []string
+		for rows.Next() {
+			var requestEventID, status string
+			if scanErr := rows.Scan(&requestEventID, &status); scanErr != nil {
+				t.Fatalf("reconciled claim = %#v found=%v err=%v; scan journal: %v", record, ok, err, scanErr)
+			}
+			journalRows = append(journalRows, requestEventID+":"+status)
+		}
+		t.Fatalf("reconciled claim = %#v found=%v err=%v expected=%s journal=%v", record, ok, err, activityRequestEventID(intent), journalRows)
 	}
 	if len(bus.publishes) != 0 {
 		t.Fatalf("published results after indeterminate claim: %#v", bus.publishes)
@@ -1604,8 +1621,10 @@ func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *t
 }
 
 type activityCommitAckLossRunner struct {
-	db       *sql.DB
-	failNext atomic.Bool
+	db          *sql.DB
+	failNext    atomic.Bool
+	ackLost     atomic.Bool
+	callbackErr atomic.Value
 }
 
 func (r *activityCommitAckLossRunner) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
@@ -1626,6 +1645,7 @@ func (r *activityCommitAckLossRunner) RunRuntimeMutationContext(ctx context.Cont
 		return err
 	}
 	if err := fn(storyctx); err != nil {
+		r.callbackErr.Store(err.Error())
 		return err
 	}
 	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
@@ -1637,6 +1657,7 @@ func (r *activityCommitAckLossRunner) RunRuntimeMutationContext(ctx context.Cont
 	committed = true
 	flushPipelinePostCommitActions(postCommit)
 	if r.failNext.Swap(false) {
+		r.ackLost.Store(true)
 		return errors.New("simulated commit acknowledgment loss")
 	}
 	return nil

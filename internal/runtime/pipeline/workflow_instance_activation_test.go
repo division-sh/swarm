@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,17 +20,20 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
 type workflowInitialMaterializationTestOwner struct {
-	effects int
+	effects   int
+	emissions int
 }
 
 type concurrentWorkflowInitialMaterializationTestOwner struct {
@@ -38,15 +41,43 @@ type concurrentWorkflowInitialMaterializationTestOwner struct {
 	effects int
 }
 
-func (o *workflowInitialMaterializationTestOwner) ApplyWorkflowLifecycleEffects(_ context.Context, effects []runtimeworkflowlifecycle.Effect) error {
-	o.effects += len(effects)
+func (o *workflowInitialMaterializationTestOwner) PrepareWorkflowLifecycleMutation(_ context.Context, _ *WorkflowInstance, _ []runtimeworkflowlifecycle.Effect, _ bool) (PreparedWorkflowLifecycleMutation, error) {
+	return PreparedWorkflowLifecycleMutation{Emissions: make([]runtimeengine.EmitIntent, o.emissions)}, nil
+}
+
+func TestWorkflowInitialMaterializationRejectsUnownedLifecycleEmissions(t *testing.T) {
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
+	store.lifecycleOwner = &workflowInitialMaterializationTestOwner{emissions: 1}
+	ctx := sqliteExactOnceRunContext(t, db)
+	instance := WorkflowInstance{
+		InstanceID: "inst-1", StorageRef: "review/inst-1", WorkflowName: "review",
+		WorkflowVersion: "1.0.0", CurrentState: "pending",
+		Metadata: map[string]any{"instance_id": "inst-1", "flow_path": "review/inst-1"},
+	}
+	if _, err := store.MaterializeInitialEntry(ctx, instance, time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC)); err == nil {
+		t.Fatal("initial materialization accepted lifecycle emissions outside its atomic commit")
+	} else if !strings.Contains(err.Error(), "lifecycle emissions outside its atomic commit") {
+		t.Fatalf("initial materialization error = %v", err)
+	}
+	if _, found, err := store.Load(ctx, testWorkflowInstanceRoute(instance.StorageRef)); err != nil || found {
+		t.Fatalf("rejected initial materialization persisted state: found=%v err=%v", found, err)
+	}
+}
+
+func (o *workflowInitialMaterializationTestOwner) FinalizeWorkflowLifecycleMutation(_ context.Context, _ CommittedWorkflowLifecycleMutation) error {
+	o.effects++
 	return nil
 }
 
-func (o *concurrentWorkflowInitialMaterializationTestOwner) ApplyWorkflowLifecycleEffects(_ context.Context, effects []runtimeworkflowlifecycle.Effect) error {
+func (*concurrentWorkflowInitialMaterializationTestOwner) PrepareWorkflowLifecycleMutation(_ context.Context, _ *WorkflowInstance, _ []runtimeworkflowlifecycle.Effect, _ bool) (PreparedWorkflowLifecycleMutation, error) {
+	return PreparedWorkflowLifecycleMutation{}, nil
+}
+
+func (o *concurrentWorkflowInitialMaterializationTestOwner) FinalizeWorkflowLifecycleMutation(_ context.Context, _ CommittedWorkflowLifecycleMutation) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.effects += len(effects)
+	o.effects++
 	return nil
 }
 
@@ -189,6 +220,19 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			}
 
 			runID := runtimecorrelation.RunIDFromContext(ctx)
+			deleteEntityQuery := `DELETE FROM entity_state WHERE run_id = ? AND flow_instance = ?`
+			if !store.isSQLite() {
+				deleteEntityQuery = `DELETE FROM entity_state WHERE run_id = $1::uuid AND flow_instance = $2`
+			}
+			if _, err := store.db.ExecContext(ctx, deleteEntityQuery, runID, instance.StorageRef); err != nil {
+				t.Fatalf("remove materialized entity state: %v", err)
+			}
+			if _, err := store.MaterializeInitialEntry(ctx, instance, occurredAt); err == nil {
+				t.Fatal("creation replay accepted an incomplete persisted snapshot")
+			} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate {
+				t.Fatalf("incomplete snapshot failure = %#v, want conflicting duplicate", failure)
+			}
+
 			deleteQuery := `DELETE FROM workflow_instance_initial_materializations WHERE run_id = ? AND instance_id = ?`
 			if !store.isSQLite() {
 				deleteQuery = `DELETE FROM workflow_instance_initial_materializations WHERE run_id = $1::uuid AND instance_id = $2`
@@ -238,8 +282,8 @@ func TestWorkflowInitialMaterializationConcurrentExactReplayPostgres(t *testing.
 	}
 	defer lockTx.Rollback()
 	if _, err := lockTx.ExecContext(ctx,
-		`SELECT pg_advisory_xact_lock(hashtext($1))`,
-		"workflow-instance:"+storageRef,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		fmt.Sprintf("%d:%s%s", len(runtimecorrelation.RunIDFromContext(ctx)), runtimecorrelation.RunIDFromContext(ctx), storageRef),
 	); err != nil {
 		t.Fatalf("hold instance lock: %v", err)
 	}
@@ -554,7 +598,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			nextPlan.CreationEvent = &nextCreationEvent
 			nextInstance := instance
 			nextInstance.RuntimeReadiness = &nextPlan
-			nextContext := WithStandingGenerationRebind(runtimecorrelation.WithRunID(ctx, nextRunID))
+			nextContext := runtimecorrelation.WithRunID(ctx, nextRunID)
 			result, err = store.MaterializeInitialEntry(nextContext, nextInstance, occurredAt.Add(time.Hour))
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("successor generation materialization: result=%d err=%v", result, err)
