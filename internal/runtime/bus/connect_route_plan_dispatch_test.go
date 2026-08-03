@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
@@ -82,6 +82,7 @@ type connectRoutePlanConcurrentLifecycleStore struct {
 type connectRoutePlanStaleSnapshotStore struct {
 	*connectRoutePlanLifecycleStore
 	mutations int
+	mutating  bool
 }
 
 func (s *connectRoutePlanDescriptorStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []FlowInstanceRouteRecordSet) error {
@@ -215,6 +216,8 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 			for _, subscriberType := range []string{"node", "agent"} {
 				name := strings.Join([]string{producerMode, map[bool]string{false: "flow", true: "root"}[rootReceiver], subscriberType}, "/")
 				t.Run(name, func(t *testing.T) {
+					runID := uuid.NewString()
+					ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 					source := connectReceiverPinCollisionSource(producerMode, rootReceiver, subscriberType, false)
 					store := newTargetRouteMemoryStore()
 					routeTable, err := DeriveRouteTable(source)
@@ -259,7 +262,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 						envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{EntityID: rootEntityID})
 					}
 					eventID := uuid.NewString()
-					evt := connectRoutePlanStaticProducerEvent(eventID, eventType, "", "", []byte(`{}`), 0, "", "", envelope, time.Now().UTC())
+					evt := connectRoutePlanStaticProducerEvent(eventID, eventType, "", "", []byte(`{}`), 0, runID, "", envelope, time.Now().UTC())
 					if subscriberType == "agent" {
 						flowPath := "consumer"
 						entityID := evt.EntityID()
@@ -274,7 +277,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 						}
 					}
 
-					plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+					plan, err := eb.CheckPublishRecipientPlan(ctx, evt)
 					if err != nil {
 						t.Fatalf("CheckPublishRecipientPlan: %v", err)
 					}
@@ -284,7 +287,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 					if len(plan.DeliveryRoutes) != 0 {
 						t.Fatalf("delivery routes = %#v, want none", plan.DeliveryRoutes)
 					}
-					if err := eb.Publish(context.Background(), evt); err != nil {
+					if err := eb.Publish(ctx, evt); err != nil {
 						t.Fatalf("Publish classified target failure: %v", err)
 					}
 					if routes := store.routes[eventID]; len(routes) != 0 {
@@ -447,6 +450,7 @@ func connectReceiverPinCollisionSource(producerMode string, rootReceiver bool, s
 	if !rootReceiver {
 		return semanticview.Wrap(bundle)
 	}
+	bundle.Semantics.Name = "root"
 	bundle.Semantics.CompositionConnects[0].To = ".work_accepted"
 	bundle.Semantics.CompositionConnects[1].To = ".work_audited"
 	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{Events: connectRoutePlanInputEvents(inputs), EventPins: inputs}}}
@@ -549,11 +553,13 @@ func (s *connectRoutePlanConcurrentLifecycleStore) ListActiveFlowInstanceDescrip
 
 func (s *connectRoutePlanStaleSnapshotStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]ActiveFlowInstanceDescriptor, error) {
 	descriptors, err := s.connectRoutePlanLifecycleStore.ListActiveFlowInstanceDescriptors(ctx)
-	if err != nil || s.mutations <= 0 || s.bus == nil {
+	if err != nil || s.mutations <= 0 || s.bus == nil || s.mutating {
 		return descriptors, err
 	}
 	ordinal := s.mutations
 	s.mutations--
+	s.mutating = true
+	defer func() { s.mutating = false }()
 	if err := s.bus.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
 		Identity: runtimeflowidentity.DeriveRoute("consumer", fmt.Sprintf("stale-%d", ordinal)),
 	}); err != nil {

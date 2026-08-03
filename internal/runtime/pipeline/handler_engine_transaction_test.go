@@ -39,6 +39,50 @@ func handlerTestRootIngress(id string, eventType events.EventType, sourceAgent, 
 	return admitted.Event()
 }
 
+func handlerTestWorkflowEnvelope(flowID, flowInstance, entityID string) events.EventEnvelope {
+	envelope := events.EnvelopeForEntityID(events.EventEnvelope{}, entityID)
+	envelope = events.EnvelopeForFlowInstance(envelope, flowInstance)
+	return events.EnvelopeForSourceRoute(envelope, events.RouteIdentity{
+		FlowID:       flowID,
+		FlowInstance: flowInstance,
+		EntityID:     entityID,
+	})
+}
+
+func handlerTestWorkflowModule(flowID string, nodeIDs ...string) WorkflowModule {
+	return handlerTestWorkflowModuleWithBundle(nil, flowID, nodeIDs...)
+}
+
+func handlerTestWorkflowModuleWithBundle(bundle *runtimecontracts.WorkflowContractBundle, flowID string, nodeIDs ...string) WorkflowModule {
+	nodes := make(map[string]runtimecontracts.SystemNodeContract, len(nodeIDs))
+	for _, nodeID := range nodeIDs {
+		nodes[nodeID] = runtimecontracts.SystemNodeContract{ID: nodeID}
+	}
+	flow := runtimecontracts.FlowContractView{
+		Paths:  runtimecontracts.FlowContractPaths{ID: flowID, Flow: flowID, Mode: "static"},
+		Schema: runtimecontracts.FlowSchemaDocument{Name: flowID, Mode: "static"},
+		Nodes:  nodes,
+		Path:   flowID,
+	}
+	if bundle == nil {
+		bundle = &runtimecontracts.WorkflowContractBundle{}
+	} else {
+		cloned := *bundle
+		bundle = &cloned
+	}
+	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{
+		Root: &flow,
+		ByID: map[string]*runtimecontracts.FlowContractView{flowID: &flow},
+	}
+	if strings.TrimSpace(bundle.Semantics.Name) == "" {
+		bundle.Semantics.Name = flowID
+	}
+	if strings.TrimSpace(bundle.Semantics.Version) == "" {
+		bundle.Semantics.Version = "1"
+	}
+	return &previewWorkflowModule{bundle: bundle}
+}
+
 type recordingPipelineBus struct {
 	mu                    sync.Mutex
 	publishes             []events.Event
@@ -815,7 +859,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 		},
 	}, workflowTriggerContext{
 		Event: trigger,
-		State: mustCurrentWorkflowState(t, pc, ctx, entityID),
+		State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(entityID), entityID),
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
@@ -890,7 +934,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 		},
 	}, workflowTriggerContext{
 		Event: trigger,
-		State: mustCurrentWorkflowState(t, pc, ctx, entityID),
+		State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(entityID), entityID),
 	}, false)
 	if err == nil {
 		t.Fatal("expected executeNodeContractHandler to fail on data accumulation CEL runtime error")
@@ -960,7 +1004,7 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 		},
 	}, workflowTriggerContext{
 		Event: trigger,
-		State: mustCurrentWorkflowState(t, pc, ctx, entityID),
+		State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(entityID), entityID),
 	}, false)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)

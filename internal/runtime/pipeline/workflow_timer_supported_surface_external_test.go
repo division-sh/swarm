@@ -153,13 +153,13 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 
 			createdAt := time.Now().UTC()
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-				InstanceID: entityID, StorageRef: entityID, WorkflowName: "producer", WorkflowVersion: "1.0.0",
+				InstanceID: "producer", StorageRef: "producer", WorkflowName: "producer", WorkflowVersion: "1.0.0",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Metadata: map[string]any{"run_id": runID},
+				Metadata: map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": "producer", "instance_id": "producer"},
 			}, createdAt); err != nil {
 				t.Fatalf("materialize producer workflow instance: %v", err)
 			}
-			if err := coordinator.ArmInitialEntryTimers(ctx, entityID); err != nil {
+			if err := coordinator.ArmInitialEntryTimers(ctx, testWorkflowInstanceRoute("producer")); err != nil {
 				t.Fatalf("arm authored workflow timer: %v", err)
 			}
 

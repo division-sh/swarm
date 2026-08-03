@@ -259,7 +259,6 @@ func (p RoutePlan) Normalized() RoutePlan {
 	p.ActivationPlans = append([]runtimepipeline.FlowInstanceActivationPlan(nil), p.ActivationPlans...)
 	p.ReplyCreations = append([]runtimereplycontext.Record(nil), p.ReplyCreations...)
 	p.ReplyClaims = append([]runtimereplycontext.ClaimCommand(nil), p.ReplyClaims...)
-	p.TargetFailure = runtimepinrouting.TargetFailure(strings.TrimSpace(string(p.TargetFailure)))
 	p.ContradictionReason = strings.TrimSpace(p.ContradictionReason)
 	if p.CycleEscalation != nil {
 		evt := *p.CycleEscalation

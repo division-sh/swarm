@@ -78,13 +78,9 @@ func commitProjectedWorkflowEvidenceForTest(ctx context.Context, pc *PipelineCoo
 	mutation, err := pc.projectWorkflowEvidence(runtimeengine.ExecutionContext{Request: runtimeengine.ExecutionRequest{
 		EntityID: address.EntityID,
 		FlowID:   address.FlowID,
-		ProducerRoute: events.RouteIdentity{
-			FlowID:       flowID,
-			FlowInstance: route.InstancePath,
-			EntityID:     entityID,
-		},
-		Event: event,
-		State: state,
+		Route:    route,
+		Event:    event,
+		State:    state,
 	}}, bucketID, payload)
 	if err != nil {
 		return err
@@ -974,11 +970,12 @@ func TestPipelineEngineActionRunner_RecordEvidenceUsesMatchedHandlerEvidenceTarg
 					EntityID: identity.NormalizeEntityID(tt.entityID),
 					NodeID:   identity.NormalizeNodeID("build-orchestrator"),
 					FlowID:   identity.NormalizeFlowID("operating"),
-					ProducerRoute: events.RouteIdentity{
+					Route:    testWorkflowInstanceRoute(tt.flowInstance),
+					ProducerSource: mustStaticExecutionRoutingSource(events.RouteIdentity{
 						FlowID:       "operating",
 						FlowInstance: tt.flowInstance,
 						EntityID:     tt.entityID,
-					},
+					}),
 					Event: eventtest.RunCreatingRootIngress(
 						uuid.NewString(),
 						tt.concreteEvent,

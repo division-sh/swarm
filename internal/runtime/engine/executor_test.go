@@ -671,9 +671,7 @@ func TestExecutorTimerReconciliationRequiresExactEventAuthority(t *testing.T) {
 	}), WorkflowLifecycle: owner}}
 	frame, err := executor.newExecutionFrame(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		ProducerRoute: events.RouteIdentity{
-			FlowInstance: "flow-1",
-		},
+		Route:    runtimeflowidentity.RouteForInstancePath("flow-1"),
 		Event: eventtest.RunCreatingRootIngress(
 			"event-1", "work.received", "", "", json.RawMessage(`{}`), 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), time.Time{},
 		),
@@ -697,9 +695,7 @@ func TestExecutorTimerReconciliationCarriesOnlyActualTransitionTarget(t *testing
 	createdAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
 	frame, err := executor.newExecutionFrame(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
-		ProducerRoute: events.RouteIdentity{
-			FlowInstance: "flow-1",
-		},
+		Route:    runtimeflowidentity.RouteForInstancePath("flow-1"),
 		Event: eventtest.RunCreatingRootIngress(
 			"event-1", "work.noted", "", "", json.RawMessage(`{}`), 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "flow-1"), createdAt,
 		),

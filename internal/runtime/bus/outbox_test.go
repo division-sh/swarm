@@ -269,8 +269,8 @@ func (s *directRecipientTransactionalStore) CommitPublication(ctx context.Contex
 		s.receipts[eventID] = command.Commit.Disposition.Kind()
 	}
 	for _, route := range s.routes[eventID] {
-		if route.SubscriberType == "agent" {
-			s.deliveries[eventID] = append(s.deliveries[eventID], route.SubscriberID)
+		if route.Recipient.IsAgent() {
+			s.deliveries[eventID] = append(s.deliveries[eventID], route.Recipient.ID())
 		}
 	}
 	if len(s.active) > 0 {

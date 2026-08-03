@@ -413,7 +413,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		direct:           replayScope == runtimepipelineobligation.ScopeDirect,
 		publicationClaim: claim,
 	}
-	if routePlan.TargetFailure != "" {
+	if !routePlan.TargetFailure.Empty() {
 		prepared.targetFailure = true
 	}
 	if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
@@ -749,7 +749,7 @@ func reuseDurableSubscribedEventRouteFacts(admitted, durable events.AdmittedEven
 	}
 	durableTargets := eventDeliveryTargetRoutes(durableEvent)
 	existingTargets := eventDeliveryTargetRoutes(evt)
-	if len(existingTargets) > 0 && !sameRouteIdentities(existingTargets, durableTargets) {
+	if len(existingTargets) > 0 && !sameRouteIdentities(existingTargets, durableTargets) && !routeIdentitiesCanBeExactlyCompleted(existingTargets, durableTargets) {
 		return admitted, evt, errors.New("durable event route facts conflict with the admitted event target")
 	}
 	if len(durableTargets) == 0 || sameRouteIdentities(existingTargets, durableTargets) {
@@ -799,8 +799,8 @@ func resolveCanonicalConnectRouteEvent(evt events.Event, plan RoutePlan) (events
 		return evt, false, nil
 	}
 	existing := uniqueRouteIdentities(eventDeliveryTargetRoutes(evt))
-	if len(existing) > 0 && !sameRouteIdentities(existing, targets) {
-		return evt, false, errors.New("connect route facts conflict with the admitted event target")
+	if len(existing) > 0 && !sameRouteIdentities(existing, targets) && !routeIdentitiesCanBeExactlyCompleted(existing, targets) {
+		return evt, false, fmt.Errorf("connect route facts conflict with the admitted event target: admitted=%#v planned=%#v", existing, targets)
 	}
 	envelope := evt.NormalizedEnvelope()
 	if len(targets) == 1 {
@@ -827,6 +827,35 @@ func sameRouteIdentities(left, right []events.RouteIdentity) bool {
 	}
 	for index := range left {
 		if left[index].Normalized() != right[index].Normalized() {
+			return false
+		}
+	}
+	return true
+}
+
+func routeIdentitiesCanBeExactlyCompleted(existing, canonical []events.RouteIdentity) bool {
+	existing = uniqueRouteIdentities(existing)
+	canonical = uniqueRouteIdentities(canonical)
+	if len(existing) == 0 || len(existing) != len(canonical) {
+		return false
+	}
+	byEntity := make(map[string]events.RouteIdentity, len(canonical))
+	for _, route := range canonical {
+		route = route.Normalized()
+		if route.EntityID == "" || route.FlowID == "" || route.FlowInstance == "" {
+			return false
+		}
+		if _, duplicate := byEntity[route.EntityID]; duplicate {
+			return false
+		}
+		byEntity[route.EntityID] = route
+	}
+	for _, route := range existing {
+		route = route.Normalized()
+		if route.EntityID == "" || route.FlowID != "" || route.FlowInstance != "" {
+			return false
+		}
+		if _, ok := byEntity[route.EntityID]; !ok {
 			return false
 		}
 	}

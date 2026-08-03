@@ -100,7 +100,7 @@ func (pc *PipelineCoordinator) handleProposedEffectDecisionCard(ctx context.Cont
 	var intent runtimeengine.EmitIntent
 	switch card.Verdict {
 	case "approve":
-		intent, err = activityRequestEmitIntent(activityIntentFromProposedEffect(continuation, executionSource))
+		intent, err = activityRequestEmitIntentFromAdmittedSource(activityIntentFromProposedEffect(continuation, executionSource))
 	case "revise", "reject":
 		var product events.Event
 		product, err = proposedEffectOutcomeEvent(card, evt, continuation)

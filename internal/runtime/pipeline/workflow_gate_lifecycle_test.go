@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -122,16 +123,17 @@ func TestStageGateOwnerRequiresAuthoritativeWorkflowInstance(t *testing.T) {
 		Metadata: map[string]any{"flow_path": instancePath, "entity_id": entityID},
 	}
 	anchor := decisioncard.StageGateAnchor{
-		FlowID: "telegram-ingress", FlowInstance: instancePath, EntityID: entityID,
+		Route:  runtimeflowidentity.StoredRoute("telegram-ingress", "standing-one", instancePath),
+		FlowID: "telegram-ingress", EntityID: entityID,
 	}
 	activation := gateruntime.Activation{FlowID: anchor.FlowID}
 	if err := validateStageGateInstanceOwner(anchor, instance, activation); err != nil {
 		t.Fatalf("exact workflow instance owner rejected: %v", err)
 	}
 	for _, hostile := range []decisioncard.StageGateAnchor{
-		{FlowID: "foreign-flow", FlowInstance: instancePath, EntityID: entityID},
-		{FlowID: anchor.FlowID, FlowInstance: "telegram-ingress/foreign", EntityID: entityID},
-		{FlowID: anchor.FlowID, FlowInstance: instancePath, EntityID: uuid.NewString()},
+		{Route: anchor.Route, FlowID: "foreign-flow", EntityID: entityID},
+		{Route: runtimeflowidentity.StoredRoute("telegram-ingress", "foreign", "telegram-ingress/foreign"), FlowID: anchor.FlowID, EntityID: entityID},
+		{Route: anchor.Route, FlowID: anchor.FlowID, EntityID: uuid.NewString()},
 	} {
 		if err := validateStageGateInstanceOwner(hostile, instance, activation); err == nil {
 			t.Fatalf("foreign stage-gate owner accepted: %#v", hostile)

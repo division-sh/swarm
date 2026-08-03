@@ -134,28 +134,40 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 
 	memo, _ := ctx.Value(connectRoutePlanEvaluationMemoKey{}).(*connectRoutePlanEvaluationMemo)
 	if memo != nil && memo.ready && memo.eventID == evt.ID() {
-		return memo.dispatch, nil
+		if r.routeTable.snapshotGenerationCurrent(memo.snapshot.base) {
+			return memo.dispatch, nil
+		}
+		memo.ready = false
 	}
 
 	matched := r.matchedPlans(ctx, evt)
 	if len(matched) == 0 {
 		return connectRoutePlanDispatch{}, nil
 	}
-	evaluationCtx := runtimecorrelation.WithInboundEvent(ctx, evt)
-	descriptors, err := r.descriptorsForPlans(evaluationCtx, matched)
-	if err != nil {
-		return connectRoutePlanDispatch{}, err
+	for attempt := 0; attempt < 3; attempt++ {
+		snapshot := connectRoutePlanSnapshot{base: r.routeTable.snapshotGeneration()}
+		evaluationCtx := runtimecorrelation.WithInboundEvent(ctx, evt)
+		descriptors, err := r.descriptorsForPlans(evaluationCtx, matched)
+		if err != nil {
+			return connectRoutePlanDispatch{}, err
+		}
+		evaluationCtx = withTemplateInstanceLifecyclePreview(evaluationCtx)
+		evaluationCtx = context.WithValue(evaluationCtx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{})
+		evaluated, err := r.planMatched(evaluationCtx, evt, matched, descriptors, connectRoutePlanMatchValues(evt))
+		if err != nil {
+			return connectRoutePlanDispatch{}, err
+		}
+		if memo != nil {
+			memo.eventID, memo.dispatch, memo.snapshot, memo.ready, memo.applied = evt.ID(), evaluated, snapshot, true, false
+		}
+		if !evaluated.Failure.Empty() || templateInstanceLifecyclePreview(ctx) || r.routeTable.snapshotGenerationCurrent(snapshot.base) {
+			return evaluated, nil
+		}
+		if memo != nil {
+			memo.ready = false
+		}
 	}
-	evaluationCtx = withTemplateInstanceLifecyclePreview(evaluationCtx)
-	evaluationCtx = context.WithValue(evaluationCtx, connectRoutePlanPreviewRoutesKey{}, &connectRoutePlanPreviewRoutes{})
-	evaluated, err := r.planMatched(evaluationCtx, evt, matched, descriptors, connectRoutePlanMatchValues(evt))
-	if err != nil {
-		return connectRoutePlanDispatch{}, err
-	}
-	if memo != nil {
-		memo.eventID, memo.dispatch, memo.ready, memo.applied = evt.ID(), evaluated, true, false
-	}
-	return evaluated, nil
+	return connectRoutePlanDispatch{}, staleConnectRoutePlanSnapshotError{}
 }
 
 func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Event, matched []runtimepinrouting.ConnectRoutePlan, descriptors []runtimepinrouting.Descriptor, values map[string]string) (connectRoutePlanDispatch, error) {
@@ -428,6 +440,19 @@ func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Contex
 		if target.EntityID == "" {
 			return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetUnresolved}, TemplateInstanceLifecycleDecision{}, nil
 		}
+		rootFlowID := strings.TrimSpace(r.source.WorkflowName())
+		rootInstance := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+		if rootFlowID == "" || rootInstance == "" {
+			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, errors.New("root connect receiver requires canonical workflow identity")
+		}
+		if target.FlowID != "" && target.FlowID != rootFlowID {
+			return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetUnresolved}, TemplateInstanceLifecycleDecision{}, nil
+		}
+		if target.FlowInstance != "" && target.FlowInstance != rootInstance {
+			return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetUnresolved}, TemplateInstanceLifecycleDecision{}, nil
+		}
+		target.FlowID = rootFlowID
+		target.FlowInstance = rootInstance
 		return runtimepinrouting.ConnectRoutePlanMaterialization{Target: target}, TemplateInstanceLifecycleDecision{}, nil
 	}
 	if materialized, decision, handled, err := r.lifecycle.Materialize(ctx, evt, plan, values, descriptors); handled || err != nil {
@@ -515,7 +540,14 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.C
 	subscribers := make([]Subscriber, 0, len(targets))
 	for _, target := range targets {
 		target = target.Normalized()
-		matchedSubscribers := r.resolveSelectedReceiverCarriers(ctx, plan, target)
+		selectionTarget := target
+		if plan.ReceiverEndpoint().IsRoot() {
+			// Root receiver registration is pin-owned and has no instance path.
+			// Keep exact execution identity on the delivery route while matching
+			// the registered root carrier through its entity-bearing pin target.
+			selectionTarget = events.RouteIdentity{EntityID: target.EntityID}
+		}
+		matchedSubscribers := r.resolveSelectedReceiverCarriers(ctx, plan, selectionTarget)
 		if len(matchedSubscribers) == 0 {
 			return nil, nil, nil, nil
 		}

@@ -408,6 +408,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		EntityID:        identity.NormalizeEntityID(entityID),
 		NodeID:          identity.NormalizeNodeID(e.nodeID),
 		FlowID:          identity.NormalizeFlowID(flowID),
+		Route:           stateRoute,
 		Event:           evt,
 		ProducerSource:  producerSource,
 		HandlerEventKey: handlerEventKey,

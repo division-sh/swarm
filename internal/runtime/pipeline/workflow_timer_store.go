@@ -52,6 +52,7 @@ type WorkflowTimerActivationPersistenceRecord struct {
 	RunID               string
 	EntityID            string
 	Route               runtimeflowidentity.Route
+	RoutingSource       events.RoutingSource
 	EventType           string
 	Payload             []byte
 	FireAt              time.Time
@@ -82,7 +83,7 @@ func DecodeWorkflowTimerActivationPersistenceRecord(record WorkflowTimerActivati
 	}
 	activation := WorkflowTimerActivation{
 		Ref: ref, RunID: record.RunID, EntityID: record.EntityID, Route: record.Route,
-		OwnerAgent: record.OwnerAgent, EventType: record.EventType, Payload: record.Payload,
+		RoutingSource: record.RoutingSource, OwnerAgent: record.OwnerAgent, EventType: record.EventType, Payload: record.Payload,
 		FireAt: record.FireAt, Recurring: record.Recurring, Status: record.Status,
 		FiredAt: record.FiredAt, CreatedAt: record.CreatedAt, SourceTimerID: record.SourceTimerID,
 		ForkedFromRunID: record.ForkedFromRunID, ForkedFromEventID: record.ForkedFromEventID,

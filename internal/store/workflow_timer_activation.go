@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -113,7 +114,7 @@ func workflowTimerSelectColumns() string {
 			CAST(t.timer_id AS TEXT), t.timer_name, COALESCE(CAST(t.run_id AS TEXT), ''),
 			COALESCE(CAST(t.entity_id AS TEXT), ''), COALESCE(t.flow_scope_key, ''),
 			COALESCE(t.flow_instance_id, ''), COALESCE(t.flow_instance, ''),
-			t.fire_event, COALESCE(t.fire_payload, '{}'), t.fire_at, t.recurring,
+			t.fire_event, COALESCE(t.fire_payload, '{}'), t.routing_source, t.fire_at, t.recurring,
 			COALESCE(t.recurrence_interval, ''), COALESCE(t.owner_node, ''),
 			COALESCE(t.owner_agent, ''), t.task_type, t.status, t.fired_at, t.created_at,
 			COALESCE(CAST(t.source_timer_id AS TEXT), ''),
@@ -127,13 +128,13 @@ func workflowTimerSelectColumns() string {
 
 func scanWorkflowTimerActivation(scanner workflowTimerScanner) (runtimepipeline.WorkflowTimerActivation, error) {
 	var (
-		record                                          runtimepipeline.WorkflowTimerActivationPersistenceRecord
-		payloadRaw, fireAtRaw, firedAtRaw, createdAtRaw any
+		record                                                            runtimepipeline.WorkflowTimerActivationPersistenceRecord
+		payloadRaw, routingSourceRaw, fireAtRaw, firedAtRaw, createdAtRaw any
 	)
 	if err := scanner.Scan(
 		&record.ActivationID, &record.TaskID, &record.RunID, &record.EntityID, &record.Route.ScopeKey,
 		&record.Route.InstanceID, &record.Route.InstancePath,
-		&record.EventType, &payloadRaw, &fireAtRaw, &record.Recurring, &record.RecurrenceInterval,
+		&record.EventType, &payloadRaw, &routingSourceRaw, &fireAtRaw, &record.Recurring, &record.RecurrenceInterval,
 		&record.OwnerNode, &record.OwnerAgent, &record.TaskType, &record.Status, &firedAtRaw, &createdAtRaw,
 		&record.SourceTimerID, &record.ForkedFromRunID, &record.ForkedFromEventID,
 		&record.ReconstructionOwner,
@@ -141,6 +142,9 @@ func scanWorkflowTimerActivation(scanner workflowTimerScanner) (runtimepipeline.
 		return runtimepipeline.WorkflowTimerActivation{}, err
 	}
 	record.Payload = workflowEngineJSONBytes(payloadRaw)
+	if err := json.Unmarshal(workflowEngineJSONBytes(routingSourceRaw), &record.RoutingSource); err != nil {
+		return runtimepipeline.WorkflowTimerActivation{}, fmt.Errorf("decode workflow timer routing source: %w", err)
+	}
 	var err error
 	if record.FireAt, _, err = sqliteTimeValue(fireAtRaw); err != nil {
 		return runtimepipeline.WorkflowTimerActivation{}, err

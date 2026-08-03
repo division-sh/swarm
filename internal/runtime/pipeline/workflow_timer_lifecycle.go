@@ -47,9 +47,9 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 	if entityID == "" {
 		return true, false, fmt.Errorf("stage timer %s fired without entity_id", timer.ID)
 	}
-	route, err := workflowInstanceRouteForExecution(source, source.WorkflowName(), evt.FlowInstance())
-	if err != nil {
-		return true, false, fmt.Errorf("workflow timer event route: %w", err)
+	route := activation.Route
+	if !route.Valid() {
+		return true, false, fmt.Errorf("workflow timer activation is missing its canonical route")
 	}
 	nextStage := strings.TrimSpace(timer.AdvancesTo)
 	if nextStage == "" {

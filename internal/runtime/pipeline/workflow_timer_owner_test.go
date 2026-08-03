@@ -103,7 +103,7 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 				InstanceID: entityID, StorageRef: entityID,
 				WorkflowName: "workflow-timer-source-revision", WorkflowVersion: "1.0.0",
 				CurrentState: "waiting", CreatedAt: createdAt,
-				Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx)},
+				Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx), "flow_path": entityID, "instance_id": entityID},
 			}, createdAt)
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("materialize source A: result=%v err=%v", result, err)
@@ -247,7 +247,7 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 				InstanceID: entityID, StorageRef: entityID,
 				WorkflowName: "workflow-timer-progressed-revision", WorkflowVersion: "1.0.0",
 				CurrentState: "waiting", CreatedAt: createdAt,
-				Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx)},
+				Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx), "flow_path": entityID, "instance_id": entityID},
 			}, createdAt)
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("materialize source A: result=%v err=%v", result, err)
@@ -351,7 +351,7 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 				InstanceID: entityID, StorageRef: entityID,
 				WorkflowName: "workflow-timer-initial-event", WorkflowVersion: "1.0.0",
 				CurrentState: "waiting", CreatedAt: createdAt,
-				Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx)},
+				Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx), "flow_path": entityID, "instance_id": entityID},
 			}, createdAt)
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("materialize initial/event timers: result=%v err=%v", result, err)
@@ -430,7 +430,7 @@ func TestWorkflowTimerLifecycleScopesDeclarationsToOwningFlowOnBothStores(t *tes
 					InstanceID: entityID, StorageRef: entityID,
 					WorkflowName: instanceFlow, WorkflowVersion: "1.0.0",
 					CurrentState: "waiting", CreatedAt: createdAt,
-					Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx)},
+					Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx), "flow_path": entityID, "instance_id": entityID},
 				}, createdAt)
 				if err != nil || result != WorkflowInitialMaterializationCreated {
 					t.Fatalf("materialize %s: result=%v err=%v", instanceFlow, result, err)
@@ -508,6 +508,9 @@ func TestAcceptedWorkflowTimerEventRoutingMatrixOnBothStores(t *testing.T) {
 				t.Fatalf("fire canonical occurrence outcome=%q err=%v", outcome, err)
 			}
 			canonical := bus.publishedEvent(0)
+			routed := eventtest.TargetRouted(canonical, events.RouteIdentity{
+				FlowID: "consumer", FlowInstance: "consumer", EntityID: uuid.NewString(),
+			})
 
 			tests := []struct {
 				name           string
@@ -516,6 +519,7 @@ func TestAcceptedWorkflowTimerEventRoutingMatrixOnBothStores(t *testing.T) {
 				wantErr        bool
 			}{
 				{name: "exact producer and canonical occurrence", event: canonical, wantRecognized: true},
+				{name: "exact producer projected to compiled target", event: routed, wantRecognized: true},
 				{
 					name: "exact producer with malformed occurrence",
 					event: eventtest.RuntimeControl(
@@ -795,7 +799,7 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 				)
 				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runID, entityID, payload, eventAt)
 				result, err := pc.executeNodeContractHandler(ctx, "observer", runtimecontracts.SystemNodeEventHandler{}, workflowTriggerContext{
-					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, entityID),
+					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(entityID), entityID),
 				}, false)
 				if err != nil {
 					t.Fatalf("execute %s event-only handler: %v", eventType, err)
@@ -882,7 +886,7 @@ func TestWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores(t *test
 				)
 				persistWorkflowTimerEvent(t, store, ctx, eventID, eventType, runtimecorrelation.RunIDFromContext(ctx), entityID, payload, eventAt)
 				result, err := pc.executeNodeContractHandler(ctx, "observer", handler, workflowTriggerContext{
-					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, entityID),
+					Event: evt, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(entityID), entityID),
 				}, false)
 				if err != nil {
 					t.Fatalf("execute %s handler: %v", eventType, err)
@@ -1253,7 +1257,7 @@ func TestWorkflowTimerWakeupRejectsForeignDeclarationSourceOnBothStores(t *testi
 				t.Fatalf("bind workflow timer scheduler: %v", err)
 			}
 			foreignSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
-				FlowID: "foreign", FlowInstance: activation.FlowInstance, EntityID: activation.EntityID,
+				FlowID: "foreign", FlowInstance: activation.Route.InstancePath, EntityID: activation.EntityID,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -1263,9 +1267,9 @@ func TestWorkflowTimerWakeupRejectsForeignDeclarationSourceOnBothStores(t *testi
 				t.Fatal(err)
 			}
 			if store.isSQLite() {
-				_, err = store.db.ExecContext(ctx, `UPDATE timers SET routing_source = ?, fire_event = ? WHERE timer_id = ?`, raw, "foreign/timer.timeout", activation.Ref.ActivationID)
+				_, err = store.testDB().ExecContext(ctx, `UPDATE timers SET routing_source = ?, fire_event = ? WHERE timer_id = ?`, raw, "foreign/timer.timeout", activation.Ref.ActivationID)
 			} else {
-				_, err = store.db.ExecContext(ctx, `UPDATE timers SET routing_source = $1::jsonb, fire_event = $2 WHERE timer_id = $3::uuid`, raw, "foreign/timer.timeout", activation.Ref.ActivationID)
+				_, err = store.testDB().ExecContext(ctx, `UPDATE timers SET routing_source = $1::jsonb, fire_event = $2 WHERE timer_id = $3::uuid`, raw, "foreign/timer.timeout", activation.Ref.ActivationID)
 			}
 			if err != nil {
 				t.Fatalf("install foreign workflow timer source: %v", err)
@@ -1842,7 +1846,7 @@ func TestWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStores(t *te
 			result, err := pc.MaterializeInitialEntry(ctx, WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "workflow-timer-owner-test",
 				WorkflowVersion: "1.0.0", CurrentState: "waiting",
-				Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx)},
+				Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx), "flow_path": entityID, "instance_id": entityID},
 			}, createdAt)
 			if err != nil {
 				t.Fatalf("MaterializeInitialEntry: %v", err)
@@ -2168,7 +2172,7 @@ func seedWorkflowTimerOwnerActivationAt(
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: entityID, StorageRef: entityID, WorkflowName: "workflow-timer-owner-test",
 		WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
-		CreatedAt: createdAt, Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx)},
+		CreatedAt: createdAt, Metadata: map[string]any{"run_id": runtimecorrelation.RunIDFromContext(ctx), "flow_path": entityID, "instance_id": entityID},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}

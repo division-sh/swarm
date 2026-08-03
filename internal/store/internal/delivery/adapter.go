@@ -245,7 +245,7 @@ func (a *Adapter) insertExactObligation(ctx context.Context, tx *sql.Tx, obligat
 	if inserted == 0 && (record.Status != StatusPending || record.RetryCount != 0 || record.ClaimVersion != 0) {
 		return DurableHandoffProof{}, fmt.Errorf("%w: delivery obligation replay conflicts with existing lifecycle", ErrConflict)
 	}
-	return AdmitDurableHandoffProof(obligation.DeliveryID(), obligation.EventID(), obligation.RouteIdentity().String(), obligation.Authority())
+	return AdmitDurableHandoffProof(obligation.DeliveryID(), obligation.EventID(), events.EncodeDeliveryRouteIdentity(obligation.RouteIdentity()), obligation.Authority())
 }
 
 func (a *Adapter) ClaimExactResult(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration) (ClaimResult, error) {
@@ -683,7 +683,7 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, story runtimeauth
 			return ClaimedObligation{}, err
 		}
 	}
-	claim, err := AdmitPersistedClaim(record.DeliveryID, record.RunID, record.RouteIdentity.String(), token, version, record.SubscriberClass, record.SubscriberID)
+	claim, err := AdmitPersistedClaim(record.DeliveryID, record.RunID, events.EncodeDeliveryRouteIdentity(record.RouteIdentity), token, version, record.SubscriberClass, record.SubscriberID)
 	if err != nil {
 		return ClaimedObligation{}, err
 	}
@@ -1070,7 +1070,7 @@ func (a *Adapter) ProveHandoff(ctx context.Context, q queryer, eventID string, r
 	if !events.SameDeliveryRouteIdentity(record.Route, route) {
 		return DurableHandoffProof{}, fmt.Errorf("%w: durable handoff route mismatch", ErrConflict)
 	}
-	return AdmitDurableHandoffProof(record.DeliveryID, record.EventID, record.RouteIdentity.String(), record.Authority)
+	return AdmitDurableHandoffProof(record.DeliveryID, record.EventID, events.EncodeDeliveryRouteIdentity(record.RouteIdentity), record.Authority)
 }
 
 func (a *Adapter) SummarizeRun(ctx context.Context, q queryer, runID string) (RunSummary, error) {
@@ -1912,7 +1912,7 @@ func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, story runtimea
 			return nil, fmt.Errorf("%w: run terminalization lost delivery claim fence", ErrConflict)
 		}
 		if record.claimToken != "" && record.ClaimVersion > 0 {
-			claim, err := AdmitPersistedClaim(id, record.RunID, record.RouteIdentity.String(), record.claimToken, record.ClaimVersion, record.SubscriberClass, record.SubscriberID)
+			claim, err := AdmitPersistedClaim(id, record.RunID, events.EncodeDeliveryRouteIdentity(record.RouteIdentity), record.claimToken, record.ClaimVersion, record.SubscriberClass, record.SubscriberID)
 			if err != nil {
 				return nil, err
 			}
@@ -2016,7 +2016,7 @@ func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cla
 		return deliveryRecord{}, time.Time{}, err
 	}
 	if record.Status != StatusInProgress || record.claimToken != claim.PersistenceToken() || record.ClaimVersion != claim.Version() ||
-		record.RouteIdentity.String() != claim.RouteIdentity() || record.ClaimExpiresAt.IsZero() || !record.ClaimExpiresAt.After(now) {
+		events.EncodeDeliveryRouteIdentity(record.RouteIdentity) != claim.RouteIdentity() || record.ClaimExpiresAt.IsZero() || !record.ClaimExpiresAt.After(now) {
 		return deliveryRecord{}, time.Time{}, fmt.Errorf("%w: delivery claim is stale", ErrConflict)
 	}
 	return record, now, nil
@@ -2513,9 +2513,14 @@ func decodeRoute(
 			return events.DeliveryRoute{}, fmt.Errorf("node delivery row carries agent identity fields")
 		}
 	}
-	recipient, err := deliveryRecipientForClass(class, subscriberID)
-	if err != nil {
-		return events.DeliveryRoute{}, err
+	var recipient events.DeliveryRecipient
+	switch class {
+	case SubscriberAgent:
+		recipient = events.MustAgentDeliveryRecipient(subscriberID)
+	case SubscriberNode:
+		recipient = events.MustNodeDeliveryRecipient(subscriberID)
+	default:
+		return events.DeliveryRoute{}, fmt.Errorf("unsupported delivery subscriber class %q", class)
 	}
 	return events.DeliveryRoute{
 		Recipient:         recipient,

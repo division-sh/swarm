@@ -931,8 +931,8 @@ func (s *descriptorAwareEventStore) CommitPublication(_ context.Context, command
 	defer s.mu.Unlock()
 	s.deliveries = s.deliveries[:0]
 	for _, route := range command.Commit.DeliveryRoutes {
-		if route.SubscriberType == "agent" {
-			s.deliveries = append(s.deliveries, route.SubscriberID)
+		if route.Recipient.IsAgent() {
+			s.deliveries = append(s.deliveries, route.Recipient.ID())
 		}
 	}
 	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
@@ -3196,13 +3196,15 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	ctx := eventBusTestRunContext(t, db)
 	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
-			InstanceID:      rootEntityID,
-			StorageRef:      rootEntityID,
+			InstanceID:      eventBusTestRunID,
+			StorageRef:      eventBusTestRunID,
 			WorkflowName:    bundle.WorkflowName(),
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "idle",
 			Metadata: map[string]any{
-				"entity_id": rootEntityID,
+				"entity_id":   rootEntityID,
+				"flow_path":   eventBusTestRunID,
+				"instance_id": eventBusTestRunID,
 			},
 		},
 		{
@@ -3212,6 +3214,9 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "delegated",
 			Metadata: map[string]any{
+				"entity_id":        childEntityID,
+				"flow_path":        "child",
+				"instance_id":      "child",
 				"parent_entity_id": rootEntityID,
 			},
 		},
@@ -3221,6 +3226,11 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 			WorkflowName:    "grandchild",
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "finished",
+			Metadata: map[string]any{
+				"entity_id":   grandchildEntityID,
+				"flow_path":   "child/grandchild",
+				"instance_id": "grandchild",
+			},
 		},
 	}) {
 		if _, err := workflowStore.MaterializeInitialEntry(ctx, instance, instance.CreatedAt); err != nil {
@@ -3258,7 +3268,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		t.Fatalf("child current_state = %q, want completed", got)
 	}
 
-	root, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(rootEntityID))
+	root, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(eventBusTestRunID))
 	if err != nil {
 		t.Fatalf("load root instance: %v", err)
 	}
@@ -3341,11 +3351,16 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 	workflowStore := pc
 	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
-			InstanceID:      rootEntityID,
-			StorageRef:      rootEntityID,
+			InstanceID:      eventBusTestRunID,
+			StorageRef:      eventBusTestRunID,
 			WorkflowName:    "mixed-route",
 			WorkflowVersion: "v-test",
 			CurrentState:    "active",
+			Metadata: map[string]any{
+				"entity_id":   rootEntityID,
+				"flow_path":   eventBusTestRunID,
+				"instance_id": eventBusTestRunID,
+			},
 		},
 		{
 			InstanceID:      childEntityID,
@@ -3353,6 +3368,11 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 			WorkflowName:    "child",
 			WorkflowVersion: "v-test",
 			CurrentState:    "active",
+			Metadata: map[string]any{
+				"entity_id":   childEntityID,
+				"flow_path":   "child",
+				"instance_id": "child",
+			},
 		},
 	}) {
 		if _, err := workflowStore.MaterializeInitialEntry(ctx, instance, instance.CreatedAt); err != nil {
@@ -3370,7 +3390,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 		[]byte(`{"entity_id":"`+rootEntityID+`"}`),
 		0,
 		eventBusTestRunID,
-		events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID), eventBusTestRunID),
 		time.Now().UTC(),
 	)
 	plan, err := eb.CheckPublishRecipientPlan(ctx, evt)
@@ -3591,11 +3611,16 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	workflowStore := pc
 	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
-			InstanceID:      rootEntityID,
-			StorageRef:      rootEntityID,
+			InstanceID:      eventBusTestRunID,
+			StorageRef:      eventBusTestRunID,
 			WorkflowName:    bundle.WorkflowName(),
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "idle",
+			Metadata: map[string]any{
+				"entity_id":   rootEntityID,
+				"flow_path":   eventBusTestRunID,
+				"instance_id": eventBusTestRunID,
+			},
 		},
 		{
 			InstanceID:      runtimeflowidentity.EntityID("child"),
@@ -3604,6 +3629,9 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "waiting",
 			Metadata: map[string]any{
+				"entity_id":        runtimeflowidentity.EntityID("child"),
+				"flow_path":        "child",
+				"instance_id":      "child",
 				"parent_entity_id": rootEntityID,
 			},
 		},
@@ -3613,6 +3641,11 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 			WorkflowName:    "grandchild",
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "ready",
+			Metadata: map[string]any{
+				"entity_id":   runtimeflowidentity.EntityID("child/grandchild"),
+				"flow_path":   "child/grandchild",
+				"instance_id": "grandchild",
+			},
 		},
 	}) {
 		if _, err := workflowStore.MaterializeInitialEntry(ctx, instance, instance.CreatedAt); err != nil {
@@ -3628,7 +3661,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		[]byte(`{"entity_id":"`+rootEntityID+`"}`),
 		0,
 		eventBusTestRunID,
-		events.EnvelopeForEntityID(events.EnvelopeForFlowInstance(events.EventEnvelope{}, rootEntityID), rootEntityID),
+		events.EnvelopeForEntityID(events.EnvelopeForFlowInstance(events.EventEnvelope{}, eventBusTestRunID), rootEntityID),
 		rootSource,
 		time.Now().UTC(),
 	)
@@ -3731,7 +3764,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		[]byte(`{"entity_id":"`+rootEntityID+`"}`),
 		0,
 		eventBusTestRunID,
-		events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID), eventBusTestRunID),
 		time.Now().UTC(),
 	)); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -3749,13 +3782,18 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("load child/micro.start event id: %v", err)
 	}
 	assertNodeDeliveryStatus(t, db, microStartEventID, "grandchild-worker", "delivered")
+	var microDoneEventID string
+	if err := db.QueryRowContext(ctx, `SELECT event_id::text FROM events WHERE event_name = 'child/grandchild/micro.done' ORDER BY created_at DESC LIMIT 1`).Scan(&microDoneEventID); err != nil {
+		t.Fatalf("load child/grandchild/micro.done event id: %v", err)
+	}
+	assertNodeDeliveryStatus(t, db, microDoneEventID, "child-relay", "delivered")
 	var microRelayedEventID string
 	if err := db.QueryRowContext(ctx, `SELECT event_id::text FROM events WHERE event_name = 'child/micro.relayed' ORDER BY created_at DESC LIMIT 1`).Scan(&microRelayedEventID); err != nil {
 		t.Fatalf("load child/micro.relayed event id: %v", err)
 	}
 	assertNodeDeliveryStatus(t, db, microRelayedEventID, "root-collector", "delivered")
 
-	root, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(rootEntityID))
+	root, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(eventBusTestRunID))
 	if err != nil {
 		t.Fatalf("load root instance: %v", err)
 	}
@@ -3853,13 +3891,15 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 	ctx := eventBusTestRunContext(t, db)
 	workflowStore := pc
 	rootFixture := exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{{
-		InstanceID:      rootEntityID,
-		StorageRef:      rootEntityID,
+		InstanceID:      eventBusTestRunID,
+		StorageRef:      eventBusTestRunID,
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "pending",
 		Metadata: map[string]any{
-			"entity_id": rootEntityID,
+			"entity_id":   rootEntityID,
+			"flow_path":   eventBusTestRunID,
+			"instance_id": eventBusTestRunID,
 		},
 	}})[0]
 	if _, err := workflowStore.MaterializeInitialEntry(ctx, rootFixture, rootFixture.CreatedAt); err != nil {
@@ -3874,7 +3914,7 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 		[]byte(`{"entity_id":"`+rootEntityID+`"}`),
 		0,
 		eventBusTestRunID,
-		events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID), eventBusTestRunID),
 		time.Now().UTC(),
 	))
 	if err != nil {
@@ -3899,7 +3939,7 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 		t.Fatalf("dead-lettered exact deliveries = %d, want 1", deadLettered)
 	}
 
-	root, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(rootEntityID))
+	root, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(eventBusTestRunID))
 	if err != nil {
 		t.Fatalf("load root instance: %v", err)
 	}

@@ -969,11 +969,14 @@ func (l *WorkflowTimerLifecycle) AuthorizeAcceptedEvent(ctx context.Context, evt
 		)
 	}
 	if evt.ID() != timeridentity.WorkflowTimerOccurrenceEventID(occurrence) ||
-		evt.RunID() != activation.RunID || workflowEventEntityID(evt) != activation.EntityID ||
-		strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/") != activation.Route.InstancePath ||
+		evt.RunID() != activation.RunID ||
 		strings.TrimSpace(string(evt.Type())) != activation.EventType ||
 		!workflowTimerJSONEqual(evt.Payload(), activation.Payload) {
-		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("accepted workflow timer event does not match canonical activation")
+		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf(
+			"accepted workflow timer event does not match canonical activation: event_id=%q/%q run_id=%q/%q type=%q/%q payload_equal=%t",
+			evt.ID(), timeridentity.WorkflowTimerOccurrenceEventID(occurrence), evt.RunID(), activation.RunID,
+			strings.TrimSpace(string(evt.Type())), activation.EventType, workflowTimerJSONEqual(evt.Payload(), activation.Payload),
+		)
 	}
 	if source := evt.RoutingSource(); source != activation.RoutingSource {
 		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf(

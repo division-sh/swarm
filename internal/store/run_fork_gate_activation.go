@@ -36,7 +36,7 @@ func materializeRunForkDecisionCards(ctx context.Context, tx *sql.Tx, forkRunID,
 		if err != nil {
 			return fmt.Errorf("source decision card %s anchor: %w", sourceCard.CardID, err)
 		}
-		forkSource, err := forkDecisionCardExecutionSource(sourceAnchor.Source, sourceAnchor.FlowInstance, entityID)
+		forkSource, err := forkDecisionCardExecutionSource(sourceAnchor.Source, sourceAnchor.Route.InstancePath, entityID)
 		if err != nil {
 			return fmt.Errorf("construct fork stage_gate source: %w", err)
 		}

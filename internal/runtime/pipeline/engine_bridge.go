@@ -239,6 +239,10 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
+	stateRoute, err := workflowInstanceRouteForExecution(source, flowID, firstNonEmptyString(asString(triggerCtx.State.Metadata["flow_path"]), triggerCtx.Event.FlowInstance()))
+	if err != nil {
+		return contractHandlerExecutionResult{}, err
+	}
 	producerSource, err := workflowNodeProducerSource(ctx, source, nodeID, flowID, entityID, triggerCtx.Event.RoutingSource())
 	if err != nil {
 		return contractHandlerExecutionResult{}, fmt.Errorf("admit workflow node producer source: %w", err)
@@ -247,6 +251,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		EntityID:           identity.NormalizeEntityID(entityID),
 		NodeID:             identity.NormalizeNodeID(nodeID),
 		FlowID:             identity.NormalizeFlowID(flowID),
+		Route:              stateRoute,
 		Event:              triggerCtx.Event,
 		ProducerSource:     producerSource,
 		HandlerEventKey:    handlerEventKey,

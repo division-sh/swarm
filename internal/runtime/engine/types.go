@@ -209,7 +209,10 @@ type ExecutionRequest struct {
 	EntityID    identity.EntityID
 	NodeID      identity.NodeID
 	FlowID      identity.FlowID
-	Event       events.Event
+	// Route is the exact workflow-instance persistence identity selected by
+	// the runtime boundary. ProducerSource remains event-source authority.
+	Route runtimeflowidentity.Route
+	Event events.Event
 	// ProducerSource is admitted once at the handler boundary and copied by
 	// every runtime event produced by this execution.
 	ProducerSource events.RoutingSource
@@ -235,7 +238,7 @@ type ExecutionRequest struct {
 func (r ExecutionRequest) StateAddress() StateAddress {
 	return StateAddress{
 		FlowID:   identity.NormalizeFlowID(r.FlowID.String()),
-		Route:    runtimeflowidentity.RouteForInstancePath(r.ProducerRoute.FlowInstance),
+		Route:    r.Route,
 		EntityID: identity.NormalizeEntityID(r.EntityID.String()),
 	}
 }
