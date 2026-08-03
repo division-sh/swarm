@@ -336,7 +336,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, constructionDB *sql.DB
 		cfg = &config.Config{}
 	}
 	pg.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
-	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(constructionDB, pg)
+	workflowPersistence := runtimepipeline.NewWorkflowPersistence(pg)
 	bundle := storeBundle{
 		Postgres:           pg,
 		SQLDB:              constructionDB,
@@ -2214,7 +2214,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			return storeBundle{}, err
 		}
 		sqliteStore.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
-		workflowPersistence := runtimepipeline.NewSQLiteWorkflowPersistence(constructionDB, sqliteStore)
+		workflowPersistence := runtimepipeline.NewWorkflowPersistence(sqliteStore)
 		bundle := storeBundle{
 			SQLDB:              constructionDB,
 			WorkspaceLookup:    sqliteStore,

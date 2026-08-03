@@ -243,7 +243,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			workflowStore, ctx := tc.open(t)
-			owner := newPipelineTestDeliveryOwnerForDB(t, workflowStore.db)
+			owner := newPipelineTestDeliveryOwnerForDB(t, workflowStore.testDB())
 			baseBus := &recordingPipelineBus{}
 			bus := &failOnceRetryPipelineBus{recordingPipelineBus: baseBus}
 			bus.outbox = &failOnceRetryOutbox{inner: baseBus.EngineOutbox()}
@@ -281,7 +281,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 				ID: "node-a", Subscriptions: []events.EventType{"source.evt"},
 				Policies: map[string]WorkflowEventPolicy{"source.evt": {Consume: true}},
 			}}
-			pc := newPostgresPipelineCoordinatorForTest(bus, workflowStore.db, PipelineCoordinatorOptions{
+			pc := newPostgresPipelineCoordinatorForTest(bus, workflowStore.testDB(), PipelineCoordinatorOptions{
 				Module:        module,
 				Persistence:   workflowPersistenceForTest(workflowStore),
 				DeliveryStore: owner,
@@ -299,7 +299,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			if workflowStore.isSQLite() {
 				dialect = runtimeauthoractivity.DialectSQLite
 			}
-			seedPipelineEventRecordForDialect(t, ctx, workflowStore.db, dialect, evt)
+			seedPipelineEventRecordForDialect(t, ctx, workflowStore.testDB(), dialect, evt)
 			if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: entityID, StorageRef: entityID, WorkflowName: "delivery-retry", WorkflowVersion: "v-test", CurrentState: "queued",
 				EnteredStageAt: evt.CreatedAt(), CreatedAt: evt.CreatedAt(),

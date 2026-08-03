@@ -118,7 +118,7 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 	}
 	result := CommittedWorkflowEngineMutation{}
 	err := r.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		store := &workflowInstanceStore{db: r.db, dialect: r.dialect, runtimeMutation: r, runLifecycle: r, decisionCards: r.decisionCards}
+		store := workflowStoreForRecordingRunner(r)
 		if err := commitPipelineTestWorkflowState(txctx, store, command.State); err != nil {
 			return err
 		}
@@ -319,7 +319,7 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowInitialMaterialization(ct
 				return pipelineTestInitialConflict(record.State.Route.InstancePath)
 			}
 		}
-		store := &workflowInstanceStore{db: r.db, dialect: r.dialect, runtimeMutation: r, runLifecycle: r, instanceReader: r, engineMutations: r}
+		store := workflowStoreForRecordingRunner(r)
 		if err := commitPipelineTestWorkflowStateWithRouteRebind(txctx, store, record.State, flow); err != nil {
 			return err
 		}
@@ -503,7 +503,7 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowTimerOccurrence(ctx conte
 	}
 	result := CommittedWorkflowTimerOccurrence{Outcome: WorkflowTimerOccurrenceTerminal}
 	err := r.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		store := &workflowInstanceStore{db: r.db, dialect: r.dialect, runtimeMutation: r, runLifecycle: r}
+		store := workflowStoreForRecordingRunner(r)
 		activation, found, err := store.loadWorkflowTimerActivation(txctx, command.Activation.Ref.ActivationID, true)
 		if err != nil {
 			return err
@@ -589,14 +589,14 @@ func commitPipelineTestWorkflowStateWithRouteRebind(ctx context.Context, store *
 	if err := store.runLifecycle.RequireActiveRun(ctx, record.RunID); err != nil {
 		return err
 	}
-	if store.dialect == workflowStoreDialectPostgres {
+	if store.testDialect() == workflowStoreDialectPostgres {
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, record.RunID+":"+record.Route.InstancePath); err != nil {
 			return err
 		}
 	}
 	var before runtimemutationlog.EntityStateProjection
 	var err error
-	if store.dialect == workflowStoreDialectPostgres {
+	if store.testDialect() == workflowStoreDialectPostgres {
 		before, err = loadTrackedEntityStateProjection(ctx, tx, record.RunID, record.EntityID)
 	} else {
 		before, err = store.loadTrackedEntityStateProjectionSQLite(ctx, tx, record.RunID, record.EntityID)
@@ -613,7 +613,7 @@ func commitPipelineTestWorkflowStateWithRouteRebind(ctx context.Context, store *
 				entered_state_at, created_at, updated_at
 			) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, 1, ?, ?, ?)
 		`
-		if store.dialect == workflowStoreDialectPostgres {
+		if store.testDialect() == workflowStoreDialectPostgres {
 			flowQuery = `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at) VALUES ($1, $2, $3, $4::jsonb, $5, $6)`
 			entityQuery = `
 				INSERT INTO entity_state (
@@ -624,7 +624,7 @@ func commitPipelineTestWorkflowStateWithRouteRebind(ctx context.Context, store *
 			`
 		}
 		if rebindExistingRoute {
-			if store.dialect == workflowStoreDialectPostgres {
+			if store.testDialect() == workflowStoreDialectPostgres {
 				flowQuery += ` ON CONFLICT (instance_id) DO UPDATE SET flow_template = EXCLUDED.flow_template, mode = EXCLUDED.mode, config = EXCLUDED.config, status = EXCLUDED.status, terminated_at = NULL`
 			} else {
 				flowQuery += ` ON CONFLICT(instance_id) DO UPDATE SET flow_template = excluded.flow_template, mode = excluded.mode, config = excluded.config, status = excluded.status, terminated_at = NULL`
@@ -638,7 +638,7 @@ func commitPipelineTestWorkflowStateWithRouteRebind(ctx context.Context, store *
 			record.CurrentState, string(record.Gates), string(record.Fields), string(record.Accumulator),
 			record.EnteredStageAt, record.CreatedAt,
 		}
-		if store.dialect == workflowStoreDialectSQLite {
+		if store.testDialect() == workflowStoreDialectSQLite {
 			entityArgs = append(entityArgs, record.CreatedAt)
 		}
 		if _, err := tx.ExecContext(ctx, entityQuery, entityArgs...); err != nil {
@@ -654,7 +654,7 @@ func commitPipelineTestWorkflowStateWithRouteRebind(ctx context.Context, store *
 		WHERE run_id = ? AND entity_id = ? AND flow_instance = ? AND revision = ? AND current_state = ?
 	`
 	flowQuery := `UPDATE flow_instances SET flow_template = ?, mode = ?, config = ?, status = ?, terminated_at = CASE WHEN ? = 'terminated' THEN COALESCE(terminated_at, ?) ELSE NULL END WHERE instance_id = ?`
-	if store.dialect == workflowStoreDialectPostgres {
+	if store.testDialect() == workflowStoreDialectPostgres {
 		stateQuery = `
 			UPDATE entity_state
 			SET entity_type = $1, slug = NULLIF($2, ''), name = NULLIF($3, ''), current_state = $4,
@@ -681,7 +681,7 @@ func commitPipelineTestWorkflowStateWithRouteRebind(ctx context.Context, store *
 		return fmt.Errorf("pipeline test workflow state changed before commit")
 	}
 	flowArgs := []any{record.WorkflowName, record.Mode, string(record.Config), record.Status}
-	if store.dialect == workflowStoreDialectSQLite {
+	if store.testDialect() == workflowStoreDialectSQLite {
 		flowArgs = append(flowArgs, record.Status)
 	}
 	flowArgs = append(flowArgs, nullablePipelineTestWorkflowTerminationTime(record.TerminatedAt), record.Route.InstancePath)
@@ -746,7 +746,7 @@ func commitPipelineTestWorkflowMutationLog(
 		return fmt.Errorf("decode pipeline test workflow initial fields: %w", err)
 	}
 	if record.Create && len(initial) > 0 {
-		if store.dialect == workflowStoreDialectPostgres {
+		if store.testDialect() == workflowStoreDialectPostgres {
 			before, err = insertWorkflowCreateEntityInitialValueMutations(ctx, tx, store.runLifecycle, record.EntityID, before, after, initial)
 		} else {
 			before, err = insertSQLiteWorkflowCreateEntityInitialValueMutations(ctx, tx, store.runLifecycle, record.EntityID, before, after, initial)
@@ -760,7 +760,7 @@ func commitPipelineTestWorkflowMutationLog(
 		ID:          "workflow_engine",
 		HandlerStep: map[bool]string{true: "create", false: "mutate"}[record.Create],
 	}
-	if store.dialect == workflowStoreDialectPostgres {
+	if store.testDialect() == workflowStoreDialectPostgres {
 		return runtimemutationlog.InsertEntityStateDiff(ctx, tx, store.runLifecycle, record.EntityID, before, after, writer)
 	}
 	return insertSQLiteEntityStateDiff(ctx, tx, store.runLifecycle, record.EntityID, before, after, writer)

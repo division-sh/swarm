@@ -243,11 +243,11 @@ func TestSelectedRuntimeConstructionUsesOpaqueWorkflowPersistence(t *testing.T) 
 		t.Fatalf("read internal/serveapp/main.go: %v", err)
 	}
 	mainText := string(mainData)
-	if !strings.Contains(mainText, "NewSQLiteWorkflowPersistence(constructionDB, sqliteStore)") {
-		t.Fatal("serve runtime SQLite construction must keep the raw lifecycle handle confined to construction and wire the selected semantic owner")
+	if !strings.Contains(mainText, "NewWorkflowPersistence(sqliteStore)") {
+		t.Fatal("serve runtime SQLite construction must wire the selected semantic owner without a raw database handle")
 	}
-	if !strings.Contains(mainText, "NewPostgresWorkflowPersistence(constructionDB, pg)") {
-		t.Fatal("serve runtime PostgreSQL construction must keep the raw lifecycle handle confined to construction and wire the selected semantic owner")
+	if !strings.Contains(mainText, "NewWorkflowPersistence(pg)") {
+		t.Fatal("serve runtime PostgreSQL construction must wire the selected semantic owner without a raw database handle")
 	}
 	for _, forbidden := range []string{
 		"NewSQLiteWorkflowInstanceStore",
@@ -319,8 +319,12 @@ func TestSelectedRuntimeConstructionUsesOpaqueWorkflowPersistence(t *testing.T) 
 			t.Fatalf("SQLite pipeline store must not own busy/retry policy through %s", forbidden)
 		}
 	}
-	if !strings.Contains(pipelineText, "errSQLiteWorkflowMutationOwnerRequired") {
-		t.Fatal("SQLite workflow persistence must fail closed when its private selected mutation owner is absent")
+	if !strings.Contains(pipelineText, "type WorkflowPersistenceOwner interface") ||
+		!strings.Contains(pipelineText, "func NewWorkflowPersistence(owner WorkflowPersistenceOwner)") {
+		t.Fatal("workflow persistence must require the complete selected-store semantic owner")
+	}
+	if strings.Contains(pipelineText, "*sql.DB") || strings.Contains(pipelineText, "runtimeMutationRunner") {
+		t.Fatal("workflow persistence must not retain raw database or generic mutation authority")
 	}
 }
 

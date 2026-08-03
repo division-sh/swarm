@@ -64,12 +64,12 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				t.Cleanup(cleanup)
 				pg := storetest.AdmitPostgresRuntimeStore(t, postgresDB)
 				seedPostgresInboundGatewayRuntime(t, ctx, postgresDB, pg, runID, entityID, flowInstance, "channel-runtime", "telegram", "unused", "channel-runtime-observer")
-				db, eventStore, workflowPersistence, runLifecycle, deliveryStore = postgresDB, pg, runtimepipeline.NewPostgresWorkflowPersistence(postgresDB, pg), pg, pg
+				db, eventStore, workflowPersistence, runLifecycle, deliveryStore = postgresDB, pg, runtimepipeline.NewWorkflowPersistence(pg), pg, pg
 			} else {
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 				seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "channel-runtime", "telegram", "unused", "channel-runtime-observer")
 				db, eventStore = storetest.Database(sqliteStore), sqliteStore
-				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(storetest.Database(sqliteStore), sqliteStore)
+				workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 				runLifecycle, deliveryStore = sqliteStore, sqliteStore
 			}
 			seedConfiguredChannelBundleIdentity(t, ctx, db, selected, runID, bundleHash)

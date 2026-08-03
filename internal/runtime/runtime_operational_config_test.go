@@ -201,13 +201,13 @@ func TestNewRuntimeBuildsRunLifecycleExecutorFromTypedOwnerWithoutRawSQLCapabili
 
 func TestNewRuntimeRejectsInvalidArtifactRootEnv(t *testing.T) {
 	t.Setenv("SWARM_ARTIFACT_ROOT", "/data/swarm/artifacts")
-	_, db, cleanup := testutil.StartPostgres(t)
+	_, _, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence: runtimepipeline.WorkflowPersistence{},
 		EventStore:          &minimalRuntimeEventStore{},
 		EventBusDurable:     runtimeTestSyntheticDurableDependencies(deliveryStore),
 		DeliveryStore:       deliveryStore,

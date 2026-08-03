@@ -34,6 +34,7 @@ import (
 type workflowTimerStartupStore interface {
 	externalRuntimeTestDurableEventStore
 	externalRuntimeTestMutationOwner
+	runtimepipeline.WorkflowPersistenceOwner
 	swarmruntime.EventPayloadValidationBinder
 	swarmruntime.AuthorActivityCatalogRegistrar
 	runtimerunlifecycle.CandidateOwner
@@ -87,9 +88,9 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 	} {
 		t.Run(backend.name, func(t *testing.T) {
 			db, selected, postgres := backend.open(t)
-			workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
 			if !postgres {
-				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
+				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 			}
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
@@ -232,9 +233,9 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 	} {
 		t.Run(backend.name, func(t *testing.T) {
 			db, selected, postgres := backend.open(t)
-			workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
 			if !postgres {
-				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
+				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 			}
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
@@ -359,9 +360,9 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 	} {
 		t.Run(backend.name, func(t *testing.T) {
 			db, selected, postgres := backend.open(t)
-			workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
 			if !postgres {
-				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
+				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 			}
 			runID := uuid.NewString()
 			entityID := uuid.NewString()

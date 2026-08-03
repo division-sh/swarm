@@ -260,9 +260,6 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 	var workflowStore *workflowInstanceStore
 	if storeTemplate != nil {
 		workflowStore = &workflowInstanceStore{
-			db:               storeTemplate.db,
-			dialect:          storeTemplate.dialect,
-			runtimeMutation:  storeTemplate.runtimeMutation,
 			entityQuery:      storeTemplate.entityQuery,
 			routeRecovery:    storeTemplate.routeRecovery,
 			activityResults:  storeTemplate.activityResults,
@@ -281,7 +278,6 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 			deliveryStore:    opts.DeliveryStore,
 			pipelineStore:    opts.PipelineObligations,
 			decisionCards:    opts.DecisionCards,
-			gateEvents:       opts.GatePublisher,
 			lifecycleOwner:   pipelineWorkflowLifecycleOwner{coordinator: coordinator},
 			runLifecycle:     opts.RunLifecycle,
 			deliverySignals:  make(map[runtimedelivery.ExecutionAuthority]func()),

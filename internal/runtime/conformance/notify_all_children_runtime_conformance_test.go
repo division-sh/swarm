@@ -46,6 +46,7 @@ import (
 
 type notifyAllChildrenStore interface {
 	conformanceDurableEventBusStore
+	runtimepipeline.WorkflowPersistenceOwner
 	runtimemanager.ManagerPersistence
 	runtimemanager.AgentLifecyclePersistence
 	runtimemanager.AgentLifecycleStateReader
@@ -1471,12 +1472,12 @@ func newNotifyAllChildrenRuntime(
 		}
 		llmBackend = llmselection.BackendMock
 	}
-	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, backend)
+	workflowPersistence := runtimepipeline.NewWorkflowPersistence(backend)
 	switch sqliteStore := backend.(type) {
 	case *store.SQLiteRuntimeStore:
-		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, sqliteStore)
+		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 	case *failingNotifyAllChildrenSQLiteStore:
-		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, sqliteStore)
+		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 	}
 	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
 	if err != nil {

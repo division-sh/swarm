@@ -38,6 +38,7 @@ import (
 
 type completeEventDispatchStore interface {
 	runtimebus.EventStore
+	runtimepipeline.WorkflowPersistenceOwner
 	runtimedelivery.Store
 	runtimemanager.ManagerPersistence
 	interface {
@@ -264,9 +265,9 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	runID, eventID := uuid.NewString(), uuid.NewString()
 	if origin.Kind() == runtimerunlifecycle.OriginStandingGeneration {
 		runID = runtimeflowidentity.StandingGenerationRunID(origin.ServiceID(), origin.Generation())
-		workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+		workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
 		if backend == "sqlite" {
-			workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected.(*store.SQLiteRuntimeStore))
+			workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected.(*store.SQLiteRuntimeStore))
 		}
 		workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
 			Module:                  standingDispatchWorkflowModule{},

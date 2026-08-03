@@ -34,6 +34,7 @@ import (
 type dynamicFlowCreationAtomicityStore interface {
 	externalStoreTestDurableEventBusStore
 	externalStoreTestMutationOwner
+	runtimepipeline.WorkflowPersistenceOwner
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
 	decisioncard.Store
@@ -188,9 +189,9 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+	workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
 	if sqlite {
-		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
+		workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 	}
 	workflow = runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  dynamicFlowCreationWorkflowModule{source: semanticview.Wrap(dynamicFlowCreationAtomicityBundle())},

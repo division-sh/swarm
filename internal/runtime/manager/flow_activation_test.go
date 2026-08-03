@@ -46,6 +46,7 @@ import (
 )
 
 type flowActivationTestRunLifecycleOwner struct {
+	runtimepipeline.WorkflowPersistenceOwner
 	runtimerunlifecycle.OperationOwner
 	db *sql.DB
 }
@@ -3317,7 +3318,7 @@ func TestActivateFlowInstanceCanonicalStoreFinalizesIdenticalReplayWithoutDuplic
 	bundle := testFlowBundle("task.started")
 	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, completeFlowActivationWorkflowOptions(runtimepipeline.PipelineCoordinatorOptions{
 		Module:              newFlowActivationWorkflowModule(t, bundle),
-		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, workflowOwner),
+		Persistence:         runtimepipeline.NewWorkflowPersistence(workflowOwner),
 		RunLifecycle:        workflowOwner,
 		PipelineObligations: bus.PipelineObligationOwner(),
 		FlowRoutes:          bus,
@@ -3856,7 +3857,7 @@ func TestDeactivateFlowInstanceModel_PersistsTerminalStateInFlowInstances(t *tes
 	bundle := testFlowBundle("")
 	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, completeFlowActivationWorkflowOptions(runtimepipeline.PipelineCoordinatorOptions{
 		Module:              newFlowActivationWorkflowModule(t, bundle),
-		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, workflowOwner),
+		Persistence:         runtimepipeline.NewWorkflowPersistence(workflowOwner),
 		RunLifecycle:        workflowOwner,
 		PipelineObligations: bus.PipelineObligationOwner(),
 		FlowRoutes:          bus,
@@ -3958,7 +3959,7 @@ func TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit(t
 	bundle := testFlowBundle("")
 	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, completeFlowActivationWorkflowOptions(runtimepipeline.PipelineCoordinatorOptions{
 		Module:              newFlowActivationWorkflowModule(t, bundle),
-		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, workflowOwner),
+		Persistence:         runtimepipeline.NewWorkflowPersistence(workflowOwner),
 		RunLifecycle:        workflowOwner,
 		PipelineObligations: bus.PipelineObligationOwner(),
 		FlowRoutes:          bus,

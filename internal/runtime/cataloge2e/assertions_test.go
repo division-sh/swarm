@@ -260,7 +260,7 @@ func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 	bus := catalogPersistenceBus{}
 	workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  &fixtureWorkflowModule{},
-		Persistence:             runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Persistence:             runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:            pg,
 		PipelineObligations:     pg.PipelineObligations(),
 		DeliveryStore:           pg,

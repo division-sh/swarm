@@ -93,11 +93,11 @@ func newHumanTaskAckLossOwners(
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		return pg, pg, pg, pg, newHumanTaskAckLossDecisionAuthority(t, db, pg, runtimepipeline.NewPostgresWorkflowPersistence(db, pg), pg, pg, publisher), publisher, db
+		return pg, pg, pg, pg, newHumanTaskAckLossDecisionAuthority(t, db, pg, runtimepipeline.NewWorkflowPersistence(pg), pg, pg, publisher), publisher, db
 	}
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	return sqliteStore, sqliteStore, sqliteStore, sqliteStore,
-		newHumanTaskAckLossDecisionAuthority(t, storetest.Database(sqliteStore), sqliteStore, runtimepipeline.NewSQLiteWorkflowPersistence(storetest.Database(sqliteStore), sqliteStore), sqliteStore, sqliteStore, publisher), publisher, storetest.Database(sqliteStore)
+		newHumanTaskAckLossDecisionAuthority(t, storetest.Database(sqliteStore), sqliteStore, runtimepipeline.NewWorkflowPersistence(sqliteStore), sqliteStore, sqliteStore, publisher), publisher, storetest.Database(sqliteStore)
 }
 
 type humanTaskAckLossPersistence interface {

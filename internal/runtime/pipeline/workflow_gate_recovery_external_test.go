@@ -1446,7 +1446,7 @@ func makeGateRecoveryRouteDue(t *testing.T, tc gateRecoveryStoreCase, eventID st
 
 func openSQLiteGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 	selected := storetest.StartSQLiteRuntimeStore(t)
-	persistence := runtimepipeline.NewSQLiteWorkflowPersistence(storetest.Database(selected), selected)
+	persistence := runtimepipeline.NewWorkflowPersistence(selected)
 	result := gateRecoveryStoreCase{
 		name: "sqlite", db: storetest.Database(selected), events: selected, cards: selected,
 		lifecycle: selected, persistence: persistence,
@@ -1458,7 +1458,7 @@ func openPostgresGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
-	persistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+	persistence := runtimepipeline.NewWorkflowPersistence(selected)
 	result := gateRecoveryStoreCase{
 		name: "postgres", postgres: true, db: db, events: selected, cards: selected,
 		lifecycle: selected, persistence: persistence,

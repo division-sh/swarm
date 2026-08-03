@@ -262,7 +262,7 @@ rows:
       - SQLite write serialization and SQLITE_BUSY policy
     owners:
       - internal/store.SQLiteRuntimeStore mutation executor
-      - internal/runtime/pipeline.WorkflowInstanceStore RuntimeMutationRunner requirement
+      - internal/runtime/pipeline.WorkflowPersistenceOwner named operation facade
       - internal/store/runtime_mutation_guard_test.go
     proof_refs:
       - kind: artifact
@@ -276,8 +276,6 @@ rows:
       - kind: go_test
         name: TestSQLiteRuntimeStore_RunRuntimeMutationDoesNotRetryActiveTransaction
       - kind: go_test
-        name: TestSQLiteWorkflowInstanceStore_runPipelineMutationRequiresRuntimeMutationRunner
-      - kind: go_test
         name: TestSQLiteWorkflowInstanceStore_runPipelineMutationUsesRuntimeMutationRunner
       - kind: go_test
         name: TestPostgresStore_RunEventTransactionSerializesStoryCommitOrder
@@ -285,8 +283,8 @@ rows:
       - kind: go_test
         name: TestSelectedRuntimeConstructionUsesOpaqueWorkflowPersistence
       - kind: go_test
-        name: TestSQLiteWorkflowInstanceStore_runPipelineMutationRequiresRuntimeMutationRunner
+        name: TestWorkflowMutationExecutorDoesNotEscapeOpaquePersistence
     notes: >
       SQLite busy/retry policy belongs below the store boundary. Pipeline writes
-      require an injected RuntimeMutationRunner and must not own a fallback
-      SQLite retry classifier or queue.
+      consume selected-store named operations and must not own a mutation runner,
+      fallback SQLite retry classifier, or queue.

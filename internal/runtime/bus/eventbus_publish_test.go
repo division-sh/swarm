@@ -3230,7 +3230,7 @@ func newEventBusWorkflowCoordinator(
 ) *runtimepipeline.PipelineCoordinator {
 	return runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  module,
-		Persistence:             runtimepipeline.NewPostgresWorkflowPersistence(db, selected),
+		Persistence:             runtimepipeline.NewWorkflowPersistence(selected),
 		RunLifecycle:            selected,
 		PipelineObligations:     selected.PipelineObligations(),
 		DeliveryStore:           selected,

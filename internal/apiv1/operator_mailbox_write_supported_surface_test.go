@@ -210,9 +210,9 @@ func newMailboxWriteSupportedSurfaceHandler(
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	module := newRunCompletionSystemNodeModule(t, source)
-	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, persistence.(apiTestRuntimeMutationOwner))
+	workflowPersistence := runtimepipeline.NewWorkflowPersistence(persistence.(apiTestRuntimeMutationOwner))
 	if sqliteStore, ok := persistence.(*store.SQLiteRuntimeStore); ok {
-		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, sqliteStore)
+		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 	}
 	deliveryOwner := persistence.(runtimedelivery.Store)
 	obligationOwner := persistence.(interface {

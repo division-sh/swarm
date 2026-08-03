@@ -65,7 +65,7 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 			}
 			return manager.ActivateFlowInstance(ctx, req)
 		},
-		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,

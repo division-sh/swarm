@@ -51,7 +51,7 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              newRuntimeTestWorkflowModule(t, source),
-		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:        pg,
 		DeliveryStore:       pg,
 		PipelineObligations: pg.PipelineObligations(),

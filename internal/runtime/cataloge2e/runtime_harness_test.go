@@ -191,7 +191,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	loadAgentFixtures(t, fixtureRoot, llmRuntime)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	pg.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
-	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, pg)
+	workflowPersistence := runtimepipeline.NewWorkflowPersistence(pg)
 
 	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), catalogRuntimeRunID))
 	t.Cleanup(cancel)

@@ -203,7 +203,7 @@ func (j pipelineTestActivityJournal) MarkActivityAttemptUncertain(ctx context.Co
 }
 
 func (j pipelineTestActivityJournal) LoadActivityAttempt(ctx context.Context, requestEventID string) (ActivityAttemptRecord, bool, error) {
-	return j.load(ctx, j.store.db, requestEventID)
+	return j.load(ctx, j.store.testDB(), requestEventID)
 }
 
 func (j pipelineTestActivityJournal) load(ctx context.Context, db interface {

@@ -71,7 +71,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              module,
-				Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+				Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 				RunLifecycle:        pg,
 				PipelineObligations: pg.PipelineObligations(),
 				DeliveryStore:       pg,
@@ -223,7 +223,7 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              module,
-				Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+				Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 				RunLifecycle:        pg,
 				PipelineObligations: pg.PipelineObligations(),
 				DeliveryStore:       pg,

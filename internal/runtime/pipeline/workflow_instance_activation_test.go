@@ -224,7 +224,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			if !store.isSQLite() {
 				deleteEntityQuery = `DELETE FROM entity_state WHERE run_id = $1::uuid AND flow_instance = $2`
 			}
-			if _, err := store.db.ExecContext(ctx, deleteEntityQuery, runID, instance.StorageRef); err != nil {
+			if _, err := store.testDB().ExecContext(ctx, deleteEntityQuery, runID, instance.StorageRef); err != nil {
 				t.Fatalf("remove materialized entity state: %v", err)
 			}
 			if _, err := store.MaterializeInitialEntry(ctx, instance, occurredAt); err == nil {
@@ -237,7 +237,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			if !store.isSQLite() {
 				deleteQuery = `DELETE FROM workflow_instance_initial_materializations WHERE run_id = $1::uuid AND instance_id = $2`
 			}
-			if _, err := store.db.ExecContext(ctx, deleteQuery, runID, instance.StorageRef); err != nil {
+			if _, err := store.testDB().ExecContext(ctx, deleteQuery, runID, instance.StorageRef); err != nil {
 				t.Fatalf("remove immutable creation record: %v", err)
 			}
 			if _, err := store.MaterializeInitialEntry(ctx, instance, occurredAt); err == nil {
@@ -584,9 +584,9 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				runtimerunlifecycle.StateCancelled,
 			)
 			if store.isSQLite() {
-				runlifecyclefixture.RequireSQLite(t, ctx, store.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: nextRunID, StartedAt: occurredAt.Add(time.Hour), BundleHash: bundleHash, BundleSource: bundleSource})
+				runlifecyclefixture.RequireSQLite(t, ctx, store.testDB(), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: nextRunID, StartedAt: occurredAt.Add(time.Hour), BundleHash: bundleHash, BundleSource: bundleSource})
 			} else {
-				runlifecyclefixture.RequirePostgres(t, ctx, store.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: nextRunID, BundleHash: bundleHash, BundleSource: bundleSource})
+				runlifecyclefixture.RequirePostgres(t, ctx, store.testDB(), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: nextRunID, BundleHash: bundleHash, BundleSource: bundleSource})
 			}
 			nextPlan := plan
 			nextPlan.RunID = nextRunID
@@ -673,10 +673,10 @@ func transitionWorkflowActivationRunForTest(
 	state runtimerunlifecycle.State,
 ) {
 	t.Helper()
-	if store == nil || store.runtimeMutation == nil {
+	if store == nil || store.testRuntimeMutation() == nil {
 		t.Fatal("workflow activation run transition requires runtime mutation owner")
 	}
-	if err := store.runtimeMutation.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
+	if err := store.testRuntimeMutation().RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 		if state == runtimerunlifecycle.StateCancelled {
 			_, _, err := store.runLifecycle.MarkTerminalRun(txctx, runtimerunlifecycle.TerminalRequest{
 				RunID: runID, State: state, EndedAt: time.Now().UTC(),

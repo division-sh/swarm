@@ -248,7 +248,7 @@ func TestPipelineCoordinatorRequiresCanonicalObligationOwner(t *testing.T) {
 
 	if durable := NewPipelineCoordinatorWithOptions(previewBus{}, PipelineCoordinatorOptions{
 		Module:      module,
-		Persistence: WorkflowPersistence{store: &workflowInstanceStore{db: new(sql.DB)}},
+		Persistence: WorkflowPersistence{store: &workflowInstanceStore{}},
 	}); durable != nil {
 		t.Fatal("durable coordinator accepted incomplete persistence roles")
 	}
@@ -259,7 +259,7 @@ func TestRuntimePipelineRejectsUnconfiguredReceiverExecution(t *testing.T) {
 	module := staticSemanticWorkflowModule{source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})}
 	opts := completeDurablePipelineTestOptions(previewBus{}, PipelineCoordinatorOptions{
 		Module:      module,
-		Persistence: WorkflowPersistence{store: &workflowInstanceStore{db: new(sql.DB)}},
+		Persistence: WorkflowPersistence{store: &workflowInstanceStore{}},
 	})
 	opts.ReceiverExecution = eventreceiver.ExecutionVariant{}
 	if coordinator := NewPipelineCoordinatorWithOptions(previewBus{}, opts); coordinator != nil {

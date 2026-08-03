@@ -72,7 +72,7 @@ func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t
 			if store.isSQLite() {
 				dialect = runtimeauthoractivity.DialectSQLite
 			}
-			seedPipelineEventRecordForDialect(t, ctx, store.db, dialect, evt)
+			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
 			engine := newCoordinatorHandlerExecutionEngine(pc, "acceptor")
 			outcome, err := engine.ExecuteHandlerSteps(ctx, runtimecontracts.SystemNodeEventHandler{
 				AdvancesTo: "done",

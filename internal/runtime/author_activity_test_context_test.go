@@ -69,6 +69,14 @@ func (*runtimeTestUnavailableHumanTaskExpiry) ExpireHumanTaskCardsInMutation(con
 	return nil, nil
 }
 
+func (*runtimeTestUnavailableHumanTaskExpiry) ListDueHumanTaskExpiryEvents(context.Context, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+
+func (*runtimeTestUnavailableHumanTaskExpiry) CommitHumanTaskExpirations(context.Context, runtimepipeline.HumanTaskExpiryCommand) (runtimepipeline.CommittedHumanTaskExpiry, error) {
+	return runtimepipeline.CommittedHumanTaskExpiry{}, nil
+}
+
 func completeRuntimeTestPipelineOptions(bus *runtimebus.EventBus, opts runtimepipeline.PipelineCoordinatorOptions) runtimepipeline.PipelineCoordinatorOptions {
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()

@@ -125,12 +125,15 @@ func TestWorkflowMutationExecutorDoesNotEscapeOpaquePersistence(t *testing.T) {
 
 	workflowPersistence := readOwnershipSource(t, root, "internal/runtime/pipeline/workflow_instance_store.go")
 	assertOwnershipSourceContains(t, workflowPersistence,
-		"type runtimeMutationRunner interface",
-		"runtimeMutation  runtimeMutationRunner",
+		"type WorkflowPersistenceOwner interface",
+		"func NewWorkflowPersistence(owner WorkflowPersistenceOwner)",
 	)
 	assertOwnershipSourceExcludes(t, workflowPersistence,
+		"type runtimeMutationRunner interface",
+		"runtimeMutation  runtimeMutationRunner",
 		"type RuntimeMutationRunner interface",
 		"RuntimeMutationRunner runtimeMutationRunner",
+		"*sql.DB",
 	)
 }
 
@@ -240,8 +243,8 @@ func TestServeCompositionProvidesExactRuntimePorts(t *testing.T) {
 	mainSource := readOwnershipSource(t, root, "internal/serveapp/main.go")
 	facadeSource := readOwnershipSource(t, root, "internal/serveapp/store_facade.go")
 	assertOwnershipSourceContains(t, mainSource,
-		"runtimepipeline.NewPostgresWorkflowPersistence(constructionDB, pg)",
-		"runtimepipeline.NewSQLiteWorkflowPersistence(constructionDB, sqliteStore)",
+		"runtimepipeline.NewWorkflowPersistence(pg)",
+		"runtimepipeline.NewWorkflowPersistence(sqliteStore)",
 		"LiveSessionAcquirer:            pg",
 		"LiveSessionAcquirer:            sqliteStore",
 		"SessionResetter:                pg",

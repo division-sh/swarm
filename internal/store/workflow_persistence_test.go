@@ -21,6 +21,7 @@ import (
 )
 
 type workflowTestSelectedStore interface {
+	runtimepipeline.WorkflowPersistenceOwner
 	storeTestRuntimeMutationOwner
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
@@ -72,7 +73,7 @@ func newPostgresWorkflowTestCoordinator(
 	selected workflowTestSelectedStore,
 ) *runtimepipeline.PipelineCoordinator {
 	t.Helper()
-	return newWorkflowTestCoordinator(t, db, runtimepipeline.NewPostgresWorkflowPersistence(db, selected), selected)
+	return newWorkflowTestCoordinator(t, db, runtimepipeline.NewWorkflowPersistence(selected), selected)
 }
 
 func newSQLiteWorkflowTestCoordinator(
@@ -81,7 +82,7 @@ func newSQLiteWorkflowTestCoordinator(
 	selected workflowTestSelectedStore,
 ) *runtimepipeline.PipelineCoordinator {
 	t.Helper()
-	return newWorkflowTestCoordinator(t, db, runtimepipeline.NewSQLiteWorkflowPersistence(db, selected), selected)
+	return newWorkflowTestCoordinator(t, db, runtimepipeline.NewWorkflowPersistence(selected), selected)
 }
 
 func newWorkflowTestCoordinator(
@@ -169,23 +170,22 @@ func TestWorkflowStoreRolesAreImmutableConstructorInputs(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var (
-				db          *sql.DB
 				selected    workflowTestSelectedStore
 				persistence runtimepipeline.WorkflowPersistence
 				invalid     runtimepipeline.WorkflowPersistence
 			)
 			if backend == "sqlite" {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-				db, selected = store.backend.db, store
-				persistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, store)
-				invalid = runtimepipeline.NewSQLiteWorkflowPersistence(db, nil)
+				selected = store
+				persistence = runtimepipeline.NewWorkflowPersistence(store)
+				invalid = runtimepipeline.NewWorkflowPersistence(nil)
 			} else {
 				_, opened, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				store := admitTestPostgresStore(t, opened)
-				db, selected = opened, store
-				persistence = runtimepipeline.NewPostgresWorkflowPersistence(db, store)
-				invalid = runtimepipeline.NewPostgresWorkflowPersistence(db, nil)
+				selected = store
+				persistence = runtimepipeline.NewWorkflowPersistence(store)
+				invalid = runtimepipeline.NewWorkflowPersistence(nil)
 			}
 
 			if coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(workflowTestBus{}, completeWorkflowTestCoordinatorOptions(persistence, selected)); coordinator == nil {

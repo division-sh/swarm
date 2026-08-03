@@ -40,7 +40,7 @@ type startupRecoveryPipelineOwner struct {
 }
 
 type startupRecoveryWorkflowOwner struct {
-	runtimeTestRejectedMutationOwner
+	runtimepipeline.WorkflowPersistenceOwner
 	timers runtimetimerobligation.Reader
 }
 
@@ -52,7 +52,7 @@ func (o startupRecoveryWorkflowOwner) ReadTimerObligations(ctx context.Context, 
 }
 
 func startupRecoveryWorkflowPersistence(db *sql.DB, timers runtimetimerobligation.Reader) runtimepipeline.WorkflowPersistence {
-	return runtimepipeline.NewPostgresWorkflowPersistence(db, startupRecoveryWorkflowOwner{timers: timers})
+	return runtimepipeline.NewWorkflowPersistence(startupRecoveryWorkflowOwner{timers: timers})
 }
 
 func newStartupRecoveryPipelineOwner(work []events.PersistedReplayEvent, claimErr error) *startupRecoveryPipelineOwner {

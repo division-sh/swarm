@@ -35,7 +35,7 @@ func TestWorkflowLifecycleOwnerIsConstructedBeforeDurableStoreReachabilityOnBoth
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			store, _ := tc.open(t)
-			coordinator := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+			coordinator := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module:      &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowJoinLifecycleBundle())},
 				Persistence: workflowPersistenceForTest(store),
 			})
@@ -51,7 +51,7 @@ func TestWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStores(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			bundle := workflowJoinLifecycleBundle()
-			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module:      &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
 				Persistence: workflowPersistenceForTest(store),
 			})
@@ -216,7 +216,7 @@ func TestWorkflowJoinCustomCompletionControlsExpectedZeroOnBothStores(t *testing
 			bundle.Semantics.NodeHandlers["join-node"] = node.EventHandlers
 
 			schedules := &recordingSchedulePersistence{}
-			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module:             &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
 				Persistence:        workflowPersistenceForTest(store),
 				TimerScheduleStore: schedules,
@@ -318,7 +318,7 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 			bundle.Semantics.EffectiveNodes["join-node"] = runtimecontracts.SystemNodeEffectiveSemantics{ID: "join-node", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(node)}
 
 			schedules := &recordingSchedulePersistence{}
-			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module:             &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
 				Persistence:        workflowPersistenceForTest(store),
 				TimerScheduleStore: schedules,
@@ -424,7 +424,7 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			store, ctx := tc.store(t)
 			bundle := workflowJoinLifecycleBundle()
 			bus := &recordingPipelineBus{}
-			pc := newWorkflowJoinPipelineCoordinator(bus, store.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store)})
+			pc := newWorkflowJoinPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store)})
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
 			now := time.Now().UTC()
@@ -520,7 +520,7 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 			bundle := workflowJoinLifecycleBundle()
 			bus := &recordingPipelineBus{}
 			schedules := &recordingSchedulePersistence{}
-			pc := newWorkflowJoinPipelineCoordinator(bus, store.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store), TimerScheduleStore: schedules})
+			pc := newWorkflowJoinPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store), TimerScheduleStore: schedules})
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a", "b"}}})); err != nil {
@@ -603,7 +603,7 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			bundle := workflowJoinLifecycleBundle()
 			schedules := &recordingSchedulePersistence{}
 			newCoordinator := func() *PipelineCoordinator {
-				return newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store), TimerScheduleStore: schedules})
+				return newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store), TimerScheduleStore: schedules})
 			}
 			pc := newCoordinator()
 			path := "orders/" + uuid.NewString()
@@ -699,7 +699,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			bundle := workflowJoinLifecycleBundle()
 			schedules := &recordingSchedulePersistence{}
 			newCoordinator := func() *PipelineCoordinator {
-				return newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store), TimerScheduleStore: schedules})
+				return newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store), TimerScheduleStore: schedules})
 			}
 			pc := newCoordinator()
 			path := "orders/" + uuid.NewString()
@@ -796,7 +796,7 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 			store, ctx := tc.store(t)
 			bundle := workflowJoinLifecycleBundle()
 			schedules := &recordingSchedulePersistence{}
-			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module:             &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)},
 				Persistence:        workflowPersistenceForTest(store),
 				TimerScheduleStore: schedules,

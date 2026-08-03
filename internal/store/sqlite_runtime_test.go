@@ -602,7 +602,7 @@ func configureSQLiteFlowActivationLifecycle(
 	}
 	return runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  module,
-		Persistence:             runtimepipeline.NewSQLiteWorkflowPersistence(selected.backend.db, selected),
+		Persistence:             runtimepipeline.NewWorkflowPersistence(selected),
 		RunLifecycle:            selected,
 		PipelineObligations:     selected.PipelineObligations(),
 		DeliveryStore:           selected,

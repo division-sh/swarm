@@ -60,7 +60,7 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 	pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              module,
-		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,
@@ -182,7 +182,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              module,
-		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,
@@ -291,7 +291,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 			}
 			return manager.ActivateFlowInstance(ctx, req)
 		},
-		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,
@@ -384,7 +384,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              newRuntimeTestWorkflowModule(t, source),
-		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:        pg,
 		DeliveryStore:       pg,
 		PipelineObligations: pg.PipelineObligations(),
@@ -469,7 +469,7 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 			}
 			return manager.ActivateFlowInstance(ctx, req)
 		},
-		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,
@@ -587,7 +587,7 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 			}
 			return manager.ActivateFlowInstance(ctx, req)
 		},
-		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:        pg,
 		PipelineObligations: pg.PipelineObligations(),
 		DeliveryStore:       pg,

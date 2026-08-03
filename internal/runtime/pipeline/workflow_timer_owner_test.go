@@ -97,7 +97,7 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 			sourceA := semanticview.Wrap(workflowTimerSourceRevisionBundle(false))
 			ownerA := pipelineTestWorkOwner(t)
 			schedulerA := newWorkflowTimerTestScheduler(t, ownerA)
-			pcA := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+			pcA := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module:         &pipelineFixtureWorkflowModule{source: sourceA},
 				Persistence:    workflowPersistenceForTest(store),
 				WorkOwner:      ownerA,
@@ -133,7 +133,7 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 			sourceB := semanticview.Wrap(workflowTimerSourceRevisionBundle(true))
 			ownerB := pipelineTestWorkOwner(t)
 			schedulerB := newWorkflowTimerTestScheduler(t, ownerB)
-			pcB := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+			pcB := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module:         &pipelineFixtureWorkflowModule{source: sourceB},
 				Persistence:    workflowPersistenceForTest(store),
 				WorkOwner:      ownerB,
@@ -216,7 +216,7 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 			cancelStop()
 			ownerRestarted := pipelineTestWorkOwner(t)
 			schedulerRestarted := newWorkflowTimerTestScheduler(t, ownerRestarted)
-			pcRestarted := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+			pcRestarted := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module:         &pipelineFixtureWorkflowModule{source: sourceB},
 				Persistence:    workflowPersistenceForTest(store),
 				WorkOwner:      ownerRestarted,
@@ -241,7 +241,7 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 			sourceA := semanticview.Wrap(workflowTimerProgressedSourceRevisionBundle(false))
 			ownerA := pipelineTestWorkOwner(t)
 			schedulerA := newWorkflowTimerTestScheduler(t, ownerA)
-			pcA := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+			pcA := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module:         &pipelineFixtureWorkflowModule{source: sourceA},
 				Persistence:    workflowPersistenceForTest(store),
 				WorkOwner:      ownerA,
@@ -296,7 +296,7 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 			sourceB := semanticview.Wrap(workflowTimerProgressedSourceRevisionBundle(true))
 			ownerB := pipelineTestWorkOwner(t)
 			schedulerB := newWorkflowTimerTestScheduler(t, ownerB)
-			pcB := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+			pcB := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module:         &pipelineFixtureWorkflowModule{source: sourceB},
 				Persistence:    workflowPersistenceForTest(store),
 				WorkOwner:      ownerB,
@@ -343,7 +343,7 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 			source := semanticview.Wrap(workflowTimerInitialAndEventBundle())
 			owner := pipelineTestWorkOwner(t)
 			scheduler := newWorkflowTimerTestScheduler(t, owner)
-			pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+			pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module:         &pipelineFixtureWorkflowModule{source: source},
 				Persistence:    workflowPersistenceForTest(store),
 				WorkOwner:      owner,
@@ -422,7 +422,7 @@ func TestWorkflowTimerLifecycleScopesDeclarationsToOwningFlowOnBothStores(t *tes
 				source := semanticview.Wrap(workflowTimerFlowScopedBundle())
 				owner := pipelineTestWorkOwner(t)
 				scheduler := newWorkflowTimerTestScheduler(t, owner)
-				pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+				pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 					Module:         &pipelineFixtureWorkflowModule{source: source},
 					Persistence:    workflowPersistenceForTest(store),
 					WorkOwner:      owner,
@@ -619,15 +619,15 @@ func TestStandingRestartAbandonUsesTimerObligationSnapshotOnBothStores(t *testin
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			_, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
-			store.deliveryStore = newPipelineTestDeliveryOwnerForDB(t, store.db)
+			store.deliveryStore = newPipelineTestDeliveryOwnerForDB(t, store.testDB())
 			store.pipelineStore = settledPipelineTestObligationOwner{}
 			if store.isSQLite() {
-				if _, err := store.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS agent_sessions (run_id TEXT, status TEXT)`); err != nil {
+				if _, err := store.testDB().ExecContext(ctx, `CREATE TABLE IF NOT EXISTS agent_sessions (run_id TEXT, status TEXT)`); err != nil {
 					t.Fatalf("create SQLite standing session proof table: %v", err)
 				}
 			}
 
-			tx, err := store.db.BeginTx(ctx, nil)
+			tx, err := store.testDB().BeginTx(ctx, nil)
 			if err != nil {
 				t.Fatalf("begin standing timer proof: %v", err)
 			}
@@ -649,7 +649,7 @@ func TestStandingRestartAbandonUsesTimerObligationSnapshotOnBothStores(t *testin
 			if err := tx.Rollback(); err != nil {
 				t.Fatalf("rollback standing timer proof: %v", err)
 			}
-			verifyTx, err := store.db.BeginTx(ctx, nil)
+			verifyTx, err := store.testDB().BeginTx(ctx, nil)
 			if err != nil {
 				t.Fatalf("begin standing timer rollback verification: %v", err)
 			}
@@ -773,8 +773,8 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 			}
 			bundle := workflowTimerEventOnlyStateTriggerBundle()
 			bus := &recordingPipelineBus{}
-			pc := newWorkflowTimerOwnerPipelineCoordinator(bus, store.db, PipelineCoordinatorOptions{
-				Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store),
+			pc := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
+				Module: handlerTestWorkflowModuleWithBundle(bundle, "workflow-timer-owner-test", "observer"), Persistence: workflowPersistenceForTest(store),
 			})
 
 			if err := store.runPipelineMutation(ctx, func(txctx context.Context) error {
@@ -866,8 +866,8 @@ func TestWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores(t *test
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
-			pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
-				Module:      &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowTimerHandledOutcomeBundle())},
+			pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
+				Module:      handlerTestWorkflowModuleWithBundle(workflowTimerHandledOutcomeBundle(), "workflow-timer-owner-test", "observer"),
 				Persistence: workflowPersistenceForTest(store),
 			})
 			eventOffset := time.Duration(0)
@@ -981,8 +981,8 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 			}
 
 			bus := &recordingPipelineBus{}
-			pc := newWorkflowTimerOwnerPipelineCoordinator(bus, store.db, PipelineCoordinatorOptions{
-				Module:      &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowTimerLoopEventBundle())},
+			pc := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
+				Module:      handlerTestWorkflowModuleWithBundle(workflowTimerLoopEventBundle(), "workflow-timer-owner-test", "observer"),
 				Persistence: workflowPersistenceForTest(store),
 			})
 			armHandler := runtimecontracts.SystemNodeEventHandler{
@@ -1082,7 +1082,7 @@ func TestWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnBothStore
 			bundle.Semantics.Timers[0].Stage = ""
 			bundle.Semantics.Timers[0].StageOwned = false
 			bundle.Semantics.Timers[0].StartOn = "event:work.created"
-			pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+			pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module: &pipelineFixtureWorkflowModule{source: semanticview.Wrap(bundle)}, Persistence: workflowPersistenceForTest(store),
 			})
 			eventID := uuid.NewString()
@@ -1162,7 +1162,7 @@ func TestWorkflowTimerLifecycleRecurringAdvancesPersistedCoordinateOnBothStores(
 
 			restartedOwner := pipelineTestWorkOwner(t)
 			restartedScheduler := newWorkflowTimerTestScheduler(t, restartedOwner)
-			restarted := newWorkflowTimerOwnerPipelineCoordinator(bus, store.db, PipelineCoordinatorOptions{
+			restarted := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
 				Module:         &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowTimerOwnerBundle(true))},
 				Persistence:    workflowPersistenceForTest(store),
 				WorkOwner:      restartedOwner,
@@ -1193,7 +1193,7 @@ func TestWorkflowTimerLifecycleListsScopeWildcardsOnBothStores(t *testing.T) {
 			lookalikeID := uuid.NewString()
 			lookalikeTaskID := "workflowXtimer:v1:generic"
 			if store.isSQLite() {
-				_, err := store.db.ExecContext(ctx, `
+				_, err := store.testDB().ExecContext(ctx, `
 					INSERT INTO timers (
 						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event,
 						fire_payload, routing_source, fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
@@ -1205,7 +1205,7 @@ func TestWorkflowTimerLifecycleListsScopeWildcardsOnBothStores(t *testing.T) {
 					t.Fatalf("insert SQLite generic prefix lookalike: %v", err)
 				}
 			} else {
-				_, err := store.db.ExecContext(ctx, `
+				_, err := store.testDB().ExecContext(ctx, `
 					INSERT INTO timers (
 						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event,
 						fire_payload, routing_source, fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
@@ -1320,7 +1320,7 @@ func TestWorkflowTimerLifecycleRollbackAndCancellationOnBothStores(t *testing.T)
 
 			restartedOwner := pipelineTestWorkOwner(t)
 			restartedScheduler := newWorkflowTimerTestScheduler(t, restartedOwner)
-			restarted := newWorkflowTimerOwnerPipelineCoordinator(bus, store.db, PipelineCoordinatorOptions{
+			restarted := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
 				Module:         &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowTimerOwnerBundle(false))},
 				Persistence:    workflowPersistenceForTest(store),
 				WorkOwner:      restartedOwner,
@@ -1515,7 +1515,7 @@ func TestWorkflowTimerLifecycleActivationRollbackDoesNotRegisterOnBothStores(t *
 			}
 			owner := pipelineTestWorkOwner(t)
 			scheduler := newWorkflowTimerTestScheduler(t, owner)
-			pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.db, PipelineCoordinatorOptions{
+			pc := newWorkflowTimerOwnerPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
 				Module:         &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowTimerOwnerBundle(false))},
 				Persistence:    workflowPersistenceForTest(store),
 				WorkOwner:      owner,
@@ -1628,7 +1628,7 @@ func TestWorkflowTimerWakeupReconciliationRetiresTerminalAndMissingRowsOnBothSto
 					if store.isSQLite() {
 						placeholder = "?"
 					}
-					if _, err := store.db.ExecContext(ctx, "DELETE FROM timers WHERE timer_id = "+placeholder, activation.Ref.ActivationID); err != nil {
+					if _, err := store.testDB().ExecContext(ctx, "DELETE FROM timers WHERE timer_id = "+placeholder, activation.Ref.ActivationID); err != nil {
 						t.Fatalf("delete workflow timer row: %v", err)
 					}
 				default:
@@ -1806,7 +1806,7 @@ func TestWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothSto
 			store, ctx := tc.open(t)
 			standingCtx := ctx
 			if store.isSQLite() {
-				if _, err := store.db.ExecContext(ctx, `
+				if _, err := store.testDB().ExecContext(ctx, `
 					CREATE TABLE standing_services (
 						current_run_id TEXT NOT NULL,
 						declaration_present BOOLEAN NOT NULL,
@@ -1815,7 +1815,7 @@ func TestWorkflowTimerGlobalRestoreDefersStandingUntilRunScopedAdoptionOnBothSto
 				`); err != nil {
 					t.Fatalf("create standing ownership fixture: %v", err)
 				}
-				if _, err := store.db.ExecContext(ctx, `
+				if _, err := store.testDB().ExecContext(ctx, `
 					INSERT INTO standing_services (current_run_id, declaration_present, effective_state)
 					VALUES (?, TRUE, 'active')
 				`, runtimecorrelation.RunIDFromContext(ctx)); err != nil {
@@ -1880,7 +1880,7 @@ func TestWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStores(t *te
 					return nil
 				},
 			}
-			pc := newWorkflowTimerOwnerPipelineCoordinator(bus, store.db, PipelineCoordinatorOptions{
+			pc := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
 				Module: &pipelineFixtureWorkflowModule{
 					source: semanticview.Wrap(workflowTimerOwnerBundleWithDelay(false, "1ns")),
 				},
@@ -2150,7 +2150,7 @@ func TestWorkflowTimerLifecyclePostgresFireRejectsOuterMutationAuthority(t *test
 		bus := &recordingPipelineBus{}
 		pc, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, bus, false)
 
-		tx, err := store.db.BeginTx(ctx, nil)
+		tx, err := store.testDB().BeginTx(ctx, nil)
 		if err != nil {
 			t.Fatalf("BeginTx: %v", err)
 		}
@@ -2228,7 +2228,7 @@ func seedWorkflowTimerOwnerActivationAt(
 	if register {
 		scheduler = newWorkflowTimerTestScheduler(t, owner)
 	}
-	pc := newWorkflowTimerOwnerPipelineCoordinator(bus, store.db, PipelineCoordinatorOptions{
+	pc := newWorkflowTimerOwnerPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
 		Module:         &pipelineFixtureWorkflowModule{source: semanticview.Wrap(workflowTimerOwnerBundleWithDelay(recurring, delay))},
 		Persistence:    workflowPersistenceForTest(store),
 		WorkOwner:      owner,
@@ -2323,7 +2323,7 @@ func persistWorkflowTimerEvent(
 		eventID, events.EventType(eventType), "operator", "", payload, 0, runID, "",
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), createdAt.UTC(),
 	)
-	seedPipelineEventRecordForDialect(t, ctx, store.db, dialect, event)
+	seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, event)
 }
 
 func workflowTimerOwnerBundle(recurring bool) *runtimecontracts.WorkflowContractBundle {

@@ -208,7 +208,7 @@ func configurePipelineTestDeliveryOwner(t interface {
 	Fatalf(string, ...any)
 }, pc *PipelineCoordinator) *pipelineTestDeliveryOwner {
 	t.Helper()
-	if pc == nil || pc.workflowStore == nil || pc.workflowStore.db == nil {
+	if pc == nil || pc.workflowStore == nil || pc.workflowStore.testDB() == nil {
 		t.Fatalf("pipeline test delivery owner requires a configured workflow store")
 	}
 	if owner, ok := pc.deliveryStore.(*pipelineTestDeliveryOwner); ok {
@@ -223,7 +223,7 @@ func configurePipelineTestDeliveryOwner(t interface {
 		pc.workflowStore.deliveryStore = owner
 		return owner
 	}
-	owner := newPipelineTestDeliveryOwnerForDB(t, pc.workflowStore.db)
+	owner := newPipelineTestDeliveryOwnerForDB(t, pc.workflowStore.testDB())
 	pc.deliveryStore = owner
 	pc.workflowStore.deliveryStore = owner
 	if bus, ok := pc.bus.(interface {

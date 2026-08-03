@@ -398,13 +398,13 @@ func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelected
 	primaryPublisher := &recordingBundleGatePublisher{delegate: fixture.busA}
 	selectedPublisher := &recordingBundleGatePublisher{delegate: fixture.busB}
 	primaryPipeline := runtimepipeline.NewPipelineCoordinatorWithOptions(fixture.busA, completeAPITestDurableWorkflowOptions(t, fixture.pg, fixture.busA, runtimepipeline.PipelineCoordinatorOptions{
-		Module: moduleA, Persistence: runtimepipeline.NewPostgresWorkflowPersistence(fixture.db, fixture.pg),
+		Module: moduleA, Persistence: runtimepipeline.NewWorkflowPersistence(fixture.pg),
 		DecisionCards: primaryCards, GatePublisher: primaryPublisher,
 		BundleSourceFact: runtimeContextTestSourceFact(runStartTestBundleHash),
 	}))
 
 	selectedPipeline := runtimepipeline.NewPipelineCoordinatorWithOptions(fixture.busB, completeAPITestDurableWorkflowOptions(t, fixture.pg, fixture.busB, runtimepipeline.PipelineCoordinatorOptions{
-		Module: moduleB, Persistence: runtimepipeline.NewPostgresWorkflowPersistence(fixture.db, fixture.pg),
+		Module: moduleB, Persistence: runtimepipeline.NewWorkflowPersistence(fixture.pg),
 		GatePublisher: selectedPublisher, BundleSourceFact: runtimeContextTestSourceFact(runtimeContextTestBundleHashB),
 	}))
 

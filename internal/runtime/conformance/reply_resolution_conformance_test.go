@@ -726,10 +726,9 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 		t.Fatalf("%T lacks typed human-task runtime surface", backend)
 	}
 	eb := newDurableReplyConformanceBus(t, ctx, backend, source)
-	db := replyConformanceDB(t, backend)
-	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, backend)
+	workflowPersistence := runtimepipeline.NewWorkflowPersistence(backend)
 	if sqliteStore, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, sqliteStore)
+		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 	}
 	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
 	if err != nil {
@@ -807,6 +806,7 @@ func receiveReplyConformanceHumanTaskOutcome(t *testing.T, outcomes <-chan *bus.
 
 type durableReplyConformanceStore interface {
 	conformanceDurableEventBusStore
+	runtimepipeline.WorkflowPersistenceOwner
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 }
 

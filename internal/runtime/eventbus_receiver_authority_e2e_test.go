@@ -71,9 +71,9 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 
 			bundle := loadRuntimeTempBundle(t, closedReceiverAuthorityFixtureFiles())
 			source := semanticview.Wrap(bundle)
-			workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
 			if backend == "sqlite" {
-				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
+				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 			}
 			processOwner := worklifetime.NewProcess()
 			t.Cleanup(func() {

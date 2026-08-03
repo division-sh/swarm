@@ -490,7 +490,7 @@ func newPostgresWorkflowInstanceStoreForTest(db *sql.DB) *workflowInstanceStore 
 		db:      db,
 		dialect: workflowStoreDialectPostgres,
 	}
-	store.runtimeMutation = runner
+	registerWorkflowPersistenceFixture(store, db, workflowStoreDialectPostgres, runner)
 	store.runLifecycle = runner
 	store.instanceReader = runner
 	store.engineMutations = runner

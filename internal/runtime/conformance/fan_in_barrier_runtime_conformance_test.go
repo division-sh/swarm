@@ -31,6 +31,7 @@ import (
 
 type fanInBarrierConformanceStore interface {
 	conformanceDurableEventBusStore
+	runtimepipeline.WorkflowPersistenceOwner
 	runtimepipeline.SchedulePersistence
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 }
@@ -154,9 +155,9 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 
 func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, db *sql.DB, source semanticview.Source) fanInBarrierRuntime {
 	t.Helper()
-	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, backend)
+	workflowPersistence := runtimepipeline.NewWorkflowPersistence(backend)
 	if sqliteStore, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, sqliteStore)
+		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 	}
 	var (
 		coordinator *runtimepipeline.PipelineCoordinator
