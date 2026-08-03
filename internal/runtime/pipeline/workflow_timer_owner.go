@@ -171,9 +171,6 @@ func (l *WorkflowTimerLifecycle) reconcile(ctx context.Context, route runtimeflo
 	if store == nil || !store.enabled() {
 		return nil
 	}
-	if _, ok := PipelineSQLTxFromContext(ctx); !ok {
-		return fmt.Errorf("workflow timer reconciliation requires the selected workflow mutation")
-	}
 	entityID = strings.TrimSpace(entityID)
 	currentState = strings.TrimSpace(currentState)
 	nextState = strings.TrimSpace(nextState)
@@ -202,6 +199,8 @@ func (l *WorkflowTimerLifecycle) reconcile(ctx context.Context, route runtimeflo
 	if err != nil {
 		return err
 	}
+	plan := WorkflowLifecycleMutationPlan{}
+	unchanged := make([]timeridentity.WorkflowTimerActivationRef, 0, len(active))
 	activeByDeclaration := map[string]WorkflowTimerActivation{}
 	for _, activation := range active {
 		declaration, found := workflowTimerDeclarationForInstance(source, instance, activation.Ref.Declaration)
@@ -212,15 +211,8 @@ func (l *WorkflowTimerLifecycle) reconcile(ctx context.Context, route runtimeflo
 			return err
 		}
 		if workflowTimerShouldCancelOnTransition(declaration, currentState, nextState, cause.EventType) {
-			cancelled, changed, err := store.cancelWorkflowTimerActivation(ctx, activation.Ref)
-			if err != nil {
-				return err
-			}
-			if changed {
-				if err := l.queueCancellation(ctx, cancelled); err != nil {
-					return err
-				}
-			}
+			plan.Timers = append(plan.Timers, WorkflowTimerMutation{Kind: WorkflowTimerMutationCancel, Activation: activation})
+			plan.RequestCompletionCandidate = true
 			continue
 		}
 		activeByDeclaration[workflowTimerGenerationKey(activation.Ref.Declaration, activation.Ref.Generation)] = activation
@@ -267,23 +259,31 @@ func (l *WorkflowTimerLifecycle) reconcile(ctx context.Context, route runtimeflo
 		key := workflowTimerGenerationKey(declaration.ID, generation)
 		if existing, found := activeByDeclaration[key]; found {
 			if armWakeups && existing.Ref == activation.Ref {
-				if err := l.queueWakeupReconcile(ctx, existing.Ref); err != nil {
-					return err
-				}
+				unchanged = append(unchanged, existing.Ref)
 			}
 			continue
 		}
-		persisted, _, err := store.insertWorkflowTimerActivation(ctx, activation)
+		plan.Timers = append(plan.Timers, WorkflowTimerMutation{Kind: WorkflowTimerMutationInsert, Activation: activation})
+		activeByDeclaration[key] = activation
+	}
+	committed := CommittedWorkflowLifecycleMutation{}
+	if len(plan.Timers) != 0 {
+		if store.timerActivations == nil {
+			return fmt.Errorf("workflow timer reconciliation owner is required")
+		}
+		committed, err = store.timerActivations.CommitWorkflowTimerReconciliation(ctx, WorkflowTimerReconciliationCommand{
+			RunID: runID, Route: route, EntityID: entityID, Plan: plan,
+		})
 		if err != nil {
 			return err
 		}
-		if persisted.Status == workflowTimerStatusActive {
-			activeByDeclaration[key] = persisted
-			if armWakeups {
-				if err := l.queueWakeupReconcile(ctx, persisted.Ref); err != nil {
-					return err
-				}
-			}
+	}
+	if !armWakeups {
+		return nil
+	}
+	for _, ref := range append(append(unchanged, committed.Wakeups...), committed.Cancellations...) {
+		if err := l.queueWakeupReconcile(ctx, ref); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -678,18 +678,30 @@ func (l *WorkflowTimerLifecycle) CancelSupersededGenerations(ctx context.Context
 	if err != nil {
 		return err
 	}
+	plan := WorkflowLifecycleMutationPlan{}
 	for _, activation := range active {
 		if !activation.Ref.Generation.Valid() || workflowTimerGenerationPresent(current, activation.Ref.Generation) {
 			continue
 		}
-		cancelled, changed, err := store.cancelWorkflowTimerActivation(ctx, activation.Ref)
-		if err != nil {
+		plan.Timers = append(plan.Timers, WorkflowTimerMutation{Kind: WorkflowTimerMutationCancel, Activation: activation})
+		plan.RequestCompletionCandidate = true
+	}
+	if len(plan.Timers) == 0 {
+		return nil
+	}
+	if store.timerActivations == nil {
+		return fmt.Errorf("workflow timer reconciliation owner is required")
+	}
+	runID := workflowTimerRunID(ctx, instance)
+	committed, err := store.timerActivations.CommitWorkflowTimerReconciliation(ctx, WorkflowTimerReconciliationCommand{
+		RunID: runID, Route: route, EntityID: entityID, Plan: plan,
+	})
+	if err != nil {
+		return err
+	}
+	for _, ref := range committed.Cancellations {
+		if err := l.queueWakeupReconcile(ctx, ref); err != nil {
 			return err
-		}
-		if changed {
-			if err := l.queueCancellation(ctx, cancelled); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
@@ -809,23 +821,14 @@ func (l *WorkflowTimerLifecycle) queueWakeupReconcile(ctx context.Context, ref t
 	if l == nil {
 		return nil
 	}
-	action := func(actionCtx context.Context) {
-		postCommitCtx := withoutSQLTxContext(actionCtx)
-		if err := l.reconcileWakeupImmediately(postCommitCtx, ref); err != nil {
-			l.logFailure(postCommitCtx, "workflow_timer_reconcile_failed", ref, err)
-			if errors.Is(err, errWorkflowTimerSchedulerRequired) {
-				return
-			}
+	if err := l.reconcileWakeupImmediately(ctx, ref); err != nil {
+		l.logFailure(ctx, "workflow_timer_reconcile_failed", ref, err)
+		if !errors.Is(err, errWorkflowTimerSchedulerRequired) {
 			l.startWakeupRecovery(ref)
-		}
-	}
-	if _, inMutation := PipelineSQLTxFromContext(ctx); inMutation {
-		if !queuePipelinePostCommitAction(ctx, action) {
-			return fmt.Errorf("workflow timer wakeup reconciliation requires post-commit ownership")
 		}
 		return nil
 	}
-	return l.reconcileWakeupImmediately(withoutSQLTxContext(ctx), ref)
+	return nil
 }
 
 func (l *WorkflowTimerLifecycle) queueCancellation(ctx context.Context, activation WorkflowTimerActivation) error {
