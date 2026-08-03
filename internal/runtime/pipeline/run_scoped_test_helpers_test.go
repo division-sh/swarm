@@ -23,6 +23,7 @@ import (
 
 func newTestWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 	store := NewPostgresWorkflowPersistence(db, &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectPostgres}).store
+	store.readiness = pipelineTestDynamicFlowRuntimeReadinessPersistence{store: store}
 	store.timerActivations = pipelineTestWorkflowTimerPersistence{store: store}
 	store.runLifecycle = &unavailablePipelineTestRunLifecycle{}
 	store.timerObligations = pipelineTestTimerObligationReader{db: db, dialect: timerobligationadapter.DialectPostgres}
@@ -32,6 +33,7 @@ func newTestWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 func newTestSQLiteWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 	reader := &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite}
 	store := NewSQLiteWorkflowPersistence(db, reader).store
+	store.readiness = pipelineTestDynamicFlowRuntimeReadinessPersistence{store: store}
 	store.timerActivations = pipelineTestWorkflowTimerPersistence{store: store}
 	store.runLifecycle = &unavailablePipelineTestRunLifecycle{}
 	store.timerObligations = pipelineTestTimerObligationReader{db: db, dialect: timerobligationadapter.DialectSQLite}
@@ -40,6 +42,11 @@ func newTestSQLiteWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
 
 func newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, runner runtimeMutationRunner) *workflowInstanceStore {
 	store := NewSQLiteWorkflowPersistence(db, runner).store
+	if owner, ok := runner.(DynamicFlowRuntimeReadinessPersistence); ok {
+		store.readiness = owner
+	} else {
+		store.readiness = pipelineTestDynamicFlowRuntimeReadinessPersistence{store: store}
+	}
 	if owner, ok := runner.(WorkflowTimerActivationPersistence); ok {
 		store.timerActivations = owner
 	} else {
@@ -63,6 +70,30 @@ func newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, run
 		store.runLifecycle = &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite}
 	}
 	return installPipelineTestActivityJournal(store)
+}
+
+type pipelineTestDynamicFlowRuntimeReadinessPersistence struct {
+	store *workflowInstanceStore
+}
+
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
+	return p.store.legacyReconcileDynamicFlowRuntimeReadinessPlan(ctx, plan, observedAt)
+}
+
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error) {
+	return p.store.legacyLoadDynamicFlowRuntimeReadiness(ctx, runID, route)
+}
+
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error) {
+	return p.store.legacyListDynamicFlowRuntimeReadiness(ctx)
+}
+
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error) {
+	return p.store.legacyListDynamicFlowRuntimeReadinessKeys(ctx)
+}
+
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {
+	return p.store.legacyMarkDynamicFlowRuntimeTopologyReady(ctx, plan, readyAt)
 }
 
 type pipelineTestWorkflowTimerPersistence struct {

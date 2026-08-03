@@ -105,6 +105,44 @@ type DynamicFlowRuntimeReadinessKey struct {
 	InstancePath string
 }
 
+// DynamicFlowRuntimeReadinessPersistence owns the complete selected-store
+// readiness projection. Runtime consumers receive only typed records and
+// named mutations; transaction and query authority remain private.
+type DynamicFlowRuntimeReadinessPersistence interface {
+	ReconcileDynamicFlowRuntimeReadinessPlan(context.Context, DynamicFlowRuntimeReadinessPlan, time.Time) (bool, error)
+	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error)
+	ListDynamicFlowRuntimeReadiness(context.Context) ([]DynamicFlowRuntimeReadiness, error)
+	ListDynamicFlowRuntimeReadinessKeys(context.Context) ([]DynamicFlowRuntimeReadinessKey, error)
+	MarkDynamicFlowRuntimeTopologyReady(context.Context, DynamicFlowRuntimeReadinessPlan, time.Time) error
+}
+
+type DynamicFlowRuntimeReadinessPersistenceRecord struct {
+	RunID                     string
+	InstancePath              string
+	Plan                      []byte
+	RunStatus                 string
+	InstanceStatus            string
+	InstanceTerminatedAt      time.Time
+	HasInstanceTerminatedAt   bool
+	TopologyReadyAt           time.Time
+	HasTopologyReadyAt        bool
+	CreationEventEmittedAt    time.Time
+	HasCreationEventEmittedAt bool
+}
+
+func DecodeDynamicFlowRuntimeReadinessPersistenceRecord(record DynamicFlowRuntimeReadinessPersistenceRecord) (DynamicFlowRuntimeReadiness, error) {
+	return decodeDynamicFlowRuntimeReadiness(
+		record.RunID,
+		record.InstancePath,
+		record.Plan,
+		record.RunStatus,
+		record.InstanceStatus,
+		dynamicFlowRuntimeReadinessTime{Time: record.InstanceTerminatedAt, Valid: record.HasInstanceTerminatedAt},
+		dynamicFlowRuntimeReadinessTime{Time: record.TopologyReadyAt, Valid: record.HasTopologyReadyAt},
+		dynamicFlowRuntimeReadinessTime{Time: record.CreationEventEmittedAt, Valid: record.HasCreationEventEmittedAt},
+	)
+}
+
 func (r DynamicFlowRuntimeReadiness) Eligible() bool {
 	runState, err := runtimerunlifecycle.ParseState(r.RunStatus)
 	return err == nil && runState.Active() &&
@@ -353,7 +391,7 @@ func (s *workflowInstanceStore) dynamicFlowRuntimeReadinessPlanEqual(
 
 // ReconcileDynamicFlowRuntimeReadinessPlan advances the durable topology owner
 // when an existing flow instance is ensured against a revised semantic source.
-func (s *workflowInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(
+func (s *workflowInstanceStore) legacyReconcileDynamicFlowRuntimeReadinessPlan(
 	ctx context.Context,
 	expected DynamicFlowRuntimeReadinessPlan,
 	observedAt time.Time,
@@ -470,7 +508,7 @@ func (s *workflowInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(
 	return changed, nil
 }
 
-func (s *workflowInstanceStore) LoadDynamicFlowRuntimeReadiness(
+func (s *workflowInstanceStore) legacyLoadDynamicFlowRuntimeReadiness(
 	ctx context.Context,
 	runID string,
 	route runtimeflowidentity.Route,
@@ -533,7 +571,7 @@ func (s *workflowInstanceStore) LoadDynamicFlowRuntimeReadiness(
 	return item, err == nil, err
 }
 
-func (s *workflowInstanceStore) ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error) {
+func (s *workflowInstanceStore) legacyListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("workflow instance store is required")
 	}
@@ -591,7 +629,7 @@ func (s *workflowInstanceStore) ListDynamicFlowRuntimeReadiness(ctx context.Cont
 	return out, rows.Err()
 }
 
-func (s *workflowInstanceStore) ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error) {
+func (s *workflowInstanceStore) legacyListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("workflow instance store is required")
 	}
@@ -674,7 +712,7 @@ func decodeDynamicFlowRuntimeReadiness(
 	return item, nil
 }
 
-func (s *workflowInstanceStore) MarkDynamicFlowRuntimeTopologyReady(
+func (s *workflowInstanceStore) legacyMarkDynamicFlowRuntimeTopologyReady(
 	ctx context.Context,
 	expected DynamicFlowRuntimeReadinessPlan,
 	readyAt time.Time,

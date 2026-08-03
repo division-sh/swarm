@@ -103,8 +103,11 @@ func (*unavailableFlowActivationDecisionCardDraftExpiry) ExpireDecisionCardInput
 	return 0, nil
 }
 
-func (*unavailableFlowActivationHumanTaskExpiry) ExpireHumanTaskCardsInMutation(context.Context, time.Time, int) ([]events.Event, error) {
+func (*unavailableFlowActivationHumanTaskExpiry) ListDueHumanTaskExpiryEvents(context.Context, time.Time, int) ([]events.Event, error) {
 	return nil, nil
+}
+func (*unavailableFlowActivationHumanTaskExpiry) CommitHumanTaskExpirations(context.Context, runtimepipeline.HumanTaskExpiryCommand) (runtimepipeline.CommittedHumanTaskExpiry, error) {
+	return runtimepipeline.CommittedHumanTaskExpiry{}, errors.New("human-task expiry is unavailable")
 }
 
 func completeFlowActivationWorkflowOptions(opts runtimepipeline.PipelineCoordinatorOptions) runtimepipeline.PipelineCoordinatorOptions {
