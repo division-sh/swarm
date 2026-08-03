@@ -30,11 +30,10 @@ type TargetFailureDeadLetterRecorder interface {
 }
 
 func targetDeliveryFailureEnvelope(failure runtimepinrouting.TargetFailure) *runtimefailures.Envelope {
-	failure = runtimepinrouting.TargetFailure(strings.TrimSpace(string(failure)))
-	if failure == "" {
+	if failure.Empty() {
 		return nil
 	}
-	canonical := runtimefailures.Normalize(runtimefailures.NewTarget(string(failure), "eventbus", "resolve_delivery_target", nil), "eventbus", "resolve_delivery_target")
+	canonical := runtimefailures.Normalize(runtimefailures.NewTarget(failure.Code(), "eventbus", "resolve_delivery_target", nil), "eventbus", "resolve_delivery_target")
 	return &canonical
 }
 
@@ -363,8 +362,8 @@ func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 		ReplayScope:       runtimepipelineobligation.ScopeSubscribed,
 		PipelineClaim:     p.publicationClaim.Claim(),
 	}
-	if failure := runtimepinrouting.TargetFailure(strings.TrimSpace(string(p.plan.TargetFailure))); failure != "" {
-		disposition := runtimepipelineobligation.DeadLetter(string(failure), targetDeliveryFailureEnvelope(failure))
+	if failure := p.plan.TargetFailure; !failure.Empty() {
+		disposition := runtimepipelineobligation.DeadLetter(failure.Code(), targetDeliveryFailureEnvelope(failure))
 		request.Disposition = &disposition
 		_, _, record := targetDeliveryFailureRecord(p.Event, p.plan, failure)
 		request.DeadLetter = &record
@@ -472,7 +471,7 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 		publicationClaim: publicationClaim,
 		deliveryReceipt:  newDeliveryCommitReceipt(),
 	}
-	if plan.TargetFailure != "" {
+	if !plan.TargetFailure.Empty() {
 		prepared.targetFailure = true
 		return prepared, nil
 	}
@@ -617,8 +616,8 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 	prepared.plan = inboundPlan
 	var initialDisposition *runtimepipelineobligation.Disposition
 	var initialDeadLetter *runtimedeadletters.Record
-	if inboundPlan.TargetFailure != "" {
-		disposition := runtimepipelineobligation.DeadLetter(string(inboundPlan.TargetFailure), targetDeliveryFailureEnvelope(inboundPlan.TargetFailure))
+	if !inboundPlan.TargetFailure.Empty() {
+		disposition := runtimepipelineobligation.DeadLetter(inboundPlan.TargetFailure.Code(), targetDeliveryFailureEnvelope(inboundPlan.TargetFailure))
 		initialDisposition = &disposition
 		_, _, deadLetter := targetDeliveryFailureRecord(evt, inboundPlan, inboundPlan.TargetFailure)
 		initialDeadLetter = &deadLetter
@@ -644,7 +643,7 @@ func (eb *EventBus) prepareAdmittedPublishInMutation(
 			eb.notifyTestPublishPersisted(actionCtx, evt, inboundPlan)
 		})
 	}
-	if inboundPlan.TargetFailure != "" {
+	if !inboundPlan.TargetFailure.Empty() {
 		prepared.targetFailure = true
 		return prepared, nil
 	}
@@ -1135,7 +1134,7 @@ func (eb *EventBus) runInterceptorsForDeliveryRoutes(ctx context.Context, evt ev
 func nodeDeliveryRoutes(deliveryRoutes []events.DeliveryRoute) []events.DeliveryRoute {
 	routes := make([]events.DeliveryRoute, 0)
 	for _, route := range events.NormalizeDeliveryRoutes(deliveryRoutes) {
-		if strings.TrimSpace(route.SubscriberType) != "node" {
+		if !route.Recipient.IsNode() {
 			continue
 		}
 		routes = append(routes, route)
@@ -1169,17 +1168,19 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 	}
 	passthrough := true
 	deferred := make([]events.Event, 0)
-	seen := map[string]struct{}{}
+	type nodeDeliveryRouteKey struct {
+		recipient      events.DeliveryRecipient
+		target         events.RouteIdentity
+		replyContextID string
+		projection     string
+	}
+	seen := map[nodeDeliveryRouteKey]struct{}{}
 	for _, route := range deliveryRoutes {
 		target := route.Target.Normalized()
-		key := strings.Join([]string{
-			route.SubscriberID,
-			target.FlowID,
-			target.FlowInstance,
-			target.EntityID,
-			route.Context.ReplyContextID(),
-			route.PayloadProjection.Fingerprint(),
-		}, "\x00")
+		key := nodeDeliveryRouteKey{
+			recipient: route.Recipient, target: target,
+			replyContextID: route.Context.ReplyContextID(), projection: route.PayloadProjection.Fingerprint(),
+		}
 		if _, ok := seen[key]; ok {
 			continue
 		}
@@ -1214,7 +1215,7 @@ func (eb *EventBus) runNodeDeliveryRouteInterceptors(ctx context.Context, evt ev
 func projectEventForDeliveryRoute(evt events.Event, route events.DeliveryRoute) (events.DeliveryEvent, error) {
 	projected, err := events.NewDeliveryEvent(evt, route)
 	if err != nil {
-		return events.DeliveryEvent{}, fmt.Errorf("delivery route for %s: %w", strings.TrimSpace(route.SubscriberID), err)
+		return events.DeliveryEvent{}, fmt.Errorf("delivery route for %s: %w", route.Recipient.ID(), err)
 	}
 	return projected, nil
 }
@@ -1474,7 +1475,7 @@ func (eb *EventBus) publishRecipientPlan(evt events.Event, routePlan RoutePlan) 
 		PersistedRecipients:    routePlan.PersistedRecipientIDs(),
 		SubscriptionRecipients: uniqueStrings(routePlan.SubscribedRecipients),
 		DeliveryRoutes:         routePlan.DeliveryRoutes(),
-		TargetFailure:          strings.TrimSpace(string(routePlan.TargetFailure)),
+		TargetFailure:          routePlan.TargetFailure.Code(),
 		canonicalAuthority:     routePlan.CanonicalRouteOwnerMatched() && routePlan.AuthorityOwner == routePlanSourceConnectRoutePlan,
 	}
 	if eb != nil {
@@ -1522,11 +1523,10 @@ func subscriberIDs(in []Subscriber) []string {
 	}
 	out := make([]string, 0, len(in))
 	for _, subscriber := range in {
-		id := strings.TrimSpace(subscriber.ID)
-		if id == "" {
+		if subscriber.Recipient.Empty() {
 			continue
 		}
-		out = append(out, id)
+		out = append(out, subscriber.Recipient.ID())
 	}
 	return uniqueStrings(out)
 }
@@ -1569,16 +1569,15 @@ func (eb *EventBus) describeSubscribersForEvent(eventType string, in []Subscribe
 	}
 	out := make([]PublishDiagnosticRecipient, 0, len(in))
 	for _, subscriber := range in {
-		id := strings.TrimSpace(subscriber.ID)
-		if id == "" {
+		if subscriber.Recipient.Empty() {
 			continue
 		}
 		item := PublishDiagnosticRecipient{
-			ID:             id,
-			Type:           strings.TrimSpace(subscriber.Type),
+			ID:             subscriber.Recipient.ID(),
+			Type:           subscriber.Recipient.Code(),
 			Path:           strings.TrimSpace(subscriber.Path),
 			MatchedPattern: strings.TrimSpace(subscriber.MatchPattern),
-			RouteSource:    strings.TrimSpace(subscriber.RouteSource),
+			RouteSource:    subscriber.RouteSourceCode(),
 		}
 		if localized := eb.localizedSubscriberEvent(eventType, subscriber); localized != "" {
 			item.LocalizedEvent = localized
@@ -1592,7 +1591,7 @@ func (eb *EventBus) describeSubscribersForEvent(eventType string, in []Subscribe
 }
 
 func (eb *EventBus) localizedSubscriberEvent(eventType string, subscriber Subscriber) string {
-	if strings.TrimSpace(subscriber.Type) != "node" {
+	if !subscriber.Recipient.IsNode() {
 		return ""
 	}
 	if localized := eventidentity.Normalize(subscriber.LocalizedEvent); localized != "" {
@@ -1999,8 +1998,8 @@ func (eb *EventBus) deliveryRoutesForEvent(ctx context.Context, eventID string) 
 }
 
 func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.Event, plan RoutePlan) {
-	failure := runtimepinrouting.TargetFailure(strings.TrimSpace(string(plan.TargetFailure)))
-	if failure == "" {
+	failure := plan.TargetFailure
+	if failure.Empty() {
 		return
 	}
 	_, detail, record := targetDeliveryFailureRecord(evt, plan, failure)
@@ -2020,7 +2019,7 @@ func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runti
 	target := evt.TargetRoute()
 	targetSet := evt.TargetRoutes()
 	detail := map[string]any{
-		"target_detail_code":   string(failure),
+		"target_detail_code":   failure.Code(),
 		"source":               evt.SourceRoute(),
 		"target":               target,
 		"target_set":           targetSet,
@@ -2059,7 +2058,7 @@ func canonicalTargetDeliveryFailure(failure runtimepinrouting.TargetFailure, det
 	case runtimepinrouting.FailureReplyAlreadyTerminal:
 		err = runtimefailures.New(runtimefailures.ClassReplyAlreadyTerminal, "reply_already_terminal", "eventbus", "resolve_delivery_target", detail)
 	default:
-		err = runtimefailures.NewTarget(string(failure), "eventbus", "resolve_delivery_target", detail)
+		err = runtimefailures.NewTarget(failure.Code(), "eventbus", "resolve_delivery_target", detail)
 	}
 	return runtimefailures.FromError(err, "eventbus", "resolve_delivery_target")
 }

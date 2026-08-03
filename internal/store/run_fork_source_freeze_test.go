@@ -307,7 +307,7 @@ func seedRunForkFreezeDeliveryAuthority(t *testing.T, ctx context.Context, db *s
 	if live {
 		state = runtimedelivery.StateLaunching
 	}
-	seedDeliveryStateFixture(t, ctx, postgresDeliveryFixtureStore(db), event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "freeze-agent"}, state, nil)
+	seedDeliveryStateFixture(t, ctx, postgresDeliveryFixtureStore(db), event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("freeze-agent")}, state, nil)
 }
 
 func seedRunForkFreezeSessionAuthority(t *testing.T, ctx context.Context, db *sql.DB, lineage runForkActivationLineage, now time.Time, live bool) {

@@ -2,6 +2,7 @@ package routingtopology
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"sort"
@@ -297,9 +298,22 @@ func rootInputSourceViews(source semanticview.Source) []RootInputSource {
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		left := strings.Join([]string{out[i].Alias, out[i].Provider, out[i].Target.PackageKey, out[i].Target.FlowID, out[i].AuthoredLocation, out[i].ID}, "\x00")
-		right := strings.Join([]string{out[j].Alias, out[j].Provider, out[j].Target.PackageKey, out[j].Target.FlowID, out[j].AuthoredLocation, out[j].ID}, "\x00")
-		return left < right
+		if out[i].Alias != out[j].Alias {
+			return out[i].Alias < out[j].Alias
+		}
+		if out[i].Provider != out[j].Provider {
+			return out[i].Provider < out[j].Provider
+		}
+		if out[i].Target.PackageKey != out[j].Target.PackageKey {
+			return out[i].Target.PackageKey < out[j].Target.PackageKey
+		}
+		if out[i].Target.FlowID != out[j].Target.FlowID {
+			return out[i].Target.FlowID < out[j].Target.FlowID
+		}
+		if out[i].AuthoredLocation != out[j].AuthoredLocation {
+			return out[i].AuthoredLocation < out[j].AuthoredLocation
+		}
+		return out[i].ID < out[j].ID
 	})
 	return out
 }
@@ -594,9 +608,19 @@ func issueViews(connectIssues []pinrouting.ConnectRoutePlanIssue, relationIssues
 		out = append(out, view)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		left := strings.Join([]string{out[i].PackageKey, out[i].From, out[i].To, out[i].Failure, out[i].Detail}, "\x00")
-		right := strings.Join([]string{out[j].PackageKey, out[j].From, out[j].To, out[j].Failure, out[j].Detail}, "\x00")
-		return left < right
+		if out[i].PackageKey != out[j].PackageKey {
+			return out[i].PackageKey < out[j].PackageKey
+		}
+		if out[i].From != out[j].From {
+			return out[i].From < out[j].From
+		}
+		if out[i].To != out[j].To {
+			return out[i].To < out[j].To
+		}
+		if out[i].Failure != out[j].Failure {
+			return out[i].Failure < out[j].Failure
+		}
+		return out[i].Detail < out[j].Detail
 	})
 	return out
 }
@@ -636,8 +660,7 @@ func WithIssues(topology Topology, additional ...Issue) Topology {
 
 func issueID(issue Issue) string {
 	parts := []string{issue.CheckID, issue.Severity, issue.Location, issue.PackageKey, issue.From, issue.To, issue.Failure, issue.Detail, issue.AuthoredLocation}
-	digest := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
-	return "issue-" + hex.EncodeToString(digest[:8])
+	return "issue-" + topologyIdentityDigest(parts...)
 }
 
 func edgeID(edge Edge) string {
@@ -663,8 +686,7 @@ func edgeID(edge Edge) string {
 	if edge.Boundary != nil {
 		parts = append(parts, edge.Boundary.PackageKey, edge.Boundary.From, edge.Boundary.To)
 	}
-	digest := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
-	return "route-" + hex.EncodeToString(digest[:8])
+	return "route-" + topologyIdentityDigest(parts...)
 }
 
 func rootInputSourceID(source RootInputSource) string {
@@ -677,8 +699,18 @@ func rootInputSourceID(source RootInputSource) string {
 		strings.TrimSpace(source.Target.FlowPath),
 		strings.TrimSpace(source.AuthoredLocation),
 	}
-	digest := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
-	return "root-input-" + hex.EncodeToString(digest[:8])
+	return "root-input-" + topologyIdentityDigest(parts...)
+}
+
+func topologyIdentityDigest(parts ...string) string {
+	digest := sha256.New()
+	var length [8]byte
+	for _, part := range parts {
+		binary.BigEndian.PutUint64(length[:], uint64(len(part)))
+		_, _ = digest.Write(length[:])
+		_, _ = digest.Write([]byte(part))
+	}
+	return hex.EncodeToString(digest.Sum(nil)[:8])
 }
 
 func normalizedStrings(values []string) []string {

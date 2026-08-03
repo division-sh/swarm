@@ -314,11 +314,7 @@ func (s *exactHandoffProofStore) claim(t *testing.T, eventID, runID string, rout
 }
 
 func deliverToTestAgent(ctx context.Context, eb *EventBus, evt events.Event, identity agentidentity.Identity) error {
-	route := events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   identity.AgentID(),
-		AgentIdentity:  identity,
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 	return eb.deliverToRecipientsWithRoutes(ctx, evt, []string{identity.AgentID()}, []events.DeliveryRoute{route})
 }
 
@@ -336,11 +332,7 @@ func TestSelectedDeliveryTransfersAcceptCommittedIsAtomic(t *testing.T) {
 	}
 	store.authority = authority
 	eventID := uuid.NewString()
-	route := events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   "selected-agent",
-		AgentIdentity:  testAgentRouteIdentity(t, "selected-agent", ""),
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("selected-agent"), AgentIdentity: testAgentRouteIdentity(t, "selected-agent", "")}
 	store.seed(t, eventID, forkRunID, route)
 	proof, err := store.ProveHandoff(context.Background(), eventID, route)
 	if err != nil {
@@ -506,10 +498,8 @@ func TestEventBusSnapshottedAgentRouteSendLinearizesWithRemoval(t *testing.T) {
 		}
 		recipients := eb.snapshotRoutePlanRecipientChans(
 			[]string{token.AgentID},
-			[]RoutePlanLiveRecipient{{
-				RecipientID:       token.AgentID,
-				AgentIdentity:     token.Identity,
-				SubscriberType:    routePlanSubscriberAgent,
+			[]RoutePlanLiveRecipient{{Recipient: events.MustAgentDeliveryRecipient(token.AgentID), AgentIdentity: token.Identity,
+
 				PersistAsDelivery: true,
 				liveAuthority:     liveRecipientAuthorityIdentity,
 			}},
@@ -518,7 +508,7 @@ func TestEventBusSnapshottedAgentRouteSendLinearizesWithRemoval(t *testing.T) {
 			t.Fatalf("generation %d snapshot = %#v, want exact route handle", generation, recipients)
 		}
 		eventID, runID := uuid.NewString(), uuid.NewString()
-		route := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: token.AgentID, AgentIdentity: token.Identity}
+		route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(token.AgentID), AgentIdentity: token.Identity}
 		evt := eventtest.RuntimeControl(
 			eventID, events.EventType("test.work"), "test", "", []byte(`{}`), 0,
 			runID, "", events.EventEnvelope{}, time.Now(),
@@ -583,7 +573,7 @@ func TestInternalSubscriptionInactiveSendReturnsExactContinuation(t *testing.T) 
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)
-	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-a"}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-a")}
 	for _, test := range []struct {
 		name   string
 		handle *internalSubscriptionHandle
@@ -721,8 +711,12 @@ func TestNoContextRouteCleanupReturnsExactDeliveryContinuation(t *testing.T) {
 			}
 
 			eventID, runID := uuid.NewString(), uuid.NewString()
-			route := events.DeliveryRoute{SubscriberType: tc.subscriberType, SubscriberID: subscriberID}
+			recipient := events.MustNodeDeliveryRecipient(subscriberID)
 			if tc.subscriberType == "agent" {
+				recipient = events.MustAgentDeliveryRecipient(subscriberID)
+			}
+			route := events.DeliveryRoute{Recipient: recipient}
+			if recipient.IsAgent() {
 				route.AgentIdentity = token.Identity
 			}
 			evt := eventtest.RuntimeControl(
@@ -737,11 +731,8 @@ func TestNoContextRouteCleanupReturnsExactDeliveryContinuation(t *testing.T) {
 				if err := bus.deliverLiveRecipientsWithRoutes(
 					context.Background(),
 					evt,
-					[]RoutePlanLiveRecipient{{
-						RecipientID:       subscriberID,
-						SubscriberType:    routePlanSubscriberInternal,
-						PersistAsDelivery: false,
-						liveAuthority:     liveRecipientAuthorityIdentity,
+					[]RoutePlanLiveRecipient{{Recipient: events.MustNodeDeliveryRecipient(subscriberID), PersistAsDelivery: false,
+						liveAuthority: liveRecipientAuthorityIdentity,
 					}},
 					[]events.DeliveryRoute{route},
 				); err != nil {
@@ -820,11 +811,8 @@ func TestEventBusResetRetiresAndRestartsInternalSubscriptionGeneration(t *testin
 	if err := eb.deliverLiveRecipientsWithRoutes(
 		context.Background(),
 		evt,
-		[]RoutePlanLiveRecipient{{
-			RecipientID:       "reset-proof",
-			SubscriberType:    routePlanSubscriberInternal,
-			PersistAsDelivery: false,
-			liveAuthority:     liveRecipientAuthorityIdentity,
+		[]RoutePlanLiveRecipient{{Recipient: events.MustNodeDeliveryRecipient("reset-proof"), PersistAsDelivery: false,
+			liveAuthority: liveRecipientAuthorityIdentity,
 		}},
 		nil,
 	); err != nil {
@@ -937,7 +925,7 @@ func TestEventBusSnapshottedInternalSendLinearizesWithReset(t *testing.T) {
 	for i := 0; i < 64; i++ {
 		recipients := eb.snapshotRoutePlanRecipientChans(
 			[]string{"reset-race-proof"},
-			[]RoutePlanLiveRecipient{{RecipientID: "reset-race-proof", SubscriberType: routePlanSubscriberAgent}},
+			[]RoutePlanLiveRecipient{{Recipient: events.MustAgentDeliveryRecipient("reset-race-proof")}},
 		)
 		if len(recipients) != 1 || recipients[0].internal == nil {
 			t.Fatalf("iteration %d snapshot = %#v, want one internal generation", i, recipients)

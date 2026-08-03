@@ -31,7 +31,7 @@ func TestRouteFlowInputHarnessSourceSuppressesProducerFallbackWithoutAddingRoute
 			t.Fatalf("routes for %s changed by harness source: got %#v want %#v", eventType, got, want)
 		}
 		for _, subscriber := range got {
-			if subscriber.RouteSource != "subscription" {
+			if subscriber.RouteSourceCode() != "subscription" {
 				t.Fatalf("harness-created route authority survived: %#v", subscriber)
 			}
 		}
@@ -57,7 +57,7 @@ func TestRouteResolveSubscriberPatterns_HarnessAddsNoProducerPattern(t *testing.
 		t.Fatal("ordinary authored subscription did not resolve")
 	}
 	for _, pattern := range patterns {
-		if pattern.RouteSource != "subscription" {
+		if pattern.routeSource != subscriberRouteSourceSubscription {
 			t.Fatalf("resolved pattern = %#v, want ordinary subscription only", pattern)
 		}
 	}
@@ -80,7 +80,7 @@ func loadHarnessRouteSource(t *testing.T, root string) semanticview.Source {
 func subscriberSignature(subscribers []Subscriber) string {
 	parts := make([]string, 0, len(subscribers))
 	for _, subscriber := range subscribers {
-		parts = append(parts, strings.Join([]string{subscriber.ID, subscriber.Type, subscriber.Path, subscriber.MatchPattern, subscriber.RouteSource, subscriber.LocalizedEvent}, "|"))
+		parts = append(parts, strings.Join([]string{subscriber.Recipient.ID(), subscriber.Recipient.Code(), subscriber.Path, subscriber.MatchPattern, subscriber.RouteSourceCode(), subscriber.LocalizedEvent}, "|"))
 	}
 	return strings.Join(parts, "\n")
 }

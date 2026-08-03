@@ -34,10 +34,10 @@ func TestBuildHistoricalReplayContractSwapBootResumeConsumesOwnersAndSelectedRec
 		execution.ExecutableWork[0].SourceEventID != "source-event" ||
 		len(execution.ExecutableWork[0].SourceDeliveryIDs) != 2 ||
 		len(execution.ExecutableWork[0].SelectedRecipients) != 1 ||
-		execution.ExecutableWork[0].SelectedRecipients[0].SubscriberID != "selected-node" {
+		execution.ExecutableWork[0].SelectedRecipients[0].Recipient.ID() != "selected-node" {
 		t.Fatalf("executable work = %#v, want selected recipient-plan work grouped by source event", execution.ExecutableWork)
 	}
-	if execution.ExecutableWork[0].SelectedRecipients[0].SubscriberID == "source-agent" {
+	if execution.ExecutableWork[0].SelectedRecipients[0].Recipient.ID() == "source-agent" {
 		t.Fatalf("source subscriber leaked into selected recipient truth: %#v", execution.ExecutableWork[0])
 	}
 	if !executionBoundaryHas(execution.InvalidPaths, "source_subscriber_as_selected_recipient", runfork.RunForkSelectedContractDispositionInvalid) ||
@@ -98,12 +98,9 @@ func testContractSwapExecutionInputs(t *testing.T) (
 	selectedAdmission.RecipientPlanning.RecipientPlanEvents = []runfork.RunForkSelectedContractRecipientPlanEvent{{
 		SourceEventID: "source-event",
 		EventName:     "work.begin",
-		Recipients: []runfork.RunForkContractFrontierRecipient{{
-			SubscriberType: "node",
-			SubscriberID:   "selected-node",
-			Path:           "flow-a/selected-node",
-			RouteSource:    "selected_contracts",
-		}},
+		Recipients: []runfork.RunForkContractFrontierRecipient{
+			testNodeFrontierRecipient("selected-node", "flow-a/selected-node", "selected_contracts"),
+		},
 		Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 	}}
 	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)

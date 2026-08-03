@@ -217,11 +217,7 @@ func (b *projectionTestBus) send(agentID string, event events.Event) error {
 	localRoute, ok := b.routes[agentID]
 	b.mu.Unlock()
 	if ok {
-		deliveryRoute := events.DeliveryRoute{
-			SubscriberType: string(runtimedelivery.SubscriberAgent),
-			SubscriberID:   agentID,
-			AgentIdentity:  localRoute.token.Identity,
-		}
+		deliveryRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: localRoute.token.Identity}
 		deliveryCtx := b.deliveryCtx
 		if deliveryCtx == nil {
 			deliveryCtx = context.Background()

@@ -160,18 +160,11 @@ func assertSealedPackageConformancePublishPreflight(t *testing.T, source semanti
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if carriers := eb.RouteTable().Resolve("consumer/work.ready"); !sealedPackageConformanceSubscribersContain(carriers, "consumer-node", "consumer", "receiver_carrier") {
-		t.Fatalf("receiver carrier route consumer/work.ready = %#v, want consumer-node receiver_carrier", carriers)
-	}
-
-	want := events.DeliveryRoute{
-		SubscriberType: "node",
-		SubscriberID:   "consumer-node",
-		Target: events.RouteIdentity{
-			FlowID:       "consumer",
-			FlowInstance: "consumer",
-			EntityID:     runtimeflowidentity.EntityID("consumer"),
-		},
+	want := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
+		FlowID:       "consumer",
+		FlowInstance: "consumer",
+		EntityID:     runtimeflowidentity.EntityID("consumer"),
+	},
 	}
 	evt := eventtest.ChildWithLineage(
 		eventtest.UUID("evt-sealed-conformance-connect"),
@@ -233,7 +226,7 @@ func sealedPackageConformanceFindingContains(findings []runtimebootverify.Findin
 
 func sealedPackageConformanceSubscribersContain(subscribers []runtimebus.Subscriber, id, path, source string) bool {
 	for _, subscriber := range subscribers {
-		if subscriber.ID == id && subscriber.Path == path && subscriber.RouteSource == source {
+		if subscriber.Recipient.ID() == id && subscriber.Path == path && subscriber.RouteSourceCode() == source {
 			return true
 		}
 	}
@@ -245,7 +238,7 @@ func sealedPackageConformanceRoutesContain(routes []events.DeliveryRoute, want e
 	for _, got := range events.NormalizeDeliveryRoutes(routes) {
 		claim := got.ConnectClaim
 		got.ConnectClaim = events.ConnectExecutionClaim{}
-		handlerEvent, claimed := claim.NodeHandlerEvent(want.SubscriberID)
+		handlerEvent, claimed := claim.NodeHandlerEvent(want.Recipient.ID())
 		if got == want && claimed && handlerEvent == events.EventType("work.ready") {
 			return true
 		}

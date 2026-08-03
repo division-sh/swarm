@@ -69,8 +69,12 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
+	recipient, err := deliveryRecipientForClass(class, fact.SubscriberID)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	route := events.DeliveryRoute{
-		SubscriberType: string(class), SubscriberID: fact.SubscriberID,
+		Recipient:     recipient,
 		AgentIdentity: fact.AgentIdentity, Target: fact.DeliveryTargetRoute, Context: fact.DeliveryContext,
 		PayloadProjection: fact.DeliveryPayloadProjection,
 	}.Normalized()
@@ -80,7 +84,7 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 	}
 	snapshot := Snapshot{
 		DeliveryID: fact.DeliveryID, EventID: fact.EventID, RunID: fact.RunID,
-		RouteIdentity: identity, Route: route, SubscriberClass: class, SubscriberID: route.SubscriberID,
+		RouteIdentity: identity, Route: route, SubscriberClass: class, SubscriberID: route.Recipient.ID(),
 		Status: status, RetryCount: fact.RetryCount, MaxRetries: fact.MaxRetries,
 		ClaimVersion: fact.ClaimVersion, ActiveSessionID: strings.TrimSpace(fact.ActiveSessionID),
 		ReasonCode: strings.TrimSpace(fact.ReasonCode), Failure: runtimefailures.CloneEnvelope(fact.Failure),

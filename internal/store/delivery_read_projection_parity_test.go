@@ -38,17 +38,11 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 			pageAgent := "page-agent"
 			pageIdentity := testAgentIdentity(t, pageAgent, "delivery-projection/page")
 			siblingRoutes := []events.DeliveryRoute{
-				{
-					SubscriberType: string(runtimedelivery.SubscriberAgent),
-					SubscriberID:   pageAgent,
-					AgentIdentity:  pageIdentity,
-					Target:         events.RouteIdentity{FlowID: "delivery-projection", FlowInstance: "delivery-projection/one", EntityID: uuid.NewString()},
+				{Recipient: events.MustAgentDeliveryRecipient(pageAgent), AgentIdentity: pageIdentity,
+					Target: events.RouteIdentity{FlowID: "delivery-projection", FlowInstance: "delivery-projection/one", EntityID: uuid.NewString()},
 				},
-				{
-					SubscriberType: string(runtimedelivery.SubscriberAgent),
-					SubscriberID:   pageAgent,
-					AgentIdentity:  pageIdentity,
-					Target:         events.RouteIdentity{FlowID: "delivery-projection", FlowInstance: "delivery-projection/two", EntityID: uuid.NewString()},
+				{Recipient: events.MustAgentDeliveryRecipient(pageAgent), AgentIdentity: pageIdentity,
+					Target: events.RouteIdentity{FlowID: "delivery-projection", FlowInstance: "delivery-projection/two", EntityID: uuid.NewString()},
 				},
 			}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, siblingEvent, siblingRoutes); err != nil {
@@ -66,7 +60,7 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 				uuid.NewString(), "projection.malformed_tail", "gateway", "", json.RawMessage(`{"kind":"tail"}`), 0,
 				runID, "", events.EventEnvelope{}, base.Add(time.Minute),
 			)
-			tailRoute := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: pageAgent, AgentIdentity: pageIdentity}
+			tailRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(pageAgent), AgentIdentity: pageIdentity}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, tailEvent, []events.DeliveryRoute{tailRoute}); err != nil {
 				t.Fatalf("commit malformed-tail event: %v", err)
 			}
@@ -107,7 +101,7 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 				uuid.NewString(), "projection.current", "gateway", "", json.RawMessage(`{"kind":"current"}`), 0,
 				runID, "", events.EventEnvelope{}, base.Add(2*time.Minute),
 			)
-			currentRoute := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: currentAgent, AgentIdentity: currentIdentity}
+			currentRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(currentAgent), AgentIdentity: currentIdentity}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, currentEvent, []events.DeliveryRoute{currentRoute}); err != nil {
 				t.Fatalf("commit current lifecycle event: %v", err)
 			}
@@ -118,7 +112,7 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 				uuid.NewString(), "projection.delivered_history", "gateway", "", json.RawMessage(`{"kind":"history"}`), 0,
 				runID, "", events.EventEnvelope{}, base.Add(3*time.Minute),
 			)
-			historyRoute := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberAgent), SubscriberID: currentAgent, AgentIdentity: currentIdentity}
+			historyRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(currentAgent), AgentIdentity: currentIdentity}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, historyEvent, []events.DeliveryRoute{historyRoute}); err != nil {
 				t.Fatalf("commit delivered history event: %v", err)
 			}

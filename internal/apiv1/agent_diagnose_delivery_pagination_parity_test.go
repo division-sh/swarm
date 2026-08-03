@@ -88,17 +88,11 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 				runID, "", events.EventEnvelope{}, now,
 			)
 			routes := []events.DeliveryRoute{
-				{
-					SubscriberType: string(runtimedelivery.SubscriberAgent),
-					SubscriberID:   agentID,
-					AgentIdentity:  identity,
-					Target:         events.RouteIdentity{FlowID: "diagnose", FlowInstance: "diagnose/one", EntityID: uuid.NewString()},
+				{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity,
+					Target: events.RouteIdentity{FlowID: "diagnose", FlowInstance: "diagnose/one", EntityID: uuid.NewString()},
 				},
-				{
-					SubscriberType: string(runtimedelivery.SubscriberAgent),
-					SubscriberID:   agentID,
-					AgentIdentity:  identity,
-					Target:         events.RouteIdentity{FlowID: "diagnose", FlowInstance: "diagnose/one", EntityID: uuid.NewString()},
+				{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity,
+					Target: events.RouteIdentity{FlowID: "diagnose", FlowInstance: "diagnose/one", EntityID: uuid.NewString()},
 				},
 			}
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, routes, runtimepipelineobligation.ScopeSubscribed)

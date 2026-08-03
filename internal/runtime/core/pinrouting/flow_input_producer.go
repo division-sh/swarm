@@ -50,7 +50,7 @@ func ResolveFlowInputProducerWithOptions(source semanticview.Source, flowID, eve
 		out.Evidence = filtered
 	}
 	sort.SliceStable(out.Evidence, func(i, j int) bool {
-		return flowInputProducerEvidenceKey(out.Evidence[i]) < flowInputProducerEvidenceKey(out.Evidence[j])
+		return flowInputProducerEvidenceLess(out.Evidence[i], out.Evidence[j])
 	})
 	return out
 }
@@ -64,6 +64,38 @@ func flowInputProducerEvidenceContains(existing []runtimecontracts.FlowInputProd
 	return false
 }
 
-func flowInputProducerEvidenceKey(e runtimecontracts.FlowInputProducerEvidence) string {
-	return strings.Join([]string{e.Kind, e.FlowID, e.EventType, e.Pin, e.Pattern, e.Detail}, "\x00")
+type flowInputProducerEvidenceIdentity struct {
+	kind      string
+	flowID    string
+	eventType string
+	pin       string
+	pattern   string
+	detail    string
+}
+
+func flowInputProducerEvidenceKey(e runtimecontracts.FlowInputProducerEvidence) flowInputProducerEvidenceIdentity {
+	return flowInputProducerEvidenceIdentity{
+		kind: e.Kind, flowID: e.FlowID, eventType: e.EventType,
+		pin: e.Pin, pattern: e.Pattern, detail: e.Detail,
+	}
+}
+
+func flowInputProducerEvidenceLess(left, right runtimecontracts.FlowInputProducerEvidence) bool {
+	l, r := flowInputProducerEvidenceKey(left), flowInputProducerEvidenceKey(right)
+	if l.kind != r.kind {
+		return l.kind < r.kind
+	}
+	if l.flowID != r.flowID {
+		return l.flowID < r.flowID
+	}
+	if l.eventType != r.eventType {
+		return l.eventType < r.eventType
+	}
+	if l.pin != r.pin {
+		return l.pin < r.pin
+	}
+	if l.pattern != r.pattern {
+		return l.pattern < r.pattern
+	}
+	return l.detail < r.detail
 }

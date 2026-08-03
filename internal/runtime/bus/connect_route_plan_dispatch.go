@@ -140,7 +140,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 
 	memo, _ := ctx.Value(connectRoutePlanEvaluationMemoKey{}).(*connectRoutePlanEvaluationMemo)
 	if memo != nil && memo.ready && memo.eventID == evt.ID() {
-		if templateInstanceLifecyclePreview(ctx) || memo.applied || memo.dispatch.Failure != "" {
+		if templateInstanceLifecyclePreview(ctx) || memo.applied || !memo.dispatch.Failure.Empty() {
 			return memo.dispatch, nil
 		}
 		if err := r.applyEvaluationAtSnapshot(ctx, memo.snapshot, evt, memo.dispatch); err == nil {
@@ -175,7 +175,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		if memo != nil {
 			memo.eventID, memo.dispatch, memo.snapshot, memo.ready, memo.applied = evt.ID(), evaluated, snapshot, true, false
 		}
-		if evaluated.Failure != "" || templateInstanceLifecyclePreview(ctx) {
+		if !evaluated.Failure.Empty() || templateInstanceLifecyclePreview(ctx) {
 			return evaluated, nil
 		}
 		if err := r.applyEvaluationAtSnapshot(ctx, snapshot, evt, evaluated); err != nil {
@@ -276,7 +276,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 			if err != nil {
 				return connectRoutePlanDispatch{}, err
 			}
-			if failure != "" {
+			if !failure.Empty() {
 				out.Failure = failure
 				for key, value := range detail {
 					out.ExtraDetail[key] = value
@@ -372,7 +372,7 @@ func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Ev
 		}
 		if len(routes) == 0 {
 			out.Failure = runtimepinrouting.FailureTargetNotSubscribed
-			out.ExtraDetail["connect_route_plan_failure"] = string(runtimepinrouting.FailureTargetNotSubscribed)
+			out.ExtraDetail["connect_route_plan_failure"] = runtimepinrouting.FailureTargetNotSubscribed.Code()
 			out.ExtraDetail["connect_route_plan_source_event"] = plan.SourceEndpoint().Readback().ResolvedEvent
 			out.ExtraDetail["connect_route_plan_receiver_event"] = plan.ReceiverEndpoint().Readback().ResolvedEvent
 			return out, nil
@@ -448,25 +448,25 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 		"connect_route_plan_reply_pin":       reply.RequesterFlowID + "." + reply.ReplyInputPin,
 	}
 	if contextID == "" || r.replyStore == nil {
-		detail["connect_route_plan_failure"] = string(runtimepinrouting.FailureStaleArrival)
+		detail["connect_route_plan_failure"] = runtimepinrouting.FailureStaleArrival.Code()
 		return nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil, nil
 	}
 	record, err := r.replyStore.LoadReplyContext(ctx, contextID)
 	if err != nil {
 		if errors.Is(err, runtimereplycontext.ErrNotFound) {
-			detail["connect_route_plan_failure"] = string(runtimepinrouting.FailureStaleArrival)
+			detail["connect_route_plan_failure"] = runtimepinrouting.FailureStaleArrival.Code()
 			return nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil, nil
 		}
-		return nil, nil, "", nil, nil, err
+		return nil, nil, 0, nil, nil, err
 	}
 	if !plan.MatchesReplyRecord(record) {
-		detail["connect_route_plan_failure"] = string(runtimepinrouting.FailureStaleArrival)
+		detail["connect_route_plan_failure"] = runtimepinrouting.FailureStaleArrival.Code()
 		return nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil, nil
 	}
 	if key := record.CorrelationKey; key != "" {
 		actual, present := plan.ReplyResponseCorrelation(runtimepinrouting.AdmitConnectRouteMatchValues(values))
 		if !present || actual != record.RequestCorrelationID {
-			detail["connect_route_plan_failure"] = string(runtimepinrouting.FailureStaleArrival)
+			detail["connect_route_plan_failure"] = runtimepinrouting.FailureStaleArrival.Code()
 			detail["reply_context_id"] = contextID
 			detail["reply_correlation_key"] = key
 			detail["request_correlation_id"] = record.RequestCorrelationID
@@ -479,7 +479,7 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 	target := record.Origin.Normalized()
 	subscribers := r.resolveSelectedReceiverCarriers(ctx, plan, target)
 	if target.Empty() || len(subscribers) == 0 {
-		detail["connect_route_plan_failure"] = string(runtimepinrouting.FailureStaleArrival)
+		detail["connect_route_plan_failure"] = runtimepinrouting.FailureStaleArrival.Code()
 		detail["reply_origin"] = target
 		return nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil, nil
 	}
@@ -495,25 +495,20 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 		}
 	}
 	if outcome == runtimereplycontext.ClaimTerminal {
-		detail["connect_route_plan_failure"] = string(runtimepinrouting.FailureReplyAlreadyTerminal)
+		detail["connect_route_plan_failure"] = runtimepinrouting.FailureReplyAlreadyTerminal.Code()
 		detail["accepted_reply_event_id"] = claimed.AcceptedReplyEventID
 		return nil, nil, runtimepinrouting.FailureReplyAlreadyTerminal, detail, nil, nil
 	}
 	routes := make([]events.DeliveryRoute, 0, len(subscribers))
 	for _, subscriber := range subscribers {
-		subscriberType := strings.TrimSpace(subscriber.Type)
-		if subscriberType == "" {
-			subscriberType = "node"
-		}
 		identity, _, err := r.resolveAgentCarrierIdentity(ctx, subscriber, target, TemplateInstanceLifecycleDecision{}, false)
 		if err != nil {
-			return nil, nil, "", nil, nil, err
+			return nil, nil, 0, nil, nil, err
 		}
 		routes = append(routes, events.DeliveryRoute{
-			SubscriberType: subscriberType,
-			SubscriberID:   strings.TrimSpace(subscriber.ID),
-			AgentIdentity:  identity,
-			Target:         target,
+			Recipient:     subscriber.Recipient,
+			AgentIdentity: identity,
+			Target:        target,
 		})
 	}
 	detail["reply_context_id"] = contextID
@@ -523,7 +518,7 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 	application := &connectReplyApplication{
 		kind: connectReplyApplicationClaim, contextID: contextID, eventID: evt.ID(), wantOutcome: outcome,
 	}
-	return events.NormalizeDeliveryRoutes(routes), dedupeSubscribers(subscribers), "", detail, application, nil
+	return events.NormalizeDeliveryRoutes(routes), dedupeSubscribers(subscribers), 0, detail, application, nil
 }
 
 func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, descriptors []runtimepinrouting.Descriptor) (runtimepinrouting.ConnectRoutePlanMaterialization, TemplateInstanceLifecycleDecision, error) {
@@ -625,17 +620,12 @@ func (r connectRoutePlanResolver) deliveryRoutesForMaterialization(ctx context.C
 		}
 		subscribers = append(subscribers, matchedSubscribers...)
 		for _, subscriber := range matchedSubscribers {
-			subscriberType := strings.TrimSpace(subscriber.Type)
-			if subscriberType == "" {
-				subscriberType = "node"
-			}
 			identity, live, err := r.resolveAgentCarrierIdentity(ctx, subscriber, target, decision, routeCreatedInPlan)
 			if err != nil {
 				return nil, nil, nil, err
 			}
 			route := events.DeliveryRoute{
-				SubscriberType:    subscriberType,
-				SubscriberID:      strings.TrimSpace(subscriber.ID),
+				Recipient:         subscriber.Recipient,
 				AgentIdentity:     identity,
 				Target:            target,
 				PayloadProjection: projection,
@@ -656,10 +646,10 @@ func (r connectRoutePlanResolver) resolveAgentCarrierIdentity(
 	decision TemplateInstanceLifecycleDecision,
 	routeCreatedInPlan bool,
 ) (agentidentity.Identity, bool, error) {
-	if strings.TrimSpace(subscriber.Type) != routePlanSubscriberAgent {
+	if !subscriber.Recipient.IsAgent() {
 		return agentidentity.Identity{}, true, nil
 	}
-	agentID := strings.TrimSpace(subscriber.ID)
+	agentID := subscriber.Recipient.ID()
 	matches := make([]agentidentity.Identity, 0, 1)
 	available := false
 	if r.loadAgents != nil {
@@ -726,29 +716,29 @@ func plannedCreateAgentCarrierIdentity(
 	}
 	identity := subscriber.AgentIdentity.Normalize()
 	if err := identity.Validate(); err != nil {
-		return agentidentity.Identity{}, true, fmt.Errorf("created connect agent carrier %q has no canonical declared identity: %w", subscriber.ID, err)
+		return agentidentity.Identity{}, true, fmt.Errorf("created connect agent carrier %q has no canonical declared identity: %w", subscriber.Recipient.ID(), err)
 	}
-	if identity.AgentID() != strings.TrimSpace(subscriber.ID) {
-		return agentidentity.Identity{}, true, fmt.Errorf("created connect agent carrier %q identity names %q", subscriber.ID, identity.AgentID())
+	if identity.AgentID() != subscriber.Recipient.ID() {
+		return agentidentity.Identity{}, true, fmt.Errorf("created connect agent carrier %q identity names %q", subscriber.Recipient.ID(), identity.AgentID())
 	}
 	route := decision.Route()
 	if !route.Valid() {
-		return agentidentity.Identity{}, true, fmt.Errorf("created connect agent carrier %q has no canonical flow route", subscriber.ID)
+		return agentidentity.Identity{}, true, fmt.Errorf("created connect agent carrier %q has no canonical flow route", subscriber.Recipient.ID())
 	}
 	expectedRoute, err := route.AgentIdentityRoute()
 	if err != nil {
-		return agentidentity.Identity{}, true, fmt.Errorf("created connect agent carrier %q flow route: %w", subscriber.ID, err)
+		return agentidentity.Identity{}, true, fmt.Errorf("created connect agent carrier %q flow route: %w", subscriber.Recipient.ID(), err)
 	}
 	if identity.Route != expectedRoute {
 		return agentidentity.Identity{}, true, fmt.Errorf(
 			"created connect agent carrier %q identity route %q does not match lifecycle route %q",
-			subscriber.ID,
+			subscriber.Recipient.ID(),
 			identity.FlowInstance(),
 			route.InstancePath,
 		)
 	}
 	if !target.Empty() && !routeMatchesAgentDescriptor(target, ActiveAgentDescriptor{Identity: identity, EntityID: target.EntityID}) {
-		return agentidentity.Identity{}, true, fmt.Errorf("created connect agent carrier %q identity does not match target %#v", subscriber.ID, target.Normalized())
+		return agentidentity.Identity{}, true, fmt.Errorf("created connect agent carrier %q identity does not match target %#v", subscriber.Recipient.ID(), target.Normalized())
 	}
 	return identity, true, nil
 }
@@ -785,33 +775,15 @@ func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(ctx context.Co
 	if len(tables) == 0 {
 		return nil
 	}
-	keys := connectReceiverCarrierRouteKeys(plan, target)
-	out := make([]Subscriber, 0, len(keys))
+	out := make([]Subscriber, 0)
 	for _, routeTable := range tables {
 		if routeTable == nil {
 			continue
 		}
-		for _, key := range keys {
-			for _, subscriber := range routeTable.Resolve(key) {
-				if !connectSubscriberMatchesPlanTarget(plan, subscriber, target) {
-					continue
-				}
-				subscriber.LocalizedEvent = string(plan.ReceiverLocalEvent())
-				out = append(out, subscriber)
-			}
-		}
+		evaluation := routeTable.evaluateConnectPlan(plan, []events.RouteIdentity{target})
+		out = append(out, connectRecipientSubscribers(evaluation)...)
 	}
 	return dedupeSubscribers(out)
-}
-
-func connectSubscriberMatchesPlanTarget(plan runtimepinrouting.ConnectRoutePlan, subscriber Subscriber, target events.RouteIdentity) bool {
-	if connectSubscriberMatchesTarget(subscriber, target) {
-		return true
-	}
-	if plan.FanIn() == nil {
-		return false
-	}
-	return plan.SubscriberPathMatchesFanInReceiver(strings.Trim(strings.TrimSpace(subscriber.Path), "/"), target)
 }
 
 func connectRoutePlanMatchesEvent(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, evt events.Event) bool {
@@ -825,29 +797,6 @@ func connectMaterializedTargets(materialized runtimepinrouting.ConnectRoutePlanM
 	return uniqueRouteIdentities(materialized.TargetSet)
 }
 
-func connectReceiverCarrierRouteKeys(plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) []string {
-	eventTypes := plan.ReceiverEventTypes(target)
-	out := make([]string, 0, len(eventTypes))
-	for _, eventType := range eventTypes {
-		out = append(out, string(eventType))
-	}
-	return uniqueStrings(out)
-}
-
-func connectSubscriberMatchesTarget(subscriber Subscriber, target events.RouteIdentity) bool {
-	if strings.TrimSpace(subscriber.ID) == "" {
-		return false
-	}
-	subscriberType := strings.TrimSpace(subscriber.Type)
-	if subscriberType == "" {
-		return false
-	}
-	if target.Empty() {
-		return true
-	}
-	return routeMatchesInternalSubscriber(target, subscriber)
-}
-
 func connectRoutePlanLiveRecipients(routes []events.DeliveryRoute) []RoutePlanLiveRecipient {
 	routes = events.NormalizeDeliveryRoutes(routes)
 	if len(routes) == 0 {
@@ -855,16 +804,13 @@ func connectRoutePlanLiveRecipients(routes []events.DeliveryRoute) []RoutePlanLi
 	}
 	out := make([]RoutePlanLiveRecipient, 0, len(routes))
 	for _, route := range routes {
-		subscriberType := strings.TrimSpace(route.SubscriberType)
-		subscriberID := strings.TrimSpace(route.SubscriberID)
-		if subscriberType == "" || subscriberID == "" {
+		if route.Recipient.Empty() {
 			continue
 		}
 		out = append(out, RoutePlanLiveRecipient{
-			RecipientID:       subscriberID,
+			Recipient:         route.Recipient,
 			AgentIdentity:     route.AgentIdentity,
-			SubscriberType:    subscriberType,
-			PersistAsDelivery: subscriberType == routePlanSubscriberAgent,
+			PersistAsDelivery: route.Recipient.IsAgent(),
 			Producer:          routeIntentProducerConnectRoutePlan,
 		})
 	}
@@ -875,13 +821,13 @@ func connectRoutePlanDeliveryIntents(routes, liveRoutes []events.DeliveryRoute, 
 	intents := routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerConnectRoutePlan)
 	liveAgents := make(map[agentidentity.Identity]struct{}, len(liveRoutes))
 	for _, route := range events.NormalizeDeliveryRoutes(liveRoutes) {
-		if route.SubscriberType == routePlanSubscriberAgent {
+		if route.Recipient.IsAgent() {
 			liveAgents[route.AgentIdentity] = struct{}{}
 		}
 	}
 	for index := range intents {
 		intent := &intents[index]
-		if intent.SubscriberType != routePlanSubscriberAgent {
+		if !intent.Recipient.IsAgent() {
 			continue
 		}
 		if _, live := liveAgents[intent.AgentIdentity]; !live && routeCreatedInPlan {
@@ -893,9 +839,9 @@ func connectRoutePlanDeliveryIntents(routes, liveRoutes []events.DeliveryRoute, 
 
 func connectRoutePlanTargetFailure(failure runtimepinrouting.ConnectRoutePlanFailure) runtimepinrouting.TargetFailure {
 	if failure.Empty() {
-		return ""
+		return 0
 	}
-	return runtimepinrouting.TargetFailure(failure.Code())
+	return runtimepinrouting.TargetFailureFromConnect(failure)
 }
 
 func connectRoutePlanFailureDetail(plan runtimepinrouting.ConnectRoutePlan, failure runtimepinrouting.ConnectRoutePlanFailure, values map[string]string, descriptors []runtimepinrouting.Descriptor) map[string]any {

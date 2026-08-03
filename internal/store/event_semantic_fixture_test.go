@@ -40,11 +40,7 @@ func commitSemanticEventFixture(ctx context.Context, store any, event events.Eve
 func commitSemanticEventFixtureWithAgents(ctx context.Context, store any, event events.Event, agentIDs []string) error {
 	routes := make([]events.DeliveryRoute, 0, len(agentIDs))
 	for _, agentID := range agentIDs {
-		routes = append(routes, events.DeliveryRoute{
-			SubscriberType: "agent",
-			SubscriberID:   agentID,
-			AgentIdentity:  mustTestAgentIdentity(agentID, "fixture/"+agentID),
-		})
+		routes = append(routes, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: mustTestAgentIdentity(agentID, "fixture/"+agentID)})
 	}
 	scope := runtimepipelineobligation.ScopeDirect
 	if len(routes) > 0 {
@@ -241,10 +237,19 @@ func commitDeliveryReplayEventFixture(
 		if err := insertCommittedPipelineScopeTx(txctx, tx, forkEventID, runtimepipelineobligation.ScopeDirect, true, time.Now().UTC()); err != nil {
 			return err
 		}
-		route := canonicalDeliveryFixtureRouteValue(events.DeliveryRoute{
-			SubscriberType: subscriberType,
-			SubscriberID:   subscriberID,
-		})
+		var recipient events.DeliveryRecipient
+		switch subscriberType {
+		case "node":
+			recipient, err = events.NewNodeDeliveryRecipient(subscriberID)
+		case "agent":
+			recipient, err = events.NewAgentDeliveryRecipient(subscriberID)
+		default:
+			return fmt.Errorf("delivery-replay fixture subscriber type %q is unsupported", subscriberType)
+		}
+		if err != nil {
+			return err
+		}
+		route := canonicalDeliveryFixtureRouteValue(events.DeliveryRoute{Recipient: recipient})
 		authority, err := deliveryFixtureAuthorityForRun(txctx, tx, runtimedelivery.DialectPostgres, forkRunID)
 		if err != nil {
 			return err

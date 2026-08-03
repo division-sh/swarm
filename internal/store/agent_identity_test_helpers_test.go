@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -68,11 +67,7 @@ func mustTestAgentIdentity(agentID, flowInstance string) agentidentity.Identity 
 func testAgentDeliveryRoute(t testing.TB, agentID, flowInstance string) events.DeliveryRoute {
 	t.Helper()
 	identity := testAgentIdentity(t, agentID, flowInstance)
-	return events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberAgent),
-		SubscriberID:   identity.AgentID(),
-		AgentIdentity:  identity,
-	}
+	return events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 }
 
 func testAgentOwnedSchedule(t testing.TB, schedule runtimepipeline.Schedule) runtimepipeline.Schedule {

@@ -74,8 +74,8 @@ func (s *bootSelfCheckDescriptorStore) CommitPublish(ctx context.Context, plan r
 		s.events = append(s.events, req.Event.Event())
 		s.deliveries = s.deliveries[:0]
 		for _, route := range req.DeliveryRoutes {
-			if route.SubscriberType == "agent" {
-				s.deliveries = append(s.deliveries, route.SubscriberID)
+			if route.Recipient.IsAgent() {
+				s.deliveries = append(s.deliveries, route.Recipient.ID())
 			}
 		}
 		return nil

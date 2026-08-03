@@ -67,7 +67,7 @@ func commitPostgresDeliveryFixture(t testing.TB, ctx context.Context, db *sql.DB
 		_, err = postgresDeliveryAdapter.CommitInitial(txctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority)
 		return err
 	}); err != nil {
-		t.Fatalf("commit delivery fixture %s/%s: %v", eventID, route.SubscriberID, err)
+		t.Fatalf("commit delivery fixture %s/%s: %v", eventID, route.Recipient.ID(), err)
 	}
 	return event
 }
@@ -78,7 +78,7 @@ func claimPostgresDeliveryFixture(t testing.TB, ctx context.Context, db *sql.DB,
 	store := postgresDeliveryFixtureStore(db)
 	claimed, err := claimDeliveryFixture(ctx, store, event, route)
 	if err != nil {
-		t.Fatalf("claim delivery fixture %s/%s: %v", event.ID(), route.SubscriberID, err)
+		t.Fatalf("claim delivery fixture %s/%s: %v", event.ID(), route.Recipient.ID(), err)
 	}
 	return claimed
 }
@@ -109,14 +109,14 @@ func seedDeliveryStateFixture(
 	t.Helper()
 	route = canonicalDeliveryFixtureRoute(t, route)
 	if err := commitDeliveryObligationFixture(ctx, store, event, route); err != nil {
-		t.Fatalf("commit delivery fixture %s/%s: %v", event.ID(), route.SubscriberID, err)
+		t.Fatalf("commit delivery fixture %s/%s: %v", event.ID(), route.Recipient.ID(), err)
 	}
 	if state == runtimedelivery.StateQueued {
 		return loadDeliverySnapshotFixture(t, ctx, store, event.ID(), route)
 	}
 	claimed, err := claimDeliveryFixture(ctx, store, event, route)
 	if err != nil {
-		t.Fatalf("claim delivery fixture %s/%s: %v", event.ID(), route.SubscriberID, err)
+		t.Fatalf("claim delivery fixture %s/%s: %v", event.ID(), route.Recipient.ID(), err)
 	}
 	switch state {
 	case runtimedelivery.StateLaunching:
@@ -131,13 +131,13 @@ func seedDeliveryStateFixture(
 			RetryBase:   time.Hour,
 		})
 		if err != nil {
-			t.Fatalf("settle retrying delivery fixture %s/%s: %v", event.ID(), route.SubscriberID, err)
+			t.Fatalf("settle retrying delivery fixture %s/%s: %v", event.ID(), route.Recipient.ID(), err)
 		}
 		return snapshot
 	case runtimedelivery.StateDelivered:
 		snapshot, err := store.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond)
 		if err != nil {
-			t.Fatalf("settle delivered fixture %s/%s: %v", event.ID(), route.SubscriberID, err)
+			t.Fatalf("settle delivered fixture %s/%s: %v", event.ID(), route.Recipient.ID(), err)
 		}
 		return snapshot
 	case runtimedelivery.StateExhausted:
@@ -150,7 +150,7 @@ func seedDeliveryStateFixture(
 			Failure:     failure,
 		})
 		if err != nil {
-			t.Fatalf("settle exhausted delivery fixture %s/%s: %v", event.ID(), route.SubscriberID, err)
+			t.Fatalf("settle exhausted delivery fixture %s/%s: %v", event.ID(), route.Recipient.ID(), err)
 		}
 		return snapshot
 	default:
@@ -166,8 +166,8 @@ func canonicalDeliveryFixtureRoute(t testing.TB, route events.DeliveryRoute) eve
 
 func canonicalDeliveryFixtureRouteValue(route events.DeliveryRoute) events.DeliveryRoute {
 	route = route.Normalized()
-	if route.SubscriberType == string(runtimedelivery.SubscriberAgent) && route.AgentIdentity.IsZero() {
-		route.AgentIdentity = mustTestAgentIdentity(route.SubscriberID, "fixture/"+route.SubscriberID)
+	if route.Recipient.IsAgent() && route.AgentIdentity.IsZero() {
+		route.AgentIdentity = mustTestAgentIdentity(route.Recipient.ID(), "fixture/"+route.Recipient.ID())
 	}
 	return route
 }
@@ -268,7 +268,7 @@ func loadDeliverySnapshotFixture(t testing.TB, ctx context.Context, store delive
 			return snapshot
 		}
 	}
-	t.Fatalf("delivery fixture snapshot %s/%s was not found", eventID, route.SubscriberID)
+	t.Fatalf("delivery fixture snapshot %s/%s was not found", eventID, route.Recipient.ID())
 	return runtimedelivery.Snapshot{}
 }
 

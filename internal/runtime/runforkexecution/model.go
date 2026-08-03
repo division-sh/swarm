@@ -319,13 +319,9 @@ func selectedContractDynamicTopologyEvidence(frontier runfork.RunForkContractFro
 			if normalizeRouteInstance(recipient.Path) != instance {
 				continue
 			}
-			item.recipients = append(item.recipients, runfork.RunForkContractFrontierRecipient{
-				SubscriberType: strings.TrimSpace(recipient.SubscriberType),
-				SubscriberID:   strings.TrimSpace(recipient.SubscriberID),
-				Path:           strings.TrimSpace(recipient.Path),
-				RouteSource:    strings.TrimSpace(recipient.RouteSource),
-				AgentIdentity:  recipient.AgentIdentity.Normalize(),
-			})
+			item.recipients = append(item.recipients, runfork.NewRunForkContractFrontierRecipient(
+				recipient.Recipient, recipient.Path, recipient.RouteSourceCode(), recipient.AgentIdentity,
+			))
 		}
 	}
 	for _, event := range frontier.FrontierEvents {

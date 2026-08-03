@@ -92,7 +92,7 @@ func workflowNodeDeliveryRoute(ctx context.Context) (events.DeliveryRoute, bool)
 		return events.DeliveryRoute{}, false
 	}
 	route = route.Normalized()
-	return route, route.SubscriberType == "node" && route.SubscriberID != ""
+	return route, route.Recipient.IsNode()
 }
 
 func withPipelineFlowScope(ctx context.Context, flowID string) context.Context {

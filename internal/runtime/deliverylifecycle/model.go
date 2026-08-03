@@ -33,6 +33,17 @@ const (
 	SubscriberNode  SubscriberClass = "node"
 )
 
+func deliveryRecipientForClass(class SubscriberClass, id string) (events.DeliveryRecipient, error) {
+	switch class {
+	case SubscriberNode:
+		return events.NewNodeDeliveryRecipient(id)
+	case SubscriberAgent:
+		return events.NewAgentDeliveryRecipient(id)
+	default:
+		return events.DeliveryRecipient{}, fmt.Errorf("delivery subscriber class %q is invalid", class)
+	}
+}
+
 func ParseSubscriberClass(raw string) (SubscriberClass, error) {
 	class := SubscriberClass(strings.TrimSpace(raw))
 	switch class {
@@ -289,11 +300,13 @@ func NewObligation(eventID, runID string, route events.DeliveryRoute, authority 
 		return Obligation{}, fmt.Errorf("selected delivery authority fork run does not match obligation run")
 	}
 	route = route.Normalized()
-	class, err := ParseSubscriberClass(route.SubscriberType)
-	if err != nil {
-		return Obligation{}, err
+	class := SubscriberNode
+	if route.Recipient.IsAgent() {
+		class = SubscriberAgent
+	} else if !route.Recipient.IsNode() {
+		return Obligation{}, fmt.Errorf("delivery obligation subscriber class is invalid")
 	}
-	if route.SubscriberID == "" {
+	if route.Recipient.ID() == "" {
 		return Obligation{}, fmt.Errorf("delivery obligation subscriber id is required")
 	}
 	identity, err := route.Identity()
@@ -316,7 +329,7 @@ func (o Obligation) RunID() string                               { return o.runI
 func (o Obligation) RouteIdentity() events.DeliveryRouteIdentity { return o.routeIdentity }
 func (o Obligation) Route() events.DeliveryRoute                 { return o.route.Normalized() }
 func (o Obligation) SubscriberClass() SubscriberClass            { return o.class }
-func (o Obligation) SubscriberID() string                        { return o.route.SubscriberID }
+func (o Obligation) SubscriberID() string                        { return o.route.Recipient.ID() }
 func (o Obligation) MaxRetries() int                             { return o.maxRetries }
 func (o Obligation) Authority() ExecutionAuthority               { return o.authority }
 

@@ -181,7 +181,7 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 		{subscriber: "retry-agent", state: runtimedelivery.StateRetrying, failure: &retryFailure},
 		{subscriber: "dead-agent", state: runtimedelivery.StateExhausted, failure: &deadFailure},
 	} {
-		seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: fixture.subscriber}, fixture.state, fixture.failure)
+		seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(fixture.subscriber)}, fixture.state, fixture.failure)
 	}
 
 	captureRunForkTestRevision(t, db, runID)
@@ -260,7 +260,7 @@ func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *te
 	at := time.Unix(1700000250, 0).UTC()
 	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.safe_pending", events.EventProducerPlatform, "test", "", "", at)
-	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "safe-agent"}, runtimedelivery.StateQueued, nil)
+	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("safe-agent")}, runtimedelivery.StateQueued, nil)
 
 	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
@@ -297,7 +297,7 @@ func TestRunForkPlanner_NodePendingDeliveryRemainsBlocked(t *testing.T) {
 	at := time.Unix(1700000260, 0).UTC()
 	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.node_pending", events.EventProducerPlatform, "test", "", "", at)
-	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-handler"}, runtimedelivery.StateQueued, nil)
+	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-handler")}, runtimedelivery.StateQueued, nil)
 
 	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
@@ -362,7 +362,7 @@ func TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers(t *testing.T) 
 			at := time.Unix(1700000265, 0).UTC()
 			requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 			event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.non_agent", events.EventProducerPlatform, "test", "", "", at)
-			seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-handler"}, tc.state, tc.failure)
+			seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-handler")}, tc.state, tc.failure)
 
 			captureRunForkTestRevision(t, db, runID)
 			plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
@@ -419,20 +419,12 @@ func TestRunForkPlanner_CommittedReplayScopeDoesNotMasqueradeAsExecutableDeliver
 }
 
 func TestRunForkPlanner_SystemDeliveryRowsAreNotCanonicalEventDeliveries(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-
-	runID := uuid.NewString()
-	eventID := uuid.NewString()
-	at := time.Unix(1700000267, 0).UTC()
-	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
-	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.system_delivery", events.EventProducerPlatform, "test", "", "", at)
-	err := commitDeliveryObligationFixture(ctx, pg, event, events.DeliveryRoute{SubscriberType: "system", SubscriberID: "system-handler"})
+	var route events.DeliveryRoute
+	err := json.Unmarshal([]byte(`{"subscriber_type":"system","subscriber_id":"system-handler"}`), &route)
 	if err == nil {
-		t.Fatal("seed system delivery succeeded, want canonical event_deliveries subscriber_type check to reject system rows")
+		t.Fatal("decode system delivery succeeded, want closed delivery recipient codec to reject system rows")
 	}
-	if !strings.Contains(err.Error(), "unsupported subscriber type") {
+	if !strings.Contains(err.Error(), "recipient kind is invalid") {
 		t.Fatalf("system delivery error = %v, want typed subscriber refusal", err)
 	}
 }
@@ -616,9 +608,9 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	retryFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "retryable_error", nil)
-	nodeDead := seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-dead"}, runtimedelivery.StateRetrying, &retryFailure)
-	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-ok"}, runtimedelivery.StateDelivered, nil)
-	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-ok"}, runtimedelivery.StateDelivered, nil)
+	nodeDead := seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-dead")}, runtimedelivery.StateRetrying, &retryFailure)
+	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-ok")}, runtimedelivery.StateDelivered, nil)
+	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-ok")}, runtimedelivery.StateDelivered, nil)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO dead_letters (
 			original_event_id, delivery_id, claim_version, original_event, original_payload, flow_instance,
@@ -671,14 +663,8 @@ func TestRunForkPlanner_DeadLetterClassificationUsesExactSiblingDeliveryID(t *te
 	at := time.Unix(1700000255, 0).UTC()
 	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
-	deadRoute := events.DeliveryRoute{
-		SubscriberType: "agent", SubscriberID: "agent-shared",
-		Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/dead", EntityID: uuid.NewString()},
-	}
-	deliveredRoute := events.DeliveryRoute{
-		SubscriberType: "agent", SubscriberID: "agent-shared",
-		Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/delivered", EntityID: uuid.NewString()},
-	}
+	deadRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-shared"), Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/dead", EntityID: uuid.NewString()}}
+	deliveredRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-shared"), Target: events.RouteIdentity{FlowID: "flow-a", FlowInstance: "flow-a/delivered", EntityID: uuid.NewString()}}
 	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "route_failed", nil)
 	dead := seedDeliveryStateFixture(t, ctx, pg, event, deadRoute, runtimedelivery.StateExhausted, &failure)
 	delivered := seedDeliveryStateFixture(t, ctx, pg, event, deliveredRoute, runtimedelivery.StateDelivered, nil)
@@ -844,8 +830,8 @@ func TestRunForkPlanner_AccountsForPlatformReceiptAndExactDeliveryOutcomes(t *te
 	`, eventID, at); err != nil {
 		t.Fatalf("seed platform processing fact: %v", err)
 	}
-	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-a"}, runtimedelivery.StateDelivered, nil)
-	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-done"}, runtimedelivery.StateDelivered, nil)
+	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-a")}, runtimedelivery.StateDelivered, nil)
+	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-done")}, runtimedelivery.StateDelivered, nil)
 
 	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})

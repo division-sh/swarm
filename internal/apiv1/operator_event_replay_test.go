@@ -255,10 +255,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					originalID, events.EventType("scan.requested"), eventtest.Producer(events.EventProducerAgent, "origin-agent"), "event-owned-task",
 					json.RawMessage(`{"task_id":"payload-owned-task","topic":"medicine"}`), 4, runID, parentID, envelope, createdAt,
 				), "mock")
-				originalRoute := events.DeliveryRoute{
-					SubscriberType: "agent", SubscriberID: agentID,
-					AgentIdentity: agentIdentity, Target: deliveryTarget,
-				}
+				originalRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: agentIdentity, Target: deliveryTarget}
 				storetest.CommitSemanticEvent(t, ctx, f.store, parent)
 				storetest.CommitSemanticEventWithRoutes(t, ctx, f.store, original,
 					[]events.DeliveryRoute{originalRoute},
@@ -401,17 +398,13 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 				t.Fatal(err)
 			}
 			routes := []events.DeliveryRoute{
-				{
-					SubscriberType: "agent", SubscriberID: agentID,
-					AgentIdentity: identity,
-					Target:        events.RouteIdentity{FlowID: "target-flow", FlowInstance: identity.FlowInstance(), EntityID: uuid.NewString()},
-					Context:       events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-first"}}, PayloadProjection: firstProjection,
+				{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity,
+					Target:  events.RouteIdentity{FlowID: "target-flow", FlowInstance: identity.FlowInstance(), EntityID: uuid.NewString()},
+					Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-first"}}, PayloadProjection: firstProjection,
 				},
-				{
-					SubscriberType: "agent", SubscriberID: agentID,
-					AgentIdentity: identity,
-					Target:        events.RouteIdentity{FlowID: "target-flow", FlowInstance: identity.FlowInstance(), EntityID: uuid.NewString()},
-					Context:       events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-second"}}, PayloadProjection: secondProjection,
+				{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity,
+					Target:  events.RouteIdentity{FlowID: "target-flow", FlowInstance: identity.FlowInstance(), EntityID: uuid.NewString()},
+					Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-second"}}, PayloadProjection: secondProjection,
 				},
 			}
 			parent := eventtest.InExecutionMode(eventtest.PersistedRuntimeControlForProducer(
@@ -1003,9 +996,7 @@ func TestOperatorEventReplaySubsetAndFailClosedCases(t *testing.T) {
 			"",
 			events.EventEnvelope{EntityID: runID},
 			time.Now().UTC())
-		storetest.CommitSemanticEventWithRoutes(t, ctx, pg, nodeOnlyEvent, []events.DeliveryRoute{{
-			SubscriberType: string(runtimedelivery.SubscriberNode), SubscriberID: "workflow-runtime",
-		}}, runtimepipelineobligation.ScopeSubscribed)
+		storetest.CommitSemanticEventWithRoutes(t, ctx, pg, nodeOnlyEvent, []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("workflow-runtime")}}, runtimepipelineobligation.ScopeSubscribed)
 		handler := eventReplayTestHandler(t, pg, bus)
 		resp := rpcCall(t, handler, eventReplayBody(eventID, nil, "idem-node-only-pending"))
 		if resp.Error == nil {
@@ -1384,11 +1375,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 	)
 	routes := make([]events.DeliveryRoute, 0, len(subscribers))
 	for _, subscriber := range subscribers {
-		routes = append(routes, events.DeliveryRoute{
-			SubscriberType: "agent",
-			SubscriberID:   subscriber,
-			AgentIdentity:  operatorReplayAgentIdentity(t, subscriber),
-		})
+		routes = append(routes, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(subscriber), AgentIdentity: operatorReplayAgentIdentity(t, subscriber)})
 	}
 	scope := runtimepipelineobligation.ScopeDirect
 	if len(routes) > 0 {
@@ -1396,7 +1383,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, semanticEvent, routes, scope)
 	for _, route := range routes {
-		subscriber := route.SubscriberID
+		subscriber := route.Recipient.ID()
 		switch status {
 		case runtimedelivery.StatusPending:
 			continue

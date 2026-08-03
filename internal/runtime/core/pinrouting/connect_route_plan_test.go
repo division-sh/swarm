@@ -61,14 +61,11 @@ func TestConnectReceiverPinAdmissionOwnsRuntimeCollisionIdentity(t *testing.T) {
 			authoredLocation: "package.yaml:10",
 		}
 	}
-	route := events.DeliveryRoute{
-		SubscriberType: "node",
-		SubscriberID:   "consumer-node",
-		Target: events.RouteIdentity{
-			FlowID:       "consumer",
-			FlowInstance: "consumer",
-			EntityID:     flowidentity.EntityID("consumer"),
-		},
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
+		FlowID:       "consumer",
+		FlowInstance: "consumer",
+		EntityID:     flowidentity.EntityID("consumer"),
+	},
 	}
 	var admission ConnectReceiverPinAdmission
 	if err := admission.Admit(plan("accepted", "work.accepted"), []events.DeliveryRoute{route}); err != nil {

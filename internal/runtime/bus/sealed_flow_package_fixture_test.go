@@ -171,18 +171,11 @@ func assertSealedFlowPackageRuntimeDelivery(t *testing.T, source semanticview.So
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if carriers := eb.RouteTable().Resolve("consumer/work.ready"); !sealedFlowPackageSubscriberListContains(carriers, "consumer-node", "consumer", "receiver_carrier") {
-		t.Fatalf("receiver carrier route consumer/work.ready = %#v, want consumer-node receiver_carrier", carriers)
-	}
-
-	wantRoute := events.DeliveryRoute{
-		SubscriberType: "node",
-		SubscriberID:   "consumer-node",
-		Target: events.RouteIdentity{
-			FlowID:       "consumer",
-			FlowInstance: "consumer",
-			EntityID:     runtimeflowidentity.EntityID("consumer"),
-		},
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
+		FlowID:       "consumer",
+		FlowInstance: "consumer",
+		EntityID:     runtimeflowidentity.EntityID("consumer"),
+	},
 	}
 	producerSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{
 		FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("sealed-producer"),
@@ -280,10 +273,7 @@ func (s *sealedFlowPackageRouteStore) InsertEventDeliveries(_ context.Context, e
 	}
 	routes := make([]events.DeliveryRoute, 0, len(agentIDs))
 	for _, agentID := range agentIDs {
-		routes = append(routes, events.DeliveryRoute{
-			SubscriberType: "agent",
-			SubscriberID:   agentID,
-		})
+		routes = append(routes, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID)})
 	}
 	s.routes[eventID] = events.NormalizeDeliveryRoutes(routes)
 	return nil
@@ -300,8 +290,8 @@ func (s *sealedFlowPackageRouteStore) InsertEventDeliveryRoutes(_ context.Contex
 func (s *sealedFlowPackageRouteStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
 	var out []string
 	for _, route := range events.NormalizeDeliveryRoutes(s.routes[eventID]) {
-		if route.SubscriberType == "agent" {
-			out = append(out, route.SubscriberID)
+		if route.Recipient.IsAgent() {
+			out = append(out, route.Recipient.ID())
 		}
 	}
 	return out, nil
@@ -331,7 +321,7 @@ func sealedFlowPackageDeliveryRoutesContain(routes []events.DeliveryRoute, want 
 
 func sealedFlowPackageSubscriberListContains(subscribers []runtimebus.Subscriber, id, path, source string) bool {
 	for _, subscriber := range subscribers {
-		if subscriber.ID == id && subscriber.Path == path && subscriber.RouteSource == source {
+		if subscriber.Recipient.ID() == id && subscriber.Path == path && subscriber.RouteSourceCode() == source {
 			return true
 		}
 	}

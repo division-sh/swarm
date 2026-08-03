@@ -214,7 +214,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				eventID, "task.requested", "test", "", []byte(`{}`), 0,
 				templateInstanceDeliveryRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
 			)
-			nodeRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "complete-task"}
+			nodeRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("complete-task")}
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimepipelineobligation.ScopeSubscribed)
 
 			processOwner := worklifetime.NewProcess()
@@ -311,10 +311,10 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 		wantDenied bool
 	}{
 		{name: "pending_agent", route: startupRecoveryAgentRoute(t, "startup-agent"), state: "pending", wantDenied: true},
-		{name: "pending_node", route: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "complete-task"}, state: "pending", wantDenied: true},
+		{name: "pending_node", route: events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("complete-task")}, state: "pending", wantDenied: true},
 		{name: "future_failed", route: startupRecoveryAgentRoute(t, "startup-agent"), state: "future_failed", wantDenied: true},
 		{name: "busy_in_progress", route: startupRecoveryAgentRoute(t, "startup-agent"), state: "busy", wantDenied: true},
-		{name: "reclaimable_in_progress", route: events.DeliveryRoute{SubscriberType: "node", SubscriberID: "complete-task"}, state: "reclaimable", wantDenied: true},
+		{name: "reclaimable_in_progress", route: events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("complete-task")}, state: "reclaimable", wantDenied: true},
 		{name: "foreign_bundle_excluded", route: startupRecoveryAgentRoute(t, "foreign-agent"), state: "pending", foreign: true},
 		{name: "empty_control"},
 	}
@@ -514,7 +514,7 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 				events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("pipeline-handoff-cleanup-entity-"+backend)),
 				time.Now().UTC(),
 			)
-			route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "complete-task"}
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("complete-task")}
 			storetest.CommitSemanticEventWithInitialFacts(
 				t, ctx, selected, event, []events.DeliveryRoute{route},
 				runtimepipelineobligation.ScopeSubscribed, nil,
@@ -614,7 +614,7 @@ func startupRecoveryAgentRoute(t *testing.T, agentID string) events.DeliveryRout
 	if err != nil {
 		t.Fatalf("construct startup recovery agent identity: %v", err)
 	}
-	return events.DeliveryRoute{SubscriberType: "agent", SubscriberID: agentID, AgentIdentity: identity}
+	return events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity}
 }
 
 func startupRecoverySourceContext(source runtimecorrelation.BundleSourceFact, runID string) context.Context {
@@ -816,7 +816,7 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 				eventtest.ConcreteTemplateRoutingSource(target.FlowID, target.FlowInstance, target.EntityID),
 				time.Now().UTC(),
 			)
-			route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: target}
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("repo-scaffold-node"), Target: target}
 			storetest.CommitSemanticEventWithInitialFacts(
 				t, ctx, selected, event, []events.DeliveryRoute{route},
 				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
@@ -917,7 +917,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				eventtest.ConcreteTemplateRoutingSource(poisonTarget.FlowID, poisonTarget.FlowInstance, poisonTarget.EntityID),
 				time.Now().UTC().Add(-time.Minute),
 			)
-			poisonRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: poisonTarget}
+			poisonRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("repo-scaffold-node"), Target: poisonTarget}
 			storetest.CommitSemanticEventWithInitialFacts(
 				t, ctx, selected, poison, []events.DeliveryRoute{poisonRoute},
 				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
@@ -932,7 +932,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 				eventtest.ConcreteTemplateRoutingSource(healthyTarget.FlowID, healthyTarget.FlowInstance, healthyTarget.EntityID),
 				time.Now().UTC(),
 			)
-			healthyRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: healthyTarget}
+			healthyRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("repo-scaffold-node"), Target: healthyTarget}
 			storetest.CommitSemanticEventWithInitialFacts(
 				t, ctx, selected, healthy, []events.DeliveryRoute{healthyRoute},
 				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
@@ -1069,7 +1069,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				eventtest.ConcreteTemplateRoutingSource(target.FlowID, target.FlowInstance, target.EntityID),
 				time.Now().UTC(),
 			)
-			route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "repo-scaffold-node", Target: target}
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("repo-scaffold-node"), Target: target}
 			storetest.CommitSemanticEventWithInitialFacts(
 				t, ctx, selected, event, []events.DeliveryRoute{route},
 				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),

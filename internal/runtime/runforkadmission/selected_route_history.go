@@ -53,7 +53,7 @@ func AdmitSelectedContractRouteHistory(req SelectedContractRouteHistoryRequest) 
 	if len(connectIssues) != 0 {
 		return runfork.RunForkSelectedContractRouteAdmission{}, fmt.Errorf("derive selected route admission connect routes: %#v", connectIssues)
 	}
-	routeEvents, incompleteRoutes := selectedRouteHistoryEvents(routeTable, connectGraph, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
+	routeEvents, incompleteRoutes := selectedRouteHistoryEvents(routeTable, selectedRouteHistoryEventEvidence(req.Plan, req.FrontierAdmission))
 	dynamicFlowInstances := selectedRouteHistoryDynamicFlowInstances(req.Source, req.Plan, req.FrontierAdmission)
 	blockers := []runfork.RunForkUnsupportedBlocker{{
 		Code:    runfork.RunForkBlockerSelectedContractRouteAdmissionNonMutating,
@@ -169,7 +169,7 @@ func selectedRouteHistoryEventEvidence(plan runfork.RunForkPlan, frontier runfor
 	return out
 }
 
-func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectGraph runtimepinrouting.CompiledConnectGraph, events []selectedRouteHistoryEvent) ([]runfork.RunForkSelectedContractRouteEvent, bool) {
+func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, events []selectedRouteHistoryEvent) ([]runfork.RunForkSelectedContractRouteEvent, bool) {
 	out := make([]runfork.RunForkSelectedContractRouteEvent, 0, len(events))
 	incomplete := false
 	for _, event := range events {
@@ -181,17 +181,21 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectGraph 
 			})
 			continue
 		}
-		lookups := contractFrontierRouteLookups(event.eventName, event.routingSource, connectGraph)
-		eventIncomplete := contractFrontierLookupsRequireRuntimeResolution(lookups)
+		evaluation := contractFrontierRouteEvaluation(routeTable, event.eventName, event.routingSource)
+		eventIncomplete := evaluation.requiresRuntimeResolution
 		incomplete = incomplete || eventIncomplete
 		disposition := runfork.RunForkSelectedContractDispositionEvidenceOnly
 		if eventIncomplete {
 			disposition = runfork.RunForkSelectedContractDispositionFailClosed
 		}
+		recipients := evaluation.recipients
+		if !evaluation.connectMatched {
+			recipients = contractFrontierRecipients(routeTable.Resolve(event.eventName))
+		}
 		out = append(out, runfork.RunForkSelectedContractRouteEvent{
 			SourceEventID:     event.sourceEventID,
 			EventName:         event.eventName,
-			DerivedRecipients: contractFrontierRecipients(resolveContractFrontierRoutes(routeTable, lookups)),
+			DerivedRecipients: recipients,
 			Disposition:       disposition,
 		})
 	}
@@ -200,11 +204,10 @@ func selectedRouteHistoryEvents(routeTable *runtimebus.RouteTable, connectGraph 
 
 func selectedRouteHistoryStampedRecipients(routes []events.DeliveryRoute) []runfork.RunForkContractFrontierRecipient {
 	type recipientKey struct {
-		subscriberType string
-		subscriberID   string
-		path           string
-		routeSource    string
-		agentIdentity  runtimeagentidentity.Identity
+		recipient     events.DeliveryRecipient
+		path          string
+		routeSource   string
+		agentIdentity runtimeagentidentity.Identity
 	}
 	seen := map[recipientKey]runfork.RunForkContractFrontierRecipient{}
 	for _, route := range routes {
@@ -213,11 +216,10 @@ func selectedRouteHistoryStampedRecipients(routes []events.DeliveryRoute) []runf
 			continue
 		}
 		key := recipientKey{
-			subscriberType: recipient.SubscriberType,
-			subscriberID:   recipient.SubscriberID,
-			path:           recipient.Path,
-			routeSource:    recipient.RouteSource,
-			agentIdentity:  recipient.AgentIdentity,
+			recipient:     recipient.Recipient,
+			path:          recipient.Path,
+			routeSource:   recipient.RouteSourceCode(),
+			agentIdentity: recipient.AgentIdentity,
 		}
 		seen[key] = recipient
 	}
@@ -226,11 +228,11 @@ func selectedRouteHistoryStampedRecipients(routes []events.DeliveryRoute) []runf
 		out = append(out, recipient)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].SubscriberType != out[j].SubscriberType {
-			return out[i].SubscriberType < out[j].SubscriberType
+		if out[i].Recipient.Code() != out[j].Recipient.Code() {
+			return out[i].Recipient.Code() < out[j].Recipient.Code()
 		}
-		if out[i].SubscriberID != out[j].SubscriberID {
-			return out[i].SubscriberID < out[j].SubscriberID
+		if out[i].Recipient.ID() != out[j].Recipient.ID() {
+			return out[i].Recipient.ID() < out[j].Recipient.ID()
 		}
 		return out[i].Path < out[j].Path
 	})

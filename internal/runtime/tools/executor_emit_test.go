@@ -153,8 +153,8 @@ func (s *emitRoutePlanStore) finalizePublish(_ context.Context, req runtimebus.C
 func (s *emitRoutePlanStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
 	var out []string
 	for _, route := range s.routes[eventID] {
-		if route.SubscriberType == "agent" {
-			out = append(out, route.SubscriberID)
+		if route.Recipient.IsAgent() {
+			out = append(out, route.Recipient.ID())
 		}
 	}
 	return out, nil
@@ -1003,7 +1003,7 @@ func TestHandleEmitTool_RoutesTypedSameFlowOutputToNodeConsumer(t *testing.T) {
 		t.Fatalf("handleEmitTool: %v", err)
 	}
 	eventID := emitToolResultString(t, out, "event_id")
-	if !emitDeliveryRoutesContain(store.routes[eventID], events.DeliveryRoute{SubscriberType: "node", SubscriberID: "test-node"}) {
+	if !emitDeliveryRoutesContain(store.routes[eventID], events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("test-node")}) {
 		t.Fatalf("persisted delivery routes = %#v, want typed same-flow node consumer", store.routes[eventID])
 	}
 }
@@ -1052,14 +1052,11 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	if got, want := string(persisted.Type()), "producer/deploy.done"; got != want {
 		t.Fatalf("persisted event type = %q, want %q", got, want)
 	}
-	wantRoute := events.DeliveryRoute{
-		SubscriberType: "node",
-		SubscriberID:   "consumer-node",
-		Target: events.RouteIdentity{
-			FlowID:       "consumer",
-			FlowInstance: "consumer",
-			EntityID:     runtimeflowidentity.EntityID("consumer"),
-		},
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
+		FlowID:       "consumer",
+		FlowInstance: "consumer",
+		EntityID:     runtimeflowidentity.EntityID("consumer"),
+	},
 	}
 	if got := persisted.TargetRoute().Normalized(); got != wantRoute.Target.Normalized() {
 		t.Fatalf("persisted event target route = %#v, want canonical connect target %#v", got, wantRoute.Target)
@@ -1122,11 +1119,7 @@ func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflig
 	if got := persisted.TargetRoute(); got != parentRoute {
 		t.Fatalf("persisted target route = %#v, want parent route %#v", got, parentRoute)
 	}
-	wantRoute := events.DeliveryRoute{
-		SubscriberType: "node",
-		SubscriberID:   "root-receiver",
-		Target:         parentRoute,
-	}
+	wantRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("root-receiver"), Target: parentRoute}
 	if !emitDeliveryRoutesContain(store.routes[eventID], wantRoute) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", store.routes[eventID], wantRoute)
 	}

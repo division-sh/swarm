@@ -1298,7 +1298,7 @@ func (p *mutatingProbeEventPublisher) PublishDirectRoutes(_ context.Context, evt
 	p.state.recordEffect()
 	deliveries := make([]store.OperatorEventDelivery, 0, len(routes))
 	for i, route := range routes {
-		recipient := route.SubscriberID
+		recipient := route.Recipient.ID()
 		identity, err := route.Identity()
 		if err != nil {
 			return err
@@ -1329,7 +1329,7 @@ func (p *mutatingProbeEventPublisher) CheckDirectRoutes(_ context.Context, _ eve
 			missing[recipient] = struct{}{}
 		}
 		for _, route := range status.Requested {
-			if _, ok := missing[route.SubscriberID]; ok {
+			if _, ok := missing[route.Recipient.ID()]; ok {
 				status.Missing = append(status.Missing, route)
 			} else {
 				status.Deliverable = append(status.Deliverable, route)
@@ -1405,9 +1405,8 @@ func mutatingProbeOriginalEvent(t testing.TB, eventID string, subscribers []stri
 	for _, subscriber := range subscribers {
 		identity := agentidentitytest.Declared(t, subscriber, "test-bundle", "research", "inst-1", "research/inst-1")
 		route := events.DeliveryRoute{
-			SubscriberType: eventReplaySubscriberTypeAgent,
-			SubscriberID:   subscriber,
-			AgentIdentity:  identity,
+			Recipient:     events.MustAgentDeliveryRecipient(subscriber),
+			AgentIdentity: identity,
 		}
 		deliveries = append(deliveries, store.OperatorEventDelivery{
 			DeliveryID:     "original-" + subscriber,

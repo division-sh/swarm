@@ -130,11 +130,7 @@ func TestDeliveryContinuationUsesClosedReceiverProjection(t *testing.T) {
 		uuid.NewString(), events.EventType("custom.continuation_receiver_projection"), "receiver-projection-test", "", []byte(`{}`), 0,
 		"", "", events.EventEnvelope{}, time.Now().UTC(),
 	)
-	route := events.DeliveryRoute{
-		SubscriberType: "node",
-		SubscriberID:   "workflow-node",
-		Context:        events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-continuation"}},
-	}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("workflow-node"), Context: events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-continuation"}}}
 	if err := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), evt, route); err != nil {
 		t.Fatalf("dispatch continuation receiver: %v", err)
 	}
@@ -177,7 +173,7 @@ func TestAgentRouteUsesClosedReceiverProjection(t *testing.T) {
 	if err := validateClosedReceiverContext(delivery.Context(), evt); err != nil {
 		t.Fatal(err)
 	}
-	if route, ok := runtimedeliveryRouteFromContext(delivery.Context()); !ok || route.SubscriberType != "agent" || route.SubscriberID != "agent-a" {
+	if route, ok := runtimedeliveryRouteFromContext(delivery.Context()); !ok || !route.Recipient.IsAgent() || route.Recipient.ID() != "agent-a" {
 		t.Fatalf("agent receiver route = %#v, %v", route, ok)
 	}
 	if err := delivery.Complete(); err != nil {
@@ -193,11 +189,7 @@ func TestInternalSubscriptionUsesClosedReceiverProjection(t *testing.T) {
 	eventType := events.EventType("custom.internal_receiver_projection")
 	deliveries := subscribeInternalDeliveriesForTest(t, eventBus, "internal-owner", eventType)
 	evt := receiverProjectionEventForType("internal-route", eventType)
-	route := events.DeliveryRoute{
-		SubscriberType: "node",
-		SubscriberID:   "internal-owner",
-		Context:        evt.DeliveryContext(),
-	}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("internal-owner"), Context: evt.DeliveryContext()}
 	if err := eventBus.deliverToRecipientsWithRoutes(hostilePublisherContext(t), evt, []string{"internal-owner"}, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("publish through internal receiver: %v", err)
 	}
@@ -205,7 +197,7 @@ func TestInternalSubscriptionUsesClosedReceiverProjection(t *testing.T) {
 	if err := validateClosedReceiverContext(delivery.Context(), evt); err != nil {
 		t.Fatal(err)
 	}
-	if route, ok := runtimedeliveryRouteFromContext(delivery.Context()); !ok || route.SubscriberType != "node" || route.SubscriberID != "internal-owner" {
+	if route, ok := runtimedeliveryRouteFromContext(delivery.Context()); !ok || !route.Recipient.IsNode() || route.Recipient.ID() != "internal-owner" {
 		t.Fatalf("internal receiver route = %#v, %v", route, ok)
 	}
 	if err := delivery.Complete(); err != nil {

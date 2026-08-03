@@ -87,9 +87,8 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 			return nil, fmt.Errorf("agent_message target %s: %w", targetID, err)
 		}
 		targetRoutes = append(targetRoutes, events.DeliveryRoute{
-			SubscriberType: "agent",
-			SubscriberID:   targetIdentity.AgentID(),
-			AgentIdentity:  targetIdentity,
+			Recipient:     events.MustAgentDeliveryRecipient(targetIdentity.AgentID()),
+			AgentIdentity: targetIdentity,
 		})
 	}
 

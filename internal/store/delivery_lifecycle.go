@@ -84,8 +84,8 @@ func (s *SQLiteRuntimeStore) InspectDeliveryRecovery(
 }
 
 func (s *PostgresStore) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
-	if _, err := runtimedelivery.ParseSubscriberClass(route.Normalized().SubscriberType); err != nil {
-		return runtimedelivery.ClaimResult{}, err
+	if route.Normalized().Recipient.Empty() {
+		return runtimedelivery.ClaimResult{}, fmt.Errorf("delivery recipient is required")
 	}
 	var result runtimedelivery.ClaimResult
 	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -105,8 +105,8 @@ func (s *PostgresStore) ClaimDelivery(ctx context.Context, authority runtimedeli
 }
 
 func (s *SQLiteRuntimeStore) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
-	if _, err := runtimedelivery.ParseSubscriberClass(route.Normalized().SubscriberType); err != nil {
-		return runtimedelivery.ClaimResult{}, err
+	if route.Normalized().Recipient.Empty() {
+		return runtimedelivery.ClaimResult{}, fmt.Errorf("delivery recipient is required")
 	}
 	var result runtimedelivery.ClaimResult
 	err := s.runEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {

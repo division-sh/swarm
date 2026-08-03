@@ -143,8 +143,8 @@ func (s *routePersistenceTestStore) InsertEventDeliveryRoutes(_ context.Context,
 	}
 	recipients := make([]string, 0, len(routes))
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
-		if route.SubscriberID != "" {
-			recipients = append(recipients, route.SubscriberID)
+		if !route.Recipient.Empty() {
+			recipients = append(recipients, route.Recipient.ID())
 		}
 	}
 	s.deliveries[eventID] = recipients

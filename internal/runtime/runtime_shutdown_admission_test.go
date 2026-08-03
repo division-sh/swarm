@@ -213,10 +213,7 @@ func (s *runtimeShutdownDeliveryStore) seedAgentDelivery(
 		t.Fatalf("seed runtime delivery event: %v", err)
 	}
 	s.events[evt.ID()] = evt
-	route := events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberAgent),
-		SubscriberID:   agentID,
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID)}
 	if err := s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
 		_, err := s.adapter.CommitInitial(
 			story,

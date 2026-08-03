@@ -606,10 +606,10 @@ func fanOutPinRouteDeliveryRoutesContain(routes []events.DeliveryRoute, target e
 	nodeFound := false
 	agentFound := false
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
-		if route.SubscriberType == "node" && route.SubscriberID == "account-node" && route.Target == target {
+		if route.Recipient.IsNode() && route.Recipient.ID() == "account-node" && route.Target == target {
 			nodeFound = true
 		}
-		if route.SubscriberType == "agent" && route.SubscriberID == "account-worker" &&
+		if route.Recipient.IsAgent() && route.Recipient.ID() == "account-worker" &&
 			route.AgentIdentity == agentIdentity && route.Target == target {
 			agentFound = true
 		}

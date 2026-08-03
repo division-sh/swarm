@@ -403,6 +403,69 @@ func (i ConnectReceiverPinIdentity) Equal(other ConnectReceiverPinIdentity) bool
 }
 func (i ConnectReceiverPinIdentity) Diagnostic() string { return i.diagnostic }
 
+type ConnectRecipientKind uint8
+
+const (
+	ConnectRecipientNode ConnectRecipientKind = iota + 1
+	ConnectRecipientAgent
+)
+
+// ConnectRecipient is an admitted receiver projection. The graph owns the
+// receiver pin and target association; consumers may only inspect the typed
+// recipient selected by that evaluation.
+type ConnectRecipient struct {
+	kind          ConnectRecipientKind
+	id            string
+	path          string
+	agentIdentity agentidentity.Identity
+	handlerEvent  events.EventType
+}
+
+func NewConnectNodeRecipient(id, path string) (ConnectRecipient, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ConnectRecipient{}, fmt.Errorf("connect node recipient id is required")
+	}
+	return ConnectRecipient{kind: ConnectRecipientNode, id: id, path: eventidentity.Normalize(path)}, nil
+}
+
+func NewConnectAgentRecipient(id, path string, identity agentidentity.Identity) (ConnectRecipient, error) {
+	id = strings.TrimSpace(id)
+	identity = identity.Normalize()
+	if id == "" {
+		return ConnectRecipient{}, fmt.Errorf("connect agent recipient id is required")
+	}
+	if err := identity.Validate(); err != nil || identity.AgentID() != id {
+		return ConnectRecipient{}, fmt.Errorf("connect agent recipient requires its exact concrete identity")
+	}
+	return ConnectRecipient{kind: ConnectRecipientAgent, id: id, path: eventidentity.Normalize(path), agentIdentity: identity}, nil
+}
+
+func (r ConnectRecipient) Kind() ConnectRecipientKind            { return r.kind }
+func (r ConnectRecipient) ID() string                            { return r.id }
+func (r ConnectRecipient) Path() string                          { return r.path }
+func (r ConnectRecipient) AgentIdentity() agentidentity.Identity { return r.agentIdentity }
+func (r ConnectRecipient) HandlerEvent() events.EventType        { return r.handlerEvent }
+
+type ConnectRecipientRegistration struct {
+	receiverPin ConnectReceiverPinIdentity
+	recipient   ConnectRecipient
+}
+
+type ConnectRecipientEvaluation struct {
+	matched                   bool
+	requiresRuntimeResolution bool
+	recipients                []ConnectRecipient
+}
+
+func (e ConnectRecipientEvaluation) Matched() bool { return e.matched }
+func (e ConnectRecipientEvaluation) RequiresRuntimeResolution() bool {
+	return e.requiresRuntimeResolution
+}
+func (e ConnectRecipientEvaluation) Recipients() []ConnectRecipient {
+	return append([]ConnectRecipient(nil), e.recipients...)
+}
+
 func (e ConnectRoutePlanEndpoint) receiverPinIdentity() ConnectReceiverPinIdentity {
 	if e.pin.direction != ConnectEndpointRoleConsumer || e.pin.value == "" || e.event.value == "" {
 		return ConnectReceiverPinIdentity{}
@@ -442,6 +505,10 @@ func (e ConnectRoutePlanEndpoint) receiverEventTypes(target events.RouteIdentity
 	return out
 }
 
+func (p ConnectRoutePlan) ReceiverPinIdentity() ConnectReceiverPinIdentity {
+	return p.receiver.receiverPinIdentity()
+}
+
 func (e ConnectRoutePlanEndpoint) subscriberPathMatchesReceiver(subscriberPath string, target events.RouteIdentity) bool {
 	receiverPath := e.flowPath.value
 	if receiverPath == "" {
@@ -450,14 +517,6 @@ func (e ConnectRoutePlanEndpoint) subscriberPathMatchesReceiver(subscriberPath s
 	target = target.Normalized()
 	return subscriberPath != "" && receiverPath != "" && target.FlowInstance != "" && subscriberPath == receiverPath &&
 		(target.FlowInstance == receiverPath || runtimeflowidentity.SemanticScopeFromInstancePath(target.FlowInstance) == receiverPath)
-}
-
-func (p ConnectRoutePlan) ReceiverPinIdentity() ConnectReceiverPinIdentity {
-	return p.receiver.receiverPinIdentity()
-}
-
-func (p ConnectRoutePlan) ReceiverEventTypes(target events.RouteIdentity) []events.EventType {
-	return p.receiver.receiverEventTypes(target)
 }
 
 func (p ConnectRoutePlan) ReceiverLocalEvent() events.EventType { return p.receiver.event.value }
@@ -503,10 +562,6 @@ func (p ConnectRoutePlan) SourceParentRoute(sourceEvent SourceEvent) runtimeflow
 		FlowInstance: sourceEvent.route.FlowInstance,
 		EntityID:     sourceEvent.route.EntityID,
 	}
-}
-
-func (p ConnectRoutePlan) SubscriberPathMatchesFanInReceiver(subscriberPath string, target events.RouteIdentity) bool {
-	return p.fanIn != nil && p.receiver.subscriberPathMatchesReceiver(subscriberPath, target)
 }
 
 func (p ConnectRoutePlan) ReplyRole() ConnectReplyRole {
@@ -1000,8 +1055,8 @@ type ConnectReceiverPinCollision struct {
 }
 
 func (c ConnectReceiverPinCollision) SourceDiagnostic() string { return c.sourceDiagnostic }
-func (c ConnectReceiverPinCollision) SubscriberType() string   { return c.route.SubscriberType }
-func (c ConnectReceiverPinCollision) SubscriberID() string     { return c.route.SubscriberID }
+func (c ConnectReceiverPinCollision) SubscriberType() string   { return c.route.Recipient.Code() }
+func (c ConnectReceiverPinCollision) SubscriberID() string     { return c.route.Recipient.ID() }
 func (c ConnectReceiverPinCollision) Target() events.RouteIdentity {
 	return c.route.Target.Normalized()
 }
@@ -1170,56 +1225,130 @@ type ConnectEdgeEvidence struct {
 	resolution runtimecontracts.FlowInputResolutionMode
 }
 
-type ConnectReceiverKind uint8
-
-const (
-	ConnectReceiverCarrier ConnectReceiverKind = iota + 1
-	ConnectReceiverRoot
-)
-
-type ConnectReceiverLookup struct {
-	events     []events.EventType
-	kind       ConnectReceiverKind
-	resolution ConnectRoutePlanResolutionKind
-}
-
-func (l ConnectReceiverLookup) EventTypes() []events.EventType {
-	return append([]events.EventType(nil), l.events...)
-}
-func (l ConnectReceiverLookup) Kind() ConnectReceiverKind { return l.kind }
-func (l ConnectReceiverLookup) RequiresRuntimeResolution() bool {
-	return l.resolution != ConnectResolutionStatic
-}
-
-func (g CompiledConnectGraph) ReceiverLookup(plan ConnectRoutePlan) ConnectReceiverLookup {
-	kind := ConnectReceiverCarrier
-	if plan.receiver.IsRoot() {
-		kind = ConnectReceiverRoot
+func (g CompiledConnectGraph) AdmitReceiverRecipient(flowID string, eventType events.EventType, recipient ConnectRecipient) []ConnectRecipientRegistration {
+	flowID = strings.TrimSpace(flowID)
+	eventType = events.EventType(eventidentity.Normalize(string(eventType)))
+	if eventType == "" || recipient.id == "" || recipient.kind == 0 {
+		return nil
 	}
-	lookup := ConnectReceiverLookup{kind: kind, resolution: connectRoutePlanResolutionKind(plan)}
-	if plan.RequiresRuntimeResolution() {
-		return lookup
-	}
-	seen := map[events.EventType]struct{}{}
-	add := func(eventType events.EventType) {
-		if eventType != "" {
-			seen[eventType] = struct{}{}
+	seen := map[ConnectReceiverPinIdentity]struct{}{}
+	out := make([]ConnectRecipientRegistration, 0, 1)
+	for _, plan := range g.plans {
+		role := connectEndpointRole(ConnectEndpointRoleConsumer, plan.receiver)
+		if !role.Matches(flowID, eventType) {
+			continue
 		}
-	}
-	for _, eventType := range plan.receiver.receiverEventTypes(plan.target) {
-		add(eventType)
-	}
-	for _, target := range plan.targetSet {
-		for _, eventType := range plan.receiver.receiverEventTypes(target) {
-			add(eventType)
+		pin := plan.ReceiverPinIdentity()
+		if pin.Empty() {
+			continue
 		}
+		if _, exists := seen[pin]; exists {
+			continue
+		}
+		seen[pin] = struct{}{}
+		out = append(out, ConnectRecipientRegistration{receiverPin: pin, recipient: recipient})
 	}
-	lookup.events = make([]events.EventType, 0, len(seen))
-	for eventType := range seen {
-		lookup.events = append(lookup.events, eventType)
+	return out
+}
+
+func (g CompiledConnectGraph) EvaluateMaterializedRecipients(plan ConnectRoutePlan, targets []events.RouteIdentity, registrations []ConnectRecipientRegistration) ConnectRecipientEvaluation {
+	evaluation := ConnectRecipientEvaluation{matched: true}
+	if plan.RequiresRuntimeResolution() && len(targets) == 0 {
+		evaluation.requiresRuntimeResolution = true
+		return evaluation
 	}
-	sort.Slice(lookup.events, func(i, j int) bool { return lookup.events[i] < lookup.events[j] })
-	return lookup
+	if len(targets) == 0 {
+		targets = []events.RouteIdentity{{}}
+	}
+	for _, target := range targets {
+		evaluation.recipients = append(evaluation.recipients, evaluateConnectPlanRecipients(plan, target, registrations)...)
+	}
+	evaluation.recipients = normalizeConnectRecipients(evaluation.recipients)
+	return evaluation
+}
+
+func (g CompiledConnectGraph) EvaluateSourceRecipients(sourceEvent SourceEvent, registrations []ConnectRecipientRegistration) ConnectRecipientEvaluation {
+	evaluation := ConnectRecipientEvaluation{}
+	for _, plan := range g.MatchingSourceEvent(sourceEvent) {
+		evaluation.matched = true
+		if plan.RequiresRuntimeResolution() {
+			evaluation.requiresRuntimeResolution = true
+			continue
+		}
+		targets := append([]events.RouteIdentity(nil), plan.targetSet...)
+		if !plan.target.Empty() {
+			targets = append([]events.RouteIdentity{plan.target}, targets...)
+		}
+		part := g.EvaluateMaterializedRecipients(plan, targets, registrations)
+		evaluation.recipients = append(evaluation.recipients, part.recipients...)
+	}
+	evaluation.recipients = normalizeConnectRecipients(evaluation.recipients)
+	return evaluation
+}
+
+func evaluateConnectPlanRecipients(plan ConnectRoutePlan, target events.RouteIdentity, registrations []ConnectRecipientRegistration) []ConnectRecipient {
+	target = target.Normalized()
+	pin := plan.ReceiverPinIdentity()
+	if pin.Empty() {
+		return nil
+	}
+	out := make([]ConnectRecipient, 0, len(registrations))
+	for _, registration := range registrations {
+		if !registration.receiverPin.Equal(pin) || !connectRecipientMatchesTarget(plan, registration.recipient, target) {
+			continue
+		}
+		recipient := registration.recipient
+		recipient.handlerEvent = plan.ReceiverLocalEvent()
+		out = append(out, recipient)
+	}
+	return normalizeConnectRecipients(out)
+}
+
+func connectRecipientMatchesTarget(plan ConnectRoutePlan, recipient ConnectRecipient, target events.RouteIdentity) bool {
+	if recipient.id == "" || recipient.kind == 0 {
+		return false
+	}
+	if target.Empty() {
+		return true
+	}
+	if recipient.path == "" {
+		return plan.receiver.IsRoot() && target.FlowInstance == "" && target.FlowID == "" && target.EntityID != ""
+	}
+	if target.FlowInstance == recipient.path {
+		return true
+	}
+	return plan.fanIn != nil && plan.receiver.subscriberPathMatchesReceiver(recipient.path, target)
+}
+
+type connectRecipientIdentity struct {
+	kind          ConnectRecipientKind
+	id            string
+	path          string
+	agentIdentity agentidentity.Identity
+	handlerEvent  events.EventType
+}
+
+func normalizeConnectRecipients(in []ConnectRecipient) []ConnectRecipient {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := map[connectRecipientIdentity]struct{}{}
+	out := make([]ConnectRecipient, 0, len(in))
+	for _, recipient := range in {
+		key := connectRecipientIdentity{
+			kind: recipient.kind, id: recipient.id, path: recipient.path,
+			agentIdentity: recipient.agentIdentity, handlerEvent: recipient.handlerEvent,
+		}
+		if recipient.kind == 0 || recipient.id == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, recipient)
+	}
+	return out
 }
 
 func (e ConnectEdgeEvidence) Producer() ConnectEndpointRole { return e.producer }
@@ -1450,7 +1579,7 @@ func staticConnectReceiverDeliveryRoute(source semanticview.Source, endpoint sem
 		if nodeID == "" {
 			return events.DeliveryRoute{}, false
 		}
-		return events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID, Target: target}, true
+		return events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: target}, true
 	case semanticview.EventEndpointAgent:
 		logicalID := strings.TrimSpace(endpoint.AgentID)
 		agentID, owner, ok := staticConnectReceiverAgent(source, endpoint.FlowID, logicalID)
@@ -1473,10 +1602,9 @@ func staticConnectReceiverDeliveryRoute(source semanticview.Source, endpoint sem
 			return events.DeliveryRoute{}, false
 		}
 		return events.DeliveryRoute{
-			SubscriberType: "agent",
-			SubscriberID:   agentID,
-			AgentIdentity:  identity,
-			Target:         target,
+			Recipient:     events.MustAgentDeliveryRecipient(agentID),
+			AgentIdentity: identity,
+			Target:        target,
 		}, true
 	default:
 		return events.DeliveryRoute{}, false

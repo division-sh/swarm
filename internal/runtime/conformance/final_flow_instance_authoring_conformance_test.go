@@ -173,7 +173,7 @@ func TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysCla
 		"direct_delivery_path",
 		"event_delivery_plan_compatibility",
 		"route_table_resolve",
-		"receiver_carrier",
+		"typed_connect_recipient_evaluation",
 	} {
 		dimension := routeAuthorityDriftSearchDimensionByID(t, &inventory, id)
 		if !dimension.ClassifiedPathsRequired {
@@ -184,7 +184,7 @@ func TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysCla
 		"direct_delivery_path_classification",
 		"event_delivery_plan_compatibility_adapter",
 		"route_table_resolve_role_separation",
-		"receiver_carrier_evidence",
+		"compiled_connect_recipient_evaluation",
 		"live_carriers_internal_subscriptions",
 	} {
 		family := routeAuthorityDriftSeamFamilyByID(t, &inventory, id)

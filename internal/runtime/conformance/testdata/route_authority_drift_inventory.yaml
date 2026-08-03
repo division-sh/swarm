@@ -123,23 +123,23 @@ search_dimensions:
     pattern: '\bRouteTable\.Resolve\b|\brouteTable\.Resolve\b'
     minimum_matching_files: 4
     required_paths:
-      - internal/runtime/bus/connect_route_plan_dispatch.go
-      - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/runforkadmission/contract_frontier.go
+      - internal/runtime/runforkadmission/selected_route_history.go
       - internal/runtime/runstart/root_inputs.go
     canonical_layer: route_topology
     classified_paths_required: true
-  - id: receiver_carrier
-    pattern: 'receiver_carrier|connectReceiverCarrier|resolveSelectedReceiverCarriers|receiver carrier'
-    minimum_matching_files: 5
+  - id: typed_connect_recipient_evaluation
+    pattern: 'ConnectRecipientEvaluation|EvaluateMaterializedRecipients|EvaluateSourceRecipients|EvaluateConnectSource|evaluateConnectPlan|compiled connect recipient'
+    minimum_matching_files: 7
     required_paths:
       - platform-spec.yaml
+      - internal/runtime/core/pinrouting/connect_route_plan.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
-      - internal/runtime/bus/eventbus_target_routes_test.go
       - internal/runtime/bus/routing_derivation.go
-    canonical_layer: live_dispatch_non_authority
+      - internal/runtime/runforkadmission/contract_frontier.go
+    canonical_layer: route_plan_authority
     classified_paths_required: true
   - id: descriptor_evidence
     pattern: 'PinRoutingDescriptors|TargetDescriptors|activeTargetDescriptors|activeAgentDescriptors|descriptorsForPlans|descriptor evidence|descriptor lookup|active descriptor'
@@ -496,9 +496,9 @@ seam_families:
       - internal/runtime/runforkadmission/contract_frontier.go
       - internal/runtime/runforkadmission/contract_frontier_test.go
       - internal/runtime/runforkadmission/selected_route_history.go
-    search_dimensions: [connect_route_plan, route_table_resolve, receiver_carrier]
+    search_dimensions: [connect_route_plan, route_table_resolve, typed_connect_recipient_evaluation]
     invalid_authority:
-      - applying receiver_carrier filtering to a global-root connect receiver
+      - applying retired receiver-carrier filtering to a global-root connect receiver
       - treating a nested package-root receiver as the repository root
       - admitting non-carrier routes for a non-root connect receiver
     notes: >
@@ -514,7 +514,7 @@ seam_families:
       - internal/runtime/runforkadmission/contract_frontier.go
       - internal/runtime/runforkadmission/contract_frontier_test.go
       - internal/runtime/runforkadmission/selected_route_history.go
-    search_dimensions: [connect_route_plan, route_table_resolve, receiver_carrier]
+    search_dimensions: [connect_route_plan, route_table_resolve, typed_connect_recipient_evaluation]
     invalid_authority:
       - a proven static sibling suppressing an unresolved runtime receiver
       - discarding proven root or static-child recipients because another plan is unresolved
@@ -782,45 +782,41 @@ seam_families:
     classification: valid_consumer
     paths:
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
-      - internal/runtime/bus/connect_route_plan_dispatch.go
-      - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/runforkadmission/contract_frontier.go
+      - internal/runtime/runforkadmission/selected_route_history.go
       - internal/runtime/runstart/root_inputs.go
-    search_dimensions: [route_table_resolve, route_event_key_derivation, connect_route_plan, receiver_carrier]
+    search_dimensions: [route_table_resolve, route_event_key_derivation, connect_route_plan, typed_connect_recipient_evaluation]
     notes: >
-      RouteTable.Resolve must be classified by role. EventBus lowered-connect
-      use is post-identity receiver-carrier lookup; runstart/runfork uses are
-      separate admission/readiness route-fact consumers, not publish-time route
-      authority. The template lifecycle owner uses this only after a failed
-      select-or-create activation to prove the matching descriptor is already
-      routable before treating the error as same-key convergence.
-  - id: receiver_carrier_evidence
-    layer: live_dispatch_non_authority
-    classification: valid_consumer
+      RouteTable.Resolve is limited to direct typed pub/sub consumers in
+      runstart and selected-fork admission. EventBus lowered-connect planning
+      and template lifecycle do not call it; they consume the compiled typed
+      recipient evaluator instead.
+  - id: compiled_connect_recipient_evaluation
+    layer: route_plan_authority
+    classification: canonical_owner
     paths:
       - platform-spec.yaml
+      - internal/runtime/core/pinrouting/connect_route_plan.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
-      - internal/runtime/bus/eventbus_target_routes_test.go
-      - internal/runtime/bus/eventbus_receiver_structure_test.go
       - internal/runtime/bus/routing_derivation.go
-      - internal/runtime/bus/routing_derivation_test.go
-      - internal/runtime/conformance/route_authority_matrix_test.go
+      - internal/runtime/runforkadmission/contract_frontier.go
+      - internal/runtime/runforkadmission/selected_route_history.go
       - internal/runtime/conformance/template_instance_semantic_ownership_test.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
-    search_dimensions: [receiver_carrier, connect_route_plan]
+    search_dimensions: [typed_connect_recipient_evaluation, connect_route_plan]
     invalid_authority:
       - producer/source endpoint key
       - raw producer event name
       - live subscriber fallback key
       - legacy route/subscriber interpretation after matched ConnectRoutePlan
     notes: >
-      Receiver carriers are concrete dispatch evidence after a lowered plan
-      selects target identity. They must not repair or replace the route
-      authority decision. The template lifecycle owner may consume them only to
-      avoid swallowing a failed activation whose descriptor is visible but whose
-      receiver route was never installed.
+      CompiledConnectGraph evaluates receiver identity and typed recipient
+      registrations once. EventBus planning, lifecycle, pending frontier, and
+      pending route history consume the opaque result. Receiver event-key
+      reconstruction, local subscriber rematching, and RouteTable shadow
+      decisions are retired and prohibited.
   - id: descriptor_evidence_non_authority
     layer: descriptor_evidence_non_authority
     classification: non_authoritative_observer_projection
@@ -1151,12 +1147,12 @@ seam_families:
       - internal/runtime/swarmflowtest/catalog_runner_test.go
       - tests/tier11-flow-composition/test-dynamic-flow-instance/expected.yaml
       - tests/tier5-flow-lifecycle/test-create-flow-instance/expected.yaml
-    search_dimensions: [flow_instance, event_deliveries, replay_scope, connect_route_plan, receiver_carrier, live_agent_subscription_route_authority]
+    search_dimensions: [flow_instance, event_deliveries, replay_scope, connect_route_plan, typed_connect_recipient_evaluation, live_agent_subscription_route_authority]
     notes: >
       Catalog and fixture proofs are broader behavior consumers. Required PR
       smoke must cite focused rows; full route behavior stays in named full
       conformance/catalog tiers. The sealed package fixture and conformance
-      tests consume lowered connect route plans and receiver-carrier evidence
+      tests consume lowered connect route plans and typed recipient evaluation
       as runtime proof; they do not introduce or replace route authority. #1552
       adds the template-flow pilot conformance fixture as an integrated
       package-boundary proof consumer for the existing route-authority owners.

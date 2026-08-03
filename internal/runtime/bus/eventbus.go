@@ -713,18 +713,40 @@ func (eb *EventBus) VerifyFlowInstanceRoute(ctx context.Context, identity runtim
 	return nil
 }
 
-func flowInstanceRouteRecordKeys(records []FlowInstanceRouteRecord) []string {
-	keys := make([]string, 0, len(records))
+type flowInstanceRouteRecordIdentity struct {
+	instancePath   string
+	eventPattern   string
+	subscriberType string
+	subscriberID   string
+	sourceFlow     string
+}
+
+func flowInstanceRouteRecordKeys(records []FlowInstanceRouteRecord) []flowInstanceRouteRecordIdentity {
+	keys := make([]flowInstanceRouteRecordIdentity, 0, len(records))
 	for _, record := range records {
-		keys = append(keys, strings.Join([]string{
-			strings.Trim(record.Identity.InstancePath, "/"),
-			strings.TrimSpace(record.EventPattern),
-			strings.TrimSpace(record.SubscriberType),
-			strings.TrimSpace(record.SubscriberID),
-			strings.TrimSpace(record.SourceFlow),
-		}, "\x00"))
+		keys = append(keys, flowInstanceRouteRecordIdentity{
+			instancePath:   strings.Trim(record.Identity.InstancePath, "/"),
+			eventPattern:   strings.TrimSpace(record.EventPattern),
+			subscriberType: strings.TrimSpace(record.SubscriberType),
+			subscriberID:   strings.TrimSpace(record.SubscriberID),
+			sourceFlow:     strings.TrimSpace(record.SourceFlow),
+		})
 	}
-	sort.Strings(keys)
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].instancePath != keys[j].instancePath {
+			return keys[i].instancePath < keys[j].instancePath
+		}
+		if keys[i].eventPattern != keys[j].eventPattern {
+			return keys[i].eventPattern < keys[j].eventPattern
+		}
+		if keys[i].subscriberType != keys[j].subscriberType {
+			return keys[i].subscriberType < keys[j].subscriberType
+		}
+		if keys[i].subscriberID != keys[j].subscriberID {
+			return keys[i].subscriberID < keys[j].subscriberID
+		}
+		return keys[i].sourceFlow < keys[j].sourceFlow
+	})
 	return keys
 }
 

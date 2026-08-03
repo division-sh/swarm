@@ -9,32 +9,73 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 )
 
-const (
-	routePlanSubscriberAgent    = "agent"
-	routePlanSubscriberInternal = "internal"
-)
-
-type routePlanSource string
-type routePlanReason string
+type routePlanSource uint8
+type routePlanReason uint8
 
 const (
-	routePlanSourceAgentPolicy           routePlanSource = "agent_policy"
-	routePlanSourceDirectPolicy          routePlanSource = "direct_policy"
-	routePlanSourceInternalTarget        routePlanSource = "internal_target_route"
-	routePlanSourceConcreteNodeRoute     routePlanSource = "concrete_node_route"
-	routePlanSourceScopedNodeRoute       routePlanSource = "scoped_node_route"
-	routePlanSourceRootNodeRoute         routePlanSource = "root_node_route"
-	routePlanSourceRootInputFlowNode     routePlanSource = "root_input_flow_node_route"
-	routePlanSourceRecipientMaterializer routePlanSource = "recipient_plan_materializer"
-	routePlanSourceConnectRoutePlan      routePlanSource = "connect_route_plan"
-
-	routePlanReasonMatchedAgentSubscription routePlanReason = "matched_agent_subscription"
-	routePlanReasonDirectPublish            routePlanReason = "direct_publish"
-	routePlanReasonInternalCarrier          routePlanReason = "internal_carrier"
-	routePlanReasonRouteTableNode           routePlanReason = "route_table_node"
-	routePlanReasonMaterializedRoute        routePlanReason = "materialized_route"
-	routePlanReasonLoweredConnectRoutePlan  routePlanReason = "lowered_connect_route_plan"
+	routePlanSourceAgentPolicy routePlanSource = iota + 1
+	routePlanSourceDirectPolicy
+	routePlanSourceInternalTarget
+	routePlanSourceConcreteNodeRoute
+	routePlanSourceScopedNodeRoute
+	routePlanSourceRootNodeRoute
+	routePlanSourceRootInputFlowNode
+	routePlanSourceRecipientMaterializer
+	routePlanSourceConnectRoutePlan
 )
+
+const (
+	routePlanReasonMatchedAgentSubscription routePlanReason = iota + 1
+	routePlanReasonDirectPublish
+	routePlanReasonInternalCarrier
+	routePlanReasonRouteTableNode
+	routePlanReasonMaterializedRoute
+	routePlanReasonLoweredConnectRoutePlan
+)
+
+func (s routePlanSource) code() string {
+	switch s {
+	case routePlanSourceAgentPolicy:
+		return "agent_policy"
+	case routePlanSourceDirectPolicy:
+		return "direct_policy"
+	case routePlanSourceInternalTarget:
+		return "internal_target_route"
+	case routePlanSourceConcreteNodeRoute:
+		return "concrete_node_route"
+	case routePlanSourceScopedNodeRoute:
+		return "scoped_node_route"
+	case routePlanSourceRootNodeRoute:
+		return "root_node_route"
+	case routePlanSourceRootInputFlowNode:
+		return "root_input_flow_node_route"
+	case routePlanSourceRecipientMaterializer:
+		return "recipient_plan_materializer"
+	case routePlanSourceConnectRoutePlan:
+		return "connect_route_plan"
+	default:
+		return ""
+	}
+}
+
+func (r routePlanReason) code() string {
+	switch r {
+	case routePlanReasonMatchedAgentSubscription:
+		return "matched_agent_subscription"
+	case routePlanReasonDirectPublish:
+		return "direct_publish"
+	case routePlanReasonInternalCarrier:
+		return "internal_carrier"
+	case routePlanReasonRouteTableNode:
+		return "route_table_node"
+	case routePlanReasonMaterializedRoute:
+		return "materialized_route"
+	case routePlanReasonLoweredConnectRoutePlan:
+		return "lowered_connect_route_plan"
+	default:
+		return ""
+	}
+}
 
 type routeIntentProducer uint8
 
@@ -91,7 +132,7 @@ func (p routeIntentProducer) Source() routePlanSource {
 	case routeIntentProducerConnectRoutePlan:
 		return routePlanSourceConnectRoutePlan
 	default:
-		return ""
+		return 0
 	}
 }
 
@@ -114,7 +155,7 @@ func (p routeIntentProducer) Reason() routePlanReason {
 	case routeIntentProducerConnectRoutePlan:
 		return routePlanReasonLoweredConnectRoutePlan
 	default:
-		return ""
+		return 0
 	}
 }
 
@@ -126,22 +167,22 @@ func routeIntentProducerCode(p routeIntentProducer) string {
 	p = p.Normalized()
 	source := p.Source()
 	reason := p.Reason()
-	if source == "" {
-		return string(reason)
+	if source == 0 {
+		return reason.code()
 	}
-	if reason == "" {
-		return string(source)
+	if reason == 0 {
+		return source.code()
 	}
-	return string(source) + "/" + string(reason)
+	return source.code() + "/" + reason.code()
 }
 
-type RoutePlanAuthorityState string
+type RoutePlanAuthorityState uint8
 
 const (
-	RoutePlanAuthorityNoCanonicalMatch      RoutePlanAuthorityState = "no_canonical_match"
-	RoutePlanAuthorityCanonicalMatched      RoutePlanAuthorityState = "canonical_matched"
-	RoutePlanAuthorityCanonicalFailedClosed RoutePlanAuthorityState = "canonical_failed_closed"
-	RoutePlanAuthorityLowerPrecedence       RoutePlanAuthorityState = "lower_precedence"
+	RoutePlanAuthorityNoCanonicalMatch RoutePlanAuthorityState = iota
+	RoutePlanAuthorityCanonicalMatched
+	RoutePlanAuthorityCanonicalFailedClosed
+	RoutePlanAuthorityLowerPrecedence
 )
 
 // RoutePlan is the EventBus-owned publish-time route authority. It records the
@@ -164,9 +205,8 @@ type RoutePlan struct {
 }
 
 type RoutePlanLiveRecipient struct {
-	RecipientID       string
+	Recipient         events.DeliveryRecipient
 	AgentIdentity     agentidentity.Identity
-	SubscriberType    string
 	PersistAsDelivery bool
 	Producer          routeIntentProducer
 	liveAuthority     liveRecipientAuthority
@@ -188,8 +228,7 @@ func (a liveRecipientAuthority) Normalized() liveRecipientAuthority {
 }
 
 type RoutePlanDeliveryIntent struct {
-	SubscriberType        string
-	SubscriberID          string
+	Recipient             events.DeliveryRecipient
 	AgentIdentity         agentidentity.Identity
 	Target                events.RouteIdentity
 	Context               events.DeliveryContext
@@ -212,13 +251,12 @@ func (p RoutePlan) Normalized() RoutePlan {
 	p.RoutedRecipients = append([]Subscriber(nil), p.RoutedRecipients...)
 	p.SubscribedRecipients = uniqueStrings(p.SubscribedRecipients)
 	p.ExtraDetail = cloneStringAnyMap(p.ExtraDetail)
-	p.TargetFailure = runtimepinrouting.TargetFailure(strings.TrimSpace(string(p.TargetFailure)))
 	p.ContradictionReason = strings.TrimSpace(p.ContradictionReason)
 	if p.CycleEscalation != nil {
 		evt := *p.CycleEscalation
 		p.CycleEscalation = &evt
 	}
-	if p.AuthorityState == RoutePlanAuthorityCanonicalMatched && p.TargetFailure != "" {
+	if p.AuthorityState == RoutePlanAuthorityCanonicalMatched && !p.TargetFailure.Empty() {
 		p.AuthorityState = RoutePlanAuthorityCanonicalFailedClosed
 	}
 	if p.AuthorityState == RoutePlanAuthorityCanonicalFailedClosed {
@@ -244,7 +282,7 @@ func (p *RoutePlan) MarkCanonicalRouteFailedClosed(producer routeIntentProducer,
 	}
 	p.AuthorityState = RoutePlanAuthorityCanonicalFailedClosed
 	p.AuthorityOwner = producer.Source()
-	p.TargetFailure = runtimepinrouting.TargetFailure(strings.TrimSpace(string(failure)))
+	p.TargetFailure = failure
 	p.LiveRecipients = nil
 	p.DeliveryIntents = nil
 	p.RoutedRecipients = nil
@@ -256,7 +294,7 @@ func (p *RoutePlan) MarkLowerPrecedenceRouteProduction(producer routeIntentProdu
 		return
 	}
 	p.AuthorityState = RoutePlanAuthorityLowerPrecedence
-	if p.AuthorityOwner == "" {
+	if p.AuthorityOwner == 0 {
 		p.AuthorityOwner = producer.Source()
 	}
 }
@@ -315,7 +353,7 @@ func (p RoutePlan) RecipientIDs() []string {
 	p = p.Normalized()
 	out := make([]string, 0, len(p.LiveRecipients))
 	for _, recipient := range p.LiveRecipients {
-		out = append(out, recipient.RecipientID)
+		out = append(out, recipient.Recipient.ID())
 	}
 	return uniqueStrings(out)
 }
@@ -327,7 +365,7 @@ func (p RoutePlan) PersistedRecipientIDs() []string {
 		if !recipient.PersistAsDelivery {
 			continue
 		}
-		out = append(out, recipient.RecipientID)
+		out = append(out, recipient.Recipient.ID())
 	}
 	return uniqueStrings(out)
 }
@@ -336,13 +374,13 @@ func (p RoutePlan) DeliveryTargets() map[string]events.RouteIdentity {
 	p = p.Normalized()
 	out := map[string]events.RouteIdentity{}
 	for _, intent := range p.DeliveryIntents {
-		if intent.SubscriberType != routePlanSubscriberAgent {
+		if !intent.Recipient.IsAgent() {
 			continue
 		}
 		if intent.Target.Empty() {
 			continue
 		}
-		out[intent.SubscriberID] = intent.Target.Normalized()
+		out[intent.Recipient.ID()] = intent.Target.Normalized()
 	}
 	if len(out) == 0 {
 		return nil
@@ -358,8 +396,7 @@ func (p RoutePlan) DeliveryRoutes() []events.DeliveryRoute {
 			continue
 		}
 		out = append(out, events.DeliveryRoute{
-			SubscriberType:    intent.SubscriberType,
-			SubscriberID:      intent.SubscriberID,
+			Recipient:         intent.Recipient,
 			AgentIdentity:     intent.AgentIdentity,
 			Target:            intent.Target,
 			Context:           intent.Context,
@@ -374,7 +411,7 @@ func (p RoutePlan) liveDispatchDeliveryRoutes() []events.DeliveryRoute {
 	p = p.Normalized()
 	liveAgents := make(map[agentidentity.Identity]struct{}, len(p.LiveRecipients))
 	for _, recipient := range p.LiveRecipients {
-		if recipient.SubscriberType == routePlanSubscriberAgent {
+		if recipient.Recipient.IsAgent() {
 			liveAgents[recipient.AgentIdentity] = struct{}{}
 		}
 	}
@@ -383,14 +420,13 @@ func (p RoutePlan) liveDispatchDeliveryRoutes() []events.DeliveryRoute {
 		if !intent.Persist {
 			continue
 		}
-		if intent.SubscriberType == routePlanSubscriberAgent && intent.PendingAgentLifecycle {
+		if intent.Recipient.IsAgent() && intent.PendingAgentLifecycle {
 			if _, live := liveAgents[intent.AgentIdentity]; !live {
 				continue
 			}
 		}
 		out = append(out, events.DeliveryRoute{
-			SubscriberType:    intent.SubscriberType,
-			SubscriberID:      intent.SubscriberID,
+			Recipient:         intent.Recipient,
 			AgentIdentity:     intent.AgentIdentity,
 			Target:            intent.Target,
 			Context:           intent.Context,
@@ -417,13 +453,13 @@ func (p RoutePlan) ValidatePersistentDeliveries() error {
 		if !recipient.PersistAsDelivery {
 			continue
 		}
-		if recipient.SubscriberType != routePlanSubscriberAgent || strings.TrimSpace(recipient.RecipientID) == "" {
+		if !recipient.Recipient.IsAgent() {
 			return fmt.Errorf("persistent live recipient %d must identify one agent", index)
 		}
 		if err := recipient.AgentIdentity.Validate(); err != nil {
 			return fmt.Errorf("persistent live recipient %d agent identity: %w", index, err)
 		}
-		if recipient.AgentIdentity.AgentID() != recipient.RecipientID {
+		if recipient.AgentIdentity.AgentID() != recipient.Recipient.ID() {
 			return fmt.Errorf("persistent live recipient %d subscriber id does not match agent identity", index)
 		}
 		liveAgents[recipient.AgentIdentity] = struct{}{}
@@ -437,16 +473,16 @@ func (p RoutePlan) ValidatePersistentDeliveries() error {
 		if !intent.Persist {
 			return fmt.Errorf("pending lifecycle delivery intent must be persistent")
 		}
-		if intent.SubscriberType != routePlanSubscriberAgent {
+		if !intent.Recipient.IsAgent() {
 			return fmt.Errorf("pending lifecycle delivery intent must identify one agent")
 		}
-		if err := intent.AgentIdentity.Validate(); err != nil || intent.AgentIdentity.AgentID() != intent.SubscriberID {
+		if err := intent.AgentIdentity.Validate(); err != nil || intent.AgentIdentity.AgentID() != intent.Recipient.ID() {
 			return fmt.Errorf("pending lifecycle delivery intent has invalid agent identity")
 		}
 		pendingAgents[intent.AgentIdentity] = struct{}{}
 	}
 	for _, route := range routes {
-		if route.SubscriberType == routePlanSubscriberAgent {
+		if route.Recipient.IsAgent() {
 			routeAgents[route.AgentIdentity] = struct{}{}
 		}
 	}
@@ -482,7 +518,7 @@ func (p RoutePlan) InternalDeliveryRoutes() []events.DeliveryRoute {
 		if recipient.PersistAsDelivery {
 			continue
 		}
-		internalRecipients = append(internalRecipients, recipient.RecipientID)
+		internalRecipients = append(internalRecipients, recipient.Recipient.ID())
 	}
 	internalRecipients = uniqueStrings(internalRecipients)
 	if len(internalRecipients) == 0 {
@@ -495,7 +531,7 @@ func (p RoutePlan) InternalDeliveryRoutes() []events.DeliveryRoute {
 		internalSet[strings.TrimSpace(recipient)] = struct{}{}
 	}
 	for _, route := range known {
-		if _, ok := internalSet[strings.TrimSpace(route.SubscriberID)]; !ok {
+		if _, ok := internalSet[route.Recipient.ID()]; !ok {
 			continue
 		}
 		out = append(out, route)
@@ -503,8 +539,7 @@ func (p RoutePlan) InternalDeliveryRoutes() []events.DeliveryRoute {
 	if len(out) == 0 {
 		for _, recipient := range internalRecipients {
 			out = append(out, events.DeliveryRoute{
-				SubscriberType: "node",
-				SubscriberID:   recipient,
+				Recipient: events.MustNodeDeliveryRecipient(recipient),
 			})
 		}
 	}
@@ -533,16 +568,17 @@ func routePlanLiveRecipientsFromManifest(manifest deliveryRecipientManifest, pro
 	out := make([]RoutePlanLiveRecipient, 0, len(candidates))
 	for _, candidate := range candidates {
 		recipient := candidate.ID
-		subscriberType := routePlanSubscriberInternal
 		persist := false
 		if _, ok := persisted[recipient]; ok {
-			subscriberType = routePlanSubscriberAgent
 			persist = true
 		}
+		typedRecipient := events.MustNodeDeliveryRecipient(recipient)
+		if persist {
+			typedRecipient = events.MustAgentDeliveryRecipient(recipient)
+		}
 		out = append(out, RoutePlanLiveRecipient{
-			RecipientID:       recipient,
+			Recipient:         typedRecipient,
 			AgentIdentity:     candidate.AgentIdentity,
-			SubscriberType:    subscriberType,
 			PersistAsDelivery: persist,
 			Producer:          producer,
 			liveAuthority:     candidate.LiveAuthority.Normalized(),
@@ -560,8 +596,7 @@ func routePlanDeliveryIntentsFromRoutes(routes []events.DeliveryRoute, producer 
 	out := make([]RoutePlanDeliveryIntent, 0, len(routes))
 	for _, route := range routes {
 		out = append(out, RoutePlanDeliveryIntent{
-			SubscriberType:    route.SubscriberType,
-			SubscriberID:      route.SubscriberID,
+			Recipient:         route.Recipient,
 			AgentIdentity:     route.AgentIdentity,
 			Target:            route.Target,
 			Context:           route.Context,
@@ -579,14 +614,14 @@ func routePlanFromManifest(evt events.Event, manifest deliveryRecipientManifest,
 	plan.AddLiveRecipients(routePlanLiveRecipientsFromManifest(manifest, producer)...)
 	plan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(manifest.DeliveryRoutes, producer)...)
 	plan.TargetFailure = manifest.TargetFailure
-	if len(plan.LiveRecipients) > 0 || len(plan.DeliveryIntents) > 0 || plan.TargetFailure != "" {
+	if len(plan.LiveRecipients) > 0 || len(plan.DeliveryIntents) > 0 || !plan.TargetFailure.Empty() {
 		plan.MarkLowerPrecedenceRouteProduction(producer)
 	}
 	return plan.Normalized()
 }
 
 func normalizeRoutePlanAuthorityState(state RoutePlanAuthorityState) RoutePlanAuthorityState {
-	switch RoutePlanAuthorityState(strings.TrimSpace(string(state))) {
+	switch state {
 	case RoutePlanAuthorityCanonicalMatched:
 		return RoutePlanAuthorityCanonicalMatched
 	case RoutePlanAuthorityCanonicalFailedClosed:
@@ -599,13 +634,19 @@ func normalizeRoutePlanAuthorityState(state RoutePlanAuthorityState) RoutePlanAu
 }
 
 func normalizeRoutePlanSource(source routePlanSource) routePlanSource {
-	return routePlanSource(strings.TrimSpace(string(source)))
+	switch source {
+	case routePlanSourceAgentPolicy, routePlanSourceDirectPolicy, routePlanSourceInternalTarget,
+		routePlanSourceConcreteNodeRoute, routePlanSourceScopedNodeRoute, routePlanSourceRootNodeRoute,
+		routePlanSourceRootInputFlowNode, routePlanSourceRecipientMaterializer, routePlanSourceConnectRoutePlan:
+		return source
+	default:
+		return 0
+	}
 }
 
 type liveRecipientKey struct {
-	subscriberType string
-	subscriberID   string
-	agentIdentity  agentidentity.Identity
+	recipient     events.DeliveryRecipient
+	agentIdentity agentidentity.Identity
 }
 
 func normalizeRoutePlanLiveRecipients(in []RoutePlanLiveRecipient) []RoutePlanLiveRecipient {
@@ -615,35 +656,25 @@ func normalizeRoutePlanLiveRecipients(in []RoutePlanLiveRecipient) []RoutePlanLi
 	out := make([]RoutePlanLiveRecipient, 0, len(in))
 	indexByKey := make(map[liveRecipientKey]int, len(in))
 	for _, recipient := range in {
-		recipient.RecipientID = strings.TrimSpace(recipient.RecipientID)
 		recipient.AgentIdentity = recipient.AgentIdentity.Normalize()
-		recipient.SubscriberType = strings.TrimSpace(recipient.SubscriberType)
 		recipient.Producer = recipient.Producer.Normalized()
 		recipient.liveAuthority = recipient.liveAuthority.Normalized()
 		if recipient.liveAuthority == liveRecipientAuthorityIdentity {
 			recipient.agentRoute = nil
 		}
-		if recipient.RecipientID == "" {
+		if recipient.Recipient.Empty() {
 			continue
 		}
-		if recipient.SubscriberType == "" {
-			if recipient.PersistAsDelivery {
-				recipient.SubscriberType = routePlanSubscriberAgent
-			} else {
-				recipient.SubscriberType = routePlanSubscriberInternal
-			}
-		}
-		if recipient.SubscriberType == routePlanSubscriberAgent {
-			if err := recipient.AgentIdentity.Validate(); err != nil || recipient.AgentIdentity.AgentID() != recipient.RecipientID {
+		if recipient.Recipient.IsAgent() {
+			if err := recipient.AgentIdentity.Validate(); err != nil || recipient.AgentIdentity.AgentID() != recipient.Recipient.ID() {
 				continue
 			}
-		} else if !recipient.AgentIdentity.IsZero() {
+		} else if !recipient.Recipient.IsNode() || !recipient.AgentIdentity.IsZero() {
 			continue
 		}
 		key := liveRecipientKey{
-			subscriberType: recipient.SubscriberType,
-			subscriberID:   recipient.RecipientID,
-			agentIdentity:  recipient.AgentIdentity,
+			recipient:     recipient.Recipient,
+			agentIdentity: recipient.AgentIdentity,
 		}
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].PersistAsDelivery = out[idx].PersistAsDelivery || recipient.PersistAsDelivery
@@ -673,8 +704,7 @@ func mergeRoutePlanLiveRecipientAuthority(current, candidate RoutePlanLiveRecipi
 }
 
 type deliveryIntentKey struct {
-	subscriberType string
-	subscriberID   string
+	recipient      events.DeliveryRecipient
 	agentIdentity  agentidentity.Identity
 	target         events.RouteIdentity
 	replyContextID string
@@ -689,27 +719,24 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 	out := make([]RoutePlanDeliveryIntent, 0, len(in))
 	indexByKey := make(map[deliveryIntentKey]int, len(in))
 	for _, intent := range in {
-		intent.SubscriberType = strings.TrimSpace(intent.SubscriberType)
-		intent.SubscriberID = strings.TrimSpace(intent.SubscriberID)
 		intent.AgentIdentity = intent.AgentIdentity.Normalize()
 		intent.Target = intent.Target.Normalized()
 		intent.Context = intent.Context.Normalized()
 		intent.PayloadProjection = intent.PayloadProjection.Normalized()
 		intent.Producer = intent.Producer.Normalized()
-		if intent.SubscriberType == "" || intent.SubscriberID == "" {
+		if intent.Recipient.Empty() {
 			out = append(out, intent)
 			continue
 		}
-		if intent.SubscriberType == routePlanSubscriberAgent {
-			if err := intent.AgentIdentity.Validate(); err != nil || intent.AgentIdentity.AgentID() != intent.SubscriberID {
+		if intent.Recipient.IsAgent() {
+			if err := intent.AgentIdentity.Validate(); err != nil || intent.AgentIdentity.AgentID() != intent.Recipient.ID() {
 				continue
 			}
-		} else if !intent.AgentIdentity.IsZero() {
+		} else if !intent.Recipient.IsNode() || !intent.AgentIdentity.IsZero() {
 			continue
 		}
 		key := deliveryIntentKey{
-			subscriberType: intent.SubscriberType,
-			subscriberID:   intent.SubscriberID,
+			recipient:      intent.Recipient,
 			agentIdentity:  intent.AgentIdentity,
 			target:         intent.Target,
 			replyContextID: intent.Context.ReplyContextID(),

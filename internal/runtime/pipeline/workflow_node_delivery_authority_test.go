@@ -83,12 +83,8 @@ func TestPipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAu
 	target := events.RouteIdentity{
 		EntityID: evt.EntityID(),
 	}
-	route := events.DeliveryRoute{
-		SubscriberType: "node",
-		SubscriberID:   "node-a",
-		Target:         target,
-	}
-	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, evt.ID(), route.SubscriberID, target)
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-a"), Target: target}
+	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, evt.ID(), route.Recipient.ID(), target)
 	targetEvt := eventtest.TargetRouted(evt, target)
 	delivery, err := events.NewDeliveryEvent(targetEvt, route)
 	if err != nil {
@@ -106,7 +102,7 @@ func TestPipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAu
 	if deliveryAuthorityLogCount(bus.runtimeLogEntries()) != 0 {
 		t.Fatalf("target runtime logs = %#v, want no false delivery_authority_missing log", bus.runtimeLogEntries())
 	}
-	assertDeliveryAuthorityOutcomeCount(t, db, evt.ID(), route.SubscriberID, 1)
+	assertDeliveryAuthorityOutcomeCount(t, db, evt.ID(), route.Recipient.ID(), 1)
 }
 
 func TestPipelineCoordinatorInterceptDeliveryRouteRejectsConnectedInputReplayWithoutStampedClaim(t *testing.T) {
@@ -140,8 +136,8 @@ func TestPipelineCoordinatorInterceptDeliveryRouteRejectsConnectedInputReplayWit
 	}, time.Now().UTC())
 	ctx := testAuthorActivityContext(t, runCtx)
 	seedPipelineEventRecord(t, ctx, db, evt)
-	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "receiver-node", Target: target}
-	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, eventID, route.SubscriberID, target)
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("receiver-node"), Target: target}
+	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, eventID, route.Recipient.ID(), target)
 	delivery, err := events.NewDeliveryEvent(evt, route)
 	if err != nil {
 		t.Fatalf("NewDeliveryEvent: %v", err)
@@ -159,13 +155,13 @@ func TestPipelineCoordinatorInterceptDeliveryRouteRejectsConnectedInputReplayWit
 			t.Fatalf("attempt %d deferred events = %#v, want none", attempt, deferred)
 		}
 	}
-	assertDeliveryAuthorityOutcomeCount(t, db, eventID, route.SubscriberID, 0)
+	assertDeliveryAuthorityOutcomeCount(t, db, eventID, route.Recipient.ID(), 0)
 	var status string
 	if err := db.QueryRowContext(ctx, `
 		SELECT status
 		FROM event_deliveries
 		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, eventID, route.SubscriberID).Scan(&status); err != nil {
+	`, eventID, route.Recipient.ID()).Scan(&status); err != nil {
 		t.Fatalf("load ambiguous connected-input delivery: %v", err)
 	}
 	if status != "pending" {
@@ -304,9 +300,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
-			route := events.DeliveryRoute{
-				SubscriberType: "node", SubscriberID: "node-a", Target: events.RouteIdentity{EntityID: entityID},
-			}
+			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-a"), Target: events.RouteIdentity{EntityID: entityID}}
 			if err := owner.commitInitial(ctx, evt, route); err != nil {
 				t.Fatalf("commit node delivery: %v", err)
 			}
@@ -485,7 +479,7 @@ func seedDeliveryAuthorityNodeDeliveryForTarget(t *testing.T, db *sql.DB, eventI
 	if err != nil {
 		t.Fatalf("load delivery authority event: %v", err)
 	}
-	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID, Target: target}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: target}
 	if err := owner.commitInitial(testAuthorActivityContext(t, context.Background()), evt, route); err != nil {
 		t.Fatalf("seed target delivery authority node delivery: %v", err)
 	}
@@ -500,7 +494,7 @@ func seedDeliveryAuthorityTerminalNodeDelivery(t *testing.T, db *sql.DB, eventID
 	if err != nil {
 		t.Fatalf("load terminal delivery authority event: %v", err)
 	}
-	route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: nodeID, Target: events.RouteIdentity{EntityID: evt.EntityID()}}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(nodeID), Target: events.RouteIdentity{EntityID: evt.EntityID()}}
 	if err := owner.commitInitial(ctx, evt, route); err != nil {
 		t.Fatalf("commit terminal delivery authority: %v", err)
 	}

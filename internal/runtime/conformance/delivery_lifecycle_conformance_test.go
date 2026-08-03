@@ -35,8 +35,9 @@ type deliveryLifecycleConformanceBackend struct {
 
 func deliveryLifecycleConformanceRoute(t testing.TB, subscriberType, subscriberID string) events.DeliveryRoute {
 	t.Helper()
-	route := events.DeliveryRoute{SubscriberType: subscriberType, SubscriberID: subscriberID}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(subscriberID)}
 	if subscriberType == string(runtimedelivery.SubscriberAgent) {
+		route.Recipient = events.MustAgentDeliveryRecipient(subscriberID)
 		route.AgentIdentity = agentidentitytest.RootRuntime(t, subscriberID, "delivery-lifecycle-conformance")
 	}
 	return route
@@ -69,7 +70,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				agent := deliveryLifecycleConformanceRoute(t, "agent", "agent-a")
 				sibling := agent
 				sibling.Target = events.RouteIdentity{FlowID: "flow-a"}
-				node := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-a"}
+				node := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-a")}
 				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{agent, sibling, node}, runtimepipelineobligation.ScopeSubscribed)
 
 				agentProof, err := backend.store.ProveHandoff(ctx, event.ID(), agent)
@@ -96,7 +97,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					t.Fatalf("second live claim = %#v, err=%v; want busy", secondClaim, err)
 				}
 				sessionID := uuid.NewString()
-				seedDeliveryAgentSession(t, ctx, backend, sessionID, event.RunID(), agent.SubscriberID)
+				seedDeliveryAgentSession(t, ctx, backend, sessionID, event.RunID(), agent.Recipient.ID())
 				bound, err := backend.store.BindAgentSession(ctx, claimed.Claim, sessionID)
 				if err != nil {
 					t.Fatalf("bind agent session: %v", err)
@@ -380,9 +381,9 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 
 				if backend.postgres {
 					longEvent := deliveryLifecycleEvent("long-transaction-clock-" + backend.name)
-					longClaimRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "long-claim"}
-					longRetryRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "long-retry"}
-					longLeaseRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "long-lease"}
+					longClaimRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("long-claim")}
+					longRetryRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("long-retry")}
+					longLeaseRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("long-lease")}
 					storetest.CommitSemanticEventWithInitialFacts(
 						t,
 						ctx,
@@ -771,14 +772,11 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				route := deliveryLifecycleConformanceRoute(t, "agent", "selector-agent-"+backend.name)
 				routes := []events.DeliveryRoute{route}
 				for index := 0; index < 12; index++ {
-					routes = append(routes, events.DeliveryRoute{
-						SubscriberType: "agent",
-						SubscriberID:   fmt.Sprintf("selector-pending-%s-%02d", backend.name, index),
-						AgentIdentity: agentidentitytest.RootRuntime(
-							t,
-							fmt.Sprintf("selector-pending-%s-%02d", backend.name, index),
-							"delivery-lifecycle-conformance",
-						),
+					routes = append(routes, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(fmt.Sprintf("selector-pending-%s-%02d", backend.name, index)), AgentIdentity: agentidentitytest.RootRuntime(
+						t,
+						fmt.Sprintf("selector-pending-%s-%02d", backend.name, index),
+						"delivery-lifecycle-conformance",
+					),
 					})
 				}
 				storetest.CommitSemanticEventWithInitialFacts(
@@ -1026,7 +1024,7 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 	assertDeliverySQLRejected(t, backend, "nonexistent exact agent session",
 		`UPDATE event_delivery_attempts SET active_session_id=$1::uuid, session_run_id=$2::uuid, session_agent_id=$3 WHERE delivery_id=$4::uuid AND claim_version=$5`,
 		`UPDATE event_delivery_attempts SET active_session_id=?, session_run_id=?, session_agent_id=? WHERE delivery_id=? AND claim_version=?`,
-		[]any{uuid.NewString(), sessionEvent.RunID(), route.SubscriberID, claimed.Snapshot.DeliveryID, claimed.Claim.Version()})
+		[]any{uuid.NewString(), sessionEvent.RunID(), route.Recipient.ID(), claimed.Snapshot.DeliveryID, claimed.Claim.Version()})
 
 	otherSessionEvent := deliveryLifecycleEvent("schema-session-other-owner-" + backend.name)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, otherSessionEvent, nil, runtimepipelineobligation.ScopeDirect)
@@ -1054,7 +1052,7 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 		t.Fatal(err)
 	}
 	terminatedSessionID := uuid.NewString()
-	seedDeliveryAgentSession(t, ctx, backend, terminatedSessionID, terminatedEvent.RunID(), terminatedRoute.SubscriberID)
+	seedDeliveryAgentSession(t, ctx, backend, terminatedSessionID, terminatedEvent.RunID(), terminatedRoute.Recipient.ID())
 	terminateSessionQuery := `UPDATE agent_sessions SET status='terminated', termination_reason='normal', terminated_at=$2, updated_at=$2 WHERE session_id=$1::uuid`
 	if !backend.postgres {
 		terminateSessionQuery = `UPDATE agent_sessions SET status='terminated', termination_reason='normal', terminated_at=?, updated_at=? WHERE session_id=?`

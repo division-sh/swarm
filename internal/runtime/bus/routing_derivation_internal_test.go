@@ -16,10 +16,7 @@ func TestRouteTableResolve_WildcardSubscriberMatchesActiveConcreteChildEventWith
 	rt.eventPath[eventType] = struct{}{}
 	rt.patterns = []routePattern{{
 		EventPattern: pattern,
-		Subscriber: Subscriber{
-			ID:   "operating-accumulator",
-			Type: "node",
-		},
+		Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient("operating-accumulator")},
 	}}
 	rt.rebuildLocked()
 	delete(rt.routes, eventType)
@@ -28,7 +25,7 @@ func TestRouteTableResolve_WildcardSubscriberMatchesActiveConcreteChildEventWith
 	if len(got) != 1 {
 		t.Fatalf("Resolve concrete child event = %#v, want one wildcard subscriber", got)
 	}
-	if got[0].ID != "operating-accumulator" || got[0].Type != "node" {
+	if got[0].Recipient.ID() != "operating-accumulator" || !got[0].Recipient.IsNode() {
 		t.Fatalf("resolved subscriber = %#v, want operating-accumulator node", got[0])
 	}
 	if got[0].MatchPattern != pattern {
@@ -52,10 +49,7 @@ func TestRouteTableResolve_WildcardSubscriberDoesNotMatchRemovedConcreteChildEve
 	rt.eventPath[eventType] = struct{}{}
 	rt.patterns = []routePattern{{
 		EventPattern: pattern,
-		Subscriber: Subscriber{
-			ID:   "operating-accumulator",
-			Type: "node",
-		},
+		Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient("operating-accumulator")},
 	}}
 	rt.rebuildLocked()
 	if got := rt.Resolve(eventType); len(got) != 1 {
@@ -80,31 +74,19 @@ func TestRouteTableResolve_ExactAndWildcardMatchesDeduplicateSameSubscriber(t *t
 	rt.patterns = []routePattern{
 		{
 			EventPattern: exact,
-			Subscriber: Subscriber{
-				ID:   "dual-listener",
-				Type: "node",
-			},
+			Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient("dual-listener")},
 		},
 		{
 			EventPattern: pattern,
-			Subscriber: Subscriber{
-				ID:   "dual-listener",
-				Type: "node",
-			},
+			Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient("dual-listener")},
 		},
 		{
 			EventPattern: pattern,
-			Subscriber: Subscriber{
-				ID:   "wildcard-listener",
-				Type: "node",
-			},
+			Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient("wildcard-listener")},
 		},
 		{
 			EventPattern: exact,
-			Subscriber: Subscriber{
-				ID:   "exact-listener",
-				Type: "node",
-			},
+			Subscriber:   Subscriber{Recipient: events.MustNodeDeliveryRecipient("exact-listener")},
 		},
 	}
 	rt.rebuildLocked()
@@ -128,11 +110,7 @@ func TestEventBusPublish_UsesRouteTableWildcardSubscriberResolution(t *testing.T
 	rt.eventPath[eventType] = struct{}{}
 	rt.patterns = []routePattern{{
 		EventPattern: pattern,
-		Subscriber: Subscriber{
-			ID:          "operating-observer",
-			Type:        "agent",
-			RouteSource: "subscription",
-		},
+		Subscriber:   Subscriber{Recipient: events.MustAgentDeliveryRecipient("operating-observer"), routeSource: subscriberRouteSourceSubscription},
 	}}
 	rt.rebuildLocked()
 	delete(rt.routes, eventType)
@@ -168,7 +146,7 @@ func TestEventBusPublish_UsesRouteTableWildcardSubscriberResolution(t *testing.T
 func subscriberIDsForTest(in []Subscriber) map[string]int {
 	out := make(map[string]int, len(in))
 	for _, subscriber := range in {
-		out[subscriber.ID]++
+		out[subscriber.Recipient.ID()]++
 	}
 	return out
 }

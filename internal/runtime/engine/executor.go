@@ -3160,7 +3160,7 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 		EntityID:     entityID,
 		FlowInstance: flowInstance,
 	}
-	resolution, err := e.resolveEmitRoute(frame, eventType, sourceRoute, envelope)
+	resolution, err := e.resolveEmitRoute(frame, eventType, envelope)
 	if err != nil {
 		return EmitIntent{}, err
 	}
@@ -3216,14 +3216,13 @@ func nextPersistenceSafeEmitTime(now, previous time.Time) time.Time {
 	return now
 }
 
-func (e *Executor) resolveEmitRoute(frame *executionFrame, eventType string, sourceRoute events.RouteIdentity, envelope events.EventEnvelope) (runtimepinrouting.Resolution, error) {
+func (e *Executor) resolveEmitRoute(frame *executionFrame, eventType string, envelope events.EventEnvelope) (runtimepinrouting.Resolution, error) {
 	input := runtimepinrouting.ResolutionInput{
-		Source:      e.deps.Source,
-		FlowID:      strings.TrimSpace(frame.req.FlowID.String()),
-		EventType:   strings.TrimSpace(eventType),
-		SourceRoute: sourceRoute,
-		Inbound:     frame.req.Event,
-		ParentRoute: parentRouteFromState(frame.state.State.StateCarrier.Metadata),
+		Source:        e.deps.Source,
+		FlowID:        strings.TrimSpace(frame.req.FlowID.String()),
+		EventType:     strings.TrimSpace(eventType),
+		RoutingSource: frame.req.ProducerSource,
+		ParentRoute:   parentRouteFromState(frame.state.State.StateCarrier.Metadata),
 	}
 	resolution := runtimepinrouting.ResolveEnvelope(input, envelope)
 	if err := runtimepinrouting.FailureError(resolution.Failure); err != nil {

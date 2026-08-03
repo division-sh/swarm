@@ -83,23 +83,17 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	seedSQLiteEntityStateRows(t, sqliteStore.DB, ctx, newer, newerEntityA, newerEntityB)
 	seedSQLiteEntityStateRows(t, sqliteStore.DB, ctx, older, olderEntity)
 	rootEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, newerEvent)
-	pendingDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, rootEvent, events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberAgent),
-		SubscriberID:   "agent-1",
-	}, runtimedelivery.StateQueued, nil)
+	pendingDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, rootEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1")}, runtimedelivery.StateQueued, nil)
 	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, pendingDelivery, now.Add(3*time.Second), now.Add(3*time.Second))
 
 	middleEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, newerMiddleEvent)
 	agentFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "agent_failure", nil)
-	agentFailedDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, middleEvent, events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberAgent),
-		SubscriberID:   "agent-failed",
-	}, runtimedelivery.StateRetrying, &agentFailure)
+	agentFailedDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, middleEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-failed")}, runtimedelivery.StateRetrying, &agentFailure)
 	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, agentFailedDelivery, now.Add(4*time.Second), now.Add(5*time.Second))
 	agentFailedDeliveryID := agentFailedDelivery.DeliveryID
 
 	latestEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, newerLatestEvent)
-	deadRoute := events.DeliveryRoute{SubscriberType: string(runtimedelivery.SubscriberNode), SubscriberID: "node-dead"}
+	deadRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-dead")}
 	if err := commitDeliveryObligationFixture(ctx, sqliteStore, latestEvent, deadRoute); err != nil {
 		t.Fatalf("commit sqlite exhausted delivery: %v", err)
 	}
@@ -130,10 +124,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, nodeDeadDelivery, now.Add(6*time.Second), now.Add(8*time.Second))
 	nodeDeadDeliveryID := nodeDeadDelivery.DeliveryID
 
-	successfulDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, middleEvent, events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberNode),
-		SubscriberID:   "node-success",
-	}, runtimedelivery.StateDelivered, nil)
+	successfulDelivery := seedDeliveryStateFixture(t, ctx, sqliteStore, middleEvent, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-success")}, runtimedelivery.StateDelivered, nil)
 	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.DB, successfulDelivery, now.Add(5*time.Second), now.Add(7*time.Second))
 	successDeliveryID := successfulDelivery.DeliveryID
 	header, err := sqliteStore.LoadRunHeader(ctx, older)
@@ -290,15 +281,9 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 		t.Fatalf("UpsertPipelineReceipt ready event: %v", err)
 	}
 	activeEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, activeEventID)
-	seedDeliveryStateFixture(t, ctx, sqliteStore, activeEvent, events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberAgent),
-		SubscriberID:   "agent-active",
-	}, runtimedelivery.StateQueued, nil)
+	seedDeliveryStateFixture(t, ctx, sqliteStore, activeEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-active")}, runtimedelivery.StateQueued, nil)
 	readyEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.DB, readyEventID)
-	seedDeliveryStateFixture(t, ctx, sqliteStore, readyEvent, events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberAgent),
-		SubscriberID:   "agent-done",
-	}, runtimedelivery.StateDelivered, nil)
+	seedDeliveryStateFixture(t, ctx, sqliteStore, readyEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-done")}, runtimedelivery.StateDelivered, nil)
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 		INSERT INTO timers (
 			timer_id, run_id, timer_name, fire_event, fire_payload,

@@ -21,11 +21,7 @@ const coordinatorTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeee
 
 func coordinatorTestAgentRoute(t testing.TB, agentID string) events.DeliveryRoute {
 	t.Helper()
-	return events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   agentID,
-		AgentIdentity:  agentidentitytest.RootRuntime(t, agentID, "delivery-continuation-test"),
-	}
+	return events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: agentidentitytest.RootRuntime(t, agentID, "delivery-continuation-test")}
 }
 
 type coordinatorTestStore struct {
@@ -127,7 +123,7 @@ func (d *coordinatorTestDispatcher) DispatchDeliveryContinuation(
 	route events.DeliveryRoute,
 ) error {
 	d.mu.Lock()
-	d.calls = append(d.calls, event.ID()+"\x00"+route.SubscriberID)
+	d.calls = append(d.calls, event.ID()+"\x00"+route.Recipient.ID())
 	err := d.err
 	if len(d.errs) > 0 {
 		err = d.errs[0]

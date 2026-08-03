@@ -33,8 +33,8 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	olderEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, olderEventID)
 	agentFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "retry_exhausted", nil)
 	nodeFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "node_failed", nil)
-	seedDeliveryStateFixture(t, ctx, pg, olderEvent, events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-a"}, runtimedelivery.StateExhausted, &agentFailure)
-	seedDeliveryStateFixture(t, ctx, pg, olderEvent, events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-a"}, runtimedelivery.StateRetrying, &nodeFailure)
+	seedDeliveryStateFixture(t, ctx, pg, olderEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a")}, runtimedelivery.StateExhausted, &agentFailure)
+	seedDeliveryStateFixture(t, ctx, pg, olderEvent, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-a")}, runtimedelivery.StateRetrying, &nodeFailure)
 	hasDead := true
 	filtered, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{
 		Filter: OperatorEventListFilter{
@@ -635,10 +635,10 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	seedOperatorObservabilityEvent(t, ctx, pg, firstEvent, runID, "first.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), entityOne, base)
 	seedOperatorObservabilityEvent(t, ctx, pg, secondEvent, runID, "second.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), entityTwo, base.Add(time.Second))
-	firstSnapshot := seedDeliveryStateFixture(t, ctx, pg, loadPostgresDeliveryFixtureEvent(t, ctx, db, firstEvent), events.DeliveryRoute{SubscriberType: "node", SubscriberID: "node-1"}, runtimedelivery.StateQueued, nil)
+	firstSnapshot := seedDeliveryStateFixture(t, ctx, pg, loadPostgresDeliveryFixtureEvent(t, ctx, db, firstEvent), events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-1")}, runtimedelivery.StateQueued, nil)
 	setPostgresDeliveryFixtureTimes(t, ctx, db, firstSnapshot, base, base)
 	filterFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "handler_error", nil)
-	secondSnapshot := seedDeliveryStateFixture(t, ctx, pg, loadPostgresDeliveryFixtureEvent(t, ctx, db, secondEvent), events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-2"}, runtimedelivery.StateExhausted, &filterFailure)
+	secondSnapshot := seedDeliveryStateFixture(t, ctx, pg, loadPostgresDeliveryFixtureEvent(t, ctx, db, secondEvent), events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-2")}, runtimedelivery.StateExhausted, &filterFailure)
 	setPostgresDeliveryFixtureTimes(t, ctx, db, secondSnapshot, base.Add(time.Second), base.Add(time.Second))
 
 	for _, tc := range []struct {

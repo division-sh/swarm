@@ -464,11 +464,11 @@ func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, 
 func (pc *PipelineCoordinator) InterceptDeliveryRoute(ctx context.Context, delivery events.DeliveryEvent, route events.DeliveryRoute) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	evt := delivery.Event()
 	route = route.Normalized()
-	if route.SubscriberType != "node" || route.SubscriberID == "" {
+	if !route.Recipient.IsNode() {
 		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
 	if route.Target.Normalized() != evt.TargetRoute().Normalized() {
-		return true, nil, runtimepipelineobligation.Continue(), fmt.Errorf("workflow node delivery route target mismatch for %s: route=%#v event=%#v", route.SubscriberID, route.Target.Normalized(), evt.TargetRoute().Normalized())
+		return true, nil, runtimepipelineobligation.Continue(), fmt.Errorf("workflow node delivery route target mismatch for %s: route=%#v event=%#v", route.Recipient.ID(), route.Target.Normalized(), evt.TargetRoute().Normalized())
 	}
 	ctx = runtimedelivery.WithoutClaim(ctx)
 	return pc.intercept(withWorkflowNodeDeliveryRoute(ctx, route), evt, true)
@@ -543,7 +543,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 		return false, fmt.Errorf("workflow node delivery lifecycle owner is required")
 	}
 	route, routeOK := runtimedelivery.RouteFromContext(ctx)
-	if !routeOK || route.SubscriberType != string(runtimedelivery.SubscriberNode) || strings.TrimSpace(route.SubscriberID) != nodeID {
+	if !routeOK || !route.Recipient.IsNode() || route.Recipient.ID() != nodeID {
 		return false, fmt.Errorf("workflow node %s requires its exact admitted delivery route", nodeID)
 	}
 	claim, claimed := runtimedelivery.ClaimFromContext(ctx)

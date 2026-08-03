@@ -25,31 +25,32 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 ) ([]string, []string, []events.DeliveryRoute, error) {
 	persisted = uniqueStrings(persisted)
 	persistedRoutes := eb.deliveryRoutesForEvent(ctx, evt.ID())
-	persisted = uniqueStrings(append(persisted, deliveryRouteRecipientIDsByType(persistedRoutes, "agent")...))
+	persisted = uniqueStrings(append(persisted, deliveryRouteAgentRecipientIDs(persistedRoutes)...))
 	if scope == runtimepipelineobligation.ScopeDirect && len(persistedRoutes) > 0 {
 		internal := []string(nil)
-		live := deliveryRouteRecipientIDsByType(persistedRoutes, "agent")
+		live := deliveryRouteAgentRecipientIDs(persistedRoutes)
 		if len(live) > 0 {
 			return live, internal, persistedRoutes, nil
 		}
 	}
-	if scope == runtimepipelineobligation.ScopeSubscribed && hasDeliveryRouteSubscriberType(persistedRoutes, "node") {
+	if scope == runtimepipelineobligation.ScopeSubscribed && hasNodeDeliveryRoute(persistedRoutes) {
 		if hasFlowInstanceNodeDeliveryRoute(persistedRoutes) {
-			internal := deliveryRouteRecipientIDsByType(persistedRoutes, "node")
-			live := uniqueStrings(append(deliveryRouteRecipientIDsByType(persistedRoutes, "agent"), internal...))
+			internal := deliveryRouteNodeRecipientIDs(persistedRoutes)
+			live := uniqueStrings(append(deliveryRouteAgentRecipientIDs(persistedRoutes), internal...))
 			return live, internal, persistedRoutes, nil
 		}
 		internal, err := eb.currentInternalRecipientsForCommittedEvent(ctx, evt)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		live := uniqueStrings(append(deliveryRouteRecipientIDsByType(persistedRoutes, "agent"), internal...))
+		live := uniqueStrings(append(deliveryRouteAgentRecipientIDs(persistedRoutes), internal...))
 		routes := append([]events.DeliveryRoute(nil), persistedRoutes...)
 		for _, recipient := range internal {
-			if hasDeliveryRouteRecipient(routes, "node", recipient) {
+			typedRecipient := events.MustNodeDeliveryRecipient(recipient)
+			if hasDeliveryRouteRecipient(routes, typedRecipient) {
 				continue
 			}
-			routes = append(routes, events.DeliveryRoute{SubscriberType: "node", SubscriberID: recipient})
+			routes = append(routes, events.DeliveryRoute{Recipient: typedRecipient})
 		}
 		return live, internal, events.NormalizeDeliveryRoutes(routes), nil
 	}
@@ -70,10 +71,11 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 			return nil, nil, nil, fmt.Errorf("replay event %s has persisted agent recipients without exact identity-bearing delivery routes", evt.ID())
 		}
 		for _, recipient := range internal {
-			if hasDeliveryRouteRecipient(routes, "node", recipient) {
+			typedRecipient := events.MustNodeDeliveryRecipient(recipient)
+			if hasDeliveryRouteRecipient(routes, typedRecipient) {
 				continue
 			}
-			routes = append(routes, events.DeliveryRoute{SubscriberType: "node", SubscriberID: recipient})
+			routes = append(routes, events.DeliveryRoute{Recipient: typedRecipient})
 		}
 		return live, internal, events.NormalizeDeliveryRoutes(routes), nil
 	default:
@@ -81,10 +83,9 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 	}
 }
 
-func hasDeliveryRouteSubscriberType(routes []events.DeliveryRoute, subscriberType string) bool {
-	subscriberType = strings.TrimSpace(subscriberType)
+func hasNodeDeliveryRoute(routes []events.DeliveryRoute) bool {
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
-		if route.SubscriberType == subscriberType {
+		if route.Recipient.IsNode() {
 			return true
 		}
 	}
@@ -93,7 +94,7 @@ func hasDeliveryRouteSubscriberType(routes []events.DeliveryRoute, subscriberTyp
 
 func hasFlowInstanceNodeDeliveryRoute(routes []events.DeliveryRoute) bool {
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
-		if route.SubscriberType != "node" {
+		if !route.Recipient.IsNode() {
 			continue
 		}
 		target := route.Target.Normalized()
@@ -104,14 +105,12 @@ func hasFlowInstanceNodeDeliveryRoute(routes []events.DeliveryRoute) bool {
 	return false
 }
 
-func hasDeliveryRouteRecipient(routes []events.DeliveryRoute, subscriberType, subscriberID string) bool {
-	subscriberType = strings.TrimSpace(subscriberType)
-	subscriberID = strings.TrimSpace(subscriberID)
-	if subscriberType == "" || subscriberID == "" {
+func hasDeliveryRouteRecipient(routes []events.DeliveryRoute, recipient events.DeliveryRecipient) bool {
+	if recipient.Empty() {
 		return false
 	}
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
-		if route.SubscriberType == subscriberType && route.SubscriberID == subscriberID {
+		if route.Recipient == recipient {
 			return true
 		}
 	}
@@ -122,22 +121,33 @@ func deliveryRouteRecipientIDs(routes []events.DeliveryRoute) []string {
 	routes = events.NormalizeDeliveryRoutes(routes)
 	out := make([]string, 0, len(routes))
 	for _, route := range routes {
-		if route.SubscriberID != "" {
-			out = append(out, route.SubscriberID)
+		if !route.Recipient.Empty() {
+			out = append(out, route.Recipient.ID())
 		}
 	}
 	return uniqueStrings(out)
 }
 
-func deliveryRouteRecipientIDsByType(routes []events.DeliveryRoute, subscriberType string) []string {
+func deliveryRouteNodeRecipientIDs(routes []events.DeliveryRoute) []string {
 	routes = events.NormalizeDeliveryRoutes(routes)
-	subscriberType = strings.TrimSpace(subscriberType)
 	out := make([]string, 0, len(routes))
 	for _, route := range routes {
-		if route.SubscriberType != subscriberType || route.SubscriberID == "" {
+		if !route.Recipient.IsNode() {
 			continue
 		}
-		out = append(out, route.SubscriberID)
+		out = append(out, route.Recipient.ID())
+	}
+	return uniqueStrings(out)
+}
+
+func deliveryRouteAgentRecipientIDs(routes []events.DeliveryRoute) []string {
+	routes = events.NormalizeDeliveryRoutes(routes)
+	out := make([]string, 0, len(routes))
+	for _, route := range routes {
+		if !route.Recipient.IsAgent() {
+			continue
+		}
+		out = append(out, route.Recipient.ID())
 	}
 	return uniqueStrings(out)
 }

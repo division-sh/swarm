@@ -21,10 +21,7 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 	defer cancel()
 
 	fixture := seedNormalRunCompletionFixture(t, db, "active", "lock-order/instance", "lock-order")
-	route := events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberAgent),
-		SubscriberID:   "lock-order-agent",
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("lock-order-agent")}
 	event := commitPostgresDeliveryFixture(t, ctx, db, fixture.EventID, route)
 	claimed := claimPostgresDeliveryFixture(t, ctx, db, event, route)
 	settlementStore := postgresDeliveryFixtureStore(db)

@@ -1294,15 +1294,15 @@ func assertNotifyAllChildrenExactRoutes(
 		if route.Target.FlowInstance != want.FlowInstance || route.Target.EntityID != want.EntityID {
 			t.Fatalf("persisted route = %#v, want target %s/%s", route, want.FlowInstance, want.EntityID)
 		}
-		switch route.SubscriberType {
-		case "node":
-			nodeFound = route.SubscriberID == "account-node"
-		case "agent":
+		switch {
+		case route.Recipient.IsNode():
+			nodeFound = route.Recipient.ID() == "account-node"
+		case route.Recipient.IsAgent():
 			identity := route.AgentIdentity.Normalize()
 			if err := identity.Validate(); err != nil {
 				t.Fatalf("persisted account-worker identity = %#v: %v", route.AgentIdentity, err)
 			}
-			agentFound = route.SubscriberID == "account-worker" &&
+			agentFound = route.Recipient.ID() == "account-worker" &&
 				identity.AgentID() == "account-worker" &&
 				identity.FlowInstance() == want.FlowInstance
 		}

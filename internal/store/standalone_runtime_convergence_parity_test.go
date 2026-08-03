@@ -80,11 +80,7 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 							if status != "running" || countRunConvergenceDeliveries(t, fixture, ctx, event.ID()) != 1 {
 								t.Fatalf("pre-receipt state = run:%q deliveries:%d, want running/1", status, countRunConvergenceDeliveries(t, fixture, ctx, event.ID()))
 							}
-							route := events.DeliveryRoute{
-								SubscriberType: string(runtimedelivery.SubscriberAgent),
-								SubscriberID:   agentID,
-								AgentIdentity:  agentIdentity,
-							}
+							route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: agentIdentity}
 							claimed, err := claimDeliveryFixture(ctx, fixture.store, event, route)
 							if err != nil {
 								t.Fatalf("ClaimAgentDelivery: %v", err)
@@ -259,7 +255,7 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 	for _, route := range routes {
 		claimed, err := claimDeliveryFixture(ctx, pg, event, route)
 		if err != nil {
-			t.Fatalf("ClaimAgentDelivery(%s): %v", route.SubscriberID, err)
+			t.Fatalf("ClaimAgentDelivery(%s): %v", route.Recipient.ID(), err)
 		}
 		claims = append(claims, claimed.Claim)
 	}

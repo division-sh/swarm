@@ -24,7 +24,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -249,7 +248,7 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	)
 	routes := []events.DeliveryRoute{
 		testAgentDeliveryRoute(t, "agent-pending", "fixture/agent-pending"),
-		{SubscriberType: "node", SubscriberID: "node-pending"},
+		{Recipient: events.MustNodeDeliveryRecipient("node-pending")},
 	}
 	if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, routes); err != nil {
 		t.Fatalf("seed sqlite event: %v", err)
@@ -1296,11 +1295,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 		events.EventType("trace.visible"),
 		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now)
 
-	route := events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberAgent),
-		SubscriberID:   identity.AgentID(),
-		AgentIdentity:  identity.Agent,
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity.Agent}
 	if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("PersistEventWithDeliveries trace event: %v", err)
 	}

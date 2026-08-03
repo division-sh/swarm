@@ -554,8 +554,8 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	} {
 		eventsByID[event.id] = seedOperatorAgentEvent(t, ctx, pg, event.id, runID, event.name, entityID, now.Add(-10*time.Minute))
 	}
-	agentOneRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1", AgentIdentity: testOperatorAgentIdentity("agent-1")}
-	agentTwoRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-2", AgentIdentity: testOperatorAgentIdentity("agent-2")}
+	agentOneRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: testOperatorAgentIdentity("agent-1")}
+	agentTwoRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-2"), AgentIdentity: testOperatorAgentIdentity("agent-2")}
 	oldFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "old_failure", nil)
 	oldSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[failedOldEventID], agentOneRoute, runtimedelivery.StateRetrying, &oldFailure)
 	terminalFailureEnvelope := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal_failure", nil)
@@ -956,8 +956,8 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 	} {
 		eventsByID[event.id] = seedOperatorAgentEvent(t, ctx, pg, event.id, event.runID, event.name, entityID, base.Add(-10*time.Minute))
 	}
-	agentOneRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1", AgentIdentity: testOperatorAgentIdentity("agent-1")}
-	agentTwoRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-2", AgentIdentity: testOperatorAgentIdentity("agent-2")}
+	agentOneRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: testOperatorAgentIdentity("agent-1")}
+	agentTwoRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-2"), AgentIdentity: testOperatorAgentIdentity("agent-2")}
 	pendingSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[pendingEventID], agentOneRoute, runtimedelivery.StateQueued, nil)
 	inProgressSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[inProgressEventID], agentOneRoute, runtimedelivery.StateLaunching, nil)
 	deliveredSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[deliveredEventID], agentOneRoute, runtimedelivery.StateDelivered, nil)
@@ -1141,8 +1141,8 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 		}
 		eventsByID[event.id] = fixture
 	}
-	agentOneRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-1", AgentIdentity: testOperatorAgentIdentity("agent-1")}
-	agentTwoRoute := events.DeliveryRoute{SubscriberType: "agent", SubscriberID: "agent-2", AgentIdentity: testOperatorAgentIdentity("agent-2")}
+	agentOneRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: testOperatorAgentIdentity("agent-1")}
+	agentTwoRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-2"), AgentIdentity: testOperatorAgentIdentity("agent-2")}
 	pendingSnapshot := seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[pendingEventID], agentOneRoute, runtimedelivery.StateQueued, nil)
 	inProgressSnapshot := seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[inProgressEventID], agentOneRoute, runtimedelivery.StateLaunching, nil)
 	deliveredSnapshot := seedAgentDeliveryStateFixture(t, ctx, sqliteStore, eventsByID[deliveredEventID], agentOneRoute, runtimedelivery.StateDelivered, nil)
@@ -1336,11 +1336,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsUsesCanonicalLifecy
 	requireRunFixtureForTest(t, ctx, &PostgresStore{DB: db}, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	event := seedOperatorAgentEvent(t, ctx, pg, eventID, runID, "task.dead", "", time.Now().UTC())
 	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "missing_dead_letter_record", nil)
-	seedAgentDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   "agent-1",
-		AgentIdentity:  testOperatorAgentIdentity("agent-1"),
-	}, runtimedelivery.StateExhausted, &failure)
+	seedAgentDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: testOperatorAgentIdentity("agent-1")}, runtimedelivery.StateExhausted, &failure)
 
 	got, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryDiagnosticsOptions{})
 	if err != nil {

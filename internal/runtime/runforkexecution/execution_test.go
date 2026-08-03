@@ -515,7 +515,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002200, 0).UTC()
 	seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, "item.received", at,
-		events.DeliveryRoute{SubscriberType: "node", SubscriberID: "source-only-node"}, nil, loaded.BundleSourceFact)
+		events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("source-only-node")}, nil, loaded.BundleSourceFact)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
@@ -1024,7 +1024,7 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	laterEvent := eventtest.PersistedChildForProducer(laterEventID, events.EventType("item.received"),
 		eventtest.Producer(events.EventProducerNode, "source-node"), "", payload, 0, sourceRunID, earlierEventID,
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), laterAt)
-	commitRunForkTestEvent(t, ctx, pg, laterEvent, []events.DeliveryRoute{{SubscriberType: "node", SubscriberID: "test-node"}})
+	commitRunForkTestEvent(t, ctx, pg, laterEvent, []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("test-node")}})
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -3815,12 +3815,9 @@ func TestSelectedContractRecipientPlanPublishGuardScopesPathDriftToFreshCreatePr
 		RecipientPlanEvents: []runfork.RunForkSelectedContractRecipientPlanEvent{{
 			SourceEventID: "source-event",
 			EventName:     "validation.requested",
-			Recipients: []runfork.RunForkContractFrontierRecipient{{
-				SubscriberType: "node",
-				SubscriberID:   "validator-node",
-				Path:           "validator/source-instance",
-				RouteSource:    "canonical_connect",
-			}},
+			Recipients: []runfork.RunForkContractFrontierRecipient{
+				testNodeFrontierRecipient("validator-node", "validator/source-instance", "canonical_connect"),
+			},
 			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},
 	}
@@ -3851,29 +3848,18 @@ func TestSelectedContractRecipientPlanPublishGuardScopesPathDriftToFreshCreatePr
 	}{
 		{
 			name: "create fresh projected route accepts fork-local path",
-			routes: []events.DeliveryRoute{{
-				SubscriberType:    "node",
-				SubscriberID:      "validator-node",
-				Target:            events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"},
+			routes: []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("validator-node"), Target: events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"},
 				PayloadProjection: projection,
 			}},
 		},
 		{
-			name: "select canonical path drift is rejected",
-			routes: []events.DeliveryRoute{{
-				SubscriberType: "node",
-				SubscriberID:   "validator-node",
-				Target:         events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"},
-			}},
+			name:    "select canonical path drift is rejected",
+			routes:  []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("validator-node"), Target: events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"}}},
 			wantErr: true,
 		},
 		{
-			name: "select-or-create canonical path drift is rejected",
-			routes: []events.DeliveryRoute{{
-				SubscriberType: "node",
-				SubscriberID:   "validator-node",
-				Target:         events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"},
-			}},
+			name:    "select-or-create canonical path drift is rejected",
+			routes:  []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("validator-node"), Target: events.RouteIdentity{FlowID: "validator", FlowInstance: "validator/fork-instance", EntityID: "fork-case"}}},
 			wantErr: true,
 		},
 	}
@@ -3906,16 +3892,8 @@ func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDelivery
 			SourceEventID: "source-event",
 			EventName:     "item.received",
 			Recipients: []runfork.RunForkContractFrontierRecipient{
-				{
-					SubscriberType: "agent",
-					SubscriberID:   "target-agent",
-					RouteSource:    "selected_contracts",
-				},
-				{
-					SubscriberType: "node",
-					SubscriberID:   "test-node",
-					RouteSource:    "selected_contracts",
-				},
+				testAgentFrontierRecipient("target-agent", "", "selected_contracts", agentidentity.Identity{}),
+				testNodeFrontierRecipient("test-node", "", "selected_contracts"),
 			},
 			Disposition: runfork.RunForkSelectedContractDispositionForkLocalTruth,
 		}},
@@ -3947,8 +3925,8 @@ func TestSelectedContractRecipientPlanPublishGuardMaterializesTargetNodeDelivery
 		t.Fatalf("MaterializeNodeDeliveryRoutes: %v", err)
 	}
 	if len(routes) != 1 ||
-		routes[0].SubscriberType != "node" ||
-		routes[0].SubscriberID != "test-node" ||
+		!routes[0].Recipient.IsNode() ||
+		routes[0].Recipient.ID() != "test-node" ||
 		!routes[0].Target.Empty() {
 		t.Fatalf("materialized routes = %#v, want target node route only", routes)
 	}
@@ -4331,11 +4309,7 @@ func seedSelectedExecutionSourceRun(
 
 func selectedExecutionTestAgentRoute(t testing.TB, agentID, flowInstance string) events.DeliveryRoute {
 	t.Helper()
-	return events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   agentID,
-		AgentIdentity:  selectedContractTestAgentIdentity(t, agentID, flowInstance),
-	}
+	return events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: selectedContractTestAgentIdentity(t, agentID, flowInstance)}
 }
 
 func selectedExecutionTestAgentFields(t testing.TB, identity agentidentity.Identity) agentidentity.StorageFields {
@@ -4413,7 +4387,7 @@ func seedSelectedExecutionSourceRunWithRoutes(
 	sourceFacts ...runtimecorrelation.BundleSourceFact,
 ) events.Event {
 	return seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, eventName, at,
-		events.DeliveryRoute{SubscriberType: "node", SubscriberID: "test-node"}, extraRoutes, sourceFacts...)
+		events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("test-node")}, extraRoutes, sourceFacts...)
 }
 
 func seedSelectedExecutionSourceRunWithPrimaryRoute(

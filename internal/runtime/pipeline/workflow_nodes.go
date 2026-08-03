@@ -745,7 +745,7 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Conte
 func (pc *PipelineCoordinator) workflowNodeDeliveryRouteMatches(ctx context.Context, nodeID string, eventTarget events.RouteIdentity) bool {
 	nodeID = strings.TrimSpace(nodeID)
 	if route, ok := workflowNodeDeliveryRoute(ctx); ok {
-		if strings.TrimSpace(route.SubscriberID) != nodeID {
+		if route.Recipient.ID() != nodeID {
 			return false
 		}
 		return pc.workflowNodeMatchesDeliveryTarget(nodeID, route.Target)

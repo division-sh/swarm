@@ -401,7 +401,7 @@ func fanInStreamRoutesContain(routes []events.DeliveryRoute, target events.Route
 func fanInStreamTargetRoute(routes []events.DeliveryRoute, target events.RouteIdentity) (events.RouteIdentity, bool) {
 	target = target.Normalized()
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
-		if route.SubscriberType == "node" && route.SubscriberID == templatefanin.ReceiverNodeID &&
+		if route.Recipient.IsNode() && route.Recipient.ID() == templatefanin.ReceiverNodeID &&
 			route.Target.FlowID == target.FlowID && route.Target.FlowInstance == target.FlowInstance &&
 			route.Target.EntityID == target.EntityID {
 			return route.Target, true

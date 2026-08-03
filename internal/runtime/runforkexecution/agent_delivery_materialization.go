@@ -81,15 +81,15 @@ func selectedContractPlannedAgentRecipients(planning runfork.RunForkSelectedCont
 	seen := map[agentidentity.Identity]struct{}{}
 	for _, event := range planning.RecipientPlanEvents {
 		for _, recipient := range event.Recipients {
-			if strings.TrimSpace(recipient.SubscriberType) != "agent" {
+			if !recipient.Recipient.IsAgent() {
 				continue
 			}
 			identity := recipient.AgentIdentity.Normalize()
 			if err := identity.Validate(); err != nil {
-				return nil, fmt.Errorf("selected-contract agent recipient %q requires exact concrete identity: %w", strings.TrimSpace(recipient.SubscriberID), err)
+				return nil, fmt.Errorf("selected-contract agent recipient %q requires exact concrete identity: %w", recipient.Recipient.ID(), err)
 			}
-			if identity.AgentID() != strings.TrimSpace(recipient.SubscriberID) {
-				return nil, fmt.Errorf("selected-contract agent recipient %q conflicts with concrete identity %s", strings.TrimSpace(recipient.SubscriberID), identity.Description())
+			if identity.AgentID() != recipient.Recipient.ID() {
+				return nil, fmt.Errorf("selected-contract agent recipient %q conflicts with concrete identity %s", recipient.Recipient.ID(), identity.Description())
 			}
 			seen[identity] = struct{}{}
 		}

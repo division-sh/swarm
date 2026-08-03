@@ -101,11 +101,7 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity},
 		now.Add(-time.Minute),
 	)
-	route := events.DeliveryRoute{
-		SubscriberType: string(runtimedelivery.SubscriberAgent),
-		SubscriberID:   "agent-1",
-		AgentIdentity:  sqliteAgentUsageIdentity(t, "agent-1"),
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: sqliteAgentUsageIdentity(t, "agent-1")}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, "subscribed")
 	claimed, err := storetest.ClaimDelivery(ctx, sqliteStore, evt, route)
 	if err != nil {

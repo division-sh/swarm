@@ -60,7 +60,7 @@ func checkPinTargetResolution(c *checkerContext) []Finding {
 		}
 		consumer := runtimepinrouting.ClassifyOutputConsumer(c.source, site.FlowID, eventType)
 		if !consumer.HasRuntimeConsumer() {
-			findings = append(findings, pinTargetFinding(site, string(runtimepinrouting.FailureTargetRequiredMissing)))
+			findings = append(findings, pinTargetFinding(site, runtimepinrouting.FailureTargetRequiredMissing.Code()))
 		}
 	}
 	for _, site := range pinRoutingAgentEmitSites(c.source) {
@@ -72,7 +72,7 @@ func checkPinTargetResolution(c *checkerContext) []Finding {
 		}
 		consumer := runtimepinrouting.ClassifyOutputConsumer(c.source, site.FlowID, site.EventType)
 		if !consumer.HasRuntimeConsumer() {
-			findings = append(findings, pinTargetAgentFinding(site, string(runtimepinrouting.FailureTargetRequiredMissing)))
+			findings = append(findings, pinTargetAgentFinding(site, runtimepinrouting.FailureTargetRequiredMissing.Code()))
 		}
 	}
 	return findings

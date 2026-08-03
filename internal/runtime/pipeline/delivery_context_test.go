@@ -11,12 +11,9 @@ import (
 )
 
 func TestWorkflowNodeDeliveryRouteInstallsReplyContext(t *testing.T) {
-	route := events.DeliveryRoute{
-		SubscriberType: "node",
-		SubscriberID:   "provider-node",
-		Context: events.DeliveryContext{
-			Reply: &events.ReplyContextRef{ID: "reply-v1:node-delivery"},
-		},
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("provider-node"), Context: events.DeliveryContext{
+		Reply: &events.ReplyContextRef{ID: "reply-v1:node-delivery"},
+	},
 	}
 	ctx := withWorkflowNodeDeliveryRoute(testAuthorActivityContext(t, context.Background()), route)
 	if got := events.DeliveryContextFromContext(ctx).ReplyContextID(); got != route.Context.ReplyContextID() {

@@ -312,36 +312,36 @@ func (g *selectedContractRecoveredRecipientGuard) expectedRecipientPlanEvent(evt
 	return sourceEventID, expected, nil
 }
 
-func selectedContractRecoveredExpectedRecipientKeys(in []selectedContractRecoveredRecipient) []string {
-	out := make([]string, 0, len(in))
+func selectedContractRecoveredExpectedRecipientKeys(in []selectedContractRecoveredRecipient) []selectedContractRecoveredRecipientIdentity {
+	out := make([]selectedContractRecoveredRecipientIdentity, 0, len(in))
 	for _, recipient := range in {
-		if strings.TrimSpace(recipient.SubscriberType) == "" || strings.TrimSpace(recipient.SubscriberID) == "" {
+		key, ok := selectedContractRecoveredRecipientKey(recipient)
+		if !ok {
 			continue
 		}
-		out = append(out, selectedContractRecoveredRecipientKey(recipient))
+		out = append(out, key)
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return selectedContractRecoveredRecipientLess(out[i], out[j]) })
 	return out
 }
 
-func selectedContractRecoveredActualRecipientKeys(in []runtimebus.PublishDiagnosticRecipient) []string {
-	out := make([]string, 0, len(in))
+func selectedContractRecoveredActualRecipientKeys(in []runtimebus.PublishDiagnosticRecipient) []selectedContractRecoveredRecipientIdentity {
+	out := make([]selectedContractRecoveredRecipientIdentity, 0, len(in))
 	for _, recipient := range in {
-		if strings.TrimSpace(recipient.Type) == "" || strings.TrimSpace(recipient.ID) == "" {
+		key, ok := selectedContractRecoveredRecipientKey(selectedContractRecoveredRecipient{
+			SubscriberType: recipient.Type, SubscriberID: recipient.ID,
+			Path: recipient.Path, RouteSource: recipient.RouteSource,
+		})
+		if !ok {
 			continue
 		}
-		out = append(out, selectedContractRecoveredRecipientKey(selectedContractRecoveredRecipient{
-			SubscriberType: recipient.Type,
-			SubscriberID:   recipient.ID,
-			Path:           recipient.Path,
-			RouteSource:    recipient.RouteSource,
-		}))
+		out = append(out, key)
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return selectedContractRecoveredRecipientLess(out[i], out[j]) })
 	return out
 }
 
-func selectedContractRecoveredRecipientKeysEqual(left, right []string) bool {
+func selectedContractRecoveredRecipientKeysEqual(left, right []selectedContractRecoveredRecipientIdentity) bool {
 	if len(left) != len(right) {
 		return false
 	}
@@ -353,13 +353,45 @@ func selectedContractRecoveredRecipientKeysEqual(left, right []string) bool {
 	return true
 }
 
-func selectedContractRecoveredRecipientKey(recipient selectedContractRecoveredRecipient) string {
-	return strings.Join([]string{
-		strings.TrimSpace(recipient.SubscriberType),
-		strings.TrimSpace(recipient.SubscriberID),
-		strings.TrimSpace(recipient.Path),
-		strings.TrimSpace(recipient.RouteSource),
-	}, "\x00")
+type selectedContractRecoveredRecipientIdentity struct {
+	recipient   events.DeliveryRecipient
+	path        string
+	routeSource string
+}
+
+func selectedContractRecoveredRecipientKey(recipient selectedContractRecoveredRecipient) (selectedContractRecoveredRecipientIdentity, bool) {
+	var (
+		typedRecipient events.DeliveryRecipient
+		err            error
+	)
+	switch strings.TrimSpace(recipient.SubscriberType) {
+	case "node":
+		typedRecipient, err = events.NewNodeDeliveryRecipient(recipient.SubscriberID)
+	case "agent":
+		typedRecipient, err = events.NewAgentDeliveryRecipient(recipient.SubscriberID)
+	default:
+		return selectedContractRecoveredRecipientIdentity{}, false
+	}
+	if err != nil {
+		return selectedContractRecoveredRecipientIdentity{}, false
+	}
+	return selectedContractRecoveredRecipientIdentity{
+		recipient: typedRecipient, path: strings.TrimSpace(recipient.Path),
+		routeSource: strings.TrimSpace(recipient.RouteSource),
+	}, true
+}
+
+func selectedContractRecoveredRecipientLess(left, right selectedContractRecoveredRecipientIdentity) bool {
+	if left.recipient.Code() != right.recipient.Code() {
+		return left.recipient.Code() < right.recipient.Code()
+	}
+	if left.recipient.ID() != right.recipient.ID() {
+		return left.recipient.ID() < right.recipient.ID()
+	}
+	if left.path != right.path {
+		return left.path < right.path
+	}
+	return left.routeSource < right.routeSource
 }
 
 func (am *AgentManager) SelectedContractRouteRecoverySnapshot() map[string]SelectedContractRouteRecoveryTruth {

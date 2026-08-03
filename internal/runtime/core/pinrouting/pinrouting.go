@@ -7,21 +7,79 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-type TargetFailure string
+type TargetFailure uint8
 
 const (
-	FailureTargetRequiredMissing       TargetFailure = "target_required_missing"
-	FailureTargetNotSubscribed         TargetFailure = "target_not_subscribed"
-	FailureTargetUnreachableTerminated TargetFailure = "target_unreachable_terminated"
-	FailureParentRouteIncomplete       TargetFailure = "parent_route_incomplete"
-	FailureReplyAlreadyTerminal        TargetFailure = "platform.reply_already_terminal"
-	FailureStaleArrival                TargetFailure = "platform.stale_arrival"
+	FailureTargetRequiredMissing TargetFailure = iota + 1
+	FailureTargetNotSubscribed
+	FailureTargetUnreachableTerminated
+	FailureParentRouteIncomplete
+	FailureReplyAlreadyTerminal
+	FailureStaleArrival
 )
+
+const targetFailureConnectOffset TargetFailure = 32
+
+func TargetFailureFromConnect(failure ConnectRoutePlanFailure) TargetFailure {
+	if failure.Empty() {
+		return 0
+	}
+	return targetFailureConnectOffset + TargetFailure(failure)
+}
+
+func (f TargetFailure) Empty() bool { return f == 0 }
+
+func (f TargetFailure) Code() string {
+	switch f {
+	case FailureTargetRequiredMissing:
+		return "target_required_missing"
+	case FailureTargetNotSubscribed:
+		return "target_not_subscribed"
+	case FailureTargetUnreachableTerminated:
+		return "target_unreachable_terminated"
+	case FailureParentRouteIncomplete:
+		return "parent_route_incomplete"
+	case FailureReplyAlreadyTerminal:
+		return "platform.reply_already_terminal"
+	case FailureStaleArrival:
+		return "platform.stale_arrival"
+	default:
+		if f > targetFailureConnectOffset {
+			return ConnectRoutePlanFailure(f - targetFailureConnectOffset).Code()
+		}
+		return ""
+	}
+}
+
+func ParseTargetFailure(code string) (TargetFailure, error) {
+	switch strings.TrimSpace(code) {
+	case "":
+		return 0, nil
+	case "target_required_missing":
+		return FailureTargetRequiredMissing, nil
+	case "target_not_subscribed":
+		return FailureTargetNotSubscribed, nil
+	case "target_unreachable_terminated":
+		return FailureTargetUnreachableTerminated, nil
+	case "parent_route_incomplete":
+		return FailureParentRouteIncomplete, nil
+	case "platform.reply_already_terminal":
+		return FailureReplyAlreadyTerminal, nil
+	case "platform.stale_arrival":
+		return FailureStaleArrival, nil
+	default:
+		for failure := ConnectFailureSourceMissing; failure <= ConnectFailureLifecycleUnavailable; failure++ {
+			if failure.Code() == strings.TrimSpace(code) {
+				return TargetFailureFromConnect(failure), nil
+			}
+		}
+		return 0, fmt.Errorf("target failure code %q is invalid", code)
+	}
+}
 
 type Descriptor struct {
 	ID            string
@@ -31,12 +89,11 @@ type Descriptor struct {
 }
 
 type ResolutionInput struct {
-	Source      semanticview.Source
-	FlowID      string
-	EventType   string
-	SourceRoute events.RouteIdentity
-	Inbound     events.Event
-	ParentRoute events.RouteIdentity
+	Source        semanticview.Source
+	FlowID        string
+	EventType     string
+	RoutingSource events.RoutingSource
+	ParentRoute   events.RouteIdentity
 	// Static child flows have no persisted ParentRoute row; they may route back to
 	// the current delivery entity, but template/dynamic ParentRoute metadata must
 	// remain complete and fail closed when partial.
@@ -81,6 +138,10 @@ func (c OutputConsumerClassification) HasRuntimeConsumer() bool {
 }
 
 func ClassifyOutputConsumer(source semanticview.Source, flowID, eventType string) OutputConsumerClassification {
+	return classifyOutputConsumer(source, flowID, eventType, events.NoRoutingSource())
+}
+
+func classifyOutputConsumer(source semanticview.Source, flowID, eventType string, routingSource events.RoutingSource) OutputConsumerClassification {
 	classification := OutputConsumerClassification{classes: map[OutputConsumerClass]struct{}{}}
 	if source == nil {
 		return classification
@@ -95,7 +156,14 @@ func ClassifyOutputConsumer(source semanticview.Source, flowID, eventType string
 		if pin.Sink == runtimecontracts.FlowOutputSinkHarness {
 			classification.classes[OutputConsumerHarness] = struct{}{}
 		}
-		classification.connects = append(classification.connects, graph.PlansFromOutputPin(flowID, pin)...)
+		if routingSource.Empty() {
+			classification.connects = append(classification.connects, graph.PlansFromOutputPin(flowID, pin)...)
+		}
+	}
+	if !routingSource.Empty() {
+		if sourceEvent, err := AdmitSourceEvent(events.EventType(eventType), routingSource); err == nil {
+			classification.connects = append(classification.connects, graph.MatchingSourceEvent(sourceEvent)...)
+		}
 	}
 	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).MatchingConsumers(flowID, eventType) {
 		if endpoint.Kind != semanticview.EventEndpointExternal {
@@ -128,28 +196,21 @@ func structuralParentRouteEligible(source semanticview.Source, flowID string) bo
 }
 
 func PinDeclaredOutput(source semanticview.Source, flowID, eventType string) bool {
-	flowID = strings.TrimSpace(flowID)
-	eventType = eventidentity.Normalize(eventType)
-	if source == nil || eventType == "" {
+	if source == nil {
 		return false
 	}
-	if flowID == "" {
-		return rootPinDeclaredOutput(source, eventType)
+	proof := semanticview.ResolveFlowEventProof(source, flowID, eventType)
+	for _, candidate := range []string{proof.Authored, proof.Local, proof.Canonical} {
+		if strings.TrimSpace(candidate) != "" && source.FlowHasOutputEvent(flowID, candidate) {
+			return true
+		}
 	}
-	if source.FlowHasOutputEvent(flowID, eventType) {
+	if len(outputPinsForEvent(source, flowID, eventType)) > 0 {
 		return true
 	}
-	leaf := eventidentity.LeafName(eventType)
-	if leaf != "" && source.FlowHasOutputEvent(flowID, leaf) {
-		return true
-	}
-	resolved := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, eventType))
-	if resolved != "" && source.FlowHasOutputEvent(flowID, resolved) {
-		return true
-	}
+	eventKey := proof.EventKey()
 	for _, output := range source.FlowOutputEvents(flowID) {
-		output = eventidentity.Normalize(output)
-		if output == eventType || output == resolved || output == leaf {
+		if semanticview.ResolveFlowEventProof(source, flowID, output).EventKey() == eventKey {
 			return true
 		}
 	}
@@ -160,93 +221,26 @@ func outputPinsForEvent(source semanticview.Source, flowID, eventType string) []
 	if source == nil {
 		return nil
 	}
+	eventKey := semanticview.ResolveFlowEventProof(source, flowID, eventType).EventKey()
+	if eventKey == "" {
+		return nil
+	}
 	out := []runtimecontracts.FlowOutputEventPin{}
 	for _, pin := range source.FlowOutputEventPins(flowID) {
-		if eventReferencesOverlap(source, flowID, []string{eventType}, flowID, []string{pin.PinName(), pin.EventType()}) {
-			out = append(out, pin)
-		}
-	}
-	return out
-}
-
-func eventReferencesOverlap(source semanticview.Source, leftFlowID string, leftEvents []string, rightFlowID string, rightEvents []string) bool {
-	leftRefs := eventReferences(source, leftFlowID, leftEvents...)
-	rightRefs := eventReferences(source, rightFlowID, rightEvents...)
-	for _, left := range leftRefs {
-		for _, right := range rightRefs {
-			if eventReferencesMatch(left, right) {
-				return true
+		for _, authored := range []string{pin.PinName(), pin.EventType()} {
+			if semanticview.ResolveFlowEventProof(source, flowID, authored).EventKey() == eventKey {
+				out = append(out, pin)
+				break
 			}
 		}
 	}
-	return false
-}
-
-func eventReferences(source semanticview.Source, flowID string, eventTypes ...string) []string {
-	out := []string{}
-	seen := map[string]struct{}{}
-	add := func(eventType string) {
-		eventType = eventidentity.Normalize(eventType)
-		if eventType == "" {
-			return
-		}
-		if _, ok := seen[eventType]; ok {
-			return
-		}
-		seen[eventType] = struct{}{}
-		out = append(out, eventType)
-	}
-	for _, eventType := range eventTypes {
-		add(eventType)
-		if source != nil {
-			add(source.ResolveFlowEventReference(flowID, eventType))
-		}
-	}
 	return out
 }
 
-func eventReferencesMatch(left, right string) bool {
-	left = eventidentity.Normalize(left)
-	right = eventidentity.Normalize(right)
-	if left == "" || right == "" {
-		return false
-	}
-	if left == right {
-		return true
-	}
-	leftQualified := strings.Contains(left, "/")
-	rightQualified := strings.Contains(right, "/")
-	if leftQualified == rightQualified {
-		return false
-	}
-	return eventidentity.LeafName(left) == eventidentity.LeafName(right)
-}
-
-func rootPinDeclaredOutput(source semanticview.Source, eventType string) bool {
-	if source == nil {
-		return false
-	}
-	eventType = eventidentity.Normalize(eventType)
-	if eventType == "" {
-		return false
-	}
-	for _, pin := range source.FlowOutputEventPins("") {
-		output := eventidentity.Normalize(pin.EventType())
-		if output == "" {
-			continue
-		}
-		if output == eventType {
-			return true
-		}
-		resolved := eventidentity.Normalize(source.ResolveFlowEventReference("", output))
-		if resolved != "" && resolved == eventType {
-			return true
-		}
-	}
-	return false
-}
-
 func Resolve(input ResolutionInput, evt events.Event) Resolution {
+	if input.RoutingSource.Empty() {
+		input.RoutingSource = evt.RoutingSource()
+	}
 	resolution := ResolveEnvelope(input, evt.NormalizedEnvelope())
 	resolved, err := events.ResolveEnvelope(evt, resolution.Envelope)
 	if err != nil {
@@ -260,35 +254,32 @@ func Resolve(input ResolutionInput, evt events.Event) Resolution {
 func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resolution {
 	input.FlowID = strings.TrimSpace(input.FlowID)
 	input.EventType = strings.TrimSpace(input.EventType)
-	input.SourceRoute = input.SourceRoute.Normalized()
-	if input.SourceRoute.Empty() {
-		input.SourceRoute = routeFromEvent(input.Inbound)
-	}
-	if !input.SourceRoute.Empty() {
-		envelope = events.EnvelopeForSourceRoute(envelope, input.SourceRoute)
+	sourceRoute := input.RoutingSource.Route().Normalized()
+	if !sourceRoute.Empty() {
+		envelope = events.EnvelopeForSourceRoute(envelope, sourceRoute)
 	}
 	if !PinDeclaredOutput(input.Source, input.FlowID, input.EventType) {
 		return Resolution{Envelope: envelope.Normalized()}
 	}
-	consumer := ClassifyOutputConsumer(input.Source, input.FlowID, input.EventType)
+	consumer := classifyOutputConsumer(input.Source, input.FlowID, input.EventType, input.RoutingSource)
 	if consumer.InvalidSink() || (consumer.Has(OutputConsumerHarness) && consumer.HasRuntimeConsumer()) {
 		return Resolution{Envelope: envelope.Normalized(), Failure: FailureTargetRequiredMissing}
+	}
+	connectPlans := consumer.connects
+	if connectPlansContainRootReceiver(connectPlans) {
+		parentRoute := input.ParentRoute.Normalized()
+		if parentRoute.EntityID == "" {
+			return Resolution{Envelope: envelope.Normalized(), Failure: FailureParentRouteIncomplete}
+		}
+		return Resolution{
+			Envelope: events.EnvelopeForTargetRoute(envelope, parentRoute),
+			Target:   parentRoute,
+		}
 	}
 	if consumer.Has(OutputConsumerHarness) || consumer.Has(OutputConsumerSameFlow) || consumer.Has(OutputConsumerExternal) {
 		return Resolution{Envelope: envelope.Normalized()}
 	}
-	connectPlans := consumer.connects
 	if len(connectPlans) > 0 {
-		if connectPlansContainRootReceiver(connectPlans) {
-			parentRoute := input.ParentRoute.Normalized()
-			if parentRoute.EntityID == "" {
-				return Resolution{Envelope: envelope.Normalized(), Failure: FailureParentRouteIncomplete}
-			}
-			return Resolution{
-				Envelope: events.EnvelopeForTargetRoute(envelope, parentRoute),
-				Target:   parentRoute,
-			}
-		}
 		return Resolution{Envelope: envelope.Normalized()}
 	}
 	parentRoute := input.ParentRoute.Normalized()
@@ -324,21 +315,6 @@ func OutputHasExternalConsumer(source semanticview.Source, flowID, eventType str
 	return ClassifyOutputConsumer(source, flowID, eventType).Has(OutputConsumerExternal)
 }
 
-func routeFromEvent(evt events.Event) events.RouteIdentity {
-	source := evt.SourceRoute()
-	if !source.Empty() {
-		return source
-	}
-	target := evt.TargetRoute()
-	if !target.Empty() {
-		return target
-	}
-	return events.RouteIdentity{
-		FlowInstance: evt.FlowInstance(),
-		EntityID:     evt.EntityID(),
-	}.Normalized()
-}
-
 func descriptorRoute(flowID string, descriptor Descriptor) events.RouteIdentity {
 	flowInstance := strings.Trim(strings.TrimSpace(descriptor.FlowInstance), "/")
 	entityID := strings.TrimSpace(descriptor.EntityID)
@@ -357,17 +333,16 @@ func descriptorRoute(flowID string, descriptor Descriptor) events.RouteIdentity 
 
 func uniqueRoutes(in []events.RouteIdentity) []events.RouteIdentity {
 	out := make([]events.RouteIdentity, 0, len(in))
-	seen := map[string]struct{}{}
+	seen := map[events.RouteIdentity]struct{}{}
 	for _, route := range in {
 		route = route.Normalized()
 		if route.Empty() {
 			continue
 		}
-		key := route.FlowID + "\x00" + route.FlowInstance + "\x00" + route.EntityID
-		if _, ok := seen[key]; ok {
+		if _, ok := seen[route]; ok {
 			continue
 		}
-		seen[key] = struct{}{}
+		seen[route] = struct{}{}
 		out = append(out, route)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -380,8 +355,8 @@ func uniqueRoutes(in []events.RouteIdentity) []events.RouteIdentity {
 }
 
 func FailureError(failure TargetFailure) error {
-	if failure == "" {
+	if failure.Empty() {
 		return nil
 	}
-	return fmt.Errorf("pin routing target resolution failed: %s", string(failure))
+	return fmt.Errorf("pin routing target resolution failed: %s", failure.Code())
 }

@@ -448,10 +448,10 @@ func decodeDeliveryPayloadProjectionJSON(raw []byte) (events.DeliveryPayloadProj
 }
 
 func deliveryRouteReasonCode(route events.DeliveryRoute) string {
-	switch strings.TrimSpace(route.SubscriberType) {
-	case "agent":
+	switch {
+	case route.Recipient.IsAgent():
 		return "matched_agent_subscription"
-	case "node":
+	case route.Recipient.IsNode():
 		return "matched_node_subscription"
 	default:
 		return "matched_subscription"

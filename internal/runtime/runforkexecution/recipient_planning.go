@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -97,9 +98,10 @@ func selectedContractRecipientPlanEvents(events []runfork.RunForkContractFrontie
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
-		left := strings.Join([]string{out[i].SourceEventID, out[i].EventName}, "\x00")
-		right := strings.Join([]string{out[j].SourceEventID, out[j].EventName}, "\x00")
-		return left < right
+		if out[i].SourceEventID != out[j].SourceEventID {
+			return out[i].SourceEventID < out[j].SourceEventID
+		}
+		return out[i].EventName < out[j].EventName
 	})
 	return out
 }
@@ -109,16 +111,12 @@ func sortedFrontierRecipients(in []runfork.RunForkContractFrontierRecipient) []r
 		return nil
 	}
 	out := make([]runfork.RunForkContractFrontierRecipient, 0, len(in))
-	seen := map[string]struct{}{}
+	seen := map[frontierRecipientKey]struct{}{}
 	for _, recipient := range in {
-		recipient = runfork.RunForkContractFrontierRecipient{
-			SubscriberType: strings.TrimSpace(recipient.SubscriberType),
-			SubscriberID:   strings.TrimSpace(recipient.SubscriberID),
-			Path:           strings.TrimSpace(recipient.Path),
-			RouteSource:    strings.TrimSpace(recipient.RouteSource),
-			AgentIdentity:  recipient.AgentIdentity.Normalize(),
-		}
-		if recipient.SubscriberType == "" || recipient.SubscriberID == "" {
+		recipient = runfork.NewRunForkContractFrontierRecipient(
+			recipient.Recipient, recipient.Path, recipient.RouteSourceCode(), recipient.AgentIdentity,
+		)
+		if recipient.Recipient.Empty() {
 			continue
 		}
 		key := recipientKey(recipient)
@@ -128,9 +126,7 @@ func sortedFrontierRecipients(in []runfork.RunForkContractFrontierRecipient) []r
 		seen[key] = struct{}{}
 		out = append(out, recipient)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		return recipientKey(out[i]) < recipientKey(out[j])
-	})
+	sort.Slice(out, func(i, j int) bool { return frontierRecipientLess(out[i], out[j]) })
 	return out
 }
 
@@ -403,15 +399,15 @@ func hasFreshCreateRecipientProjection(plan runtimebus.PublishRecipientPlan) (bo
 		return false, fmt.Errorf("selected-contract publish path has invalid delivery projection evidence: %w", err)
 	}
 
-	projectedPaths := make(map[string]string, len(plan.DeliveryRoutes))
+	projectedPaths := make(map[events.DeliveryRecipient]string, len(plan.DeliveryRoutes))
 	for _, route := range plan.DeliveryRoutes {
 		route = route.Normalized()
 		if route.PayloadProjection.Empty() {
 			continue
 		}
-		key := recipientIdentityKey(route.SubscriberType, route.SubscriberID)
+		key := route.Recipient
 		path := route.Target.FlowInstance
-		if key == "" || path == "" {
+		if key.Empty() || path == "" {
 			return false, nil
 		}
 		if previous, exists := projectedPaths[key]; exists && previous != path {
@@ -423,11 +419,11 @@ func hasFreshCreateRecipientProjection(plan runtimebus.PublishRecipientPlan) (bo
 		return false, nil
 	}
 
-	actualPaths := make(map[string]string, len(plan.RoutedRecipients))
+	actualPaths := make(map[events.DeliveryRecipient]string, len(plan.RoutedRecipients))
 	for _, recipient := range plan.RoutedRecipients {
-		key := recipientIdentityKey(recipient.Type, recipient.ID)
+		key, ok := deliveryRecipientFromReadback(recipient.Type, recipient.ID)
 		path := strings.Trim(strings.TrimSpace(recipient.Path), "/")
-		if key == "" || path == "" {
+		if !ok || path == "" {
 			return false, nil
 		}
 		if previous, exists := actualPaths[key]; exists && previous != path {
@@ -496,16 +492,15 @@ func selectedContractNodeDeliveryRoutes(evt events.Event, in []runfork.RunForkCo
 	}
 	out := make([]events.DeliveryRoute, 0, len(in))
 	for _, recipient := range in {
-		if strings.TrimSpace(recipient.SubscriberType) != "node" {
+		if !recipient.Recipient.IsNode() {
 			continue
 		}
-		id := strings.TrimSpace(recipient.SubscriberID)
+		id := recipient.Recipient.ID()
 		if id == "" {
 			continue
 		}
 		route := events.DeliveryRoute{
-			SubscriberType: "node",
-			SubscriberID:   id,
+			Recipient: events.MustNodeDeliveryRecipient(id),
 		}
 		if path := strings.Trim(strings.TrimSpace(recipient.Path), "/"); path != "" {
 			route.Target.FlowInstance = path
@@ -516,74 +511,59 @@ func selectedContractNodeDeliveryRoutes(evt events.Event, in []runfork.RunForkCo
 	return events.NormalizeDeliveryRoutes(out)
 }
 
-func expectedRecipientKeys(in []runfork.RunForkContractFrontierRecipient) []string {
-	out := make([]string, 0, len(in))
+func expectedRecipientKeys(in []runfork.RunForkContractFrontierRecipient) []frontierRecipientKey {
+	out := make([]frontierRecipientKey, 0, len(in))
 	for _, recipient := range in {
-		recipient = runfork.RunForkContractFrontierRecipient{
-			SubscriberType: strings.TrimSpace(recipient.SubscriberType),
-			SubscriberID:   strings.TrimSpace(recipient.SubscriberID),
-			Path:           strings.TrimSpace(recipient.Path),
-			RouteSource:    strings.TrimSpace(recipient.RouteSource),
-			AgentIdentity:  recipient.AgentIdentity.Normalize(),
-		}
-		if recipient.SubscriberType == "" || recipient.SubscriberID == "" {
+		recipient = runfork.NewRunForkContractFrontierRecipient(
+			recipient.Recipient, recipient.Path, recipient.RouteSourceCode(), recipient.AgentIdentity,
+		)
+		if recipient.Recipient.Empty() {
 			continue
 		}
 		out = append(out, recipientKey(recipient))
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return frontierRecipientKeyLess(out[i], out[j]) })
 	return out
 }
 
-func actualRecipientKeys(in []runtimebus.PublishDiagnosticRecipient) []string {
-	out := make([]string, 0, len(in))
+func actualRecipientKeys(in []runtimebus.PublishDiagnosticRecipient) []frontierRecipientKey {
+	out := make([]frontierRecipientKey, 0, len(in))
 	for _, recipient := range in {
-		if strings.TrimSpace(recipient.Type) == "" || strings.TrimSpace(recipient.ID) == "" {
+		typedRecipient, ok := deliveryRecipientFromReadback(recipient.Type, recipient.ID)
+		if !ok {
 			continue
 		}
-		out = append(out, recipientKey(runfork.RunForkContractFrontierRecipient{
-			SubscriberType: recipient.Type,
-			SubscriberID:   recipient.ID,
-			Path:           recipient.Path,
-			RouteSource:    recipient.RouteSource,
-		}))
+		out = append(out, recipientKey(runfork.NewRunForkContractFrontierRecipient(
+			typedRecipient, recipient.Path, recipient.RouteSource, agentidentity.Identity{},
+		)))
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return frontierRecipientKeyLess(out[i], out[j]) })
 	return out
 }
 
-func expectedRecipientIdentityKeys(in []runfork.RunForkContractFrontierRecipient) []string {
-	out := make([]string, 0, len(in))
+func expectedRecipientIdentityKeys(in []runfork.RunForkContractFrontierRecipient) []frontierRecipientKey {
+	out := make([]frontierRecipientKey, 0, len(in))
 	for _, recipient := range in {
-		if key := recipientIdentityKey(recipient.SubscriberType, recipient.SubscriberID); key != "" {
-			out = append(out, key)
+		if !recipient.Recipient.Empty() {
+			out = append(out, frontierRecipientKey{recipient: recipient.Recipient})
 		}
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return frontierRecipientKeyLess(out[i], out[j]) })
 	return out
 }
 
-func actualRecipientIdentityKeys(in []runtimebus.PublishDiagnosticRecipient) []string {
-	out := make([]string, 0, len(in))
+func actualRecipientIdentityKeys(in []runtimebus.PublishDiagnosticRecipient) []frontierRecipientKey {
+	out := make([]frontierRecipientKey, 0, len(in))
 	for _, recipient := range in {
-		if key := recipientIdentityKey(recipient.Type, recipient.ID); key != "" {
-			out = append(out, key)
+		if typedRecipient, ok := deliveryRecipientFromReadback(recipient.Type, recipient.ID); ok {
+			out = append(out, frontierRecipientKey{recipient: typedRecipient})
 		}
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return frontierRecipientKeyLess(out[i], out[j]) })
 	return out
 }
 
-func recipientIdentityKey(subscriberType, subscriberID string) string {
-	subscriberType = strings.TrimSpace(subscriberType)
-	subscriberID = strings.TrimSpace(subscriberID)
-	if subscriberType == "" || subscriberID == "" {
-		return ""
-	}
-	return subscriberType + "\x00" + subscriberID
-}
-
-func recipientKeysEqual(left, right []string) bool {
+func recipientKeysEqual(left, right []frontierRecipientKey) bool {
 	if len(left) != len(right) {
 		return false
 	}
@@ -595,11 +575,48 @@ func recipientKeysEqual(left, right []string) bool {
 	return true
 }
 
-func recipientKey(recipient runfork.RunForkContractFrontierRecipient) string {
-	return strings.Join([]string{
-		strings.TrimSpace(recipient.SubscriberType),
-		strings.TrimSpace(recipient.SubscriberID),
-		strings.TrimSpace(recipient.Path),
-		strings.TrimSpace(recipient.RouteSource),
-	}, "\x00")
+type frontierRecipientKey struct {
+	recipient   events.DeliveryRecipient
+	path        string
+	routeSource string
+}
+
+func recipientKey(recipient runfork.RunForkContractFrontierRecipient) frontierRecipientKey {
+	return frontierRecipientKey{
+		recipient: recipient.Recipient,
+		path:      strings.TrimSpace(recipient.Path), routeSource: recipient.RouteSourceCode(),
+	}
+}
+
+func frontierRecipientKeyLess(left, right frontierRecipientKey) bool {
+	if left.recipient.Code() != right.recipient.Code() {
+		return left.recipient.Code() < right.recipient.Code()
+	}
+	if left.recipient.ID() != right.recipient.ID() {
+		return left.recipient.ID() < right.recipient.ID()
+	}
+	if left.path != right.path {
+		return left.path < right.path
+	}
+	return left.routeSource < right.routeSource
+}
+
+func frontierRecipientLess(left, right runfork.RunForkContractFrontierRecipient) bool {
+	return frontierRecipientKeyLess(recipientKey(left), recipientKey(right))
+}
+
+func deliveryRecipientFromReadback(kind, id string) (events.DeliveryRecipient, bool) {
+	var (
+		recipient events.DeliveryRecipient
+		err       error
+	)
+	switch strings.TrimSpace(kind) {
+	case "node":
+		recipient, err = events.NewNodeDeliveryRecipient(id)
+	case "agent":
+		recipient, err = events.NewAgentDeliveryRecipient(id)
+	default:
+		return events.DeliveryRecipient{}, false
+	}
+	return recipient, err == nil
 }

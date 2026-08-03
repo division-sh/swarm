@@ -38,11 +38,11 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	envelope := events.EnvelopeForTargetRoute(events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute), targetRoute)
 	pendingEvent := eventtest.ExistingRunRootIngress(pendingEventID, "producer/inst-1/scan.requested", "producer-node", "", []byte(`{}`), 0, runID, envelope, at)
-	pendingRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "pending-source-node"}
+	pendingRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("pending-source-node")}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, pendingEvent, []events.DeliveryRoute{pendingRoute}, runtimepipelineobligation.ScopeSubscribed)
 
 	completedEvent := eventtest.ExistingRunRootIngress(completedEventID, "producer/inst-1/scan.requested", "producer-node", "", []byte(`{}`), 0, runID, envelope, at.Add(time.Second))
-	completedRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "completed-source-node"}
+	completedRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("completed-source-node")}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, completedEvent, []events.DeliveryRoute{completedRoute}, runtimepipelineobligation.ScopeSubscribed)
 	completedClaim, err := storetest.ClaimDelivery(ctx, pg, completedEvent, completedRoute)
 	if err != nil {
@@ -86,7 +86,7 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 	if err != nil {
 		t.Fatalf("AdmitContractFrontier: %v", err)
 	}
-	if len(frontier.FrontierEvents) != 1 || len(frontier.FrontierEvents[0].DerivedRecipients) != 1 || frontier.FrontierEvents[0].DerivedRecipients[0].SubscriberID != "consumer-node" {
+	if len(frontier.FrontierEvents) != 1 || len(frontier.FrontierEvents[0].DerivedRecipients) != 1 || frontier.FrontierEvents[0].DerivedRecipients[0].Recipient.ID() != "consumer-node" {
 		t.Fatalf("frontier = %#v, want producer/inst-1 source routed independently of consumer/inst-9 receiver context", frontier.FrontierEvents)
 	}
 
@@ -96,7 +96,7 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 	if err != nil {
 		t.Fatalf("AdmitSelectedContractRouteHistory: %v", err)
 	}
-	if len(history.SelectedRouteEvents) != 1 || len(history.SelectedRouteEvents[0].DerivedRecipients) != 1 || history.SelectedRouteEvents[0].DerivedRecipients[0].SubscriberID != "consumer-node" {
+	if len(history.SelectedRouteEvents) != 1 || len(history.SelectedRouteEvents[0].DerivedRecipients) != 1 || history.SelectedRouteEvents[0].DerivedRecipients[0].Recipient.ID() != "consumer-node" {
 		t.Fatalf("history = %#v, want revisioned producer source routed independently of receiver context", history.SelectedRouteEvents)
 	}
 }
@@ -209,7 +209,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			eventEnvelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, tc.sourceRoute)
 			event := eventtest.ExistingRunRootIngress(eventID, events.EventType(tc.eventName), "producer-node", "", []byte(`{}`), 0, runID, eventEnvelope, at)
 			if tc.deliveryStatus != "" {
-				route := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "source-node"}
+				route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("source-node")}
 				storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 				if tc.deliveryStatus == "completed" {
 					claimed, err := storetest.ClaimDelivery(ctx, pg, event, route)
@@ -302,7 +302,7 @@ func frontierRecipientIDs(frontier runfork.RunForkContractFrontierAdmission) []s
 	var out []string
 	for _, event := range frontier.FrontierEvents {
 		for _, recipient := range event.DerivedRecipients {
-			out = append(out, recipient.SubscriberID)
+			out = append(out, recipient.Recipient.ID())
 		}
 	}
 	return out
@@ -312,7 +312,7 @@ func historyRecipientIDs(history runfork.RunForkSelectedContractRouteAdmission) 
 	var out []string
 	for _, event := range history.SelectedRouteEvents {
 		for _, recipient := range event.DerivedRecipients {
-			out = append(out, recipient.SubscriberID)
+			out = append(out, recipient.Recipient.ID())
 		}
 	}
 	return out

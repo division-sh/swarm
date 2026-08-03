@@ -61,11 +61,7 @@ func TestAgentDeliveryExecutionContextRejectsPublisherValuesAndBuildsNormalRecei
 		t.Fatal("delivery context has no occurrence owner")
 	}
 
-	route := events.DeliveryRoute{
-		SubscriberType: "agent",
-		SubscriberID:   identity.AgentID(),
-		AgentIdentity:  identity,
-	}
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 	got, cleanup, err := agentDeliveryExecutionContext(
 		delivery.Context(), loopCtx, token, deliveryOwner, event, route, eventreceiver.NormalExecution(), admitManagerTestBusContext,
 	)

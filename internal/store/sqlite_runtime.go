@@ -229,7 +229,7 @@ func (s *SQLiteRuntimeStore) ListEventDeliveryRecipients(ctx context.Context, ev
 	}
 	out := make([]string, 0)
 	for _, snapshot := range snapshots {
-		if snapshot.Route.SubscriberType == "agent" {
+		if snapshot.Route.Recipient.IsAgent() {
 			out = append(out, strings.TrimSpace(snapshot.SubscriberID))
 		}
 	}
