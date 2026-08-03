@@ -58,21 +58,21 @@ func insertHumanTaskCard(ctx context.Context, tx *sql.Tx, card decisioncard.Card
 		return err
 	}
 	query := `INSERT INTO human_task_continuations (
-		card_id, run_id, requester_flow_instance, requester_entity_id, reply_context_id, source_event_id, deadline_at,
+		card_id, run_id, requester_flow_id, requester_flow_instance, requester_entity_id, reply_context_id, source_event_id, deadline_at,
 		budget_bundle_hash, budget_limit, budget_window_start, budget_window_end,
 		requeue_count, defer_cause, deferred_until, state, outcome_event_id, created_at, updated_at
-	) VALUES (?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?)
+	) VALUES (?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?)
 	ON CONFLICT (card_id) DO NOTHING`
 	if postgres {
 		query = `INSERT INTO human_task_continuations (
-			card_id, run_id, requester_flow_instance, requester_entity_id, reply_context_id, source_event_id, deadline_at,
+			card_id, run_id, requester_flow_id, requester_flow_instance, requester_entity_id, reply_context_id, source_event_id, deadline_at,
 			budget_bundle_hash, budget_limit, budget_window_start, budget_window_end,
 			requeue_count, defer_cause, deferred_until, state, outcome_event_id, created_at, updated_at
-		) VALUES ($1, $2::uuid, NULLIF($3, ''), NULLIF($4, '')::uuid, NULLIF($5, ''), $6::uuid, $7, $8, $9, $10, $11, $12, NULLIF($13, ''), $14, $15, NULLIF($16, '')::uuid, $17, $18)
+		) VALUES ($1, $2::uuid, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, '')::uuid, NULLIF($6, ''), $7::uuid, $8, $9, $10, $11, $12, $13, NULLIF($14, ''), $15, $16, NULLIF($17, '')::uuid, $18, $19)
 		ON CONFLICT (card_id) DO NOTHING`
 	}
 	res, err := tx.ExecContext(ctx, query,
-		continuation.CardID, continuation.RunID, continuation.RequesterRoute.FlowInstance, continuation.RequesterRoute.EntityID,
+		continuation.CardID, continuation.RunID, continuation.RequesterRoute.FlowID, continuation.RequesterRoute.FlowInstance, continuation.RequesterRoute.EntityID,
 		continuation.ReplyContextID, continuation.SourceEventID,
 		continuation.DeadlineAt.UTC(), continuation.BudgetBundleHash, continuation.BudgetLimit,
 		continuation.BudgetWindowStart.UTC(), continuation.BudgetWindowEnd.UTC(), continuation.RequeueCount,
@@ -324,7 +324,7 @@ func expireHumanTaskCards(ctx context.Context, tx *sql.Tx, now time.Time, limit 
 }
 
 func loadHumanTaskContinuation(ctx context.Context, db decisionCardSQL, cardID string, postgres, forUpdate bool) (decisioncard.HumanTaskContinuation, error) {
-	query := `SELECT card_id, run_id, COALESCE(requester_flow_instance, ''), COALESCE(CAST(requester_entity_id AS TEXT), ''),
+	query := `SELECT card_id, run_id, COALESCE(requester_flow_id, ''), COALESCE(requester_flow_instance, ''), COALESCE(CAST(requester_entity_id AS TEXT), ''),
 		COALESCE(reply_context_id, ''), COALESCE(CAST(source_event_id AS TEXT), ''),
 		deadline_at, budget_bundle_hash, budget_limit, budget_window_start, budget_window_end,
 		requeue_count, COALESCE(defer_cause, ''), deferred_until, state,
@@ -339,7 +339,7 @@ func loadHumanTaskContinuation(ctx context.Context, db decisionCardSQL, cardID s
 	var out decisioncard.HumanTaskContinuation
 	var deadline, windowStart, windowEnd, deferred, created, updated any
 	err := db.QueryRowContext(ctx, query, strings.TrimSpace(cardID)).Scan(
-		&out.CardID, &out.RunID, &out.RequesterRoute.FlowInstance, &out.RequesterRoute.EntityID,
+		&out.CardID, &out.RunID, &out.RequesterRoute.FlowID, &out.RequesterRoute.FlowInstance, &out.RequesterRoute.EntityID,
 		&out.ReplyContextID, &out.SourceEventID, &deadline,
 		&out.BudgetBundleHash, &out.BudgetLimit, &windowStart, &windowEnd, &out.RequeueCount,
 		&out.DeferCause, &deferred, &out.State, &out.OutcomeEventID, &created, &updated,

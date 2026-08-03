@@ -1263,6 +1263,9 @@ contract_formats:
             shadow HasConsumer/Resolve decision, or flatten the result into free recipient-kind strings before behavior.
             Replay, duplicate recovery, settlement, handler execution, and selected-fork execution consume the persisted
             connect execution claim and MUST NOT rematch current connect topology.
+            Exact and wildcard receiver subscriptions are expanded over the receiver flow's finite declared input-event catalog
+            before typed recipient admission. Raw wildcard patterns never enter the exact compiled endpoint matcher, and events
+            outside that declared catalog cannot acquire connect recipient authority.
           finite_variant_boundary: |
             Routing-source kind and authority, delivery-recipient kind, compiled target and resolution kind, failure,
             fan-in aggregation, and reply role are immutable integer-backed named constants. They MUST NOT store their
@@ -13098,7 +13101,10 @@ platform_tables:
         effective cadence, contract and provenance identity, and presentation hashes. Generic mailbox rows never mirror
         writable card state. Creation and every lifecycle mutation admit authoritative timestamps to UTC microsecond
         precision before validation, card/continuation mutation, change emission, event construction, or readback; this
-        includes decisions, defers, expiry, outcome completion, and supersession. Unknown anchor kinds fail closed;
+        includes decisions, defers, expiry, outcome completion, and supersession. Every execution-source anchor is constructed
+        from its typed owner; lifecycle consumers revalidate static/singleton stage instances against the authoritative workflow
+        row and continuation-backed anchors against their complete persisted owner before emission. Partial or foreign flow,
+        instance, or entity provenance fails closed. Unknown anchor kinds fail closed;
         proposed_effect execution is owned separately by proposed_effect_continuations.'
       ddl: |
         CREATE TABLE decision_cards (
@@ -13164,7 +13170,8 @@ platform_tables:
         card decision and continuation commit, expiry, and run supersession are each one selected-store mutation. Human-task
         admission canonicalizes source, deadline, budget-window, and continuation lifecycle timestamps to UTC microsecond
         precision before snapshot construction, hashing, persistence, or idempotent replay comparison; both selected stores
-        consume that same admitted representation. The requester route is stamped independently from the card business scope,
+        consume that same admitted representation. The complete requester route (flow ID, flow instance, and entity for flow
+        execution; entity only for root execution) is stamped from the admitted routing source independently from the card business scope,
         so entity-bound requesters receive flow- and global-scoped task outcomes. Transactional direct publication rolls back
         when its explicit requester is rejected by route policy; outcome delivery state never commits against an empty plan.
         Human-task outcome completion is transaction-local only and requires the deterministic human_task.approved,
@@ -13182,6 +13189,7 @@ platform_tables:
         CREATE TABLE human_task_continuations (
             card_id                UUID PRIMARY KEY REFERENCES decision_cards(card_id) ON DELETE CASCADE,
             run_id                 UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            requester_flow_id      TEXT,
             requester_flow_instance TEXT,
             requester_entity_id    UUID,
             reply_context_id       TEXT REFERENCES reply_contexts(reply_context_id),

@@ -525,6 +525,17 @@ func TestReplyResolutionConformance_TypedHumanTaskPreservesReplyAuthorityAcrossR
 			// Rebuild the bus and coordinator before any operator outcome. No
 			// process-local request state may be needed to resume the requester.
 			resumedBus, outcomes := newDurableReplyHumanTaskRuntime(t, ctx, backend, source)
+			persistedCard, err := cards.GetDecisionCard(ctx, card.CardID)
+			if err != nil {
+				t.Fatalf("reload typed human-task card: %v", err)
+			}
+			persistedContinuation, err := cards.LoadHumanTaskContinuation(ctx, card.CardID)
+			if err != nil {
+				t.Fatalf("reload typed human-task continuation: %v", err)
+			}
+			if err := persistedContinuation.Validate(persistedCard); err != nil {
+				t.Fatalf("reloaded typed human-task ownership: %v; route=%#v", err, persistedContinuation.RequesterRoute)
+			}
 			deferredAt := time.Now().UTC().Truncate(time.Microsecond).Add(789 * time.Nanosecond)
 			deferred, err := cards.DeferDecisionCard(ctx, decisioncard.DeferRequest{
 				CardID: card.CardID, ActorTokenID: "operator", Until: deferredAt.Add(10 * time.Minute), Now: deferredAt,
@@ -697,7 +708,7 @@ func createReplyConformanceHumanTask(t *testing.T, ctx context.Context, cards re
 		t.Fatal(err)
 	}
 	continuation := decisioncard.HumanTaskContinuation{
-		CardID: card.CardID, RunID: runID, ReplyContextID: deliveryContext.ReplyContextID(), SourceEventID: sourceEventID,
+		CardID: card.CardID, RunID: runID, RequesterRoute: source.Route(), ReplyContextID: deliveryContext.ReplyContextID(), SourceEventID: sourceEventID,
 		DeadlineAt: now.Add(time.Hour), BudgetBundleHash: card.BundleHash,
 		BudgetWindowStart: now.Truncate(7 * 24 * time.Hour), BudgetWindowEnd: now.Truncate(7 * 24 * time.Hour).Add(7 * 24 * time.Hour),
 		State: decisioncard.HumanTaskContinuationPending, CreatedAt: now, UpdatedAt: now,
@@ -741,10 +752,18 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 	})
 
 	eb.SetInterceptors(coordinator)
+	requesterIdentity := runtimebustest.Identity(t, "provider-agent", templatereply.ProviderFlowID)
 	eb.RegisterRuntimeActiveAgentDescriptor(bus.ActiveAgentDescriptor{
-		Identity: runtimebustest.Identity(t, "provider-agent", ""),
+		Identity: requesterIdentity,
 	})
-	outcomes := runtimebustest.Subscribe(t, eb, "provider-agent", events.EventType("human_task.deferred"), events.EventType("human_task.approved"))
+	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
+		AgentID: "provider-agent", FlowID: templatereply.ProviderFlowID, FlowPath: templatereply.ProviderFlowID,
+		Subscriptions: []string{"human_task.deferred", "human_task.approved"},
+	})
+	if err != nil {
+		t.Fatalf("admit provider human-task outcome subscriptions: %v", err)
+	}
+	outcomes := runtimebustest.SubscribeIdentity(t, eb, requesterIdentity, admission)
 	return eb, outcomes
 }
 

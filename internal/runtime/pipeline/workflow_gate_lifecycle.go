@@ -51,11 +51,13 @@ func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, ent
 
 	var create *workflowGateIntent
 	superseded := []gateruntime.Activation{}
+	var lifecycleOwner WorkflowInstance
 	now := occurredAt.UTC()
 	if now.IsZero() {
 		return fmt.Errorf("workflow gate lifecycle requires an exact occurrence time")
 	}
 	err := pc.workflowStore.mutateE(ctx, entityID, func(instance *WorkflowInstance) error {
+		lifecycleOwner = *instance
 		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 		if err != nil {
 			return fmt.Errorf("decode gate state: %w", err)
@@ -147,7 +149,7 @@ func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, ent
 		if err := pc.decisionCards.SupersedeDecisionCardsForStage(ctx, runtimecorrelation.RunIDFromContext(ctx), entityID, activation.ActivationID, activation.SupersededReason, now); err != nil {
 			return err
 		}
-		if err := pc.publishWorkflowGateSuperseded(ctx, card, activation, now); err != nil {
+		if err := pc.publishWorkflowGateSuperseded(ctx, card, activation, lifecycleOwner, now); err != nil {
 			return err
 		}
 	}
@@ -159,7 +161,7 @@ func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, ent
 	return nil
 }
 
-func (pc *PipelineCoordinator) publishWorkflowGateSuperseded(ctx context.Context, card decisioncard.Card, activation gateruntime.Activation, now time.Time) error {
+func (pc *PipelineCoordinator) publishWorkflowGateSuperseded(ctx context.Context, card decisioncard.Card, activation gateruntime.Activation, instance WorkflowInstance, now time.Time) error {
 	publisher := pc.gatePublisher
 	if publisher == nil {
 		return fmt.Errorf("transactional event publisher is required to supersede decision card %s", activation.CardID)
@@ -172,6 +174,9 @@ func (pc *PipelineCoordinator) publishWorkflowGateSuperseded(ctx context.Context
 	}
 	anchor, err := card.Anchor.StageGate()
 	if err != nil {
+		return err
+	}
+	if err := validateStageGateInstanceOwner(anchor, instance); err != nil {
 		return err
 	}
 	routingSource, err := card.Anchor.ControlRoutingSource()

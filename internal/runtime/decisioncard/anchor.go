@@ -265,6 +265,29 @@ func validateProposedEffectSourceOwner(anchor ProposedEffectAnchor, continuation
 	return nil
 }
 
+func validateHumanTaskSourceOwner(anchor HumanTaskAnchor, continuation HumanTaskContinuation) error {
+	want := continuation.RequesterRoute.Normalized()
+	if want.Empty() {
+		return fmt.Errorf("human-task continuation requester route is required")
+	}
+	if anchor.Source.Route() != want {
+		return fmt.Errorf("human-task anchor source does not match its continuation requester owner")
+	}
+	switch anchor.Source.Kind() {
+	case events.RoutingSourceRoot:
+		if want.FlowID != "" || want.FlowInstance != "" {
+			return fmt.Errorf("root human-task requester owner forbids flow identity")
+		}
+	case events.RoutingSourceStaticFlow, events.RoutingSourceConcreteTemplateInstance:
+		if want.FlowID == "" || want.FlowInstance == "" {
+			return fmt.Errorf("flow human-task requester owner requires flow identity")
+		}
+	default:
+		return fmt.Errorf("human-task anchor source kind %q is not an execution owner", anchor.Source.Kind())
+	}
+	return nil
+}
+
 func DecodeAnchor(kind string, raw []byte) (Anchor, error) {
 	value, err := canonicaljson.Decode(raw)
 	if err != nil {

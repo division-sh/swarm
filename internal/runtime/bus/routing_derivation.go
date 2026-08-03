@@ -447,7 +447,7 @@ func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 			}
 		}
 		for _, rawPattern := range subscriberTemplate.RawPatterns {
-			if err := rt.addConnectRecipientLocked(templateDef.FlowID, rawPattern, subscriber, instancePath); err != nil {
+			if err := rt.addConnectRecipientLocked(templateDef.FlowID, templateDef.InputEvents, rawPattern, subscriber, instancePath); err != nil {
 				return err
 			}
 			for _, resolved := range routeResolveSubscriberPatterns(rt.source, templateDef.PackageKey, templateDef.FlowID, templateDef.InputEvents, instancePath, templateDef.LocalEvents, rawPattern) {
@@ -738,7 +738,7 @@ func (rt *RouteTable) addTopLevelRootInputNodeRoutesLocked(source semanticview.S
 				MatchPattern: eventType,
 				routeSource:  subscriberRouteSourceRootInputProject,
 			}
-			if err := rt.addConnectRecipientLocked("", eventType, subscriber, ""); err != nil {
+			if err := rt.addConnectRecipientLocked("", nil, eventType, subscriber, ""); err != nil {
 				return fmt.Errorf("admit root connect recipient %s for %s: %w", subscriberID, eventType, err)
 			}
 			rt.rootInputRoutes[eventType] = appendUniqueRootInputSubscriber(rt.rootInputRoutes[eventType], subscriber)
@@ -964,7 +964,7 @@ func (rt *RouteTable) addAgentPatternsLocked(
 			return fmt.Errorf("route subscriber agent %s concrete identity: %w", key, err)
 		}
 		for _, rawPattern := range normalizeStringList(entry.Subscriptions) {
-			if err := rt.addConnectRecipientLocked(routingFlowID, rawPattern, subscriber, ""); err != nil {
+			if err := rt.addConnectRecipientLocked(routingFlowID, inputEvents, rawPattern, subscriber, ""); err != nil {
 				return err
 			}
 			for _, resolved := range routeResolveSubscriberPatterns(source, packageKey, routingFlowID, inputEvents, basePath, localEvents, rawPattern) {
@@ -995,7 +995,7 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageK
 			patterns = source.NodeRuntimeSubscriptions(semanticNodeID)
 		}
 		for _, rawPattern := range patterns {
-			if err := rt.addConnectRecipientLocked(flowID, rawPattern, subscriber, ""); err != nil {
+			if err := rt.addConnectRecipientLocked(flowID, inputEvents, rawPattern, subscriber, ""); err != nil {
 				return err
 			}
 			for _, resolved := range routeResolveSubscriberPatterns(source, packageKey, flowID, inputEvents, basePath, localEvents, rawPattern) {
@@ -1012,7 +1012,7 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageK
 	return nil
 }
 
-func (rt *RouteTable) addConnectRecipientLocked(flowID, eventType string, subscriber Subscriber, instancePath string) error {
+func (rt *RouteTable) addConnectRecipientLocked(flowID string, inputEvents []string, eventPattern string, subscriber Subscriber, instancePath string) error {
 	var recipient runtimepinrouting.ConnectRecipient
 	var err error
 	switch {
@@ -1026,11 +1026,23 @@ func (rt *RouteTable) addConnectRecipientLocked(flowID, eventType string, subscr
 	if err != nil {
 		return err
 	}
-	for _, registration := range rt.connectGraph.AdmitReceiverRecipient(strings.TrimSpace(flowID), events.EventType(eventType), recipient) {
-		rt.connectRecipients = append(rt.connectRecipients, routeConnectRecipientRegistration{
-			registration: registration,
-			instancePath: strings.Trim(strings.TrimSpace(instancePath), "/"),
-		})
+	eventPattern = eventidentity.Normalize(eventPattern)
+	eventTypes := []string{eventPattern}
+	if strings.Contains(eventPattern, "*") {
+		eventTypes = nil
+		for _, eventType := range normalizeStringList(inputEvents) {
+			if eventidentity.MatchPattern(eventPattern, eventType) {
+				eventTypes = append(eventTypes, eventType)
+			}
+		}
+	}
+	for _, eventType := range eventTypes {
+		for _, registration := range rt.connectGraph.AdmitReceiverRecipient(strings.TrimSpace(flowID), events.EventType(eventType), recipient) {
+			rt.connectRecipients = append(rt.connectRecipients, routeConnectRecipientRegistration{
+				registration: registration,
+				instancePath: strings.Trim(strings.TrimSpace(instancePath), "/"),
+			})
+		}
 	}
 	return nil
 }

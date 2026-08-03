@@ -232,7 +232,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 								AgentIdentity: identity,
 							}
 							routeTable.rootInputRoutes[localEvent] = appendUniqueRootInputSubscriber(routeTable.rootInputRoutes[localEvent], subscriber)
-							if err := routeTable.addConnectRecipientLocked("", localEvent, subscriber, ""); err != nil {
+							if err := routeTable.addConnectRecipientLocked("", nil, localEvent, subscriber, ""); err != nil {
 								t.Fatalf("admit root receiver: %v", err)
 							}
 						}
@@ -1036,6 +1036,51 @@ func TestConnectRecipientEvaluationUsesCompiledReceiverPin(t *testing.T) {
 	}
 	if got := recipients[0].HandlerEvent(); got != "deploy.completed" {
 		t.Fatalf("handler event = %q, want deploy.completed", got)
+	}
+}
+
+func TestEventBusConnectRecipientRegistrationExpandsWildcardOverDeclaredInputs(t *testing.T) {
+	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+		{
+			id: "producer", mode: "static",
+			outputs: []runtimecontracts.FlowOutputEventPin{{Name: "deploy_done", Event: "deploy.done"}},
+		},
+		{
+			id: "consumer", mode: "static",
+			inputs: []runtimecontracts.FlowInputEventPin{{Name: "deploy_completed", Event: "deploy.completed"}},
+			nodes: map[string]runtimecontracts.SystemNodeContract{
+				"consumer-node": {
+					ID: "consumer-node",
+					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+						"deploy.*": {},
+					},
+				},
+			},
+		},
+	}, []runtimecontracts.FlowPackageConnect{{
+		From: "producer.deploy_done", To: "consumer.deploy_completed", Adapter: "deploy_done_to_completed",
+	}}))
+	store := newTargetRouteMemoryStore()
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	eventID := uuid.NewString()
+	evt := connectRoutePlanStaticProducerEvent(eventID, events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	want := connectRoutePlanStaticDeliveryRoute()
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if plan.TargetFailure != "" || !deliveryRoutesContain(plan.DeliveryRoutes, want) {
+		t.Fatalf("wildcard connect plan = routes:%#v failure:%q, want %#v", plan.DeliveryRoutes, plan.TargetFailure, want)
+	}
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
+		t.Fatalf("persisted wildcard connect routes = %#v, want %#v", routes, want)
 	}
 }
 

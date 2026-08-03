@@ -136,9 +136,11 @@ func newHumanTaskAckLossDecisionAuthority(
 
 func newAPIHumanTaskAckLossCard(t *testing.T, runID string, now time.Time) (decisioncard.Card, decisioncard.HumanTaskContinuation) {
 	t.Helper()
+	requesterEntityID := uuid.NewString()
+	source := eventtest.RootRoutingSource(requesterEntityID)
 	anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
 		RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
-		Scope: decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: "provider/instance-a"}, Source: eventtest.RootRoutingSource("requester-entity"),
+		Scope: decisioncard.Scope{Kind: decisioncard.ScopeFlow, FlowInstance: "provider/instance-a"}, Source: source,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -157,7 +159,7 @@ func newAPIHumanTaskAckLossCard(t *testing.T, runID string, now time.Time) (deci
 		t.Fatal(err)
 	}
 	return card, decisioncard.HumanTaskContinuation{
-		CardID: card.CardID, RunID: runID, SourceEventID: uuid.NewString(), DeadlineAt: now.Add(24 * time.Hour),
+		CardID: card.CardID, RunID: runID, RequesterRoute: source.Route(), SourceEventID: uuid.NewString(), DeadlineAt: now.Add(24 * time.Hour),
 		BudgetBundleHash: card.BundleHash, BudgetLimit: 10,
 		BudgetWindowStart: now, BudgetWindowEnd: now.Add(7 * 24 * time.Hour),
 		State: decisioncard.HumanTaskContinuationPending, CreatedAt: now, UpdatedAt: now,

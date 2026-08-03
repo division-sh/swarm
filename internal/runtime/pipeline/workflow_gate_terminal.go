@@ -69,6 +69,9 @@ func (s *workflowInstanceStore) supersedeWorkflowInstanceGates(ctx context.Conte
 		if err != nil {
 			return err
 		}
+		if err := validateStageGateInstanceOwner(anchor, *instance); err != nil {
+			return err
+		}
 		routingSource, err := card.Anchor.ControlRoutingSource()
 		if err != nil {
 			return err

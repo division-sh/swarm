@@ -614,6 +614,55 @@ func TestProposedEffectSourceOwnerRequiresExactContinuationIdentity(t *testing.T
 	}
 }
 
+func TestHumanTaskSourceOwnerRequiresExactRequesterRoute(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		source events.RoutingSource
+	}{
+		{name: "root", source: testRootRoutingSource("entity-root")},
+		{name: "static", source: mustDecisionCardStaticSource(t, events.RouteIdentity{FlowID: "review", FlowInstance: "review", EntityID: "entity-1"})},
+		{name: "template", source: mustDecisionCardTemplateSource(t, events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: "entity-1"})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			anchor := HumanTaskAnchor{Source: tc.source}
+			continuation := HumanTaskContinuation{RequesterRoute: tc.source.Route()}
+			if err := validateHumanTaskSourceOwner(anchor, continuation); err != nil {
+				t.Fatalf("exact requester owner rejected: %v", err)
+			}
+			for _, hostile := range []events.RouteIdentity{
+				{FlowID: tc.source.Route().FlowID, FlowInstance: tc.source.Route().FlowInstance, EntityID: "foreign-entity"},
+				{FlowID: "foreign-flow", FlowInstance: tc.source.Route().FlowInstance, EntityID: tc.source.Route().EntityID},
+				{FlowID: tc.source.Route().FlowID, FlowInstance: "foreign-instance", EntityID: tc.source.Route().EntityID},
+			} {
+				if hostile == tc.source.Route() {
+					continue
+				}
+				if err := validateHumanTaskSourceOwner(anchor, HumanTaskContinuation{RequesterRoute: hostile}); err == nil {
+					t.Fatalf("foreign requester route accepted: %#v", hostile)
+				}
+			}
+		})
+	}
+}
+
+func mustDecisionCardStaticSource(t *testing.T, route events.RouteIdentity) events.RoutingSource {
+	t.Helper()
+	source, err := events.NewStaticFlowRoutingSource(route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source
+}
+
+func mustDecisionCardTemplateSource(t *testing.T, route events.RouteIdentity) events.RoutingSource {
+	t.Helper()
+	source, err := events.NewConcreteTemplateInstanceRoutingSource(route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source
+}
+
 func TestProposedEffectContinuationValidationBindsAnchorSource(t *testing.T) {
 	now := time.Date(2026, time.August, 3, 1, 0, 0, 0, time.UTC)
 	continuation := ProposedEffectContinuation{
