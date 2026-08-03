@@ -297,7 +297,7 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationOnBothStores(t *testing.
 			if continuation.ReplyContextID != replyContextID || continuation.SourceEventID != sourceEventID || continuation.State != decisioncard.HumanTaskContinuationPending {
 				t.Fatalf("human-task continuation = %#v", continuation)
 			}
-			if got := continuation.RequesterRoute.Normalized(); got != (events.RouteIdentity{FlowInstance: "provider", EntityID: requester.EntityID}) {
+			if got := continuation.RequesterRoute.Normalized(); got != (events.RouteIdentity{FlowID: "provider", FlowInstance: "provider", EntityID: requester.EntityID}) {
 				t.Fatalf("human-task requester route = %#v", got)
 			}
 			if got := continuation.DeadlineAt.Sub(card.CreatedAt); got != 48*time.Hour {

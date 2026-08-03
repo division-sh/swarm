@@ -377,7 +377,8 @@ func expireHumanTaskCardsInTestMutation(t *testing.T, ctx context.Context, cardS
 
 func newHumanTaskDecisionCardTestFixture(t *testing.T, runID, operationID string, createdAt time.Time, budgetLimit int, deadline time.Time) (decisioncard.Card, decisioncard.HumanTaskContinuation) {
 	t.Helper()
-	source, err := events.NewRootRoutingSource("requester-entity")
+	requesterEntityID := uuid.NewString()
+	source, err := events.NewRootRoutingSource(requesterEntityID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +410,7 @@ func newHumanTaskDecisionCardTestFixture(t *testing.T, runID, operationID string
 	}
 	windowStart := time.Date(createdAt.Year(), createdAt.Month(), createdAt.Day(), 0, 0, 0, 0, time.UTC)
 	return card, decisioncard.HumanTaskContinuation{
-		CardID: card.CardID, RunID: runID, SourceEventID: uuid.NewString(), DeadlineAt: deadline,
+		CardID: card.CardID, RunID: runID, RequesterRoute: source.Route(), SourceEventID: uuid.NewString(), DeadlineAt: deadline,
 		BudgetBundleHash: card.BundleHash, BudgetLimit: budgetLimit,
 		BudgetWindowStart: windowStart, BudgetWindowEnd: windowStart.Add(7 * 24 * time.Hour),
 		State: decisioncard.HumanTaskContinuationPending, CreatedAt: createdAt, UpdatedAt: createdAt,

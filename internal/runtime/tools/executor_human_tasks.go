@@ -226,7 +226,7 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 	windowEnd := NextWeekResetUTC(now, reset)
 	continuation := decisioncard.HumanTaskContinuation{
 		CardID: card.CardID, RunID: runID,
-		RequesterRoute: events.RouteIdentity{FlowInstance: flowInstance, EntityID: requesterEntityID},
+		RequesterRoute: source.Route(),
 		ReplyContextID: events.DeliveryContextFromContext(ctx).ReplyContextID(),
 		SourceEventID:  sourceEventID, DeadlineAt: deadline, BudgetBundleHash: bundleHash,
 		BudgetLimit: limit, BudgetWindowStart: windowStart, BudgetWindowEnd: windowEnd,

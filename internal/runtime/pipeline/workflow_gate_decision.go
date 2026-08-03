@@ -251,6 +251,9 @@ func (pc *PipelineCoordinator) handleDecisionCardDeferredEvent(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
+	if err := continuation.Validate(card); err != nil {
+		return nil, err
+	}
 	if continuation.State != decisioncard.HumanTaskContinuationPending || !continuation.DeferredUntil.Equal(card.DeferredUntil) {
 		return nil, fmt.Errorf("mailbox.card_deferred does not match the authoritative human-task continuation")
 	}
@@ -305,6 +308,9 @@ func (pc *PipelineCoordinator) handleDecisionCardExpiredEvent(ctx context.Contex
 	}
 	continuation, err := store.LoadHumanTaskContinuation(ctx, card.CardID)
 	if err != nil {
+		return nil, err
+	}
+	if err := continuation.Validate(card); err != nil {
 		return nil, err
 	}
 	if continuation.OutcomeEventID != evt.ID() || (continuation.State != decisioncard.HumanTaskContinuationExpired && continuation.State != decisioncard.HumanTaskContinuationOutcomeDispatched) {
@@ -400,6 +406,9 @@ func (pc *PipelineCoordinator) loadStageGateRoute(ctx context.Context, card deci
 	if !found {
 		return gateruntime.Route{}, fmt.Errorf("decision card workflow instance is missing")
 	}
+	if err := validateStageGateInstanceOwner(anchor, instance); err != nil {
+		return gateruntime.Route{}, err
+	}
 	carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 	if err != nil {
 		return gateruntime.Route{}, err
@@ -412,6 +421,15 @@ func (pc *PipelineCoordinator) loadStageGateRoute(ctx context.Context, card deci
 		return gateruntime.Route{}, fmt.Errorf("decision card activation is no longer authoritative")
 	}
 	return gateruntime.RouteFor(activation.RoutesJSON, card.Verdict)
+}
+
+func validateStageGateInstanceOwner(anchor decisioncard.StageGateAnchor, instance WorkflowInstance) error {
+	owner := StoredFlowInstance(nil, instance)
+	if strings.TrimSpace(anchor.FlowInstance) != strings.TrimSpace(owner.InstancePath) ||
+		strings.TrimSpace(anchor.EntityID) != strings.TrimSpace(owner.EntityID) {
+		return fmt.Errorf("stage_gate anchor does not match its authoritative workflow instance")
+	}
+	return nil
 }
 
 func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, evt events.Event, card decisioncard.Card) ([]events.Event, error) {
@@ -444,6 +462,9 @@ func (pc *PipelineCoordinator) handleHumanTaskDecisionCard(ctx context.Context, 
 	return nil, pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
 		continuation, err := store.LoadHumanTaskContinuation(txctx, card.CardID)
 		if err != nil {
+			return err
+		}
+		if err := continuation.Validate(card); err != nil {
 			return err
 		}
 		productEventID := decisioncard.HumanTaskOutcomeEventID(card.CardID, evt.ID())

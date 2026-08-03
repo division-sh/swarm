@@ -64,6 +64,13 @@ func (c HumanTaskContinuation) Validate(card Card) error {
 	if card.Anchor.Kind() != AnchorKindHumanTask {
 		return fmt.Errorf("human-task continuation requires a human_task card")
 	}
+	anchor, err := card.Anchor.HumanTask()
+	if err != nil {
+		return err
+	}
+	if err := validateHumanTaskSourceOwner(anchor, c); err != nil {
+		return err
+	}
 	if strings.TrimSpace(c.CardID) == "" || c.CardID != card.CardID {
 		return fmt.Errorf("human-task continuation card_id does not match its card")
 	}

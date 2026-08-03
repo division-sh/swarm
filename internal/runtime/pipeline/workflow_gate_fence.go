@@ -37,6 +37,9 @@ func (s *workflowInstanceStore) commitGateDecision(ctx context.Context, card dec
 		return err
 	}
 	return s.mutateE(ctx, anchor.EntityID, func(instance *WorkflowInstance) error {
+		if err := validateStageGateInstanceOwner(anchor, *instance); err != nil {
+			return err
+		}
 		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 		if err != nil {
 			return err

@@ -106,6 +106,29 @@ func (s *gateLifecycleCardStore) CompleteHumanTaskOutcome(ctx context.Context, c
 	return continuation, nil
 }
 
+func TestStageGateOwnerRequiresAuthoritativeWorkflowInstance(t *testing.T) {
+	entityID := uuid.NewString()
+	instancePath := "telegram-ingress/standing-one"
+	instance := WorkflowInstance{
+		InstanceID: "standing-one", WorkflowName: "telegram-ingress",
+		Metadata: map[string]any{"flow_path": instancePath, "entity_id": entityID},
+	}
+	anchor := decisioncard.StageGateAnchor{
+		FlowID: "telegram-ingress", FlowInstance: instancePath, EntityID: entityID,
+	}
+	if err := validateStageGateInstanceOwner(anchor, instance); err != nil {
+		t.Fatalf("exact workflow instance owner rejected: %v", err)
+	}
+	for _, hostile := range []decisioncard.StageGateAnchor{
+		{FlowID: anchor.FlowID, FlowInstance: "telegram-ingress/foreign", EntityID: entityID},
+		{FlowID: anchor.FlowID, FlowInstance: instancePath, EntityID: uuid.NewString()},
+	} {
+		if err := validateStageGateInstanceOwner(hostile, instance); err == nil {
+			t.Fatalf("foreign stage-gate owner accepted: %#v", hostile)
+		}
+	}
+}
+
 func TestHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStores(t *testing.T) {
 	for _, scopeCase := range []struct {
 		name  string
@@ -121,9 +144,10 @@ func TestHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStores(t *
 				ensurePipelineTestRun(t, workflowStore, runID)
 				now := time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
 				decisionEventID := uuid.NewString()
+				source := eventtest.ConcreteTemplateRoutingSource("provider", "provider/instance-a", "requester-entity")
 				anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
 					RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
-					Scope: scopeCase.scope, Source: eventtest.RootRoutingSource("requester-entity"),
+					Scope: scopeCase.scope, Source: source,
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -157,7 +181,7 @@ func TestHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStores(t *
 					created: []decisioncard.Card{card},
 					continuations: map[string]decisioncard.HumanTaskContinuation{card.CardID: {
 						CardID: card.CardID, RunID: runID,
-						RequesterRoute: events.RouteIdentity{FlowInstance: "provider/instance-a", EntityID: "requester-entity"},
+						RequesterRoute: source.Route(),
 						ReplyContextID: "reply-context-a", SourceEventID: uuid.NewString(),
 						DeadlineAt: now.Add(24 * time.Hour), BudgetBundleHash: card.BundleHash,
 						BudgetWindowStart: now, BudgetWindowEnd: now.Add(7 * 24 * time.Hour),
@@ -175,6 +199,17 @@ func TestHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStores(t *
 					t.Fatal(err)
 				}
 				parent := eventtest.RuntimeControl(decisionEventID, workflowGateDecisionEventType, "platform", "", payload, 0, runID, "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, "provider/instance-a"), card.DecidedAt)
+				hostile := cards.continuations[card.CardID]
+				hostile.RequesterRoute.EntityID = "foreign-requester"
+				cards.continuations[card.CardID] = hostile
+				if _, _, err := pc.handleWorkflowGateDecisionEvent(ctx, parent); err == nil {
+					t.Fatal("human-task decision accepted a foreign requester route")
+				}
+				if len(bus.directPublishes) != 0 || len(cards.completedTx) != 0 {
+					t.Fatalf("foreign requester mutated outcome state: publishes=%d completions=%#v", len(bus.directPublishes), cards.completedTx)
+				}
+				hostile.RequesterRoute = source.Route()
+				cards.continuations[card.CardID] = hostile
 				if _, _, err := pc.handleWorkflowGateDecisionEvent(ctx, parent); err != nil {
 					t.Fatal(err)
 				}
@@ -187,7 +222,7 @@ func TestHumanTaskDecisionRoutesDirectlyToRequesterInOneMutationOnBothStores(t *
 				if len(bus.directRecipients) != 1 || len(bus.directRecipients[0]) != 1 || bus.directRecipients[0][0] != "requester-agent" {
 					t.Fatalf("direct recipients = %#v", bus.directRecipients)
 				}
-				if got := bus.directPublishes[0].TargetRoute().Normalized(); got != (events.RouteIdentity{FlowInstance: "provider/instance-a", EntityID: "requester-entity"}) {
+				if got := bus.directPublishes[0].TargetRoute().Normalized(); got != source.Route() {
 					t.Fatalf("direct requester route = %#v", got)
 				}
 				if len(bus.directContexts) != 1 || bus.directContexts[0].ReplyContextID() != "reply-context-a" || !bus.directInMutation[0] {
@@ -218,9 +253,10 @@ func TestHumanTaskDeferredAndExpiredOutcomesUseRequesterRouteOnBothStores(t *tes
 				ensurePipelineTestRun(t, workflowStore, runID)
 				now := time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
 				lifecycleEventID := uuid.NewString()
+				source := eventtest.ConcreteTemplateRoutingSource("provider", "provider/instance-a", "requester-entity")
 				anchor, err := decisioncard.NewHumanTaskAnchor(decisioncard.HumanTaskAnchor{
 					RequesterAgentID: "requester-agent", OperationID: "provider-turn/tool-call-1", Category: "review",
-					Scope: decisioncard.Scope{Kind: decisioncard.ScopeGlobal}, Source: eventtest.RootRoutingSource("requester-entity"),
+					Scope: decisioncard.Scope{Kind: decisioncard.ScopeGlobal}, Source: source,
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -242,7 +278,7 @@ func TestHumanTaskDeferredAndExpiredOutcomesUseRequesterRouteOnBothStores(t *tes
 				}
 				continuation := decisioncard.HumanTaskContinuation{
 					CardID: card.CardID, RunID: runID,
-					RequesterRoute: events.RouteIdentity{FlowInstance: "provider/instance-a", EntityID: "requester-entity"},
+					RequesterRoute: source.Route(),
 					ReplyContextID: "reply-context-a", SourceEventID: uuid.NewString(),
 					DeadlineAt: now.Add(24 * time.Hour), BudgetBundleHash: card.BundleHash,
 					BudgetWindowStart: now, BudgetWindowEnd: now.Add(7 * 24 * time.Hour), CreatedAt: now, UpdatedAt: now,
@@ -273,6 +309,23 @@ func TestHumanTaskDeferredAndExpiredOutcomesUseRequesterRouteOnBothStores(t *tes
 					t.Fatal(err)
 				}
 				parent := eventtest.RuntimeControl(lifecycleEventID, lifecycle.eventType, "platform", "", payload, 0, runID, "", events.EventEnvelope{}, now.Add(time.Hour))
+				hostile := cards.continuations[card.CardID]
+				hostile.RequesterRoute.FlowInstance = "provider/foreign"
+				cards.continuations[card.CardID] = hostile
+				switch lifecycle.name {
+				case "deferred":
+					_, err = pc.handleDecisionCardDeferredEvent(ctx, parent)
+				case "expired":
+					_, err = pc.handleDecisionCardExpiredEvent(ctx, parent)
+				}
+				if err == nil {
+					t.Fatal("human-task lifecycle accepted a foreign requester route")
+				}
+				if len(bus.directPublishes) != 0 || len(cards.completedTx) != 0 {
+					t.Fatalf("foreign requester mutated lifecycle state: publishes=%d completions=%#v", len(bus.directPublishes), cards.completedTx)
+				}
+				hostile.RequesterRoute = source.Route()
+				cards.continuations[card.CardID] = hostile
 				switch lifecycle.name {
 				case "deferred":
 					_, err = pc.handleDecisionCardDeferredEvent(ctx, parent)
