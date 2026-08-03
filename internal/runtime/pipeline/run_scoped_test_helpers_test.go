@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -146,6 +147,57 @@ func (p pipelineTestWorkflowTimerPersistence) CommitWorkflowTimerReconciliation(
 type pipelineTestTimerObligationReader struct {
 	db      *sql.DB
 	dialect timerobligationadapter.Dialect
+}
+
+func (s *workflowInstanceStore) standingRunHasLiveWorkTx(ctx context.Context, tx *sql.Tx, runID string, observedAt time.Time) (bool, error) {
+	if s.deliveryStore == nil {
+		return false, fmt.Errorf("inspect standing run live work: delivery lifecycle store is required")
+	}
+	deliverySummary, err := s.deliveryStore.SummarizeRun(ctx, runID)
+	if err != nil {
+		return false, fmt.Errorf("inspect standing run delivery work: %w", err)
+	}
+	if !deliverySummary.Settled() {
+		return true, nil
+	}
+	if s.pipelineStore == nil {
+		return false, fmt.Errorf("inspect standing run pipeline work: pipeline obligation store is required")
+	}
+	pipelineSummary, err := s.pipelineStore.SummarizeRun(ctx, runID)
+	if err != nil {
+		return false, fmt.Errorf("inspect standing run pipeline work: %w", err)
+	}
+	if pipelineSummary.HasOpenWork() {
+		return true, nil
+	}
+	query := `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = ? AND status IN ('active', 'suspended'))`
+	args := []any{runID}
+	dialect := timerobligationadapter.DialectSQLite
+	if !s.isSQLite() {
+		query = `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = $1::uuid AND status IN ('active', 'suspended'))`
+		args = []any{runID}
+		dialect = timerobligationadapter.DialectPostgres
+	}
+	var live bool
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&live); err != nil {
+		return false, fmt.Errorf("inspect standing run live work: %w", err)
+	}
+	if live {
+		return true, nil
+	}
+	scope, err := runtimetimerobligation.Run(runID)
+	if err != nil {
+		return false, err
+	}
+	snapshot, err := timerobligationadapter.Read(ctx, tx, dialect, scope, observedAt)
+	if err != nil {
+		return false, fmt.Errorf("inspect standing run timer work: %w", err)
+	}
+	run, ok := snapshot.Run(runID)
+	if !ok {
+		return false, fmt.Errorf("inspect standing run timer work: snapshot omitted requested run")
+	}
+	return run.Totals().ActiveCount > 0, nil
 }
 
 func (r pipelineTestTimerObligationReader) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {

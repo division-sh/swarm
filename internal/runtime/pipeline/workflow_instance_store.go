@@ -231,6 +231,7 @@ type workflowInstanceStore struct {
 	timerOccurrences WorkflowTimerOccurrenceOwner
 	timerActivations WorkflowTimerActivationPersistence
 	readiness        DynamicFlowRuntimeReadinessPersistence
+	standingServices StandingServicePersistence
 	decisionRoutes   WorkflowDecisionRouteOwner
 	instanceReader   WorkflowInstancePersistenceReader
 	initialCommits   WorkflowInitialMaterializationCommitOwner
@@ -302,10 +303,11 @@ func NewPostgresWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) Wo
 	timerOccurrences, _ := runner.(WorkflowTimerOccurrenceOwner)
 	timerActivations, _ := runner.(WorkflowTimerActivationPersistence)
 	readiness, _ := runner.(DynamicFlowRuntimeReadinessPersistence)
+	standingServices, _ := runner.(StandingServicePersistence)
 	decisionRoutes, _ := runner.(WorkflowDecisionRouteOwner)
 	instanceReader, _ := runner.(WorkflowInstancePersistenceReader)
 	initialCommits, _ := runner.(WorkflowInitialMaterializationCommitOwner)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations, cardMutations: cardMutations, timerOccurrences: timerOccurrences, timerActivations: timerActivations, readiness: readiness, decisionRoutes: decisionRoutes, instanceReader: instanceReader, initialCommits: initialCommits}}
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectPostgres, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations, cardMutations: cardMutations, timerOccurrences: timerOccurrences, timerActivations: timerActivations, readiness: readiness, standingServices: standingServices, decisionRoutes: decisionRoutes, instanceReader: instanceReader, initialCommits: initialCommits}}
 }
 
 func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) WorkflowPersistence {
@@ -320,10 +322,11 @@ func NewSQLiteWorkflowPersistence(db *sql.DB, runner runtimeMutationRunner) Work
 	timerOccurrences, _ := runner.(WorkflowTimerOccurrenceOwner)
 	timerActivations, _ := runner.(WorkflowTimerActivationPersistence)
 	readiness, _ := runner.(DynamicFlowRuntimeReadinessPersistence)
+	standingServices, _ := runner.(StandingServicePersistence)
 	decisionRoutes, _ := runner.(WorkflowDecisionRouteOwner)
 	instanceReader, _ := runner.(WorkflowInstancePersistenceReader)
 	initialCommits, _ := runner.(WorkflowInitialMaterializationCommitOwner)
-	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations, cardMutations: cardMutations, timerOccurrences: timerOccurrences, timerActivations: timerActivations, readiness: readiness, decisionRoutes: decisionRoutes, instanceReader: instanceReader, initialCommits: initialCommits}}
+	return WorkflowPersistence{store: &workflowInstanceStore{db: db, dialect: workflowStoreDialectSQLite, runtimeMutation: runner, entityQuery: reader, routeRecovery: routeRecovery, activityResults: activityResults, activityJournal: activityJournal, gateRoutes: gateRoutes, timerObligations: timerObligations, engineMutations: engineMutations, cardMutations: cardMutations, timerOccurrences: timerOccurrences, timerActivations: timerActivations, readiness: readiness, standingServices: standingServices, decisionRoutes: decisionRoutes, instanceReader: instanceReader, initialCommits: initialCommits}}
 }
 
 func (p WorkflowPersistence) empty() bool {
