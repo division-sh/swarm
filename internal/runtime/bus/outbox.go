@@ -9,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -336,27 +335,6 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 		return nil
 	}
 	if runtimepipeline.CollectPipelineEmitIntents(ctx, intents) {
-		return nil
-	}
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
-		queuedIntents := clonePostCommitEmitIntents(intents)
-		sourceFact, _ := runtimecorrelation.BundleSourceFactFromContext(ctx)
-		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
-			postCommitActions := make([]runtimepipeline.OwnerAction, 0, 4)
-			rollbackActions := make([]runtimepipeline.OwnerAction, 0, 4)
-			dispatchCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
-			dispatchCtx = runtimecorrelation.WithBundleSourceFact(dispatchCtx, sourceFact)
-			dispatchCtx = runtimepipeline.WithPipelinePostCommitActions(dispatchCtx, &postCommitActions)
-			dispatchCtx = runtimepipeline.WithPipelineRollbackActions(dispatchCtx, &rollbackActions)
-			if err := d.DispatchPostCommit(dispatchCtx, queuedIntents); err != nil {
-				d.bus.logRuntime(dispatchCtx, "error", "Post-commit outbox dispatch failed", "eventbus", "post_commit_outbox_dispatch_failed", "", "", "", "", "", nil, map[string]any{
-					"intents_count": len(queuedIntents),
-				}, eventBusDependencyFailure(err, "post_commit_outbox_dispatch_failed", "dispatch_outbox"), 0)
-			}
-			runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
-		}) {
-			return errors.New("post-commit dispatch requires pipeline post-commit actions when a SQL transaction is active")
-		}
 		return nil
 	}
 	for _, intent := range intents {

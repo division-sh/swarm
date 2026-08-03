@@ -158,9 +158,6 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) error {
 	if err != nil {
 		return err
 	}
-	if queued, err := eb.queuePreparedPublishForActiveMutation(ctx, prepared); queued || err != nil {
-		return err
-	}
 	return eb.dispatchPreparedPublish(ctx, prepared)
 }
 
@@ -168,9 +165,6 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) error {
 // of process-local deliveries accepted from that dispatch. Durable retry work
 // remains owned by the store and is not reinterpreted as live local work.
 func (eb *EventBus) PublishAndWait(ctx context.Context, evt events.Event) error {
-	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); active {
-		return errors.New("PublishAndWait cannot dispatch before its active mutation commits")
-	}
 	ctx, lease, err := eb.beginRuntimeWork(ctx)
 	if err != nil {
 		return err
@@ -213,9 +207,6 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 	}
 	prepared, err := eb.commitPublish(ctx, eventBusCommitPublishPlan{bus: eb, event: evt})
 	if err != nil {
-		return err
-	}
-	if queued, err := eb.queuePreparedPublishForActiveMutation(ctx, prepared); queued || err != nil {
 		return err
 	}
 	if prepared.exactDuplicate {
@@ -1351,8 +1342,6 @@ func (eb *EventBus) completeCommittedPublishDispatch(evt events.Event, inboundPl
 	defer eb.notifyTestPostCommitDispatchCompleted(workCtx, evt)
 
 	inboundPlan = inboundPlan.Normalized()
-	postCommitActions := make([]runtimepipeline.OwnerAction, 0, 8)
-	workCtx = runtimepipeline.WithPipelinePostCommitActions(workCtx, &postCommitActions)
 
 	passthrough, deferred, outcome, err := eb.runInterceptorsForDeliveryRoutes(workCtx, evt, inboundPlan.DeliveryRoutes())
 	if err != nil {
@@ -1387,7 +1376,6 @@ func (eb *EventBus) completeCommittedPublishDispatch(evt events.Event, inboundPl
 		}
 	}
 	eb.logPublished(ctx, evt, 0)
-	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 
 	for _, d := range deferred {
 		if err := eb.publishDeferred(workCtx, d); err != nil {
@@ -1712,7 +1700,6 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 	if !isValidEventTypeName(string(evt.Type())) {
 		return fmt.Errorf("invalid deferred event type: %s", strings.TrimSpace(string(evt.Type())))
 	}
-	ctx = WithoutCommitPublishTransaction(runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(ctx)))
 	var admitted events.AdmittedEvent
 	ctx, admitted, err = admitEventForPublish(ctx, evt, time.Now())
 	if err != nil {
@@ -2008,9 +1995,6 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	if err != nil {
 		return err
 	}
-	if queued, err := eb.queuePreparedPublishForActiveMutation(ctx, prepared); queued || err != nil {
-		return err
-	}
 	return eb.dispatchPreparedPublish(ctx, prepared)
 }
 
@@ -2033,9 +2017,6 @@ func (eb *EventBus) PublishDirectRoutes(ctx context.Context, evt events.Event, r
 		bus: eb, event: evt, direct: true, directRoutes: events.NormalizeDeliveryRoutes(routes),
 	})
 	if err != nil {
-		return err
-	}
-	if queued, err := eb.queuePreparedPublishForActiveMutation(ctx, prepared); queued || err != nil {
 		return err
 	}
 	return eb.dispatchPreparedPublish(ctx, prepared)
@@ -2246,8 +2227,6 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 	passthrough := true
 	deferred := []events.Event(nil)
 	if replayInterceptors && scope == runtimepipelineobligation.ScopeSubscribed {
-		postCommitActions := make([]runtimepipeline.OwnerAction, 0, 8)
-		ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
 		var outcome runtimepipelineobligation.ExecutionOutcome
 		if dispatchRecipients {
 			passthrough, deferred, outcome, err = eb.runInterceptorsForDeliveryRoutes(ctx, evt, deliveryRoutes)
@@ -2261,7 +2240,6 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 		if !outcome.ContinueDispatch() {
 			return outcome, nil
 		}
-		runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 	}
 	if dispatchRecipients && passthrough && len(liveRecipients) > 0 {
 		if err := eb.deliverToRecipientsWithRoutes(ctx, evt, liveRecipients, deliveryRoutes); err != nil {
