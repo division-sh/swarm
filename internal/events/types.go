@@ -644,6 +644,9 @@ type deliveryRouteWire struct {
 
 func (r DeliveryRoute) MarshalJSON() ([]byte, error) {
 	r = r.Normalized()
+	if err := r.ConnectClaim.validateRecipient(r.Recipient); err != nil {
+		return nil, err
+	}
 	return json.Marshal(deliveryRouteWire{
 		SubscriberType: r.Recipient.Code(), SubscriberID: r.Recipient.ID(), AgentIdentity: r.AgentIdentity,
 		Target: r.Target, Context: r.Context, PayloadProjection: r.PayloadProjection, ConnectClaim: r.ConnectClaim,
@@ -666,6 +669,9 @@ func (r *DeliveryRoute) UnmarshalJSON(raw []byte) error {
 	}
 	recipient, err := newDeliveryRecipient(kind, wire.SubscriberID)
 	if err != nil {
+		return err
+	}
+	if err := wire.ConnectClaim.validateRecipient(recipient); err != nil {
 		return err
 	}
 	*r = DeliveryRoute{
@@ -714,6 +720,16 @@ func AdmitConnectExecutionClaim(digest, receiverPinDigest [sha256.Size]byte, rou
 
 func (c ConnectExecutionClaim) Empty() bool { return !c.present }
 
+func (c ConnectExecutionClaim) validateRecipient(recipient DeliveryRecipient) error {
+	if c.Empty() {
+		return nil
+	}
+	if c.recipientKind != recipient.kind || c.recipientID != recipient.ID() {
+		return fmt.Errorf("connect execution claim recipient does not match its delivery route")
+	}
+	return nil
+}
+
 func (c ConnectExecutionClaim) Equal(other ConnectExecutionClaim) bool {
 	return c.present == other.present && (!c.present ||
 		(c.digest == other.digest && c.receiverPinDigest == other.receiverPinDigest &&
@@ -759,7 +775,14 @@ func (c *ConnectExecutionClaim) UnmarshalJSON(raw []byte) error {
 	if err := decoder.Decode(&encoded); err != nil {
 		return fmt.Errorf("decode connect execution claim: %w", err)
 	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return fmt.Errorf("connect execution claim must be an object")
+	}
 	if encoded.Digest == "" {
+		if len(fields) != 0 {
+			return fmt.Errorf("empty connect execution claim cannot carry partial fields")
+		}
 		*c = ConnectExecutionClaim{}
 		return nil
 	}
@@ -852,6 +875,9 @@ func (r DeliveryRoute) Identity() (DeliveryRouteIdentity, error) {
 	r = r.Normalized()
 	if r.Recipient.Empty() {
 		return DeliveryRouteIdentity{}, fmt.Errorf("delivery route subscriber type and id are required")
+	}
+	if err := r.ConnectClaim.validateRecipient(r.Recipient); err != nil {
+		return DeliveryRouteIdentity{}, err
 	}
 	switch {
 	case r.Recipient.IsAgent():

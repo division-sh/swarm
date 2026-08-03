@@ -555,6 +555,123 @@ func TestRegisteredAnchorKindsAreClosedAndProjectScope(t *testing.T) {
 	}
 }
 
+func TestProposedEffectSourceOwnerRequiresExactContinuationIdentity(t *testing.T) {
+	continuation := ProposedEffectContinuation{
+		EntityID: "entity-1", FlowID: "review", FlowInstance: "review/one",
+	}.Canonical()
+	source, err := events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
+		FlowID: continuation.FlowID, FlowInstance: continuation.FlowInstance, EntityID: continuation.EntityID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchor := ProposedEffectAnchor{
+		Scope:  Scope{Kind: ScopeEntity, FlowInstance: continuation.FlowInstance, EntityID: continuation.EntityID},
+		Source: source,
+	}
+	if err := validateProposedEffectSourceOwner(anchor, continuation); err != nil {
+		t.Fatalf("exact owner rejected: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		route events.RouteIdentity
+		scope Scope
+	}{
+		{name: "foreign entity", route: events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: "entity-2"}},
+		{name: "foreign flow", route: events.RouteIdentity{FlowID: "other", FlowInstance: "review/one", EntityID: "entity-1"}},
+		{name: "foreign instance", route: events.RouteIdentity{FlowID: "review", FlowInstance: "review/two", EntityID: "entity-1"}},
+		{name: "foreign scope", route: source.Route(), scope: Scope{Kind: ScopeEntity, FlowInstance: "review/two", EntityID: "entity-1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hostile := anchor
+			if !tc.route.Empty() && tc.route != source.Route() {
+				hostile.Source, err = events.NewConcreteTemplateInstanceRoutingSource(tc.route)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.scope.Kind != "" {
+				hostile.Scope = tc.scope
+			}
+			if err := validateProposedEffectSourceOwner(hostile, continuation); err == nil || !strings.Contains(err.Error(), "continuation owner") {
+				t.Fatalf("foreign owner error = %v", err)
+			}
+		})
+	}
+
+	rootContinuation := ProposedEffectContinuation{EntityID: "entity-root", FlowInstance: "root"}.Canonical()
+	rootAnchor := ProposedEffectAnchor{
+		Scope:  Scope{Kind: ScopeEntity, FlowInstance: "root", EntityID: "entity-root"},
+		Source: testRootRoutingSource("entity-root"),
+	}
+	if err := validateProposedEffectSourceOwner(rootAnchor, rootContinuation); err != nil {
+		t.Fatalf("exact root owner rejected: %v", err)
+	}
+	rootAnchor.Source = testRootRoutingSource("foreign-entity")
+	if err := validateProposedEffectSourceOwner(rootAnchor, rootContinuation); err == nil {
+		t.Fatal("root source accepted a foreign continuation entity")
+	}
+}
+
+func TestProposedEffectContinuationValidationBindsAnchorSource(t *testing.T) {
+	now := time.Date(2026, time.August, 3, 1, 0, 0, 0, time.UTC)
+	continuation := ProposedEffectContinuation{
+		CardID: uuid.NewString(), RunID: "run-1", RequestEventID: uuid.NewString(), ActivityID: "send",
+		Tool: "provider.send", BundleHash: "bundle-hash", WorkflowVersion: "1", Input: semanticvalue.EmptyObject(),
+		EffectClass:  runtimecontracts.ActivityEffectClassNonIdempotentWrite,
+		SuccessEvent: "send.succeeded", FailureEvent: "send.failed", RevisionEvent: "send.revision_requested", RejectedEvent: "send.rejected",
+		EntityID: "entity-1", NodeID: "sender", FlowID: "support", FlowInstance: "root", HandlerEventKey: "support.send",
+		SourceEventID: uuid.NewString(), SourceRunID: "run-1", Attempt: 1,
+		ExecutionMode: "live", State: ProposedEffectPending, CreatedAt: now, UpdatedAt: now,
+	}.Canonical()
+	effect, err := continuation.EffectValue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuation.EffectContentHash, err = canonicaljson.HashValue(effect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	anchor, err := NewProposedEffectAnchor(ProposedEffectAnchor{
+		RequestEventID: continuation.RequestEventID, ActivityID: continuation.ActivityID, Decision: "approve_send",
+		Scope:  Scope{Kind: ScopeEntity, FlowInstance: continuation.FlowInstance, EntityID: continuation.EntityID},
+		Source: testRootRoutingSource(continuation.EntityID),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := FreezeSnapshot("approve_send", "", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+		"approve": {Verdict: "approve"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	card, err := New(Card{
+		CardID: continuation.CardID, RunID: continuation.RunID, Anchor: anchor, Snapshot: snapshot,
+		ExecutionMode: "live", EffectContentHash: continuation.EffectContentHash,
+		BundleHash: continuation.BundleHash, WorkflowVersion: continuation.WorkflowVersion, CreatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := continuation.Validate(card); err != nil {
+		t.Fatalf("exact proposed-effect owner rejected: %v", err)
+	}
+	foreignAnchor, err := NewProposedEffectAnchor(ProposedEffectAnchor{
+		RequestEventID: continuation.RequestEventID, ActivityID: continuation.ActivityID, Decision: "approve_send",
+		Scope:  Scope{Kind: ScopeEntity, FlowInstance: continuation.FlowInstance, EntityID: continuation.EntityID},
+		Source: testRootRoutingSource("foreign-entity"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	card.Anchor = foreignAnchor
+	if err := continuation.Validate(card); err == nil || !strings.Contains(err.Error(), "continuation owner") {
+		t.Fatalf("foreign proposed-effect source error = %v", err)
+	}
+}
+
 func testRootRoutingSource(entityID string) events.RoutingSource {
 	source, err := events.NewRootRoutingSource(entityID)
 	if err != nil {

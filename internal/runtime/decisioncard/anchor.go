@@ -237,6 +237,34 @@ func validateStageGateSourceOwner(in StageGateAnchor) error {
 	return nil
 }
 
+func validateProposedEffectSourceOwner(anchor ProposedEffectAnchor, continuation ProposedEffectContinuation) error {
+	continuation = continuation.Canonical()
+	scope := anchor.Scope
+	scope.FlowInstance = strings.Trim(strings.TrimSpace(scope.FlowInstance), "/")
+	scope.EntityID = strings.TrimSpace(scope.EntityID)
+	if scope.Kind != ScopeEntity || scope.FlowInstance != continuation.FlowInstance || scope.EntityID != continuation.EntityID {
+		return fmt.Errorf("proposed-effect anchor scope does not match its continuation owner")
+	}
+
+	route := anchor.Source.Route()
+	switch anchor.Source.Kind() {
+	case events.RoutingSourceRoot:
+		if route != (events.RouteIdentity{EntityID: continuation.EntityID}.Normalized()) {
+			return fmt.Errorf("root proposed-effect anchor source does not match its continuation owner")
+		}
+	case events.RoutingSourceStaticFlow, events.RoutingSourceConcreteTemplateInstance:
+		want := (events.RouteIdentity{
+			FlowID: continuation.FlowID, FlowInstance: continuation.FlowInstance, EntityID: continuation.EntityID,
+		}).Normalized()
+		if route != want {
+			return fmt.Errorf("flow proposed-effect anchor source does not match its continuation owner")
+		}
+	default:
+		return fmt.Errorf("proposed-effect anchor source kind %q is not an execution owner", anchor.Source.Kind())
+	}
+	return nil
+}
+
 func DecodeAnchor(kind string, raw []byte) (Anchor, error) {
 	value, err := canonicaljson.Decode(raw)
 	if err != nil {
