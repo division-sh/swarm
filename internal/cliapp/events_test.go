@@ -239,6 +239,139 @@ func TestEventReplayOmitsOptionalParamsWhenNotProvided(t *testing.T) {
 	}
 }
 
+func TestEventsListSendsEmptyFilterWhenNoFilters(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, map[string]any{"events": []any{}})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"event", "list"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if captured.Method != eventObservationMethodList {
+		t.Fatalf("method = %q, want %s", captured.Method, eventObservationMethodList)
+	}
+	if got := captured.Params["filter"]; !reflect.DeepEqual(got, map[string]any{}) {
+		t.Fatalf("filter = %#v, want empty object so the semantic run-scope gate answers", got)
+	}
+}
+
+func TestEventsFollowSendsEmptyFilterWhenNoFilters(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	server, wsRequests := newEventObservationWSServer(t, eventObservationWSServerOptions{
+		events:         []map[string]any{validEventObservationEvent("event-live-1")},
+		closeAfterRows: true,
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"event", "follow"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if len(*wsRequests) != 1 {
+		t.Fatalf("ws requests = %d, want 1", len(*wsRequests))
+	}
+	req := (*wsRequests)[0]
+	if got := req.Params["filter"]; !reflect.DeepEqual(got, map[string]any{}) {
+		t.Fatalf("filter = %#v, want empty object so the semantic run-scope gate answers", got)
+	}
+}
+
+func TestEventsListRunScopeMissingTeachingDiagnostic(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		w.Header().Set("content-type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"error": map[string]any{
+				"code":    -32000,
+				"message": "EVENT_OBSERVATION_RUN_SCOPE_REQUIRED",
+				"data": map[string]any{
+					"code":      "EVENT_OBSERVATION_RUN_SCOPE_REQUIRED",
+					"retryable": false,
+					"details": map[string]any{
+						"field":  "filter.run_id",
+						"reason": "required run scope is missing",
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"event", "list"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 3 {
+		t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{
+		"event observation requires a run scope",
+		"swarm run list",
+		"--run-id",
+		"EVENT_OBSERVATION_RUN_SCOPE_REQUIRED",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+		}
+	}
+}
+
+func TestEventPublishBundleScopeRequiredTeachingDiagnostic(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		w.Header().Set("content-type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"error": map[string]any{
+				"code":    -32000,
+				"message": "BUNDLE_SCOPE_REQUIRED",
+				"data": map[string]any{
+					"code":      "BUNDLE_SCOPE_REQUIRED",
+					"retryable": false,
+					"details": map[string]any{
+						"field":  "bundle_hash",
+						"reason": "bundle_hash is required when no existing run bundle context is available",
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
+		"event", "publish", "scan.requested", "--payload-json", `{"handle":"@acme"}`,
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 6 {
+		t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{
+		"creating new work requires a bundle scope",
+		"--run-id",
+		"swarm bundle list",
+		"--bundle-hash",
+		"BUNDLE_SCOPE_REQUIRED",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+		}
+	}
+}
+
 func TestEventsFollowUsesEventSubscribeV1WS(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	server, wsRequests := newEventObservationWSServer(t, eventObservationWSServerOptions{

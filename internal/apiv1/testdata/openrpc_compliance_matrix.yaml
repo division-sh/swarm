@@ -411,12 +411,12 @@ methods:
   - method: event.list
     transport: http
     required_params: [filter]
-    declared_errors: []
+    declared_errors: [EVENT_OBSERVATION_RUN_SCOPE_REQUIRED]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorObservabilityHandlersExposePersistedReadMethods}]}
     required_param_validation: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestEventListFilterValidationCoversListAndSubscribe}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
-    declared_error_tests: {status: not_applicable}
+    declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorObservabilityHandlersExposePersistedReadMethods}]}
     idempotency: {status: not_applicable}
     result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorObservabilityHandlersExposePersistedReadMethods}]}
     notification_schema: {status: not_applicable}
@@ -471,12 +471,12 @@ methods:
   - method: event.subscribe
     transport: ws
     required_params: [filter]
-    declared_errors: []
+    declared_errors: [EVENT_OBSERVATION_RUN_SCOPE_REQUIRED]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay}]}
     required_param_validation: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestEventListFilterValidationCoversListAndSubscribe}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_helper, name: validateParams}]}
     auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketAuthAndFrameValidation}]}
-    declared_error_tests: {status: not_applicable}
+    declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestEventListFilterValidationCoversListAndSubscribe}]}
     idempotency: {status: not_applicable}
     result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}, {kind: go_test, name: TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay}]}
     notification_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSubscriptionNotificationSchemas}]}

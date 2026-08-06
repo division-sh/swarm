@@ -423,9 +423,7 @@ func (opts eventListCommandOptions) params() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(filter) > 0 {
-		params["filter"] = filter
-	}
+	params["filter"] = filter
 	if cursor := strings.TrimSpace(opts.cursor); cursor != "" {
 		params["cursor"] = cursor
 	}
@@ -453,9 +451,7 @@ func (opts eventFollowCommandOptions) params() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(filter) > 0 {
-		params["filter"] = filter
-	}
+	params["filter"] = filter
 	if replaySince := strings.TrimSpace(opts.replaySince); replaySince != "" {
 		if err := validateRFC3339Flag("--replay-since", replaySince); err != nil {
 			return nil, err

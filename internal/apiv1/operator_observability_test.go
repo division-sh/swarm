@@ -172,8 +172,8 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 	}
 
 	missingEventRun := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"events-missing-run","method":"event.list","params":{"filter":{"event_name":"scan.requested"},"limit":10}}`)
-	if missingEventRun.Error == nil || missingEventRun.Error.Code != codeInvalidParams {
-		t.Fatalf("event.list missing run scope error = %#v, want invalid params", missingEventRun.Error)
+	if missingEventRun.Error == nil || asMap(t, missingEventRun.Error.Data)["code"] != EventObservationRunScopeRequiredCode {
+		t.Fatalf("event.list missing run scope error = %#v, want %s", missingEventRun.Error, EventObservationRunScopeRequiredCode)
 	}
 	if details := asMap(t, asMap(t, missingEventRun.Error.Data)["details"]); details["field"] != "filter.run_id" {
 		t.Fatalf("event.list missing run scope details = %#v, want filter.run_id", details)

@@ -24,8 +24,8 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if report.SchemaCount != 138 {
 		t.Fatalf("schema count = %d, want 138", report.SchemaCount)
 	}
-	if report.ErrorCodeCount != 46 {
-		t.Fatalf("error code count = %d, want 46", report.ErrorCodeCount)
+	if report.ErrorCodeCount != 47 {
+		t.Fatalf("error code count = %d, want 47", report.ErrorCodeCount)
 	}
 	if report.MutatingMethodCount != 27 {
 		t.Fatalf("mutating method count = %d, want 27", report.MutatingMethodCount)
@@ -100,8 +100,8 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if len(doc.Components.Schemas) != 138 {
 		t.Fatalf("generated OpenRPC schemas = %d, want 138", len(doc.Components.Schemas))
 	}
-	if len(doc.Components.Errors) != 46 {
-		t.Fatalf("generated OpenRPC errors = %d, want 46", len(doc.Components.Errors))
+	if len(doc.Components.Errors) != 47 {
+		t.Fatalf("generated OpenRPC errors = %d, want 47", len(doc.Components.Errors))
 	}
 	assertGeneratedMethodsOmitExamplesUnderPolicy(t, api, artifact)
 	assertGeneratedMethodsOmitRPCDiscoverUnderPolicy(t, api, doc)

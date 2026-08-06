@@ -122,6 +122,12 @@ func FormatCLIAPIError(err error) string {
 	if diagnostic, ok := cliRootInputDiagnosticParts(err); ok {
 		return formatCLIRootInputDiagnostic(err, diagnostic)
 	}
+	if diagnostic, ok := cliEventObservationRunScopeDiagnosticParts(err); ok {
+		return formatCLIEventObservationRunScopeDiagnostic(err, diagnostic)
+	}
+	if diagnostic, ok := cliBundleScopeRequiredDiagnosticParts(err); ok {
+		return formatCLIBundleScopeRequiredDiagnostic(err, diagnostic)
+	}
 	if diagnostic, ok := cliAPITransportDiagnosticParts(err); ok {
 		lines := []string{"ERROR: " + cliAPIProblemWithWrapper(err, diagnostic.leaf, diagnostic.problem)}
 		lines = append(lines, diagnostic.evidence...)
@@ -196,6 +202,79 @@ func formatCLIRootInputDiagnostic(err error, diagnostic cliRootInputDiagnostic) 
 		"  Routable root inputs: " + formatCLIStringDomain(diagnostic.routableEvents) + ".",
 		"  Remediation: " + remediation,
 		"  Code: EVENT_NOT_DECLARED.",
+	}, "\n")
+}
+
+type cliEventObservationRunScopeDiagnostic struct {
+	leaf *jsonRPCError
+}
+
+func cliEventObservationRunScopeDiagnosticParts(err error) (cliEventObservationRunScopeDiagnostic, bool) {
+	var rpcErr *jsonRPCError
+	if !errors.As(err, &rpcErr) || rpcErr == nil {
+		return cliEventObservationRunScopeDiagnostic{}, false
+	}
+	var data struct {
+		Code    string `json:"code"`
+		Details struct {
+			Field  string `json:"field"`
+			Reason string `json:"reason"`
+		} `json:"details"`
+	}
+	if json.Unmarshal(rpcErr.Data, &data) != nil {
+		return cliEventObservationRunScopeDiagnostic{}, false
+	}
+	if data.Code != "EVENT_OBSERVATION_RUN_SCOPE_REQUIRED" {
+		return cliEventObservationRunScopeDiagnostic{}, false
+	}
+	if !validCanonicalCLIScalar(data.Details.Field) || !validCanonicalCLIScalar(data.Details.Reason) {
+		return cliEventObservationRunScopeDiagnostic{}, false
+	}
+	return cliEventObservationRunScopeDiagnostic{leaf: rpcErr}, true
+}
+
+func formatCLIEventObservationRunScopeDiagnostic(err error, diagnostic cliEventObservationRunScopeDiagnostic) string {
+	return strings.Join([]string{
+		"ERROR: " + cliAPIProblemWithWrapper(err, diagnostic.leaf, "event observation requires a run scope."),
+		"  Multi-bundle-safe event reads must be scoped to one run; unscoped event firehose reads are not a public v1 surface.",
+		"  Remediation: pass --run-id <run-id> to scope the listing or follow, or find run ids with `swarm run list`.",
+		"  Code: EVENT_OBSERVATION_RUN_SCOPE_REQUIRED.",
+	}, "\n")
+}
+
+type cliBundleScopeRequiredDiagnostic struct {
+	leaf *jsonRPCError
+}
+
+func cliBundleScopeRequiredDiagnosticParts(err error) (cliBundleScopeRequiredDiagnostic, bool) {
+	var rpcErr *jsonRPCError
+	if !errors.As(err, &rpcErr) || rpcErr == nil {
+		return cliBundleScopeRequiredDiagnostic{}, false
+	}
+	var data struct {
+		Code    string `json:"code"`
+		Details struct {
+			Reason string `json:"reason"`
+		} `json:"details"`
+	}
+	if json.Unmarshal(rpcErr.Data, &data) != nil {
+		return cliBundleScopeRequiredDiagnostic{}, false
+	}
+	if data.Code != "BUNDLE_SCOPE_REQUIRED" {
+		return cliBundleScopeRequiredDiagnostic{}, false
+	}
+	if !validCanonicalCLIScalar(data.Details.Reason) {
+		return cliBundleScopeRequiredDiagnostic{}, false
+	}
+	return cliBundleScopeRequiredDiagnostic{leaf: rpcErr}, true
+}
+
+func formatCLIBundleScopeRequiredDiagnostic(err error, diagnostic cliBundleScopeRequiredDiagnostic) string {
+	return strings.Join([]string{
+		"ERROR: " + cliAPIProblemWithWrapper(err, diagnostic.leaf, "creating new work requires a bundle scope."),
+		"  The server has no active bundle context for this request.",
+		"  Remediation: publish into an existing run with --run-id <run-id>, or find the server's canonical bundle hash with `swarm bundle list` and pass it with --bundle-hash.",
+		"  Code: BUNDLE_SCOPE_REQUIRED.",
 	}, "\n")
 }
 
