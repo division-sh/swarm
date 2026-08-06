@@ -55,7 +55,6 @@ func BuildBundleRegistrationDirectoryUpload(repoRoot, contractsRoot, platformSpe
 	if err != nil {
 		return BundleRegistrationUpload{}, err
 	}
-	mockModulePaths := declaredAgentMockModulePaths(bundle)
 	files := make([]bundleRegistrationUploadFile, 0, len(entries))
 	var dataEntries []BundleRegisterDataEntryV1
 	for _, entry := range entries {
@@ -72,9 +71,6 @@ func BuildBundleRegistrationDirectoryUpload(repoRoot, contractsRoot, platformSpe
 		}
 		switch entry.Policy {
 		case bundleHashRaw:
-			if err := validateBundleRegistrationUploadDataPath(rel, mockModulePaths); err != nil {
-				return BundleRegistrationUpload{}, err
-			}
 			dataEntries = append(dataEntries, BundleRegisterDataEntryV1{
 				Path:       rel,
 				DataBase64: base64.StdEncoding.EncodeToString(raw),
@@ -138,41 +134,6 @@ func encodeBundleRegistrationEnvelopeYAML(files []bundleRegistrationUploadFile) 
 	return builder.String(), nil
 }
 
-// declaredAgentMockModulePaths returns the contracts-root-relative slash paths
-// of every agent mock module declared by the bundle. These are admissible raw
-// data blob entries alongside flow data directories.
-func declaredAgentMockModulePaths(bundle *WorkflowContractBundle) map[string]struct{} {
-	paths := map[string]struct{}{}
-	if bundle == nil {
-		return paths
-	}
-	for _, agent := range bundle.ScopedAgentEntries() {
-		if !agent.Mock.Configured() {
-			continue
-		}
-		if sourcePath := strings.TrimSpace(agent.Mock.SourcePath); sourcePath != "" {
-			paths[sourcePath] = struct{}{}
-		}
-	}
-	return paths
-}
-
-func validateBundleRegistrationUploadDataPath(path string, mockModulePaths map[string]struct{}) error {
-	segments := strings.Split(path, "/")
-	if bundleRegistrationUploadDataPathIsFlowData(segments) {
-		return nil
-	}
-	if _, declared := mockModulePaths[path]; declared {
-		return nil
-	}
-	return fmt.Errorf("raw data input %s cannot be represented in BundleRegisterDataBlobV1; data entries must be under a flow data directory (.../flows/<flow>/data/...) or a declared agent mock module path", path)
-}
-
-func bundleRegistrationUploadDataPathIsFlowData(segments []string) bool {
-	for i := 0; i+3 < len(segments); i++ {
-		if segments[i] == "flows" && segments[i+1] != "" && segments[i+2] == "data" {
-			return true
-		}
-	}
-	return false
-}
+// Bundle membership of raw data entries is owned exclusively by the canonical
+// bundle_hash entry list (this packager) and the server-side consumed-inputs
+// gate; no additional client-side path shape whitelist is maintained.
