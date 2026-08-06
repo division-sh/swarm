@@ -438,6 +438,14 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			},
 		},
 		{
+			Method: "event.list",
+			Params: map[string]any{"filter": map[string]any{}},
+			Code:   EventObservationRunScopeRequiredCode,
+			Options: func(t *testing.T) OperatorReadOptions {
+				return readOnlyRuntimeProbeOptions(t)
+			},
+		},
+		{
 			Method: "mailbox.get",
 			Params: map[string]any{"mailbox_id": "missing"},
 			Code:   MailboxNotFoundCode,

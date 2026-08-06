@@ -1549,7 +1549,10 @@ func eventListFilterParam(params map[string]any) (store.OperatorEventListFilter,
 
 func requireEventListRunScope(filter store.OperatorEventListFilter) error {
 	if strings.TrimSpace(filter.RunID) == "" {
-		return NewInvalidParamsError(map[string]any{"field": "filter.run_id", "reason": "required run scope is missing"})
+		return NewApplicationError(EventObservationRunScopeRequiredCode, false, map[string]any{
+			"field":  "filter.run_id",
+			"reason": "required run scope is missing",
+		})
 	}
 	return nil
 }

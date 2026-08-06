@@ -260,8 +260,8 @@ func TestEventListFilterValidationCoversListAndSubscribe(t *testing.T) {
 	}
 
 	listMissingRun := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list-missing-run","method":"event.list","params":{"filter":{"event_name":"scan.requested"}}}`)
-	if listMissingRun.Error == nil || listMissingRun.Error.Code != codeInvalidParams {
-		t.Fatalf("event.list missing run scope error = %#v, want invalid params", listMissingRun.Error)
+	if listMissingRun.Error == nil || asMap(t, listMissingRun.Error.Data)["code"] != EventObservationRunScopeRequiredCode {
+		t.Fatalf("event.list missing run scope error = %#v, want %s", listMissingRun.Error, EventObservationRunScopeRequiredCode)
 	}
 	if details := asMap(t, asMap(t, listMissingRun.Error.Data)["details"]); details["field"] != "filter.run_id" {
 		t.Fatalf("event.list missing run scope details = %#v", details)
@@ -312,8 +312,8 @@ func TestEventListFilterValidationCoversListAndSubscribe(t *testing.T) {
 		},
 	})
 	subMissingRun := readWSResponse(t, conn)
-	if subMissingRun.Error == nil || subMissingRun.Error.Code != codeInvalidParams {
-		t.Fatalf("event.subscribe missing run scope error = %#v, want invalid params", subMissingRun.Error)
+	if subMissingRun.Error == nil || asMap(t, subMissingRun.Error.Data)["code"] != EventObservationRunScopeRequiredCode {
+		t.Fatalf("event.subscribe missing run scope error = %#v, want %s", subMissingRun.Error, EventObservationRunScopeRequiredCode)
 	}
 	if details := asMap(t, asMap(t, subMissingRun.Error.Data)["details"]); details["field"] != "filter.run_id" {
 		t.Fatalf("event.subscribe missing run scope details = %#v", details)

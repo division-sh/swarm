@@ -28317,6 +28317,19 @@ api_specification:
             $ref: '#/components/schemas/BundleHash'
           bundle_source:
             type: string
+      EVENT_OBSERVATION_RUN_SCOPE_REQUIRED:
+        type: object
+        additionalProperties: false
+        required:
+        - field
+        - reason
+        properties:
+          field:
+            type: string
+          reason:
+            type: string
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
       BUNDLE_SCOPE_REQUIRED:
         type: object
         additionalProperties: false
@@ -29916,7 +29929,8 @@ api_specification:
                 $ref: '#/components/schemas/EventFull'
             next_cursor:
               $ref: '#/components/schemas/Cursor'
-      errors: []
+      errors:
+      - EVENT_OBSERVATION_RUN_SCOPE_REQUIRED
     event.get:
       tier: should_have
       description: Read one event with its full delivery and dead-letter detail.
@@ -29963,7 +29977,8 @@ api_specification:
       notification_schema:
         $ref: '#/components/schemas/EventFull'
       notification_cadence: Pushed per event matching filter.
-      errors: []
+      errors:
+      - EVENT_OBSERVATION_RUN_SCOPE_REQUIRED
     mailbox.list:
       tier: must_have
       description: List mailbox items. Filters cover the operator workflow of "find items requiring my attention."
