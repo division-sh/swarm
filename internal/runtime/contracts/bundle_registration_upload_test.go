@@ -69,6 +69,39 @@ func TestBuildBundleRegistrationDirectoryUploadPackagesTextAndData(t *testing.T)
 	}
 }
 
+func TestBuildBundleRegistrationDirectoryUploadCarriesDeclaredMockModules(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := writeMockedAgentContractsDir(t)
+
+	upload, err := BuildBundleRegistrationDirectoryUpload(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("BuildBundleRegistrationDirectoryUpload: %v", err)
+	}
+	if upload.DataBlob == nil {
+		t.Fatal("DataBlob = nil, want declared mock module entry")
+	}
+	var paths []string
+	for _, entry := range upload.DataBlob.Entries {
+		paths = append(paths, entry.Path)
+	}
+	if !reflect.DeepEqual(paths, []string{"mocks/assistant.py"}) {
+		t.Fatalf("data entries = %#v, want mocks/assistant.py only", paths)
+	}
+	want := base64.StdEncoding.EncodeToString([]byte(mockAssistantSource))
+	if got := upload.DataBlob.Entries[0].DataBase64; got != want {
+		t.Fatalf("mock data_base64 = %q, want exact declared module bytes", got)
+	}
+	var envelope bundleRegistrationEnvelopeUploadV1
+	if err := yaml.Unmarshal([]byte(upload.ContentYAML), &envelope); err != nil {
+		t.Fatalf("unmarshal content_yaml: %v\n%s", err, upload.ContentYAML)
+	}
+	for _, file := range envelope.Files {
+		if file.Path == "mocks/assistant.py" {
+			t.Fatal("mock module must be carried as a data blob entry, not a text envelope file")
+		}
+	}
+}
+
 func TestBuildBundleRegistrationDirectoryUploadFailsClosed(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	for _, tc := range []struct {

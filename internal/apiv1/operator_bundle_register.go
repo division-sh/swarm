@@ -196,9 +196,6 @@ func bundleRegistrationDataBlobParam(params map[string]any) ([]bundleRegistratio
 		if err != nil {
 			return nil, err
 		}
-		if err := validateBundleRegistrationDataPath(path, field+".path"); err != nil {
-			return nil, err
-		}
 		folded := asciiFoldBundleRegistrationPath(path)
 		if existing, exists := seen[folded]; exists {
 			if existing == path {
@@ -367,22 +364,10 @@ func cleanBundleRegistrationPath(raw, field string) (string, error) {
 	return raw, nil
 }
 
-func validateBundleRegistrationDataPath(path, field string) error {
-	segments := strings.Split(path, "/")
-	if !bundleRegistrationDataPathIsFlowData(segments) {
-		return NewInvalidParamsError(map[string]any{"field": field, "reason": "data_blob entries must be under a flow data directory (.../flows/<flow>/data/...)"})
-	}
-	return nil
-}
-
-func bundleRegistrationDataPathIsFlowData(segments []string) bool {
-	for i := 0; i+3 < len(segments); i++ {
-		if segments[i] == "flows" && segments[i+1] != "" && segments[i+2] == "data" {
-			return true
-		}
-	}
-	return false
-}
+// Data blob entries are admitted structurally by cleanBundleRegistrationPath;
+// bundle membership is gated by verifyBundleRegistrationInputsConsumed against
+// the canonical bundle_hash owner, which covers every raw input including flow
+// data directories, policy modules, and declared agent mock modules.
 
 func asciiFoldBundleRegistrationPath(path string) string {
 	buf := []byte(path)

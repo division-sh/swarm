@@ -94,6 +94,40 @@ func TestBundleHashV1AcceptsCurrentPlatformSpec(t *testing.T) {
 	}
 }
 
+func TestBundleHashV1IncludesAgentMockModuleBytes(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := writeMockedAgentContractsDir(t)
+	platform := DefaultPlatformSpecFile(repo)
+	load := func() *WorkflowContractBundle {
+		t.Helper()
+		bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, platform)
+		if err != nil {
+			t.Fatalf("load mocked agent bundle: %v", err)
+		}
+		return bundle
+	}
+	before, err := BundleHash(load())
+	if err != nil {
+		t.Fatalf("BundleHash before: %v", err)
+	}
+	writeBundleHashText(t, filepath.Join(root, "mocks", "assistant.py"), strings.Replace(mockAssistantSource, "hello from mock", "hello from moxk", 1))
+	after, err := BundleHash(load())
+	if err != nil {
+		t.Fatalf("BundleHash after: %v", err)
+	}
+	if before == after {
+		t.Fatalf("BundleHash did not change after mock module byte change: %s", before)
+	}
+
+	unchanged, err := BundleHash(load())
+	if err != nil {
+		t.Fatalf("BundleHash unchanged fixture: %v", err)
+	}
+	if unchanged != after {
+		t.Fatalf("identical mock bytes produced different hashes: %s vs %s", unchanged, after)
+	}
+}
+
 func TestBundleHashV1IncludesPolicyModuleBytes(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := t.TempDir()

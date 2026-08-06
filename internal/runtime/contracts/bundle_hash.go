@@ -166,6 +166,9 @@ func bundleHashEntries(bundle *WorkflowContractBundle) ([]bundleHashEntry, error
 	if err := builder.addPolicyModuleFiles(bundle); err != nil {
 		return nil, err
 	}
+	if err := builder.addAgentMockModuleFiles(bundle); err != nil {
+		return nil, err
+	}
 
 	sort.Slice(builder.entries, func(i, j int) bool {
 		return builder.entries[i].Label < builder.entries[j].Label
@@ -216,6 +219,31 @@ func (b *bundleHashEntryBuilder) addPolicyModuleFiles(bundle *WorkflowContractBu
 			if err := b.addOptionalBundleFile(path, bundleHashRaw); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// addAgentMockModuleFiles captures every declared agent mock module as a raw
+// bundle hash input. Mock modules are behavior-bearing authored content: in
+// mock execution mode the module is the agent's behavior, so the bundle
+// identity must cover its exact bytes, not just the path string authored in
+// agents.yaml.
+func (b *bundleHashEntryBuilder) addAgentMockModuleFiles(bundle *WorkflowContractBundle) error {
+	if bundle == nil {
+		return nil
+	}
+	for _, agent := range bundle.ScopedAgentEntries() {
+		if !agent.Mock.Configured() {
+			continue
+		}
+		sourcePath := strings.TrimSpace(agent.Mock.SourcePath)
+		if sourcePath == "" {
+			return fmt.Errorf("agent %s mock module is configured but has no source path", strings.TrimSpace(agent.ID))
+		}
+		path := filepath.Join(b.contractsRoot, filepath.FromSlash(sourcePath))
+		if err := b.addOptionalBundleFile(path, bundleHashRaw); err != nil {
+			return fmt.Errorf("agent %s mock module: %w", strings.TrimSpace(agent.ID), err)
 		}
 	}
 	return nil

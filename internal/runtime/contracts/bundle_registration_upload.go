@@ -55,6 +55,7 @@ func BuildBundleRegistrationDirectoryUpload(repoRoot, contractsRoot, platformSpe
 	if err != nil {
 		return BundleRegistrationUpload{}, err
 	}
+	mockModulePaths := declaredAgentMockModulePaths(bundle)
 	files := make([]bundleRegistrationUploadFile, 0, len(entries))
 	var dataEntries []BundleRegisterDataEntryV1
 	for _, entry := range entries {
@@ -71,7 +72,7 @@ func BuildBundleRegistrationDirectoryUpload(repoRoot, contractsRoot, platformSpe
 		}
 		switch entry.Policy {
 		case bundleHashRaw:
-			if err := validateBundleRegistrationUploadDataPath(rel); err != nil {
+			if err := validateBundleRegistrationUploadDataPath(rel, mockModulePaths); err != nil {
 				return BundleRegistrationUpload{}, err
 			}
 			dataEntries = append(dataEntries, BundleRegisterDataEntryV1{
@@ -137,12 +138,34 @@ func encodeBundleRegistrationEnvelopeYAML(files []bundleRegistrationUploadFile) 
 	return builder.String(), nil
 }
 
-func validateBundleRegistrationUploadDataPath(path string) error {
-	segments := strings.Split(path, "/")
-	if !bundleRegistrationUploadDataPathIsFlowData(segments) {
-		return fmt.Errorf("raw data input %s cannot be represented in BundleRegisterDataBlobV1; data entries must be under a flow data directory (.../flows/<flow>/data/...)", path)
+// declaredAgentMockModulePaths returns the contracts-root-relative slash paths
+// of every agent mock module declared by the bundle. These are admissible raw
+// data blob entries alongside flow data directories.
+func declaredAgentMockModulePaths(bundle *WorkflowContractBundle) map[string]struct{} {
+	paths := map[string]struct{}{}
+	if bundle == nil {
+		return paths
 	}
-	return nil
+	for _, agent := range bundle.ScopedAgentEntries() {
+		if !agent.Mock.Configured() {
+			continue
+		}
+		if sourcePath := strings.TrimSpace(agent.Mock.SourcePath); sourcePath != "" {
+			paths[sourcePath] = struct{}{}
+		}
+	}
+	return paths
+}
+
+func validateBundleRegistrationUploadDataPath(path string, mockModulePaths map[string]struct{}) error {
+	segments := strings.Split(path, "/")
+	if bundleRegistrationUploadDataPathIsFlowData(segments) {
+		return nil
+	}
+	if _, declared := mockModulePaths[path]; declared {
+		return nil
+	}
+	return fmt.Errorf("raw data input %s cannot be represented in BundleRegisterDataBlobV1; data entries must be under a flow data directory (.../flows/<flow>/data/...) or a declared agent mock module path", path)
 }
 
 func bundleRegistrationUploadDataPathIsFlowData(segments []string) bool {
