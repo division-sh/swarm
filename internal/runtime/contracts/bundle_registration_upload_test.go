@@ -1,7 +1,9 @@
 package contracts
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -99,6 +101,92 @@ func TestBuildBundleRegistrationDirectoryUploadCarriesDeclaredMockModules(t *tes
 		if file.Path == "mocks/assistant.py" {
 			t.Fatal("mock module must be carried as a data blob entry, not a text envelope file")
 		}
+	}
+}
+
+func TestBuildBundleRegistrationDirectoryUploadCarriesPolicyModules(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := writePolicyModuleContractsDir(t)
+
+	upload, err := BuildBundleRegistrationDirectoryUpload(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("BuildBundleRegistrationDirectoryUpload: %v", err)
+	}
+	if upload.DataBlob == nil {
+		t.Fatal("DataBlob = nil, want policy module entries")
+	}
+	wasmRaw, err := os.ReadFile(filepath.Join(root, "modules", "structured_renderer.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pythonRaw := []byte(pythonRendererSource())
+	want := []BundleRegisterDataEntryV1{
+		{Path: "modules/python_renderer.py", DataBase64: base64.StdEncoding.EncodeToString(pythonRaw)},
+		{Path: "modules/structured_renderer.wasm", DataBase64: base64.StdEncoding.EncodeToString(wasmRaw)},
+	}
+	if !reflect.DeepEqual(upload.DataBlob.Entries, want) {
+		t.Fatalf("data entries = %#v, want %#v", upload.DataBlob.Entries, want)
+	}
+}
+
+func TestPolicyModuleRegistrationRuntimeSourceReloadRoundTrip(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := writePolicyModuleContractsDir(t)
+	platform := DefaultPlatformSpecFile(repo)
+
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, platform)
+	if err != nil {
+		t.Fatalf("load policy module bundle: %v", err)
+	}
+	bundleHash, err := BundleHash(bundle)
+	if err != nil {
+		t.Fatalf("BundleHash: %v", err)
+	}
+	projection, err := BuildBundleCatalogProjectionWithOptions(bundle, BundleCatalogProjectionOptions{Source: "test"})
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+	source, err := LoadBundleCatalogRuntimeSource(repo, BundleCatalogRuntimeLoadRequest{
+		BundleHash:              bundleHash,
+		ContentYAML:             projection.ContentYAML,
+		DataBlob:                projection.DataBlob,
+		RunningPlatformSpecPath: platform,
+	})
+	if err != nil {
+		t.Fatalf("LoadBundleCatalogRuntimeSource: %v", err)
+	}
+	defer source.Cleanup()
+	reloadedHash, err := BundleHash(source.Bundle)
+	if err != nil {
+		t.Fatalf("reloaded bundle hash: %v", err)
+	}
+	if reloadedHash != bundleHash {
+		t.Fatalf("reloaded hash = %s, want %s", reloadedHash, bundleHash)
+	}
+	for _, rel := range []string{"modules/structured_renderer.wasm", "modules/python_renderer.py"} {
+		info, err := os.Stat(filepath.Join(source.ContractsRoot, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("reconstructed root missing %s: %v", rel, err)
+		}
+		if !info.Mode().IsRegular() {
+			t.Fatalf("reconstructed %s is not a regular file", rel)
+		}
+	}
+
+	mutated := append([]byte(nil), wasmPolicyModuleBytes(t)...)
+	mutated[len(mutated)-1] ^= 0xff
+	writeBundleHashBytes(t, filepath.Join(root, "modules", "structured_renderer.wasm"), mutated)
+	writeBundleHashText(t, filepath.Join(root, "flows", "render", "policy.yaml"), combinedPolicyModuleYAML(t, root, mutated, []byte(pythonRendererSource())))
+	drifted, err := LoadWorkflowContractBundleWithOverrides(repo, root, platform)
+	if err != nil {
+		t.Fatalf("load drifted policy module bundle: %v", err)
+	}
+	driftedHash, err := BundleHash(drifted)
+	if err != nil {
+		t.Fatalf("drifted bundle hash: %v", err)
+	}
+	if driftedHash == bundleHash {
+		t.Fatalf("policy module byte change produced identical bundle hash %s; content replaced under unchanged identity", bundleHash)
 	}
 }
 
@@ -204,4 +292,103 @@ states:
 	writeBundleHashBytes(t, filepath.Join(root, "flows", "alpha", "data", "payload.bin"), []byte{0x01, 0x02, 0x03})
 	writeBundleHashBytes(t, filepath.Join(root, "flows", "alpha", "flows", "gamma", "data", "nested.bin"), []byte{0x09})
 	writeBundleHashBytes(t, filepath.Join(root, "packages", "foo", "flows", "beta", "data", "child.bin"), []byte{0x04, 0x05})
+}
+
+func wasmPolicyModuleBytes(t *testing.T) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "computemodule", "testdata", "structured_renderer.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func writePolicyModuleContractsDir(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeBundleHashText(t, filepath.Join(root, "package.yaml"), `name: policy-module-bundle
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: render
+    flow: render
+`)
+	writeBundleHashText(t, filepath.Join(root, "flows", "render", "schema.yaml"), `name: render
+mode: static
+states: [ready]
+initial_state: ready
+terminal_states: [ready]
+`)
+	writeBundleHashBytes(t, filepath.Join(root, "modules", "structured_renderer.wasm"), wasmPolicyModuleBytes(t))
+	writeBundleHashBytes(t, filepath.Join(root, "modules", "python_renderer.py"), []byte(pythonRendererSource()))
+	writeBundleHashText(t, filepath.Join(root, "flows", "render", "policy.yaml"), combinedPolicyModuleYAML(t, root, wasmPolicyModuleBytes(t), []byte(pythonRendererSource())))
+	return root
+}
+
+func combinedPolicyModuleYAML(t *testing.T, root string, wasmBytes, pythonBytes []byte) string {
+	t.Helper()
+	wasmSum := sha256.Sum256(wasmBytes)
+	pythonSum := sha256.Sum256(pythonBytes)
+	srcRaw, err := os.ReadFile(filepath.Join(root, "src", "structured_renderer.rs"))
+	if err != nil {
+		srcRaw = []byte("fn compute() {}\n")
+	}
+	srcSum := sha256.Sum256(srcRaw)
+	return `modules:
+  structured_renderer:
+    path: modules/structured_renderer.wasm
+    abi: core-json-v1
+    entry: compute
+    digest: sha256:` + hex.EncodeToString(wasmSum[:]) + `
+    source_path: src/structured_renderer.rs
+    source_hash: sha256:` + hex.EncodeToString(srcSum[:]) + `
+    limits:
+      gas: 5000000
+      memory_pages: 17
+      output_bytes: 1024
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [component, owner, language, files]
+      properties:
+        component: {type: string}
+        owner: {type: string}
+        language: {type: string}
+        files: {type: array, items: {type: string}}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [content, format, line_count]
+      properties:
+        content: {type: string}
+        format: {type: string}
+        line_count: {type: integer}
+  python_renderer:
+    path: modules/python_renderer.py
+    kind: python
+    abi: python-json-v1
+    entry: handle
+    digest: sha256:` + hex.EncodeToString(pythonSum[:]) + `
+    limits:
+      gas: 2500000000
+      memory_pages: 8192
+      output_bytes: 4096
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [component, owner, language, files]
+      properties:
+        component: {type: string}
+        owner: {type: string}
+        language: {type: string}
+        files: {type: array, items: {type: string}}
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [content, format, line_count]
+      properties:
+        content: {type: string}
+        format: {type: string}
+        line_count: {type: integer}
+`
 }
