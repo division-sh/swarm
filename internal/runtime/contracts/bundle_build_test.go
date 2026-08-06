@@ -322,6 +322,130 @@ func TestBuildBundleMaterializationFailsClosedForPythonSyntax(t *testing.T) {
 	}
 }
 
+func TestBuildBundleMaterializationMaterializesAgentMockModules(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := writeMockedAgentContractsDir(t)
+	platform := DefaultPlatformSpecFile(repo)
+
+	report, err := BuildBundleMaterialization(context.Background(), BundleBuildRequest{
+		RepoRoot:         repo,
+		ContractsRoot:    root,
+		PlatformSpecPath: platform,
+		OutputRoot:       filepath.Join(t.TempDir(), "build"),
+	})
+	if err != nil {
+		t.Fatalf("BuildBundleMaterialization: %v", err)
+	}
+	materialized, err := os.ReadFile(filepath.Join(report.OutputPath, "mocks", "assistant.py"))
+	if err != nil {
+		t.Fatalf("materialized mock module missing: %v", err)
+	}
+	if string(materialized) != mockAssistantSource {
+		t.Fatalf("materialized mock module = %q, want %q", materialized, mockAssistantSource)
+	}
+	var manifest BundleBuildManifest
+	if err := json.Unmarshal([]byte(readBundleBuildFile(t, report.OutputPath, "build-manifest.json")), &manifest); err != nil {
+		t.Fatalf("decode build manifest: %v", err)
+	}
+	found := false
+	for _, input := range manifest.Inputs {
+		if input.Label == "bundle/mocks/assistant.py" {
+			found = true
+			if input.Policy != "raw_data" || input.SizeBytes != int64(len(mockAssistantSource)) {
+				t.Fatalf("mock build input = %#v, want raw_data policy with exact size", input)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("manifest inputs = %#v, want bundle/mocks/assistant.py", manifest.Inputs)
+	}
+	reloaded, err := LoadWorkflowContractBundleWithOverrides(repo, report.OutputPath, platform)
+	if err != nil {
+		t.Fatalf("reload materialized bundle: %v", err)
+	}
+	reloadedHash, err := BundleHash(reloaded)
+	if err != nil {
+		t.Fatalf("reload bundle hash: %v", err)
+	}
+	if reloadedHash != report.BundleHash {
+		t.Fatalf("reloaded hash = %s, want %s", reloadedHash, report.BundleHash)
+	}
+
+	outB := filepath.Join(t.TempDir(), "build-b")
+	reportB, err := BuildBundleMaterialization(context.Background(), BundleBuildRequest{
+		RepoRoot:         repo,
+		ContractsRoot:    root,
+		PlatformSpecPath: platform,
+		OutputRoot:       outB,
+	})
+	if err != nil {
+		t.Fatalf("rebuild: %v", err)
+	}
+	if reportB.BundleHash != report.BundleHash {
+		t.Fatalf("rebuild hash = %s, want %s", reportB.BundleHash, report.BundleHash)
+	}
+	if gotA, gotB := materializedHashedFileBytes(t, report.OutputPath), materializedHashedFileBytes(t, reportB.OutputPath); !reflect.DeepEqual(gotA, gotB) {
+		t.Fatalf("materialized hashed files drifted:\nA=%#v\nB=%#v", gotA, gotB)
+	}
+}
+
+func TestBuildBundleMaterializationChangesHashWhenMockBytesChange(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := writeMockedAgentContractsDir(t)
+	platform := DefaultPlatformSpecFile(repo)
+
+	reportA, err := BuildBundleMaterialization(context.Background(), BundleBuildRequest{
+		RepoRoot:         repo,
+		ContractsRoot:    root,
+		PlatformSpecPath: platform,
+		OutputRoot:       filepath.Join(t.TempDir(), "build-a"),
+	})
+	if err != nil {
+		t.Fatalf("BuildBundleMaterialization A: %v", err)
+	}
+	writeBundleHashText(t, filepath.Join(root, "mocks", "assistant.py"), strings.Replace(mockAssistantSource, "hello from mock", "hello from moxk", 1))
+	reportB, err := BuildBundleMaterialization(context.Background(), BundleBuildRequest{
+		RepoRoot:         repo,
+		ContractsRoot:    root,
+		PlatformSpecPath: platform,
+		OutputRoot:       filepath.Join(t.TempDir(), "build-b"),
+	})
+	if err != nil {
+		t.Fatalf("BuildBundleMaterialization B: %v", err)
+	}
+	if reportB.BundleHash == reportA.BundleHash {
+		t.Fatalf("mock byte change produced identical bundle hash %s; content silently replaced under unchanged identity", reportA.BundleHash)
+	}
+}
+
+func TestBuildBundleMaterializationDetectsTamperedMaterializedMock(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := writeMockedAgentContractsDir(t)
+	platform := DefaultPlatformSpecFile(repo)
+
+	report, err := BuildBundleMaterialization(context.Background(), BundleBuildRequest{
+		RepoRoot:         repo,
+		ContractsRoot:    root,
+		PlatformSpecPath: platform,
+		OutputRoot:       filepath.Join(t.TempDir(), "build"),
+	})
+	if err != nil {
+		t.Fatalf("BuildBundleMaterialization: %v", err)
+	}
+	writeBundleHashText(t, filepath.Join(report.OutputPath, "mocks", "assistant.py"), strings.Replace(mockAssistantSource, "hello from mock", "hello from moxk", 1))
+	reloaded, err := LoadWorkflowContractBundleWithOverrides(repo, report.OutputPath, platform)
+	if err != nil {
+		t.Fatalf("reload tampered materialized bundle: %v", err)
+	}
+	tamperedHash, err := BundleHash(reloaded)
+	if err != nil {
+		t.Fatalf("hash tampered materialized bundle: %v", err)
+	}
+	if tamperedHash == report.BundleHash {
+		t.Fatalf("tampered mock module retained bundle hash %s; identity no longer covers execution behavior", report.BundleHash)
+	}
+}
+
 func writeBundleBuildContractsDir(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -345,6 +469,30 @@ terminal_states: [ready]
 	writeBundleHashBytes(t, filepath.Join(root, "modules", "structured_renderer.wasm"), raw)
 	writeBundleHashText(t, filepath.Join(root, "src", "structured_renderer.rs"), "fn compute() {}\n")
 	writeBundleHashText(t, filepath.Join(root, "flows", "render", "policy.yaml"), bundleBuildPolicyYAML(t, root, bundleBuildSourceHash(t, root)))
+	return root
+}
+
+const mockAssistantSource = `def handle(input):
+    return {"text": "hello from mock"}
+`
+
+func writeMockedAgentContractsDir(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeBundleHashText(t, filepath.Join(root, "package.yaml"), `name: mocked-agent-bundle
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows: []
+`)
+	writeBundleHashText(t, filepath.Join(root, "agents.yaml"), `assistant:
+  id: assistant
+  role: helper
+  model: regular
+  mock:
+    kind: python
+    module: mocks/assistant.py
+`)
+	writeBundleHashText(t, filepath.Join(root, "mocks", "assistant.py"), mockAssistantSource)
 	return root
 }
 
