@@ -24,6 +24,16 @@ const (
 	cliAPIRPCPath       = "/v1/rpc"
 	cliAPIWSPath        = "/v1/ws"
 
+	// cliAPIResponseBudget is the deliberate CLI response budget for one
+	// JSON-RPC response or WebSocket message. It is a DETECTOR: an over-budget
+	// response means the endpoint is unbounded by contract (a server-side
+	// defect), and the client fails with a typed teaching error naming the
+	// method and budget instead of silently truncating into a corrupt-parse
+	// error. Raising it, per-endpoint exceptions, truncation recovery, and
+	// client-side pagination synthesis are all intentionally unsupported
+	// (#2016).
+	cliAPIResponseBudget = 1 << 20
+
 	cliServeAPIListenAddrEnv = "SWARM_API_LISTEN_ADDR"
 	cliServeMCPListenAddrEnv = "SWARM_MCP_LISTEN_ADDR"
 
@@ -32,6 +42,34 @@ const (
 	serveAPITokenFileFlagSource   = "--api-token-file"
 	serveAPITokenFileConfigSource = "config serve.api_token_file"
 )
+
+// cliAPIResponseBudgetError is the typed failure for a response that exceeds
+// the CLI response budget. It names the method, the transport, and the budget
+// and derives remediation from the method catalog (the one owner of bounded
+// read-surface shape); it never surfaces as a JSON parse error.
+type cliAPIResponseBudgetError struct {
+	Method    string
+	Surface   string
+	Transport string
+	Budget    int
+	Overrun   int
+}
+
+func (e *cliAPIResponseBudgetError) Error() string {
+	method := strings.TrimSpace(e.Method)
+	if method == "" {
+		method = "(unknown method)"
+	}
+	return fmt.Sprintf(
+		"%s response exceeded the %s budget: got %d bytes over %d for method %s. The endpoint is unbounded by contract; %s",
+		strings.TrimSpace(e.Surface), formatCLIResponseBudget(e.Budget), e.Overrun, e.Budget, method,
+		responseBudgetRemediation(method),
+	)
+}
+
+func formatCLIResponseBudget(budget int) string {
+	return fmt.Sprintf("%d MiB", budget>>20)
+}
 
 type rootCommandOptions struct {
 	apiServer string
@@ -722,9 +760,15 @@ func (c *cliAPIClient) call(ctx context.Context, method string, params map[strin
 	}
 	defer resp.Body.Close()
 
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, cliAPIResponseBudget+1))
 	if err != nil {
 		return &cliAPITransportError{surface: "runtime API", endpoint: c.endpoint, operation: "response read", err: err}
+	}
+	if len(raw) > cliAPIResponseBudget {
+		return &cliAPIResponseBudgetError{
+			Method: method, Surface: "runtime API", Transport: "http",
+			Budget: cliAPIResponseBudget, Overrun: len(raw),
+		}
 	}
 	if resp.StatusCode != http.StatusOK {
 		message := strings.TrimSpace(string(raw))
