@@ -48,6 +48,7 @@ const (
 	runTraceDetachTraceRowInvalid             runTraceDetachReason = "trace_row_invalid"
 	runTraceDetachStreamClosed                runTraceDetachReason = "stream_closed"
 	runTraceDetachQueueOverflow               runTraceDetachReason = "queue_overflow"
+	runTraceDetachResponseOverBudget          runTraceDetachReason = "response_over_budget"
 )
 
 type runCommandOptions struct {
@@ -129,11 +130,12 @@ type runTraceObserverDetachedFact struct {
 	RunID           string               `json:"run_id"`
 	RunContinues    bool                 `json:"run_continues"`
 	ReattachCommand string               `json:"reattach_command"`
+	Message         string               `json:"message,omitempty"`
 }
 
 type foregroundRunTraceObserver struct {
 	rows     <-chan diagnosticRunTraceRow
-	detached <-chan runTraceDetachReason
+	detached <-chan runTraceDetach
 	cancel   context.CancelFunc
 	done     <-chan struct{}
 	stopOnce sync.Once
@@ -668,30 +670,31 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 		renderer.stop()
 	}()
 	detached := observer.detached
-	reportDetach := func(reason runTraceDetachReason) {
+	reportDetach := func(det runTraceDetach) {
 		renderer.enqueueDetached(runTraceObserverDetachedFact{
 			Type:            runTraceObserverDetachedType,
 			Severity:        runTraceObserverWarning,
-			ReasonCode:      reason,
+			ReasonCode:      det.reason,
 			RunID:           runID,
 			RunContinues:    true,
 			ReattachCommand: runCommandReattachGuidance(runID, opts.connectURL),
+			Message:         det.message,
 		})
 		detached = nil
 	}
 	settleObservation := func() {
 		observer.stop()
 		select {
-		case reason := <-detached:
-			reportDetach(reason)
+		case det := <-detached:
+			reportDetach(det)
 		default:
 		}
 		renderer.stop()
 	}
 	for {
 		select {
-		case reason := <-detached:
-			reportDetach(reason)
+		case det := <-detached:
+			reportDetach(det)
 			continue
 		default:
 		}
@@ -713,8 +716,8 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 				fmt.Fprintln(errOut, "detached from run trace")
 			}
 			return commandExitError{code: 130}
-		case reason := <-detached:
-			reportDetach(reason)
+		case det := <-detached:
+			reportDetach(det)
 		case <-ticker.C:
 			run, err := runCommandGet(ctx, client, runID)
 			if err != nil {
@@ -776,7 +779,7 @@ func startForegroundRunTraceObserver(ctx context.Context, wsEndpoint, token, run
 	}
 	observerCtx, cancel := context.WithCancel(ctx)
 	rows := make(chan diagnosticRunTraceRow)
-	detached := make(chan runTraceDetachReason, 1)
+	detached := make(chan runTraceDetach, 1)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -790,22 +793,22 @@ func startForegroundRunTraceObserver(ctx context.Context, wsEndpoint, token, run
 			if observerCtx.Err() != nil {
 				return
 			}
-			reason := runTraceDetachReasonForError(err, runTraceDetachAttachFailed)
+			det := runTraceDetachFromError(err, runTraceDetachAttachFailed)
 			if attachTimedOut {
-				reason = runTraceDetachAttachTimedOut
+				det = runTraceDetach{reason: runTraceDetachAttachTimedOut}
 			}
-			detached <- reason
+			detached <- det
 			return
 		}
 		defer sub.close()
 		if attachTimedOut {
-			detached <- runTraceDetachAttachTimedOut
+			detached <- runTraceDetach{reason: runTraceDetachAttachTimedOut}
 			return
 		}
 
 		for {
-			if reason, terminated := runTraceSubscriptionDetachReason(sub); terminated {
-				detached <- reason
+			if det, terminated := runTraceSubscriptionDetachReason(sub); terminated {
+				detached <- det
 				return
 			}
 			select {
@@ -814,11 +817,11 @@ func startForegroundRunTraceObserver(ctx context.Context, wsEndpoint, token, run
 				return
 			case row, ok := <-sub.rows:
 				if !ok {
-					reason, terminated := runTraceSubscriptionDetachReason(sub)
+					det, terminated := runTraceSubscriptionDetachReason(sub)
 					if !terminated {
-						reason = runTraceDetachStreamClosed
+						det = runTraceDetach{reason: runTraceDetachStreamClosed}
 					}
-					detached <- reason
+					detached <- det
 					return
 				}
 				select {
@@ -827,16 +830,16 @@ func startForegroundRunTraceObserver(ctx context.Context, wsEndpoint, token, run
 					publishRunTraceTerminationIfPresent(sub, detached)
 					return
 				case err := <-sub.errs:
-					detached <- runTraceDetachReasonForError(err, runTraceDetachTransportLost)
+					detached <- runTraceDetachFromError(err, runTraceDetachTransportLost)
 					return
 				case <-sub.done:
-					reason, _ := runTraceSubscriptionDetachReason(sub)
-					detached <- reason
+					det, _ := runTraceSubscriptionDetachReason(sub)
+					detached <- det
 					return
 				}
 			case err := <-sub.errs:
 				if err != nil {
-					detached <- runTraceDetachReasonForError(err, runTraceDetachTransportLost)
+					detached <- runTraceDetachFromError(err, runTraceDetachTransportLost)
 					return
 				}
 			}
@@ -845,25 +848,25 @@ func startForegroundRunTraceObserver(ctx context.Context, wsEndpoint, token, run
 	return &foregroundRunTraceObserver{rows: rows, detached: detached, cancel: cancel, done: done}
 }
 
-func publishRunTraceTerminationIfPresent(sub *runTraceSubscription, detached chan<- runTraceDetachReason) {
-	if reason, terminated := runTraceSubscriptionDetachReason(sub); terminated {
-		detached <- reason
+func publishRunTraceTerminationIfPresent(sub *runTraceSubscription, detached chan<- runTraceDetach) {
+	if det, terminated := runTraceSubscriptionDetachReason(sub); terminated {
+		detached <- det
 	}
 }
 
-func runTraceSubscriptionDetachReason(sub *runTraceSubscription) (runTraceDetachReason, bool) {
+func runTraceSubscriptionDetachReason(sub *runTraceSubscription) (runTraceDetach, bool) {
 	select {
 	case err := <-sub.errs:
-		return runTraceDetachReasonForError(err, runTraceDetachTransportLost), true
+		return runTraceDetachFromError(err, runTraceDetachTransportLost), true
 	case <-sub.done:
 		select {
 		case err := <-sub.errs:
-			return runTraceDetachReasonForError(err, runTraceDetachTransportLost), true
+			return runTraceDetachFromError(err, runTraceDetachTransportLost), true
 		default:
-			return runTraceDetachStreamClosed, true
+			return runTraceDetach{reason: runTraceDetachStreamClosed}, true
 		}
 	default:
-		return "", false
+		return runTraceDetach{}, false
 	}
 }
 
@@ -877,12 +880,21 @@ func (o *foregroundRunTraceObserver) stop() {
 	})
 }
 
-func runTraceDetachReasonForError(err error, fallback runTraceDetachReason) runTraceDetachReason {
+type runTraceDetach struct {
+	reason  runTraceDetachReason
+	message string
+}
+
+func runTraceDetachFromError(err error, fallback runTraceDetachReason) runTraceDetach {
+	var budgetErr *cliAPIResponseBudgetError
+	if errors.As(err, &budgetErr) && budgetErr != nil {
+		return runTraceDetach{reason: runTraceDetachResponseOverBudget, message: budgetErr.Error()}
+	}
 	var observerErr *runTraceObserverError
 	if errors.As(err, &observerErr) && observerErr != nil && observerErr.reason != "" {
-		return observerErr.reason
+		return runTraceDetach{reason: observerErr.reason}
 	}
-	return fallback
+	return runTraceDetach{reason: fallback}
 }
 
 func wrapRunTraceObserverError(reason runTraceDetachReason, err error) error {
@@ -921,7 +933,7 @@ func subscribeRunTrace(ctx context.Context, wsEndpoint, token, runID string, rep
 		return nil, wrapRunTraceObserverError(runTraceDetachAttachFailed, &cliAPITransportError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription request", err: err})
 	}
 	var envelope jsonRPCResponse
-	if err := cliAPIReadWebSocketJSON(conn, "runtime event stream", wsEndpoint, "subscription response", &envelope); err != nil {
+	if err := cliAPIReadWebSocketJSON(conn, "run.subscribe_trace", "runtime event stream", wsEndpoint, "subscription response", &envelope); err != nil {
 		conn.Close()
 		var protocolErr *cliAPIProtocolError
 		if errors.As(err, &protocolErr) {
@@ -967,7 +979,7 @@ func (s *runTraceSubscription) readLoop() {
 	defer close(s.rows)
 	for {
 		var notification runTraceNotification
-		if err := cliAPIReadWebSocketJSON(s.conn, "runtime event stream", s.endpoint, "notification read", &notification); err != nil {
+		if err := cliAPIReadWebSocketJSON(s.conn, "run.subscribe_trace", "runtime event stream", s.endpoint, "notification read", &notification); err != nil {
 			if cliAPIIsNormalWebSocketClose(err) {
 				return
 			}

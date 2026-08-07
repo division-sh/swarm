@@ -351,7 +351,7 @@ func subscribeRuntimeLogs(ctx context.Context, wsEndpoint, token string, params 
 		return nil, &cliAPITransportError{surface: "runtime log stream", endpoint: wsEndpoint, operation: "subscription request", err: err}
 	}
 	var envelope jsonRPCResponse
-	if err := cliAPIReadWebSocketJSON(conn, "runtime log stream", wsEndpoint, "subscription response", &envelope); err != nil {
+	if err := cliAPIReadWebSocketJSON(conn, runtimeLogsMethodSubscribe, "runtime log stream", wsEndpoint, "subscription response", &envelope); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -391,7 +391,7 @@ func (s *runtimeLogSubscription) readLoop() {
 	defer close(s.logs)
 	for {
 		var notification runtimeLogSubscriptionNotification
-		if err := cliAPIReadWebSocketJSON(s.conn, "runtime log stream", s.endpoint, "notification read", &notification); err != nil {
+		if err := cliAPIReadWebSocketJSON(s.conn, runtimeLogsMethodSubscribe, "runtime log stream", s.endpoint, "notification read", &notification); err != nil {
 			if cliAPIIsNormalWebSocketClose(err) {
 				return
 			}

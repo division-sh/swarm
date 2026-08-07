@@ -68,6 +68,51 @@ func TestRunCommandPostStartObserverFailuresDetachAndUseTerminalTruth(t *testing
 	}
 }
 
+func TestRunCommandTraceObserverOverBudgetNotificationShedsAndContinues(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	warning := &notifyingBuffer{needle: "response_over_budget", notify: make(chan struct{})}
+	overBudgetRow := validRunCommandTraceRow("evt-over-budget")
+	overBudgetRow["payload"] = map[string]any{"blob": strings.Repeat("a", cliAPIResponseBudget)}
+	serverOpts := runCommandServerOptions{
+		wsRows:       []map[string]any{overBudgetRow},
+		rpcResponder: observerTerminalAfterWarningResponder(t, "run-over-budget", warning.notify),
+	}
+	server, calls, _ := newRunCommandServer(t, serverOpts)
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	code := executeRootCommandWithOptions(
+		ctx,
+		t.TempDir(),
+		[]string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath},
+		&stdout,
+		warning,
+		testRunCommandOptions(server),
+	)
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), warning.String())
+	}
+	fact := requireSingleRunTraceDetachFact(t, warning.String())
+	if fact.ReasonCode != runTraceDetachResponseOverBudget {
+		t.Fatalf("detach fact = %#v, want response_over_budget", fact)
+	}
+	for _, want := range []string{"run.subscribe_trace", "1 MiB"} {
+		if !strings.Contains(fact.Message, want) {
+			t.Fatalf("detach message missing %q: %s", want, fact.Message)
+		}
+	}
+	methods := runCommandMethodNames(*calls)
+	if len(methods) < 3 || methods[0] != "health.check" || methods[1] != "run.start" || methods[len(methods)-1] != "run.get" {
+		t.Fatalf("methods = %v, want health.check, run.start, then run.get polling to continue", methods)
+	}
+	if !strings.Contains(stdout.String(), "run terminal: run_id=run-over-budget status=completed") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
 func TestRunCommandTraceAttachTimeoutDetachesAndContinues(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
@@ -600,9 +645,9 @@ func TestForegroundRunTraceObserverTimeoutInterruptsBlockedRequestWrite(t *testi
 	defer observer.stop()
 	requireSignal(t, upgraded, "WebSocket upgrade")
 	select {
-	case reason := <-observer.detached:
-		if reason != runTraceDetachAttachTimedOut {
-			t.Fatalf("reason = %q, want %q", reason, runTraceDetachAttachTimedOut)
+	case det := <-observer.detached:
+		if det.reason != runTraceDetachAttachTimedOut {
+			t.Fatalf("reason = %q, want %q", det.reason, runTraceDetachAttachTimedOut)
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("blocked subscription write did not time out")

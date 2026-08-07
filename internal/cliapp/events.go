@@ -783,7 +783,7 @@ func subscribeEvents(ctx context.Context, wsEndpoint, token string, params map[s
 		return nil, &cliAPITransportError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription request", err: err}
 	}
 	var envelope jsonRPCResponse
-	if err := cliAPIReadWebSocketJSON(conn, "runtime event stream", wsEndpoint, "subscription response", &envelope); err != nil {
+	if err := cliAPIReadWebSocketJSON(conn, eventObservationMethodSubscribe, "runtime event stream", wsEndpoint, "subscription response", &envelope); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -823,7 +823,7 @@ func (s *eventSubscription) readLoop() {
 	defer close(s.events)
 	for {
 		var notification eventSubscriptionNotification
-		if err := cliAPIReadWebSocketJSON(s.conn, "runtime event stream", s.endpoint, "notification read", &notification); err != nil {
+		if err := cliAPIReadWebSocketJSON(s.conn, eventObservationMethodSubscribe, "runtime event stream", s.endpoint, "notification read", &notification); err != nil {
 			if cliAPIIsNormalWebSocketClose(err) {
 				return
 			}

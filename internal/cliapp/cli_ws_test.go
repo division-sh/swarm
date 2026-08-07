@@ -1,6 +1,7 @@
 package cliapp
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -11,8 +12,51 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func TestCLIAPIReadWebSocketJSONClassifiesMalformedPayloadAsProtocol(t *testing.T) {
+func TestCLIAPIReadWebSocketJSONClassifiesOverBudgetAsBudgetError(t *testing.T) {
 	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade websocket: %v", err)
+			return
+		}
+		defer conn.Close()
+		payload := []byte(`{"jsonrpc":"2.0","method":"rpc.subscription","params":{"result":{"payload":"`)
+		payload = append(payload, bytes.Repeat([]byte("a"), cliAPIResponseBudget)...)
+		payload = append(payload, []byte(`"}}}`)...)
+		if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+			t.Errorf("write over-budget payload: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	endpoint := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.DialContext(context.Background(), endpoint, nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close()
+
+	var out map[string]any
+	err = cliAPIReadWebSocketJSON(conn, "event.subscribe", "runtime event stream", endpoint, "notification read", &out)
+	if err == nil {
+		t.Fatal("expected over-budget websocket payload error")
+	}
+	var budgetErr *cliAPIResponseBudgetError
+	if !errors.As(err, &budgetErr) {
+		t.Fatalf("error = %T %v, want cliAPIResponseBudgetError", err, err)
+	}
+	if budgetErr.Method != "event.subscribe" || budgetErr.Transport != "ws" {
+		t.Fatalf("budget error = %#v", budgetErr)
+	}
+	for _, want := range []string{"event.subscribe", "1 MiB"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error missing %q: %v", want, err)
+		}
+	}
+}
+
+func TestCLIAPIReadWebSocketJSONClassifiesMalformedPayloadAsProtocol(t *testing.T) {	upgrader := websocket.Upgrader{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -34,7 +78,7 @@ func TestCLIAPIReadWebSocketJSONClassifiesMalformedPayloadAsProtocol(t *testing.
 	defer conn.Close()
 
 	var out map[string]any
-	err = cliAPIReadWebSocketJSON(conn, "runtime event stream", endpoint, "subscription response", &out)
+	err = cliAPIReadWebSocketJSON(conn, eventObservationMethodSubscribe, "runtime event stream", endpoint, "subscription response", &out)
 	if err == nil {
 		t.Fatal("expected malformed websocket payload error")
 	}
