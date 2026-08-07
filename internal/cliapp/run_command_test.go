@@ -225,6 +225,48 @@ func TestStartLocalRunServeConsumesContractPathConfigResolver(t *testing.T) {
 	}
 }
 
+func TestRunStartLocalServeUsesMCPListenerOwner(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	repo := t.TempDir()
+	configContracts := filepath.Join(t.TempDir(), "config-contracts")
+	configPlatform := filepath.Join(t.TempDir(), "config-platform.yaml")
+	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+		"contracts_path":     configContracts,
+		"platform_spec_path": configPlatform,
+		"api_token_file":     writeCLIAPITokenFile(t, "test-token"),
+	}))
+	server, _, _ := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			if req.Method != "health.check" {
+				t.Fatalf("unexpected method = %q", req.Method)
+			}
+			return runCommandHealthResult()
+		},
+	})
+	defer server.Close()
+
+	opts := runCommandOptions{apiOptions: testRunCommandOptions(server), mcpPort: 19002}
+	serveStarted := make(chan ServeOptions, 1)
+	opts.apiOptions.runServe = func(ctx context.Context, repo string, serveOpts ServeOptions) int {
+		serveStarted <- serveOpts
+		<-ctx.Done()
+		return 0
+	}
+
+	stop, err := startLocalRunServe(context.Background(), repo, opts, io.Discard)
+	if err != nil {
+		t.Fatalf("startLocalRunServe: %v", err)
+	}
+	stop()
+	serveOpts := <-serveStarted
+	if serveOpts.MCPListenAddr != "127.0.0.1:19002" {
+		t.Fatalf("mcp listen addr = %q, want MCP listener owner from --mcp-port", serveOpts.MCPListenAddr)
+	}
+	if serveOpts.APIListenAddr != defaultAPIListenAddr {
+		t.Fatalf("api listen addr = %q, want unchanged default %q", serveOpts.APIListenAddr, defaultAPIListenAddr)
+	}
+}
+
 func TestRunCommandHelpShowsDataFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--help"}, &stdout, &stderr, rootCommandOptions{})
@@ -829,14 +871,16 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		{name: "reattach rejects api port flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--api-port", "8081"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --api-port"},
 		{name: "blank data rejected", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--data", " "}, wantCode: 2, wantStderr: "--data must be non-empty"},
 		{name: "api port zero rejected when explicit", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "0"}, wantCode: 2, wantStderr: "--api-port must be between 1 and 65535"},
-		{name: "api port rejects default mcp listener conflict", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8082"}, wantCode: 2, wantStderr: "--api-port 8082 conflicts with default MCP listener 127.0.0.1:8082"},
-		{name: "mcp port unsupported", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--mcp-port", "9000"}, wantCode: 2, wantStderr: "--mcp-port is not supported"},
+		{name: "api port rejects default mcp listener conflict", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8082"}, wantCode: 2, wantStderr: "--api-port 8082 conflicts with MCP listener 127.0.0.1:8082"},
+		{name: "mcp port zero rejected when explicit", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--mcp-port", "0"}, wantCode: 2, wantStderr: "--mcp-port must be between 1 and 65535"},
+		{name: "api port rejects custom mcp listener conflict", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "9000", "--mcp-port", "9000"}, wantCode: 2, wantStderr: "--api-port 9000 conflicts with MCP listener 127.0.0.1:9000"},
 		{name: "connect rejects config local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "--config requires local foreground mode"},
 		{name: "connect rejects backend local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--backend requires local foreground mode"},
 		{name: "connect rejects contracts local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--contracts", "contracts"}, wantCode: 2, wantStderr: "--contracts requires local foreground mode"},
 		{name: "connect rejects data local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--data", "reference-data"}, wantCode: 2, wantStderr: "--data requires local foreground mode"},
 		{name: "connect rejects platform spec local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "--platform-spec requires local foreground mode"},
 		{name: "connect rejects api port local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8081"}, wantCode: 2, wantStderr: "--api-port requires local foreground mode"},
+		{name: "connect rejects mcp port local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--mcp-port", "9000"}, wantCode: 2, wantStderr: "--mcp-port requires local foreground mode"},
 		{name: "connect rejects legacy path", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1/api/rpc", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect path must be empty or /v1/rpc"},
 		{name: "connect rejects unsupported scheme", token: "test-token", args: []string{"run", "start", "--connect", "ftp://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect must use http or https"},
 		{name: "missing explicit token for non-loopback exits four", args: []string{"run", "start", "--connect", "http://192.0.2.10:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 4, wantStderr: "API token source is required"},
