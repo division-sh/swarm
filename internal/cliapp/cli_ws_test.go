@@ -56,7 +56,8 @@ func TestCLIAPIReadWebSocketJSONClassifiesOverBudgetAsBudgetError(t *testing.T) 
 	}
 }
 
-func TestCLIAPIReadWebSocketJSONClassifiesMalformedPayloadAsProtocol(t *testing.T) {	upgrader := websocket.Upgrader{}
+func TestCLIAPIReadWebSocketJSONClassifiesMalformedPayloadAsProtocol(t *testing.T) {
+	upgrader := websocket.Upgrader{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
