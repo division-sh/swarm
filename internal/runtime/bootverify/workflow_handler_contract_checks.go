@@ -105,7 +105,8 @@ func handlerRuleContext(prefix string, idx int, id string) string {
 	return fmt.Sprintf("%s[%d]", prefix, idx)
 }
 
-func (c *checkerContext) validateWorkflowActionSpec(nodeID, eventContext, evidenceTarget string, action runtimecontracts.ActionSpec) []Finding {	actionID := strings.TrimSpace(action.ID)
+func (c *checkerContext) validateWorkflowActionSpec(nodeID, eventContext, evidenceTarget string, action runtimecontracts.ActionSpec) []Finding {
+	actionID := strings.TrimSpace(action.ID)
 	if actionID == "" {
 		return nil
 	}
