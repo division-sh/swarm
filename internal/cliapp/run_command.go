@@ -268,7 +268,7 @@ func (o runCommandOptions) validate() error {
 	if o.apiPort < 0 || o.apiPort > 65535 || (o.changedFlags["api-port"] && o.apiPort == 0) {
 		return fmt.Errorf("--api-port must be between 1 and 65535")
 	}
-	if o.mcpPort < 0 || o.mcpPort > 65535 {
+	if o.mcpPort < 0 || o.mcpPort > 65535 || (o.changedFlags["mcp-port"] && o.mcpPort == 0) {
 		return fmt.Errorf("--mcp-port must be between 1 and 65535")
 	}
 	if o.changedFlags["bundle-hash"] {
@@ -280,19 +280,20 @@ func (o runCommandOptions) validate() error {
 			return fmt.Errorf("--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>")
 		}
 	}
-	if o.changedFlags["mcp-port"] {
-		return fmt.Errorf("--mcp-port is not supported until the serve owner can bind MCP explicitly")
-	}
 	if o.changedFlags["data"] && strings.TrimSpace(o.dataSource) == "" {
 		return fmt.Errorf("--data must be non-empty")
 	}
 	if o.changedFlags["api-port"] {
-		_, defaultMCPPort, err := net.SplitHostPort(defaultMCPListenAddr)
-		if err != nil {
-			return fmt.Errorf("default MCP listener address %q is invalid: %w", defaultMCPListenAddr, err)
+		effectiveMCPAddr := defaultMCPListenAddr
+		if o.changedFlags["mcp-port"] {
+			effectiveMCPAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(o.mcpPort))
 		}
-		if strconv.Itoa(o.apiPort) == defaultMCPPort {
-			return fmt.Errorf("--api-port %d conflicts with default MCP listener %s", o.apiPort, defaultMCPListenAddr)
+		_, mcpPort, err := net.SplitHostPort(effectiveMCPAddr)
+		if err != nil {
+			return fmt.Errorf("MCP listener address %q is invalid: %w", effectiveMCPAddr, err)
+		}
+		if strconv.Itoa(o.apiPort) == mcpPort {
+			return fmt.Errorf("--api-port %d conflicts with MCP listener %s", o.apiPort, effectiveMCPAddr)
 		}
 	}
 	if o.noFollow && strings.TrimSpace(o.connectURL) == "" {
@@ -313,7 +314,7 @@ func (o runCommandOptions) validate() error {
 		return nil
 	}
 	if strings.TrimSpace(o.connectURL) != "" {
-		for _, flag := range []string{"config", "backend", "contracts", "data", "platform-spec", "api-port"} {
+		for _, flag := range []string{"config", "backend", "contracts", "data", "platform-spec", "api-port", "mcp-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--%s requires local foreground mode and cannot be used with --connect", flag)
 			}
@@ -476,6 +477,9 @@ func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions
 	serveOpts.ErrorOutput = &startupOutput
 	if opts.apiPort > 0 {
 		serveOpts.APIListenAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(opts.apiPort))
+	}
+	if opts.mcpPort > 0 {
+		serveOpts.MCPListenAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(opts.mcpPort))
 	}
 	serveCtx, cancel := context.WithCancel(ctx)
 	done := make(chan int, 1)

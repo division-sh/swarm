@@ -1065,7 +1065,7 @@ func TestPlatformSpecServeUnifiedListenerBindContractPromoted(t *testing.T) {
 			t.Fatalf("api-port boundary missing %q:\n%s", want, spec.ConsumerBoundaries.SwarmRunAPIPort)
 		}
 	}
-	for _, want := range []string{"swarm run start --mcp-port", "fail before API/WS calls", "local foreground MCP listener control"} {
+	for _, want := range []string{"swarm run start --mcp-port", "consumer", "second bind owner", "local foreground startup"} {
 		if !strings.Contains(spec.ConsumerBoundaries.SwarmRunMCPPort, want) {
 			t.Fatalf("mcp-port boundary missing %q:\n%s", want, spec.ConsumerBoundaries.SwarmRunMCPPort)
 		}
@@ -1172,7 +1172,7 @@ func TestPlatformSpecServeListenerTopologyRuntimeBindingPromoted(t *testing.T) {
 			t.Fatalf("mcp routes missing %q: %#v", want, spec.Listeners.MCP.Routes)
 		}
 	}
-	for _, want := range []string{"#992 implements", "`--health-addr` retirement", "`swarm run start --mcp-port` remains fail-closed", "#1891 implements `swarm serve` listener source precedence"} {
+	for _, want := range []string{"#992 implements", "`--health-addr` retirement", "#2173/T5 promotes `swarm run start --mcp-port`", "#1891 implements `swarm serve` listener source precedence"} {
 		if !stringSliceContains(spec.ImplementationBoundaries, want) {
 			t.Fatalf("implementation boundaries missing %q: %#v", want, spec.ImplementationBoundaries)
 		}
