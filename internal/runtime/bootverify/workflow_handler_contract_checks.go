@@ -3,6 +3,7 @@ package bootverify
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -104,8 +105,7 @@ func handlerRuleContext(prefix string, idx int, id string) string {
 	return fmt.Sprintf("%s[%d]", prefix, idx)
 }
 
-func (c *checkerContext) validateWorkflowActionSpec(nodeID, eventContext, evidenceTarget string, action runtimecontracts.ActionSpec) []Finding {
-	actionID := strings.TrimSpace(action.ID)
+func (c *checkerContext) validateWorkflowActionSpec(nodeID, eventContext, evidenceTarget string, action runtimecontracts.ActionSpec) []Finding {	actionID := strings.TrimSpace(action.ID)
 	if actionID == "" {
 		return nil
 	}
@@ -126,7 +126,7 @@ func (c *checkerContext) validateWorkflowActionSpec(nodeID, eventContext, eviden
 		}
 	case "record_evidence":
 		if strings.TrimSpace(evidenceTarget) == "" {
-			findings = append(findings, handlerActionFinding(nodeID, eventContext, "record_evidence is missing evidence_target"))
+			findings = append(findings, handlerActionFinding(nodeID, eventContext, recordEvidenceMissingTargetMessage(c, nodeID)))
 		}
 	case "mailbox_write":
 		if action.Mailbox == nil {
@@ -172,6 +172,54 @@ func handlerActionFinding(nodeID, eventContext, message string) Finding {
 		Message:  fmt.Sprintf("node %s handler %s %s", nodeID, eventContext, message),
 		Location: nodeID,
 	}
+}
+
+// recordEvidenceMissingTargetMessage is the teaching error for an omitted
+// record_evidence.evidence_target: evidence_target is required (no default),
+// and the message names the declared evidence targets in the same flow so the
+// author sees what the flow already writes.
+func recordEvidenceMissingTargetMessage(c *checkerContext, nodeID string) string {
+	flowID := nodeFlowID(c.source, nodeID)
+	declared := c.declaredEvidenceTargetsForFlow(flowID)
+	flow := defaultFlowLabel(flowID)
+	if len(declared) == 0 {
+		return fmt.Sprintf("record_evidence is missing evidence_target; declared evidence targets in flow %s: none", flow)
+	}
+	return fmt.Sprintf("record_evidence is missing evidence_target; declared evidence targets in flow %s: %s", flow, strings.Join(declared, ", "))
+}
+
+// declaredEvidenceTargetsForFlow returns the sorted set of evidence_target
+// values declared by record_evidence actions (handler-level or rule-level) in
+// the given flow. Rules share their handler's evidence_target.
+func (c *checkerContext) declaredEvidenceTargetsForFlow(flowID string) []string {
+	declared := map[string]struct{}{}
+	for nodeID, node := range c.source.NodeEntries() {
+		if nodeFlowID(c.source, nodeID) != flowID {
+			continue
+		}
+		for _, handler := range node.EventHandlers {
+			target := strings.TrimSpace(handler.EvidenceTarget)
+			if target == "" {
+				continue
+			}
+			if normalizeWorkflowBuiltinActionID(strings.TrimSpace(handler.Action.ID)) == "record_evidence" {
+				declared[target] = struct{}{}
+				continue
+			}
+			for _, rule := range handler.Rules {
+				if normalizeWorkflowBuiltinActionID(strings.TrimSpace(rule.Action.ID)) == "record_evidence" {
+					declared[target] = struct{}{}
+					break
+				}
+			}
+		}
+	}
+	out := make([]string, 0, len(declared))
+	for target := range declared {
+		out = append(out, target)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func supportedWorkflowRuntimeExecutorIDs(source semanticview.Source) map[string]struct{} {

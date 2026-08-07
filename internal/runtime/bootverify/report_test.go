@@ -1151,8 +1151,118 @@ func TestRun_ReportsRecordEvidenceMissingEvidenceTarget(t *testing.T) {
 
 	report := Run(context.Background(), source, Options{})
 
-	if !reportContains(report.Errors(), "handler_field_compliance", "record_evidence is missing evidence_target") {
+	if !reportContains(report.Errors(), "handler_field_compliance", "record_evidence is missing evidence_target; declared evidence targets in flow root: none") {
 		t.Fatalf("expected handler_field_compliance error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsRecordEvidenceMissingTargetNamesDeclaredFlowTargetsSorted(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"node-a": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.completed": {
+						Action: runtimecontracts.ActionSpec{ID: "record_evidence"},
+					},
+				},
+			},
+			"node-b": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.approved": {
+						Action:         runtimecontracts.ActionSpec{ID: "record_evidence"},
+						EvidenceTarget: "zeta_evidence",
+					},
+				},
+			},
+			"node-c": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.rejected": {
+						Action:         runtimecontracts.ActionSpec{ID: "record_evidence"},
+						EvidenceTarget: "alpha_evidence",
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "record_evidence is missing evidence_target; declared evidence targets in flow root: alpha_evidence, zeta_evidence") {
+		t.Fatalf("expected sorted declared-targets teaching error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsRuleRecordEvidenceMissingTargetNamesDeclaredFlowTargets(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"node-a": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.completed": {
+						Rules: []runtimecontracts.HandlerRuleEntry{{
+							ID:     "approve",
+							Action: runtimecontracts.ActionSpec{ID: "record_evidence"},
+						}},
+					},
+				},
+			},
+			"node-b": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.approved": {
+						Action:         runtimecontracts.ActionSpec{ID: "record_evidence"},
+						EvidenceTarget: "build_evidence",
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "record_evidence is missing evidence_target; declared evidence targets in flow root: build_evidence") {
+		t.Fatalf("expected rule-branch teaching error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RecordEvidenceMissingTargetDoesNotLeakOtherFlowTargets(t *testing.T) {
+	child := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+		Path:  "child",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"child-node": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.completed": {
+						Action:         runtimecontracts.ActionSpec{ID: "record_evidence"},
+						EvidenceTarget: "child_evidence",
+					},
+				},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"root-node": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.completed": {
+						Action: runtimecontracts.ActionSpec{ID: "record_evidence"},
+					},
+				},
+			},
+		},
+		Children: []runtimecontracts.FlowContractView{child},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
+		},
+		Nodes:  root.Nodes,
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{},
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "handler_field_compliance", "record_evidence is missing evidence_target; declared evidence targets in flow root: none") {
+		t.Fatalf("expected flow-scoped teaching error without sibling-flow leakage, got %#v", report.Errors())
 	}
 }
 

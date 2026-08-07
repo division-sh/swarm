@@ -3931,8 +3931,10 @@ handler_specification:
         its node declared.'
       limitation: 'All-or-nothing. Selective gate clearing (clear_gates: [gate_a]) is a potential v1.3 feature.'
     evidence_target:
-      description: Specifies which accumulator key the evidence is appended to when action is record_evidence. If omitted,
-        defaults to the node ID. Explicit declaration is recommended for clarity.
+      description: Specifies which accumulator key the evidence is appended to when action is record_evidence. Required
+        when the handler action (or a selected handler.rules branch action) is record_evidence; there is no default.
+        Omitted evidence_target is a contract error rejected by boot verification with a teaching error naming the field
+        and the declared evidence targets in the same flow.
       type: string
       example: build_evidence
   expression_context:
@@ -7921,7 +7923,9 @@ tool_model:
         They are listed separately from the tool catalog because agents cannot call them directly.
       actions:
         create_flow_instance: Create a new dynamic flow instance from a template.
-        record_evidence: Append payload to entity accumulator. Requires evidence_target field on the handler.
+        record_evidence: Append payload to entity accumulator. Requires evidence_target field on the handler; there is no
+          default — omitted evidence_target is a contract error rejected by boot verification with a teaching error naming
+          the field and the declared evidence targets in the same flow.
         mailbox_write: Deterministically materialize authored mailbox request events into public.mailbox. Handler-without-rules
           or selected handler.rules branch action only.
         artifact_repo_commit: Deterministically commit allowlisted service-owned artifact files to a local git repository,
