@@ -175,7 +175,7 @@ func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&opts.backend, "backend", "", "LLM backend profile for local foreground startup: anthropic, claude_cli, openai_compatible, or openai_responses")
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", "", "Path to Swarm contract bundle root for local foreground startup")
 	cmd.Flags().StringVar(&opts.dataSource, "data", "", "Path to agent-visible read-only /data reference directory")
-	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", "", "Path to platform spec yaml for local foreground startup")
+	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", "", retiredPlatformSpecFlagHelp)
 	cmd.Flags().StringVar(&opts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for run.start")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
 	cmd.Flags().StringVar(&opts.runID, "run-id", "", "Optional caller-provided run id for run.start")
@@ -280,6 +280,9 @@ func (o runCommandOptions) validate() error {
 			return fmt.Errorf("--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>")
 		}
 	}
+	if o.changedFlags["platform-spec"] {
+		return fmt.Errorf("--platform-spec is retired; the swarm binary embeds its own platform spec. Use config paths.platform_spec_path only for platform spec development")
+	}
 	if o.changedFlags["data"] && strings.TrimSpace(o.dataSource) == "" {
 		return fmt.Errorf("--data must be non-empty")
 	}
@@ -306,7 +309,7 @@ func (o runCommandOptions) validate() error {
 		if strings.TrimSpace(o.eventName) != "" || strings.TrimSpace(o.payloadPath) != "" || strings.TrimSpace(o.idempotencyKey) != "" || strings.TrimSpace(o.runID) != "" {
 			return fmt.Errorf("--reattach is mutually exclusive with --event, --payload, --idempotency-key, and --run-id")
 		}
-		for _, flag := range []string{"bundle-hash", "config", "backend", "contracts", "data", "platform-spec", "api-port", "mcp-port"} {
+		for _, flag := range []string{"bundle-hash", "config", "backend", "contracts", "data", "api-port", "mcp-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--reattach is mutually exclusive with --%s", flag)
 			}
@@ -314,7 +317,7 @@ func (o runCommandOptions) validate() error {
 		return nil
 	}
 	if strings.TrimSpace(o.connectURL) != "" {
-		for _, flag := range []string{"config", "backend", "contracts", "data", "platform-spec", "api-port", "mcp-port"} {
+		for _, flag := range []string{"config", "backend", "contracts", "data", "api-port", "mcp-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--%s requires local foreground mode and cannot be used with --connect", flag)
 			}

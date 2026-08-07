@@ -67,13 +67,12 @@ func TestDoctorCommandIgnoresMalformedRepoDotEnv(t *testing.T) {
 		"--backend", "claude_cli",
 		"--config", writeDoctorClaudeConfig(t, ""),
 		"--contracts", contractsRoot,
-		"--platform-spec", defaultPlatformSpecPath,
 		"--data", t.TempDir(),
 		"--api-listen-addr", "127.0.0.1:0",
 		"--mcp-listen-addr", "127.0.0.1:0",
 	}, &stdout, &stderr, defaultRootCommandOptions())
-	if code == 0 {
-		t.Fatalf("doctor unexpectedly succeeded; expected non-env preflight failure to keep proof meaningful")
+	if code != 0 {
+		t.Fatalf("doctor exited %d; with the embedded platform spec the preflight must complete, stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	assertNoDotEnvLoadFailure(t, stdout.String()+stderr.String())
 }
@@ -890,7 +889,6 @@ func TestDoctorReportsSwarmEnvFindingsWithConfigFailure(t *testing.T) {
 		"--json",
 		"--config", filepath.Join(t.TempDir(), "missing-runtime.yaml"),
 		"--contracts", contractsRoot,
-		"--platform-spec", defaultPlatformSpecPath,
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != CLIExitRuntime {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, CLIExitRuntime, stdout.String(), stderr.String())

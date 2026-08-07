@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 )
@@ -25,6 +27,19 @@ const (
 )
 
 var errCLIAPITokenRequired = errors.New("API token source is required for non-loopback API targets; use --api-token-file, context descriptor auth, or config connection.api_token_file")
+
+const retiredPlatformSpecFlagHelp = "Retired; the swarm binary embeds its own platform spec. Use config paths.platform_spec_path only for platform spec development."
+
+// rejectRetiredPlatformSpecFlag implements the --platform-spec retirement:
+// the binary embeds the tracked platform spec at compile time, so a
+// user-supplied path is neither needed nor accepted. The config escape
+// paths.platform_spec_path remains the sole override for spec development.
+func rejectRetiredPlatformSpecFlag(cmd *cobra.Command) error {
+	if cmd == nil || !cmd.Flags().Changed("platform-spec") {
+		return nil
+	}
+	return fmt.Errorf("--platform-spec is retired; the swarm binary embeds its own platform spec. Use config paths.platform_spec_path only for platform spec development")
+}
 
 type cliAPIErrorClassifier struct {
 	runtimeExit   int

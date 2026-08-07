@@ -311,6 +311,9 @@ func newConnectionsStatusCommand(ctx context.Context, repo string) *cobra.Comman
 		Short: "Show managed credential connection status.",
 		Args:  argcount.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			store, err := BuildManagedCredentialStore()
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure managed credential store: %w", err))
@@ -332,7 +335,7 @@ func newConnectionsStatusCommand(ctx context.Context, repo string) *cobra.Comman
 		},
 	}
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root for required_by metadata")
-	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, "Path to platform spec yaml")
+	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, retiredPlatformSpecFlagHelp)
 	cmd.Flags().BoolVar(&opts.asJSON, "json", false, "Render successful output as one JSON document")
 	argcount.SetDiscoveryHint(cmd, "List connection keys with `swarm connections status`.")
 	return cmd

@@ -2950,7 +2950,7 @@ func TestPlatformSpecContractPlatformSpecPathResolutionPromoted(t *testing.T) {
 	if !strings.Contains(spec.ContractsPath.RejectedSources["SWARM_CONTRACTS_DIR"], "Not a CLI source") {
 		t.Fatalf("SWARM_CONTRACTS_DIR rejection missing CLI-source rule:\n%s", spec.ContractsPath.RejectedSources["SWARM_CONTRACTS_DIR"])
 	}
-	wantPlatformOrder := []string{"--platform-spec", "config paths.platform_spec_path", "embedded tracked platform spec"}
+	wantPlatformOrder := []string{"config paths.platform_spec_path", "embedded tracked platform spec"}
 	if len(spec.PlatformSpecPath.SourceOrder) != len(wantPlatformOrder) {
 		t.Fatalf("platform source order = %#v, want %#v", spec.PlatformSpecPath.SourceOrder, wantPlatformOrder)
 	}
@@ -2959,8 +2959,11 @@ func TestPlatformSpecContractPlatformSpecPathResolutionPromoted(t *testing.T) {
 			t.Fatalf("platform source order[%d] = %q, want %q", i, spec.PlatformSpecPath.SourceOrder[i], want)
 		}
 	}
-	if spec.PlatformSpecPath.AcceptedSources.Flag != "--platform-spec <path>" {
-		t.Fatalf("platform flag = %q", spec.PlatformSpecPath.AcceptedSources.Flag)
+	if spec.PlatformSpecPath.AcceptedSources.Flag != "" {
+		t.Fatalf("platform flag = %q, want retired", spec.PlatformSpecPath.AcceptedSources.Flag)
+	}
+	if !strings.Contains(spec.PlatformSpecPath.RejectedSources["--platform-spec"], "Retired (#1574)") {
+		t.Fatalf("platform flag rejection missing retirement rule:\n%s", spec.PlatformSpecPath.RejectedSources["--platform-spec"])
 	}
 	if spec.PlatformSpecPath.AcceptedSources.ConfigKey != "paths.platform_spec_path" {
 		t.Fatalf("platform config key = %q", spec.PlatformSpecPath.AcceptedSources.ConfigKey)

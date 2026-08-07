@@ -1218,7 +1218,6 @@ func doctorClaudeArgs(t *testing.T, configPath string, asJSON bool) []string {
 		"--backend", "claude_cli",
 		"--config", configPath,
 		"--contracts", doctorAgentContractsPath,
-		"--platform-spec", defaultPlatformSpecPath,
 		"--data", t.TempDir(),
 		"--api-listen-addr", "127.0.0.1:0",
 		"--mcp-listen-addr", "127.0.0.1:0",

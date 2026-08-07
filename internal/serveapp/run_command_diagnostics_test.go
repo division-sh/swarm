@@ -55,7 +55,6 @@ func TestRunCommandLocalForegroundRendersRealWorkspaceStartupDiagnostics(t *test
 				"--backend", "claude_cli",
 				"--contracts", doctorAgentContractsPath,
 				"--data", t.TempDir(),
-				"--platform-spec", defaultPlatformSpecPath,
 				"--api-port", apiPort,
 			}, &stdout, &stderr, Run)
 			if code != cliapp.CLIExitRuntime {

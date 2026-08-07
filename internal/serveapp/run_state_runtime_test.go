@@ -148,26 +148,25 @@ func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, eventID strin
 	}
 }
 
-func TestCLI_ServeMissingPlatformSpecWritesOnlyStderr(t *testing.T) {
+func TestCLI_ServeRetiredPlatformSpecWritesOnlyStderr(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	var stdout, stderr bytes.Buffer
-	missing := filepath.Join(t.TempDir(), "missing-platform-spec.yaml")
-	configPath := writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "missing-spec.sqlite"), nil)
+	configPath := writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "retired-spec.sqlite"), nil)
 	code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
 		"serve",
 		"--config", configPath,
 		"--contracts", filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		"--platform-spec", missing,
+		"--platform-spec", filepath.Join(t.TempDir(), "platform-spec.yaml"),
 		"--store", "sqlite",
 	}, &stdout, &stderr, Run)
-	if code == 0 {
-		t.Fatalf("serve code = 0, want startup failure\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
+	if code != cliapp.CLIExitValidation {
+		t.Fatalf("serve code = %d, want %d\nstdout=%s\nstderr=%s", code, cliapp.CLIExitValidation, stdout.String(), stderr.String())
 	}
 	if stdout.Len() != 0 {
-		t.Fatalf("missing platform spec contaminated stdout: %q", stdout.String())
+		t.Fatalf("retired platform spec contaminated stdout: %q", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "ERROR: serve failed") || !strings.Contains(stderr.String(), "missing-platform-spec.yaml") {
-		t.Fatalf("missing platform spec stderr is incomplete:\n%s", stderr.String())
+	if !strings.Contains(stderr.String(), "--platform-spec is retired") || !strings.Contains(stderr.String(), "paths.platform_spec_path") {
+		t.Fatalf("retired platform spec stderr is incomplete:\n%s", stderr.String())
 	}
 }
 

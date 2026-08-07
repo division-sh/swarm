@@ -46,7 +46,6 @@ func TestProviderTriggerReleaseLayoutLoadsCompleteFilesystemInventory(t *testing
 			"doctor",
 			"--config", configPath,
 			"--contracts", filepath.Join(releaseRoot, "contracts"),
-			"--platform-spec", filepath.Join(releaseRoot, "platform-spec.yaml"),
 			"--data", filepath.Join(releaseRoot, "data"),
 			"--workspace-backend", "host",
 			"--api-listen-addr", "127.0.0.1:0",

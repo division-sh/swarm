@@ -202,7 +202,7 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 		{name: "forkchat list", args: []string{"forkchat", "list"}},
 		{name: "forkchat view", args: []string{"forkchat", "view", "fork-1"}},
 		{name: "forkchat delete", args: []string{"forkchat", "delete", "fork-1"}},
-		{name: "test", args: []string{"test", "--contracts", scenarioContractsDir, "--platform-spec", filepath.Join(RepoRoot(), defaultPlatformSpecPath)}},
+		{name: "test", args: []string{"test", "--contracts", scenarioContractsDir}},
 		{name: "version server", args: []string{"version", "--server"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
