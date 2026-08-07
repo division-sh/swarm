@@ -37,6 +37,9 @@ func newDoctorCommand(ctx context.Context, repo string, rootOpts rootCommandOpti
   swarm doctor --target    # show which runtime this CLI targets`,
 		Args: cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
+				return err
+			}
 			if cliAPIConnectionFlagsChanged(cmd) && !opts.target {
 				return fmt.Errorf("--api-server and --api-token-file require --target")
 			}

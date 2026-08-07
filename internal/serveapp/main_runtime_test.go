@@ -8509,7 +8509,6 @@ func TestStartLocalRunServeClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 			"--backend", "claude_cli",
 			"--contracts", filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 			"--data", dataSource,
-			"--platform-spec", defaultPlatformSpecPath,
 			"--api-port", apiPortText,
 		}, &stdout, &stderr, runServe)
 	}()
@@ -8560,7 +8559,6 @@ func TestStartLocalRunServeLateReadinessGateFailureDoesNotCommit(t *testing.T) {
 		"--config", writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "late-gate.sqlite"), nil),
 		"--contracts", filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 		"--data", t.TempDir(),
-		"--platform-spec", defaultPlatformSpecPath,
 		"--api-port", apiPortText,
 	}, &stdout, &stderr, runServe)
 	if code == 0 || !strings.Contains(stderr.String(), "exited before readiness") {

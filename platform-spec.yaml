@@ -21619,17 +21619,18 @@ cli_specification:
           `contracts/package.yaml` discovery remains the only discovered default.
       platform_spec_path:
         accepted_sources:
-          flag: --platform-spec <path>
           config_key: paths.platform_spec_path
           built_in_default: platform-spec.yaml
         source_order:
-        - --platform-spec
         - config paths.platform_spec_path
         - embedded tracked platform spec
         rejected_sources:
           SWARM_PLATFORM_SPEC_PATH: >
-            Not promoted. Platform spec path selection is intentionally flag/config/default only; adding an env
+            Not promoted. Platform spec path selection is intentionally config/default only; adding an env
             source would create untracked source precedence and must be separately gated.
+          --platform-spec: >
+            Retired (#1574). The flag was removed from every command surface; passing it fails before API calls with
+            exit 2 and a teaching error naming the embedded default and the `paths.platform_spec_path` config escape.
         default_rule: >
           The built-in default is the tracked platform spec embedded into the installed `swarm` binary at compile time
           from `platform-spec.yaml`; it MUST NOT require source checkout,
@@ -21799,7 +21800,7 @@ cli_specification:
       - trusted runtime identity and context registry consumption
       - store/data migration and swarm run start behavior
     test:
-      command: swarm test [scenario-file ...] [--contracts <path>] [--platform-spec <path>] [--timeout <duration>] [--poll-interval <duration>]
+      command: swarm test [scenario-file ...] [--contracts <path>] [--timeout <duration>] [--poll-interval <duration>]
       group: author_validate
       tier: should_have
       implementation_status: implemented_first_slice
@@ -21825,13 +21826,12 @@ cli_specification:
       - name: --contracts <path>
         behavior: Contract package root used for bundle loading and scenario discovery. Omitted uses config paths.contracts_path,
           then repo-local contracts when present, then the repo root.
-      - name: --platform-spec <path>
-        behavior: platform-spec.yaml path used for bundle loading. Omitted uses config paths.platform_spec_path, then the repo-local
-          default platform-spec.yaml.
       - name: --timeout <duration>
         behavior: Positive safety deadline for test quiescence waits. Reaching it fails the scenario with diagnostic context.
       - name: --poll-interval <duration>
         behavior: Positive interval between canonical readback probes while waiting for test quiescence.
+      dropped_flags:
+        --platform-spec: 'Retired (#1574); fail with exit 2 and a teaching error naming the embedded platform spec and the paths.platform_spec_path config escape.'
       output:
         success_detail: >-
           One scenario ok line per scenario file followed by
@@ -22632,16 +22632,16 @@ cli_specification:
       - --backend <anthropic|claude_cli|openai_compatible|openai_responses>
       - --contracts <path>
       - --data <path>
-      - --platform-spec <path>
       - --idempotency-key <key>
       - --run-id <id>
       - --api-port <int>
       - --mcp-port <int>
       dropped_flags:
         --detach: 'Unsupported in v2; fail before API calls with exit 2 and migration text. Use `swarm serve` plus `swarm run start --connect ... --no-follow`.'
+        --platform-spec: 'Retired (#1574); fail with exit 2 and a teaching error naming the embedded platform spec and the paths.platform_spec_path config escape.'
       modes:
         foreground_local_start:
-          invocation: swarm run start --event <name> --payload <file> [--config <path>] [--backend <profile>] --contracts <path> [--data <path>] --platform-spec <path>
+          invocation: swarm run start --event <name> --payload <file> [--config <path>] [--backend <profile>] --contracts <path> [--data <path>]
           behavior: >
             Start runtime/API/MCP through the existing serve startup owner, call health.check, call run.start, begin
             authoritative run.get status/interrupt handling, and attempt optional bounded run.subscribe_trace observation.

@@ -47,6 +47,9 @@ func newDescribeCommand(ctx context.Context, repo string, rootOpts rootCommandOp
 		Use:   "describe",
 		Short: "Render the expanded authoring view for local Swarm contracts.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			if err := opts.logging.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -67,7 +70,7 @@ func newDescribeCommand(ctx context.Context, repo string, rootOpts rootCommandOp
 		},
 	}
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root")
-	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, "Path to platform spec yaml")
+	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, retiredPlatformSpecFlagHelp)
 	cmd.Flags().BoolVar(&opts.graph, "graph", opts.graph, "Render the per-flow lifecycle stage graph")
 	bindCLIOutputFlags(cmd, &opts.output)
 	bindCLILoggingFlags(cmd, &opts.logging)
@@ -81,6 +84,9 @@ func newDescribeRoutesCommand(ctx context.Context, repo string, rootOpts rootCom
 		Use:   "routes",
 		Short: "Render the frozen authored routing topology.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			if len(args) > 0 {
 				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("unexpected argument %q", args[0]))
 			}
@@ -95,7 +101,7 @@ func newDescribeRoutesCommand(ctx context.Context, repo string, rootOpts rootCom
 		},
 	}
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root")
-	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, "Path to platform spec yaml")
+	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, retiredPlatformSpecFlagHelp)
 	bindCLIOutputFlags(cmd, &opts.output)
 	bindCLILoggingFlags(cmd, &opts.logging)
 	return cmd

@@ -108,7 +108,6 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
 		"test",
 		"--contracts", contractsPath,
-		"--platform-spec", defaultPlatformSpecPath,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -235,7 +234,6 @@ func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t 
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
 		"test",
 		"--contracts", contractsPath,
-		"--platform-spec", defaultPlatformSpecPath,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -348,7 +346,6 @@ func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) 
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
 		"test",
 		"--contracts", contractsPath,
-		"--platform-spec", defaultPlatformSpecPath,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -426,7 +423,6 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
 		"test",
 		"--contracts", contractsPath,
-		"--platform-spec", defaultPlatformSpecPath,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -996,7 +992,6 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string,
 	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
 		"test",
 		"--contracts", contractsPath,
-		"--platform-spec", defaultPlatformSpecPath,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -1057,7 +1052,6 @@ steps:
 		"test",
 		filepath.Join(contractsPath, "tests", "invalid-type.yaml"),
 		"--contracts", contractsPath,
-		"--platform-spec", defaultPlatformSpecPath,
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != scenarioTestExitValidation {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
@@ -1100,7 +1094,6 @@ steps:
 		"test",
 		scenarioPath,
 		"--contracts", contractsPath,
-		"--platform-spec", defaultPlatformSpecPath,
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != scenarioTestExitValidation {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
@@ -1171,7 +1164,6 @@ steps:
 		"test",
 		outside,
 		"--contracts", contractsPath,
-		"--platform-spec", defaultPlatformSpecPath,
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != scenarioTestExitValidation {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
@@ -1216,7 +1208,6 @@ steps:
 		"test",
 		filepath.Join(contractsPath, "tests", "symlink-escape.yaml"),
 		"--contracts", contractsPath,
-		"--platform-spec", defaultPlatformSpecPath,
 	}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != scenarioTestExitValidation {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
@@ -1286,7 +1277,6 @@ steps:
 		"test",
 		filepath.Join(contractsPath, "tests", "mailbox.yaml"),
 		"--contracts", contractsPath,
-		"--platform-spec", defaultPlatformSpecPath,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
 	}, &stdout, &stderr, testRootCommandOptions(server))
@@ -1378,7 +1368,7 @@ steps:
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
 				"test", filepath.Join(contractsPath, "tests", "human-task.yaml"),
-				"--contracts", contractsPath, "--platform-spec", defaultPlatformSpecPath,
+				"--contracts", contractsPath,
 				"--timeout", "2s", "--poll-interval", "10ms",
 			}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != 0 {
@@ -1439,7 +1429,7 @@ steps:
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
 				"test", filepath.Join(contractsPath, "tests", "invalid-card-match.yaml"),
-				"--contracts", contractsPath, "--platform-spec", defaultPlatformSpecPath,
+				"--contracts", contractsPath,
 			}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != scenarioTestExitValidation || lookup || !strings.Contains(stderr.String(), tc.want) {
 				t.Fatalf("code=%d lookup=%v stderr=%q, want validation containing %q", code, lookup, stderr.String(), tc.want)
@@ -1484,7 +1474,6 @@ steps:
 		"test",
 		filepath.Join(contractsPath, "tests", "mailbox-reject-missing-reason.yaml"),
 		"--contracts", contractsPath,
-		"--platform-spec", defaultPlatformSpecPath,
 		"--timeout", "2s",
 		"--poll-interval", "10ms",
 	}, &stdout, &stderr, testRootCommandOptions(server))

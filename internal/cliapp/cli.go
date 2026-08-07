@@ -280,6 +280,9 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
   swarm serve --contracts ./contracts    # serve a specific contract bundle`,
 		Args: cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
+				return err
+			}
 			if cmd.Flags().Changed("require-bundle-match") && cmd.Flags().Changed("no-require-bundle-match") && opts.RequireBundleMatch && opts.NoRequireBundleMatch {
 				return fmt.Errorf("--require-bundle-match and --no-require-bundle-match cannot both be set")
 			}
@@ -382,7 +385,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 	cmd.Flags().StringVar(&opts.DataSource, "data", opts.DataSource, "Path to agent-visible read-only /data reference directory")
 	cmd.Flags().StringVar(&opts.WorkspaceBackend, "workspace-backend", opts.WorkspaceBackend, "Workspace backend preference for local serve: docker, or host for explicit trusted/unsafe local-dev opt-in")
 	cmd.Flags().StringArrayVar(&opts.BundleHashes, "bundle-hash", opts.BundleHashes, "Load a persisted bundle catalog row by canonical bundle_hash; repeat to boot multiple pinned contexts")
-	cmd.Flags().StringVar(&opts.PlatformSpecPath, "platform-spec", opts.PlatformSpecPath, "Path to platform spec yaml")
+	cmd.Flags().StringVar(&opts.PlatformSpecPath, "platform-spec", opts.PlatformSpecPath, retiredPlatformSpecFlagHelp)
 	cmd.Flags().StringVar(&opts.StoreMode, "store", opts.StoreMode, RuntimeStoreBackendHelp)
 	cmd.Flags().StringVar(&opts.ContextName, "context", opts.ContextName, "Local Swarm context name to register for --dev")
 	cmd.Flags().StringVar(&opts.APITokenFile, "api-token-file", opts.APITokenFile, "Path to file containing the serve API bearer token")
@@ -407,6 +410,9 @@ func newVerifyCommand(ctx context.Context, repo string, rootOpts rootCommandOpti
 		Short:   "Validate contract files before boot.",
 		Example: `  swarm verify --contracts ./contracts`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			if err := opts.logging.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -427,7 +433,7 @@ func newVerifyCommand(ctx context.Context, repo string, rootOpts rootCommandOpti
 		},
 	}
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root")
-	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, "Path to platform spec yaml")
+	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, retiredPlatformSpecFlagHelp)
 	bindCLIOutputFlags(cmd, &opts.output)
 	bindCLILoggingFlags(cmd, &opts.logging)
 	return cmd

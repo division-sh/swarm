@@ -40,7 +40,6 @@ func TestSwarmTestServedSQLiteNoLiveLLMProof(t *testing.T) {
 	code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
 		"test",
 		"--contracts", contractsPath,
-		"--platform-spec", defaultPlatformSpecPath,
 		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 		"--timeout", "10s",
 		"--poll-interval", "25ms",
@@ -112,7 +111,6 @@ func TestSwarmTestCanonicalRoutingExamplesRunFullAuthoredPathsOnServedSQLite(t *
 			code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
 				"test",
 				"--contracts", contractsPath,
-				"--platform-spec", defaultPlatformSpecPath,
 				"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 				"--timeout", "20s",
 				"--poll-interval", "25ms",

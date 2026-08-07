@@ -24,7 +24,6 @@ func TestRunCommandLocalForegroundRendersRealExplicitHostRefusal(t *testing.T) {
 		"--backend", "claude_cli",
 		"--contracts", doctorAgentContractsPath,
 		"--data", t.TempDir(),
-		"--platform-spec", defaultPlatformSpecPath,
 		"--api-port", freeDoctorTCPPort(t),
 	}, &stdout, &stderr, Run)
 	if code != cliapp.CLIExitRuntime {

@@ -200,11 +200,14 @@ func newTestCommand(RepoRoot string, opts rootCommandOptions) *cobra.Command {
 		Short: "Run deterministic scenario tests through public read owners.",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
+				return returnScenarioTestValidationError(cmd.ErrOrStderr(), err)
+			}
 			return runScenarioTestCommand(cmd.Context(), RepoRoot, cmd.OutOrStdout(), cmd.ErrOrStderr(), args, testOpts)
 		},
 	}
 	cmd.Flags().StringVar(&testOpts.contracts, "contracts", "", "Contract package root containing scenario tests")
-	cmd.Flags().StringVar(&testOpts.platformSpec, "platform-spec", "", "platform-spec.yaml path used to load the contract bundle")
+	cmd.Flags().StringVar(&testOpts.platformSpec, "platform-spec", "", retiredPlatformSpecFlagHelp)
 	cmd.Flags().DurationVar(&testOpts.timeout, "timeout", defaultScenarioTestTimeout, "Safety deadline for test quiescence")
 	cmd.Flags().DurationVar(&testOpts.pollInterval, "poll-interval", defaultScenarioTestPoll, "Canonical readback polling interval while waiting for quiescence")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &testOpts.apiOptions, cliAPICommandClassMutating, "swarm test")
@@ -222,7 +225,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	if opts.apiOptions.rootFlags != nil && opts.apiOptions.rootFlags.configPathSet {
 		configPath = opts.apiOptions.rootFlags.configPath
 	}
-	contractsDir, platformSpec, err := resolveScenarioTestSources(RepoRoot, opts.contracts, opts.platformSpec, configPath)
+	contractsDir, platformSpec, err := resolveScenarioTestSources(RepoRoot, opts.contracts, configPath)
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, err)
 	}
@@ -265,7 +268,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	return nil
 }
 
-func resolveScenarioTestSources(RepoRoot, contractsFlag, platformSpecFlag, configPath string) (string, string, error) {
+func resolveScenarioTestSources(RepoRoot, contractsFlag, configPath string) (string, string, error) {
 	RepoRoot = strings.TrimSpace(RepoRoot)
 	if RepoRoot == "" {
 		RepoRoot = "."
@@ -288,18 +291,11 @@ func resolveScenarioTestSources(RepoRoot, contractsFlag, platformSpecFlag, confi
 	if err != nil {
 		return "", "", err
 	}
-	platformSpec := strings.TrimSpace(platformSpecFlag)
-	if platformSpec == "" {
-		platformSpec = strings.TrimSpace(cfg.Paths.PlatformSpecPath)
-	}
-	if platformSpec == "" {
-		platformSpec = runtimecontracts.DefaultPlatformSpecFile(RepoRoot)
-	}
-	platformSpec, err = absFrom(RepoRoot, platformSpec)
+	resolved, err := ResolveCLIContractPlatformSpecPaths(RepoRoot, CLIContractPlatformSpecPathOptions{ConfigPath: configPath})
 	if err != nil {
 		return "", "", err
 	}
-	return contractsDir, platformSpec, nil
+	return contractsDir, resolved.PlatformSpecPath, nil
 }
 
 func absFrom(base, path string) (string, error) {
