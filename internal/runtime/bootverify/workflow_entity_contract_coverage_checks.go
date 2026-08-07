@@ -167,6 +167,7 @@ func (c *checkerContext) entityReaderCoverage() []Finding {
 	c.entityReaderCoverageLoaded = true
 
 	readers := wave1EntityReaderCoverageByFlow(c.source)
+	wave1MergeEntityReaderCoverage(readers, wave1GateReaderCoverageByFlow(c.source))
 	for _, contract := range wave1DeclaredEntityContracts(c.source) {
 		for fieldName, fieldDecl := range contract.Contract.Fields {
 			fieldName = strings.TrimSpace(fieldName)
@@ -498,6 +499,45 @@ func wave1ScopedAgentRecords(bundle *runtimecontracts.WorkflowContractBundle) []
 		}
 	}
 	return out
+}
+
+// wave1GateReaderCoverageByFlow counts the entity-field references of every
+// gate-evaluated expression (stage gate `context:` values) as reader coverage,
+// through the same expression-reference owner used by handler reads.
+func wave1GateReaderCoverageByFlow(source semanticview.Source) map[string]map[string]struct{} {
+	out := map[string]map[string]struct{}{}
+	for _, plan := range source.WorkflowGates() {
+		flowID := strings.TrimSpace(plan.FlowID)
+		for _, expression := range plan.Context {
+			expr := expressionReference{
+				Kind:       "gate context",
+				Expression: stageGateExpressionText(expression),
+				Phase:      runtimepipeline.WorkflowEntityFieldLifecycleGate,
+			}
+			if strings.TrimSpace(expr.Expression) == "" {
+				continue
+			}
+			for _, ref := range wave1ResolvedExpressionRefs(source, flowID, "", "", expr) {
+				ownerFlowID := strings.TrimSpace(ref.OwnerFlowID)
+				if out[ownerFlowID] == nil {
+					out[ownerFlowID] = map[string]struct{}{}
+				}
+				out[ownerFlowID][ref.Field] = struct{}{}
+			}
+		}
+	}
+	return out
+}
+
+func wave1MergeEntityReaderCoverage(into, extra map[string]map[string]struct{}) {
+	for flowID, fields := range extra {
+		if into[flowID] == nil {
+			into[flowID] = map[string]struct{}{}
+		}
+		for field := range fields {
+			into[flowID][field] = struct{}{}
+		}
+	}
 }
 
 func wave1EntityReaderCoverageByFlow(source semanticview.Source) map[string]map[string]struct{} {

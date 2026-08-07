@@ -13,6 +13,7 @@ type WorkflowEntityFieldLifecyclePhase string
 const (
 	WorkflowEntityFieldLifecycleGuard            WorkflowEntityFieldLifecyclePhase = "guard"
 	WorkflowEntityFieldLifecycleGuardEscalation  WorkflowEntityFieldLifecyclePhase = "guard_escalation_fields"
+	WorkflowEntityFieldLifecycleGate             WorkflowEntityFieldLifecyclePhase = "gate"
 	WorkflowEntityFieldLifecycleAccumulate       WorkflowEntityFieldLifecyclePhase = "accumulate"
 	WorkflowEntityFieldLifecycleFilter           WorkflowEntityFieldLifecyclePhase = "filter"
 	WorkflowEntityFieldLifecycleGroupBy          WorkflowEntityFieldLifecyclePhase = "group_by"
