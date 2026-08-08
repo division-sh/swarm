@@ -4201,17 +4201,22 @@ engine:
         - processing/review/review.completed — nested sub-flow event
         - fulfillment/shipper-agent — agent in fulfillment flow
         - dashboard-node — root flow's node (no slash = root-local)
-    resolution: Slash presence determines scope. No slash = local to current flow. Slash present = absolute path from root.
-      Local names never contain slashes. The platform resolves all references to full internal paths at boot.
+    resolution: >
+      Slash presence determines scope for reference contexts that permit authored absolute paths. No slash = local to current
+      flow. Slash present = absolute path from root. Exact subscription authoring is narrower: node subscriptions are local,
+      while flow-owned agent admission may retain an already-normalized same-scope identity; neither form may cross a flow
+      boundary. Local names never contain slashes. The platform resolves admitted references to full internal paths at boot.
     type_inference: 'No type suffix needed. The context determines the type: subscriptions and emit_events contain events.
       Message targets contain agents. subscribes_to in nodes contains events. The type is implicit from where the reference
-      appears.'
+      appears. Exact subscriptions additionally consume the event-identity subscription boundary and cannot use generic
+      absolute-path resolution as cross-flow delivery authority.'
     full_uri:
       description: 'For cross-root references (future — multiple root flows on one platform), full URI format is available:
         {root}://{path}/{name}. Within a single root flow, absolute paths are sufficient.'
       format: '{root}://{path}/{name}'
       example: myapp://intake/order.ready
-      when: Only needed when multiple root flows run on the same platform instance.
+      when: Only needed when multiple root flows run on the same platform instance, and only in reference contexts that
+        explicitly permit cross-root identity. Full URIs are not exact subscription authority.
   event_identity:
     description: 'Canonical event identity model. An event has multiple projections depending on context.
       The platform MUST use a single resolver module for all identity operations — contract loading,
@@ -4230,9 +4235,10 @@ engine:
       target_routes: 'The resolved fan-out delivery route identities on the envelope: target_set[].flow_instance plus
         target_set[].entity_id. This is a concrete topology/runtime route carrier, never an authored selector.'
     resolution_rules:
-      contracts_always_local: 'Exact node subscribes_to values, handler keys, exact agent subscriptions,
-        and event definitions in events.yaml always use local names. Exact declarations never use flow
-        prefixes. Imported cross-boundary wildcard observation is pattern-only and requires typed bind.observe authorization.'
+      contracts_always_local: 'Exact node subscribes_to values, handler keys, and event definitions in events.yaml use local
+        names. Flow-owned agent subscription admission accepts local exact values and may retain an already-normalized exact
+        identity only when it resolves to that same flow. Exact subscriptions never cross a flow boundary. Imported
+        cross-boundary wildcard observation is pattern-only and requires typed bind.observe authorization.'
       bus_always_external: 'The event bus stores and routes events using external names. An event
         emitted by a node in the scoring flow is stored as scoring/vertical.shortlisted in the events
         table.'
@@ -4462,13 +4468,16 @@ engine:
     subscription_boundary:
       exact: Exact node and agent subscriptions are flow-local. A qualified exact value that crosses a flow boundary is
         a hard invalidity and cannot create or disambiguate an inter-flow route.
+      same_scope_agent_identity: Flow-owned agent admission may retain an already-normalized qualified exact identity only
+        when it resolves to the declaring agent flow. This is a same-scope route carrier, not authored inter-flow authority.
       inter_flow_delivery: Declare output/input pins and parent connect, then subscribe to the receiver-local input event.
       wildcard_observation: Imported cross-boundary wildcard observation is separately governed by typed bind.observe
         authorization and cannot become qualified exact delivery authority.
     contract_authoring_rules:
       handler_keys: Always local names. Never flow-prefixed.
-      subscribes_to: Exact subscriptions always use local names. Imported cross-boundary patterns require typed bind.observe
-        authorization; flow-prefixed exact values are invalid.
+      subscribes_to: Exact node subscriptions use local names. Flow-owned agent exact subscriptions may be local or an
+        already-normalized same-scope identity accepted by typed admission. Cross-boundary slash-qualified and full-URI exact
+        values are invalid. Imported cross-boundary patterns require typed bind.observe authorization.
       emit_events: Always local names. The platform externalizes at emission time.
       events_yaml: Always local names. Flow-scoped at load time.
       pins: Always local names. Parent connect binds output pins to receiver input pins for topology; same-name pin matching
@@ -4493,9 +4502,11 @@ engine:
     - 7. Root flow's tools and policy are inherited by all children unless overridden.
     no_conflicts: URI scoping eliminates all conflicts. Two flows with a node called "orchestrator" become myapp://intake/orchestrator
       and myapp://processing/orchestrator. No merge logic needed. No collision possible.
-    subscription_resolution: After all URIs are constructed, resolve agent subscriptions. Local subscriptions (no :// prefix)
-      resolve within the same flow instance. Full URI subscriptions resolve globally. Wildcard subscriptions expand to matching
-      URIs.
+    subscription_resolution: After all URIs are constructed, resolve subscriptions through their typed owners. Node exact
+      subscriptions resolve from local names within the same flow instance. Flow-owned agent admission may retain an
+      already-normalized same-scope exact identity. Slash-qualified or full-URI exact subscriptions that cross a flow boundary
+      fail closed rather than resolving globally. Wildcard subscriptions expand only within the candidate set admitted by
+      wildcard_subscription_scope and typed bind.observe evidence where required.
     tools: Tools are NOT URI-scoped. They are shared resources. Root flow tools are available to all child flows. Child flow
       tools are available only within that flow. If a child declares a tool with the same ID as a root tool, the child's version
       takes precedence within that flow.
@@ -4717,8 +4728,10 @@ engine:
         is hierarchical (child overrides parent).'
     - step: 6
       name: resolve_subscriptions
-      action: Resolve all agent and node subscriptions. Local names (no /) resolve within same flow. Paths with / resolve
-        as absolute from root. Wildcards expand to matching paths.
+      action: Resolve all agent and node subscriptions through the typed subscription owners. Node exact values resolve from
+        local names within the same flow. Flow-owned agent admission may retain an already-normalized same-scope identity.
+        Slash-qualified or full-URI exact values that cross a flow boundary fail closed. Wildcards expand only inside their
+        admitted same-scope or typed import-boundary candidate set.
     - step: 7
       name: validate_pins
       action: 'For each flow: required input event pins must be satisfied by the canonical input-source resolver: parent connect
@@ -18494,9 +18507,10 @@ static_analyzer:
           identity.
       root_local_usage_for_root_declared_events:
         rule: Root-level handlers or agents referencing a root-declared event by local name keep only the root declaration alive.
-      cross_flow_qualified_usage:
-        rule: Another flow or root participant references the declaration via an explicitly qualified event name that resolves
-          to the declaring flow.
+      connected_cross_flow_usage:
+        rule: A typed compiled connect edge from the declaring output to the consuming input keeps the declaration alive.
+          Raw qualified exact subscription text is not a liveness proof. Governed imported wildcard observation counts only
+          through its admitted typed authorization.
       external_annotations:
         rule: "Accepted `swarm.source` beginning with external or platform, or accepted external `swarm.consumer` metadata on the declared event entry, counts as an active external role. Internal topology roles must be derived from topology owners and fail closed if restated through `swarm.*`."
       same_flow_timer_references:
