@@ -492,7 +492,7 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 		}
 		t.Cleanup(func() { _ = sqliteStore.Close() })
 		bootstrapSQLiteSchemaForTest(t, claudeAttemptProofContext(), sqliteStore, plans)
-		return claudeAttemptProofBackend{name: name, store: sqliteStore, db: store.DatabaseForTest(sqliteStore), sessions: sqliteStore}
+		return claudeAttemptProofBackend{name: name, store: sqliteStore, db: storetest.DatabaseForTest(sqliteStore), sessions: sqliteStore}
 	case "postgres":
 		_, db, _ := testutil.StartPostgres(t)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)

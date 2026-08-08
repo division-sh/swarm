@@ -21,7 +21,7 @@ func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
-	storetest.RequireSQLiteRun(t, ctx, storepkg.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	storetest.CommitSemanticEvent(t, ctx, sqliteStore, eventtest.PersistedProjection(
 		eventID,
 		"mailbox.review_requested",
@@ -35,7 +35,7 @@ func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T
 		time.Now().UTC(),
 	))
 	itemID := uuid.NewString()
-	tx, err := storepkg.DatabaseForTest(sqliteStore).BeginTx(ctx, nil)
+	tx, err := storetest.DatabaseForTest(sqliteStore).BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}

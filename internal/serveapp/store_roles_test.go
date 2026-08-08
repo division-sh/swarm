@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestSelectedStoreBundleRoleLedgerCoversStoreBundleFields(t *testing.T) {
@@ -73,7 +73,7 @@ func TestValidateSelectedStoreBundleRolesAcceptsPostgresSelectedBundle(t *testin
 	}
 	t.Cleanup(func() { closeDB(db) })
 
-	selected := store.NewPostgresStoreForTest(db)
+	selected := storetest.NewPostgresStoreForTest(db)
 	stores := selectedPostgresStoreBundle(selected, db, &config.Config{})
 	if err := validateSelectedStoreBundleRoles(storebackend.BackendPostgres, stores); err != nil {
 		t.Fatalf("validate selected postgres store roles: %v", err)

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/platform"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store"
+	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -94,7 +95,7 @@ func StartSQLiteRuntimeStoreWithContext(t testing.TB, ctx context.Context) *stor
 // PostgreSQL test database and returns the admitted store object.
 func AdmitPostgresRuntimeStore(t testing.TB, db *sql.DB) *store.PostgresStore {
 	t.Helper()
-	postgresStore := store.NewPostgresStoreForTest(db)
+	postgresStore := NewPostgresStoreForTest(db)
 	BootstrapPostgresRuntimeStore(t, postgresStore)
 	return postgresStore
 }
@@ -103,7 +104,7 @@ func AdmitPostgresRuntimeStore(t testing.TB, db *sql.DB) *store.PostgresStore {
 // SQLite test database and returns the admitted store object.
 func AdmitSQLiteRuntimeStore(t testing.TB, db *sql.DB) *store.SQLiteRuntimeStore {
 	t.Helper()
-	sqliteStore := store.NewSQLiteRuntimeStoreForTest(db)
+	sqliteStore := NewSQLiteRuntimeStoreForTest(db)
 	platformSpec, plans := canonicalPlatformPlans(t)
 	if err := sqliteStore.BootstrapSchema(context.Background(), store.SchemaBootstrapRequest{
 		PlatformPlans: plans,
@@ -121,7 +122,19 @@ func AdmitSQLiteRuntimeStore(t testing.TB, db *sql.DB) *store.SQLiteRuntimeStore
 // Database exposes the exact test-owned SQL handle for hostile fixture setup
 // and persistence readback. Runtime code must use typed selected-store ports.
 func Database(selected any) *sql.DB {
-	return store.DatabaseForTest(selected)
+	return private.DatabaseForTest(selected)
+}
+
+func DatabaseForTest(selected any) *sql.DB {
+	return Database(selected)
+}
+
+func NewPostgresStoreForTest(db *sql.DB) *store.PostgresStore {
+	return private.NewPostgresStoreForTest(db)
+}
+
+func NewSQLiteRuntimeStoreForTest(db *sql.DB) *store.SQLiteRuntimeStore {
+	return private.NewSQLiteRuntimeStoreForTest(db)
 }
 
 // BootstrapPostgresRuntimeStore admits an existing PostgreSQL store through

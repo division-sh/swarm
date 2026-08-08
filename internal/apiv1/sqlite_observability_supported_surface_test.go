@@ -171,7 +171,7 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 	eventOnlyID := "00000000-0000-0000-0000-000000001401"
 	lateDeliveryID := "00000000-0000-0000-0000-000000001402"
 	secondDeliveryID := "00000000-0000-0000-0000-000000001403"
-	storetest.RequireSQLiteRun(t, ctx, storepkg.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Minute)})
+	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Minute)})
 	for _, fixture := range []struct {
 		id        string
 		eventType events.EventType
@@ -270,14 +270,14 @@ type observabilitySurfaceFixture struct {
 func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) observabilitySurfaceFixture {
 	t.Helper()
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-	return newObservabilitySurfaceFixture(t, ctx, sqliteStore, storepkg.DatabaseForTest(sqliteStore), true)
+	return newObservabilitySurfaceFixture(t, ctx, sqliteStore, storetest.DatabaseForTest(sqliteStore), true)
 }
 
 func newPostgresObservabilitySurfaceFixture(t *testing.T, ctx context.Context) observabilitySurfaceFixture {
 	t.Helper()
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	pg := storepkg.NewPostgresStoreForTest(db)
+	pg := storetest.NewPostgresStoreForTest(db)
 	storetest.BootstrapPostgresRuntimeStore(t, pg)
 	return newObservabilitySurfaceFixture(t, ctx, pg, db, false)
 }

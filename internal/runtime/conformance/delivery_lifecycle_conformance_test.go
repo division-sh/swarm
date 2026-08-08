@@ -1409,22 +1409,22 @@ func deliveryLifecycleConformanceBackends(t *testing.T) []deliveryLifecycleConfo
 	postgres := storetest.AdmitPostgresRuntimeStore(t, postgresDB)
 	postgresRestart := storetest.AdmitPostgresRuntimeStore(t, postgresDB)
 	return []deliveryLifecycleConformanceBackend{
-		{name: "sqlite", store: sqlite, restart: sqliteRestart, selected: sqlite, db: store.DatabaseForTest(sqlite)},
-		{name: "postgres", store: postgres, restart: postgresRestart, selected: postgres, db: store.DatabaseForTest(postgres), postgres: true},
+		{name: "sqlite", store: sqlite, restart: sqliteRestart, selected: sqlite, db: storetest.DatabaseForTest(sqlite)},
+		{name: "postgres", store: postgres, restart: postgresRestart, selected: postgres, db: storetest.DatabaseForTest(postgres), postgres: true},
 	}
 }
 
 func requireCanonicalDeliveryLifecycleSurface(t *testing.T, ctx context.Context, pg *store.PostgresStore) {
 	t.Helper()
 	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	requireTableColumns(t, ctx, store.DatabaseForTest(pg), "event_deliveries",
+	requireTableColumns(t, ctx, storetest.DatabaseForTest(pg), "event_deliveries",
 		"delivery_id", "event_id", "route_identity", "subscriber_type", "subscriber_id",
 		"status", "retry_count", "max_retries", "claim_version", "current_attempt_version",
 		"current_attempt_open", "settled_at")
-	requireTableColumns(t, ctx, store.DatabaseForTest(pg), "event_delivery_attempts",
+	requireTableColumns(t, ctx, storetest.DatabaseForTest(pg), "event_delivery_attempts",
 		"delivery_id", "claim_version", "claim_token", "started_at", "lease_expires_at", "current_delivery_id",
 		"active_session_id", "session_delivery_id", "session_run_id", "session_subscriber_type", "session_agent_id", "open_marker", "outcome")
-	requireTableColumns(t, ctx, store.DatabaseForTest(pg), "event_delivery_outcomes",
+	requireTableColumns(t, ctx, storetest.DatabaseForTest(pg), "event_delivery_outcomes",
 		"delivery_id", "claim_version", "outcome", "side_effects", "duration_ms", "settled_at")
 }
 

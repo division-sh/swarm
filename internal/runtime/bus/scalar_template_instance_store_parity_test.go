@@ -231,7 +231,7 @@ func newScalarTemplateInstanceParityStore(t *testing.T, backend string, ctx cont
 	switch backend {
 	case "sqlite":
 		selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-		return &sqliteScalarTemplateInstanceStore{SQLiteRuntimeStore: selected}, store.DatabaseForTest(selected)
+		return &sqliteScalarTemplateInstanceStore{SQLiteRuntimeStore: selected}, storetest.DatabaseForTest(selected)
 	case "postgres":
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)

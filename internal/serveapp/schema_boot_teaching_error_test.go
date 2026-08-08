@@ -10,7 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/store"
+	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -47,7 +48,7 @@ func TestServeBootLegacySchemaRendersTeachingError(t *testing.T) {
 		if _, err := pg.Exec(`CREATE TABLE timers (timer_id TEXT PRIMARY KEY, due_at TIMESTAMPTZ NOT NULL)`); err != nil {
 			t.Fatalf("create legacy timers table: %v", err)
 		}
-		pgStore := store.NewPostgresStoreForTest(pg)
+		pgStore := storetest.NewPostgresStoreForTest(pg)
 		request.Stores = storeBundle{Postgres: pgStore, SQLDB: pg, Database: pgStore, SchemaBootstrapper: pgStore}
 
 		_, err := buildServeRuntimeBundleContext(request)
@@ -56,7 +57,7 @@ func TestServeBootLegacySchemaRendersTeachingError(t *testing.T) {
 
 	t.Run("sqlite", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "legacy-timers.db")
-		sqliteStore, sqliteDB, err := store.OpenSQLiteRuntimeStore(path)
+		sqliteStore, sqliteDB, err := storeconstruction.OpenSQLiteRuntime(path)
 		if err != nil {
 			t.Fatal(err)
 		}

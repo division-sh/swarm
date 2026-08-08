@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	timerobligationadapter "github.com/division-sh/swarm/internal/persistence/timerobligationadapter"
 	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -21,7 +22,6 @@ import (
 	runtimeworkflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	timerobligationadapter "github.com/division-sh/swarm/internal/store/timerobligationadapter"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )

@@ -1,0 +1,69 @@
+package runtimepersistence
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+)
+
+type agentReceiptSideEffects struct {
+	ManagerStatus runtimemanager.ReceiptStatus `json:"manager_status"`
+	ReasonCode    string                       `json:"reason_code,omitempty"`
+	RetryCount    int                          `json:"retry_count"`
+}
+
+type pipelineReceiptSideEffects struct {
+	ManagerStatus string `json:"manager_status"`
+	ReasonCode    string `json:"reason_code,omitempty"`
+}
+
+func newAgentReceiptSideEffects(status runtimemanager.ReceiptStatus, reasonCode string, retryCount int) agentReceiptSideEffects {
+	return agentReceiptSideEffects{
+		ManagerStatus: runtimemanager.ReceiptStatus(strings.TrimSpace(string(status))),
+		ReasonCode:    strings.TrimSpace(reasonCode),
+		RetryCount:    retryCount,
+	}
+}
+
+func (p agentReceiptSideEffects) validate() error {
+	switch p.ManagerStatus {
+	case runtimemanager.ReceiptStatusProcessed, runtimemanager.ReceiptStatusError, runtimemanager.ReceiptStatusDeadLetter:
+	default:
+		if strings.TrimSpace(string(p.ManagerStatus)) == "" {
+			return fmt.Errorf("manager_status is required")
+		}
+		return fmt.Errorf("invalid manager_status %q", p.ManagerStatus)
+	}
+	if p.RetryCount < 0 {
+		return fmt.Errorf("retry_count must be >= 0")
+	}
+	return nil
+}
+
+func marshalAgentReceiptSideEffects(payload agentReceiptSideEffects) ([]byte, error) {
+	if err := payload.validate(); err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func decodeAgentReceiptSideEffects(raw []byte) (agentReceiptSideEffects, error) {
+	var payload agentReceiptSideEffects
+	if len(raw) == 0 {
+		return payload, fmt.Errorf("agent receipt side effects are required")
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return payload, err
+	}
+	payload.ReasonCode = strings.TrimSpace(payload.ReasonCode)
+	if err := payload.validate(); err != nil {
+		return payload, err
+	}
+	return payload, nil
+}

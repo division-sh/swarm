@@ -41,6 +41,7 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -736,8 +737,8 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 				if err != nil {
 					t.Fatalf("NewPostgresStore: %v", err)
 				}
-				t.Cleanup(func() { _ = store.DatabaseForTest(selected).Close() })
-				return selectedPostgresStoreBundle(selected, store.DatabaseForTest(selected), &config.Config{})
+				t.Cleanup(func() { _ = storetest.DatabaseForTest(selected).Close() })
+				return selectedPostgresStoreBundle(selected, storetest.DatabaseForTest(selected), &config.Config{})
 			},
 		},
 	}
@@ -995,8 +996,8 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 				if err != nil {
 					t.Fatalf("NewPostgresStore: %v", err)
 				}
-				t.Cleanup(func() { _ = store.DatabaseForTest(selected).Close() })
-				return selectedPostgresStoreBundle(selected, store.DatabaseForTest(selected), &config.Config{})
+				t.Cleanup(func() { _ = storetest.DatabaseForTest(selected).Close() })
+				return selectedPostgresStoreBundle(selected, storetest.DatabaseForTest(selected), &config.Config{})
 			},
 		},
 	}
@@ -1146,8 +1147,8 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 			if err != nil {
 				t.Fatalf("NewPostgresStore: %v", err)
 			}
-			t.Cleanup(func() { _ = store.DatabaseForTest(selected).Close() })
-			return selectedPostgresStoreBundle(selected, store.DatabaseForTest(selected), &config.Config{})
+			t.Cleanup(func() { _ = storetest.DatabaseForTest(selected).Close() })
+			return selectedPostgresStoreBundle(selected, storetest.DatabaseForTest(selected), &config.Config{})
 		}},
 	}
 	for _, backend := range backends {
@@ -1356,8 +1357,8 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 			if err != nil {
 				t.Fatalf("NewPostgresStore: %v", err)
 			}
-			t.Cleanup(func() { _ = store.DatabaseForTest(pg).Close() })
-			return selectedPostgresStoreBundle(pg, store.DatabaseForTest(pg), &config.Config{})
+			t.Cleanup(func() { _ = storetest.DatabaseForTest(pg).Close() })
+			return selectedPostgresStoreBundle(pg, storetest.DatabaseForTest(pg), &config.Config{})
 		}},
 	}
 	for _, backend := range backends {
@@ -1793,8 +1794,8 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 			if err != nil {
 				t.Fatalf("NewPostgresStore: %v", err)
 			}
-			t.Cleanup(func() { _ = store.DatabaseForTest(pg).Close() })
-			return selectedPostgresStoreBundle(pg, store.DatabaseForTest(pg), &config.Config{})
+			t.Cleanup(func() { _ = storetest.DatabaseForTest(pg).Close() })
+			return selectedPostgresStoreBundle(pg, storetest.DatabaseForTest(pg), &config.Config{})
 		}},
 	}
 	for _, backend := range backends {

@@ -60,6 +60,7 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/versionmetadata"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
@@ -2191,7 +2192,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		if err != nil {
 			return storeBundle{}, err
 		}
-		pg, constructionDB, err := store.OpenPostgresStore(dsn)
+		pg, constructionDB, err := storeconstruction.OpenPostgres(dsn)
 		if err != nil {
 			return storeBundle{}, err
 		}
@@ -2205,7 +2206,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		}
 		return bundle, nil
 	case storebackend.BackendSQLite:
-		sqliteStore, constructionDB, err := store.OpenSQLiteRuntimeStore(selection.SQLitePath)
+		sqliteStore, constructionDB, err := storeconstruction.OpenSQLiteRuntime(selection.SQLitePath)
 		if err != nil {
 			return storeBundle{}, err
 		}

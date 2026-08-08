@@ -90,7 +90,7 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			name: "sqlite",
 			setup: func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
 				backend := storetest.StartSQLiteRuntimeStore(t)
-				return backend, store.DatabaseForTest(backend)
+				return backend, storetest.DatabaseForTest(backend)
 			},
 		},
 	} {

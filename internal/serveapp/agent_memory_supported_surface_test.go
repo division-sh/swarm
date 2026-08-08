@@ -196,7 +196,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 		oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 			storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-			return selectedPostgresStoreBundle(runtimePG, store.DatabaseForTest(runtimePG), cfg), nil
+			return selectedPostgresStoreBundle(runtimePG, storetest.DatabaseForTest(runtimePG), cfg), nil
 		}
 		cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return serveRuntimeWorkspaceStub{}, nil

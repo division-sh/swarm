@@ -17,6 +17,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	storepkg "github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 type boundedProviderCredentialStore struct{}
@@ -88,12 +89,12 @@ func ensureBoundedStandingTarget(t *testing.T, ctx context.Context, persistence 
 
 	switch selected := persistence.(type) {
 	case *storepkg.PostgresStore:
-		if err := storepkg.DatabaseForTest(selected).QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`, runID, entityID).Scan(&flowInstance); err != nil {
+		if err := storetest.DatabaseForTest(selected).QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`, runID, entityID).Scan(&flowInstance); err != nil {
 			t.Fatalf("load postgres bounded provider flow instance: %v", err)
 		}
-		insertPostgresStandingFixture(t, ctx, storepkg.DatabaseForTest(selected), serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)
+		insertPostgresStandingFixture(t, ctx, storetest.DatabaseForTest(selected), serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)
 	case *storepkg.SQLiteRuntimeStore:
-		if err := storepkg.DatabaseForTest(selected).QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = ? AND entity_id = ?`, runID, entityID).Scan(&flowInstance); err != nil {
+		if err := storetest.DatabaseForTest(selected).QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = ? AND entity_id = ?`, runID, entityID).Scan(&flowInstance); err != nil {
 			t.Fatalf("load sqlite bounded provider flow instance: %v", err)
 		}
 		insertSQLiteStandingFixture(t, ctx, selected, serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)
@@ -181,7 +182,7 @@ func insertPostgresStandingFixture(t *testing.T, ctx context.Context, db *sql.DB
 func insertSQLiteStandingFixture(t *testing.T, ctx context.Context, selected *storepkg.SQLiteRuntimeStore, serviceID, packageKey, flowID, instanceID, entityID, runID, bundleHash, bundleSource string) {
 	t.Helper()
 	now := time.Now().UTC()
-	db := storepkg.DatabaseForTest(selected)
+	db := storetest.DatabaseForTest(selected)
 	if db == nil {
 		t.Fatal("sqlite standing fixture database is required")
 	}

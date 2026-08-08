@@ -185,7 +185,7 @@ func seedProviderTriggerSmokeRuntime(
 ) {
 	t.Helper()
 	now := time.Now().UTC()
-	storetest.RequireSQLiteRun(t, ctx, store.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now})
+	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now})
 	configBytes, err := json.Marshal(map[string]any{
 		"secrets": map[string]any{
 			"webhook_signing": map[string]string{
@@ -196,13 +196,13 @@ func seedProviderTriggerSmokeRuntime(
 	if err != nil {
 		t.Fatalf("marshal sqlite flow config: %v", err)
 	}
-	if _, err := store.DatabaseForTest(sqliteStore).ExecContext(ctx, `
+	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES (?, 'test', 'static', ?, 'active', ?)
 	`, flowInstance, string(configBytes), now); err != nil {
 		t.Fatalf("seed sqlite flow instance: %v", err)
 	}
-	if _, err := store.DatabaseForTest(sqliteStore).ExecContext(ctx, `
+	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
@@ -242,7 +242,7 @@ type providerTriggerSmokeEvent struct {
 func loadProviderTriggerSmokeEvent(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, runID string, entityID string, eventName string) providerTriggerSmokeEvent {
 	t.Helper()
 	var event providerTriggerSmokeEvent
-	if err := store.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT
 			event_id,
 			json_extract(payload, '$.provider'),
@@ -264,7 +264,7 @@ func loadProviderTriggerSmokeEvent(t *testing.T, ctx context.Context, sqliteStor
 func countProviderTriggerSmokeProviderEvents(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, runID string, entityID string, eventName string) int {
 	t.Helper()
 	var count int
-	if err := store.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM events
 		WHERE run_id = ?
@@ -279,7 +279,7 @@ func countProviderTriggerSmokeProviderEvents(t *testing.T, ctx context.Context, 
 func countProviderTriggerSmokeProviderEventsByProviderEventID(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, runID string, entityID string, eventName string, providerEventID string) int {
 	t.Helper()
 	var count int
-	if err := store.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM events
 		WHERE run_id = ?
@@ -295,7 +295,7 @@ func countProviderTriggerSmokeProviderEventsByProviderEventID(t *testing.T, ctx 
 func countProviderTriggerSmokeInboundMarkers(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, providerEventID string, entityID string, provider string) int {
 	t.Helper()
 	var count int
-	if err := store.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM events
 		WHERE event_name = 'platform.inbound_recorded'
@@ -311,7 +311,7 @@ func countProviderTriggerSmokeInboundMarkers(t *testing.T, ctx context.Context, 
 func countProviderTriggerSmokeAgentDeliveriesForEvent(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, eventID string, agentID string) int {
 	t.Helper()
 	var count int
-	if err := store.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM event_deliveries
 		WHERE event_id = ?

@@ -189,8 +189,8 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 				return storeBundle{}, err
 			}
 			storetest.BootstrapPostgresRuntimeStore(t, pg)
-			db = store.DatabaseForTest(pg)
-			return selectedPostgresStoreBundle(pg, store.DatabaseForTest(pg), cfg), nil
+			db = storetest.DatabaseForTest(pg)
+			return selectedPostgresStoreBundle(pg, storetest.DatabaseForTest(pg), cfg), nil
 		}
 		cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return serveRuntimeWorkspaceStub{}, nil
@@ -770,7 +770,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	}()
 	var runs, instances, entities int
 	var standingRunID string
-	if err := store.DatabaseForTest(sqliteStore).QueryRow(`
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
 		SELECT current_run_id
 		FROM standing_services
 		WHERE flow_id = 'telegram-ingress'
@@ -779,27 +779,27 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	`).Scan(&standingRunID); err != nil {
 		t.Fatalf("resolve standing run authority: %v", err)
 	}
-	if err := store.DatabaseForTest(sqliteStore).QueryRow(`
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
 		SELECT COUNT(*)
 		FROM standing_services
 		WHERE flow_id = 'telegram-ingress'
 	`).Scan(&runs); err != nil {
 		t.Fatalf("count standing run authorities: %v", err)
 	}
-	if err := store.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-ingress'`).Scan(&instances); err != nil {
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-ingress'`).Scan(&instances); err != nil {
 		t.Fatalf("count standing instances: %v", err)
 	}
-	if err := store.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM entity_state WHERE entity_id = ?`, firstEntity).Scan(&entities); err != nil {
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM entity_state WHERE entity_id = ?`, firstEntity).Scan(&entities); err != nil {
 		t.Fatalf("count standing entities: %v", err)
 	}
 	if runs != 1 || instances != 1 || entities != 1 {
 		t.Fatalf("standing authority counts = runs:%d instances:%d entities:%d, want 1/1/1", runs, instances, entities)
 	}
 	var chatInstances, normalizedEvents, wrongNormalizedRuns int
-	if err := store.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&chatInstances); err != nil {
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&chatInstances); err != nil {
 		t.Fatalf("count per-chat instances: %v", err)
 	}
-	if err := store.DatabaseForTest(sqliteStore).QueryRow(`
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
 		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = ? THEN 0 ELSE 1 END), 0)
 		FROM events WHERE event_name = 'inbound.telegram.text_message'
 	`, standingRunID).Scan(&normalizedEvents, &wrongNormalizedRuns); err != nil {
@@ -809,11 +809,11 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		t.Fatalf("normalized routing = chat_instances:%d events:%d wrong_run:%d, want 2/3/0", chatInstances, normalizedEvents, wrongNormalizedRuns)
 	}
 	var pendingCards int
-	if err := store.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = ? AND status = 'pending' AND json_extract(snapshot, '$.decision') = 'standing_review'`, firstEntity).Scan(&pendingCards); err != nil || pendingCards != 1 {
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = ? AND status = 'pending' AND json_extract(snapshot, '$.decision') = 'standing_review'`, firstEntity).Scan(&pendingCards); err != nil || pendingCards != 1 {
 		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
 	}
 	var entityEvents, wrongRunEvents int
-	if err := store.DatabaseForTest(sqliteStore).QueryRow(`
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
 		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = ? THEN 0 ELSE 1 END), 0)
 		FROM events
 		WHERE entity_id = ?
@@ -934,7 +934,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-		return selectedPostgresStoreBundle(runtimePG, store.DatabaseForTest(runtimePG), cfg), nil
+		return selectedPostgresStoreBundle(runtimePG, storetest.DatabaseForTest(runtimePG), cfg), nil
 	}
 	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
@@ -1352,7 +1352,7 @@ func standingSQLiteDiagnostics(path string) string {
 		return err.Error()
 	}
 	defer selected.Close()
-	rows, err := store.DatabaseForTest(selected).Query(`SELECT event_name, COUNT(*) FROM events GROUP BY event_name ORDER BY event_name`)
+	rows, err := storetest.DatabaseForTest(selected).Query(`SELECT event_name, COUNT(*) FROM events GROUP BY event_name ORDER BY event_name`)
 	if err != nil {
 		return err.Error()
 	}
@@ -1366,7 +1366,7 @@ func standingSQLiteDiagnostics(path string) string {
 		}
 		parts = append(parts, fmt.Sprintf("%s=%d", name, count))
 	}
-	logRows, err := store.DatabaseForTest(selected).Query(`SELECT payload FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at`)
+	logRows, err := storetest.DatabaseForTest(selected).Query(`SELECT payload FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at`)
 	if err == nil {
 		defer logRows.Close()
 		for logRows.Next() {
@@ -1376,7 +1376,7 @@ func standingSQLiteDiagnostics(path string) string {
 			}
 		}
 	}
-	deliveryRows, err := store.DatabaseForTest(selected).Query(`SELECT event_id, subscriber_id, COALESCE(status, '') FROM event_deliveries ORDER BY created_at`)
+	deliveryRows, err := storetest.DatabaseForTest(selected).Query(`SELECT event_id, subscriber_id, COALESCE(status, '') FROM event_deliveries ORDER BY created_at`)
 	if err == nil {
 		defer deliveryRows.Close()
 		for deliveryRows.Next() {
@@ -1386,7 +1386,7 @@ func standingSQLiteDiagnostics(path string) string {
 			}
 		}
 	}
-	receiptRows, err := store.DatabaseForTest(selected).Query(`SELECT event_id, status, COALESCE(failure, '') FROM pipeline_receipts ORDER BY updated_at`)
+	receiptRows, err := storetest.DatabaseForTest(selected).Query(`SELECT event_id, status, COALESCE(failure, '') FROM pipeline_receipts ORDER BY updated_at`)
 	if err == nil {
 		defer receiptRows.Close()
 		for receiptRows.Next() {
@@ -1412,7 +1412,7 @@ func commitReadinessHandoffAuthorActivity(sqlitePath string, rt *runtimepkg.Runt
 	defer selected.Close()
 	scope := runtimeauthoractivity.BundleScope(rt.Options.RuntimeInstanceID, rt.Options.BundleSourceFact.BundleHash())
 	ctx := runtimeauthoractivity.WithScope(context.Background(), scope)
-	tx, err := store.DatabaseForTest(selected).BeginTx(ctx, nil)
+	tx, err := storetest.DatabaseForTest(selected).BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

@@ -2002,14 +2002,14 @@ func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *test
 func requireCanonicalConversationSurface(t *testing.T, ctx context.Context, pg *store.PostgresStore) {
 	t.Helper()
 	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	requireTableColumns(t, ctx, store.DatabaseForTest(pg), "agent_turns", "turn_id", "turn_blocks")
-	requireTableColumns(t, ctx, store.DatabaseForTest(pg), "agent_conversation_audits", "session_id")
+	requireTableColumns(t, ctx, storetest.DatabaseForTest(pg), "agent_turns", "turn_id", "turn_blocks")
+	requireTableColumns(t, ctx, storetest.DatabaseForTest(pg), "agent_conversation_audits", "session_id")
 }
 
 func requireCanonicalRuntimeLogSurface(t *testing.T, ctx context.Context, pg *store.PostgresStore) {
 	t.Helper()
 	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	requireTableColumns(t, ctx, store.DatabaseForTest(pg), "events", "event_id", "event_name", "payload", "scope", "created_at")
+	requireTableColumns(t, ctx, storetest.DatabaseForTest(pg), "events", "event_id", "event_name", "payload", "scope", "created_at")
 }
 
 func requireMutationSurface(t *testing.T, db *sql.DB) {

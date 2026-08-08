@@ -5292,8 +5292,12 @@ engine:
           the store boundary and remains guarded by #1405.
       raw_sql_policy:
         allowed:
-        - boundary: backend selection, store construction, schema/bootstrap, and backend-specific store implementations
-          reason: These layers create or implement the selected backend and may own raw DB/TX mechanics.
+        - boundary: internal/store/construction and internal/store/internal/backend/{postgres,sqlite}
+          reason: The exact serve construction owner creates the process handle; private backend roots own pools, sessions, transactions, locking, dialect conversion, and backend errors.
+        - boundary: private bounded runtime-persistence and domain adapters below internal/store/internal plus repository-private persistence projections below internal/persistence
+          reason: These implementations consume only their declared backend mechanics and expose closed typed operations to the public store facade and runtime consumers.
+        - boundary: internal/store/storetest and declared fixture packages
+          reason: Test-owned raw handles exist only for hostile setup and exact persistence readback; production packages cannot recover them from the typed store facade.
         - boundary: workspace lifecycle and process DB health/close capabilities
           reason: These are explicitly adjacent process/workspace capabilities and are not selected runtime persistence owners.
         - boundary: public/operator/dashboard/digest/reset-delete/admin consumers explicitly tracked by '#2149'
@@ -5302,6 +5306,36 @@ engine:
         - Producer-side runtime behavior must not use raw *sql.DB, *sql.Tx, concrete store type, backend id, or dialect string as capability authority.
         - SQLite selected runtime construction must not pass a raw runtime SQL handle to Postgres-only runtime consumers.
         - Runtime construction must not reconstruct selected pipeline persistence from raw SQL when buildStores failed to provide the opaque WorkflowPersistence value.
+        - The public internal/store package is a typed facade. It MUST NOT import database/sql, retain a raw backend member, export a raw handle/accessor, or expose a generic query, execution, or transaction callback.
+        - Test-only construction and readback authority MUST remain in internal/store/storetest and MUST NOT be available from the production facade.
+      implementation_topology:
+        public_facade: internal/store
+        process_construction_owner: internal/store/construction
+        private_backend_roots:
+        - internal/store/internal/backend/postgres
+        - internal/store/internal/backend/sqlite
+        private_selected_runtime_operations: internal/store/internal/runtimepersistence
+        private_domain_adapters:
+        - internal/store/internal/eventrecord
+        - internal/store/internal/authoractivity
+        - internal/store/internal/authoractivityadapter
+        - internal/store/internal/delivery
+        - internal/store/internal/runforkrevision
+        - internal/store/internal/workspace
+        - internal/persistence/runbundle
+        - internal/persistence/timerobligationadapter
+        fixture_authority: internal/store/storetest
+        rules:
+        - The selected-runtime implementation package is private and composes only closed operation families; it is not importable by runtime, API, CLI, dashboard, or other consumers.
+        - Backend roots retain their raw handle privately. Selected store facades retain only the private backend root and typed operation state; no raw handle is promoted or recoverable.
+        - Moving an implementation file does not grant authority. Every raw or callback-bearing declaration is governed by its exact resolved finding identity.
+      structural_enforcement:
+        owner: internal/store/testdata/persistence_authority_findings.tsv
+        finding_identity: '{kind, raw-or-typed authority, file, enclosing declaration, member/method/context operation, resolved type/signature}'
+        rules:
+        - The registry resolves named aliases, embedded fields, interface methods, function-valued fields, function parameters/results, and context reads/writes.
+        - Unknown or stale findings fail. Regeneration preserves reviewed dispositions and marks new findings unclassified; no file or enclosing-type allowlist exists.
+        - Raw findings are valid only for an exact private backend/adapter, construction, fixture, or explicitly tracked adjacent-2149 disposition.
       dependency_classifications:
       - dependency: internal/store/backendselection and selector parsing
         classification: legitimate backend-selection/construction boundary

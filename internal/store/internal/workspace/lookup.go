@@ -11,7 +11,12 @@ import (
 	runtimeworkspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
-func LookupEntityPostgres(ctx context.Context, db *sql.DB, identity runtimecurrentstate.Identity) (runtimeworkspace.WorkspaceEntityLookup, error) {
+type Queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func LookupEntityPostgres(ctx context.Context, db Queryer, identity runtimecurrentstate.Identity) (runtimeworkspace.WorkspaceEntityLookup, error) {
 	return lookupEntity(ctx, db, `
 		SELECT slug
 		FROM entity_state
@@ -19,7 +24,7 @@ func LookupEntityPostgres(ctx context.Context, db *sql.DB, identity runtimecurre
 	`, "PostgreSQL", identity)
 }
 
-func LookupEntitySQLite(ctx context.Context, db *sql.DB, identity runtimecurrentstate.Identity) (runtimeworkspace.WorkspaceEntityLookup, error) {
+func LookupEntitySQLite(ctx context.Context, db Queryer, identity runtimecurrentstate.Identity) (runtimeworkspace.WorkspaceEntityLookup, error) {
 	return lookupEntity(ctx, db, `
 		SELECT slug
 		FROM entity_state
@@ -27,7 +32,7 @@ func LookupEntitySQLite(ctx context.Context, db *sql.DB, identity runtimecurrent
 	`, "SQLite", identity)
 }
 
-func lookupEntity(ctx context.Context, db *sql.DB, query, backend string, identity runtimecurrentstate.Identity) (runtimeworkspace.WorkspaceEntityLookup, error) {
+func lookupEntity(ctx context.Context, db Queryer, query, backend string, identity runtimecurrentstate.Identity) (runtimeworkspace.WorkspaceEntityLookup, error) {
 	var slug string
 	if err := db.QueryRowContext(ctx, query, identity.RunID, identity.EntityID).Scan(&slug); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -38,7 +43,7 @@ func lookupEntity(ctx context.Context, db *sql.DB, query, backend string, identi
 	return runtimeworkspace.WorkspaceEntityLookup{Slug: strings.TrimSpace(slug)}, nil
 }
 
-func ListContainersPostgres(ctx context.Context, db *sql.DB, runID string) (runtimeworkspace.RuntimeWorkspaceContainerSet, error) {
+func ListContainersPostgres(ctx context.Context, db Queryer, runID string) (runtimeworkspace.RuntimeWorkspaceContainerSet, error) {
 	return listContainers(ctx, db, `
 		SELECT DISTINCT es.slug
 		FROM entity_state es
@@ -49,7 +54,7 @@ func ListContainersPostgres(ctx context.Context, db *sql.DB, runID string) (runt
 	`, "PostgreSQL", runID)
 }
 
-func ListContainersSQLite(ctx context.Context, db *sql.DB, runID string) (runtimeworkspace.RuntimeWorkspaceContainerSet, error) {
+func ListContainersSQLite(ctx context.Context, db Queryer, runID string) (runtimeworkspace.RuntimeWorkspaceContainerSet, error) {
 	return listContainers(ctx, db, `
 		SELECT DISTINCT es.slug
 		FROM entity_state es
@@ -60,7 +65,7 @@ func ListContainersSQLite(ctx context.Context, db *sql.DB, runID string) (runtim
 	`, "SQLite", runID)
 }
 
-func listContainers(ctx context.Context, db *sql.DB, query, backend, runID string) (runtimeworkspace.RuntimeWorkspaceContainerSet, error) {
+func listContainers(ctx context.Context, db Queryer, query, backend, runID string) (runtimeworkspace.RuntimeWorkspaceContainerSet, error) {
 	rows, err := db.QueryContext(ctx, query, strings.TrimSpace(runID))
 	if err != nil {
 		return runtimeworkspace.RuntimeWorkspaceContainerSet{}, fmt.Errorf("list %s runtime workspace entities: %w", backend, err)

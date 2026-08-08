@@ -60,20 +60,14 @@ rows:
     concepts:
       - raw selected-runtime SQL writer and transaction bypasses
     owners:
-      - internal/store/runtime_mutation_guard_test.go
+      - internal/store/persistence_authority_registry_test.go
       - backend_neutral_runtime_mutation_write_boundary
     proof_refs:
       - kind: go_test
-        name: TestSelectedSQLiteRuntimeWriterBoundaryAudit
+        name: TestPersistenceAuthorityFindingRegistry
     guard_proof_refs:
       - kind: go_test
-        name: TestRuntimeWriterBoundaryGuardRejectsSelectedSQLiteBypassFixture
-      - kind: go_test
-        name: TestRuntimeWriterBoundaryGuardRejectsSameFunctionSQLiteBypassFixture
-      - kind: go_test
-        name: TestRuntimeWriterBoundaryGuardRejectsPipelineSQLiteDBHelperBypassFixture
-      - kind: go_test
-        name: TestRuntimeWriterBoundaryGuardRejectsPipelineSQLiteRawDBHelperFixture
+        name: TestPersistenceAuthorityRegistryRejectsHostileResolvedTypes
     notes: >
       This row guards the raw writer boundary. #1403 owns the typed selected-runtime
       row-family mutation UoW closure; backend-local SQL helpers may remain only
@@ -95,7 +89,7 @@ rows:
       - kind: go_test
         name: TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwner
       - kind: go_test
-        name: TestSelectedRuntimeConstructionUsesOpaqueWorkflowPersistence
+        name: TestWorkflowPersistenceIsOpaqueAndConcreteStoreDoesNotEscape
     guard_proof_refs:
       - kind: go_test
         name: TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore
@@ -241,12 +235,12 @@ rows:
       - kind: go_test
         name: TestPostgresStore_RunEventTransactionSerializesStoryCommitOrder
       - kind: go_test
-        name: TestSelectedSQLiteRuntimeWriterBoundaryAudit
+        name: TestPersistenceAuthorityFindingRegistry
     guard_proof_refs:
       - kind: go_test
-        name: TestSelectedSQLiteRuntimeWriterBoundaryAudit
+        name: TestPersistenceAuthorityFindingRegistry
       - kind: go_test
-        name: TestSelectedRuntimeConstructionUsesOpaqueWorkflowPersistence
+        name: TestWorkflowPersistenceIsOpaqueAndConcreteStoreDoesNotEscape
       - kind: go_test
         name: TestEventBusPublishTransactional_RunsInterceptorsAfterCommit
     notes: >
@@ -263,7 +257,7 @@ rows:
     owners:
       - internal/store.SQLiteRuntimeStore mutation executor
       - internal/runtime/pipeline.WorkflowPersistenceOwner named operation facade
-      - internal/store/runtime_mutation_guard_test.go
+      - internal/store/persistence_authority_registry_test.go
     proof_refs:
       - kind: artifact
         path: platform-spec.yaml
@@ -281,7 +275,7 @@ rows:
         name: TestPostgresStore_RunEventTransactionSerializesStoryCommitOrder
     guard_proof_refs:
       - kind: go_test
-        name: TestSelectedRuntimeConstructionUsesOpaqueWorkflowPersistence
+        name: TestWorkflowPersistenceIsOpaqueAndConcreteStoreDoesNotEscape
       - kind: go_test
         name: TestWorkflowMutationExecutorDoesNotEscapeOpaquePersistence
     notes: >

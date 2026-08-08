@@ -40,7 +40,7 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 			name: "sqlite",
 			open: func(t *testing.T) (any, *sql.DB) {
 				selected := storetest.StartSQLiteRuntimeStoreWithContext(t, context.Background())
-				return selected, store.DatabaseForTest(selected)
+				return selected, storetest.DatabaseForTest(selected)
 			},
 		},
 		{

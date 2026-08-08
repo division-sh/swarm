@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	persistedrunbundle "github.com/division-sh/swarm/internal/persistence/runbundle"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	storerunbundle "github.com/division-sh/swarm/internal/store/runbundle"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -615,7 +615,7 @@ type selectEntityTestRunBundleAvailability struct {
 }
 
 func (a selectEntityTestRunBundleAvailability) LoadRunBundleAvailability(ctx context.Context, runID string) (runtimerunbundle.Availability, error) {
-	return storerunbundle.LoadAvailability(ctx, a.db, runID)
+	return persistedrunbundle.LoadAvailability(ctx, a.db, runID)
 }
 
 func selectEntitySpendHandler() runtimecontracts.SystemNodeEventHandler {

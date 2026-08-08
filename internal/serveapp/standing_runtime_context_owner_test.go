@@ -242,7 +242,7 @@ func openStandingRuntimeContextStore(t *testing.T, backend, suffix string) store
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		return selectedPostgresStoreBundle(pg, store.DatabaseForTest(pg), &config.Config{})
+		return selectedPostgresStoreBundle(pg, storetest.DatabaseForTest(pg), &config.Config{})
 	default:
 		t.Fatalf("unsupported standing runtime-context backend %q", backend)
 		return storeBundle{}

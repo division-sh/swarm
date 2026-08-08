@@ -104,10 +104,10 @@ func CommitDeliveryObligationsForPersistedEvent(
 	)
 	switch selected := selectedStore.(type) {
 	case *store.PostgresStore:
-		db = store.DatabaseForTest(selected)
+		db = DatabaseForTest(selected)
 		adapter, err = deliveryadapter.NewAdapter(deliveryadapter.DialectPostgres)
 	case *store.SQLiteRuntimeStore:
-		db = store.DatabaseForTest(selected)
+		db = DatabaseForTest(selected)
 		adapter, err = deliveryadapter.NewAdapter(deliveryadapter.DialectSQLite)
 	default:
 		t.Fatalf("persisted event delivery fixture store %T is unsupported", selectedStore)
@@ -172,9 +172,9 @@ func LoadCanonicalEventRecord(t testing.TB, ctx context.Context, selectedStore a
 	)
 	switch selected := selectedStore.(type) {
 	case *store.PostgresStore:
-		record, found, err = eventrecordpostgres.Load(ctx, store.DatabaseForTest(selected), eventID)
+		record, found, err = eventrecordpostgres.Load(ctx, DatabaseForTest(selected), eventID)
 	case *store.SQLiteRuntimeStore:
-		record, found, err = eventrecordsqlite.Load(ctx, store.DatabaseForTest(selected), eventID)
+		record, found, err = eventrecordsqlite.Load(ctx, DatabaseForTest(selected), eventID)
 	default:
 		t.Fatalf("canonical event readback store %T is unsupported", selectedStore)
 	}
@@ -351,7 +351,7 @@ func commitSemanticEventWithInitialFacts(
 	)
 	switch selected := selectedStore.(type) {
 	case *store.PostgresStore:
-		db = store.DatabaseForTest(selected)
+		db = DatabaseForTest(selected)
 		postgres = true
 		deliveryAdapter, err = deliveryadapter.NewAdapter(deliveryadapter.DialectPostgres)
 		insert = func(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (bool, error) {
@@ -361,7 +361,7 @@ func commitSemanticEventWithInitialFacts(
 			return eventrecordpostgres.Load(ctx, tx, eventID)
 		}
 	case *store.SQLiteRuntimeStore:
-		db = store.DatabaseForTest(selected)
+		db = DatabaseForTest(selected)
 		deliveryAdapter, err = deliveryadapter.NewAdapter(deliveryadapter.DialectSQLite)
 		insert = func(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (bool, error) {
 			return eventrecordsqlite.Insert(ctx, tx, record)

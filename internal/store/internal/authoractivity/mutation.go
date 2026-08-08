@@ -9,7 +9,7 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	"github.com/division-sh/swarm/internal/store/authoractivityadapter"
+	"github.com/division-sh/swarm/internal/store/internal/authoractivityadapter"
 )
 
 type Dialect string
