@@ -97,7 +97,12 @@ func TestSQLiteRuntimeStore_RunRuntimeMutationStopsRetryOnContextDeadline(t *tes
 		t.Fatalf("acquire sqlite write lock: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(baseCtx, 35*time.Millisecond)
+	// The deadline is derived from the retry budget rather than an arbitrary
+	// wall-time margin: the production retry deadline clamps to the context
+	// deadline (so the deadline always wins structurally), and a budget-derived
+	// value far below the 5s budget but far above the first attempt's busy
+	// cost leaves no starvation window before the first retry attempt (#1658).
+	ctx, cancel := context.WithTimeout(baseCtx, sqliteRuntimeMutationRetryBudget/20)
 	defer cancel()
 	var attempts int32
 	err = store.RunRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
