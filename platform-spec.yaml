@@ -23906,8 +23906,11 @@ cli_specification:
         required: false
         api_param: cursor
       output:
-        table: ENTITY_ID / RUN_ID / FLOW / TYPE / STATE / REVISION / UPDATED / SLUG / NAME plus next_cursor when present
-        empty: No entities match the filter.
+        table: >
+          ENTITY_ID / [RUN_ID when not scoped by --run-id] / TYPE / STATE / FLOW / UPDATED by default;
+          --verbose adds REVISION / CREATED / SLUG / NAME with absolute ISO timestamps. FLOW long
+          segments (embedded bundle hash) are truncated; UPDATED is humanized relative. plus next_cursor when present
+        empty: No entities match the current filters.
       exit_codes:
         success: 0
         cli_validation: 2
@@ -23937,9 +23940,16 @@ cli_specification:
         validation: CLI validates only the OpaqueId envelope and does not assume UUID shape.
       output:
         heading: Entity <entity-id>
-        summary_line: run_id / flow / type / state / revision / created_at / updated_at
-        optional_line: slug / name with '-' for omitted optional fields
-        structured_lines: compact JSON for server-owned fields, gates, and accumulated maps
+        detail_rows: aligned labeled rows for run / flow / type / state / revision / created / updated / slug / name
+        timestamps: humanized relative by default; absolute ISO under --verbose
+        fields_section: >
+          workflow-declared content fields as aligned one-line rows (fixed 200-rune ceiling with
+          ellipsis marker; empty collections and empty strings stated as none). Platform-injected
+          bookkeeping keys are hidden from default output and shown under --verbose in a Bookkeeping section.
+        gates_section: gate name/value rows; an empty gate map states Gates none
+        verbose_sections: absolute timestamps, plus Loops (id / status / attempt / revision / stage),
+          Bookkeeping, and Accumulated sections
+        json: raw entity.get result object, including loops when present (see output_conformance_registry json_shape)
       exit_codes:
         success: 0
         cli_validation: 2

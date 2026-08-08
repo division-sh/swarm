@@ -1,6 +1,7 @@
 package cliapp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -84,6 +85,32 @@ type entityFull struct {
 	Gates       map[string]bool        `json:"gates"`
 	Accumulated map[string]any         `json:"accumulated"`
 	Loops       []entityLoopActivation `json:"loops,omitempty"`
+	loopsNull   bool
+}
+
+// UnmarshalJSON preserves whether the loops property was present and rejects
+// null so a schema-invalid server response cannot be normalized into an
+// omitted property by --json.
+func (f *entityFull) UnmarshalJSON(data []byte) error {
+	type entityFullAlias entityFull
+	var shadow struct {
+		entityFullAlias
+		Loops json.RawMessage `json:"loops"`
+	}
+	if err := json.Unmarshal(data, &shadow); err != nil {
+		return err
+	}
+	*f = entityFull(shadow.entityFullAlias)
+	if len(shadow.Loops) > 0 {
+		if bytes.Equal(bytes.TrimSpace(shadow.Loops), []byte("null")) {
+			f.loopsNull = true
+			return nil
+		}
+		if err := json.Unmarshal(shadow.Loops, &f.Loops); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // entityLoopActivation mirrors loopruntime.PublicActivation so the --json path
@@ -468,6 +495,9 @@ func validateEntityFullResult(prefix string, result entityFull) error {
 	if result.Accumulated == nil {
 		return fmt.Errorf("malformed %s: accumulated is required", prefix)
 	}
+	if result.loopsNull {
+		return fmt.Errorf("malformed %s: loops must be an array, got null", prefix)
+	}
 	for i, loop := range result.Loops {
 		if err := validateEntityLoopActivation(fmt.Sprintf("%s.loops[%d]", prefix, i), loop); err != nil {
 			return err
@@ -666,11 +696,12 @@ func writeEntityLoopSection(out io.Writer, loops []entityLoopActivation) {
 	}
 	rows := make([]cliLabeledDetailRow, 0, len(loops))
 	for _, loop := range loops {
-		summary := fmt.Sprintf("%s · %s · attempt %d/%d", loop.CurrentStage, loop.Status, loop.Attempt, loop.MaxAttempts)
+		summary := fmt.Sprintf("%s · attempt %d/%d · rev %s", loop.Status, loop.Attempt, loop.MaxAttempts, loop.RevisionID)
 		if strings.TrimSpace(loop.CloseReason) != "" {
 			summary += " · " + loop.CloseReason
 		}
-		rows = append(rows, cliLabeledDetailRow{Label: entityOneLine(loop.ID), Value: cliRenderOneLineValue(summary + " · rev " + loop.RevisionID)})
+		summary += " · " + loop.CurrentStage
+		rows = append(rows, cliLabeledDetailRow{Label: entityOneLine(loop.ID), Value: cliRenderOneLineValue(summary)})
 	}
 	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Loops", Rows: rows})
 }
