@@ -675,6 +675,9 @@ func (m *Manager) ensureTemplate(ctx context.Context, adminDB *sql.DB) error {
 		SELECT COALESCE(shobj_description(d.oid, 'pg_database'), ''), r.rolname
 		FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba
 		WHERE d.datname=$1`, m.templateName).Scan(&comment, &owner)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("inspect postgres template %q: %w", m.templateName, err)
+	}
 	if err == nil {
 		if owner != m.role {
 			return fmt.Errorf("template database %q owner %q does not match authenticated role %q; left untouched", m.templateName, owner, m.role)
@@ -702,9 +705,6 @@ func (m *Manager) ensureTemplate(ctx context.Context, adminDB *sql.DB) error {
 			}
 			return nil
 		}
-	}
-	if err != sql.ErrNoRows {
-		return fmt.Errorf("inspect postgres template %q: %w", m.templateName, err)
 	}
 	if err := m.putIntent(ctx, intent); err != nil {
 		return err

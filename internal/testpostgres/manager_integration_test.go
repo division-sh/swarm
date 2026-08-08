@@ -447,6 +447,67 @@ func TestManagerRetainsStampedTemplateFromOlderSchemaDigest(t *testing.T) {
 	assertDatabaseExists(t, manager.admin, name)
 }
 
+func TestManagerRecoversIncompleteTemplateInSingleAcquire(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// Crash-state fixture: the template database exists with an empty comment
+	// (create completed, metadata never stamped) and a matching durable intent.
+	// ensureTemplate must drop the incomplete template, delete its intent, and
+	// recreate it in the SAME call — a single Acquire(withTemplate=true) must
+	// succeed without the caller retrying.
+	name := manager.templateName
+	intent := resourceIntent{Name: name, Kind: "template", Identity: manager.templateID}
+	lockKey := resourceLockKey(intent)
+	creator, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := acquireAdvisoryLock(ctx, creator, lockKey, "recover-template "+name); err != nil {
+		t.Fatal(err)
+	}
+	// The template is content-addressed and may already exist (stamped) from a
+	// prior ensureTemplate on this server; clear it so the crash state below is
+	// the only template. Holding the template advisory lock during setup keeps
+	// concurrent managers' ensureTemplate out.
+	if err := dropDatabase(ctx, db, name); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.putIntent(ctx, intent); err != nil {
+		t.Fatal(err)
+	}
+	defer manager.deleteIntent(context.Background(), name)
+	if err := createDatabase(ctx, db, name); err != nil {
+		t.Fatal(err)
+	}
+	defer dropDatabase(context.Background(), db, name)
+	// Release the lock before Acquire: the fixture manager is dead, so its
+	// session-scoped lock is gone — the exact recovery state ensureTemplate
+	// must handle.
+	releaseAdvisoryLock(creator, lockKey)
+
+	sandbox, err := manager.Acquire(ctx, true)
+	if err != nil {
+		t.Fatalf("single Acquire(withTemplate=true) after incomplete template = %v, want successful recovery and recreate", err)
+	}
+	defer sandbox.Release(context.Background())
+
+	var comment string
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(shobj_description(d.oid, 'pg_database'), '') FROM pg_database d WHERE d.datname=$1`, name).Scan(&comment); err != nil {
+		t.Fatal(err)
+	}
+	metadata, parseErr := parseResourceMetadata(comment)
+	if parseErr != nil || metadata.Kind != "template" || metadata.Identity != manager.templateID {
+		t.Fatalf("recovered template metadata parseErr=%v metadata=%+v, want stamped template identity", parseErr, metadata)
+	}
+}
+
 func TestManagerDDLAdmissionSharesSandboxWorkAndFencesTemplateMutation(t *testing.T) {
 	manager := integrationManager(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
