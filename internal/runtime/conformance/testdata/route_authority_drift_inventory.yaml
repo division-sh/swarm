@@ -1215,11 +1215,13 @@ guardrail_proposals:
       - direct SQL tests from asserting delivery counts without typed semantic subscriber identity
       - store fixtures from becoming undocumented route-authority interpreters
 follow_up_decision:
-  tracker_state: "#1494, #1495, and #1496 are closed capped children; #1493 is closed by #1503 after its parent-tail cleanup; #1479 implements declared indexed receiver entity-field descriptor evidence; #1466 remains open for broader composition-first architecture work, with #1340/#1481 as route-authority context."
+  tracker_state: "#1494, #1495, and #1496 are closed capped children; #1493 is closed by #1503 after its parent-tail cleanup; #1479 implements declared indexed receiver entity-field descriptor evidence; #1466 closed after #1508/#1509 completed and audited root-connect source authority, with #1340/#1481 retained as historical route-authority context."
   new_child_required_before_coding: false
   runtime_behavior_child_required_now: false
   notes: >
     #1493 is historical closed parent-tail context after #1503 merges, not an
-    active route-authority tracker. Concrete bypasses discovered after this
-    inventory must open or update a child issue and receive an independent
-    implementation gate before coding.
+    active route-authority tracker. #1466 is likewise a fulfilled architecture
+    record; this inventory remains an executable drift guard rather than an
+    open parent blocker. Concrete bypasses discovered after this inventory must
+    open or update a child issue and receive an independent implementation gate
+    before coding.
