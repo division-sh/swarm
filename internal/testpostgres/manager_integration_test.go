@@ -876,17 +876,23 @@ func assertDatabaseAbsent(t *testing.T, connection Connection, name string) {
 
 // waitForAdvisoryLockFree polls until the resource advisory lock is no longer
 // granted by any session. It uses a deadline-poll on the deadline clock (no
-// sleeps) per the deterministic-wait discipline, and reuses the manager's
-// advisory-lock introspection so the poll cannot drift from the guard.
+// sleeps) per the deterministic-wait discipline, reuses the manager's
+// advisory-lock introspection, and derives the key through resourceLockKey so
+// the poll cannot drift from the guard or the reconciler.
 func waitForAdvisoryLockFree(ctx context.Context, manager *Manager, name, kind string) error {
-	lockKey := advisoryKey("template:" + name)
-	if kind == "sandbox" {
-		identity, ok := manager.verifyResourceName(name, sandboxNamePrefix, "sandbox")
-		if !ok {
-			return fmt.Errorf("verify sandbox resource name %q", name)
-		}
-		lockKey = advisoryKey("sandbox:" + identity)
+	prefix := sandboxNamePrefix
+	if kind == "template" {
+		prefix = templateNamePrefix
 	}
+	identity, ok := manager.verifyResourceName(name, prefix, kind)
+	if !ok {
+		return fmt.Errorf("verify %s resource name %q", kind, name)
+	}
+	leaseKey := int64(0)
+	if kind == "sandbox" {
+		leaseKey = advisoryKey("sandbox:" + identity)
+	}
+	lockKey := resourceLockKey(resourceIntent{Name: name, Kind: kind, Identity: identity, LeaseKey: leaseKey})
 	db, err := manager.admin.Open()
 	if err != nil {
 		return err
