@@ -123,6 +123,32 @@ type entityLoopActivation struct {
 	CurrentStage string `json:"current_stage"`
 	Status       string `json:"status"`
 	CloseReason  string `json:"close_reason,omitempty"`
+
+	closeReasonPresent bool
+}
+
+// UnmarshalJSON preserves whether close_reason was present (even as null) so a
+// schema-invalid open loop carrying a present close reason fails closed instead
+// of being normalized into an omitted property by --json.
+func (l *entityLoopActivation) UnmarshalJSON(data []byte) error {
+	type entityLoopActivationAlias entityLoopActivation
+	var shadow struct {
+		entityLoopActivationAlias
+		CloseReason json.RawMessage `json:"close_reason"`
+	}
+	if err := json.Unmarshal(data, &shadow); err != nil {
+		return err
+	}
+	*l = entityLoopActivation(shadow.entityLoopActivationAlias)
+	if len(shadow.CloseReason) > 0 {
+		l.closeReasonPresent = true
+		if !bytes.Equal(bytes.TrimSpace(shadow.CloseReason), []byte("null")) {
+			if err := json.Unmarshal(shadow.CloseReason, &l.CloseReason); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 type entityAggregateResult struct {
@@ -525,10 +551,11 @@ func validateEntityLoopActivation(prefix string, loop entityLoopActivation) erro
 	default:
 		return fmt.Errorf("malformed %s: status %q is invalid", prefix, loop.Status)
 	}
-	if loop.Status == "open" && loop.CloseReason != "" {
-		return fmt.Errorf("malformed %s: open loop cannot have close reason %q", prefix, loop.CloseReason)
-	}
-	if loop.Status == "closed" {
+	if loop.Status == "open" {
+		if loop.closeReasonPresent {
+			return fmt.Errorf("malformed %s: open loop cannot have a close reason", prefix)
+		}
+	} else {
 		switch loop.CloseReason {
 		case "completed", "escaped":
 		default:

@@ -533,6 +533,21 @@ func TestEntityCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 			wantStderr: "loops must be an array",
 		},
 		{
+			name: "view open loop with present close reason exits three",
+			args: []string{"entity", "view", "entity-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validEntityFullResult("entity-1")
+				result["loops"] = []map[string]any{
+					{"id": "loop-a", "revision_id": "rev-9", "attempt": 1, "max_attempts": 3, "current_stage": "collecting", "status": "open", "close_reason": nil},
+				}
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "open loop cannot have a close reason",
+		},
+		{
 			name: "aggregate unknown rpc exits three",
 			args: []string{"entity", "aggregate"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
