@@ -79,7 +79,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 	}
 	for _, subscription := range census.LegacyQualifiedSubscriptions() {
 		location := legacyQualifiedSubscriptionLocation(subscription)
-		message := fmt.Sprintf("qualified subscription '%s' at %s crosses a flow boundary and cannot create an inter-flow route", subscription.Consumer.Event.Authored, location)
+		message := fmt.Sprintf("qualified exact subscription '%s' at %s cannot create an inter-flow route", subscription.Consumer.Event.Authored, location)
 		remediation := "Declare output/input pins and package.yaml connect for the boundary edge, then subscribe to the receiver-local input event. Exact qualified subscriptions cannot replace connect."
 		evidence := []string{fmt.Sprintf("retired qualified subscription %q at %q", subscription.Consumer.Event.Authored, location)}
 		c.eventWarningFindings = append(c.eventWarningFindings, NewHardInvalidityFinding("legacy_qualified_subscription", location, message, remediation, evidence...))

@@ -442,6 +442,31 @@ func TestLegacyQualifiedSubscriptionsPreserveAbsoluteSiblingIdentity(t *testing.
 	}
 }
 
+func TestLegacyQualifiedSubscriptionsRejectFullURIWithoutFlowPathResolution(t *testing.T) {
+	root := runtimecontracts.FlowContractView{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"listener": {
+				ID:            "listener",
+				SubscribesTo:  []string{"myapp://producer/task.done"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"myapp://producer/task.done": {}},
+			},
+		},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{Root: &root},
+		Nodes:    root.Nodes,
+	}
+
+	legacy := BuildAuthoredEventEndpointCensus(Wrap(bundle)).LegacyQualifiedSubscriptions()
+	if len(legacy) != 1 {
+		t.Fatalf("retired subscriptions = %#v, want one full-URI exact consumer", legacy)
+	}
+	got := legacy[0]
+	if got.Consumer.NodeID != "listener" || got.Consumer.Event.Authored != "myapp://producer/task.done" || got.TargetFlowID != "" || got.Event.Canonical != "myapp://producer/task.done" {
+		t.Fatalf("retired subscription = %#v, want unresolved full-URI listener fact", got)
+	}
+}
+
 func TestEndpointCensusReusesBundleYAMLAndPreservesNodeAndAgentSourceLines(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixture := filepath.Join(repoRoot, "tests", "tier7-composition", "test-agent-emits-to-node")
