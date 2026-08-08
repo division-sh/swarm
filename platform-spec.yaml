@@ -1196,9 +1196,9 @@ contract_formats:
         evidence, template receivers declare one scalar instance identity field, receiver input
         pins declare the same-named typed carry source and explicit resolution mode, and parent
         connect lowers the edge into concrete route-plan facts. See
-        flow_model.flow_package.composition_routing and engine.cross_flow_routing for details.
-        Explicit scoped subscriptions (e.g., scoring/vertical.shortlisted) remain an escape hatch for
-        cases outside the pin/connect interface.'
+        flow_model.flow_package.composition_routing and engine.cross_flow_routing for details. Qualified
+        exact subscriptions cannot cross a flow boundary. Imported cross-boundary wildcard observation
+        requires governed bind.observe authorization and is not an exact-delivery escape hatch.'
       input_source_resolution:
         canonical_owner: internal/runtime/core/pinrouting.ResolveFlowInputProducer
         rule: |
@@ -1509,8 +1509,8 @@ contract_formats:
             business_field_descriptor_targets: 'Retired by #2087. Receiver selection consumes only the declared scalar instance field and typed input carry source; indexed arbitrary business fields are not route authority.'
             agent_node_emitter_parity: 'Closed by #1474: generated agent emit tools and node/system emits for supported connected output pins consume the same EventBus RoutePlan authority from lowered parent connect facts.'
             producer_target_broadcast_retirement: 'Closed completely by #2086: authored emit.target and emit.broadcast fail strict loading on presence and have no runtime or verification interpreter.'
-            selected_contract_runfork_readiness: 'Tracked under #1466/watchlist; not closed by #1473.'
-            parent_composition_routing_closure: '#1466 remains open until root-connect #1508 closeout is merged and audited.'
+            selected_contract_runfork_readiness: 'Closed by #2114: selected-contract frontier and route-history processing consume the typed compiled-connect evaluator.'
+            parent_composition_routing_closure: 'Closed by #1466 after root-connect #1508 merged through PR #1509 and the parent closeout audit found no remaining source-authority interpreter.'
         inputs:
           event_identity:
             fields:
@@ -4230,16 +4230,17 @@ engine:
       target_routes: 'The resolved fan-out delivery route identities on the envelope: target_set[].flow_instance plus
         target_set[].entity_id. This is a concrete topology/runtime route carrier, never an authored selector.'
     resolution_rules:
-      contracts_always_local: 'Node subscribes_to, handler keys, agent subscriptions within a flow,
-        and event definitions in events.yaml always use local names. No flow prefixes in contract
-        authoring except for explicit cross-flow escape hatches.'
+      contracts_always_local: 'Exact node subscribes_to values, handler keys, exact agent subscriptions,
+        and event definitions in events.yaml always use local names. Exact declarations never use flow
+        prefixes. Imported cross-boundary wildcard observation is pattern-only and requires typed bind.observe authorization.'
       bus_always_external: 'The event bus stores and routes events using external names. An event
         emitted by a node in the scoring flow is stored as scoring/vertical.shortlisted in the events
         table.'
       handler_lookup_localizes: 'When the runtime delivers an external event to a node, it MUST
         localize the event name before looking up the handler. Localization matches against the target
         node''s declared local interface — input pins, subscribes_to entries, and handler keys. This
-        applies to both pin-auto-wired events and explicit scoped subscription escape hatches.
+        applies to connected input-pin delivery and admitted typed pub/sub, including governed
+        import-boundary wildcard observation.
         Example: scoring/vertical.shortlisted → vertical.shortlisted when delivered to a validation
         node that declares vertical.shortlisted in any of those surfaces.'
       root_events_are_global: 'Events emitted at root level have no flow prefix. They can be routed
@@ -4256,7 +4257,7 @@ engine:
       concrete route-plan facts. For pin-declared outputs, the platform routes by resolved source/target
       identity, not by unconstrained event-type broadcast.'
     canonical_owner: platform-spec.yaml#flow_model.flow_package.composition_routing
-    implementation_status: source_authority_promoted_eventbus_dispatch_partial
+    implementation_status: typed_composition_authority_complete_for_supported_surface
     activation:
       rule: Pin routing activates when the emitter flow declares the emitted event in schema.yaml pins.outputs.events and the
         event is admitted through a valid typed same-flow consumer, lowered parent connect route, structural ParentRoute
@@ -4276,7 +4277,7 @@ engine:
         5. Persist or expose the lowered parent-connect route facts; do not treat a topology match as permission to broadcast
            to every instance.'
       ambiguity: 'If an input pin event name matches output pins from multiple flows, boot MUST fail
-        unless the parent connect, alias/adapter, or scoped subscription escape hatch disambiguates the route.'
+        unless parent connect or its typed alias/adapter input disambiguates the route.'
       static_pairs: Static-to-static pairs may resolve to a single instance pair at boot.
       template_pairs: Template or dynamic-instance pairs require lowered parent connect route facts from the receiver's
         scalar instance field, same-named typed carry source, and explicit resolution mode. Structural ParentRoute binding
@@ -4458,22 +4459,24 @@ engine:
       v2_non_blockers:
       - per-target ACLs for multi-tenant deployments
       - cross-topology grants for third-party flow contributions
-    escape_hatch:
-      description: Explicit scoped subscriptions remain an escape hatch for non-pin or disambiguated subscription cases, but
-        they are not a replacement source of truth for pin-declared output routing.
-      when_needed:
-      - Ambiguous local names where the contract intentionally selects one qualified producer.
-      - Non-pin events from another flow that are not part of the pin-routed interface.
+    subscription_boundary:
+      exact: Exact node and agent subscriptions are flow-local. A qualified exact value that crosses a flow boundary is
+        a hard invalidity and cannot create or disambiguate an inter-flow route.
+      inter_flow_delivery: Declare output/input pins and parent connect, then subscribe to the receiver-local input event.
+      wildcard_observation: Imported cross-boundary wildcard observation is separately governed by typed bind.observe
+        authorization and cannot become qualified exact delivery authority.
     contract_authoring_rules:
       handler_keys: Always local names. Never flow-prefixed.
-      subscribes_to: Local names by default. Flow-prefixed only as escape hatch.
+      subscribes_to: Exact subscriptions always use local names. Imported cross-boundary patterns require typed bind.observe
+        authorization; flow-prefixed exact values are invalid.
       emit_events: Always local names. The platform externalizes at emission time.
       events_yaml: Always local names. Flow-scoped at load time.
       pins: Always local names. Parent connect binds output pins to receiver input pins for topology; same-name pin matching
         is not route or producer authority. Receiver-owned resolution materializes concrete instance recipients after
         connect lowering.
     wildcards:
-      description: Pattern matching for subscriptions across flow instances. Wildcards do not override target filtering when event.target or event.target_set is set.
+      description: Pattern matching for subscriptions across flow instances. Imported cross-boundary patterns require typed
+        bind.observe authorization. Wildcards do not override target filtering when event.target or event.target_set is set.
       patterns:
         '*/order.completed': Any direct child flow's order.completed event
         '**/item.processed': Any flow at any depth
@@ -11376,8 +11379,8 @@ flow_model:
           The deterministic codemod removes only broadcast:true after a bundle-wide preflight. Every target and every other
           broadcast shape requires an explicit topology rewrite and leaves the bundle byte-for-byte unchanged.
       split_boundaries:
-        runtime_route_consumption: '#1473 closes supported EventBus publish/preflight/outbox consumption of lowered ConnectRoutePlan artifacts only; selected-contract runfork readiness, full agent/node parity, and parent #1466 closure remain separate tracked work. #2086 supersedes #1475 and closes producer target/broadcast completely.'
-        parser_model_support: Parser/model support beyond source-authority fixtures is follow-up unless an implementation gate explicitly widens.
+        runtime_route_consumption: '#1473 established EventBus publish/preflight/outbox consumption; #1474 closed agent/node parity; #2114 closed selected-contract frontier/history consumption through the compiled evaluator; #1466 is closed; and #2086 supersedes #1475 and closes producer target/broadcast completely.'
+        parser_model_support: '#2086 closes strict parser/model retirement for emit.target and emit.broadcast on every authored emit surface; no follow-up parser or runtime interpreter remains.'
         policy_credential_resolution: '#1453 remains separate.'
         wildcard_scoping: '#1454 remains separate.'
         final_e2e_package_proof: '#1455 proof lives in internal/runtime/bus/sealed_flow_package_fixture_test.go and internal/runtime/conformance/sealed_flow_package_conformance_test.go.'
