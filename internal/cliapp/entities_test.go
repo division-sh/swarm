@@ -537,6 +537,9 @@ func TestEntityViewVerboseShowsBookkeepingAccumulatedAndAbsoluteTimestamps(t *te
 		fields["bundle_hash"] = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 		fields["package_key"] = "."
 		fields["activation"] = "standing"
+		result["loops"] = []map[string]any{
+			{"id": "loop-a", "revision_id": "rev-9", "attempt": 1, "max_attempts": 3, "current_stage": "collecting", "status": "active"},
+		}
 		writeJSONRPCResult(t, w, captured.ID, result)
 	}))
 	defer server.Close()
@@ -546,7 +549,7 @@ func TestEntityViewVerboseShowsBookkeepingAccumulatedAndAbsoluteTimestamps(t *te
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Bookkeeping", "bundle_hash", "package_key", "activation", "Accumulated", "accumulator"} {
+	for _, want := range []string{"Bookkeeping", "bundle_hash", "package_key", "activation", "Accumulated", "accumulator", "Loops", "loop-a", "attempt 1/3"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("verbose stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -564,7 +567,7 @@ func TestEntityViewVerboseShowsBookkeepingAccumulatedAndAbsoluteTimestamps(t *te
 	if code != 0 {
 		t.Fatalf("default code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, absent := range []string{"Bookkeeping", "bundle_hash", "Accumulated", "accumulator", "2026-05-20T01:05:00Z"} {
+	for _, absent := range []string{"Bookkeeping", "bundle_hash", "Accumulated", "accumulator", "Loops", "loop-a", "2026-05-20T01:05:00Z"} {
 		if strings.Contains(stdout.String(), absent) {
 			t.Fatalf("default stdout should not contain %q:\n%s", absent, stdout.String())
 		}

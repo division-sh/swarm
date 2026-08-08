@@ -596,9 +596,29 @@ func writeEntityFullResult(out io.Writer, result entityFull, opts entityRenderOp
 	writeEntityFieldSection(out, "Fields", result.Fields, entityContentField, true)
 	writeEntityGatesSection(out, result.Gates)
 	if opts.verbose {
+		writeEntityLoopSection(out, result.Loops)
 		writeEntityFieldSection(out, "Bookkeeping", result.Fields, entityBookkeepingField, false)
 		writeEntityFieldSection(out, "Accumulated", result.Accumulated, nil, true)
 	}
+}
+
+// writeEntityLoopSection renders bounded-loop activations under --verbose. The
+// store removes the reserved loop bucket from Accumulated and exposes it solely
+// through Loops, so the full-record flag must render it or loop state would be
+// unreachable except via --json.
+func writeEntityLoopSection(out io.Writer, loops []entityLoopActivation) {
+	if len(loops) == 0 {
+		return
+	}
+	rows := make([]cliLabeledDetailRow, 0, len(loops))
+	for _, loop := range loops {
+		summary := fmt.Sprintf("%s · %s · attempt %d/%d", loop.CurrentStage, loop.Status, loop.Attempt, loop.MaxAttempts)
+		if strings.TrimSpace(loop.CloseReason) != "" {
+			summary += " · " + loop.CloseReason
+		}
+		rows = append(rows, cliLabeledDetailRow{Label: loop.ID, Value: cliRenderOneLineValue(summary)})
+	}
+	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Loops", Rows: rows})
 }
 
 func entityListTimestamp(now time.Time, raw string, verbose bool) string {

@@ -20850,7 +20850,7 @@ cli_specification:
               command: swarm entity view
               classification: shared_output
               fact_owner: /v1/rpc entity.get
-              json_shape: entity.get result object (entity with entity_id, run_id, flow_instance, entity_type, current_state, revision, created_at, updated_at, slug, name; fields; gates; accumulated)
+              json_shape: entity.get result object (entity with entity_id, run_id, flow_instance, entity_type, current_state, revision, created_at, updated_at, slug, name; fields; gates; accumulated; loops when present)
               quiet_values:
               - entity_id
             entity_aggregate:
