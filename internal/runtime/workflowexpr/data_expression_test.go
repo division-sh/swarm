@@ -116,7 +116,7 @@ func TestJoinExpressionTypeCheckingMatchesRuntimeContext(t *testing.T) {
 func TestJoinExpressionTypeCheckingPreservesCatalogTypes(t *testing.T) {
 	catalog := runtimecontracts.TypeCatalogDocument{
 		Scalars: map[string]runtimecontracts.ScalarTypeDecl{"Score": {Base: "integer"}},
-		Enums:   map[string]runtimecontracts.EnumTypeDecl{"Decision": {Values: []string{"accept", "reject"}}},
+		Enums:   map[string]runtimecontracts.EnumTypeDecl{"Decision": {Values: []string{"accept", "reject"}, Default: "accept"}},
 		Types: map[string]runtimecontracts.NamedTypeDecl{
 			"JoinResult": {Fields: map[string]runtimecontracts.TypeFieldSpec{
 				"value": {Type: "text"},

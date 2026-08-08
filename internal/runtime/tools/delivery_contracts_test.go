@@ -25,7 +25,9 @@ types:
     region: text
     score_band: score_band
 enums:
-  score_band: [low, medium, high]
+  score_band:
+    values: [low, medium, high]
+    default: low
 `, `
 review_subject:
   status: text

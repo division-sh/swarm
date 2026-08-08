@@ -1861,7 +1861,11 @@ type_system:
     - timestamp
     - uuid
     named_types: Composite types with declared inner fields.
-    enums: Closed named sets of values.
+    enums: |
+      Closed named sets of values. Each enum declares its members and an explicit default member: the canonical
+      mapping form is `enums: {name: {values: [...], default: <member>}}`. Enum defaults are explicit, never implied
+      by member order; the retired sequence form and omitted/non-member defaults are contract-load errors rejected
+      with teaching guidance (#1532).
     lists: Ordered collections of a declared element type.
   schema_refinements:
     description: |
@@ -1961,7 +1965,7 @@ type_system:
       boolean: 'false'
       list: '[]'
       named_type: empty instance with each field at its own default
-      enum: first declared value unless initial overrides it
+      enum: the enum's declared default member unless initial overrides it
       timestamp: 'null'
       uuid: 'null'
 entity_contracts:

@@ -353,10 +353,10 @@ func Materialize(contract Contract, provided map[string]any) (map[string]any, er
 	return out, nil
 }
 
-func MaterializeMetadataForFlow(source semanticview.Source, flowID string, metadata map[string]any) map[string]any {
+func MaterializeMetadataForFlow(source semanticview.Source, flowID string, metadata map[string]any) (map[string]any, error) {
 	contract, ok := ResolveForFlow(source, flowID)
 	if !ok {
-		return cloneMap(metadata)
+		return cloneMap(metadata), nil
 	}
 	input := map[string]any{}
 	for name := range contract.Entity.Fields {
@@ -366,7 +366,7 @@ func MaterializeMetadataForFlow(source semanticview.Source, flowID string, metad
 	}
 	materialized, err := Materialize(contract, input)
 	if err != nil {
-		return cloneMap(metadata)
+		return nil, err
 	}
 	out := cloneMap(metadata)
 	if out == nil {
@@ -375,7 +375,7 @@ func MaterializeMetadataForFlow(source semanticview.Source, flowID string, metad
 	for key, value := range materialized {
 		out[key] = value
 	}
-	return out
+	return out, nil
 }
 
 func NormalizeFieldValue(contract Contract, fieldName string, value any) (any, error) {
@@ -548,11 +548,12 @@ func defaultValue(contract Contract, typeRef string, explicit any) (any, error) 
 	case isJSONArrayType(contract, typeRef):
 		return []any{}, nil
 	case isEnumType(contract, typeRef):
-		enum := contract.Types.Enums[typeName(contract, typeRef)]
-		if len(enum.Values) == 0 {
-			return "", nil
+		enumName := typeName(contract, typeRef)
+		enum := contract.Types.Enums[enumName]
+		if err := enum.Validate(enumName); err != nil {
+			return "", err
 		}
-		return strings.TrimSpace(enum.Values[0]), nil
+		return strings.TrimSpace(enum.Default), nil
 	case isNamedType(contract, typeRef):
 		named := contract.Types.Types[typeName(contract, typeRef)]
 		out := make(map[string]any, len(named.Fields))

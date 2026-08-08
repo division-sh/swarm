@@ -323,15 +323,61 @@ func (m *Manager) validateControlDatabase(ctx context.Context, db databaseRowQue
 	return true, nil
 }
 
+// resourceLockKey derives the advisory lock key that protects a durable
+// resource intent. It must stay in sync with the derivation used by
+// Reconcile's intents loop when taking the lock before reconciling an intent.
+func resourceLockKey(intent resourceIntent) int64 {
+	if intent.Kind == "template" {
+		return advisoryKey("template:" + intent.Name)
+	}
+	return intent.LeaseKey
+}
+
+// advisoryLockHeld reports whether the resource advisory lock is currently
+// granted to ANY session on the cluster.
+//
+// This is deliberately a cluster-wide tripwire, not a held-by-caller gate:
+// the caller's advisory lock typically lives on a dedicated *sql.Conn (the
+// lease connection), while putIntent writes through a pooled control
+// connection, so pg_backend_pid() scoping is not cleanly expressible here.
+// A write performed while another session owns the lock therefore passes
+// undetected; that wrong-holder class is distinct from the lock-free window
+// this guard enforces. It is also check-then-insert, not atomic: the lock may
+// drop between this EXISTS and the INSERT. Both limitations are fine for the
+// guard's purpose — converting intent-ordering bugs from probabilistic CI
+// flakes into deterministic failures — but it must never be treated as a
+// transactional guarantee.
+func (m *Manager) advisoryLockHeld(ctx context.Context, db databaseRowQueryer, key int64) (bool, error) {
+	var held bool
+	err := db.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM pg_locks
+			WHERE locktype='advisory' AND granted
+			  AND `+advisoryLockKeyReconstructionSQL+`=$1
+		)`, key).Scan(&held)
+	if err != nil {
+		return false, fmt.Errorf("inspect advisory lock %d: %w", key, err)
+	}
+	return held, nil
+}
+
 func (m *Manager) putIntent(ctx context.Context, intent resourceIntent) error {
 	if !m.intentMatchesName(intent) {
 		return fmt.Errorf("refuse invalid postgres test resource intent for %q", intent.Name)
 	}
+	lockKey := resourceLockKey(intent)
 	db, err := m.control.Open()
 	if err != nil {
 		return fmt.Errorf("open postgres test control authority: %w", err)
 	}
 	defer db.Close()
+	held, err := m.advisoryLockHeld(ctx, db, lockKey)
+	if err != nil {
+		return err
+	}
+	if !held {
+		return fmt.Errorf("putIntent requires the resource advisory lock %d for %q; acquire before writing durable intent — see Acquire", lockKey, intent.Name)
+	}
 	_, err = db.ExecContext(ctx, `INSERT INTO `+quoteIdent(intentTableName)+`
 		(resource_name, kind, identity, lease_key, template_name) VALUES ($1,$2,$3,$4,$5)`,
 		intent.Name, intent.Kind, intent.Identity, intent.LeaseKey, intent.Template)
@@ -482,10 +528,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		if !m.intentMatchesName(intent) {
 			return fmt.Errorf("invalid postgres test resource intent %q left untouched", intent.Name)
 		}
-		lockKey := intent.LeaseKey
-		if intent.Kind == "template" {
-			lockKey = advisoryKey("template:" + intent.Name)
-		}
+		lockKey := resourceLockKey(intent)
 		lockConn, acquired, err := tryAdvisoryLock(ctx, db, lockKey)
 		if err != nil {
 			return err
@@ -518,10 +561,11 @@ func (m *Manager) reconcileDatabaseCandidate(ctx context.Context, db *sql.DB, ca
 	if !signed {
 		return fmt.Errorf("unprovable postgres test %s %q left untouched: invalid ownership signature", kind, candidate.name)
 	}
-	lockKey := advisoryKey("template:" + candidate.name)
+	intent := resourceIntent{Name: candidate.name, Kind: kind, Identity: identity}
 	if kind == "sandbox" {
-		lockKey = advisoryKey("sandbox:" + identity)
+		intent.LeaseKey = advisoryKey("sandbox:" + identity)
 	}
+	lockKey := resourceLockKey(intent)
 	lockConn, acquired, err := tryAdvisoryLock(ctx, db, lockKey)
 	if err != nil || !acquired {
 		return err
@@ -619,7 +663,8 @@ func (m *Manager) ensureTemplate(ctx context.Context, adminDB *sql.DB) error {
 		return err
 	}
 	defer lockConn.Close()
-	lockKey := advisoryKey("template:" + m.templateName)
+	intent := resourceIntent{Name: m.templateName, Kind: "template", Identity: m.templateID}
+	lockKey := resourceLockKey(intent)
 	if err := acquireAdvisoryLock(ctx, lockConn, lockKey, "template "+m.templateName); err != nil {
 		return err
 	}
@@ -630,6 +675,9 @@ func (m *Manager) ensureTemplate(ctx context.Context, adminDB *sql.DB) error {
 		SELECT COALESCE(shobj_description(d.oid, 'pg_database'), ''), r.rolname
 		FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba
 		WHERE d.datname=$1`, m.templateName).Scan(&comment, &owner)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("inspect postgres template %q: %w", m.templateName, err)
+	}
 	if err == nil {
 		if owner != m.role {
 			return fmt.Errorf("template database %q owner %q does not match authenticated role %q; left untouched", m.templateName, owner, m.role)
@@ -658,10 +706,7 @@ func (m *Manager) ensureTemplate(ctx context.Context, adminDB *sql.DB) error {
 			return nil
 		}
 	}
-	if err != sql.ErrNoRows {
-		return fmt.Errorf("inspect postgres template %q: %w", m.templateName, err)
-	}
-	if err := m.putIntent(ctx, resourceIntent{Name: m.templateName, Kind: "template", Identity: m.templateID}); err != nil {
+	if err := m.putIntent(ctx, intent); err != nil {
 		return err
 	}
 	if err := m.withExclusiveDDLAdmission(ctx, adminDB, "create template "+m.templateName, func(conn *sql.Conn) error {
@@ -790,6 +835,19 @@ func tryAdvisoryLock(ctx context.Context, db *sql.DB, key int64) (*sql.Conn, boo
 	return conn, true, nil
 }
 
+// advisoryLockKeyReconstructionSQL reconstructs the 64-bit advisory lock key
+// from pg_locks, whose (classid, objid) pair stores the bigint key split into
+// two 32-bit halves. Single source of truth shared by advisoryLockHeld and
+// advisoryBlockers so the bit reassembly cannot drift between the guard and
+// the diagnostics.
+const advisoryLockKeyReconstructionSQL = `((classid::bigint << 32) | objid::bigint)`
+
+// releaseAdvisoryLock releases a session-scoped advisory lock and closes the
+// connection. It is deliberately idempotent: calling it after the lock was
+// already released (e.g. a defer firing after an earlier explicit release, or
+// after the session already ended) is a harmless no-op. Tests use a deferred
+// release as the leak-safety net and the same idempotent call inline at the
+// point the lock must drop for a later re-acquiring step.
 func releaseAdvisoryLock(conn *sql.Conn, key int64) {
 	if conn == nil {
 		return
@@ -805,7 +863,7 @@ func advisoryBlockers(ctx context.Context, conn *sql.Conn, key int64) string {
 		SELECT a.pid, COALESCE(a.application_name,''), COALESCE(a.state,''), COALESCE(a.datname,''), left(COALESCE(a.query,''), 160)
 		FROM pg_locks l JOIN pg_stat_activity a ON a.pid=l.pid
 		WHERE l.locktype='advisory' AND l.granted
-		  AND ((l.classid::bigint << 32) | l.objid::bigint)=$1
+		  AND `+advisoryLockKeyReconstructionSQL+`=$1
 		ORDER BY a.pid`, key)
 	if err != nil {
 		return "unable to inspect pg_stat_activity/pg_locks: " + err.Error()

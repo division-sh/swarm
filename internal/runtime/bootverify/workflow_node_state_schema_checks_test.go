@@ -89,7 +89,7 @@ func TestRun_AllowsDeclaredNodeStateNamedType(t *testing.T) {
 func TestRun_AllowsDeclaredNodeStateScalarAndEnumRefs(t *testing.T) {
 	bundle := nodeStateSchemaTypingBundle()
 	bundle.RootTypes.Scalars["ScoreID"] = runtimecontracts.ScalarTypeDecl{Base: "text"}
-	bundle.RootTypes.Enums["ScoreStatus"] = runtimecontracts.EnumTypeDecl{Values: []string{"ready", "done"}}
+	bundle.RootTypes.Enums["ScoreStatus"] = runtimecontracts.EnumTypeDecl{Values: []string{"ready", "done"}, Default: "ready"}
 	bundle.Nodes["scoring-node"] = runtimecontracts.SystemNodeContract{
 		ID:         "scoring-node",
 		StateTable: "scoring_state",

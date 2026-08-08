@@ -3,6 +3,7 @@ package testpostgres
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
@@ -211,6 +212,62 @@ func TestManagerLeavesSignedUnstampedSandboxWithoutIntentUntouched(t *testing.T)
 	assertDatabaseExists(t, manager.admin, name)
 }
 
+func TestManagerPutIntentRequiresResourceAdvisoryLock(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	t.Run("sandbox", func(t *testing.T) {
+		identity := strings.ReplaceAll(uuid.NewString(), "-", "")
+		name := manager.signedResourceName(sandboxNamePrefix, "sandbox", identity)
+		intent := resourceIntent{Name: name, Kind: "sandbox", Identity: identity, LeaseKey: advisoryKey("sandbox:" + identity)}
+		if err := manager.putIntent(ctx, intent); err == nil || !strings.Contains(err.Error(), "requires the resource advisory lock") {
+			t.Fatalf("putIntent without lock error = %v, want teaching blocker", err)
+		}
+		if _, found, err := manager.intent(ctx, name); err != nil || found {
+			t.Fatalf("intent found=%v err=%v, want absent after refused put", found, err)
+		}
+	})
+
+	t.Run("template", func(t *testing.T) {
+		identity := "nolock" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+		name := manager.signedResourceName(templateNamePrefix, "template", identity)
+		intent := resourceIntent{Name: name, Kind: "template", Identity: identity}
+		if err := manager.putIntent(ctx, intent); err == nil || !strings.Contains(err.Error(), "requires the resource advisory lock") {
+			t.Fatalf("putIntent without lock error = %v, want teaching blocker", err)
+		}
+		if _, found, err := manager.intent(ctx, name); err != nil || found {
+			t.Fatalf("intent found=%v err=%v, want absent after refused put", found, err)
+		}
+	})
+
+	t.Run("succeedsWhileLockHeld", func(t *testing.T) {
+		db, err := manager.admin.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		identity := strings.ReplaceAll(uuid.NewString(), "-", "")
+		name := manager.signedResourceName(sandboxNamePrefix, "sandbox", identity)
+		intent := resourceIntent{Name: name, Kind: "sandbox", Identity: identity, LeaseKey: advisoryKey("sandbox:" + identity)}
+		creator, err := db.Conn(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := acquireAdvisoryLock(ctx, creator, resourceLockKey(intent), "teaching "+name); err != nil {
+			t.Fatal(err)
+		}
+		defer releaseAdvisoryLock(creator, resourceLockKey(intent))
+		if err := manager.putIntent(ctx, intent); err != nil {
+			t.Fatalf("putIntent under resource advisory lock = %v, want success", err)
+		}
+		defer manager.deleteIntent(context.Background(), name)
+		if _, found, err := manager.intent(ctx, name); err != nil || !found {
+			t.Fatalf("intent found=%v err=%v, want present", found, err)
+		}
+	})
+}
+
 func TestManagerReclaimsSandboxInterruptedBetweenCreateAndMetadata(t *testing.T) {
 	manager := integrationManager(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -223,12 +280,26 @@ func TestManagerReclaimsSandboxInterruptedBetweenCreateAndMetadata(t *testing.T)
 	identity := strings.ReplaceAll(uuid.NewString(), "-", "")
 	name := manager.signedResourceName(sandboxNamePrefix, "sandbox", identity)
 	intent := resourceIntent{Name: name, Kind: "sandbox", Identity: identity, LeaseKey: advisoryKey("sandbox:" + identity)}
+	// The intent is written under the resource advisory lock, held through
+	// createDatabase, then released before Reconcile — mirroring a manager
+	// session dying between create and metadata, which is exactly the state
+	// this test exercises. Holding the lock through create also prevents a
+	// concurrent Reconcile from retiring the intent mid-create. #2196
+	creator, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := acquireAdvisoryLock(ctx, creator, resourceLockKey(intent), "interrupted "+name); err != nil {
+		t.Fatal(err)
+	}
+	defer releaseAdvisoryLock(creator, resourceLockKey(intent))
 	if err := manager.putIntent(ctx, intent); err != nil {
 		t.Fatal(err)
 	}
 	if err := createDatabase(ctx, db, name); err != nil {
 		t.Fatal(err)
 	}
+	releaseAdvisoryLock(creator, resourceLockKey(intent))
 	if err := manager.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -249,12 +320,25 @@ func TestManagerReclaimsTemplateInterruptedBetweenCreateAndMetadata(t *testing.T
 	defer db.Close()
 	identity := "interrupted" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 	name := manager.signedResourceName(templateNamePrefix, "template", identity)
-	if err := manager.putIntent(ctx, resourceIntent{Name: name, Kind: "template", Identity: identity}); err != nil {
+	intent := resourceIntent{Name: name, Kind: "template", Identity: identity}
+	// Same interrupted-between-create-and-metadata shape as the sandbox twin:
+	// write the intent under the lock, hold through create, release (session
+	// death), then let Reconcile reclaim. #2196
+	creator, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := acquireAdvisoryLock(ctx, creator, resourceLockKey(intent), "interrupted "+name); err != nil {
+		t.Fatal(err)
+	}
+	defer releaseAdvisoryLock(creator, resourceLockKey(intent))
+	if err := manager.putIntent(ctx, intent); err != nil {
 		t.Fatal(err)
 	}
 	if err := createDatabase(ctx, db, name); err != nil {
 		t.Fatal(err)
 	}
+	releaseAdvisoryLock(creator, resourceLockKey(intent))
 	if err := manager.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -279,6 +363,14 @@ func TestManagerReconcilesAbruptCreateBeforeMetadataExit(t *testing.T) {
 			assertDatabaseExists(t, manager.admin, name)
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
+			// The child exited holding the resource advisory lock; the Postgres
+			// backend releases the session-scoped lock asynchronously on socket
+			// EOF. Wait for the lock to be free (bounded deadline-poll, no
+			// sleeps) so Reconcile's single try-lock cannot silently skip the
+			// reclaimed resource. #2196
+			if err := waitForAdvisoryLockFree(ctx, manager, name, kind); err != nil {
+				t.Fatal(err)
+			}
 			if err := manager.Reconcile(ctx); err != nil {
 				t.Fatal(err)
 			}
@@ -316,18 +408,19 @@ func TestManagerCreateBeforeMetadataCrashHelper(t *testing.T) {
 	}
 	name := manager.signedResourceName(prefix, kind, identity)
 	intent := resourceIntent{Name: name, Kind: kind, Identity: identity, LeaseKey: leaseKey}
-	if err := manager.putIntent(ctx, intent); err != nil {
-		t.Fatal(err)
-	}
-	lockKey := leaseKey
-	if kind == "template" {
-		lockKey = advisoryKey("template:" + name)
-	}
+	// Mirror production (Acquire/ensureTemplate): the advisory lock is taken
+	// BEFORE the durable intent is written. The process then crashes via
+	// os.Exit, which releases the session-scoped lock — the exact
+	// interrupted-between-create-and-metadata state the parent test reclaims.
+	// #2196
 	lockConn, err := db.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := acquireAdvisoryLock(ctx, lockConn, lockKey, "crash-window "+name); err != nil {
+	if err := acquireAdvisoryLock(ctx, lockConn, resourceLockKey(intent), "crash-window "+name); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.putIntent(ctx, intent); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(output, []byte(name+"\n"), 0o600); err != nil {
@@ -361,6 +454,67 @@ func TestManagerRetainsStampedTemplateFromOlderSchemaDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertDatabaseExists(t, manager.admin, name)
+}
+
+func TestManagerRecoversIncompleteTemplateInSingleAcquire(t *testing.T) {
+	manager := integrationManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// Crash-state fixture: the template database exists with an empty comment
+	// (create completed, metadata never stamped) and a matching durable intent.
+	// ensureTemplate must drop the incomplete template, delete its intent, and
+	// recreate it in the SAME call — a single Acquire(withTemplate=true) must
+	// succeed without the caller retrying.
+	name := manager.templateName
+	intent := resourceIntent{Name: name, Kind: "template", Identity: manager.templateID}
+	lockKey := resourceLockKey(intent)
+	creator, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := acquireAdvisoryLock(ctx, creator, lockKey, "recover-template "+name); err != nil {
+		t.Fatal(err)
+	}
+	// The template is content-addressed and may already exist (stamped) from a
+	// prior ensureTemplate on this server; clear it so the crash state below is
+	// the only template. Holding the template advisory lock during setup keeps
+	// concurrent managers' ensureTemplate out.
+	if err := dropDatabase(ctx, db, name); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.putIntent(ctx, intent); err != nil {
+		t.Fatal(err)
+	}
+	defer manager.deleteIntent(context.Background(), name)
+	if err := createDatabase(ctx, db, name); err != nil {
+		t.Fatal(err)
+	}
+	defer dropDatabase(context.Background(), db, name)
+	// Release the lock before Acquire: the fixture manager is dead, so its
+	// session-scoped lock is gone — the exact recovery state ensureTemplate
+	// must handle.
+	releaseAdvisoryLock(creator, lockKey)
+
+	sandbox, err := manager.Acquire(ctx, true)
+	if err != nil {
+		t.Fatalf("single Acquire(withTemplate=true) after incomplete template = %v, want successful recovery and recreate", err)
+	}
+	defer sandbox.Release(context.Background())
+
+	var comment string
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(shobj_description(d.oid, 'pg_database'), '') FROM pg_database d WHERE d.datname=$1`, name).Scan(&comment); err != nil {
+		t.Fatal(err)
+	}
+	metadata, parseErr := parseResourceMetadata(comment)
+	if parseErr != nil || metadata.Kind != "template" || metadata.Identity != manager.templateID {
+		t.Fatalf("recovered template metadata parseErr=%v metadata=%+v, want stamped template identity", parseErr, metadata)
+	}
 }
 
 func TestManagerDDLAdmissionSharesSandboxWorkAndFencesTemplateMutation(t *testing.T) {
@@ -511,6 +665,18 @@ func TestManagerReconcileRefreshesCreateWindowAfterTakingLease(t *testing.T) {
 	name := manager.signedResourceName(sandboxNamePrefix, "sandbox", identity)
 	leaseKey := advisoryKey("sandbox:" + identity)
 	intent := resourceIntent{Name: name, Kind: "sandbox", Identity: identity, LeaseKey: leaseKey}
+	// The intent is written under the resource advisory lock (mirroring
+	// production Acquire); the lock is released before reconcileDatabaseCandidate,
+	// which takes the lease itself to refresh the stale CREATE-window snapshot.
+	// #2196
+	creator, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := acquireAdvisoryLock(ctx, creator, resourceLockKey(intent), "create-window "+name); err != nil {
+		t.Fatal(err)
+	}
+	defer releaseAdvisoryLock(creator, resourceLockKey(intent))
 	if err := manager.putIntent(ctx, intent); err != nil {
 		t.Fatal(err)
 	}
@@ -525,6 +691,7 @@ func TestManagerReconcileRefreshesCreateWindowAfterTakingLease(t *testing.T) {
 	if err := manager.deleteIntent(ctx, name); err != nil {
 		t.Fatal(err)
 	}
+	releaseAdvisoryLock(creator, resourceLockKey(intent))
 	if err := manager.reconcileDatabaseCandidate(ctx, db, candidate); err != nil {
 		t.Fatalf("stale CREATE-window snapshot produced a false blocker: %v", err)
 	}
@@ -551,6 +718,21 @@ func TestManagerReconcileRefreshesIntentSnapshotAfterTakingLease(t *testing.T) {
 			}
 			name := manager.signedResourceName(prefix, kind, identity)
 			intent := resourceIntent{Name: name, Kind: kind, Identity: identity, LeaseKey: leaseKey}
+
+			// Mirrors production (Acquire/ensureTemplate): the resource advisory
+			// lock is held from BEFORE the durable intent is written through
+			// createDatabase, so a concurrent manager's Reconcile (shared control
+			// DB + advisory keyspace, see NewManager) can never retire the intent
+			// mid-create and orphan the database. #2196.
+			lockKey := resourceLockKey(intent)
+			creator, err := adminDB.Conn(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := acquireAdvisoryLock(ctx, creator, lockKey, "snapshot-race "+name); err != nil {
+				t.Fatal(err)
+			}
+			defer releaseAdvisoryLock(creator, lockKey)
 			if err := manager.putIntent(ctx, intent); err != nil {
 				t.Fatal(err)
 			}
@@ -578,17 +760,6 @@ func TestManagerReconcileRefreshesIntentSnapshotAfterTakingLease(t *testing.T) {
 				t.Fatal(ctx.Err())
 			}
 
-			lockKey := leaseKey
-			if kind == "template" {
-				lockKey = advisoryKey("template:" + name)
-			}
-			creator, err := adminDB.Conn(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := acquireAdvisoryLock(ctx, creator, lockKey, "snapshot-race "+name); err != nil {
-				t.Fatal(err)
-			}
 			if err := createDatabase(ctx, adminDB, name); err != nil {
 				t.Fatal(err)
 			}
@@ -625,7 +796,23 @@ func TestManagerRetiresFailedCreateIntentOnlyAfterExactAbsence(t *testing.T) {
 				leaseKey = 0
 			}
 			name := manager.signedResourceName(prefix, kind, identity)
-			if err := manager.putIntent(ctx, resourceIntent{Name: name, Kind: kind, Identity: identity, LeaseKey: leaseKey}); err != nil {
+			intent := resourceIntent{Name: name, Kind: kind, Identity: identity, LeaseKey: leaseKey}
+			// Mirrors production (Acquire holds the lease for the resource
+			// lifetime): the advisory lock is acquired BEFORE the durable intent
+			// and held through the whole retained/retired assertions, so a
+			// concurrent manager's Reconcile (shared control DB + advisory
+			// keyspace, see NewManager) can never drop the database or retire
+			// the intent underneath this test. #2196.
+			lockKey := resourceLockKey(intent)
+			creator, err := db.Conn(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer releaseAdvisoryLock(creator, lockKey)
+			if err := acquireAdvisoryLock(ctx, creator, lockKey, "retain-race "+name); err != nil {
+				t.Fatal(err)
+			}
+			if err := manager.putIntent(ctx, intent); err != nil {
 				t.Fatal(err)
 			}
 			defer manager.deleteIntent(context.Background(), name)
@@ -684,6 +871,46 @@ func assertDatabaseAbsent(t *testing.T, connection Connection, name string) {
 	}
 	if exists {
 		t.Fatalf("database %q still exists", name)
+	}
+}
+
+// waitForAdvisoryLockFree polls until the resource advisory lock is no longer
+// granted by any session. It uses a deadline-poll on the deadline clock (no
+// sleeps) per the deterministic-wait discipline, reuses the manager's
+// advisory-lock introspection, and derives the key through resourceLockKey so
+// the poll cannot drift from the guard or the reconciler.
+func waitForAdvisoryLockFree(ctx context.Context, manager *Manager, name, kind string) error {
+	prefix := sandboxNamePrefix
+	if kind == "template" {
+		prefix = templateNamePrefix
+	}
+	identity, ok := manager.verifyResourceName(name, prefix, kind)
+	if !ok {
+		return fmt.Errorf("verify %s resource name %q", kind, name)
+	}
+	leaseKey := int64(0)
+	if kind == "sandbox" {
+		leaseKey = advisoryKey("sandbox:" + identity)
+	}
+	lockKey := resourceLockKey(resourceIntent{Name: name, Kind: kind, Identity: identity, LeaseKey: leaseKey})
+	db, err := manager.admin.Open()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	for {
+		held, err := manager.advisoryLockHeld(ctx, db, lockKey)
+		if err != nil {
+			return err
+		}
+		if !held {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("resource advisory lock %d for %q never released before context deadline", lockKey, name)
+		case <-time.After(25 * time.Millisecond):
+		}
 	}
 }
 

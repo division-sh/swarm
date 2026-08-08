@@ -333,7 +333,7 @@ func TestGenerateEmitToolsForActor_GeneratedSchemaIsClosedRequiredAndRejectsUnde
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{
 			Enums: map[string]runtimecontracts.EnumTypeDecl{
-				"SignalStrength": {Values: []string{"weak", "strong"}},
+				"SignalStrength": {Values: []string{"weak", "strong"}, Default: "weak"},
 			},
 			Types: map[string]runtimecontracts.NamedTypeDecl{
 				"DiscoveryContext": {

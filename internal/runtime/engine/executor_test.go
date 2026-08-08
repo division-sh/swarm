@@ -616,13 +616,16 @@ func TestExecutorTimerReconciliationRequiresExactEventAuthority(t *testing.T) {
 			ID: "waiting.timeout", Stage: "waiting", StageOwned: true, Event: "timer.timeout", Delay: "1h",
 		}}},
 	}), WorkflowLifecycle: owner}}
-	frame := executor.newExecutionFrame(stubTx{ctx: context.Background()}, ExecutionRequest{
+	frame, err := executor.newExecutionFrame(stubTx{ctx: context.Background()}, ExecutionRequest{
 		EntityID: "entity-1",
 		Event: eventtest.RunCreatingRootIngress(
 			"event-1", "work.received", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{},
 		),
 		State: StateSnapshot{CurrentState: "waiting"},
 	})
+	if err != nil {
+		t.Fatalf("newExecutionFrame: %v", err)
+	}
 	if _, _, err := executor.buildWorkflowLifecycleEffect(&frame); err == nil || !strings.Contains(err.Error(), "exact event identity") {
 		t.Fatalf("buildWorkflowLifecycleEffect error = %v, want exact-authority refusal", err)
 	}
@@ -636,13 +639,16 @@ func TestExecutorTimerReconciliationCarriesOnlyActualTransitionTarget(t *testing
 		}}},
 	}), WorkflowLifecycle: owner}}
 	createdAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
-	frame := executor.newExecutionFrame(stubTx{ctx: context.Background()}, ExecutionRequest{
+	frame, err := executor.newExecutionFrame(stubTx{ctx: context.Background()}, ExecutionRequest{
 		EntityID: "entity-1",
 		Event: eventtest.RunCreatingRootIngress(
 			"event-1", "work.noted", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, createdAt,
 		),
 		State: StateSnapshot{CurrentState: "waiting"},
 	})
+	if err != nil {
+		t.Fatalf("newExecutionFrame: %v", err)
+	}
 
 	effect, ok, err := executor.buildWorkflowLifecycleEffect(&frame)
 	if err != nil {
