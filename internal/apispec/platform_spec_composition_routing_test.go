@@ -98,8 +98,8 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustYAMLPath(t, composition, "pin_alias_interface_adaptation", "owner_consumed"), "pin_alias_interface_adaptation")
 	assertScalarContains(t, mustYAMLPath(t, composition, "producer_routing_retirement", "role"), "retired on presence")
 	assertScalarContains(t, mustYAMLPath(t, composition, "producer_routing_retirement", "migration"), "bundle-wide preflight")
-	assertScalarContains(t, mustYAMLPath(t, composition, "split_boundaries", "runtime_route_consumption"), "#1473 closes supported EventBus publish/preflight/outbox")
-	assertScalarContains(t, mustYAMLPath(t, composition, "split_boundaries", "runtime_route_consumption"), "selected-contract runfork readiness")
+	assertScalarContains(t, mustYAMLPath(t, composition, "split_boundaries", "runtime_route_consumption"), "#1473 established EventBus publish/preflight/outbox")
+	assertScalarContains(t, mustYAMLPath(t, composition, "split_boundaries", "runtime_route_consumption"), "#2114 closed selected-contract frontier/history")
 	slice1473 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1473")
 	assertScalarValue(t, mustMappingValue(t, slice1473, "status"), "merge_bearing_runtime_behavior")
 	assertScalarContains(t, mustMappingValue(t, slice1473, "canonical_code_owner"), "internal/runtime/bus.RoutePlan")
@@ -253,7 +253,7 @@ func TestPlatformSpecCompositionRoutingRetiresProducerTargetAuthority(t *testing
 
 	crossFlow := mustYAMLPath(t, root, "engine", "cross_flow_routing")
 	assertScalarValue(t, mustMappingValue(t, crossFlow, "canonical_owner"), "platform-spec.yaml#flow_model.flow_package.composition_routing")
-	assertScalarValue(t, mustMappingValue(t, crossFlow, "implementation_status"), "source_authority_promoted_eventbus_dispatch_partial")
+	assertScalarValue(t, mustMappingValue(t, crossFlow, "implementation_status"), "typed_composition_authority_complete_for_supported_surface")
 	if !sequenceContainsScalar(mustYAMLPath(t, crossFlow, "target_resolution", "precedence"), "lowered parent connect route plan") {
 		t.Fatal("cross_flow_routing target precedence must start from lowered parent connect route plan")
 	}
@@ -314,6 +314,68 @@ func TestPlatformSpecCompositionRoutingRetiresProducerTargetAuthority(t *testing
 		t.Fatal("fan_out effective semantics must name runtime and authoring consumers")
 	}
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "platform_ceiling", "overrun"), "raise max_items or split the batch")
+}
+
+func TestPlatformSpecE1aRetirementCloseoutIsCanonicalOnly(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+
+	routingDerivation := mustYAMLPath(t, root, "contract_formats", "event_schema", "routing_derivation")
+	interFlow := mustMappingValue(t, routingDerivation, "inter_flow_connect")
+	assertScalarContains(t, interFlow, "Qualified exact subscriptions cannot cross a flow boundary")
+	assertScalarContains(t, interFlow, "bind.observe")
+
+	resolutionRules := mustYAMLPath(t, root, "engine", "event_identity", "resolution_rules")
+	assertScalarContains(t, mustMappingValue(t, resolutionRules, "contracts_always_local"), "Exact declarations never use flow prefixes")
+	assertScalarContains(t, mustMappingValue(t, resolutionRules, "contracts_always_local"), "bind.observe")
+	assertScalarContains(t, mustMappingValue(t, resolutionRules, "handler_lookup_localizes"), "governed import-boundary wildcard observation")
+
+	crossFlow := mustYAMLPath(t, root, "engine", "cross_flow_routing")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "auto_wiring", "ambiguity"), "parent connect or its typed alias/adapter input")
+	subscriptionBoundary := mustMappingValue(t, crossFlow, "subscription_boundary")
+	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "exact"), "hard invalidity")
+	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "inter_flow_delivery"), "parent connect")
+	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "wildcard_observation"), "bind.observe")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "contract_authoring_rules", "subscribes_to"), "flow-prefixed exact values are invalid")
+
+	lowered := mustYAMLPath(t, root, "contract_formats", "event_schema", "routing_derivation", "route_plan_authority", "lowered_connect_route_plan_consumption")
+	assertScalarContains(t, mustYAMLPath(t, lowered, "unsupported_or_split", "selected_contract_runfork_readiness"), "Closed by #2114")
+	assertScalarContains(t, mustYAMLPath(t, lowered, "unsupported_or_split", "parent_composition_routing_closure"), "Closed by #1466")
+
+	composition := mustYAMLPath(t, root, "flow_model", "flow_package", "composition_routing")
+	splitBoundaries := mustMappingValue(t, composition, "split_boundaries")
+	assertScalarContains(t, mustMappingValue(t, splitBoundaries, "runtime_route_consumption"), "#2114 closed selected-contract")
+	assertScalarContains(t, mustMappingValue(t, splitBoundaries, "parser_model_support"), "#2086 closes strict parser/model retirement")
+
+	var scalarValues []string
+	var collect func(*yaml.Node)
+	collect = func(node *yaml.Node) {
+		if node == nil {
+			return
+		}
+		if node.Kind == yaml.ScalarNode {
+			scalarValues = append(scalarValues, node.Value)
+			return
+		}
+		for _, child := range node.Content {
+			collect(child)
+		}
+	}
+	collect(root)
+	surface := strings.Join(scalarValues, "\n")
+	for _, stale := range []string{
+		"Explicit scoped subscriptions",
+		"explicit scoped subscription escape hatches",
+		"scoped subscription escape hatch",
+		"Flow-prefixed only as escape hatch",
+		"source_authority_promoted_eventbus_dispatch_partial",
+		"#1466 remains open",
+		"not closed by #1473",
+		"Parser/model support beyond source-authority fixtures is follow-up",
+	} {
+		if strings.Contains(surface, stale) {
+			t.Fatalf("platform spec retains stale E1a authority/status wording %q", stale)
+		}
+	}
 }
 
 func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t *testing.T) {
