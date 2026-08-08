@@ -549,10 +549,7 @@ func defaultValue(contract Contract, typeRef string, explicit any) (any, error) 
 		return []any{}, nil
 	case isEnumType(contract, typeRef):
 		enum := contract.Types.Enums[typeName(contract, typeRef)]
-		if len(enum.Values) == 0 {
-			return "", nil
-		}
-		return strings.TrimSpace(enum.Values[0]), nil
+		return strings.TrimSpace(enum.Default), nil
 	case isNamedType(contract, typeRef):
 		named := contract.Types.Types[typeName(contract, typeRef)]
 		out := make(map[string]any, len(named.Fields))

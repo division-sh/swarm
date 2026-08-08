@@ -346,7 +346,7 @@ func TestEventSchemaRegistryFromBundle_PreservesWave1TypeMeaning(t *testing.T) {
 		flowTypes: map[string]TypeCatalogDocument{
 			"review": {
 				Enums: map[string]EnumTypeDecl{
-					"Mode": {Values: []string{"fast", "deep"}},
+					"Mode": {Values: []string{"fast", "deep"}, Default: "fast"},
 				},
 			},
 		},
@@ -432,7 +432,7 @@ func TestEventSchemaForFlowEvent_UsesDeclaringFlowTypeCatalogForOverride(t *test
 	bundle := &WorkflowContractBundle{
 		RootTypes: TypeCatalogDocument{
 			Enums: map[string]EnumTypeDecl{
-				"Priority": {Values: []string{"low"}},
+				"Priority": {Values: []string{"low"}, Default: "low"},
 			},
 		},
 		FlowTree: FlowTree{
@@ -444,7 +444,7 @@ func TestEventSchemaForFlowEvent_UsesDeclaringFlowTypeCatalogForOverride(t *test
 		flowTypes: map[string]TypeCatalogDocument{
 			"review": {
 				Enums: map[string]EnumTypeDecl{
-					"Priority": {Values: []string{"urgent"}},
+					"Priority": {Values: []string{"urgent"}, Default: "urgent"},
 				},
 			},
 		},

@@ -1184,7 +1184,8 @@ type ScalarTypeDecl struct {
 }
 
 type EnumTypeDecl struct {
-	Values []string `yaml:"-"`
+	Values  []string `yaml:"values"`
+	Default string   `yaml:"default"`
 }
 
 type NamedTypeDecl struct {

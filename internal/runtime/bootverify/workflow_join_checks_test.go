@@ -85,7 +85,7 @@ func TestRun_ValidatesStagedJoinContract(t *testing.T) {
 			h.Join.Remaining = runtimecontracts.JoinRemainingIgnore
 		}, wantError: "no matching overload"},
 		{name: "custom completion preserves enum result", mutate: func(h *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
-			bundle.RootTypes = runtimecontracts.TypeCatalogDocument{Enums: map[string]runtimecontracts.EnumTypeDecl{"Decision": {Values: []string{"accept", "reject"}}}}
+			bundle.RootTypes = runtimecontracts.TypeCatalogDocument{Enums: map[string]runtimecontracts.EnumTypeDecl{"Decision": {Values: []string{"accept", "reject"}, Default: "accept"}}}
 			event := bundle.Events["item.completed"]
 			event.Payload.Properties["result"] = runtimecontracts.EventFieldSpec{Type: "Decision"}
 			bundle.Events["item.completed"] = event
