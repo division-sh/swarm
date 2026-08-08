@@ -3,7 +3,6 @@ package bootverify
 import (
 	"fmt"
 	"reflect"
-	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -180,13 +179,12 @@ func handlerActionFinding(nodeID, eventContext, message string) Finding {
 // and the message names the declared evidence targets in the same flow so the
 // author sees what the flow already writes.
 func recordEvidenceMissingTargetMessage(c *checkerContext, nodeID string) string {
-	flowID := nodeFlowID(c.source, nodeID)
-	declared := c.declaredEvidenceTargetsForFlow(flowID)
-	flow := defaultFlowLabel(flowID)
-	if len(declared) == 0 {
-		return fmt.Sprintf("record_evidence is missing evidence_target; declared evidence targets in flow %s: none", flow)
+	declared := c.declaredEvidenceTargetsForFlow(nodeFlowID(c.source, nodeID))
+	targets := "none"
+	if len(declared) > 0 {
+		targets = strings.Join(declared, ", ")
 	}
-	return fmt.Sprintf("record_evidence is missing evidence_target; declared evidence targets in flow %s: %s", flow, strings.Join(declared, ", "))
+	return fmt.Sprintf("record_evidence is missing evidence_target; declared evidence targets in flow %s: %s", defaultFlowLabel(nodeFlowID(c.source, nodeID)), targets)
 }
 
 // declaredEvidenceTargetsForFlow returns the sorted set of evidence_target
@@ -215,12 +213,7 @@ func (c *checkerContext) declaredEvidenceTargetsForFlow(flowID string) []string 
 			}
 		}
 	}
-	out := make([]string, 0, len(declared))
-	for target := range declared {
-		out = append(out, target)
-	}
-	sort.Strings(out)
-	return out
+	return sortedSetKeys(declared)
 }
 
 func supportedWorkflowRuntimeExecutorIDs(source semanticview.Source) map[string]struct{} {
