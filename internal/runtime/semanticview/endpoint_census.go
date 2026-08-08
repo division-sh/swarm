@@ -543,6 +543,15 @@ func (c AuthoredEventEndpointCensus) LegacyQualifiedSubscriptions() []LegacyQual
 		if !strings.Contains(authored, "/") {
 			continue
 		}
+		if strings.Contains(authored, "://") {
+			legacy := LegacyQualifiedSubscription{
+				Consumer: consumer,
+				Event:    consumer.Event,
+			}
+			legacy.ID = legacyQualifiedSubscriptionID(legacy)
+			out = append(out, legacy)
+			continue
+		}
 		consumerPath := eventidentity.Normalize(c.source.FlowPath(consumer.FlowID))
 		candidates := []string{authored}
 		if consumerPath != "" && !strings.HasPrefix(authored, consumerPath+"/") {

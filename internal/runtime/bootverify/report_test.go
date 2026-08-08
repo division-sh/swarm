@@ -4647,47 +4647,51 @@ func TestRun_DoesNotWarnForFlowOwnedAgentEmissionsDeclaredAsFlowOutputs(t *testi
 }
 
 func TestRun_RejectsExactQualifiedNodeAndAgentSubscriptions(t *testing.T) {
-	for _, kind := range []string{"node", "agent"} {
-		t.Run(kind, func(t *testing.T) {
-			child := runtimecontracts.FlowContractView{
-				Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
-				Path:   "child",
-				Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
-			}
-			root := runtimecontracts.FlowContractView{
-				Nodes:    map[string]runtimecontracts.SystemNodeContract{},
-				Children: []runtimecontracts.FlowContractView{child},
-			}
-			bundle := &runtimecontracts.WorkflowContractBundle{
-				FlowTree: runtimecontracts.FlowTree{
-					Root: &root,
-					ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
-				},
-				Nodes:  map[string]runtimecontracts.SystemNodeContract{},
-				Agents: map[string]runtimecontracts.AgentRegistryEntry{},
-			}
-			switch kind {
-			case "node":
-				listener := runtimecontracts.SystemNodeContract{
-					ID:               "listener",
-					SubscribesTo:     []string{"child/task.done"},
-					EventHandlers:    map[string]runtimecontracts.SystemNodeEventHandler{"child/task.done": {}},
-					ProducesDeclared: true,
-				}
-				bundle.Nodes["listener"] = listener
-				bundle.FlowTree.Root.Nodes["listener"] = listener
-			case "agent":
-				bundle.Agents["retired-agent"] = runtimecontracts.AgentRegistryEntry{ID: "retired-agent", Subscriptions: []string{"child/task.done"}}
-			}
+	for _, authored := range []string{"child/task.done", "myapp://child/task.done"} {
+		t.Run(authored, func(t *testing.T) {
+			for _, kind := range []string{"node", "agent"} {
+				t.Run(kind, func(t *testing.T) {
+					child := runtimecontracts.FlowContractView{
+						Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+						Path:   "child",
+						Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
+					}
+					root := runtimecontracts.FlowContractView{
+						Nodes:    map[string]runtimecontracts.SystemNodeContract{},
+						Children: []runtimecontracts.FlowContractView{child},
+					}
+					bundle := &runtimecontracts.WorkflowContractBundle{
+						FlowTree: runtimecontracts.FlowTree{
+							Root: &root,
+							ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
+						},
+						Nodes:  map[string]runtimecontracts.SystemNodeContract{},
+						Agents: map[string]runtimecontracts.AgentRegistryEntry{},
+					}
+					switch kind {
+					case "node":
+						listener := runtimecontracts.SystemNodeContract{
+							ID:               "listener",
+							SubscribesTo:     []string{authored},
+							EventHandlers:    map[string]runtimecontracts.SystemNodeEventHandler{authored: {}},
+							ProducesDeclared: true,
+						}
+						bundle.Nodes["listener"] = listener
+						bundle.FlowTree.Root.Nodes["listener"] = listener
+					case "agent":
+						bundle.Agents["retired-agent"] = runtimecontracts.AgentRegistryEntry{ID: "retired-agent", Subscriptions: []string{authored}}
+					}
 
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-			if !reportContains(report.HardInvalidities(), "legacy_qualified_subscription", "child/task.done") {
-				t.Fatalf("hard invalidities = %#v, want exact qualified %s rejection", report.HardInvalidities(), kind)
-			}
-			for _, finding := range report.HardInvalidities() {
-				if finding.CheckID == "legacy_qualified_subscription" && (!strings.Contains(finding.Remediation, "package.yaml connect") || !strings.Contains(finding.Remediation, "receiver-local")) {
-					t.Fatalf("teaching remediation = %q, want connect plus local subscription", finding.Remediation)
-				}
+					report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+					if !reportContains(report.HardInvalidities(), "legacy_qualified_subscription", authored) {
+						t.Fatalf("hard invalidities = %#v, want exact qualified %s rejection", report.HardInvalidities(), kind)
+					}
+					for _, finding := range report.HardInvalidities() {
+						if finding.CheckID == "legacy_qualified_subscription" && (!strings.Contains(finding.Remediation, "package.yaml connect") || !strings.Contains(finding.Remediation, "receiver-local")) {
+							t.Fatalf("teaching remediation = %q, want connect plus local subscription", finding.Remediation)
+						}
+					}
+				})
 			}
 		})
 	}
