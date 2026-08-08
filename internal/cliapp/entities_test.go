@@ -548,6 +548,21 @@ func TestEntityCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 			wantStderr: "open loop cannot have a close reason",
 		},
 		{
+			name: "view loop activation with unknown property exits three",
+			args: []string{"entity", "view", "entity-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validEntityFullResult("entity-1")
+				result["loops"] = []map[string]any{
+					{"id": "loop-a", "revision_id": "rev-9", "attempt": 1, "max_attempts": 3, "current_stage": "collecting", "status": "open", "bogus": "extra"},
+				}
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "unknown field",
+		},
+		{
 			name: "aggregate unknown rpc exits three",
 			args: []string{"entity", "aggregate"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
@@ -916,6 +931,21 @@ func TestEntityListJSONPreservesFullMachineShape(t *testing.T) {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("entity list --json missing %q:\n%s", want, stdout.String())
 		}
+	}
+}
+
+func TestCLIRenderOneLineLabelKeepsDistinguishingSuffix(t *testing.T) {
+	shared := strings.Repeat("x", 190)
+	a := cliRenderOneLineLabel(shared + "alpha")
+	b := cliRenderOneLineLabel(shared + "beta")
+	if a == b {
+		t.Fatalf("labels sharing a long prefix must stay distinguishable:\nA=%s\nB=%s", a, b)
+	}
+	if !strings.Contains(a, "alpha") || !strings.Contains(b, "beta") {
+		t.Fatalf("truncated labels should retain their distinguishing suffix:\nA=%s\nB=%s", a, b)
+	}
+	if strings.Contains(a, "\n") || strings.Contains(a, "\u2028") {
+		t.Fatalf("label sanitization leaked a line-breaking character:\n%q", a)
 	}
 }
 

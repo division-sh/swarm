@@ -438,6 +438,23 @@ func cliReplaceLineBreakingRune(r rune) rune {
 	return r
 }
 
+// cliRenderOneLineLabel sanitizes a row label and, when it exceeds the one-line
+// ceiling, retains a distinguishing suffix so two long labels sharing a common
+// prefix never render as identical rows.
+func cliRenderOneLineLabel(value string) string {
+	value = strings.Map(cliReplaceLineBreakingRune, strings.TrimSpace(value))
+	runes := []rune(value)
+	if len(runes) <= cliOneLineMaxRunes {
+		return value
+	}
+	const retainedSuffixRunes = 12
+	kept := cliOneLineMaxRunes - retainedSuffixRunes - 1
+	if kept < 1 {
+		kept = 1
+	}
+	return string(runes[:kept]) + "…" + string(runes[len(runes)-retainedSuffixRunes:])
+}
+
 func renderCLIOutput(out, errOut io.Writer, opts cliOutputOptions, value any, text cliTextRenderer, quiet cliQuietRenderer) error {
 	if err := opts.validate(); err != nil {
 		return returnCLIValidationError(errOut, err)

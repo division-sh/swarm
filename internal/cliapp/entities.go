@@ -129,14 +129,17 @@ type entityLoopActivation struct {
 
 // UnmarshalJSON preserves whether close_reason was present (even as null) so a
 // schema-invalid open loop carrying a present close reason fails closed instead
-// of being normalized into an omitted property by --json.
+// of being normalized into an omitted property by --json, and rejects unknown
+// properties since BoundedLoopActivation is additionalProperties: false.
 func (l *entityLoopActivation) UnmarshalJSON(data []byte) error {
 	type entityLoopActivationAlias entityLoopActivation
 	var shadow struct {
 		entityLoopActivationAlias
 		CloseReason json.RawMessage `json:"close_reason"`
 	}
-	if err := json.Unmarshal(data, &shadow); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&shadow); err != nil {
 		return err
 	}
 	*l = entityLoopActivation(shadow.entityLoopActivationAlias)
@@ -728,7 +731,7 @@ func writeEntityLoopSection(out io.Writer, loops []entityLoopActivation) {
 			summary += " · " + loop.CloseReason
 		}
 		summary += " · " + loop.CurrentStage
-		rows = append(rows, cliLabeledDetailRow{Label: entityOneLine(loop.ID), Value: cliRenderOneLineValue(summary)})
+		rows = append(rows, cliLabeledDetailRow{Label: cliRenderOneLineLabel(loop.ID), Value: cliRenderOneLineValue(summary)})
 	}
 	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Loops", Rows: rows})
 }
@@ -792,7 +795,7 @@ func entityFieldRows(fields map[string]any, include func(string) bool) []cliLabe
 	sort.Strings(keys)
 	rows := make([]cliLabeledDetailRow, 0, len(keys))
 	for _, key := range keys {
-		rows = append(rows, cliLabeledDetailRow{Label: entityOneLine(key), Value: entityFieldValue(fields[key])})
+		rows = append(rows, cliLabeledDetailRow{Label: cliRenderOneLineLabel(key), Value: entityFieldValue(fields[key])})
 	}
 	return rows
 }
@@ -836,7 +839,7 @@ func writeEntityGatesSection(out io.Writer, gates map[string]bool) {
 	sort.Strings(keys)
 	rows := make([]cliLabeledDetailRow, 0, len(keys))
 	for _, key := range keys {
-		rows = append(rows, cliLabeledDetailRow{Label: entityOneLine(key), Value: fmt.Sprintf("%t", gates[key])})
+		rows = append(rows, cliLabeledDetailRow{Label: cliRenderOneLineLabel(key), Value: fmt.Sprintf("%t", gates[key])})
 	}
 	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Gates", Rows: rows})
 }
