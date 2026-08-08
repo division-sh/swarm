@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/division-sh/swarm/internal/userfacing"
@@ -431,7 +432,7 @@ func cliRenderOneLineValue(value string) string {
 }
 
 func cliReplaceLineBreakingRune(r rune) rune {
-	if r < 0x20 {
+	if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
 		return ' '
 	}
 	return r

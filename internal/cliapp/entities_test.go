@@ -580,11 +580,13 @@ func TestEntityViewStatedEmptyStatesAndTruncationAndControlChars(t *testing.T) {
 		}
 		result := validEntityFullResult("entity-1")
 		result["fields"] = map[string]any{
-			"chats":         map[string]any{},
-			"empty":         "   ",
-			"long":          strings.Repeat("x", 300),
-			"broken":        "line one\nline two\tand a control \x01 byte",
-			"fan_out_count": 3,
+			"chats":                         map[string]any{},
+			"empty":                         "   ",
+			"long":                          strings.Repeat("x", 300),
+			"broken":                        "line one\nline two\tand a control \x01 byte",
+			"unicode_separators":            "a\u2028b\u2029c\u0085d",
+			"fan_out_count":                 3,
+			"last_data_accumulation_source": "scan.completed",
 		}
 		result["gates"] = map[string]any{"blocked": false, "paused": false}
 		writeJSONRPCResult(t, w, captured.ID, result)
@@ -615,14 +617,27 @@ func TestEntityViewStatedEmptyStatesAndTruncationAndControlChars(t *testing.T) {
 	if !strings.Contains(emptyLine, "none") {
 		t.Fatalf("empty string field should render as none:\n%s", stdout.String())
 	}
-	if strings.Contains(stdout.String(), "fan_out_count") {
-		t.Fatalf("platform bookkeeping key fan_out_count leaked into default Fields:\n%s", stdout.String())
+	if strings.Contains(stdout.String(), "fan_out_count") || strings.Contains(stdout.String(), "last_data_accumulation_source") {
+		t.Fatalf("platform bookkeeping keys leaked into default Fields:\n%s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "…") {
 		t.Fatalf("long value missing truncation marker:\n%s", stdout.String())
 	}
 	if strings.Contains(stdout.String(), "\nline two") || strings.Contains(stdout.String(), "\x01") {
 		t.Fatalf("control characters leaked into output line discipline:\n%q", stdout.String())
+	}
+	unicodeLine := ""
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if strings.Contains(line, "unicode_separators") {
+			unicodeLine = line
+			break
+		}
+	}
+	if !strings.Contains(unicodeLine, "a b c d") {
+		t.Fatalf("unicode line/paragraph separators not collapsed to spaces:\n%q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "\u2028") || strings.Contains(stdout.String(), "\u2029") || strings.Contains(stdout.String(), "\u0085") {
+		t.Fatalf("unicode line/paragraph separators leaked into output:\n%q", stdout.String())
 	}
 }
 
