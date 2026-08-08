@@ -649,8 +649,8 @@ func TestEntityViewStatedEmptyStatesAndTruncationAndControlChars(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "Gates  none") {
-		t.Fatalf("all-false gates should render as stated none:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "blocked") || !strings.Contains(stdout.String(), "false") || !strings.Contains(stdout.String(), "paused") {
+		t.Fatalf("populated all-false gates should render their names and values, not collapse to none:\n%s", stdout.String())
 	}
 	chatsLine := ""
 	emptyLine := ""
@@ -713,6 +713,60 @@ func TestEntityViewQuietRendersEntityID(t *testing.T) {
 	}
 	if strings.TrimSpace(stdout.String()) != "entity-1" {
 		t.Fatalf("quiet stdout = %q, want entity-1", stdout.String())
+	}
+}
+
+func TestEntityViewEmptyGatesRenderNone(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		result := validEntityFullResult("entity-1")
+		result["gates"] = map[string]any{}
+		writeJSONRPCResult(t, w, captured.ID, result)
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Gates  none") {
+		t.Fatalf("empty gates map should render as stated none:\n%s", stdout.String())
+	}
+}
+
+func TestEntityListVerboseShowsFullSummaryColumns(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		entity := validEntitySummary("entity-1")
+		entity["current_state"] = "collecting\nmore"
+		writeJSONRPCResult(t, w, captured.ID, map[string]any{"entities": []map[string]any{entity}})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "list", "--run-id", "run-1", "--verbose"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"REVISION", "CREATED", "SLUG", "NAME", "vertical-1", "Vertical One"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("verbose list missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.Contains(stdout.String(), "\nmore") {
+		t.Fatalf("control character in list cell broke the table line discipline:\n%q", stdout.String())
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 }
 

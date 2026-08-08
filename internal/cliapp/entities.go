@@ -574,21 +574,38 @@ func writeEntityListResult(out io.Writer, result entityListResult, opts entityLi
 		cliTableColumn{Header: "TYPE"},
 		cliTableColumn{Header: "STATE"},
 		cliTableColumn{Header: "FLOW", IdentifierFamily: cliIdentifierFamilyFlowInstance},
-		cliTableColumn{Header: "UPDATED"},
 	)
+	if opts.verbose {
+		columns = append(columns,
+			cliTableColumn{Header: "REVISION"},
+			cliTableColumn{Header: "CREATED"},
+		)
+	}
+	columns = append(columns, cliTableColumn{Header: "UPDATED"})
+	if opts.verbose {
+		columns = append(columns,
+			cliTableColumn{Header: "SLUG"},
+			cliTableColumn{Header: "NAME"},
+		)
+	}
 	rows := make([][]string, 0, len(result.Entities))
 	for _, entity := range result.Entities {
-		updated := entityListTimestamp(cliRelativeTimeNow(), entity.UpdatedAt, opts.verbose)
 		row := []string{entity.EntityID}
 		if !opts.runScoped {
 			row = append(row, entity.RunID)
 		}
 		row = append(row,
-			entityDash(entity.EntityType),
-			entityDash(entity.CurrentState),
-			entityShortFlow(entity.FlowInstance),
-			updated,
+			entityDash(entityOneLine(entity.EntityType)),
+			entityDash(entityOneLine(entity.CurrentState)),
+			entityShortFlow(entityOneLine(entity.FlowInstance)),
 		)
+		if opts.verbose {
+			row = append(row, fmt.Sprintf("%d", entity.Revision), entity.CreatedAt)
+		}
+		row = append(row, entityListTimestamp(cliRelativeTimeNow(), entity.UpdatedAt, opts.verbose))
+		if opts.verbose {
+			row = append(row, entityDash(entityOneLine(entity.Slug)), entityDash(entityOneLine(entity.Name)))
+		}
 		rows = append(rows, row)
 	}
 	footers := []string{}
@@ -750,17 +767,13 @@ func entityFieldValue(value any) string {
 }
 
 func writeEntityGatesSection(out io.Writer, gates map[string]bool) {
-	keys := make([]string, 0, len(gates))
-	anyTrue := false
-	for key, value := range gates {
-		keys = append(keys, key)
-		if value {
-			anyTrue = true
-		}
-	}
-	if len(keys) == 0 || !anyTrue {
+	if len(gates) == 0 {
 		writeCLITitle(out, "Gates  none")
 		return
+	}
+	keys := make([]string, 0, len(gates))
+	for key := range gates {
+		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	rows := make([]cliLabeledDetailRow, 0, len(keys))
