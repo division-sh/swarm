@@ -1044,6 +1044,9 @@ func (e *EntityContract) UnmarshalYAML(node *yaml.Node) error {
 		if key == "state_field" {
 			return fmt.Errorf("RETIRED: entity field %q is retired; state authority is implicit from schema.yaml", key)
 		}
+		if IsEntityFieldBookkeepingKey(key) {
+			return fmt.Errorf("RESERVED: entity field %q is reserved for platform-injected bookkeeping and cannot be declared as workflow content", key)
+		}
 		var field EntityFieldDecl
 		if err := value.Decode(&field); err != nil {
 			return err

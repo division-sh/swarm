@@ -498,8 +498,12 @@ func validateEntityLoopActivation(prefix string, loop entityLoopActivation) erro
 	if loop.Status == "open" && loop.CloseReason != "" {
 		return fmt.Errorf("malformed %s: open loop cannot have close reason %q", prefix, loop.CloseReason)
 	}
-	if loop.Status == "closed" && strings.TrimSpace(loop.CloseReason) == "" {
-		return fmt.Errorf("malformed %s: closed loop requires a close reason", prefix)
+	if loop.Status == "closed" {
+		switch strings.TrimSpace(loop.CloseReason) {
+		case "completed", "escaped":
+		default:
+			return fmt.Errorf("malformed %s: close reason %q is invalid; must be completed or escaped", prefix, loop.CloseReason)
+		}
 	}
 	return nil
 }

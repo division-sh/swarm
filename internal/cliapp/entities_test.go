@@ -490,6 +490,21 @@ func TestEntityCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 			wantStderr: "attempt bounds are invalid",
 		},
 		{
+			name: "view unsupported loop close reason exits three",
+			args: []string{"entity", "view", "entity-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validEntityFullResult("entity-1")
+				result["loops"] = []map[string]any{
+					{"id": "loop-a", "revision_id": "rev-9", "attempt": 1, "max_attempts": 3, "current_stage": "collecting", "status": "closed", "close_reason": "timed_out"},
+				}
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "close reason",
+		},
+		{
 			name: "aggregate unknown rpc exits three",
 			args: []string{"entity", "aggregate"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
@@ -605,6 +620,7 @@ func TestEntityViewStatedEmptyStatesAndTruncationAndControlChars(t *testing.T) {
 			"unicode_separators":            "a\u2028b\u2029c\u0085d",
 			"fan_out_count":                 3,
 			"last_data_accumulation_source": "scan.completed",
+			"last_source_event":             "event-9",
 		}
 		result["gates"] = map[string]any{"blocked": false, "paused": false}
 		writeJSONRPCResult(t, w, captured.ID, result)
@@ -635,7 +651,7 @@ func TestEntityViewStatedEmptyStatesAndTruncationAndControlChars(t *testing.T) {
 	if !strings.Contains(emptyLine, "none") {
 		t.Fatalf("empty string field should render as none:\n%s", stdout.String())
 	}
-	if strings.Contains(stdout.String(), "fan_out_count") || strings.Contains(stdout.String(), "last_data_accumulation_source") {
+	if strings.Contains(stdout.String(), "fan_out_count") || strings.Contains(stdout.String(), "last_data_accumulation_source") || strings.Contains(stdout.String(), "last_source_event") {
 		t.Fatalf("platform bookkeeping keys leaked into default Fields:\n%s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "…") {

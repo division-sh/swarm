@@ -16,6 +16,11 @@ package contracts
 //   - last_data_accumulation_event:              internal/runtime/engine/executor.go
 //   - last_data_accumulation_source:             internal/runtime/engine/helpers.go
 //   - fan_out_count:                             internal/runtime/engine/executor.go
+//   - last_source_event:                         internal/runtime/bus/template_instance_lifecycle.go
+//
+// Entity field declaration validation rejects these names as reserved
+// (workflow_contract_yaml_wave1.go), so a field present under one of these
+// keys is always platform-injected bookkeeping, never workflow content.
 //
 // `last_word` is CONTENT: no runtime machinery writes it; flows declare it.
 // This list must stay adjacent to the injection sites; a platform-injected key
@@ -29,6 +34,7 @@ var EntityFieldBookkeepingKeys = []string{
 	"last_data_accumulation_event",
 	"last_data_accumulation_source",
 	"fan_out_count",
+	"last_source_event",
 }
 
 // IsEntityFieldBookkeepingKey reports whether key is in EntityFieldBookkeepingKeys.

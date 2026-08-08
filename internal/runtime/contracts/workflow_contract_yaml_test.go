@@ -4050,3 +4050,15 @@ func TestEnumTypeDeclValidate_SharedInvariantNondeterministicFree(t *testing.T) 
 		t.Fatalf("multi-enum validation error = %v, want sorted deterministic first error naming zebra", err)
 	}
 }
+
+func TestEntityContractDecode_RejectsReservedBookkeepingFieldNames(t *testing.T) {
+	for _, name := range EntityFieldBookkeepingKeys {
+		t.Run(name, func(t *testing.T) {
+			var contract EntityContract
+			err := yaml.Unmarshal([]byte(name+": {type: text}\n"), &contract)
+			if err == nil || !strings.Contains(err.Error(), "RESERVED") || !strings.Contains(err.Error(), name) {
+				t.Fatalf("yaml.Unmarshal error = %v, want RESERVED rejection of %q", err, name)
+			}
+		})
+	}
+}
