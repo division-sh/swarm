@@ -21,10 +21,10 @@ func TestWorkflowNodeDeliveryRouteInstallsReplyContext(t *testing.T) {
 	}
 }
 
-func TestAppendEmitIntentsAsEventsPreservesIntentDeliveryContext(t *testing.T) {
+func TestPipelineEmissionPlanPreservesIntentDeliveryContext(t *testing.T) {
 	want := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:deferred-node-emit"}}
-	collector := []events.Event{}
-	appendEmitIntentsAsEvents(&collector, []runtimeengine.EmitIntent{{
+	plan := &pipelineEmissionPlan{}
+	plan.appendIntents([]runtimeengine.EmitIntent{{
 		Event: eventtest.PersistedProjection(
 			"event-1",
 			events.EventType("provider.replied"),
@@ -39,6 +39,7 @@ func TestAppendEmitIntentsAsEventsPreservesIntentDeliveryContext(t *testing.T) {
 		),
 		Context: want,
 	}})
+	collector := plan.immutableEvents()
 	if len(collector) != 1 {
 		t.Fatalf("collected events = %d, want 1", len(collector))
 	}

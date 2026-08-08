@@ -233,6 +233,10 @@ type ExecutionRequest struct {
 	ChainDepth                  int
 	MaxDepth                    int
 	Preview                     bool
+	// DeferCommittedDispatch returns committed emission and activity evidence to
+	// the caller instead of dispatching it. Intercepting runtimes use this to
+	// compose one immutable evaluation result without context-carried collectors.
+	DeferCommittedDispatch bool
 }
 
 func (r ExecutionRequest) StateAddress() StateAddress {

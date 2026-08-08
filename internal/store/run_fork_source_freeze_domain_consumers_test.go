@@ -116,9 +116,14 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 
 			requireForkedSourceRefusal(t, "record dead letter", surface.RecordDeadLetter(ctx, runtimedeadletters.Record{
 				OriginalEventID: eventID,
+				OriginalEvent:   "source.work",
+				OriginalPayload: []byte(`{}`),
+				EntityID:        entityID,
+				FlowInstance:    "source/flow",
 				Failure:         testFailureEnvelope(runtimefailures.ClassRetryExhausted, "frozen_source", nil),
 				RetryCount:      1,
 				HandlerNode:     "freeze-node",
+				Timestamp:       fixture.forkedAt.UTC().Format(time.RFC3339Nano),
 			}))
 
 			var entityRevision, mutationRows, spendRows, deadLetterRows int

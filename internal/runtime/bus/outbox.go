@@ -11,7 +11,6 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
 
@@ -211,9 +210,6 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 	}
 	intents = normalized
 	if len(intents) == 0 {
-		return nil
-	}
-	if runtimepipeline.CollectPipelineEmitIntents(ctx, intents) {
 		return nil
 	}
 	for _, intent := range intents {

@@ -14,6 +14,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -51,19 +52,19 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 		},
 	}
 	cases := []struct {
-		name                 string
-		readiness            string
-		readinessOnWrongRun  bool
-		foreignBundle        bool
-		wantDescriptorSource bool
-		wantError            string
+		name                string
+		readiness           string
+		readinessOnWrongRun bool
+		foreignBundle       bool
+		wantListError       string
+		wantError           string
 	}{
-		{name: "no readiness row", wantError: "missing exact semantic source"},
-		{name: "wrong-run readiness row", readiness: `{"workflow_version":"1.0.0"}`, readinessOnWrongRun: true, wantError: "missing exact semantic source"},
-		{name: "missing readiness version", readiness: `{}`, wantError: "missing exact semantic source"},
-		{name: "malformed readiness version", readiness: `{"workflow_version":{"unexpected":true}}`, wantDescriptorSource: true, wantError: "semantic source does not match"},
-		{name: "exact readiness owner", readiness: `{"workflow_version":"1.0.0"}`, wantDescriptorSource: true},
-		{name: "foreign run source", readiness: `{"workflow_version":"1.0.0"}`, foreignBundle: true, wantDescriptorSource: true, wantError: "semantic source does not match"},
+		{name: "no readiness row", wantListError: "missing exact readiness plan"},
+		{name: "wrong-run readiness row", readiness: "exact", readinessOnWrongRun: true, wantListError: "missing exact readiness plan"},
+		{name: "incomplete readiness plan", readiness: `{}`, wantListError: "validate"},
+		{name: "malformed readiness plan", readiness: `{"workflow_version":{"unexpected":true}}`, wantListError: "decode"},
+		{name: "exact readiness owner", readiness: "exact"},
+		{name: "foreign run source", readiness: "exact", foreignBundle: true, wantListError: "readiness source does not match persisted run"},
 	}
 
 	for _, backend := range backends {
@@ -74,7 +75,8 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 					runID := uuid.NewString()
 					ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 					source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
-					bundleHash, bundleSource := mustExternalStoreTestBundleSourceFact().StorageValues()
+					planBundleHash, bundleSource := mustExternalStoreTestBundleSourceFact().StorageValues()
+					bundleHash := planBundleHash
 					if tc.foreignBundle {
 						bundleHash = "bundle-v1:sha256:" + strings.Repeat("f", 64)
 					}
@@ -88,11 +90,18 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 						wrongRunID,
 						bundleHash,
 						bundleSource,
+						planBundleHash,
 						tc.readiness,
 						tc.readinessOnWrongRun,
 					)
 
 					descriptors, err := selected.ListActiveFlowInstanceDescriptors(ctx)
+					if tc.wantListError != "" {
+						if err == nil || !strings.Contains(err.Error(), tc.wantListError) {
+							t.Fatalf("ListActiveFlowInstanceDescriptors error = %v, want %q", err, tc.wantListError)
+						}
+						return
+					}
 					if err != nil {
 						t.Fatalf("ListActiveFlowInstanceDescriptors: %v", err)
 					}
@@ -106,8 +115,8 @@ func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenance
 					if testedDescriptor == nil {
 						t.Fatalf("active descriptors = %#v, want account/existing", descriptors)
 					}
-					if got := testedDescriptor.HasSemanticSource(); got != tc.wantDescriptorSource {
-						t.Fatalf("descriptor semantic source = %#v, HasSemanticSource=%t want %t", *testedDescriptor, got, tc.wantDescriptorSource)
+					if !testedDescriptor.HasSemanticSource() {
+						t.Fatalf("descriptor semantic source = %#v, want exact source", *testedDescriptor)
 					}
 
 					identity := runtimeflowidentity.DeriveRoute(notifyallchildren.ChildFlowID, "current")
@@ -216,6 +225,7 @@ func seedFlowInstanceDescriptorAuthorityCase(
 	wrongRunID string,
 	bundleHash string,
 	bundleSource string,
+	planBundleHash string,
 	readiness string,
 	readinessOnWrongRun bool,
 ) {
@@ -225,6 +235,10 @@ func seedFlowInstanceDescriptorAuthorityCase(
 	const config = `{"workflow_version":"1.0.0"}`
 	entityID := uuid.NewString()
 	stagedEntityID := uuid.NewString()
+	stagedReadiness := exactFlowInstanceDescriptorReadinessJSON(t, runID, planBundleHash, bundleSource, notifyallchildren.ChildFlowID, stagedInstancePath, stagedEntityID)
+	if readiness == "exact" {
+		readiness = exactFlowInstanceDescriptorReadinessJSON(t, runID, planBundleHash, bundleSource, notifyallchildren.ChildFlowID, instancePath, entityID)
+	}
 	if sqlite {
 		now := time.Now().UTC()
 		runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
@@ -251,8 +265,8 @@ func seedFlowInstanceDescriptorAuthorityCase(
 		}
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
-			VALUES (?, ?, '{"workflow_version":"1.0.0"}', ?, ?)
-		`, runID, stagedInstancePath, now, now); err != nil {
+				VALUES (?, ?, ?, ?, ?)
+			`, runID, stagedInstancePath, stagedReadiness, now, now); err != nil {
 			t.Fatalf("seed sqlite staged-owner readiness: %v", err)
 		}
 		if readiness != "" {
@@ -294,8 +308,8 @@ func seedFlowInstanceDescriptorAuthorityCase(
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
-		VALUES ($1::uuid, $2, '{"workflow_version":"1.0.0"}'::jsonb, now(), now())
-	`, runID, stagedInstancePath); err != nil {
+			VALUES ($1::uuid, $2, $3::jsonb, now(), now())
+		`, runID, stagedInstancePath, stagedReadiness); err != nil {
 		t.Fatalf("seed postgres staged-owner readiness: %v", err)
 	}
 	if readiness != "" {
@@ -310,4 +324,32 @@ func seedFlowInstanceDescriptorAuthorityCase(
 			t.Fatalf("seed postgres readiness: %v", err)
 		}
 	}
+}
+
+func exactFlowInstanceDescriptorReadinessJSON(
+	t *testing.T,
+	runID string,
+	bundleHash string,
+	bundleSource string,
+	templateID string,
+	instancePath string,
+	entityID string,
+) string {
+	t.Helper()
+	plan, err := (runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+		Identity: runtimeflowidentity.Instance{
+			TemplateID: templateID, ScopeKey: templateID,
+			InstanceID: runtimeflowidentity.LogicalInstanceID(instancePath), InstancePath: instancePath,
+			EntityID: entityID, HasStoredPath: true,
+		},
+		RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource, WorkflowVersion: "1.0.0",
+	}).Normalized()
+	if err != nil {
+		t.Fatalf("normalize exact descriptor readiness: %v", err)
+	}
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal exact descriptor readiness: %v", err)
+	}
+	return string(raw)
 }

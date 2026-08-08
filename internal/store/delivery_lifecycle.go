@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -367,6 +368,15 @@ func deliveryDeadLetterRecord(record eventrecord.Record, snapshot runtimedeliver
 	if snapshot.SettledAt.IsZero() {
 		return runtimedeadletters.Record{}, fmt.Errorf("terminal delivery %s has no settlement timestamp", snapshot.DeliveryID)
 	}
+	flowInstance := strings.Trim(strings.TrimSpace(record.FlowInstance), "/")
+	if flowInstance == "" {
+		flowInstance = strings.Trim(strings.TrimSpace(snapshot.Route.Normalized().Target.FlowInstance), "/")
+	}
+	if flowInstance == "" {
+		// An event and delivery route with no flow coordinate is the declared
+		// runtime-root diagnostic scope; storage never supplies this fact.
+		flowInstance = "runtime"
+	}
 	return runtimedeadletters.Record{
 		OriginalEventID: record.EventID,
 		DeliveryID:      snapshot.DeliveryID,
@@ -374,7 +384,7 @@ func deliveryDeadLetterRecord(record eventrecord.Record, snapshot runtimedeliver
 		OriginalEvent:   record.EventName,
 		OriginalPayload: append([]byte(nil), record.Payload...),
 		EntityID:        record.EntityID,
-		FlowInstance:    record.FlowInstance,
+		FlowInstance:    flowInstance,
 		Failure:         *failure,
 		RetryCount:      snapshot.RetryCount,
 		ChainDepth:      record.ChainDepth,

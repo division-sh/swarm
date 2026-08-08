@@ -16,6 +16,11 @@ import (
 )
 
 func (s *PostgresStore) RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error {
+	var err error
+	rec, _, err = normalizeDeadLetterRecord(rec)
+	if err != nil {
+		return err
+	}
 	return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		return s.recordDeadLetterTx(txctx, tx, story, rec, true)
 	})
@@ -23,6 +28,11 @@ func (s *PostgresStore) RecordDeadLetter(ctx context.Context, rec runtimedeadlet
 
 func (s *PostgresStore) recordDeadLetterTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, rec runtimedeadletters.Record, requireActive bool) error {
 	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	var err error
+	rec, _, err = normalizeDeadLetterRecord(rec)
+	if err != nil {
 		return err
 	}
 	if requireActive {
@@ -52,50 +62,9 @@ func insertPostgresDeadLetterRecord(ctx context.Context, tx *sql.Tx, rec runtime
 	if tx == nil {
 		return runtimedeadletters.InsertResult{}, fmt.Errorf("dead letter transaction is required")
 	}
-	rec.OriginalEventID = strings.TrimSpace(rec.OriginalEventID)
-	rec.DeliveryID = strings.TrimSpace(rec.DeliveryID)
-	rec.OriginalEvent = strings.TrimSpace(rec.OriginalEvent)
-	rec.EntityID = strings.TrimSpace(rec.EntityID)
-	rec.FlowInstance = strings.TrimSpace(rec.FlowInstance)
-	rec.HandlerNode = strings.TrimSpace(rec.HandlerNode)
-	rec.Timestamp = strings.TrimSpace(rec.Timestamp)
-	if rec.OriginalEventID == "" {
-		return runtimedeadletters.InsertResult{}, fmt.Errorf("dead letter original event id is required")
-	}
-	if _, err := uuid.Parse(rec.OriginalEventID); err != nil {
-		return runtimedeadletters.InsertResult{}, fmt.Errorf("dead letter original event id must be a uuid: %w", err)
-	}
-	if (rec.DeliveryID == "") != (rec.ClaimVersion == 0) {
-		return runtimedeadletters.InsertResult{}, fmt.Errorf("dead letter delivery id and claim version must be supplied together")
-	}
-	if rec.DeliveryID != "" {
-		if _, err := uuid.Parse(rec.DeliveryID); err != nil {
-			return runtimedeadletters.InsertResult{}, fmt.Errorf("dead letter delivery id: %w", err)
-		}
-		if rec.ClaimVersion <= 0 {
-			return runtimedeadletters.InsertResult{}, fmt.Errorf("dead letter claim version must be positive")
-		}
-	}
-	if rec.EntityID != "" {
-		if _, err := uuid.Parse(rec.EntityID); err != nil {
-			rec.EntityID = ""
-		}
-	}
 	failureJSON, err := runtimefailures.MarshalEnvelope(rec.Failure)
 	if err != nil {
 		return runtimedeadletters.InsertResult{}, fmt.Errorf("dead letter failure is invalid: %w", err)
-	}
-	if len(rec.OriginalPayload) == 0 {
-		rec.OriginalPayload = json.RawMessage(`{}`)
-	}
-	if rec.RetryCount < 0 {
-		rec.RetryCount = 0
-	}
-	if rec.ChainDepth < 0 {
-		rec.ChainDepth = 0
-	}
-	if rec.Timestamp == "" {
-		rec.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	deadLetterID := uuid.NewString()
 	result, err := tx.ExecContext(ctx, `
@@ -103,13 +72,10 @@ func insertPostgresDeadLetterRecord(ctx context.Context, tx *sql.Tx, rec runtime
 			dead_letter_id, original_event_id, delivery_id, claim_version, original_event, original_payload, entity_id, flow_instance,
 			failure, retry_count, chain_depth, handler_node, created_at
 		)
-		SELECT
-			$1::uuid, $2::uuid, NULLIF($3, '')::uuid, NULLIF($4, 0),
-			COALESCE(NULLIF($5, ''), COALESCE((SELECT e.event_name FROM events e WHERE e.event_id = $2::uuid), '')),
-			COALESCE(NULLIF($6::jsonb, 'null'::jsonb), COALESCE((SELECT e.payload FROM events e WHERE e.event_id = $2::uuid), '{}'::jsonb)),
-			NULLIF($7, '')::uuid,
-			COALESCE(NULLIF($8, ''), COALESCE((SELECT NULLIF(e.flow_instance, '') FROM events e WHERE e.event_id = $2::uuid), 'runtime')),
-			$9::jsonb, $10, $11, NULLIF($12, ''), COALESCE(NULLIF($13, '')::timestamptz, now())
+			SELECT
+				$1::uuid, $2::uuid, NULLIF($3, '')::uuid, NULLIF($4, 0),
+				$5, $6::jsonb, NULLIF($7, '')::uuid, $8,
+				$9::jsonb, $10, $11, NULLIF($12, ''), $13::timestamptz
 		WHERE NOT EXISTS (
 			SELECT 1 FROM dead_letters dl
 			WHERE (NULLIF($3, '') IS NOT NULL AND dl.delivery_id = NULLIF($3, '')::uuid AND dl.claim_version = NULLIF($4, 0))
@@ -142,6 +108,11 @@ func insertPostgresDeadLetterRecord(ctx context.Context, tx *sql.Tx, rec runtime
 }
 
 func (s *SQLiteRuntimeStore) RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error {
+	var err error
+	rec, _, err = normalizeDeadLetterRecord(rec)
+	if err != nil {
+		return err
+	}
 	return s.runPrivateAuthorActivityMutation(ctx, "sqlite record dead letter", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		return s.recordDeadLetterTx(txctx, tx, story, rec, true)
 	})
@@ -154,6 +125,11 @@ func (s *SQLiteRuntimeStore) recordDeadLetterTx(ctx context.Context, tx *sql.Tx,
 	if tx == nil {
 		return fmt.Errorf("dead letter transaction is required")
 	}
+	var err error
+	rec, _, err = normalizeDeadLetterRecord(rec)
+	if err != nil {
+		return err
+	}
 	if requireActive {
 		if err := requireActiveRunForEvent(ctx, tx, rec.OriginalEventID, false); err != nil {
 			return err
@@ -163,7 +139,7 @@ func (s *SQLiteRuntimeStore) recordDeadLetterTx(ctx context.Context, tx *sql.Tx,
 }
 
 func (s *SQLiteRuntimeStore) insertSQLiteDeadLetterTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, rec runtimedeadletters.Record) error {
-	rec, createdAt, err := normalizeSQLiteDeadLetterRecord(s, rec)
+	rec, createdAt, err := normalizeDeadLetterRecord(rec)
 	if err != nil {
 		return err
 	}
@@ -182,10 +158,10 @@ func (s *SQLiteRuntimeStore) insertSQLiteDeadLetterTx(ctx context.Context, tx *s
 			?,
 			NULLIF(?, ''),
 			NULLIF(?, 0),
-			COALESCE(NULLIF(?, ''), COALESCE((SELECT e.event_name FROM events e WHERE e.event_id = ?), '')),
-			COALESCE(NULLIF(?, 'null'), COALESCE((SELECT e.payload FROM events e WHERE e.event_id = ?), '{}')),
-			?,
-			COALESCE(NULLIF(?, ''), COALESCE((SELECT NULLIF(e.flow_instance, '') FROM events e WHERE e.event_id = ?), 'runtime')),
+				?,
+				?,
+				?,
+				?,
 			?,
 			?,
 			?,
@@ -204,12 +180,9 @@ func (s *SQLiteRuntimeStore) insertSQLiteDeadLetterTx(ctx context.Context, tx *s
 		rec.DeliveryID,
 		rec.ClaimVersion,
 		rec.OriginalEvent,
-		rec.OriginalEventID,
 		string(rec.OriginalPayload),
-		rec.OriginalEventID,
 		sqliteNullUUID(rec.EntityID),
 		rec.FlowInstance,
-		rec.OriginalEventID,
 		mustFailureJSON(rec.Failure),
 		rec.RetryCount,
 		rec.ChainDepth,
@@ -289,20 +262,26 @@ func recordDeadLetterAuthorActivity(ctx context.Context, story runtimeauthoracti
 }
 
 func deadLetterOccurredAt(raw string) time.Time {
-	if parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(raw)); err == nil {
-		return parsed.UTC()
-	}
-	return time.Now().UTC()
+	parsed, _ := time.Parse(time.RFC3339Nano, strings.TrimSpace(raw))
+	return parsed.UTC()
 }
 
-func normalizeSQLiteDeadLetterRecord(s *SQLiteRuntimeStore, rec runtimedeadletters.Record) (runtimedeadletters.Record, time.Time, error) {
-	rec.OriginalEventID = strings.TrimSpace(rec.OriginalEventID)
-	rec.DeliveryID = strings.TrimSpace(rec.DeliveryID)
-	rec.OriginalEvent = strings.TrimSpace(rec.OriginalEvent)
-	rec.EntityID = strings.TrimSpace(rec.EntityID)
-	rec.FlowInstance = strings.TrimSpace(rec.FlowInstance)
-	rec.HandlerNode = strings.TrimSpace(rec.HandlerNode)
-	rec.Timestamp = strings.TrimSpace(rec.Timestamp)
+func normalizeDeadLetterRecord(rec runtimedeadletters.Record) (runtimedeadletters.Record, time.Time, error) {
+	for field, value := range map[string]string{
+		"original event id": rec.OriginalEventID,
+		"delivery id":       rec.DeliveryID,
+		"original event":    rec.OriginalEvent,
+		"entity id":         rec.EntityID,
+		"handler node":      rec.HandlerNode,
+		"timestamp":         rec.Timestamp,
+	} {
+		if value != strings.TrimSpace(value) {
+			return rec, time.Time{}, fmt.Errorf("dead letter %s is not canonical", field)
+		}
+	}
+	if rec.FlowInstance != strings.Trim(strings.TrimSpace(rec.FlowInstance), "/") {
+		return rec, time.Time{}, fmt.Errorf("dead letter flow instance is not canonical")
+	}
 	if rec.OriginalEventID == "" {
 		return rec, time.Time{}, fmt.Errorf("dead letter original event id is required")
 	}
@@ -322,35 +301,38 @@ func normalizeSQLiteDeadLetterRecord(s *SQLiteRuntimeStore, rec runtimedeadlette
 	}
 	if rec.EntityID != "" {
 		if _, err := uuid.Parse(rec.EntityID); err != nil {
-			rec.EntityID = ""
+			return rec, time.Time{}, fmt.Errorf("dead letter entity id must be a uuid: %w", err)
 		}
+	}
+	if rec.OriginalEvent == "" {
+		return rec, time.Time{}, fmt.Errorf("dead letter original event type is required")
+	}
+	if rec.FlowInstance == "" {
+		return rec, time.Time{}, fmt.Errorf("dead letter flow instance is required")
 	}
 	if err := runtimefailures.ValidateEnvelope(rec.Failure); err != nil {
 		return rec, time.Time{}, fmt.Errorf("dead letter failure is invalid: %w", err)
 	}
 	if len(rec.OriginalPayload) == 0 {
-		rec.OriginalPayload = json.RawMessage(`{}`)
+		return rec, time.Time{}, fmt.Errorf("dead letter original payload is required")
 	}
 	if !json.Valid(rec.OriginalPayload) {
 		return rec, time.Time{}, fmt.Errorf("dead letter original payload must be valid json")
 	}
 	if rec.RetryCount < 0 {
-		rec.RetryCount = 0
+		return rec, time.Time{}, fmt.Errorf("dead letter retry count must be non-negative")
 	}
 	if rec.ChainDepth < 0 {
-		rec.ChainDepth = 0
+		return rec, time.Time{}, fmt.Errorf("dead letter chain depth must be non-negative")
 	}
-	createdAt := time.Now().UTC()
-	if s != nil {
-		createdAt = s.now()
+	if rec.Timestamp == "" {
+		return rec, time.Time{}, fmt.Errorf("dead letter timestamp is required")
 	}
-	if rec.Timestamp != "" {
-		parsed, err := time.Parse(time.RFC3339Nano, rec.Timestamp)
-		if err != nil {
-			return rec, time.Time{}, fmt.Errorf("dead letter timestamp must be RFC3339Nano: %w", err)
-		}
-		createdAt = parsed.UTC()
+	createdAt, err := time.Parse(time.RFC3339Nano, rec.Timestamp)
+	if err != nil {
+		return rec, time.Time{}, fmt.Errorf("dead letter timestamp must be RFC3339Nano: %w", err)
 	}
+	createdAt = createdAt.UTC()
 	return rec, createdAt, nil
 }
 

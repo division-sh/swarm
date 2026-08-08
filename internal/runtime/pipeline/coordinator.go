@@ -36,9 +36,6 @@ import (
 	"github.com/google/uuid"
 )
 
-type pipelineEmitCollectorKey struct{}
-type pipelineEmitIntentCollectorKey struct{}
-
 type RunBundleAvailabilityReader interface {
 	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
 }
@@ -457,9 +454,9 @@ func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, 
 	if !handled {
 		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
-	emitted := make([]events.Event, 0, 4)
-	ictx := context.WithValue(ctx, pipelineEmitCollectorKey{}, &emitted)
-	handled, outcome, err := pc.handleEventResult(ictx, evt)
+	emissions := &pipelineEmissionPlan{}
+	handled, outcome, err := pc.handleEventResultWithEmissionPlan(ctx, evt, emissions)
+	emitted := emissions.immutableEvents()
 	if !outcome.ContinueDispatch() {
 		// A non-consuming event-wide policy has no node-delivery authority.
 		// Only an exact node route or a consuming platform policy may settle
@@ -516,10 +513,14 @@ func (pc *PipelineCoordinator) handleEvent(ctx context.Context, evt events.Event
 }
 
 func (pc *PipelineCoordinator) handleEventResult(ctx context.Context, evt events.Event) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
+	return pc.handleEventResultWithEmissionPlan(ctx, evt, nil)
+}
+
+func (pc *PipelineCoordinator) handleEventResultWithEmissionPlan(ctx context.Context, evt events.Event, emissions *pipelineEmissionPlan) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
 	if evt.Type() == activityRequestEventType {
-		return pc.handleActivityRequestEvent(ctx, evt)
+		return pc.handleActivityRequestEventWithEmissionPlan(ctx, evt, emissions)
 	}
-	handled, err := pc.dispatchWorkflowNodeEventResult(ctx, evt)
+	handled, err := pc.dispatchWorkflowNodeEventResultWithEmissionPlan(ctx, evt, emissions)
 	if err == nil {
 		return handled, runtimepipelineobligation.Continue(), nil
 	}
@@ -533,6 +534,10 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlan(ctx context.Context, nodeI
 }
 
 func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context, nodeID string, evt events.Event) (bool, error) {
+	return pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, nodeID, evt, nil)
+}
+
+func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx context.Context, nodeID string, evt events.Event, emissions *pipelineEmissionPlan) (bool, error) {
 	if pc == nil {
 		return false, nil
 	}
@@ -635,10 +640,12 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 			Event:           evt,
 			HandlerEventKey: handlerEventKey,
 			State:           currentState,
-		}, false)
+		}, false, emissions != nil)
 		if err == nil {
+			for _, emitted := range result.Emissions {
+				emissions.appendEvent(emitted)
+			}
 			pc.notifyTestLifecycleHandlerCompleted(executionCtx, nodeID, evt, "completed")
-			pc.recordInterceptedEmitDeadLetters(executionCtx, evt, nodeID, result.Outcome)
 			sideEffects := []string{"handler_completed"}
 			settlementGuard, settleErr := heartbeat.BeginSettlement()
 			if settleErr != nil {
@@ -823,7 +830,7 @@ func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context,
 	}
 }
 
-func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Context, trigger events.Event, nodeID string, outcome *handlerExecutionOutcome) {
+func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Context, trigger events.Event, nodeID string, outcome *handlerExecutionOutcome, emissions *pipelineEmissionPlan) {
 	if pc == nil || outcome == nil || len(outcome.InterceptedEmits) == 0 {
 		return
 	}
@@ -846,6 +853,7 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			Failure:         failure.Failure,
 			ChainDepth:      intercepted.ChainDepth,
 			HandlerNode:     firstNonEmptyString(nodeID+":"+eventType, nodeID),
+			Timestamp:       time.Now().UTC().Format(time.RFC3339Nano),
 		}
 		if pc.deadLetters != nil {
 			if err := pc.deadLetters.RecordDeadLetter(ctx, rec); err != nil {
@@ -866,13 +874,13 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			"handler_node":     nodeID,
 			"timestamp":        time.Now().UTC().Format(time.RFC3339Nano),
 		}
-		if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
+		if emissions != nil {
 			emitted, err := newPipelineRuntimeDiagnostic(events.LineageFromEvent(trigger), "platform.dead_letter", entityID, "", deadLetterPayload)
 			if err != nil {
 				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_construct_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, nil, err)
 				continue
 			}
-			*collector = append(*collector, emitted)
+			emissions.appendEvent(emitted)
 			continue
 		}
 		if err := pc.publish(ctx, "platform.dead_letter", entityID, deadLetterPayload); err != nil {
@@ -951,10 +959,6 @@ func (pc *PipelineCoordinator) publish(ctx context.Context, eventType, entityID 
 	if err != nil {
 		return err
 	}
-	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
-		*collector = append(*collector, emitted)
-		return nil
-	}
 	if pc.bus != nil {
 		if err := pc.bus.Publish(ctx, emitted); err != nil {
 			return err
@@ -979,10 +983,6 @@ func (pc *PipelineCoordinator) publishDirect(ctx context.Context, eventType, ent
 	emitted, err := newPipelineRuntimeDiagnostic(events.LineageFromEvent(inbound), eventType, entityID, flowInstance, payload)
 	if err != nil {
 		return err
-	}
-	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
-		*collector = append(*collector, emitted)
-		return nil
 	}
 	if pc.bus != nil {
 		if err := pc.bus.PublishDirect(ctx, emitted, recipients); err != nil {

@@ -2126,24 +2126,17 @@ func TestWorkflowTimerLifecyclePostgresFireDoesNotJoinOuterTestMutation(t *testi
 	}
 }
 
-func TestWorkflowTimerLifecycleWakeupDoesNotJoinParentEmitCollectorOnBothStores(t *testing.T) {
+func TestWorkflowTimerLifecycleWakeupPublishesItsDurableIntentOnBothStores(t *testing.T) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			bus := &recordingPipelineBus{}
 			pc, _, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, bus, false)
-			collected := []runtimeengine.EmitIntent{}
-			callbackCtx := WithPipelineEmitCollectors(ctx, nil, &collected)
-
 			wakeup, err := newWorkflowTimerWakeup(activation)
 			if err != nil {
 				t.Fatalf("new workflow timer wakeup: %v", err)
 			}
-			pc.workflowTimers.handleWakeup(callbackCtx, wakeup)
-
-			if len(collected) != 0 {
-				t.Fatalf("parent handler collector received %d durable timer intent(s), want 0", len(collected))
-			}
+			pc.workflowTimers.handleWakeup(ctx, wakeup)
 			if got := bus.publishedCount(); got != 1 {
 				t.Fatalf("durable timer publications = %d, want 1", got)
 			}

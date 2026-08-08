@@ -48,18 +48,6 @@ func (noOpEngineDispatcher) DispatchPostCommit(context.Context, []runtimeengine.
 	return nil
 }
 
-type noOpActivityIntentWriter struct{}
-
-func (noOpActivityIntentWriter) WriteActivityIntents(context.Context, []runtimeengine.ActivityIntent) error {
-	return nil
-}
-
-type noOpActivityDispatcher struct{}
-
-func (noOpActivityDispatcher) DispatchActivities(context.Context, []runtimeengine.ActivityIntent) error {
-	return nil
-}
-
 type pipelineFlowScopeKey struct{}
 type workflowNodeDeliveryRouteKey struct{}
 
@@ -101,27 +89,39 @@ func pipelineFlowScope(ctx context.Context) string {
 	return strings.TrimSpace(flowID)
 }
 
-func pipelineCollectorExecutionContext(ctx context.Context) (context.Context, *[]events.Event, *[]runtimeengine.EmitIntent, bool) {
-	if ctx == nil {
-		return ctx, nil, nil, false
-	}
-	parentCollector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event)
-	if !ok || parentCollector == nil {
-		return ctx, nil, nil, false
-	}
-	if _, ok := ctx.Value(pipelineEmitIntentCollectorKey{}).(*[]runtimeengine.EmitIntent); ok {
-		return ctx, parentCollector, nil, false
-	}
-	collected := []runtimeengine.EmitIntent{}
-	ctx = WithPipelineEmitCollectors(ctx, nil, &collected)
-	return ctx, parentCollector, &collected, true
+type pipelineEmissionPlan struct {
+	events []events.Event
 }
 
-func flushCollectedPipelineEmitIntents(parentCollector *[]events.Event, collected *[]runtimeengine.EmitIntent) {
-	if parentCollector == nil || collected == nil || len(*collected) == 0 {
+func (p *pipelineEmissionPlan) appendEvent(event events.Event) {
+	if p == nil {
 		return
 	}
-	appendEmitIntentsAsEvents(parentCollector, *collected)
+	p.events = append(p.events, cloneEvent(event))
+}
+
+func (p *pipelineEmissionPlan) appendIntents(intents []runtimeengine.EmitIntent) {
+	if p == nil {
+		return
+	}
+	for _, intent := range intents {
+		emitted := cloneEvent(intent.Event)
+		if !intent.Context.Empty() {
+			emitted = events.NewContextDeliveryEvent(emitted, intent.Context).Event()
+		}
+		p.events = append(p.events, emitted)
+	}
+}
+
+func (p *pipelineEmissionPlan) immutableEvents() []events.Event {
+	if p == nil || len(p.events) == 0 {
+		return nil
+	}
+	out := make([]events.Event, 0, len(p.events))
+	for _, event := range p.events {
+		out = append(out, cloneEvent(event))
+	}
+	return out
 }
 
 const DefaultSystemNodeRetryLimit = 5
@@ -316,18 +316,6 @@ func asObject(v any) (map[string]any, bool) {
 	return m, ok
 }
 
-func CollectPipelineEmitIntents(ctx context.Context, intents []runtimeengine.EmitIntent) bool {
-	if ctx == nil || len(intents) == 0 {
-		return false
-	}
-	collected := false
-	if collector, ok := ctx.Value(pipelineEmitIntentCollectorKey{}).(*[]runtimeengine.EmitIntent); ok && collector != nil {
-		*collector = append(*collector, cloneEmitIntents(intents)...)
-		collected = true
-	}
-	return collected
-}
-
 func cloneEmitIntents(intents []runtimeengine.EmitIntent) []runtimeengine.EmitIntent {
 	if len(intents) == 0 {
 		return nil
@@ -340,42 +328,6 @@ func cloneEmitIntents(intents []runtimeengine.EmitIntent) []runtimeengine.EmitIn
 		cloned = append(cloned, copyIntent)
 	}
 	return cloned
-}
-
-func appendEmitIntentsAsEvents(collector *[]events.Event, intents []runtimeengine.EmitIntent) {
-	if collector == nil || len(intents) == 0 {
-		return
-	}
-	for _, intent := range intents {
-		emitted := cloneEvent(intent.Event)
-		if !intent.Context.Empty() {
-			emitted = events.NewContextDeliveryEvent(emitted, intent.Context).Event()
-		}
-		*collector = append(*collector, emitted)
-	}
-}
-
-func WithPipelineEmitCollectors(ctx context.Context, eventsCollector *[]events.Event, intentCollector *[]runtimeengine.EmitIntent) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if eventsCollector != nil {
-		ctx = context.WithValue(ctx, pipelineEmitCollectorKey{}, eventsCollector)
-	}
-	if intentCollector != nil {
-		ctx = context.WithValue(ctx, pipelineEmitIntentCollectorKey{}, intentCollector)
-	}
-	return ctx
-}
-
-func withoutPipelineEmitCollectors(ctx context.Context) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	var eventsCollector *[]events.Event
-	var intentCollector *[]runtimeengine.EmitIntent
-	ctx = context.WithValue(ctx, pipelineEmitCollectorKey{}, eventsCollector)
-	return context.WithValue(ctx, pipelineEmitIntentCollectorKey{}, intentCollector)
 }
 
 func shouldSQLDebugLog() bool {

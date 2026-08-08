@@ -232,9 +232,6 @@ func (b *recordingPipelineBus) EngineDispatcher() runtimeengine.PostCommitDispat
 }
 
 func (d recordingPipelineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error {
-	if CollectPipelineEmitIntents(ctx, intents) {
-		return nil
-	}
 	for _, intent := range intents {
 		intentCtx := events.WithDeliveryContext(ctx, intent.Context)
 		if len(intent.Recipients) > 0 {
@@ -501,7 +498,7 @@ func TestPipelineCoordinatorPublish_ReturnsBusPublishError(t *testing.T) {
 	}
 }
 
-func TestExecuteNodeContractHandlerFlushesCollectedEventsToParentCollector(t *testing.T) {
+func TestExecuteNodeContractHandlerReturnsDeferredCommittedEmissions(t *testing.T) {
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
@@ -509,29 +506,28 @@ func TestExecuteNodeContractHandlerFlushesCollectedEventsToParentCollector(t *te
 		entityLocks:    map[string]*sync.Mutex{},
 		module:         handlerEngineProjectNodeModule(),
 	}
-	parentCollector := make([]events.Event, 0, 1)
-	ctx := context.WithValue(testAuthorActivityContext(t, context.Background()), pipelineEmitCollectorKey{}, &parentCollector)
+	ctx := testAuthorActivityContext(t, context.Background())
 
 	result, err := pc.executeNodeContractHandler(ctx, "node-a", runtimecontracts.SystemNodeEventHandler{
 		Emit: runtimecontracts.EmitSpec{Event: "custom.emitted"},
 	}, workflowTriggerContext{
 		Event: handlerTestRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
 		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
-	}, false)
+	}, false, true)
 	if err != nil {
 		t.Fatalf("executeNodeContractHandler: %v", err)
 	}
 	if !result.Handled {
 		t.Fatal("expected handled result")
 	}
-	if got := len(parentCollector); got != 1 {
-		t.Fatalf("parent collector count = %d, want 1", got)
+	if got := len(result.Emissions); got != 1 {
+		t.Fatalf("deferred emission count = %d, want 1", got)
 	}
-	if got := string(parentCollector[0].Type()); got != "custom.emitted" {
-		t.Fatalf("collected event type = %q, want custom.emitted", got)
+	if got := string(result.Emissions[0].Type()); got != "custom.emitted" {
+		t.Fatalf("deferred emission type = %q, want custom.emitted", got)
 	}
 	if got := bus.publishedCount(); got != 0 {
-		t.Fatalf("bus published count = %d, want 0 when parent collector is present", got)
+		t.Fatalf("bus published count = %d, want 0 before deferred dispatch", got)
 	}
 }
 

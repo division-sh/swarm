@@ -547,10 +547,21 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	`, runtimeflowidentity.EntityID(instanceRoute.InstancePath), eventBusTestRunID, instanceRoute.InstancePath); err != nil {
 		t.Fatalf("seed account entity state: %v", err)
 	}
+	readinessPlan, err := json.Marshal(runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+		Identity: runtimeflowidentity.Instance{
+			TemplateID: "account", ScopeKey: "account", InstanceID: "one", InstancePath: instanceRoute.InstancePath,
+			EntityID: runtimeflowidentity.EntityID(instanceRoute.InstancePath), HasStoredPath: true,
+		},
+		RunID: eventBusTestRunID, BundleHash: "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		BundleSource: "ephemeral", WorkflowVersion: source.WorkflowVersion(),
+	})
+	if err != nil {
+		t.Fatalf("marshal account readiness owner: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
-		VALUES ($1::uuid, $2, jsonb_build_object('workflow_version', $3::text), NOW(), NOW())
-	`, eventBusTestRunID, instanceRoute.InstancePath, source.WorkflowVersion()); err != nil {
+		VALUES ($1::uuid, $2, $3::jsonb, NOW(), NOW())
+	`, eventBusTestRunID, instanceRoute.InstancePath, readinessPlan); err != nil {
 		t.Fatalf("seed account readiness owner: %v", err)
 	}
 
@@ -2464,7 +2475,7 @@ func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	ctx := context.Background()
+	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 	eventID := uuid.NewString()
 	targetEntityID := uuid.NewString()
 	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
@@ -2507,7 +2518,7 @@ func TestEventBusPublishSQLiteRecordsTargetFailureDeadLetter(t *testing.T) {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	eb.RegisterRuntimeActiveAgentDescriptor(testActiveAgentDescriptor(t, "live-other", uuid.NewString(), "other-flow"))
-	ctx := context.Background()
+	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 	descriptors, err := eb.PinRoutingDescriptors(ctx)
 	if err != nil {
 		t.Fatalf("PinRoutingDescriptors: %v", err)

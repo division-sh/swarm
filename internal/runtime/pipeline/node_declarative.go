@@ -369,30 +369,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if err := prepareHandlerMaterializationState(source, flowID, handler, stateRoute, entityID, &currentState); err != nil {
 		return nil, err
 	}
-	exec := e.executor
 	node := e.node
-	var (
-		parentEventCollector *[]events.Event
-		collectedIntents     *[]runtimeengine.EmitIntent
-		collectLocally       bool
-	)
-	ctx, parentEventCollector, collectedIntents, collectLocally = pipelineCollectorExecutionContext(ctx)
-	if collectLocally {
-		deps := coordinatorEngineDependencies(e.coordinator)
-		owner, ok := deps.MutationOwner.(pipelineEngineMutationOwner)
-		if !ok {
-			return nil, fmt.Errorf("pipeline engine mutation owner is unavailable")
-		}
-		owner.activities = noOpActivityIntentWriter{}
-		deps.MutationOwner = owner
-		deps.ActivityDispatcher = noOpActivityDispatcher{}
-		tmpExec, err := runtimeengine.NewExecutor(deps, newCoordinatorEngineEvaluator(e.coordinator))
-		if err != nil {
-			return nil, err
-		}
-		exec = tmpExec
-		node = runtimeengine.NewDeclarativeNode(strings.TrimSpace(e.nodeID), exec)
-	}
 	handlerEventKey = strings.TrimSpace(handlerEventKey)
 	if handlerEventKey == "" {
 		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, source, e.nodeID, evt)
@@ -427,8 +404,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	}
 	e.coordinator.recordInterceptedEmitDeadLetters(ctx, evt, e.nodeID, &handlerExecutionOutcome{
 		InterceptedEmits: append([]runtimeengine.EmitIntent(nil), result.DeadLetterIntents...),
-	})
-	flushCollectedPipelineEmitIntents(parentEventCollector, collectedIntents)
+	}, nil)
 	return &HandlerOutcome{
 		Handled:         runtimeengine.IsHandledOutcome(result.Status),
 		ActionsExecuted: append([]string{}, result.ActionsExecuted...),

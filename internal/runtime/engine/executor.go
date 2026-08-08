@@ -554,6 +554,11 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		}
 		return result, err
 	}
+	result.EmitIntents = append([]EmitIntent(nil), intents...)
+	result.ActivityIntents = append([]ActivityIntent(nil), activityIntents...)
+	if req.DeferCommittedDispatch {
+		return result, nil
+	}
 	if len(intents) > 0 {
 		if err := e.deps.Dispatcher.DispatchPostCommit(ctx, intents); err != nil {
 			SetExecutionFailure(&result, err, "runtime.engine", "dispatch_post_commit")

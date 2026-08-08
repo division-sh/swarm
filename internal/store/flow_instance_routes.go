@@ -12,7 +12,9 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/authoractivity"
 )
 
@@ -717,168 +719,112 @@ func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) (
 	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("postgres store is required for active flow instance descriptors")
 	}
-	q := flowInstanceDescriptorQueryer(s.backend.db)
-	runID, hasRunID, err := activeFlowInstanceDescriptorRunID(ctx)
+	runID, err := activeFlowInstanceDescriptorRunID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if !hasRunID {
-		rows, err := q.QueryContext(ctx, `
-			SELECT
-				COALESCE(fi.instance_id, ''),
-				COALESCE(fi.flow_template, ''),
-				'', '', '', '{}'::jsonb
-			FROM flow_instances fi
-			WHERE COALESCE(fi.status, '') = 'active'
-			  AND COALESCE(fi.mode, '') = 'template'
-			  AND COALESCE(fi.instance_id, '') <> ''
-			ORDER BY fi.instance_id ASC
-		`)
-		if err != nil {
-			return nil, fmt.Errorf("list unscoped active flow instance descriptors: %w", err)
-		}
-		return scanActiveFlowInstanceDescriptors(rows, "active flow instance descriptor")
-	}
-	rows, err := q.QueryContext(ctx, `
-		SELECT
-			COALESCE(fi.instance_id, ''),
-			COALESCE(fi.flow_template, ''),
-			CASE
-				WHEN readiness.run_id IS NOT NULL THEN COALESCE(run.bundle_hash, '')
-				ELSE ''
-			END,
-			CASE
-				WHEN readiness.run_id IS NOT NULL THEN COALESCE(run.bundle_source, '')
-				ELSE ''
-			END,
-			COALESCE(NULLIF(BTRIM(readiness.plan->>'workflow_version'), ''), ''),
-			COALESCE(es.fields, '{}'::jsonb)
+	rows, err := s.backend.db.QueryContext(ctx, `
+		SELECT fi.instance_id, fi.flow_template, readiness.plan,
+		       run.bundle_hash, run.bundle_source, es.fields
 		FROM flow_instances fi
 		LEFT JOIN flow_instance_runtime_readiness readiness
-		  ON readiness.instance_id = fi.instance_id
-		 AND readiness.run_id = $1::uuid
-		JOIN runs run
-		  ON run.run_id = $1::uuid
-		JOIN LATERAL (
-			SELECT fields
-			FROM entity_state es
-			WHERE es.flow_instance = fi.instance_id
-			  AND es.run_id = $1::uuid
-			ORDER BY es.updated_at DESC, es.created_at DESC, es.entity_id::text ASC
-			LIMIT 1
-		) es ON true
-		WHERE COALESCE(fi.status, '') = 'active'
-		  AND COALESCE(fi.mode, '') = 'template'
-		  AND COALESCE(fi.instance_id, '') <> ''
+		  ON readiness.instance_id = fi.instance_id AND readiness.run_id = $1::uuid
+		JOIN runs run ON run.run_id = $1::uuid
+		LEFT JOIN entity_state es
+		  ON es.run_id = $1::uuid
+		 AND es.flow_instance = fi.instance_id
+		 AND es.entity_id = NULLIF(readiness.plan #>> '{identity,EntityID}', '')::uuid
+		WHERE fi.status = 'active' AND fi.mode = 'template'
 		  AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
 		ORDER BY fi.instance_id ASC
 	`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("list active flow instance descriptors: %w", err)
 	}
-	defer rows.Close()
-
-	return scanActiveFlowInstanceDescriptors(rows, "active flow instance descriptor")
+	return scanExactActiveFlowInstanceDescriptors(rows, runID, "active flow instance descriptor")
 }
 
 func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
 	if s == nil || s.backend.db == nil {
 		return nil, fmt.Errorf("sqlite runtime store is required for active flow instance descriptors")
 	}
-	q := flowInstanceDescriptorQueryer(s.backend.db)
-	runID, hasRunID, err := activeFlowInstanceDescriptorRunID(ctx)
+	runID, err := activeFlowInstanceDescriptorRunID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if !hasRunID {
-		rows, err := q.QueryContext(ctx, `
-			SELECT
-				COALESCE(fi.instance_id, ''),
-				COALESCE(fi.flow_template, ''),
-				'', '', '', '{}'
-			FROM flow_instances fi
-			WHERE COALESCE(fi.status, '') = 'active'
-			  AND COALESCE(fi.mode, '') = 'template'
-			  AND COALESCE(fi.instance_id, '') <> ''
-			ORDER BY fi.instance_id ASC
-		`)
-		if err != nil {
-			return nil, fmt.Errorf("list unscoped sqlite active flow instance descriptors: %w", err)
-		}
-		return scanActiveFlowInstanceDescriptors(rows, "sqlite active flow instance descriptor")
-	}
-	rows, err := q.QueryContext(ctx, `
-		SELECT
-			COALESCE(fi.instance_id, ''),
-			COALESCE(fi.flow_template, ''),
-			CASE
-				WHEN readiness.run_id IS NOT NULL THEN COALESCE(run.bundle_hash, '')
-				ELSE ''
-			END,
-			CASE
-				WHEN readiness.run_id IS NOT NULL THEN COALESCE(run.bundle_source, '')
-				ELSE ''
-			END,
-			COALESCE(NULLIF(TRIM(json_extract(readiness.plan, '$.workflow_version')), ''), ''),
-			COALESCE((
-			SELECT es.fields
-			FROM entity_state es
-			WHERE es.flow_instance = fi.instance_id
-			  AND es.run_id = ?
-			ORDER BY es.updated_at DESC, es.created_at DESC, es.entity_id ASC
-			LIMIT 1
-			), '{}')
+	rows, err := s.backend.db.QueryContext(ctx, `
+		SELECT fi.instance_id, fi.flow_template, readiness.plan,
+		       run.bundle_hash, run.bundle_source, es.fields
 		FROM flow_instances fi
 		LEFT JOIN flow_instance_runtime_readiness readiness
-		  ON readiness.instance_id = fi.instance_id
-		 AND readiness.run_id = ?
-		JOIN runs run
-		  ON run.run_id = ?
-		WHERE COALESCE(fi.status, '') = 'active'
-		  AND COALESCE(fi.mode, '') = 'template'
-		  AND COALESCE(fi.instance_id, '') <> ''
+		  ON readiness.instance_id = fi.instance_id AND readiness.run_id = ?
+		JOIN runs run ON run.run_id = ?
+		LEFT JOIN entity_state es
+		  ON es.run_id = ?
+		 AND es.flow_instance = fi.instance_id
+		 AND es.entity_id = json_extract(readiness.plan, '$.identity.EntityID')
+		WHERE fi.status = 'active' AND fi.mode = 'template'
 		  AND LOWER(TRIM(run.status)) IN ('running', 'paused')
-		  AND EXISTS (
-			  SELECT 1
-			  FROM entity_state descriptor_entity
-			  WHERE descriptor_entity.flow_instance = fi.instance_id
-			    AND descriptor_entity.run_id = ?
-		  )
 		ORDER BY fi.instance_id ASC
-	`, runID, runID, runID, runID)
+	`, runID, runID, runID)
 	if err != nil {
 		return nil, fmt.Errorf("list sqlite active flow instance descriptors: %w", err)
 	}
-	defer rows.Close()
-
-	return scanActiveFlowInstanceDescriptors(rows, "sqlite active flow instance descriptor")
+	return scanExactActiveFlowInstanceDescriptors(rows, runID, "sqlite active flow instance descriptor")
 }
 
-func scanActiveFlowInstanceDescriptors(
-	rows *sql.Rows,
-	label string,
-) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+func scanExactActiveFlowInstanceDescriptors(rows *sql.Rows, runID, label string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
 	defer rows.Close()
 	out := []runtimebus.ActiveFlowInstanceDescriptor{}
 	for rows.Next() {
-		var descriptor runtimebus.ActiveFlowInstanceDescriptor
-		var fieldsRaw any
-		if err := rows.Scan(
-			&descriptor.FlowInstance,
-			&descriptor.FlowTemplate,
-			&descriptor.BundleHash,
-			&descriptor.BundleSource,
-			&descriptor.WorkflowVersion,
-			&fieldsRaw,
-		); err != nil {
+		var instancePath, templateID string
+		var planRaw, bundleHash, bundleSource, fieldsRaw sql.NullString
+		if err := rows.Scan(&instancePath, &templateID, &planRaw, &bundleHash, &bundleSource, &fieldsRaw); err != nil {
 			return nil, fmt.Errorf("scan %s: %w", label, err)
 		}
-		descriptor.AddressFields = descriptorAddressFields(fieldsRaw)
-		descriptor = descriptor.Normalized()
-		if descriptor.FlowInstance == "" {
-			continue
+		instancePath = strings.Trim(strings.TrimSpace(instancePath), "/")
+		templateID = strings.TrimSpace(templateID)
+		if instancePath == "" || templateID == "" {
+			return nil, fmt.Errorf("%s is missing exact instance identity", label)
 		}
-		out = append(out, descriptor)
+		if !planRaw.Valid || strings.TrimSpace(planRaw.String) == "" {
+			return nil, fmt.Errorf("%s %s is missing exact readiness plan", label, instancePath)
+		}
+		if !bundleHash.Valid || !bundleSource.Valid {
+			return nil, fmt.Errorf("%s %s is missing exact run bundle source", label, instancePath)
+		}
+		var plan runtimepipeline.DynamicFlowRuntimeReadinessPlan
+		if err := json.Unmarshal([]byte(planRaw.String), &plan); err != nil {
+			return nil, fmt.Errorf("decode %s %s readiness plan: %w", label, instancePath, err)
+		}
+		plan, err := plan.Normalized()
+		if err != nil {
+			return nil, fmt.Errorf("validate %s %s readiness plan: %w", label, instancePath, err)
+		}
+		if plan.RunID != runID || plan.Identity.InstancePath != instancePath || plan.Identity.TemplateID != templateID {
+			return nil, fmt.Errorf("%s %s readiness identity does not match persisted owner", label, instancePath)
+		}
+		if !fieldsRaw.Valid {
+			return nil, fmt.Errorf("%s %s is missing exact entity state", label, instancePath)
+		}
+		persistedSource, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash.String, bundleSource.String)
+		if err != nil {
+			return nil, fmt.Errorf("%s %s run bundle source: %w", label, instancePath, err)
+		}
+		planSource, err := runtimecorrelation.DecodeBundleSourceFact(plan.BundleHash, plan.BundleSource)
+		if err != nil || planSource != persistedSource {
+			return nil, fmt.Errorf("%s %s readiness source does not match persisted run", label, instancePath)
+		}
+		addressFields, err := exactDescriptorAddressFields(fieldsRaw.String)
+		if err != nil {
+			return nil, fmt.Errorf("%s %s entity fields: %w", label, instancePath, err)
+		}
+		out = append(out, runtimebus.ActiveFlowInstanceDescriptor{
+			InstanceID: plan.Identity.InstanceID, EntityID: plan.Identity.EntityID,
+			FlowInstance: instancePath, FlowTemplate: templateID,
+			BundleHash: plan.BundleHash, BundleSource: plan.BundleSource,
+			WorkflowVersion: plan.WorkflowVersion, AddressFields: addressFields,
+		}.Normalized())
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate %ss: %w", label, err)
@@ -886,12 +832,34 @@ func scanActiveFlowInstanceDescriptors(
 	return out, nil
 }
 
-func activeFlowInstanceDescriptorRunID(ctx context.Context) (string, bool, error) {
-	runID, ok, err := runtimecurrentstate.RunIDFromContext(ctx)
+func activeFlowInstanceDescriptorRunID(ctx context.Context) (string, error) {
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
-		return "", false, fmt.Errorf("active flow instance descriptor run scope: %w", err)
+		return "", fmt.Errorf("active flow instance descriptor run scope: %w", err)
 	}
-	return runID, ok, nil
+	return runID, nil
+}
+
+func exactDescriptorAddressFields(raw any) (map[string]string, error) {
+	values, err := decodeDescriptorJSONMap(raw)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return nil, fmt.Errorf("entity field name is empty")
+		}
+		scalar, ok := descriptorScalarString(value)
+		if ok {
+			out["entity."+key] = scalar
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 func descriptorAddressFields(fieldsRaw any) map[string]string {

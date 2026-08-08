@@ -47,11 +47,12 @@ func TestPipelineRuntimeDiagnosticsPreserveExactContextualLineage(t *testing.T) 
 		t.Fatalf("publish direct contextual diagnostic: %v", err)
 	}
 	collector := []events.Event{}
-	collectorCtx := context.WithValue(ctx, pipelineEmitCollectorKey{}, &collector)
-	coordinator.recordInterceptedEmitDeadLetters(collectorCtx, parent, "node-a", &handlerExecutionOutcome{InterceptedEmits: []runtimeengine.EmitIntent{{
+	emissions := &pipelineEmissionPlan{}
+	coordinator.recordInterceptedEmitDeadLetters(ctx, parent, "node-a", &handlerExecutionOutcome{InterceptedEmits: []runtimeengine.EmitIntent{{
 		Event:      eventtest.Child(uuid.NewString(), "work.emitted", "agent-a", "", []byte(`{}`), 1, parent, events.EventEnvelope{}, time.Now().UTC()),
 		ChainDepth: 2, DeadLetterHint: "chain_depth_exceeded",
-	}}})
+	}}}, emissions)
+	collector = emissions.immutableEvents()
 
 	manifestations := []struct {
 		name  string

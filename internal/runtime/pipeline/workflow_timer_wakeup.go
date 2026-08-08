@@ -81,7 +81,7 @@ func (l *WorkflowTimerLifecycle) registerWakeup(ctx context.Context, wakeup Work
 }
 
 func (l *WorkflowTimerLifecycle) handleWakeup(ctx context.Context, wakeup WorkflowTimerWakeup) {
-	callbackCtx, cancel := context.WithTimeout(withoutPipelineEmitCollectors(ctx), l.wakeupCallbackTimeout)
+	callbackCtx, cancel := context.WithTimeout(ctx, l.wakeupCallbackTimeout)
 	defer cancel()
 
 	outcome, recurrenceCommitted, err := l.fireWakeup(callbackCtx, wakeup)

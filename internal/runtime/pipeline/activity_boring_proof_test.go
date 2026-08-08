@@ -722,9 +722,6 @@ func (d persistingActivityBoringDispatcher) DispatchPostCommit(ctx context.Conte
 	if d.bus == nil {
 		return nil
 	}
-	if CollectPipelineEmitIntents(ctx, intents) {
-		return nil
-	}
 	for _, intent := range intents {
 		if len(intent.Recipients) > 0 {
 			if err := d.bus.recordingPipelineBus.PublishDirect(ctx, intent.Event, intent.Recipients); err != nil {

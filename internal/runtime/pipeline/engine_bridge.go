@@ -51,6 +51,7 @@ type contractHandlerExecutionResult struct {
 	GuardsEvaluated           []string
 	PreviewMetadata           map[string]any
 	InitialValuesMaterialized map[string]any
+	Emissions                 []events.Event
 	Handled                   bool
 }
 
@@ -106,7 +107,7 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 	if strings.TrimSpace(triggerCtx.HandlerEventKey) == "" {
 		triggerCtx.HandlerEventKey = handlerEventKey
 	}
-	return pc.executeNodeContractHandler(ctx, nodeID, handler, triggerCtx, false)
+	return pc.executeNodeContractHandler(ctx, nodeID, handler, triggerCtx, false, true)
 }
 
 func isJoinLifecycleEvent(eventType events.EventType) bool {
@@ -135,7 +136,9 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	handler runtimecontracts.SystemNodeEventHandler,
 	triggerCtx workflowTriggerContext,
 	preview bool,
+	deferCommittedDispatchOption ...bool,
 ) (contractHandlerExecutionResult, error) {
+	deferCommittedDispatch := len(deferCommittedDispatchOption) > 0 && deferCommittedDispatchOption[0]
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" {
 		return contractHandlerExecutionResult{}, nil
@@ -208,12 +211,6 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			Handled:         true,
 		}, nil
 	}
-	var (
-		parentEventCollector *[]events.Event
-		collectLocally       bool
-		collectedIntents     *[]runtimeengine.EmitIntent
-	)
-	ctx, parentEventCollector, collectedIntents, collectLocally = pipelineCollectorExecutionContext(ctx)
 	ctx = withPipelineFlowScope(ctx, flowID)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, triggerCtx.Event)
 	ctx = runtimecorrelation.WithHandlerID(ctx, strings.TrimSpace(nodeID)+":"+strings.TrimSpace(string(triggerCtx.Event.Type())))
@@ -226,13 +223,6 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, source, nodeID, triggerCtx.Event)
 	}
 	deps := coordinatorEngineDependencies(pc)
-	if collectLocally {
-		owner, ok := deps.MutationOwner.(pipelineEngineMutationOwner)
-		if !ok {
-			return contractHandlerExecutionResult{}, fmt.Errorf("pipeline engine mutation owner is unavailable")
-		}
-		deps.MutationOwner = owner
-	}
 	exec, err := runtimeengine.NewExecutor(deps, newCoordinatorEngineEvaluator(pc))
 	if err != nil {
 		return contractHandlerExecutionResult{}, fmt.Errorf("build runtime engine: %w", err)
@@ -259,18 +249,19 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		return contractHandlerExecutionResult{}, fmt.Errorf("admit workflow node producer source: %w", err)
 	}
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
-		EntityID:           identity.NormalizeEntityID(entityID),
-		NodeID:             identity.NormalizeNodeID(nodeID),
-		FlowID:             identity.NormalizeFlowID(flowID),
-		Route:              stateRoute,
-		Event:              triggerCtx.Event,
-		ProducerSource:     producerSource,
-		HandlerEventKey:    handlerEventKey,
-		ChainDepth:         triggerCtx.Event.ChainDepth(),
-		Handler:            handler,
-		Preview:            preview,
-		State:              stateSnapshot,
-		InitialFieldValues: initialFieldValues,
+		EntityID:               identity.NormalizeEntityID(entityID),
+		NodeID:                 identity.NormalizeNodeID(nodeID),
+		FlowID:                 identity.NormalizeFlowID(flowID),
+		Route:                  stateRoute,
+		Event:                  triggerCtx.Event,
+		ProducerSource:         producerSource,
+		HandlerEventKey:        handlerEventKey,
+		ChainDepth:             triggerCtx.Event.ChainDepth(),
+		Handler:                handler,
+		Preview:                preview,
+		State:                  stateSnapshot,
+		InitialFieldValues:     initialFieldValues,
+		DeferCommittedDispatch: deferCommittedDispatch,
 	})
 	if !preview {
 		logComputeModuleReplayEvidence(ctx, pc.bus, nodeID, triggerCtx.Event, result.ComputeModuleTraces)
@@ -287,15 +278,27 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if handler.CreateEntity {
 		initialValuesMaterialized = workflowEntitySchemaInitialValues(source, flowID)
 	}
-	if !preview {
-		pc.recordInterceptedEmitDeadLetters(ctx, triggerCtx.Event, nodeID, handlerOutcomeFromExecutionResult(result))
+	emissions := &pipelineEmissionPlan{}
+	if deferCommittedDispatch {
+		emissions.appendIntents(result.EmitIntents)
+		immediateActivities := make([]runtimeengine.ActivityIntent, 0, len(result.ActivityIntents))
+		for _, intent := range result.ActivityIntents {
+			if intent.Normalized().ApprovalDecision == "" {
+				immediateActivities = append(immediateActivities, intent)
+			}
+		}
+		activityEmissions, err := activityRequestEmitIntents(immediateActivities)
+		if err != nil {
+			return contractHandlerExecutionResult{}, err
+		}
+		emissions.appendIntents(activityEmissions)
 	}
-	if collectLocally {
-		flushCollectedPipelineEmitIntents(parentEventCollector, collectedIntents)
+	if !preview {
+		pc.recordInterceptedEmitDeadLetters(ctx, triggerCtx.Event, nodeID, handlerOutcomeFromExecutionResult(result), emissionPlanWhen(deferCommittedDispatch, emissions))
 	}
 	handled := runtimeengine.IsHandledOutcome(result.Status)
 	if result.Status == runtimeengine.OutcomeUnknown {
-		return contractHandlerExecutionResult{Handled: handled}, nil
+		return contractHandlerExecutionResult{Handled: handled, Emissions: emissions.immutableEvents()}, nil
 	}
 	outcome := handlerOutcomeFromExecutionResult(result)
 	plan := handlerExecutionPlanFromNodeHandler(nodeID, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
@@ -317,8 +320,16 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		GuardsEvaluated:           append([]string{}, outcome.GuardsEvaluated...),
 		PreviewMetadata:           previewMetadata,
 		InitialValuesMaterialized: initialValuesMaterialized,
+		Emissions:                 emissions.immutableEvents(),
 		Handled:                   handled,
 	}, nil
+}
+
+func emissionPlanWhen(enabled bool, plan *pipelineEmissionPlan) *pipelineEmissionPlan {
+	if !enabled {
+		return nil
+	}
+	return plan
 }
 
 func logLoopExecution(ctx context.Context, bus Bus, nodeID string, evt events.Event, trace *runtimeengine.LoopExecutionTrace) {

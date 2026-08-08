@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/testutil"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
@@ -847,6 +849,7 @@ func TestPostgresStoreListFlowInstanceRoutesFiltersTerminatedInstances(t *testin
 
 func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(t *testing.T) {
 	const runID = "11111111-1111-4111-8111-111111111111"
+	const entityID = "22222222-2222-4222-8222-222222222222"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
@@ -865,18 +868,30 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: "44444444-4444-4444-8444-444444444444",
 	})
+	readinessPlan, err := json.Marshal(runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+		Version: 0,
+		Identity: runtimeflowidentity.Instance{
+			TemplateID: "component-scaffold", ScopeKey: "component-scaffold", InstanceID: "active",
+			InstancePath: "component-scaffold/active", EntityID: entityID, HasStoredPath: true,
+		},
+		RunID: runID, BundleHash: "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		BundleSource: "ephemeral", WorkflowVersion: "1.0.0",
+	})
+	if err != nil {
+		t.Fatalf("marshal readiness plan: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
-		VALUES ($1::uuid, 'component-scaffold/active', '{"workflow_version":"1.0.0"}'::jsonb, NOW(), NOW())
-	`, runID); err != nil {
+		VALUES ($1::uuid, 'component-scaffold/active', $2::jsonb, NOW(), NOW())
+	`, runID, readinessPlan); err != nil {
 		t.Fatalf("seed flow-instance readiness: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
 		VALUES
-			('22222222-2222-4222-8222-222222222222', $1::uuid, 'component-scaffold/active', 'component', 'ready', '{"vertical_id":"v-active","weight":1.1234567}'::jsonb, NOW(), NOW()),
+			($2::uuid, $1::uuid, 'component-scaffold/active', 'component', 'ready', '{"vertical_id":"v-active","weight":1.1234567}'::jsonb, NOW(), NOW()),
 			('33333333-3333-4333-8333-333333333333', '44444444-4444-4444-8444-444444444444'::uuid, 'component-scaffold/active', 'component', 'ready', '{"vertical_id":"wrong-run"}'::jsonb, NOW() + INTERVAL '1 minute', NOW() + INTERVAL '1 minute')
-	`, runID); err != nil {
+	`, runID, entityID); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
 
@@ -894,8 +909,8 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 	if got.InstanceID != "active" {
 		t.Fatalf("InstanceID = %q, want active", got.InstanceID)
 	}
-	if got.EntityID != runtimeflowidentity.EntityID("component-scaffold/active") {
-		t.Fatalf("EntityID = %q, want derived flow instance entity id", got.EntityID)
+	if got.EntityID != entityID {
+		t.Fatalf("EntityID = %q, want exact readiness entity id", got.EntityID)
 	}
 	if got.FlowTemplate != "component-scaffold" {
 		t.Fatalf("FlowTemplate = %q, want component-scaffold", got.FlowTemplate)
@@ -913,15 +928,14 @@ func TestPostgresStoreListActiveFlowInstanceDescriptorsFiltersToActiveTemplates(
 	}
 }
 
-func TestPostgresStoreListActiveFlowInstanceDescriptorsAllowsUnscopedEmptyCensus(t *testing.T) {
+func TestPostgresStoreListActiveFlowInstanceDescriptorsRejectsUnscopedCensus(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ensureFlowInstanceRouteTables(t, ctx, db)
 
-	descriptors, err := pg.ListActiveFlowInstanceDescriptors(ctx)
-	if err != nil || len(descriptors) != 0 {
-		t.Fatalf("unscoped descriptor census: descriptors=%#v err=%v", descriptors, err)
+	if descriptors, err := pg.ListActiveFlowInstanceDescriptors(ctx); err == nil || !strings.Contains(err.Error(), "run_id is required") {
+		t.Fatalf("unscoped descriptor census: descriptors=%#v err=%v, want exact run scope rejection", descriptors, err)
 	}
 }
 

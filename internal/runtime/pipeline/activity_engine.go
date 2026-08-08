@@ -90,6 +90,7 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 type pipelineActivityDispatcher struct {
 	coordinator *PipelineCoordinator
 	client      *http.Client
+	emissions   *pipelineEmissionPlan
 }
 
 func (d pipelineActivityDispatcher) DispatchActivities(ctx context.Context, intents []runtimeengine.ActivityIntent) error {
@@ -615,6 +616,10 @@ func (d pipelineActivityDispatcher) logActivityRuntime(ctx context.Context, inte
 }
 
 func (pc *PipelineCoordinator) handleActivityRequestEvent(ctx context.Context, evt events.Event) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
+	return pc.handleActivityRequestEventWithEmissionPlan(ctx, evt, nil)
+}
+
+func (pc *PipelineCoordinator) handleActivityRequestEventWithEmissionPlan(ctx context.Context, evt events.Event, emissions *pipelineEmissionPlan) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
 	if pc == nil || evt.Type() != activityRequestEventType {
 		return false, runtimepipelineobligation.Continue(), nil
 	}
@@ -622,7 +627,7 @@ func (pc *PipelineCoordinator) handleActivityRequestEvent(ctx context.Context, e
 	if err != nil {
 		return true, runtimepipelineobligation.Continue(), err
 	}
-	dispatcher := pipelineActivityDispatcher{coordinator: pc}
+	dispatcher := pipelineActivityDispatcher{coordinator: pc, emissions: emissions}
 	if failure := dispatcher.activityContractPinFailure(ctx, intent, pc.SemanticSource()); failure != nil {
 		if failure.Class == runtimefailures.ClassDependencyUnavailable {
 			return true, runtimepipelineobligation.ReleaseForRetry(failure.Detail.Code, failure), nil
@@ -1453,8 +1458,8 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 	if err != nil {
 		return fmt.Errorf("construct activity result event: %w", err)
 	}
-	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
-		*collector = append(*collector, evt)
+	if d.emissions != nil {
+		d.emissions.appendEvent(evt)
 		d.logActivityRuntime(ctx, intent, "result_published", map[string]any{
 			"activity_id":       intent.ActivityID,
 			"tool":              intent.Tool,

@@ -720,6 +720,10 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEvent(ctx context.Context, ev
 }
 
 func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Context, evt events.Event) (bool, error) {
+	return pc.dispatchWorkflowNodeEventResultWithEmissionPlan(ctx, evt, nil)
+}
+
+func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResultWithEmissionPlan(ctx context.Context, evt events.Event, emissions *pipelineEmissionPlan) (bool, error) {
 	eventType := strings.TrimSpace(string(evt.Type()))
 	if eventType == "" {
 		return false, nil
@@ -730,7 +734,7 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Conte
 		if !pc.workflowNodeDeliveryRouteMatches(ctx, nodeID, evt.TargetRoute()) {
 			continue
 		}
-		handled, err := pc.executeNodeHandlerPlanResult(ctx, nodeID, evt)
+		handled, err := pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, nodeID, evt, emissions)
 		if err != nil {
 			return handledAny || handled, err
 		}

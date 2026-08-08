@@ -15,7 +15,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
@@ -421,30 +420,22 @@ func (r *recordingDeliveryRouteInterceptor) seen(route events.DeliveryRoute) boo
 	return false
 }
 
-func TestEngineDispatcherCollectsEmitIntentsWithChainDepth(t *testing.T) {
-	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{})
+func TestEngineDispatcherDispatchesCommittedIntentWithoutHiddenCollector(t *testing.T) {
+	store := &recordingEventStore{}
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	eventCollector := make([]events.Event, 0, 1)
-	intentCollector := make([]runtimeengine.EmitIntent, 0, 1)
-	ctx := runtimepipeline.WithPipelineEmitCollectors(context.Background(), &eventCollector, &intentCollector)
-
+	eb.SetInterceptors(interceptingTestHandler{})
 	intent := runtimeengine.EmitIntent{
 		Event:      eventtest.RunCreatingRootIngress("", events.EventType("custom.emitted"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Time{}),
 		ChainDepth: 3,
 	}
-	if err := eb.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
-	if got := len(intentCollector); got != 1 {
-		t.Fatalf("intent collector count = %d, want 1", got)
-	}
-	if got := intentCollector[0].ChainDepth; got != 3 {
-		t.Fatalf("intent chain depth = %d, want 3", got)
-	}
-	if got := len(eventCollector); got != 0 {
-		t.Fatalf("event collector count = %d, want 0", got)
+	if got := store.eventTypes(); len(got) == 0 || got[0] != "custom.followup" {
+		t.Fatalf("persisted event types = %v, want first event custom.followup", got)
 	}
 }
 

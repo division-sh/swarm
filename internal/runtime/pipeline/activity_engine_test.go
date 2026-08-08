@@ -239,11 +239,11 @@ func TestActivityRequestAndResultPreserveMockExecutionMode(t *testing.T) {
 		t.Fatalf("recovered intent execution mode = %q, want mock", recovered.ExecutionMode)
 	}
 
-	var emitted []events.Event
-	ctx := context.WithValue(context.Background(), pipelineEmitCollectorKey{}, &emitted)
-	if err := (pipelineActivityDispatcher{}).publishActivityResult(ctx, recovered, recovered.SuccessEvent, map[string]any{"ok": true}); err != nil {
+	emissions := &pipelineEmissionPlan{}
+	if err := (pipelineActivityDispatcher{emissions: emissions}).publishActivityResult(context.Background(), recovered, recovered.SuccessEvent, map[string]any{"ok": true}); err != nil {
 		t.Fatalf("publishActivityResult: %v", err)
 	}
+	emitted := emissions.immutableEvents()
 	if len(emitted) != 1 || emitted[0].ExecutionMode() != executionmode.Mock {
 		t.Fatalf("result events = %#v, want one mock event", emitted)
 	}

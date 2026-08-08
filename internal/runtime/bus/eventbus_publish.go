@@ -581,7 +581,7 @@ func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 	if failure := p.plan.TargetFailure; !failure.Empty() {
 		disposition := runtimepipelineobligation.DeadLetter(failure.Code(), targetDeliveryFailureEnvelope(failure))
 		request.Disposition = &disposition
-		_, _, record := targetDeliveryFailureRecord(p.Event, p.plan, failure)
+		_, _, record := targetDeliveryFailureRecord(p.Event, p.plan, failure, time.Now().UTC())
 		request.DeadLetter = &record
 	}
 	return request
@@ -2016,7 +2016,7 @@ func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.
 	if failure.Empty() {
 		return
 	}
-	_, detail, record := targetDeliveryFailureRecord(evt, plan, failure)
+	_, detail, record := targetDeliveryFailureRecord(evt, plan, failure, time.Now().UTC())
 	eb.logRuntime(ctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, &record.Failure, 0)
 
 	recorder := eb.durable.TargetFailureRecorder
@@ -2028,7 +2028,7 @@ func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.
 	}
 }
 
-func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runtimepinrouting.TargetFailure) (string, map[string]any, runtimedeadletters.Record) {
+func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runtimepinrouting.TargetFailure, occurredAt time.Time) (string, map[string]any, runtimedeadletters.Record) {
 	plan = plan.Normalized()
 	target := evt.TargetRoute()
 	targetSet := evt.TargetRoutes()
@@ -2061,6 +2061,7 @@ func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runti
 		RetryCount:      0,
 		ChainDepth:      evt.ChainDepth(),
 		HandlerNode:     "pin_routing",
+		Timestamp:       occurredAt.UTC().Format(time.RFC3339Nano),
 	}
 }
 
