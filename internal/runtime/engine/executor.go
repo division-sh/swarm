@@ -523,7 +523,11 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		return e.deps.TxRunner.Run(lockCtx, func(tx Tx) error {
 			actionIntents := []EmitIntent{}
 			txCtx := WithActionEmitIntentCollector(tx.Context(), &actionIntents)
-			frame := e.newExecutionFrame(contextTx{Tx: tx, ctx: txCtx}, req)
+			frame, err := e.newExecutionFrame(contextTx{Tx: tx, ctx: txCtx}, req)
+			if err != nil {
+				SetExecutionFailure(&result, err, "runtime.engine", "base_context")
+				return err
+			}
 			if err := e.runSteps(&frame); err != nil {
 				result = frame.result
 				var moduleErr *computemodule.Error
@@ -606,7 +610,7 @@ func (e *Executor) loadState(ctx context.Context, req ExecutionRequest) (StateSn
 	return state, nil
 }
 
-func (e *Executor) newExecutionFrame(tx Tx, req ExecutionRequest) executionFrame {
+func (e *Executor) newExecutionFrame(tx Tx, req ExecutionRequest) (executionFrame, error) {
 	state := req.State
 	if state.StateCarrier.Metadata == nil {
 		state.StateCarrier.Metadata = map[string]any{}
@@ -618,13 +622,16 @@ func (e *Executor) newExecutionFrame(tx Tx, req ExecutionRequest) executionFrame
 	if len(payload) == 0 {
 		payload = map[string]any{}
 	}
-	base := BuildBaseContext(ContextBuilderInput{
+	base, err := BuildBaseContext(ContextBuilderInput{
 		Source:  e.deps.Source,
 		FlowID:  req.FlowID.String(),
 		State:   state,
 		Event:   req.Event,
 		Payload: payload,
 	})
+	if err != nil {
+		return executionFrame{}, err
+	}
 	req.State = state
 	currentState := strings.TrimSpace(state.CurrentState)
 	return executionFrame{
@@ -648,7 +655,7 @@ func (e *Executor) newExecutionFrame(tx Tx, req ExecutionRequest) executionFrame
 			NextState:    currentState,
 			Computed:     map[string]any{},
 		},
-	}
+	}, nil
 }
 
 func (e *Executor) runSteps(frame *executionFrame) error {

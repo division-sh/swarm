@@ -789,6 +789,15 @@ func (d *TypeCatalogDocument) UnmarshalYAML(node *yaml.Node) error {
 			return NewUndefinedFieldDiagnostic("type catalog", key, typeCatalogFieldOptions)
 		}
 	}
+	for name, decl := range doc.Enums {
+		name = strings.TrimSpace(name)
+		if len(decl.Values) == 0 {
+			return fmt.Errorf("enum %s is declared without values; declare the mapping form {values: [...], default: <member>}", name)
+		}
+		if strings.TrimSpace(decl.Default) == "" {
+			return fmt.Errorf("enum %s has no declared default; add default: %s to preserve current behavior", name, decl.Values[0])
+		}
+	}
 	*d = doc
 	return nil
 }
@@ -844,10 +853,7 @@ func decodeEnumDeclaration(node *yaml.Node) ([]string, string, error) {
 		return nil, "", fmt.Errorf("RETIRED: enum declaration uses the sequence form; convert to the mapping form and add default: %s to preserve behavior (e.g. {values: [...], default: %s})", values[0], values[0])
 	}
 	if node.Kind == yaml.ScalarNode {
-		member, err := decodeScalarStringNode(node)
-		if err != nil {
-			return nil, "", err
-		}
+		member, _ := decodeScalarStringNode(node)
 		if member == "" {
 			return nil, "", fmt.Errorf("enum declaration requires the mapping form {values: [...], default: <member>}")
 		}
@@ -874,10 +880,10 @@ func decodeEnumDeclaration(node *yaml.Node) ([]string, string, error) {
 			}
 			values = decoded
 		case "default":
-			decoded, err := decodeScalarStringNode(value)
-			if err != nil {
-				return nil, "", fmt.Errorf("enum declaration default: %w", err)
+			if value.Kind != yaml.ScalarNode {
+				return nil, "", fmt.Errorf("enum declaration default must be a scalar member")
 			}
+			decoded, _ := decodeScalarStringNode(value)
 			defaultValue = decoded
 		default:
 			return nil, "", NewUndefinedFieldDiagnostic("enum declaration", key, enumDeclarationFields)

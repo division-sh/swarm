@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -353,10 +354,10 @@ func Materialize(contract Contract, provided map[string]any) (map[string]any, er
 	return out, nil
 }
 
-func MaterializeMetadataForFlow(source semanticview.Source, flowID string, metadata map[string]any) map[string]any {
+func MaterializeMetadataForFlow(source semanticview.Source, flowID string, metadata map[string]any) (map[string]any, error) {
 	contract, ok := ResolveForFlow(source, flowID)
 	if !ok {
-		return cloneMap(metadata)
+		return cloneMap(metadata), nil
 	}
 	input := map[string]any{}
 	for name := range contract.Entity.Fields {
@@ -366,7 +367,7 @@ func MaterializeMetadataForFlow(source semanticview.Source, flowID string, metad
 	}
 	materialized, err := Materialize(contract, input)
 	if err != nil {
-		return cloneMap(metadata)
+		return nil, err
 	}
 	out := cloneMap(metadata)
 	if out == nil {
@@ -375,7 +376,7 @@ func MaterializeMetadataForFlow(source semanticview.Source, flowID string, metad
 	for key, value := range materialized {
 		out[key] = value
 	}
-	return out
+	return out, nil
 }
 
 func NormalizeFieldValue(contract Contract, fieldName string, value any) (any, error) {
@@ -549,8 +550,8 @@ func defaultValue(contract Contract, typeRef string, explicit any) (any, error) 
 		return []any{}, nil
 	case isEnumType(contract, typeRef):
 		enum := contract.Types.Enums[typeName(contract, typeRef)]
-		if strings.TrimSpace(enum.Default) == "" {
-			return "", fmt.Errorf("enum %s has no declared default; every enum must declare default: <member>", typeName(contract, typeRef))
+		if strings.TrimSpace(enum.Default) == "" || !slices.Contains(enum.Values, strings.TrimSpace(enum.Default)) {
+			return "", fmt.Errorf("enum %s has no declared member default; every enum must declare default: <member>", typeName(contract, typeRef))
 		}
 		return strings.TrimSpace(enum.Default), nil
 	case isNamedType(contract, typeRef):
