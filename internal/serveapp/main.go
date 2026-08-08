@@ -800,6 +800,10 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	if err != nil {
 		return serveRuntimeBundleContext{}, err
 	}
+	loaded.module, loaded.source, err = admittedRuntimeModuleAndSource(rt)
+	if err != nil {
+		return serveRuntimeBundleContext{}, fmt.Errorf("retain admitted runtime source: %w", err)
+	}
 	return serveRuntimeBundleContext{
 		loaded:            loaded,
 		stateStoreSummary: stateStoreSummary,

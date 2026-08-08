@@ -76,6 +76,48 @@ func TestMockResponsePlanHasOneProductionProducer(t *testing.T) {
 	}
 }
 
+func TestMockResponseCompilerConsumesCanonicalSchemaInhabitant(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve mock response ownership test path")
+	}
+	path := filepath.Join(filepath.Dir(file), "mock_response_compiler.go")
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse mock response compiler: %v", err)
+	}
+	forbidden := map[string]struct{}{
+		"validateMockResponseSchema":   {},
+		"validateMockNumericBounds":    {},
+		"deterministicMockSchemaValue": {},
+		"deterministicMockNumber":      {},
+		"deterministicMockInteger":     {},
+		"sortedUniqueStrings":          {},
+	}
+	canonicalCalls := 0
+	for _, declaration := range parsed.Decls {
+		if function, ok := declaration.(*ast.FuncDecl); ok {
+			if _, exists := forbidden[function.Name.Name]; exists {
+				t.Errorf("provider-local schema inhabitant helper %s survives", function.Name.Name)
+			}
+		}
+	}
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if ok && selector.Sel.Name == "InhabitDeterministically" {
+			canonicalCalls++
+		}
+		return true
+	})
+	if canonicalCalls != 1 {
+		t.Fatalf("canonical schema inhabitant calls = %d, want exactly one", canonicalCalls)
+	}
+}
+
 func mockResponseConstructorName(expr ast.Expr) string {
 	switch typed := expr.(type) {
 	case *ast.Ident:

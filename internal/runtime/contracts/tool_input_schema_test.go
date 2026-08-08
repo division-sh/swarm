@@ -184,6 +184,17 @@ func TestToolInputSchemaRejectsExplicitEmptyEnum(t *testing.T) {
 	}
 }
 
+func TestToolInputSchemaProjectPreservesAuthoredEnumOrder(t *testing.T) {
+	schema := MustToolInputSchema(ToolSchemaString, ToolSchemaEnum("zeta", "alpha"))
+	projected, err := schema.Project()
+	if err != nil {
+		t.Fatalf("Project: %v", err)
+	}
+	if got := projected["enum"]; !reflect.DeepEqual(got, []any{"zeta", "alpha"}) {
+		t.Fatalf("projected enum = %#v, want authored order", got)
+	}
+}
+
 func TestToolInputSchemaRejectsExplicitNullForEveryKeyword(t *testing.T) {
 	tests := []struct {
 		name    string
