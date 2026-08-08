@@ -169,10 +169,8 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 			usage.autoEmitOnCreate = true
 		}
 	}
-	for _, endpoint := range census.Consumers() {
-		if !endpointMatchesDeadEventDeclaration(endpoint, decl) {
-			continue
-		}
+	for _, match := range deadEventTypedConsumerMatches(c.source, census, decl) {
+		endpoint := match.Consumer
 		switch endpoint.Kind {
 		case semanticview.EventEndpointNodeHandler, semanticview.EventEndpointNodeGenerated:
 			usage.handlerSubscribes++
@@ -194,24 +192,15 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 	return usage
 }
 
-func deadEventRoleMatches(source semanticview.Source, decl deadEventDeclaration, referenceFlowID, reference string) bool {
-	reference = eventidentity.Normalize(reference)
-	if reference == "" {
-		return false
+func deadEventTypedConsumerMatches(source semanticview.Source, census semanticview.AuthoredEventEndpointCensus, decl deadEventDeclaration) []semanticview.TypedPubSubConsumerMatch {
+	producer := semanticview.AuthoredEventEndpoint{
+		ID:        "dead-event-schema:" + strings.TrimSpace(decl.FlowID) + ":" + eventidentity.Normalize(decl.Canonical),
+		Direction: semanticview.EventEndpointProducer,
+		FlowID:    strings.TrimSpace(decl.FlowID),
+		Event:     semanticview.ResolveFlowEventProof(source, decl.FlowID, decl.Canonical),
 	}
-	referenceFlowID = strings.TrimSpace(referenceFlowID)
-	proof := semanticview.ResolveFlowEventProof(source, referenceFlowID, reference)
-	if eventidentity.Normalize(proof.Canonical) != eventidentity.Normalize(decl.Canonical) {
-		return false
-	}
-
-	if strings.TrimSpace(decl.FlowID) == "" {
-		return referenceFlowID == ""
-	}
-	if strings.TrimSpace(decl.FlowID) == referenceFlowID {
-		return true
-	}
-	return strings.Contains(reference, "/")
+	matches, _ := census.ResolveTypedPubSubConsumerMatches(producer)
+	return matches
 }
 
 func deadEventSameScope(a, b string) bool {

@@ -724,6 +724,7 @@ seam_families:
     classification: valid_consumer
     paths:
       - platform-spec.yaml
+      - internal/apispec/platform_spec_composition_routing_test.go
       - internal/runtime/accprojection/resolver.go
       - internal/runtime/bus/import_boundary_wildcard_routing_test.go
       - internal/runtime/bus/routing_derivation.go

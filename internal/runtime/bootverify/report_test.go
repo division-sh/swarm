@@ -634,29 +634,6 @@ support-node:
 			},
 		},
 		{
-			name:   "cross-flow qualified usage",
-			target: "producer/ticket.ready",
-			opts: deadEventSchemaFixtureOptions{
-				name: "dead-event-schema-cross-flow-qualified",
-				flows: map[string]deadEventSchemaFlowFiles{
-					"producer": {
-						events: "ticket.ready: {}\n",
-					},
-					"consumer": {
-						nodes: `
-consumer-node:
-  id: consumer-node
-  execution_type: system_node
-  subscribes_to:
-    - producer/ticket.ready
-  event_handlers:
-    producer/ticket.ready: {}
-`,
-					},
-				},
-			},
-		},
-		{
 			name:   "root-local root declaration",
 			target: "ticket.ready",
 			opts: deadEventSchemaFixtureOptions{
@@ -782,6 +759,35 @@ pins:
 				t.Fatalf("unexpected semantic_drift_dead_event_schema warning for %s, got %#v", tc.target, report.Warnings())
 			}
 		})
+	}
+}
+
+func TestRun_DoesNotTreatCrossFlowQualifiedSubscriptionAsDeadEventLiveness(t *testing.T) {
+	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
+		name: "dead-event-schema-cross-flow-qualified",
+		flows: map[string]deadEventSchemaFlowFiles{
+			"producer": {
+				events: "ticket.ready: {}\n",
+			},
+			"consumer": {
+				nodes: `
+consumer-node:
+  id: consumer-node
+  execution_type: system_node
+  subscribes_to:
+    - producer/ticket.ready
+  event_handlers:
+    producer/ticket.ready: {}
+`,
+			},
+		},
+	})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "producer/ticket.ready") {
+		t.Fatalf("retired cross-flow exact subscription incorrectly kept declaration alive: %#v", report.Warnings())
 	}
 }
 
@@ -4624,6 +4630,9 @@ func TestRun_DoesNotWarnForImportedWildcardConsumer(t *testing.T) {
 
 	if reportContains(report.Warnings(), "event_consumer_exists", "child/grandchild/task.done") {
 		t.Fatalf("imported wildcard consumer was omitted from canonical topology: %#v", report.Warnings())
+	}
+	if reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "child/grandchild/task.done") {
+		t.Fatalf("typed imported wildcard authorization was omitted from dead-schema liveness: %#v", report.Warnings())
 	}
 }
 
