@@ -380,7 +380,26 @@ func TestEnumDefaultMissingFailsFast(t *testing.T) {
 		},
 	}
 	_, err := defaultValue(contract, "order_status", nil)
-	if err == nil || !strings.Contains(err.Error(), "order_status") || !strings.Contains(err.Error(), "no declared default") {
+	if err == nil || !strings.Contains(err.Error(), "order_status") || !strings.Contains(err.Error(), "no declared member default") {
 		t.Fatalf("missing enum default error = %v, want fail-fast invariant violation", err)
+	}
+}
+
+func TestEnumDefaultNonMemberFailsFast(t *testing.T) {
+	contract := Contract{
+		Entity: runtimecontracts.EntityContract{
+			Fields: map[string]runtimecontracts.EntityFieldDecl{
+				"status": {Type: "order_status"},
+			},
+		},
+		Types: runtimecontracts.TypeCatalogDocument{
+			Enums: map[string]runtimecontracts.EnumTypeDecl{
+				"order_status": {Values: []string{"archived", "draft"}, Default: "urgent"},
+			},
+		},
+	}
+	_, err := defaultValue(contract, "order_status", nil)
+	if err == nil || !strings.Contains(err.Error(), "no declared member default") {
+		t.Fatalf("non-member enum default error = %v, want fail-fast invariant violation", err)
 	}
 }

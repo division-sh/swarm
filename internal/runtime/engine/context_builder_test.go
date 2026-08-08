@@ -1,10 +1,13 @@
 package engine
 
 import (
+	"strings"
 	"testing"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestBuildBaseContext_CopiesPayloadMetadataAndPolicy(t *testing.T) {
@@ -20,7 +23,10 @@ func TestBuildBaseContext_CopiesPayloadMetadataAndPolicy(t *testing.T) {
 		Payload: map[string]any{"p": "x"},
 	}
 
-	base := BuildBaseContext(input)
+	base, err := BuildBaseContext(input)
+	if err != nil {
+		t.Fatalf("BuildBaseContext: %v", err)
+	}
 
 	if got := base.PlatformEntity.Raw()["id"]; got != "entity-1" {
 		t.Fatalf("_entity.id = %#v", got)
@@ -60,7 +66,10 @@ func TestBuildBaseContext_UsesConcreteFlowInstanceForPlatformEntity(t *testing.T
 		},
 	}
 
-	base := BuildBaseContext(input)
+	base, err := BuildBaseContext(input)
+	if err != nil {
+		t.Fatalf("BuildBaseContext: %v", err)
+	}
 
 	if got := base.PlatformEntity.Raw()["flow_instance"]; got != "child/inst-1" {
 		t.Fatalf("_entity.flow_instance = %#v, want concrete flow path", got)
@@ -157,5 +166,34 @@ func TestStateMutationAndResultBucketHelpers(t *testing.T) {
 	result.SetComputed("score", 9)
 	if got := result.ComputedBucket().Int("score"); got != 9 {
 		t.Fatalf("computed bucket score = %d", got)
+	}
+}
+
+func TestBuildBaseContext_PropagatesEntityMaterializationFailure(t *testing.T) {
+	input := ContextBuilderInput{
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+			RootEntities: runtimecontracts.EntityContractsDocument{
+				"ticket": {
+					Fields: map[string]runtimecontracts.EntityFieldDecl{
+						"status": {Type: "order_status"},
+					},
+				},
+			},
+			RootTypes: runtimecontracts.TypeCatalogDocument{
+				Enums: map[string]runtimecontracts.EnumTypeDecl{
+					"order_status": {Values: []string{"draft", "open"}, Default: ""},
+				},
+			},
+		}),
+		State: StateSnapshot{
+			EntityID:     "entity-1",
+			CurrentState: "researching",
+			StateCarrier: NewStateCarrier(nil, map[string]bool{}, nil),
+		},
+		Payload: map[string]any{},
+	}
+	_, err := BuildBaseContext(input)
+	if err == nil || !strings.Contains(err.Error(), "order_status") || !strings.Contains(err.Error(), "no declared member default") {
+		t.Fatalf("BuildBaseContext error = %v, want propagated enum-default invariant violation", err)
 	}
 }

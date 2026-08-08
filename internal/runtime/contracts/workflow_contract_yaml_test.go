@@ -3999,3 +3999,30 @@ func TestEnumTypeDeclDecode_AcceptsCanonicalMappingForm(t *testing.T) {
 		t.Fatalf("decoded enum = %#v", decl)
 	}
 }
+
+func TestEnumTypeDeclDecode_EmptyScalarShorthandRequiresMappingForm(t *testing.T) {
+	var decl EnumTypeDecl
+	err := yaml.Unmarshal([]byte(`""`), &decl)
+	if err == nil || !strings.Contains(err.Error(), "requires the mapping form") {
+		t.Fatalf("empty scalar shorthand error = %v, want mapping-form guidance", err)
+	}
+}
+
+func TestEnumTypeDeclDecode_NonScalarDefaultGetsAuthorMessage(t *testing.T) {
+	var decl EnumTypeDecl
+	err := yaml.Unmarshal([]byte("values: [low, high]\ndefault: [low]\n"), &decl)
+	if err == nil || !strings.Contains(err.Error(), "default must be a scalar member") {
+		t.Fatalf("non-scalar default error = %v, want author-facing scalar-member message", err)
+	}
+	if strings.Contains(err.Error(), "kind") {
+		t.Fatalf("non-scalar default leaked an internal yaml kind: %v", err)
+	}
+}
+
+func TestTypeCatalogDecode_RejectsNullEnumEntry(t *testing.T) {
+	var catalog TypeCatalogDocument
+	err := yaml.Unmarshal([]byte("enums:\n  Mode:\n"), &catalog)
+	if err == nil || !strings.Contains(err.Error(), `enum Mode is declared without values`) {
+		t.Fatalf("null enum entry error = %v, want load-time teaching rejection", err)
+	}
+}
