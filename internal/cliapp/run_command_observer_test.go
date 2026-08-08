@@ -202,6 +202,7 @@ func TestRunCommandTerminalStatusCancelsPendingTraceObserver(t *testing.T) {
 			case "run.start":
 				return map[string]any{"run_id": "run-terminal-pending", "status": "running"}
 			case "run.get":
+				awaitRunCommandTraceRequest(t, requestRead)
 				run := validDiagnosticRunHeader("run-terminal-pending")
 				run["status"] = "completed"
 				run["ended_at"] = "2026-05-13T10:01:00Z"
@@ -244,6 +245,7 @@ func TestRunCommandTerminalFailureCancelsPendingTraceObserver(t *testing.T) {
 			case "run.start":
 				return map[string]any{"run_id": "run-terminal-failure-pending", "status": "running"}
 			case "run.get":
+				awaitRunCommandTraceRequest(t, requestRead)
 				run := validDiagnosticRunHeader("run-terminal-failure-pending")
 				run["status"] = "failed"
 				run["ended_at"] = "2026-05-13T10:01:00Z"
