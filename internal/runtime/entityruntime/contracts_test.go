@@ -380,8 +380,8 @@ func TestEnumDefaultMissingFailsFast(t *testing.T) {
 		},
 	}
 	_, err := defaultValue(contract, "order_status", nil)
-	if err == nil || !strings.Contains(err.Error(), "order_status") || !strings.Contains(err.Error(), "no declared member default") {
-		t.Fatalf("missing enum default error = %v, want fail-fast invariant violation", err)
+	if err == nil || !strings.Contains(err.Error(), "order_status") || !strings.Contains(err.Error(), "no declared default") || !strings.Contains(err.Error(), "default: archived") {
+		t.Fatalf("missing enum default error = %v, want fail-fast invariant violation with codemod", err)
 	}
 }
 
@@ -399,7 +399,7 @@ func TestEnumDefaultNonMemberFailsFast(t *testing.T) {
 		},
 	}
 	_, err := defaultValue(contract, "order_status", nil)
-	if err == nil || !strings.Contains(err.Error(), "no declared member default") {
-		t.Fatalf("non-member enum default error = %v, want fail-fast invariant violation", err)
+	if err == nil || !strings.Contains(err.Error(), `default "urgent" is not a declared member`) || !strings.Contains(err.Error(), "archived, draft") {
+		t.Fatalf("non-member enum default error = %v, want fail-fast invariant violation naming value and members", err)
 	}
 }

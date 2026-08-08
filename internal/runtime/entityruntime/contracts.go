@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -549,9 +548,10 @@ func defaultValue(contract Contract, typeRef string, explicit any) (any, error) 
 	case isJSONArrayType(contract, typeRef):
 		return []any{}, nil
 	case isEnumType(contract, typeRef):
-		enum := contract.Types.Enums[typeName(contract, typeRef)]
-		if strings.TrimSpace(enum.Default) == "" || !slices.Contains(enum.Values, strings.TrimSpace(enum.Default)) {
-			return "", fmt.Errorf("enum %s has no declared member default; every enum must declare default: <member>", typeName(contract, typeRef))
+		enumName := typeName(contract, typeRef)
+		enum := contract.Types.Enums[enumName]
+		if err := enum.Validate(enumName); err != nil {
+			return "", err
 		}
 		return strings.TrimSpace(enum.Default), nil
 	case isNamedType(contract, typeRef):

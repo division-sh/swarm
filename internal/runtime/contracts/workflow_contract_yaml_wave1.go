@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -789,13 +790,21 @@ func (d *TypeCatalogDocument) UnmarshalYAML(node *yaml.Node) error {
 			return NewUndefinedFieldDiagnostic("type catalog", key, typeCatalogFieldOptions)
 		}
 	}
-	for name, decl := range doc.Enums {
-		name = strings.TrimSpace(name)
-		if len(decl.Values) == 0 {
-			return fmt.Errorf("enum %s is declared without values; declare the mapping form {values: [...], default: <member>}", name)
+	enumNames := make([]string, 0, len(doc.Enums))
+	for name := range doc.Enums {
+		enumNames = append(enumNames, name)
+	}
+	sort.Strings(enumNames)
+	for _, name := range enumNames {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			return fmt.Errorf("type catalog declares an enum with an empty name")
 		}
-		if strings.TrimSpace(decl.Default) == "" {
-			return fmt.Errorf("enum %s has no declared default; add default: %s to preserve current behavior", name, decl.Values[0])
+		if trimmed != name {
+			return fmt.Errorf("type catalog enum name %q must not have surrounding whitespace", name)
+		}
+		if err := doc.Enums[name].Validate(trimmed); err != nil {
+			return err
 		}
 	}
 	*d = doc

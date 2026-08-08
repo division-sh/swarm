@@ -4026,3 +4026,27 @@ func TestTypeCatalogDecode_RejectsNullEnumEntry(t *testing.T) {
 		t.Fatalf("null enum entry error = %v, want load-time teaching rejection", err)
 	}
 }
+
+func TestTypeCatalogDecode_RejectsEmptyEnumKey(t *testing.T) {
+	var catalog TypeCatalogDocument
+	err := yaml.Unmarshal([]byte("enums:\n  \"\":\n    values: [low]\n    default: low\n"), &catalog)
+	if err == nil || !strings.Contains(err.Error(), "empty name") {
+		t.Fatalf("empty enum key error = %v, want empty-name rejection", err)
+	}
+}
+
+func TestTypeCatalogDecode_RejectsWhitespacePaddedEnumKey(t *testing.T) {
+	var catalog TypeCatalogDocument
+	err := yaml.Unmarshal([]byte("enums:\n  \" Mode\":\n    values: [low]\n    default: low\n"), &catalog)
+	if err == nil || !strings.Contains(err.Error(), "surrounding whitespace") {
+		t.Fatalf("whitespace-padded enum key error = %v, want whitespace rejection", err)
+	}
+}
+
+func TestEnumTypeDeclValidate_SharedInvariantNondeterministicFree(t *testing.T) {
+	var catalog TypeCatalogDocument
+	err := yaml.Unmarshal([]byte("enums:\n  zebra:\n  alpha:\n    values: [low]\n    default: low\n"), &catalog)
+	if err == nil || !strings.Contains(err.Error(), "enum zebra is declared without values") {
+		t.Fatalf("multi-enum validation error = %v, want sorted deterministic first error naming zebra", err)
+	}
+}
