@@ -79,10 +79,23 @@ type entitySummary struct {
 }
 
 type entityFull struct {
-	Entity      entitySummary   `json:"entity"`
-	Fields      map[string]any  `json:"fields"`
-	Gates       map[string]bool `json:"gates"`
-	Accumulated map[string]any  `json:"accumulated"`
+	Entity      entitySummary          `json:"entity"`
+	Fields      map[string]any         `json:"fields"`
+	Gates       map[string]bool        `json:"gates"`
+	Accumulated map[string]any         `json:"accumulated"`
+	Loops       []entityLoopActivation `json:"loops,omitempty"`
+}
+
+// entityLoopActivation mirrors loopruntime.PublicActivation so the --json path
+// round-trips the canonical entity.get result without dropping loop state.
+type entityLoopActivation struct {
+	ID           string `json:"id"`
+	RevisionID   string `json:"revision_id"`
+	Attempt      int    `json:"attempt"`
+	MaxAttempts  int    `json:"max_attempts"`
+	CurrentStage string `json:"current_stage"`
+	Status       string `json:"status"`
+	CloseReason  string `json:"close_reason,omitempty"`
 }
 
 type entityAggregateResult struct {
@@ -142,6 +155,9 @@ func newEntitiesListCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "List entities with filters.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := listOpts.output.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			listOpts.runIDSet = cmd.Flags().Changed("run-id")
 			listOpts.flowSet = cmd.Flags().Changed("flow")
 			listOpts.entityTypeSet = cmd.Flags().Changed("type")
@@ -170,6 +186,9 @@ func newEntityViewCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "View one entity's state.",
 		Args:  argcount.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := viewOpts.output.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			viewOpts.runIDSet = cmd.Flags().Changed("run-id")
 			return runEntityViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], viewOpts)
 		},
@@ -219,7 +238,7 @@ func runEntitiesListCommand(ctx context.Context, out, errOut io.Writer, opts ent
 		return returnCLIAPIError(errOut, err, entityListAPIErrorClassifier())
 	}
 	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
-		writeEntityListResult(w, result, opts.output.verbose)
+		writeEntityListResult(w, result, entityListRenderOptions{verbose: opts.output.verbose, runScoped: opts.runIDSet})
 	}, func() ([]string, error) {
 		ids := make([]string, 0, len(result.Entities))
 		for _, entity := range result.Entities {
@@ -499,33 +518,48 @@ func validateEntityAggregateResult(result entityAggregateResult) error {
 	return nil
 }
 
-func writeEntityListResult(out io.Writer, result entityListResult, verbose bool) {
+type entityListRenderOptions struct {
+	verbose   bool
+	runScoped bool
+}
+
+func writeEntityListResult(out io.Writer, result entityListResult, opts entityListRenderOptions) {
 	if out == nil {
 		return
 	}
+	columns := []cliTableColumn{
+		{Header: "ENTITY_ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyEntity},
+	}
+	if !opts.runScoped {
+		columns = append(columns, cliTableColumn{Header: "RUN_ID", IdentifierFamily: cliIdentifierFamilyRun})
+	}
+	columns = append(columns,
+		cliTableColumn{Header: "TYPE"},
+		cliTableColumn{Header: "STATE"},
+		cliTableColumn{Header: "FLOW", IdentifierFamily: cliIdentifierFamilyFlowInstance},
+		cliTableColumn{Header: "UPDATED"},
+	)
 	rows := make([][]string, 0, len(result.Entities))
 	for _, entity := range result.Entities {
-		updated := entityListTimestamp(cliRelativeTimeNow(), entity.UpdatedAt, verbose)
-		rows = append(rows, []string{
-			entity.EntityID,
+		updated := entityListTimestamp(cliRelativeTimeNow(), entity.UpdatedAt, opts.verbose)
+		row := []string{entity.EntityID}
+		if !opts.runScoped {
+			row = append(row, entity.RunID)
+		}
+		row = append(row,
 			entityDash(entity.EntityType),
 			entityDash(entity.CurrentState),
 			entityShortFlow(entity.FlowInstance),
 			updated,
-		})
+		)
+		rows = append(rows, row)
 	}
 	footers := []string{}
 	if strings.TrimSpace(result.NextCursor) != "" {
 		footers = append(footers, fmt.Sprintf("next_cursor=%s", result.NextCursor))
 	}
 	writeCLITable(out, cliTable{
-		Columns: []cliTableColumn{
-			{Header: "ENTITY_ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyEntity},
-			{Header: "TYPE"},
-			{Header: "STATE"},
-			{Header: "FLOW", IdentifierFamily: cliIdentifierFamilyFlowInstance},
-			{Header: "UPDATED"},
-		},
+		Columns:      columns,
 		Rows:         rows,
 		EmptyMessage: "No entities match the current filters.",
 		FooterLines:  footers,
@@ -634,7 +668,11 @@ func entityFieldValue(value any) string {
 		}
 		return "false"
 	case string:
-		return cliRenderOneLineValue(v)
+		rendered := cliRenderOneLineValue(v)
+		if strings.TrimSpace(rendered) == "" {
+			return "none"
+		}
+		return rendered
 	case map[string]any:
 		if len(v) == 0 {
 			return "none"

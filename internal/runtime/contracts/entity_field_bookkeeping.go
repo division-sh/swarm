@@ -14,6 +14,7 @@ package contracts
 // Current platform injection sites:
 //   - activation, bundle_hash, package_key: internal/runtime/standing_targets.go
 //   - last_data_accumulation_event:        internal/runtime/engine/executor.go
+//   - fan_out_count:                       internal/runtime/engine/executor.go
 //
 // `last_word` is CONTENT: no runtime machinery writes it; flows declare it.
 // This list must stay adjacent to the injection sites; a platform-injected key
@@ -25,6 +26,7 @@ var EntityFieldBookkeepingKeys = []string{
 	"package_key",
 	"entity_id",
 	"last_data_accumulation_event",
+	"fan_out_count",
 }
 
 // IsEntityFieldBookkeepingKey reports whether key is in EntityFieldBookkeepingKeys.

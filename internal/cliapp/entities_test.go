@@ -262,6 +262,38 @@ func TestEntityViewJSONPreservesFullMachineShape(t *testing.T) {
 	}
 }
 
+func TestEntityViewJSONPreservesLoopActivations(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		result := validEntityFullResult("entity-1")
+		result["loops"] = []map[string]any{
+			{"id": "loop-a", "revision_id": "rev-9", "attempt": 1, "max_attempts": 3, "current_stage": "collecting", "status": "active"},
+		}
+		writeJSONRPCResult(t, w, captured.ID, result)
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{
+		`"loops":[{"id":"loop-a","revision_id":"rev-9","attempt":1,"max_attempts":3,"current_stage":"collecting","status":"active"}]`,
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("entity view --json missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
 func TestEntityAggregateUsesEntityAggregateDefaultsAndFilters(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var captured []jsonRPCRequest
@@ -548,9 +580,11 @@ func TestEntityViewStatedEmptyStatesAndTruncationAndControlChars(t *testing.T) {
 		}
 		result := validEntityFullResult("entity-1")
 		result["fields"] = map[string]any{
-			"chats":  map[string]any{},
-			"long":   strings.Repeat("x", 300),
-			"broken": "line one\nline two\tand a control \x01 byte",
+			"chats":         map[string]any{},
+			"empty":         "   ",
+			"long":          strings.Repeat("x", 300),
+			"broken":        "line one\nline two\tand a control \x01 byte",
+			"fan_out_count": 3,
 		}
 		result["gates"] = map[string]any{"blocked": false, "paused": false}
 		writeJSONRPCResult(t, w, captured.ID, result)
@@ -566,14 +600,23 @@ func TestEntityViewStatedEmptyStatesAndTruncationAndControlChars(t *testing.T) {
 		t.Fatalf("all-false gates should render as stated none:\n%s", stdout.String())
 	}
 	chatsLine := ""
+	emptyLine := ""
 	for _, line := range strings.Split(stdout.String(), "\n") {
 		if strings.Contains(line, "chats") {
 			chatsLine = line
-			break
+		}
+		if strings.Contains(line, "empty") {
+			emptyLine = line
 		}
 	}
 	if !strings.Contains(chatsLine, "none") {
 		t.Fatalf("empty collection value should render as none:\n%s", stdout.String())
+	}
+	if !strings.Contains(emptyLine, "none") {
+		t.Fatalf("empty string field should render as none:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "fan_out_count") {
+		t.Fatalf("platform bookkeeping key fan_out_count leaked into default Fields:\n%s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "…") {
 		t.Fatalf("long value missing truncation marker:\n%s", stdout.String())
@@ -625,6 +668,69 @@ func TestEntityListQuietRendersEntityIDs(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
 	if len(lines) != 2 || lines[0] != "entity-a" || lines[1] != "entity-b" {
 		t.Fatalf("quiet stdout = %q, want entity-a/entity-b lines", stdout.String())
+	}
+}
+
+func TestEntityListUnscopedRetainsRunIdentityColumn(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, map[string]any{
+			"entities": []map[string]any{validEntitySummary("entity-1")},
+		})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "list"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"ENTITY_ID", "RUN_ID", "entity-1", "run-1"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("unscoped list missing %q:\n%s", want, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "list", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("scoped code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if strings.Contains(stdout.String(), "RUN_ID") {
+		t.Fatalf("run-scoped list should not repeat the RUN_ID column:\n%s", stdout.String())
+	}
+}
+
+func TestEntityOutputModesRejectCollisionBeforeRequest(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		writeJSONRPCResult(t, w, "unexpected", map[string]any{"entities": []any{}})
+	}))
+	defer server.Close()
+
+	for _, args := range [][]string{
+		{"entity", "list", "--json", "--quiet"},
+		{"entity", "view", "entity-1", "--json", "--quiet"},
+	} {
+		calls.Store(0)
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
+		if code != 2 {
+			t.Fatalf("%v code = %d, want 2 stdout=%s stderr=%s", args, code, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "mutually exclusive") {
+			t.Fatalf("%v stderr = %q, want collision error", args, stderr.String())
+		}
+		if calls.Load() != 0 {
+			t.Fatalf("%v RPC calls = %d, want 0 (collision must fail before any API call)", args, calls.Load())
+		}
 	}
 }
 
