@@ -1,8 +1,8 @@
-trigger:
-  boot: true
-
-expected:
-
-  boot_result: error
-  error_category: UNDEFINED-FIELD
-  error_contains: "custom_logic"
+conformance:
+  disposition: verify-only
+  verify: reject
+  proves:
+    - catalog.verify.boot_diagnostics
+  diagnostic:
+    category: "contract_loader.undefined_field"
+    contains: "custom_logic"

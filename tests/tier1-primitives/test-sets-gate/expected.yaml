@@ -9,3 +9,12 @@ expected:
   entity_state: pending
   emitted_events:
     - gate.set
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.primitives
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

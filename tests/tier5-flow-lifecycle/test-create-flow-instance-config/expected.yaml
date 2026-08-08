@@ -19,3 +19,9 @@ expected:
       max_retries: 3
       timeout_ms: 5000
     auto_emitted: worker-flow/worker-cfg-001/worker.ready
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.flow_lifecycle

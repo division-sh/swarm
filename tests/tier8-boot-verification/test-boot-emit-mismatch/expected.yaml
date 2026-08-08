@@ -1,7 +1,8 @@
-trigger:
-  boot: true
-expected:
-
-  boot_result: error
-  error_category: EMIT-MISMATCH
-  error_contains: "task.completed"
+conformance:
+  disposition: verify-only
+  verify: reject
+  proves:
+    - catalog.verify.boot_diagnostics
+  diagnostic:
+    category: "required_agents_match"
+    contains: "missing [task.completed]"

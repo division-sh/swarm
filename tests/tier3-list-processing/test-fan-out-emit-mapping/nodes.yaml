@@ -2,7 +2,7 @@ routing-node:
   id: routing-node
   execution_type: system_node
   subscribes_to: [batch.submitted]
-  produces: [routed.a, routed.b]
+  produces: [routed.a]
   event_handlers:
     batch.submitted:
       fan_out:

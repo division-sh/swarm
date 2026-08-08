@@ -5,3 +5,9 @@ expected:
 
   boot_result: success
   template_instances: 0
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.flow_lifecycle

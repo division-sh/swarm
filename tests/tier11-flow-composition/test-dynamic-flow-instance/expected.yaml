@@ -19,3 +19,9 @@ expected:
     config:
       worker_id: w-001
       task_label: route-me
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.flow_composition

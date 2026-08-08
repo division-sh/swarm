@@ -11,3 +11,9 @@ expected:
     approval_gate: true
   emitted_events:
     - task.accepted
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.event_loop

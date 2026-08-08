@@ -11,3 +11,12 @@ expected:
   emitted_events: []
   entity_fields:
     value: 42
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.primitives
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

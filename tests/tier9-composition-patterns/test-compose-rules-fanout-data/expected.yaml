@@ -13,3 +13,12 @@ expected:
   emitted_events: [batch.dispatched]
   entity_fields:
     dispatch_count: 3
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.composition_patterns
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

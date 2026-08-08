@@ -165,7 +165,7 @@ type agentFixtureEmit struct {
 
 func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHarness {
 	t.Helper()
-	runtimeCatalogHarnessStartupPolicy().apply(t)
+	strictCatalogFixtureStartupPolicy().apply(t)
 	bundle := loadFixtureBundle(t, fixtureRoot)
 	var rootSchema struct {
 		InitialState string `yaml:"initial_state"`

@@ -26,3 +26,9 @@ expected:
     config:
       worker_id: worker-dup
     auto_emitted: worker-flow/worker-dup/worker.ready
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.flow_lifecycle

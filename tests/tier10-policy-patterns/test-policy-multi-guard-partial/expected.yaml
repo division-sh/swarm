@@ -11,3 +11,12 @@ expected:
 
   handler_outcome: discard
   entity_state: pending
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.policy_patterns
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

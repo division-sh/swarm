@@ -2,8 +2,6 @@ package cataloge2e
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,14 +11,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-var tier12RuntimeToolsFixtures = []string{
-	"test-flow-data-access",
-}
-
 func TestTier12RuntimeTools_FlowDataAccessFixture(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("tests/tier12-runtime-tools/test-flow-data-access"))
-	repoRoot := repoRootFromCatalogE2E(t)
-	fixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-tools", "test-flow-data-access")
+	fixtures := catalogRuntimeFixtures(t, "catalog.runtime.flow_data_access_tools")
+	if len(fixtures) != 1 {
+		t.Fatalf("flow data access runtime fixtures = %d, want 1", len(fixtures))
+	}
+	fixtureRoot := fixtures[0].Root
 
 	h := newRuntimeHarness(t, fixtureRoot, true)
 	cfg, err := h.rt.Manager.ResolveAgentConfig("reference-agent", "support")
@@ -88,28 +85,6 @@ func TestTier12RuntimeTools_FlowDataAccessFixture(t *testing.T) {
 		"filename": "exclusions.yaml",
 	}); err == nil {
 		t.Fatal("undeclared actor read flow data, want fail-closed error")
-	}
-
-}
-
-func TestTier12RuntimeToolsFixtures_AreExplicitlyClassified(t *testing.T) {
-	repoRoot := repoRootFromCatalogE2E(t)
-	entries, err := os.ReadDir(filepath.Join(repoRoot, "tests", "tier12-runtime-tools"))
-	if err != nil {
-		t.Fatalf("read tier12 runtime-tools fixture dir: %v", err)
-	}
-	supported := map[string]struct{}{}
-	for _, name := range tier12RuntimeToolsFixtures {
-		supported[name] = struct{}{}
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name := strings.TrimSpace(entry.Name())
-		if _, ok := supported[name]; !ok {
-			t.Fatalf("tier12 runtime-tools fixture %q is not explicitly classified", name)
-		}
 	}
 }
 

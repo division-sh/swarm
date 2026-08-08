@@ -6,3 +6,14 @@ expected:
   handler_outcome: success
   emitted_events:
     - work.finished
+
+conformance:
+  disposition: retired
+  proves:
+    - catalog.runtime.flow_composition
+  retirement:
+    reason: "legacy parent-listener cross-flow subject back-propagation is unsupported"
+    replacement: "the #2114 compiled connect-routing matrix"
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

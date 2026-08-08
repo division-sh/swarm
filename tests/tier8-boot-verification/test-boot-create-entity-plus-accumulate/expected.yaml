@@ -1,8 +1,8 @@
-trigger:
-  boot: true
-
-expected:
-
-  boot_result: error
-  error_category: HANDLER-FIELD-CONFLICT
-  error_contains: "create_entity"
+conformance:
+  disposition: verify-only
+  verify: reject
+  proves:
+    - catalog.verify.boot_diagnostics
+  diagnostic:
+    category: "accumulator_input_producer_path"
+    contains: "no accepted producer/source path"

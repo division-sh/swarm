@@ -1,8 +1,8 @@
-trigger:
-  boot: true
-
-expected:
-
-  boot_result: error
-  error_category: DEPRECATED
-  error_contains: "logic"
+conformance:
+  disposition: verify-only
+  verify: reject
+  proves:
+    - catalog.verify.boot_diagnostics
+  diagnostic:
+    category: "DEPRECATED"
+    contains: "deprecated field \"logic\""

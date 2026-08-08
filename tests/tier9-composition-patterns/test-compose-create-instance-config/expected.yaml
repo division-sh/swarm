@@ -17,3 +17,9 @@ expected:
       name: alpha
       priority: 1
       owner: team-a
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.composition_patterns

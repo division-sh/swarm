@@ -1,12 +1,20 @@
 name: test-agent-emits-to-node
 initial_state: pending
-terminal_states: [done]
-states: [pending, assigned, done]
+terminal_states:
+- done
+states:
+- pending
+- assigned
+- done
 pins:
   inputs:
-    events: [task.assigned]
+    events:
+    - task.assigned
   outputs:
     events:
-      - name: task.finalized
-        event: task.finalized
-        sink: harness
+    - name: task.finalized
+      event: task.finalized
+      sink: harness
+    - name: task.acknowledged
+      event: task.acknowledged
+      sink: harness

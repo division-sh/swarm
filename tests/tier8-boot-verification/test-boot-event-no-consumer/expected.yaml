@@ -1,8 +1,8 @@
-trigger:
-  boot: true
-
-expected:
-
-  boot_result: warning
-  error_category: EVENT-NO-CONSUMER
-  error_contains: "orphan.unconsumed"
+conformance:
+  disposition: verify-only
+  verify: warning
+  proves:
+    - catalog.verify.boot_diagnostics
+  diagnostic:
+    category: "event_consumer_exists"
+    contains: "orphan.unconsumed"

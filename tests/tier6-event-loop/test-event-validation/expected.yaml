@@ -2,3 +2,9 @@ trigger:
   event: task.submitted
   payload:
   error_contains: "priority is required"
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.event_loop

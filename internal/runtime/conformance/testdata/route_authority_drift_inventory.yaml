@@ -1144,7 +1144,6 @@ seam_families:
       - internal/runtime/conformance/reply_resolution_conformance_test.go
       - internal/runtime/conformance/singleton_coordinator_pilot_conformance_test.go
       - internal/runtime/conformance/template_flow_pilot_conformance_test.go
-      - internal/runtime/swarmflowtest/catalog_runner_test.go
       - tests/tier11-flow-composition/test-dynamic-flow-instance/expected.yaml
       - tests/tier5-flow-lifecycle/test-create-flow-instance/expected.yaml
     search_dimensions: [flow_instance, event_deliveries, replay_scope, connect_route_plan, typed_connect_recipient_evaluation, live_agent_subscription_route_authority]

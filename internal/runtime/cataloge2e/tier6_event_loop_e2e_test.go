@@ -1,30 +1,11 @@
 package cataloge2e
 
 import (
-	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
-
-var tier6EventLoopFixtures = []string{
-	"test-atomicity-guard-rollback",
-	"test-atomicity-commit",
-	"test-atomicity-rollback",
-	"test-chain-depth-limit",
-	"test-cross-entity-concurrent",
-	"test-dead-letter",
-	"test-entity-serialization",
-	"test-event-persisted-before-delivery",
-	"test-event-validation",
-	"test-guards-pre-handler-state",
-	"test-on-complete-atomicity-chain",
-}
-
-var tier6ExcludedFixtures = map[string]catalogExcludedFixture{}
 
 func TestTier6EventLoopCatalogFixtures_RealRuntime(t *testing.T) {
 	canonicalrouting.Prove(t,
@@ -40,9 +21,8 @@ func TestTier6EventLoopCatalogFixtures_RealRuntime(t *testing.T) {
 		canonicalrouting.ArtifactID("tests/tier6-event-loop/test-guards-pre-handler-state"),
 		canonicalrouting.ArtifactID("tests/tier6-event-loop/test-on-complete-atomicity-chain"),
 	)
-	repoRoot := repoRootFromCatalogE2E(t)
-	for _, fixtureName := range tier6EventLoopFixtures {
-		fixtureRoot := filepath.Join(repoRoot, "tests", "tier6-event-loop", fixtureName)
+	for _, fixture := range catalogRuntimeFixtures(t, "catalog.runtime.event_loop") {
+		fixtureName, fixtureRoot := fixture.Name, fixture.Root
 		t.Run(fixtureName, func(t *testing.T) {
 			var expected catalogExpectedDocument
 			loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
@@ -58,40 +38,5 @@ func TestTier6EventLoopCatalogFixtures_RealRuntime(t *testing.T) {
 			}
 			assertCatalogRuntimeOutcome(t, h, expected)
 		})
-	}
-}
-
-func TestTier6EventLoopCatalogFixtures_AreExplicitlyClassified(t *testing.T) {
-	repoRoot := repoRootFromCatalogE2E(t)
-	entries, err := os.ReadDir(filepath.Join(repoRoot, "tests", "tier6-event-loop"))
-	if err != nil {
-		t.Fatalf("read tier6 fixture dir: %v", err)
-	}
-	supported := make(map[string]struct{}, len(tier6EventLoopFixtures))
-	for _, name := range tier6EventLoopFixtures {
-		supported[name] = struct{}{}
-	}
-	found := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name := strings.TrimSpace(entry.Name())
-		if name == "" {
-			continue
-		}
-		found = append(found, name)
-		if _, ok := supported[name]; ok {
-			continue
-		}
-		if _, ok := tier6ExcludedFixtures[name]; ok {
-			continue
-		}
-		t.Fatalf("tier6 fixture %q is neither supported nor classified", name)
-	}
-	sort.Strings(found)
-	expectedCount := len(tier6EventLoopFixtures) + len(tier6ExcludedFixtures)
-	if len(found) != expectedCount {
-		t.Fatalf("tier6 fixture accounting mismatch: found=%d supported=%d excluded=%d", len(found), len(tier6EventLoopFixtures), len(tier6ExcludedFixtures))
 	}
 }

@@ -12,3 +12,12 @@ expected:
   entity_fields:
     resolved_value: high
     resolution_method: best
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.composition_patterns
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

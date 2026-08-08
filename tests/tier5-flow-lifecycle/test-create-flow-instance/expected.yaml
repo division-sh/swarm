@@ -16,3 +16,9 @@ expected:
     config:
       worker_id: worker-001
     auto_emitted: worker-flow/worker-001/worker.ready
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.flow_lifecycle

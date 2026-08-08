@@ -1,6 +1,4 @@
 score.final:
   main_score: number
   secondary_score: number
-result.promoted:
 result.demoted:
-result.rejected:

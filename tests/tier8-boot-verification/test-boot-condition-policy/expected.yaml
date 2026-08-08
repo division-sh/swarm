@@ -1,7 +1,8 @@
-trigger:
-  boot: true
-expected:
-
-  boot_result: warning
-  error_category: CONDITION-POLICY
-  error_contains: "nonexistent_key"
+conformance:
+  disposition: verify-only
+  verify: warning
+  proves:
+    - catalog.verify.boot_diagnostics
+  diagnostic:
+    category: "condition_policy_alignment"
+    contains: "nonexistent_key"

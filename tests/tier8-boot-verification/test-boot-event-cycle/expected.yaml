@@ -1,7 +1,8 @@
-trigger:
-  boot: true
-
-expected:
-
-  boot_result: error
-  error_category: EVENT-CYCLE
+conformance:
+  disposition: verify-only
+  verify: reject
+  proves:
+    - catalog.verify.boot_diagnostics
+  diagnostic:
+    category: "event_cycle_detection"
+    contains: "cycle.ping -> cycle.pong -> cycle.ping"

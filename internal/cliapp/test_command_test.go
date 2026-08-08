@@ -16,8 +16,8 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testcatalog"
 	"github.com/google/uuid"
-	"gopkg.in/yaml.v3"
 )
 
 func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
@@ -447,157 +447,24 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 	}
 }
 
-func TestSwarmTestRunsTier1PositiveEmissionCatalogCompanions(t *testing.T) {
-	for _, packageName := range []string{
-		"test-advances-to",
-		"test-advances-to-terminal",
-		"test-compute-standalone",
-		"test-data-accumulation-direct",
-		"test-data-accumulation-literal",
-		"test-data-accumulation-mapped",
-		"test-emits-multiple",
-		"test-emits-payload-transform",
-		"test-from-filter",
-		"test-guard-escalate",
-		"test-guard-multi",
-		"test-guard-pass",
-		"test-guard-policy-ref",
-		"test-on-complete-first-match",
-		"test-on-complete-second-match",
-		"test-record-evidence",
-		"test-rules-advances-to",
-		"test-rules-else",
-		"test-rules-match",
-		"test-sets-gate",
-	} {
-		t.Run(packageName, func(t *testing.T) {
-			isolateCLIAPIConfigEnv(t)
-			setCLIAPITestToken(t, "test-token")
-			contractsPath := filepath.Join(RepoRoot(), "tests", "tier1-primitives", packageName)
-			scenarioPath := filepath.Join(contractsPath, "tests", "visible-smoke.yaml")
-			raw, err := os.ReadFile(scenarioPath)
-			if err != nil {
-				t.Fatalf("read scenario: %v", err)
-			}
-			doc, err := parseScenarioDocument(raw)
-			if err != nil {
-				t.Fatalf("parse scenario: %v", err)
-			}
-			if len(doc.Steps) != 1 || doc.Steps[0].Action != "publish" {
-				t.Fatalf("scenario steps = %#v, want one publish step", doc.Steps)
-			}
-			if len(doc.Expect.Events.Include) == 0 {
-				t.Fatal("scenario must include a positive emitted-event expectation")
-			}
-			if len(doc.Expect.Entities) != 1 || !doc.Expect.Entities[0].StateSet {
-				t.Fatalf("scenario entity expectations = %#v, want one current_state detail assertion", doc.Expect.Entities)
-			}
-			assertSwarmTestScenarioThroughPublicRPC(t, contractsPath, doc)
-		})
+func TestSwarmTestCatalogCompanionsAreProtocolOnly(t *testing.T) {
+	inventory, err := testcatalog.Load(RepoRoot())
+	if err != nil {
+		t.Fatalf("load catalog inventory: %v", err)
 	}
-}
-
-func TestSwarmTestRunsTier3ListProcessingCatalogCompanions(t *testing.T) {
-	for _, tc := range []struct {
-		packageName       string
-		wantPositiveEvent bool
-	}{
-		{packageName: "test-fan-out-basic", wantPositiveEvent: true},
-		{packageName: "test-fan-out-count", wantPositiveEvent: true},
-		{packageName: "test-fan-out-emit-mapping", wantPositiveEvent: true},
-		{packageName: "test-fan-out-empty"},
-		{packageName: "test-filter-basic", wantPositiveEvent: true},
-		{packageName: "test-filter-empty", wantPositiveEvent: true},
-		{packageName: "test-group-by-standalone", wantPositiveEvent: true},
-		{packageName: "test-reduce-count", wantPositiveEvent: true},
-		{packageName: "test-reduce-max", wantPositiveEvent: true},
-		{packageName: "test-reduce-min", wantPositiveEvent: true},
-		{packageName: "test-reduce-operation-count", wantPositiveEvent: true},
-	} {
-		t.Run(tc.packageName, func(t *testing.T) {
-			isolateCLIAPIConfigEnv(t)
-			setCLIAPITestToken(t, "test-token")
-			contractsPath := filepath.Join(RepoRoot(), "tests", "tier3-list-processing", tc.packageName)
-			scenarioPath := filepath.Join(contractsPath, "tests", "visible-smoke.yaml")
-			raw, err := os.ReadFile(scenarioPath)
-			if err != nil {
-				t.Fatalf("read scenario: %v", err)
-			}
-			doc, err := parseScenarioDocument(raw)
-			if err != nil {
-				t.Fatalf("parse scenario: %v", err)
-			}
-			if len(doc.Steps) != 1 || doc.Steps[0].Action != "publish" {
-				t.Fatalf("scenario steps = %#v, want one publish step", doc.Steps)
-			}
-			if tc.wantPositiveEvent && len(doc.Expect.Events.Include) == 0 {
-				t.Fatal("scenario must include a positive emitted-event expectation")
-			}
-			if !tc.wantPositiveEvent && len(doc.Expect.Events.Include) != 0 {
-				t.Fatalf("scenario includes events %#v, want no event-output assertion", doc.Expect.Events.Include)
-			}
-			if len(doc.Expect.Entities) != 1 || !doc.Expect.Entities[0].StateSet {
-				t.Fatalf("scenario entity expectations = %#v, want one current_state detail assertion", doc.Expect.Entities)
-			}
-			assertSwarmTestScenarioThroughPublicRPC(t, contractsPath, doc)
-		})
+	companions := inventory.PublicCompanions()
+	if len(companions) != 87 {
+		t.Fatalf("public catalog companions = %d, want 87", len(companions))
 	}
-}
-
-func TestSwarmTestRunsRemainingCurrentPublicOwnerCatalogCompanions(t *testing.T) {
-	for _, tc := range []struct {
-		tier        string
-		packageName string
-	}{
-		{tier: "tier1-primitives", packageName: "test-guard-discard"},
-		{tier: "tier1-primitives", packageName: "test-guard-kill"},
-		{tier: "tier1-primitives", packageName: "test-guard-multi-fail"},
-		{tier: "tier1-primitives", packageName: "test-guard-reject"},
-		{tier: "tier1-primitives", packageName: "test-rules-data-accumulation"},
-		{tier: "tier1-primitives", packageName: "test-rules-no-match"},
-		{tier: "tier10-policy-patterns", packageName: "test-policy-capacity-query"},
-		{tier: "tier10-policy-patterns", packageName: "test-policy-hard-gate-override"},
-		{tier: "tier10-policy-patterns", packageName: "test-policy-threshold-three-way"},
-		{tier: "tier10-policy-patterns", packageName: "test-policy-timeout-elapsed"},
-		{tier: "tier11-flow-composition", packageName: "test-child-flow-absolute-path"},
-		{tier: "tier11-flow-composition", packageName: "test-child-flow-pin-wiring"},
-		{tier: "tier11-flow-composition", packageName: "test-child-flow-policy-inherit"},
-		{tier: "tier11-flow-composition", packageName: "test-data-pin-wiring"},
-		{tier: "tier11-flow-composition", packageName: "test-multi-level-policy-inherit"},
-		{tier: "tier11-flow-composition", packageName: "test-wildcard-deep-subscription"},
-		{tier: "tier12-runtime-fork", packageName: "test-non-agent-replay-fail-closed"},
-		{tier: "tier4-cross-entity", packageName: "test-create-entity"},
-		{tier: "tier4-cross-entity", packageName: "test-query-filter"},
-		{tier: "tier4-cross-entity", packageName: "test-query-group-by"},
-		{tier: "tier5-flow-lifecycle", packageName: "test-auto-emit-on-create"},
-		{tier: "tier5-flow-lifecycle", packageName: "test-terminal-state-preserves"},
-		{tier: "tier5-flow-lifecycle", packageName: "test-terminal-state-rejects"},
-		{tier: "tier5-flow-lifecycle", packageName: "test-timer-cancel"},
-		{tier: "tier5-flow-lifecycle", packageName: "test-timer-start-on"},
-		{tier: "tier5-flow-lifecycle", packageName: "test-wildcard-subscription"},
-		{tier: "tier6-event-loop", packageName: "test-atomicity-rollback"},
-		{tier: "tier6-event-loop", packageName: "test-dead-letter"},
-		{tier: "tier6-event-loop", packageName: "test-on-complete-atomicity-chain"},
-		{tier: "tier7-composition", packageName: "test-agent-emits-to-node"},
-		{tier: "tier7-composition", packageName: "test-dual-delivery"},
-		{tier: "tier7-composition", packageName: "test-full-lifecycle"},
-		{tier: "tier7-composition", packageName: "test-multi-gate-pipeline"},
-		{tier: "tier7-composition", packageName: "test-two-node-chain"},
-		{tier: "tier7-composition", packageName: "test-wildcard-cross-flow"},
-		{tier: "tier9-composition-patterns", packageName: "test-compose-accumulate-compute-branch"},
-		{tier: "tier9-composition-patterns", packageName: "test-compose-clear-gates-reenter"},
-		{tier: "tier9-composition-patterns", packageName: "test-compose-gate-chain-three"},
-		{tier: "tier9-composition-patterns", packageName: "test-compose-gate-data-advance-emit"},
-		{tier: "tier9-composition-patterns", packageName: "test-compose-guard-query-capacity"},
-		{tier: "tier9-composition-patterns", packageName: "test-compose-lifecycle-seven-states"},
-		{tier: "tier9-composition-patterns", packageName: "test-compose-rules-fanout-data"},
-		{tier: "tier9-composition-patterns", packageName: "test-compose-rules-per-rule-data"},
-	} {
-		t.Run(tc.tier+"/"+tc.packageName, func(t *testing.T) {
+	for _, fixture := range companions {
+		fixture := fixture
+		t.Run(fixture.RelativePath, func(t *testing.T) {
+			if fixture.Metadata.PublicCompanion == nil || fixture.Metadata.PublicCompanion.ProofRole != "protocol-only" {
+				t.Fatalf("catalog companion proof role = %#v, want protocol-only", fixture.Metadata.PublicCompanion)
+			}
 			isolateCLIAPIConfigEnv(t)
 			setCLIAPITestToken(t, "test-token")
-			contractsPath := filepath.Join(RepoRoot(), "tests", tc.tier, tc.packageName)
-			scenarioPath := filepath.Join(contractsPath, "tests", "visible-smoke.yaml")
+			scenarioPath := filepath.Join(fixture.Root, fixture.Metadata.PublicCompanion.Path)
 			raw, err := os.ReadFile(scenarioPath)
 			if err != nil {
 				t.Fatalf("read scenario: %v", err)
@@ -615,7 +482,7 @@ func TestSwarmTestRunsRemainingCurrentPublicOwnerCatalogCompanions(t *testing.T)
 				}
 			}
 			if len(doc.Expect.Events.Exact) != 0 || len(doc.Expect.Events.Ordered) != 0 {
-				t.Fatalf("scenario event expectations = %#v, want include-only", doc.Expect.Events)
+				t.Fatalf("scenario event expectations = %#v, want include-only protocol fixture", doc.Expect.Events)
 			}
 			if doc.Expect.NoDeadLetters != nil {
 				t.Fatalf("scenario no_dead_letters = %#v, want omitted", *doc.Expect.NoDeadLetters)
@@ -629,138 +496,8 @@ func TestSwarmTestRunsRemainingCurrentPublicOwnerCatalogCompanions(t *testing.T)
 			if len(doc.Expect.Entities) == 1 && !doc.Expect.Entities[0].hasDetailAssertion() {
 				t.Fatalf("scenario entity expectations = %#v, want detail assertion", doc.Expect.Entities)
 			}
-			assertSwarmTestScenarioThroughPublicRPC(t, contractsPath, doc)
+			assertSwarmTestScenarioThroughPublicRPC(t, fixture.Root, doc)
 		})
-	}
-}
-
-func TestSwarmTestRunsSetupPrestateCatalogCompanions(t *testing.T) {
-	for _, tc := range []struct {
-		tier              string
-		packageName       string
-		wantPositiveEvent bool
-	}{
-		{tier: "tier1-primitives", packageName: "test-clear-gates", wantPositiveEvent: true},
-		{tier: "tier1-primitives", packageName: "test-guard-compound-condition", wantPositiveEvent: true},
-		{tier: "tier1-primitives", packageName: "test-guard-entity-ref", wantPositiveEvent: true},
-		{tier: "tier1-primitives", packageName: "test-on-complete-with-state", wantPositiveEvent: true},
-		{tier: "tier1-primitives", packageName: "test-payload-transform-multi-source", wantPositiveEvent: true},
-		{tier: "tier10-policy-patterns", packageName: "test-policy-counter-escalate", wantPositiveEvent: true},
-		{tier: "tier10-policy-patterns", packageName: "test-policy-multi-guard-partial"},
-		{tier: "tier4-cross-entity", packageName: "test-clear-multiple-targets", wantPositiveEvent: true},
-		{tier: "tier4-cross-entity", packageName: "test-clear-state", wantPositiveEvent: true},
-		{tier: "tier6-event-loop", packageName: "test-atomicity-guard-rollback"},
-		{tier: "tier6-event-loop", packageName: "test-guards-pre-handler-state"},
-		{tier: "tier9-composition-patterns", packageName: "test-compose-guard-counter-escalate", wantPositiveEvent: true},
-		{tier: "tier9-composition-patterns", packageName: "test-compose-guard-multi-source", wantPositiveEvent: true},
-	} {
-		t.Run(tc.tier+"/"+tc.packageName, func(t *testing.T) {
-			isolateCLIAPIConfigEnv(t)
-			setCLIAPITestToken(t, "test-token")
-			contractsPath := filepath.Join(RepoRoot(), "tests", tc.tier, tc.packageName)
-			scenarioPath := filepath.Join(contractsPath, "tests", "visible-smoke.yaml")
-			raw, err := os.ReadFile(scenarioPath)
-			if err != nil {
-				t.Fatalf("read scenario: %v", err)
-			}
-			doc, err := parseScenarioDocument(raw)
-			if err != nil {
-				t.Fatalf("parse scenario: %v", err)
-			}
-			if len(doc.Setup.Entities) != 1 {
-				t.Fatalf("scenario setup = %#v, want one public setup entity", doc.Setup.Entities)
-			}
-			if len(doc.Steps) == 0 {
-				t.Fatal("scenario must include at least one publish step")
-			}
-			for _, step := range doc.Steps {
-				if step.Action != "publish" {
-					t.Fatalf("scenario step = %#v, want publish", step)
-				}
-				if step.Target != nil || step.TargetEntityID != nil || step.TargetFlowInstance != nil {
-					t.Fatalf("root setup companion must not use publish target fields: %#v", step)
-				}
-			}
-			if tc.wantPositiveEvent && len(doc.Expect.Events.Include) == 0 {
-				t.Fatal("scenario must include positive emitted-event proof")
-			}
-			if !tc.wantPositiveEvent && len(doc.Expect.Events.Include) != 0 {
-				t.Fatalf("scenario includes events %#v, want no event-output assertion", doc.Expect.Events.Include)
-			}
-			if len(doc.Expect.Events.Exact) != 0 || len(doc.Expect.Events.Ordered) != 0 {
-				t.Fatalf("scenario event expectations = %#v, want include-only", doc.Expect.Events)
-			}
-			if doc.Expect.NoDeadLetters != nil {
-				t.Fatalf("scenario no_dead_letters = %#v, want omitted", *doc.Expect.NoDeadLetters)
-			}
-			if len(doc.Expect.Entities) != 1 || doc.Expect.Entities[0].Ref != "entity" || !doc.Expect.Entities[0].StateSet {
-				t.Fatalf("scenario entity expectations = %#v, want setup ref current_state assertion", doc.Expect.Entities)
-			}
-			assertSetupPrestateVisibleManifestations(t, tc.tier, tc.packageName, contractsPath, doc.Expect.Entities[0])
-			assertSwarmTestScenarioThroughPublicRPC(t, contractsPath, doc)
-		})
-	}
-}
-
-func assertSetupPrestateVisibleManifestations(t *testing.T, tier, packageName, contractsPath string, entityExpect scenarioEntityExpect) {
-	t.Helper()
-	fields, gates := loadCatalogExpectedFieldGateManifestations(t, contractsPath)
-	key := tier + "/" + packageName
-	if override, ok := publicScenarioFieldManifestationOverrides()[key]; ok {
-		fields = override
-	}
-	if split, ok := splitCatalogExpectedGateManifestations()[key]; ok {
-		for gate := range split {
-			delete(gates, gate)
-		}
-	}
-	if len(fields) > 0 {
-		if !entityExpect.FieldsSet {
-			t.Fatalf("%s expected public field manifestations %#v, but companion has no expect.entities.fields", key, fields)
-		}
-		if err := assertScenarioJSONEqual(key+" expect.entities.fields", entityExpect.Fields, fields); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if len(gates) > 0 {
-		if !entityExpect.GatesSet {
-			t.Fatalf("%s expected public gate manifestations %#v, but companion has no expect.entities.gates", key, gates)
-		}
-		if err := assertScenarioJSONEqual(key+" expect.entities.gates", entityExpect.Gates, gates); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func loadCatalogExpectedFieldGateManifestations(t *testing.T, contractsPath string) (map[string]any, map[string]any) {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(contractsPath, "expected.yaml"))
-	if err != nil {
-		t.Fatalf("read expected.yaml: %v", err)
-	}
-	var doc struct {
-		Expected struct {
-			EntityFields map[string]any `yaml:"entity_fields"`
-			Gates        map[string]any `yaml:"gates"`
-		} `yaml:"expected"`
-	}
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		t.Fatalf("parse expected.yaml: %v", err)
-	}
-	fields := cloneAnyMap(doc.Expected.EntityFields)
-	gates := cloneAnyMap(doc.Expected.Gates)
-	return fields, gates
-}
-
-func publicScenarioFieldManifestationOverrides() map[string]map[string]any {
-	return map[string]map[string]any{}
-}
-
-func splitCatalogExpectedGateManifestations() map[string]map[string]string {
-	return map[string]map[string]string{
-		"tier1-primitives/test-clear-gates": {
-			"g1_check": "private catalog gate without a declared public gate owner",
-		},
 	}
 }
 

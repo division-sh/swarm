@@ -1,7 +1,8 @@
-trigger:
-  boot: true
-
-expected:
-
-  boot_result: error
-  error_category: DIALECT-OC-ORDER
+conformance:
+  disposition: verify-only
+  verify: reject
+  proves:
+    - catalog.verify.boot_diagnostics
+  diagnostic:
+    category: "DIALECT-OC-ORDER"
+    contains: "on_complete is dict, must be ordered list"

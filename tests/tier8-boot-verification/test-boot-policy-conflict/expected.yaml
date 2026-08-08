@@ -1,8 +1,7 @@
-trigger:
-  boot: true
-
-expected:
-
-  boot_result: warning
-  error_category: POLICY-CONFLICT
-  error_contains: "max_retries"
+conformance:
+  disposition: retired
+  proves:
+    - catalog.verify.boot_diagnostics
+  retirement:
+    reason: "stateful static multi-row entity ownership is retired"
+    replacement: "TestStaticMultiEntityRetirementConformance and catalog.verify.boot_diagnostics"

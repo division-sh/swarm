@@ -14,3 +14,9 @@ expected:
     - scores.resolved
   entity_fields:
     result: 90
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.list_processing

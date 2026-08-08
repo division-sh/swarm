@@ -145,16 +145,6 @@ func strictCatalogFixtureStartupPolicy() catalogFixtureStartupPolicy {
 	}
 }
 
-func runtimeCatalogHarnessStartupPolicy() catalogFixtureStartupPolicy {
-	// Runtime-backed catalog fixtures still exercise post-boot runtime semantics for
-	// flows that intentionally carry boot warnings, so only emit-schema strictness
-	// stays forced here; "real runtime boot" fixtures use the strict policy instead.
-	return catalogFixtureStartupPolicy{
-		FatalBootWarnings: false,
-		StrictEmitSchemas: true,
-	}
-}
-
 type fixtureWorkflowModule struct {
 	source         semanticview.Source
 	workflow       *runtimepipeline.WorkflowDefinition

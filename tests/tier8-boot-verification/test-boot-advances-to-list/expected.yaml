@@ -1,7 +1,8 @@
-trigger:
-  boot: true
-
-expected:
-
-  boot_result: error
-  error_category: DIALECT-ADV-LIST
+conformance:
+  disposition: verify-only
+  verify: reject
+  proves:
+    - catalog.verify.boot_diagnostics
+  diagnostic:
+    category: "DIALECT-ADV-LIST"
+    contains: "advances_to is list, must be string"

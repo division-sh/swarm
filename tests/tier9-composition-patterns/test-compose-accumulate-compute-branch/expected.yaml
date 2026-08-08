@@ -8,3 +8,12 @@ expected:
   emitted_events: [result.high]
   entity_fields:
     score: 81
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.composition_patterns
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

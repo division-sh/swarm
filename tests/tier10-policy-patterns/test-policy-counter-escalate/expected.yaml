@@ -9,3 +9,12 @@ expected:
   handler_outcome: escalate
   entity_state: retrying
   emitted_events: [attempt.limit_hit]
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.policy_patterns
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

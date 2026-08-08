@@ -17,3 +17,12 @@ expected:
     - items.counted
   entity_fields:
     active_count: 2
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.list_processing
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

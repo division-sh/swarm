@@ -9,4 +9,3 @@ pins:
       - name: routed.a
         event: routed.a
         sink: harness
-      - routed.b

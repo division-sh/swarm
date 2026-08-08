@@ -11,3 +11,12 @@ expected:
   entity_state: cleared
   emitted_events:
     - state.cleared
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.cross_entity
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

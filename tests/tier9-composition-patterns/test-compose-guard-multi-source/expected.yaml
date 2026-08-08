@@ -12,3 +12,12 @@ expected:
   handler_outcome: success
   entity_state: accepted
   emitted_events: [candidate.accepted]
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.composition_patterns
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

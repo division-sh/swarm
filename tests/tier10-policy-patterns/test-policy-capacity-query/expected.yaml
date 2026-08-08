@@ -6,3 +6,12 @@ expected:
   handler_outcome: success
   entity_state: active
   emitted_events: [slot.granted]
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.policy_patterns
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

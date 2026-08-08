@@ -14,3 +14,12 @@ expected:
     - batch.counted
   entity_fields:
     item_count: 4
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.list_processing
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

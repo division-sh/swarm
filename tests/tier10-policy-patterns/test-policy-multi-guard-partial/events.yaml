@@ -1,4 +1,3 @@
 check.requested:
   score: number
   confidence: number
-check.passed:

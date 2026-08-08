@@ -10,3 +10,12 @@ expected:
   entity_state: timed_out
   emitted_events:
     - task.timed_out
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.flow_lifecycle
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only
