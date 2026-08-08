@@ -39,6 +39,38 @@ type startupRecoveryPipelineOwner struct {
 	scans    map[string]runtimepipelineobligation.ScanRequest
 }
 
+type startupRecoveryWorkflowOwner struct {
+	runtimepipeline.WorkflowPersistenceOwner
+	timers runtimetimerobligation.Reader
+}
+
+func (o startupRecoveryWorkflowOwner) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
+	if o.timers != nil {
+		return o.timers.ReadTimerObligations(ctx, scope, observedAt)
+	}
+	return runtimetimerobligation.Snapshot{ObservedAt: observedAt.UTC()}, nil
+}
+
+func (startupRecoveryWorkflowOwner) ListDynamicFlowRuntimeReadiness(context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
+	return nil, nil
+}
+
+func (startupRecoveryWorkflowOwner) ListDynamicFlowRuntimeReadinessKeys(context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadinessKey, error) {
+	return nil, nil
+}
+
+func (startupRecoveryWorkflowOwner) ListWorkflowTimerActivations(context.Context, string, string, bool) ([]runtimepipeline.WorkflowTimerActivation, error) {
+	return nil, nil
+}
+
+func (startupRecoveryWorkflowOwner) StandingRunUsesIntrinsicRecovery(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func startupRecoveryWorkflowPersistence(db *sql.DB, timers runtimetimerobligation.Reader) runtimepipeline.WorkflowPersistence {
+	return runtimepipeline.NewWorkflowPersistence(startupRecoveryWorkflowOwner{timers: timers})
+}
+
 func newStartupRecoveryPipelineOwner(work []events.PersistedReplayEvent, claimErr error) *startupRecoveryPipelineOwner {
 	return &startupRecoveryPipelineOwner{
 		issuer:   runtimepipelineobligation.NewClaimIssuer(),
@@ -321,15 +353,30 @@ func (*startupReadinessFinalizationStore) MaterializeInitialEntry(
 	return 0, errors.New("unexpected readiness materialization")
 }
 
-func (*startupReadinessFinalizationStore) ArmInitialEntryTimers(context.Context, string) error {
+func (*startupReadinessFinalizationStore) PrepareInitialEntryLifecycle(
+	context.Context,
+	runtimepipeline.WorkflowInstance,
+	time.Time,
+) (runtimepipeline.WorkflowInstance, runtimepipeline.WorkflowLifecycleMutationPlan, error) {
+	return runtimepipeline.WorkflowInstance{}, runtimepipeline.WorkflowLifecycleMutationPlan{}, errors.New("unexpected readiness lifecycle preparation")
+}
+
+func (*startupReadinessFinalizationStore) FinalizeInitialEntryLifecycle(
+	context.Context,
+	runtimepipeline.CommittedWorkflowLifecycleMutation,
+) error {
+	return errors.New("unexpected readiness lifecycle finalization")
+}
+
+func (*startupReadinessFinalizationStore) ArmInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
 	return errors.New("unexpected readiness timer arm")
 }
 
-func (*startupReadinessFinalizationStore) ReconcileInitialEntryTimers(context.Context, string) error {
+func (*startupReadinessFinalizationStore) ReconcileInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
 	return errors.New("unexpected readiness timer reconciliation")
 }
 
-func (*startupReadinessFinalizationStore) RetireInitialEntryTimerWakeups(context.Context, string) error {
+func (*startupReadinessFinalizationStore) RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.Route) error {
 	return errors.New("unexpected readiness timer retirement")
 }
 
@@ -344,10 +391,10 @@ func (*startupReadinessFinalizationStore) ReconcileDynamicFlowRuntimeReadinessPl
 func (s *startupReadinessFinalizationStore) LoadDynamicFlowRuntimeReadiness(
 	_ context.Context,
 	runID string,
-	instancePath string,
+	route runtimeflowidentity.Route,
 ) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error) {
 	for _, item := range s.items {
-		if item.Plan.RunID == runID && item.InstancePath == instancePath {
+		if item.Plan.RunID == runID && item.InstancePath == route.InstancePath {
 			return item, true, nil
 		}
 	}
@@ -385,11 +432,11 @@ func (*startupReadinessFinalizationStore) CommitDynamicFlowRuntimeCreationOccurr
 	return errors.New("unexpected readiness creation completion")
 }
 
-func (*startupReadinessFinalizationStore) MarkTerminated(context.Context, string, time.Time) error {
+func (*startupReadinessFinalizationStore) MarkTerminated(context.Context, runtimeflowidentity.Route, time.Time) error {
 	return errors.New("unexpected readiness termination")
 }
 
-func (*startupReadinessFinalizationStore) Load(context.Context, string) (runtimepipeline.WorkflowInstance, bool, error) {
+func (*startupReadinessFinalizationStore) Load(context.Context, runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error) {
 	return runtimepipeline.WorkflowInstance{}, false, errors.New("unexpected readiness workflow load")
 }
 
@@ -473,8 +520,8 @@ func (startupRecoveryMinimalEventStore) RegisterAuthorActivityEventCatalog(scope
 	return runtimeauthoractivity.NewEventCatalogRegistry().Register(scope, descriptors)
 }
 
-func (startupRecoveryMinimalEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublishNoop(ctx, plan)
+func (startupRecoveryMinimalEventStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublishNoop(ctx, command)
 }
 
 func (startupRecoveryMinimalEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -501,8 +548,8 @@ func (startupRecoveryEventStore) RegisterAuthorActivityEventCatalog(scope runtim
 	return runtimeauthoractivity.NewEventCatalogRegistry().Register(scope, descriptors)
 }
 
-func (startupRecoveryEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublishNoop(ctx, plan)
+func (startupRecoveryEventStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublishNoop(ctx, command)
 }
 
 func (startupRecoveryEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -783,8 +830,7 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),
-		SQLDB:                 db,
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, scheduleStore),
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,
 		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
@@ -847,8 +893,7 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(false),
-		SQLDB:                 db,
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, nil),
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,
 		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
@@ -933,8 +978,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		SQLDB:                 db,
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, scheduleStore),
 		DeliveryStore:         deliveryStore,
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,
@@ -1013,8 +1057,7 @@ func TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetai
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		SQLDB:                 db,
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, scheduleStore),
 		DeliveryStore:         deliveryStore,
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,
@@ -1120,8 +1163,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		SQLDB:                 db,
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, scheduleStore),
 		DeliveryStore:         deliveryStore,
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,
@@ -1235,8 +1277,7 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		SQLDB:                 db,
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, nil),
 		DeliveryStore:         deliveryStore,
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,
@@ -1296,8 +1337,7 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 	eventStore := startupRecoveryMinimalEventStore{}
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		SQLDB:                 db,
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, nil),
 		DeliveryStore:         deliveryStore,
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,
@@ -1375,8 +1415,7 @@ func TestRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatal(t 
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		SQLDB:                 db,
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, nil),
 		DeliveryStore:         deliveryStore,
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,
@@ -1441,8 +1480,7 @@ func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndD
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		SQLDB:                 db,
-		WorkflowPersistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, scheduleStore),
 		DeliveryStore:         deliveryStore,
 		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
 		EventStore:            eventStore,

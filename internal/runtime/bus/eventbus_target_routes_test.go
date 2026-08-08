@@ -19,7 +19,6 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -130,10 +129,6 @@ func (s *targetRouteMemoryStore) RollbackFlowInstanceRoute(_ context.Context, id
 	return nil
 }
 
-type targetRouteMemoryPublishTransaction struct {
-	store *targetRouteMemoryStore
-}
-
 func newTargetRouteMemoryStore() *targetRouteMemoryStore {
 	return &targetRouteMemoryStore{
 		events: map[string]events.Event{},
@@ -147,82 +142,84 @@ func (*targetRouteMemoryStore) LoadRunOrigin(context.Context, string) (runtimeru
 	return runtimerunlifecycle.ScenarioSetupRunOrigin(), nil
 }
 
-func (s *targetRouteMemoryStore) CommitPublish(ctx context.Context, plan CommitPublishPlan) (PreparedPublish, error) {
-	if plan == nil {
-		return PreparedPublish{}, errors.New("event publish plan is required")
+func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command PublicationCommand) (CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return CommittedPublication{}, err
 	}
-	return commitPublishInMemory(ctx, plan, &targetRouteMemoryPublishTransaction{store: s})
-}
-
-func (t *targetRouteMemoryPublishTransaction) BeginPreparedPublish(ctx context.Context, prepared PreparedPublishEvent) (EventAppendOutcome, error) {
-	return t.store.BeginPreparedPublish(ctx, prepared)
-}
-
-func (t *targetRouteMemoryPublishTransaction) LoadPreparedPublishEvent(_ context.Context, eventID string) (events.AdmittedEvent, bool, error) {
-	return t.store.LoadPreparedPublishEvent(context.Background(), eventID)
-}
-
-func (s *targetRouteMemoryStore) LoadPreparedPublishEvent(_ context.Context, eventID string) (events.AdmittedEvent, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	evt, found := s.events[eventID]
-	if !found {
-		return events.AdmittedEvent{}, false, nil
+	event := command.Commit.Event.Event()
+	if _, exists := s.events[event.ID()]; exists {
+		result := CommittedPublication{
+			AppendOutcome: EventAppendExactDuplicate,
+			RouteTopology: cloneFlowInstanceRouteTopology(command.RouteTopology),
+		}
+		for _, plan := range command.Activations {
+			result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan})
+		}
+		s.replaceFlowInstanceRouteTopologyLocked(command.RouteTopology)
+		return result, result.Validate()
 	}
-	admitted, err := events.AdmitForPersistence(evt, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
-	return admitted, err == nil, err
-}
-
-func (s *targetRouteMemoryStore) BeginPreparedPublish(ctx context.Context, prepared PreparedPublishEvent) (EventAppendOutcome, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	evt := prepared.AdmittedEvent().Event()
-	if _, exists := s.events[evt.ID()]; exists {
-		return EventAppendExactDuplicate, nil
-	}
-	s.events[evt.ID()] = evt
-	s.active[evt.ID()] = true
-	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func(context.Context) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		delete(s.events, evt.ID())
-		delete(s.routes, evt.ID())
-		delete(s.scopes, evt.ID())
-		delete(s.receipts, evt.ID())
-		delete(s.receiptErrs, evt.ID())
-	})
-	return EventAppendInserted, nil
-}
-
-func (t *targetRouteMemoryPublishTransaction) FinalizePreparedPublish(_ context.Context, finalization PreparedPublishFinalization) error {
-	return t.store.FinalizePreparedPublish(context.Background(), finalization)
-}
-
-func (s *targetRouteMemoryStore) FinalizePreparedPublish(_ context.Context, finalization PreparedPublishFinalization) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	req := finalization.Request()
-	evt := req.Event.Event()
-	if !s.active[evt.ID()] {
-		return errors.New("prepared event finalization does not match the active event")
-	}
-	if err := req.DeliveryReceipt.Record(nil); err != nil {
-		return err
-	}
-	s.routes[evt.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
-	s.scopes[evt.ID()] = req.ReplayScope
-	if req.Disposition != nil {
+	s.events[event.ID()] = event
+	s.routes[event.ID()] = events.NormalizeDeliveryRoutes(command.Commit.DeliveryRoutes)
+	s.scopes[event.ID()] = command.Commit.ReplayScope
+	if command.Commit.Disposition != nil {
 		if s.receipts == nil {
 			s.receipts = map[string]string{}
 		}
 		if s.receiptErrs == nil {
 			s.receiptErrs = map[string]*runtimefailures.Envelope{}
 		}
-		s.receipts[evt.ID()] = string(req.Disposition.Kind())
-		s.receiptErrs[evt.ID()] = req.Disposition.Failure()
+		s.receipts[event.ID()] = string(command.Commit.Disposition.Kind())
+		s.receiptErrs[event.ID()] = command.Commit.Disposition.Failure()
 	}
-	delete(s.active, evt.ID())
+	result := CommittedPublication{
+		AppendOutcome: EventAppendInserted,
+		RouteTopology: cloneFlowInstanceRouteTopology(command.RouteTopology),
+	}
+	for _, plan := range command.Activations {
+		result.Activations = append(result.Activations, CommittedFlowInstanceActivation{Plan: plan, Created: true})
+	}
+	s.replaceFlowInstanceRouteTopologyLocked(command.RouteTopology)
+	return result, result.Validate()
+}
+
+func (s *targetRouteMemoryStore) LoadPreparedPublishEvent(_ context.Context, eventID string) (events.AdmittedEvent, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	event, found := s.events[strings.TrimSpace(eventID)]
+	if !found {
+		return events.AdmittedEvent{}, false, nil
+	}
+	admitted, err := events.RevalidatePersistedEvent(event)
+	return admitted, err == nil, err
+}
+
+func (s *targetRouteMemoryStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []FlowInstanceRouteRecordSet) error {
+	if err := validateFlowInstanceRouteTopology(sets); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.replaceFlowInstanceRouteTopologyLocked(sets)
 	return nil
+}
+
+func (s *targetRouteMemoryStore) replaceFlowInstanceRouteTopologyLocked(sets []FlowInstanceRouteRecordSet) {
+	for _, set := range sets {
+		identity := targetRouteIdentity(set.Identity)
+		retained := s.flowRoutes[:0]
+		for _, existing := range s.flowRoutes {
+			if !sameTargetRoute(existing.Identity, identity) {
+				retained = append(retained, existing)
+			}
+		}
+		s.flowRoutes = retained
+		for _, route := range set.Routes {
+			route.Identity = targetRouteIdentity(route.Identity)
+			s.flowRoutes = append(s.flowRoutes, route)
+		}
+	}
 }
 
 func (s *targetRouteMemoryStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
@@ -2210,24 +2207,11 @@ func TestEventBusPublish_NodeRouteFailsClosedWithoutRouteSetPersistence(t *testi
 
 type rejectingDeliveryRouteStore struct{}
 
-func (s rejectingDeliveryRouteStore) CommitPublish(ctx context.Context, plan CommitPublishPlan) (PreparedPublish, error) {
-	return commitPublishInMemory(ctx, plan, s)
-}
-
-func (rejectingDeliveryRouteStore) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
-	return events.AdmittedEvent{}, false, nil
-}
-
-func (rejectingDeliveryRouteStore) BeginPreparedPublish(context.Context, PreparedPublishEvent) (EventAppendOutcome, error) {
-	return EventAppendInserted, nil
-}
-
-func (rejectingDeliveryRouteStore) FinalizePreparedPublish(_ context.Context, finalization PreparedPublishFinalization) error {
-	req := finalization.Request()
-	if len(req.DeliveryRoutes) > 0 {
-		return errors.New("typed delivery route persistence is unavailable")
+func (rejectingDeliveryRouteStore) CommitPublication(_ context.Context, command PublicationCommand) (CommittedPublication, error) {
+	if len(command.Commit.DeliveryRoutes) > 0 {
+		return CommittedPublication{}, errors.New("typed delivery route persistence is unavailable")
 	}
-	return req.DeliveryReceipt.Record(nil)
+	return CommittedPublication{AppendOutcome: EventAppendInserted}, nil
 }
 
 func (rejectingDeliveryRouteStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {

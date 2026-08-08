@@ -27,22 +27,27 @@ import (
 
 type flowInstancePersistence interface {
 	MaterializeInitialEntry(ctx context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error)
-	ArmInitialEntryTimers(ctx context.Context, instanceID string) error
-	ReconcileInitialEntryTimers(ctx context.Context, instanceID string) error
-	RetireInitialEntryTimerWakeups(ctx context.Context, instanceID string) error
+	PrepareInitialEntryLifecycle(ctx context.Context, instance runtimepipeline.WorkflowInstance, occurredAt time.Time) (runtimepipeline.WorkflowInstance, runtimepipeline.WorkflowLifecycleMutationPlan, error)
+	FinalizeInitialEntryLifecycle(ctx context.Context, committed runtimepipeline.CommittedWorkflowLifecycleMutation) error
+	ArmInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error
+	ReconcileInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error
+	RetireInitialEntryTimerWakeups(ctx context.Context, route runtimeflowidentity.Route) error
 	ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, plan runtimepipeline.DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error)
-	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID, instanceID string) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
+	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
 	ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
 	ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadinessKey, error)
 	MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error
-	CommitDynamicFlowRuntimeCreationOccurrence(context.Context, runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest, runtimepipeline.DynamicFlowRuntimeCreationOccurrencePublisher) error
-	MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error
-	Load(ctx context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error)
+	MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, terminatedAt time.Time) error
+	Load(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error)
 	LoadRouteRecoveryProjection(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstanceRouteRecoveryProjection, error)
 }
 
 type FlowInstanceRouteContextInstaller interface {
 	StageFlowInstanceRouteContext(context.Context, runtimebus.FlowInstanceRouteMaterializationRequest) error
+}
+
+type FlowInstanceActivationCommitter interface {
+	CommitFlowInstanceActivation(context.Context, runtimepipeline.FlowInstanceActivationPlan) (runtimepipeline.CommittedFlowInstanceActivation, error)
 }
 
 type FlowInstanceRouteContextVerifier interface {
@@ -86,19 +91,89 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	}
 	defer func() { _ = lease.Done() }()
 	ctx = lease.Context()
+	if am.workflowInstances == nil {
+		return fmt.Errorf("workflow instance store is required")
+	}
+	preparedRequest, plan, err := am.prepareFlowInstanceActivation(ctx, req)
+	if err != nil {
+		return err
+	}
+	req = preparedRequest
+	ctx = events.WithDeliveryContext(ctx, req.Context)
+	flowPath := plan.Identity.InstancePath
+	committer := am.roles.FlowActivation
+	if committer == nil {
+		return fmt.Errorf("flow instance activation requires the selected commit owner")
+	}
+	committed, err := committer.CommitFlowInstanceActivation(ctx, plan)
+	if err != nil {
+		return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
+	}
+	if committed.Plan.Identity.Route() != plan.Identity.Route() {
+		return fmt.Errorf("committed flow instance activation identity does not match plan")
+	}
+	if err := am.FinalizeCommittedFlowInstanceActivation(ctx, committed); err != nil {
+		am.signalDynamicFlowRuntimeReadiness()
+		return err
+	}
+	return nil
+}
+
+// PrepareFlowInstanceActivation derives the complete durable activation
+// command without opening or joining a persistence transaction. Publication
+// planning uses this operation before handing the command to the selected
+// store's named commit owner.
+func (am *AgentManager) PrepareFlowInstanceActivation(
+	ctx context.Context,
+	req runtimepipeline.FlowInstanceActivationRequest,
+) (runtimepipeline.FlowInstanceActivationPlan, error) {
+	_, plan, err := am.prepareFlowInstanceActivation(ctx, req)
+	return plan, err
+}
+
+func (am *AgentManager) FinalizeCommittedFlowInstanceActivation(
+	ctx context.Context,
+	committed runtimepipeline.CommittedFlowInstanceActivation,
+) error {
+	if am == nil {
+		return fmt.Errorf("agent manager is required")
+	}
+	if err := committed.Validate(); err != nil {
+		return err
+	}
+	plan := committed.Plan
+	if committed.Created {
+		if err := am.workflowInstances.FinalizeInitialEntryLifecycle(ctx, committed.Lifecycle); err != nil {
+			return fmt.Errorf("finalize flow instance initial lifecycle: %w", err)
+		}
+	}
+	err := am.reconcileCommittedDynamicFlowRuntimeReadinessPlan(ctx, plan.Readiness, am.semanticReadinessSource.source)
+	if err != nil {
+		am.signalDynamicFlowRuntimeReadiness()
+	}
+	return err
+}
+
+func (am *AgentManager) prepareFlowInstanceActivation(
+	ctx context.Context,
+	req runtimepipeline.FlowInstanceActivationRequest,
+) (runtimepipeline.FlowInstanceActivationRequest, runtimepipeline.FlowInstanceActivationPlan, error) {
+	if am == nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("agent manager is required")
+	}
+	if am.workflowInstances == nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("workflow instance store is required")
+	}
 	if req.Context.Empty() {
 		req.Context = events.DeliveryContextFromContext(ctx)
 	}
 	ctx = events.WithDeliveryContext(ctx, req.Context)
 	if req.ContractBundle == nil {
-		return fmt.Errorf("contract bundle is required")
-	}
-	if am.workflowInstances == nil {
-		return fmt.Errorf("workflow instance store is required")
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("contract bundle is required")
 	}
 	admittedSource, err := am.dynamicFlowRuntimeReadinessSource(ctx, req.ContractBundle)
 	if err != nil {
-		return err
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
 	req.ContractBundle = admittedSource.source
 	instance := req.Instance
@@ -107,20 +182,16 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	flowEntityID := strings.TrimSpace(instance.EntityID)
 	flowPath := strings.TrimSpace(instance.InstancePath)
 	if templateID == "" || instanceID == "" || flowEntityID == "" || flowPath == "" {
-		return fmt.Errorf("template_id, instance_id, and entity_id are required")
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("template_id, instance_id, and entity_id are required")
 	}
 	scope, ok := semanticview.FlowScopeByID(req.ContractBundle, templateID)
 	if !ok {
-		return fmt.Errorf("flow contract view not found: %s", templateID)
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow contract view not found: %s", templateID)
 	}
 	schema, ok := req.ContractBundle.FlowSchemaByID(templateID)
 	if !ok {
-		return fmt.Errorf("flow schema not found: %s", templateID)
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow schema not found: %s", templateID)
 	}
-	if flowEntityID == "" {
-		return fmt.Errorf("derive flow entity id for %s", flowPath)
-	}
-	parentEntityID := strings.TrimSpace(instance.ParentEntityID)
 	initialState := strings.TrimSpace(schema.LoweredInitialState())
 	if initialState == "" {
 		initialState = strings.TrimSpace(req.InitialState)
@@ -135,12 +206,12 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if err != nil {
 		if strings.TrimSpace(schema.AutoEmitOnCreate.Event) != "" &&
 			((contextRunID == "" && triggerRunID == "") || triggerEventID == "") {
-			return fmt.Errorf(
+			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf(
 				"auto-emit %s requires exact trigger run_id and parent_event_id",
 				strings.TrimSpace(schema.AutoEmitOnCreate.Event),
 			)
 		}
-		return err
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
 	autoEmitLineage := events.EventLineage{
 		RunID:         autoEmitRunID,
@@ -149,13 +220,13 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	}
 	if strings.TrimSpace(schema.AutoEmitOnCreate.Event) != "" &&
 		(strings.TrimSpace(autoEmitLineage.RunID) == "" || strings.TrimSpace(autoEmitLineage.ParentEventID) == "") {
-		return fmt.Errorf(
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf(
 			"auto-emit %s requires exact trigger run_id and parent_event_id",
 			strings.TrimSpace(schema.AutoEmitOnCreate.Event),
 		)
 	}
 	metadata := cloneFlowConfig(req.Metadata)
-	for key, value := range flowInstanceActivationMetadata(instance, flowEntityID, instanceID, flowPath, parentEntityID) {
+	for key, value := range flowInstanceActivationMetadata(instance, flowEntityID, instanceID, flowPath, strings.TrimSpace(instance.ParentEntityID)) {
 		metadata[key] = value
 	}
 	occurredAt := req.OccurredAt.UTC()
@@ -163,61 +234,47 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		occurredAt = req.TriggerEvent.CreatedAt().UTC()
 	}
 	if occurredAt.IsZero() {
-		return fmt.Errorf("flow activation requires an exact occurrence time")
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow activation requires an exact occurrence time")
 	}
 	agentRecords, err := am.flowInstanceAgentRecords(req, schema, scope)
 	if err != nil {
-		return err
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
-	readinessPlan, err := am.buildDynamicFlowRuntimeReadinessPlan(
-		ctx,
-		req,
-		agentRecords,
-		schema,
-		autoEmitLineage,
-		occurredAt,
-	)
+	readinessPlan, err := am.buildDynamicFlowRuntimeReadinessPlan(ctx, req, agentRecords, schema, autoEmitLineage, occurredAt)
 	if err != nil {
-		return err
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
-	materialization, err := am.workflowInstances.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID:       instanceID,
-		StorageRef:       flowPath,
-		WorkflowName:     templateID,
-		WorkflowVersion:  strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
-		RuntimeReadiness: &readinessPlan,
-		CurrentState:     initialState,
-		Config:           cloneFlowConfig(req.Config),
-		Metadata:         metadata,
-	}, occurredAt)
+	plan := runtimepipeline.FlowInstanceActivationPlan{
+		Instance: runtimepipeline.WorkflowInstance{
+			InstanceID:       instanceID,
+			StorageRef:       flowPath,
+			WorkflowName:     templateID,
+			WorkflowVersion:  strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
+			RuntimeReadiness: &readinessPlan,
+			CurrentState:     initialState,
+			Config:           cloneFlowConfig(req.Config),
+			Metadata:         metadata,
+			EnteredStageAt:   occurredAt,
+			CreatedAt:        occurredAt,
+		},
+		Identity:                      instance,
+		Readiness:                     readinessPlan,
+		ActivationVariables:           flowActivationVars(req),
+		OccurredAt:                    occurredAt,
+		StandingGenerationReplacement: req.StandingGenerationReplacement,
+	}
+	plan.Instance, plan.Lifecycle, err = am.workflowInstances.PrepareInitialEntryLifecycle(ctx, plan.Instance, occurredAt)
 	if err != nil {
-		return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
-	switch materialization {
-	case runtimepipeline.WorkflowInitialMaterializationCreated:
-	case runtimepipeline.WorkflowInitialMaterializationAlreadyExists:
-	default:
-		return fmt.Errorf("persist flow instance %s: unknown initial materialization result %d", flowPath, materialization)
+	plan, err = plan.Normalized()
+	if err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
-	if _, transactional := runtimepipeline.PipelineSQLTxFromContext(ctx); transactional {
-		if err := am.installFlowInstanceRoute(ctx, req); err != nil {
-			return fmt.Errorf("stage dynamic flow route %s: %w", flowPath, err)
-		}
+	if err := plan.Validate(); err != nil {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 	}
-	finalizeAfterCommit := runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
-		postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
-		if err := am.reconcileDynamicFlowRuntimeReadinessPlan(postCommitCtx, readinessPlan, req.ContractBundle); err != nil {
-			am.logFlowInstanceActivationSideEffectFailure(req, "runtime_readiness_failed", "finalize_runtime_readiness", err)
-			am.signalDynamicFlowRuntimeReadiness()
-		}
-	})
-	if !finalizeAfterCommit {
-		if err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, readinessPlan, req.ContractBundle); err != nil {
-			am.signalDynamicFlowRuntimeReadiness()
-			return err
-		}
-	}
-	return nil
+	return req, plan, nil
 }
 
 func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (bool, error) {
@@ -233,7 +290,7 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 	}
 	req.ContractBundle = admittedSource.source
 	instance := req.Instance
-	stored, exists, err := am.workflowInstances.Load(ctx, instance.InstancePath)
+	stored, exists, err := am.workflowInstances.Load(ctx, instance.Route())
 	if err != nil {
 		return false, err
 	}
@@ -254,21 +311,6 @@ func (am *AgentManager) EnsureFlowInstance(ctx context.Context, req runtimepipel
 	readinessPlan, err := am.reconcileEnsuredDynamicFlowRuntimeReadinessPlan(ctx, req, runID)
 	if err != nil {
 		return false, err
-	}
-	if _, transactional := runtimepipeline.PipelineSQLTxFromContext(ctx); transactional {
-		if err := am.installFlowInstanceRoute(ctx, req); err != nil {
-			return false, fmt.Errorf("stage dynamic flow route %s: %w", instance.InstancePath, err)
-		}
-		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
-			postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(runtimepipeline.WithoutPipelineSQLTxContext(actionCtx))
-			if err := am.reconcileDynamicFlowRuntimeReadinessPlan(postCommitCtx, readinessPlan, req.ContractBundle); err != nil {
-				am.logFlowInstanceActivationSideEffectFailure(req, "runtime_readiness_failed", "finalize_runtime_readiness", err)
-				am.signalDynamicFlowRuntimeReadiness()
-			}
-		}) {
-			return false, fmt.Errorf("dynamic flow runtime readiness %s requires post-commit finalization owner", instance.InstancePath)
-		}
-		return false, nil
 	}
 	if err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, readinessPlan, req.ContractBundle); err != nil {
 		am.signalDynamicFlowRuntimeReadiness()
@@ -728,7 +770,7 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 	}
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 	termination, err := owner.CommitFlowInstanceTermination(ctx, runtimepipeline.FlowInstanceTerminationRequest{
-		StorageRef: flowPath, RunID: runID, TerminatedAt: time.Now().UTC(),
+		Route: instance.Route(), RunID: runID, TerminatedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		return fmt.Errorf("persist flow instance terminalization %s: %w", flowPath, err)
@@ -737,17 +779,11 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 	if err != nil {
 		return err
 	}
-	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); active {
-		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(actionCtx context.Context) {
-			if err := am.applyTerminalFlowInstanceSideEffects(actionCtx, plan); err != nil {
-				am.logTerminalFlowInstanceSideEffectFailure(plan, err)
-			}
-		}) {
-			return fmt.Errorf("terminal flow-instance side effects require selected mutation post-commit ownership")
-		}
-		return nil
+	if err := am.applyTerminalFlowInstanceSideEffects(ctx, plan); err != nil {
+		am.logTerminalFlowInstanceSideEffectFailure(plan, err)
+		return err
 	}
-	return am.applyTerminalFlowInstanceSideEffects(ctx, plan)
+	return nil
 }
 
 func (am *AgentManager) terminalFlowInstanceSideEffectPlan(

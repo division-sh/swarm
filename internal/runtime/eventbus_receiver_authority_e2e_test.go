@@ -41,18 +41,17 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var (
-				runtimeDB *sql.DB
-				db        *sql.DB
-				selected  closedReceiverE2EStore
+				db       *sql.DB
+				selected closedReceiverE2EStore
 			)
 			if backend == "postgres" {
 				_, postgresDB, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				runtimeDB, db = postgresDB, postgresDB
+				db = postgresDB
 				selected = storetest.AdmitPostgresRuntimeStore(t, postgresDB)
 			} else {
 				sqlite := storetest.StartSQLiteRuntimeStore(t)
-				db = sqlite.DB
+				db = storetest.Database(sqlite)
 				selected = sqlite
 			}
 
@@ -72,9 +71,9 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 
 			bundle := loadRuntimeTempBundle(t, closedReceiverAuthorityFixtureFiles())
 			source := semanticview.Wrap(bundle)
-			workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
 			if backend == "sqlite" {
-				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
+				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 			}
 			processOwner := worklifetime.NewProcess()
 			t.Cleanup(func() {
@@ -97,8 +96,8 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 				},
 			}
 			rt, err := swarmruntime.NewValidationHarnessRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
-				Config: cfg,
-				SQLDB:  runtimeDB, EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
+				Config:     cfg,
+				EventStore: selected, EventBusDurable: externalRuntimeTestDurableDependencies(selected),
 				EventPayloadValidationBinder: selected, InboundPayloadValidationBinder: selected,
 				AuthorActivityRegistrars: []swarmruntime.AuthorActivityCatalogRegistrar{selected},
 				RunLifecycleCandidates:   selected, WorkflowPersistence: workflowPersistence,
@@ -136,10 +135,12 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 			entityID := uuid.NewString()
 			startedAt := time.Now().UTC().Add(-time.Second)
 			materializeCtx := worklifetime.WithOccurrence(ctx, rt.WorkOccurrence())
+			rootRoute := runID
 			if _, err := rt.Pipeline.MaterializeInitialEntry(materializeCtx, runtimepipeline.WorkflowInstance{
-				InstanceID: entityID, StorageRef: entityID,
+				InstanceID: rootRoute, StorageRef: rootRoute,
 				WorkflowName: bundle.WorkflowName(), WorkflowVersion: bundle.WorkflowVersion(),
 				CurrentState: "pending", EnteredStageAt: startedAt, CreatedAt: startedAt,
+				Metadata: map[string]any{"flow_path": rootRoute, "instance_id": rootRoute, "entity_id": entityID},
 			}, startedAt); err != nil {
 				t.Fatalf("materialize receiver authority workflow: %v", err)
 			}
@@ -257,7 +258,7 @@ func assertClosedReceiverAuthorityEvidence(t *testing.T, ctx context.Context, db
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for closed receiver evidence on %s", backend)
+			t.Fatalf("timed out waiting for closed receiver evidence on %s: %s", backend, closedReceiverEvidenceDiagnostic(t, ctx, db, backend, runID))
 		}
 		select {
 		case <-ctx.Done():
@@ -337,6 +338,40 @@ func assertClosedReceiverAuthorityEvidence(t *testing.T, ctx context.Context, db
 		t.Fatalf("receiver pipeline receipts = %d, want at least root, node input, and downstream input", receipts)
 	}
 	_ = finalizedID
+}
+
+func closedReceiverEvidenceDiagnostic(t testing.TB, ctx context.Context, db *sql.DB, backend, runID string) string {
+	t.Helper()
+	query := `
+		SELECT e.event_name, COALESCE(e.flow_instance, ''), COALESCE(CAST(e.entity_id AS TEXT), ''),
+		       CAST(e.target_route AS TEXT), d.subscriber_type, d.subscriber_id, d.status,
+		       COALESCE(d.reason_code, ''), COALESCE(CAST(d.failure AS TEXT), '')
+		FROM events e
+		LEFT JOIN event_deliveries d ON d.event_id = e.event_id
+		WHERE e.run_id = ?
+		ORDER BY e.created_at, d.subscriber_type, d.subscriber_id`
+	args := []any{runID}
+	if backend == "postgres" {
+		query = strings.Replace(query, "e.run_id = ?", "e.run_id = $1::uuid", 1)
+	}
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return "query diagnostic: " + err.Error()
+	}
+	defer rows.Close()
+	var facts []string
+	for rows.Next() {
+		var eventName, flowInstance, entityID, targetRoute string
+		var subscriberType, subscriberID, status, reason, failure sql.NullString
+		if err := rows.Scan(&eventName, &flowInstance, &entityID, &targetRoute, &subscriberType, &subscriberID, &status, &reason, &failure); err != nil {
+			return "scan diagnostic: " + err.Error()
+		}
+		facts = append(facts, fmt.Sprintf("%s[%s/%s target=%s]:%s/%s:%s:%s:%s", eventName, flowInstance, entityID, targetRoute, subscriberType.String, subscriberID.String, status.String, reason.String, failure.String))
+	}
+	if err := rows.Err(); err != nil {
+		return "iterate diagnostic: " + err.Error()
+	}
+	return strings.Join(facts, ", ")
 }
 
 func closedReceiverEvidenceReady(t testing.TB, ctx context.Context, db *sql.DB, backend, runID string) bool {

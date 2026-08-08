@@ -69,6 +69,14 @@ func (*runtimeTestUnavailableHumanTaskExpiry) ExpireHumanTaskCardsInMutation(con
 	return nil, nil
 }
 
+func (*runtimeTestUnavailableHumanTaskExpiry) ListDueHumanTaskExpiryEvents(context.Context, time.Time, int) ([]events.Event, error) {
+	return nil, nil
+}
+
+func (*runtimeTestUnavailableHumanTaskExpiry) CommitHumanTaskExpirations(context.Context, runtimepipeline.HumanTaskExpiryCommand) (runtimepipeline.CommittedHumanTaskExpiry, error) {
+	return runtimepipeline.CommittedHumanTaskExpiry{}, nil
+}
+
 func completeRuntimeTestPipelineOptions(bus *runtimebus.EventBus, opts runtimepipeline.PipelineCoordinatorOptions) runtimepipeline.PipelineCoordinatorOptions {
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()
@@ -90,12 +98,6 @@ func completeRuntimeTestPipelineOptions(bus *runtimebus.EventBus, opts runtimepi
 	}
 	if opts.HumanTaskExpiry == nil {
 		opts.HumanTaskExpiry = &runtimeTestUnavailableHumanTaskExpiry{}
-	}
-	if opts.GatePublisher == nil {
-		opts.GatePublisher = bus
-	}
-	if opts.DirectDecisionPublisher == nil {
-		opts.DirectDecisionPublisher = bus
 	}
 	if opts.DeliveryRuntime == nil {
 		opts.DeliveryRuntime = bus
@@ -138,7 +140,7 @@ func runtimeTestManagerBusRoles(bus *runtimebus.EventBus) runtimemanager.Persist
 	return runtimemanager.PersistenceRoles{
 		AgentRoutes: bus, RouteInstaller: bus, RouteVerifier: bus,
 		RouteRestorer: bus, RouteRetirer: bus, RouteRemover: bus,
-		CreationPublisher: bus, DeliveryRuntime: bus,
+		FlowActivation: bus, CreationPublisher: bus, DeliveryRuntime: bus,
 	}
 }
 
@@ -340,7 +342,7 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 			deps.HumanTaskExpiry = &runtimeTestUnavailableHumanTaskExpiry{}
 		}
 	}
-	if deps.SQLDB != nil && deps.RunLifecycleCandidates == nil {
+	if deps.WorkflowPersistence.Configured() && deps.RunLifecycleCandidates == nil {
 		if candidates, ok := deps.EventStore.(runtimerunlifecycle.CandidateOwner); ok {
 			deps.RunLifecycleCandidates = candidates
 		} else {

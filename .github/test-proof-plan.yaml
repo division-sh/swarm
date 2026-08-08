@@ -20,6 +20,7 @@ special_packages:
   - github.com/division-sh/swarm/internal/runtime/cataloge2e
   - github.com/division-sh/swarm/internal/runtime
   - github.com/division-sh/swarm/internal/store
+  - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
 profiles:
   pr-common:
     count_mode: cache-default
@@ -72,6 +73,7 @@ units:
   store-full:
     packages:
       - github.com/division-sh/swarm/internal/store
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full

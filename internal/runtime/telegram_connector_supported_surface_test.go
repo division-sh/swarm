@@ -58,7 +58,7 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
-			persistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+			persistence:   runtimepipeline.NewWorkflowPersistence(pg),
 			runLifecycle:  pg,
 			obligations:   pg.PipelineObligations(),
 			runID:         runID,
@@ -77,16 +77,16 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 		seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
-		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, sqliteStore.DB, flowInstance, true)
+		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, storetest.Database(sqliteStore), flowInstance, true)
 
 		runTelegramConnectorSupportedSurfaceRoundTrip(t, telegramConnectorSupportedSurfaceBackend{
 			name:          "sqlite",
 			ctx:           ctx,
-			db:            sqliteStore.DB,
+			db:            storetest.Database(sqliteStore),
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
-			persistence:   runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore),
+			persistence:   runtimepipeline.NewWorkflowPersistence(sqliteStore),
 			runLifecycle:  sqliteStore,
 			obligations:   sqliteStore.PipelineObligations(),
 			runID:         runID,
@@ -448,8 +448,7 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 		PipelineObligations: backend.obligations,
 		DeliveryStore:       backend.deliveryStore,
 		Credentials:         credentialStore,
-		GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-		FlowRoutes: bus,
+		FlowRoutes:          bus,
 	})
 
 	startConfiguredChannelActivityNode(t, backend.ctx, pc, bus, backend.db)

@@ -880,7 +880,9 @@ func (rt *RouteTable) matchFlowInstanceRouteOwnerLocked(identity runtimeflowiden
 		return owner, true, nil
 	}
 	expected := runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, "")
-	if expected.InstancePath != identity.InstancePath {
+	singleton := identity.InstancePath == identity.ScopeKey &&
+		identity.InstanceID == runtimeflowidentity.LogicalInstanceID(identity.ScopeKey)
+	if !singleton && expected.InstancePath != identity.InstancePath {
 		return runtimeflowidentity.Route{}, false, fmt.Errorf(
 			"flow-instance route identity is inconsistent: scope %q and instance %q derive path %q, not %q",
 			identity.ScopeKey,

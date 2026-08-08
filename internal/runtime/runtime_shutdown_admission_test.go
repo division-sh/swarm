@@ -13,7 +13,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
@@ -25,6 +24,8 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -49,7 +50,7 @@ type runtimeShutdownManagerStore struct{}
 type runtimeShutdownDeliveryStore struct {
 	runtimedelivery.Store
 	db        *sql.DB
-	adapter   *runtimedelivery.Adapter
+	adapter   *deliveryfixture.Adapter
 	authority runtimedelivery.ExecutionAuthority
 	mu        sync.Mutex
 	events    map[string]events.Event
@@ -125,7 +126,7 @@ func newRuntimeShutdownDeliveryStore(t *testing.T) *runtimeShutdownDeliveryStore
 			t.Fatalf("create runtime shutdown delivery schema: %v", err)
 		}
 	}
-	adapter, err := runtimedelivery.NewAdapter(runtimedelivery.DialectSQLite)
+	adapter, err := deliveryfixture.NewAdapter(deliveryfixture.DialectSQLite)
 	if err != nil {
 		t.Fatalf("create runtime shutdown delivery adapter: %v", err)
 	}
@@ -162,7 +163,7 @@ func (s *runtimeShutdownDeliveryStore) mutate(ctx context.Context, fn func(conte
 	if err != nil {
 		return err
 	}
-	story, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	story, err := authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -171,7 +172,7 @@ func (s *runtimeShutdownDeliveryStore) mutate(ctx context.Context, fn func(conte
 		_ = tx.Rollback()
 		return err
 	}
-	if err := runtimeauthoractivity.Finalize(story); err != nil {
+	if err := authoractivityfixture.Finalize(story); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -186,7 +187,7 @@ func (s *runtimeShutdownDeliveryStore) ClaimDelivery(
 ) (result runtimedelivery.ClaimResult, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := eventfixture.Insert(ctx, s.db, runtimeauthoractivity.DialectSQLite, evt); err != nil {
+	if err := eventfixture.Insert(ctx, s.db, authoractivityfixture.DialectSQLite, evt); err != nil {
 		return runtimedelivery.ClaimResult{}, err
 	}
 	s.events[evt.ID()] = evt
@@ -209,7 +210,7 @@ func (s *runtimeShutdownDeliveryStore) seedAgentDelivery(
 	t.Helper()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := eventfixture.Insert(ctx, s.db, runtimeauthoractivity.DialectSQLite, evt); err != nil {
+	if err := eventfixture.Insert(ctx, s.db, authoractivityfixture.DialectSQLite, evt); err != nil {
 		t.Fatalf("seed runtime delivery event: %v", err)
 	}
 	s.events[evt.ID()] = evt
@@ -316,13 +317,13 @@ func (s *cancellationBlockingInboundStore) bindTestInboundEventStore(store runti
 	s.store = store
 }
 
-func (s *cancellationBlockingInboundStore) RunInboundPublicationMutation(ctx context.Context, _ runtimeinbound.Request, _ func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
+func (s *cancellationBlockingInboundStore) CommitInboundPublication(ctx context.Context, _ runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
 	select {
 	case s.entered <- struct{}{}:
 	default:
 	}
 	<-ctx.Done()
-	return runtimeinbound.Record{}, ctx.Err()
+	return runtimeinbound.CommitResult{}, ctx.Err()
 }
 
 func (*cancellationBlockingInboundStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
@@ -337,9 +338,9 @@ func (s *runtimeShutdownInboundStore) bindTestInboundEventStore(store runtimebus
 	s.store = store
 }
 
-func (s *runtimeShutdownInboundStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
+func (s *runtimeShutdownInboundStore) CommitInboundPublication(_ context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
 	s.recorded = true
-	return runTestInboundPublication(ctx, s.store, request, true, fn)
+	return runTestInboundPublication(command, true)
 }
 
 func (s *runtimeShutdownInboundStore) ResolveInboundTarget(context.Context, string, string) (InboundTarget, error) {

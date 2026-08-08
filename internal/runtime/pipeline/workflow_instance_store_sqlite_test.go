@@ -10,10 +10,11 @@ import (
 	"testing"
 	"time"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
@@ -25,10 +26,6 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	ensurePipelineTestRun(t, store, runID)
-	ctx = withWorkflowCreateEntityInitialValues(ctx, map[string]any{
-		"region": "west",
-		"tier":   float64(1),
-	})
 	storageRef := "root/acme"
 	entityID := FlowInstanceEntityID(storageRef)
 
@@ -44,6 +41,10 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 			"region":    "west",
 			"tier":      float64(2),
 		},
+		InitialFieldValues: map[string]any{
+			"region": "west",
+			"tier":   float64(1),
+		},
 	})); err != nil {
 		t.Fatalf("Create workflow instance: %v", err)
 	}
@@ -51,7 +52,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 	assertSQLiteMutationCount(t, db, entityID, "region", "entity_initial_value", "create_entity", "null", `"west"`, 1)
 	assertSQLiteMutationCount(t, db, entityID, "region", "workflow_instance_store", "create", "", "", 0)
 	assertSQLiteMutationCount(t, db, entityID, "tier", "entity_initial_value", "create_entity", "null", "1", 1)
-	assertSQLiteMutationCount(t, db, entityID, "tier", "workflow_instance_store", "create", "1", "2", 1)
+	assertSQLiteMutationCount(t, db, entityID, "tier", "workflow_engine", "create", "1", "2", 1)
 }
 
 func TestSQLiteEntityStateDiffRequiresExistingCanonicalRunBeforeMutation(t *testing.T) {
@@ -63,14 +64,14 @@ func TestSQLiteEntityStateDiffRequiresExistingCanonicalRunBeforeMutation(t *test
 	t.Cleanup(func() { _ = tx.Rollback() })
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
-	ctx, err = runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	ctx, err = authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
 	if err != nil {
 		t.Fatalf("begin author activity: %v", err)
 	}
-	ctx = bindTestRunLifecycleMutation(ctx, tx, workflowStoreDialectSQLite)
 	err = insertSQLiteEntityStateDiff(
 		ctx,
 		tx,
+		testRunLifecycleMutation{tx: tx, dialect: workflowStoreDialectSQLite},
 		uuid.NewString(),
 		runtimemutationlog.EntityStateProjection{},
 		runtimemutationlog.EntityStateProjection{Fields: map[string]any{"status": "ready"}},
@@ -92,14 +93,14 @@ func TestSQLiteInitialValueMutationRequiresExistingCanonicalRunBeforeMutation(t 
 	t.Cleanup(func() { _ = tx.Rollback() })
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
-	ctx, err = runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	ctx, err = authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
 	if err != nil {
 		t.Fatalf("begin author activity: %v", err)
 	}
-	ctx = bindTestRunLifecycleMutation(ctx, tx, workflowStoreDialectSQLite)
 	_, err = insertSQLiteWorkflowCreateEntityInitialValueMutations(
 		ctx,
 		tx,
+		testRunLifecycleMutation{tx: tx, dialect: workflowStoreDialectSQLite},
 		uuid.NewString(),
 		runtimemutationlog.EntityStateProjection{},
 		runtimemutationlog.EntityStateProjection{Fields: map[string]any{"region": "west"}},
@@ -137,7 +138,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 		t.Fatalf("Create workflow instance: %v", err)
 	}
 
-	loaded, ok, err := store.Load(ctx, storageRef)
+	loaded, ok, err := store.Load(ctx, testWorkflowInstanceRoute(storageRef))
 	if err != nil {
 		t.Fatalf("Load workflow instance: %v", err)
 	}
@@ -164,21 +165,23 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 
 func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *testing.T) {
 	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	runner := &recordingRuntimeMutationRunner{db: db}
+	runner := &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite}
 	store := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	ensurePipelineTestRun(t, store, runID)
 	storageRef := "root/terminated"
+	entityID := uuid.NewString()
 	terminatedAt := time.Now().UTC().Truncate(time.Millisecond)
-	if _, err := db.Exec(`
-		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
-		VALUES (?, 'root', 'workflow', '{}', 'running', ?)
-	`, storageRef, time.Now().UTC()); err != nil {
-		t.Fatalf("seed flow instance: %v", err)
+	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+		InstanceID: entityID, StorageRef: storageRef, WorkflowName: "root", WorkflowVersion: "1",
+		CurrentState: "running", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID},
+	})); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
 	}
+	atomic.StoreInt32(&runner.calls, 0)
 
-	if err := store.MarkTerminated(ctx, storageRef, terminatedAt); err != nil {
+	if err := store.MarkTerminated(ctx, testWorkflowInstanceRoute(storageRef), terminatedAt); err != nil {
 		t.Fatalf("MarkTerminated: %v", err)
 	}
 	if got := atomic.LoadInt32(&runner.calls); got != 1 {
@@ -196,24 +199,6 @@ func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *
 	}
 	if status != "terminated" || hasTerminatedAt != 1 {
 		t.Fatalf("flow instance status=%q hasTerminatedAt=%d, want terminated/1", status, hasTerminatedAt)
-	}
-}
-
-func TestSQLiteWorkflowInstanceStore_runPipelineMutationRequiresRuntimeMutationRunner(t *testing.T) {
-	db := newSQLiteWorkflowInstanceStoreTestDB(t)
-	store := newTestSQLiteWorkflowInstanceStore(db)
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), uuid.NewString())
-	called := false
-
-	err := store.runPipelineMutation(ctx, func(context.Context) error {
-		called = true
-		return nil
-	})
-	if !errors.Is(err, errSQLiteWorkflowMutationOwnerRequired) {
-		t.Fatalf("runPipelineMutation error = %v, want runtime mutation runner required", err)
-	}
-	if called {
-		t.Fatal("runPipelineMutation callback ran without runtime mutation runner")
 	}
 }
 
@@ -242,7 +227,7 @@ func TestSQLiteWorkflowInstanceStore_runPipelineMutationUsesRuntimeMutationRunne
 		if err != nil {
 			return err
 		}
-		_, err = storerunlifecycle.Create(txctx, storerunlifecycle.CreateRequest{
+		_, err = (testRunLifecycleMutation{tx: tx, dialect: workflowStoreDialectSQLite}).CreateRun(txctx, storerunlifecycle.CreateRequest{
 			RunID: uuid.NewString(), Origin: storerunlifecycle.ScenarioSetupRunOrigin(),
 			Source: source, StartedAt: time.Now().UTC(),
 		})
@@ -271,13 +256,13 @@ func TestSQLiteWorkflowInstanceStore_MutateERollsBackCallbackFailure(t *testing.
 		t.Fatalf("seed: %v", err)
 	}
 	sentinel := errors.New("supersession failed")
-	if err := store.mutateE(ctx, instance.InstanceID, func(item *WorkflowInstance) error {
+	if err := store.mutateE(ctx, testWorkflowInstanceRoute(instance.StorageRef), func(item *WorkflowInstance) error {
 		item.CurrentState = "must_not_commit"
 		return sentinel
 	}); !errors.Is(err, sentinel) {
 		t.Fatalf("MutateE error = %v, want sentinel", err)
 	}
-	loaded, ok, err := store.Load(ctx, instance.InstanceID)
+	loaded, ok, err := store.Load(ctx, testWorkflowInstanceRoute(instance.StorageRef))
 	if err != nil || !ok {
 		t.Fatalf("Load = found %v err %v", ok, err)
 	}
@@ -298,7 +283,7 @@ func TestSQLiteWorkflowInstanceStore_runPipelineMutationDoesNotRetryActiveTransa
 
 	busyErr := errors.New("SQLITE_BUSY: database is locked")
 	var attempts int32
-	txctx, err := runtimeauthoractivity.Begin(WithPipelineSQLTxContext(ctx, tx), tx, runtimeauthoractivity.DialectSQLite)
+	txctx, err := authoractivityfixture.Begin(WithPipelineSQLTxContext(ctx, tx), tx, authoractivityfixture.DialectSQLite)
 	if err != nil {
 		t.Fatalf("begin author activity story: %v", err)
 	}
@@ -361,10 +346,112 @@ func TestWorkflowInstanceStore_runPipelineMutationDoesNotRetryPostgresDialect(t 
 }
 
 type recordingRuntimeMutationRunner struct {
-	db      *sql.DB
-	dialect workflowStoreDialect
-	mu      sync.Mutex
-	calls   int32
+	db                             *sql.DB
+	dialect                        workflowStoreDialect
+	decisionCards                  decisioncard.Store
+	mu                             sync.Mutex
+	calls                          int32
+	committedScheduleUpserts       []Schedule
+	committedScheduleCancellations []Schedule
+}
+
+func (r *recordingRuntimeMutationRunner) lifecycleMutation(ctx context.Context) (testRunLifecycleMutation, error) {
+	tx, ok := PipelineSQLTxFromContext(ctx)
+	if !ok || tx == nil {
+		return testRunLifecycleMutation{}, errors.New("test run lifecycle transaction is required")
+	}
+	dialect := r.dialect
+	if dialect == "" {
+		dialect = workflowStoreDialectSQLite
+	}
+	return testRunLifecycleMutation{tx: tx, dialect: dialect}, nil
+}
+
+func (r *recordingRuntimeMutationRunner) RequirePresentRun(ctx context.Context, runID string) error {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return err
+	}
+	return m.RequirePresentRun(ctx, runID)
+}
+
+func (r *recordingRuntimeMutationRunner) RequireActiveRun(ctx context.Context, runID string) error {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return err
+	}
+	return m.RequireActiveRun(ctx, runID)
+}
+
+func (r *recordingRuntimeMutationRunner) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return runtimecorrelation.BundleSourceFact{}, err
+	}
+	return m.RequirePresentRunSource(ctx, runID)
+}
+
+func (r *recordingRuntimeMutationRunner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return runtimecorrelation.BundleSourceFact{}, err
+	}
+	return m.RequireActiveRunSource(ctx, runID)
+}
+
+func (r *recordingRuntimeMutationRunner) CreateRun(ctx context.Context, request storerunlifecycle.CreateRequest) (storerunlifecycle.MutationDisposition, error) {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return "", err
+	}
+	return m.CreateRun(ctx, request)
+}
+
+func (r *recordingRuntimeMutationRunner) RequestCompletionCandidate(ctx context.Context, request storerunlifecycle.CandidateRequest) (storerunlifecycle.CandidateRequestDisposition, error) {
+	if err := r.RequirePresentRun(ctx, request.RunID); err != nil {
+		return "", err
+	}
+	return storerunlifecycle.CandidateRequested, nil
+}
+
+func (r *recordingRuntimeMutationRunner) TransitionActiveRun(ctx context.Context, request storerunlifecycle.ActiveTransitionRequest) (storerunlifecycle.MutationDisposition, error) {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return "", err
+	}
+	return m.TransitionActiveRun(ctx, request)
+}
+
+func (r *recordingRuntimeMutationRunner) MarkTerminalRun(ctx context.Context, request storerunlifecycle.TerminalRequest) (storerunlifecycle.Snapshot, storerunlifecycle.MutationDisposition, error) {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return storerunlifecycle.Snapshot{}, "", err
+	}
+	return m.MarkTerminalRun(ctx, request)
+}
+
+func (r *recordingRuntimeMutationRunner) ForkRunSource(ctx context.Context, request storerunlifecycle.ForkSourceRequest) (storerunlifecycle.Snapshot, storerunlifecycle.MutationDisposition, error) {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return storerunlifecycle.Snapshot{}, "", err
+	}
+	return m.ForkRunSource(ctx, request)
+}
+
+func (r *recordingRuntimeMutationRunner) ReviseRunSource(ctx context.Context, request storerunlifecycle.SourceRevisionRequest) (storerunlifecycle.MutationDisposition, error) {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return "", err
+	}
+	return m.ReviseRunSource(ctx, request)
+}
+
+func (r *recordingRuntimeMutationRunner) SyncRunCounters(ctx context.Context, runID string) error {
+	m, err := r.lifecycleMutation(ctx)
+	if err != nil {
+		return err
+	}
+	return m.SyncRunCounters(ctx, runID)
 }
 
 func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
@@ -386,23 +473,22 @@ func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.C
 	txctx := withPipelinePostCommitActions(WithPipelineSQLTxContext(ctx, tx), &postCommit)
 	txctx = withPipelineRollbackActions(txctx, &rollbackActions)
 	dialect := r.dialect
-	authorDialect := runtimeauthoractivity.DialectSQLite
+	authorDialect := authoractivityfixture.DialectSQLite
 	if dialect == workflowStoreDialectPostgres {
-		authorDialect = runtimeauthoractivity.DialectPostgres
+		authorDialect = authoractivityfixture.DialectPostgres
 	} else {
 		dialect = workflowStoreDialectSQLite
 	}
-	storyctx, err := runtimeauthoractivity.Begin(txctx, tx, authorDialect)
+	storyctx, err := authoractivityfixture.Begin(txctx, tx, authorDialect)
 	if err != nil {
 		flushPipelineRollbackActions(rollbackActions)
 		return err
 	}
-	storyctx = bindTestRunLifecycleMutation(storyctx, tx, dialect)
 	if err := fn(storyctx); err != nil {
 		flushPipelineRollbackActions(rollbackActions)
 		return err
 	}
-	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
+	if err := authoractivityfixture.Finalize(storyctx); err != nil {
 		flushPipelineRollbackActions(rollbackActions)
 		return err
 	}
@@ -417,7 +503,7 @@ func (r *recordingRuntimeMutationRunner) RunRuntimeMutationContext(ctx context.C
 
 func newSQLiteWorkflowInstanceStoreForTest(t *testing.T, db *sql.DB) *workflowInstanceStore {
 	t.Helper()
-	store := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db})
+	store := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite})
 	store.deliveryStore = newPipelineTestDeliveryOwner(t, db, true)
 	return store
 }
@@ -513,6 +599,8 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			forked_from_event_id TEXT,
 			reconstruction_owner TEXT,
 			entity_id TEXT,
+			flow_scope_key TEXT,
+			flow_instance_id TEXT,
 			flow_instance TEXT,
 			fire_event TEXT,
 			fire_payload TEXT,

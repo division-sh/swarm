@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/google/uuid"
 )
@@ -45,6 +47,7 @@ type Request struct {
 	TargetAlias                 string
 	TargetFlowInstance          string
 	ExpectedPublicationSequence int64
+	ExpectedGeneration          int64
 	ResolvedRunID               string
 	MarkerEventID               string
 	AcknowledgementMode         AcknowledgementMode
@@ -123,6 +126,9 @@ func (r Request) Validate() error {
 	if r.ExpectedPublicationSequence < 0 {
 		return fmt.Errorf("expected_publication_sequence must be nonnegative")
 	}
+	if r.ExpectedGeneration < 1 {
+		return fmt.Errorf("expected_generation must be positive")
+	}
 	switch r.AcknowledgementMode {
 	case AcknowledgementAfterPublish, AcknowledgementDurableBeforeDispatch:
 	default:
@@ -154,9 +160,84 @@ type Finalization struct {
 	Events        []EventFinalization
 }
 
-type Mutation interface {
-	Context() context.Context
-	FinalizeInboundPublication(ctx context.Context, finalization Finalization) error
+// CommitCommand is the complete inbound publication operation. Runtime plans
+// every event before entering storage; the selected store owns the one atomic
+// transaction and cannot call back into runtime or borrow transaction context.
+type CommitCommand struct {
+	Request          Request
+	Finalization     Finalization
+	Publications     []runtimebus.PublicationCommand
+	AuthorProjection runtimeauthoractivity.InboundProjection
+}
+
+func (c CommitCommand) Validate() error {
+	request := c.Request.Normalized()
+	if err := request.Validate(); err != nil {
+		return err
+	}
+	if len(c.Finalization.Events) < 1 || len(c.Finalization.Events) > 2 {
+		return fmt.Errorf("inbound publication requires raw plus zero or one normalized event")
+	}
+	if len(c.Publications) != len(c.Finalization.Events) {
+		return fmt.Errorf("inbound publication event and publication command counts differ")
+	}
+	eventIDs := make([]string, len(c.Finalization.Events))
+	eventNames := make([]string, len(c.Finalization.Events))
+	for index, item := range c.Finalization.Events {
+		if item.Ordinal != index {
+			return fmt.Errorf("inbound publication child ordinal %d is not contiguous at index %d", item.Ordinal, index)
+		}
+		expectedID, err := DeterministicEventID(request.PublicationID, index)
+		if err != nil {
+			return err
+		}
+		if item.Event.ID() != expectedID {
+			return fmt.Errorf("inbound publication child ordinal %d does not use its reserved event_id", index)
+		}
+		if item.Event.RunID() != request.ResolvedRunID {
+			return fmt.Errorf("inbound publication child ordinal %d must use the admitted resolved_run_id", index)
+		}
+		authorization := item.Authorization
+		switch item.Kind {
+		case runtimeprovideroutput.KindRaw:
+			if index != 0 || !authorization.Empty() {
+				return fmt.Errorf("inbound raw output must be ordinal 0 and carry no normalized authorization")
+			}
+		case runtimeprovideroutput.KindNormalized:
+			if index != 1 || !authorization.Valid() || authorization.Provider() != request.Provider || authorization.Event() != string(item.Event.Type()) {
+				return fmt.Errorf("inbound normalized output must be ordinal 1 with matching complete authorization")
+			}
+		default:
+			return fmt.Errorf("inbound publication child ordinal %d has unsupported output kind %q", index, item.Kind)
+		}
+		var routes []events.DeliveryRoute
+		if len(item.RecipientManifest) == 0 {
+			return fmt.Errorf("inbound publication child %d recipient manifest is required", index)
+		}
+		if err := json.Unmarshal(item.RecipientManifest, &routes); err != nil {
+			return fmt.Errorf("decode inbound recipient manifest: %w", err)
+		}
+		if _, _, _, err := CanonicalRecipientManifest(routes); err != nil {
+			return err
+		}
+		publication := c.Publications[index]
+		if err := publication.Validate(); err != nil {
+			return fmt.Errorf("inbound publication command %d: %w", index, err)
+		}
+		if publication.Commit.Event.ID() != item.Event.ID() || publication.Commit.Event.Event().Type() != item.Event.Type() {
+			return fmt.Errorf("inbound publication command %d does not match its finalized event", index)
+		}
+		eventIDs[index] = item.Event.ID()
+		eventNames[index] = string(item.Event.Type())
+	}
+	if err := ValidateEvidenceEvent(request, c.Finalization.EvidenceEvent, eventIDs, eventNames); err != nil {
+		return err
+	}
+	projection := c.AuthorProjection
+	if (strings.TrimSpace(projection.SubjectType) == "") != (strings.TrimSpace(projection.SubjectID) == "") {
+		return fmt.Errorf("inbound author projection subject requires type and id together")
+	}
+	return nil
 }
 
 type EventRecord struct {
@@ -179,6 +260,14 @@ type Record struct {
 	CommittedAt time.Time
 	Events      []EventRecord
 	Created     bool
+}
+
+// CommitResult is immutable selected-store evidence. Publications is empty for
+// an exact request duplicate and otherwise corresponds one-for-one with the
+// command's ordered publication plans.
+type CommitResult struct {
+	Record       Record
+	Publications []runtimebus.CommittedPublication
 }
 
 type EvidencePayload struct {
@@ -291,7 +380,7 @@ func ensureEvidencePayloadEOF(decoder *json.Decoder) error {
 }
 
 type Runner interface {
-	RunInboundPublicationMutation(ctx context.Context, request Request, fn func(Mutation) error) (Record, error)
+	CommitInboundPublication(ctx context.Context, command CommitCommand) (CommitResult, error)
 	LoadInboundPublicationByIdentity(ctx context.Context, provider, entityID, providerEventID string) (Record, bool, error)
 	ValidateInboundPublicationIntegrity(ctx context.Context) error
 }

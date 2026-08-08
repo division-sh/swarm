@@ -61,13 +61,21 @@ func WorkflowJoinPlanForHandler(source Source, flowID, nodeID, handlerEvent stri
 	if source == nil {
 		return runtimecontracts.WorkflowJoinPlan{}, false
 	}
-	flowID, nodeID, handlerEvent = strings.TrimSpace(flowID), strings.TrimSpace(nodeID), strings.TrimSpace(handlerEvent)
+	flowID, nodeID, handlerEvent = canonicalWorkflowJoinFlowID(source, flowID), strings.TrimSpace(nodeID), strings.TrimSpace(handlerEvent)
 	for _, plan := range source.WorkflowJoins() {
-		if strings.TrimSpace(plan.FlowID) == flowID && strings.TrimSpace(plan.NodeID) == nodeID && strings.TrimSpace(plan.HandlerEvent) == handlerEvent {
+		if canonicalWorkflowJoinFlowID(source, plan.FlowID) == flowID && strings.TrimSpace(plan.NodeID) == nodeID && strings.TrimSpace(plan.HandlerEvent) == handlerEvent {
 			return plan, true
 		}
 	}
 	return runtimecontracts.WorkflowJoinPlan{}, false
+}
+
+func canonicalWorkflowJoinFlowID(source Source, flowID string) string {
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" && source != nil {
+		return strings.TrimSpace(source.WorkflowName())
+	}
+	return flowID
 }
 
 func normalizedJoinDerivationValues(values []string) []string {

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -379,6 +380,10 @@ func eventPublicationTargetRouteParam(params map[string]any) (events.RouteIdenti
 	}.Normalized()
 	if route.FlowInstance == "" {
 		return events.RouteIdentity{}, true, NewInvalidParamsError(map[string]any{"field": "target.flow_instance", "reason": "is required"})
+	}
+	route.FlowID = runtimeflowidentity.SemanticScopeFromFlowInstanceRef(route.FlowInstance)
+	if route.FlowID == "" {
+		return events.RouteIdentity{}, true, NewInvalidParamsError(map[string]any{"field": "target.flow_instance", "reason": "must be a canonical instance path"})
 	}
 	return route, true, nil
 }

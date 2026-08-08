@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -163,13 +164,13 @@ func TestLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStores(t *testing.T) 
 			store, ctx := tc.open(t)
 
 			t.Run("claim_wins", func(t *testing.T) {
-				activation, entityID := seedLoopActivityInstance(t, store, ctx, "review")
-				record := loopActivityStartRecord(ctx, activation, entityID, uuid.NewString())
+				activation, flowInstance, entityID := seedLoopActivityInstance(t, store, ctx, "review")
+				record := loopActivityStartRecord(ctx, activation, flowInstance, entityID, uuid.NewString())
 				started, inserted, err := store.ClaimActivityAttemptForLoopGeneration(ctx, record)
 				if err != nil || !inserted || started.Status != ActivityAttemptStatusStarted {
 					t.Fatalf("claim = %#v inserted=%v err=%v", started, inserted, err)
 				}
-				advanceLoopActivityInstance(t, store, ctx, entityID, "repeat")
+				advanceLoopActivityInstance(t, store, ctx, flowInstance, "repeat")
 				loaded, ok, err := store.LoadActivityAttempt(ctx, record.RequestEventID)
 				if err != nil || !ok || loaded.Status != ActivityAttemptStatusStarted || !loaded.Generation.Equal(activation.Generation()) {
 					t.Fatalf("started claim after repeat = %#v found=%v err=%v", loaded, ok, err)
@@ -178,9 +179,9 @@ func TestLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStores(t *testing.T) 
 
 			for _, operation := range []string{"repeat", "close"} {
 				t.Run(operation+"_wins", func(t *testing.T) {
-					activation, entityID := seedLoopActivityInstance(t, store, ctx, "review")
-					record := loopActivityStartRecord(ctx, activation, entityID, uuid.NewString())
-					advanceLoopActivityInstance(t, store, ctx, entityID, operation)
+					activation, flowInstance, entityID := seedLoopActivityInstance(t, store, ctx, "review")
+					record := loopActivityStartRecord(ctx, activation, flowInstance, entityID, uuid.NewString())
+					advanceLoopActivityInstance(t, store, ctx, flowInstance, operation)
 					if _, _, err := store.ClaimActivityAttemptForLoopGeneration(ctx, record); !isFailureClass(err, runtimefailures.ClassStaleArrival) {
 						t.Fatalf("claim after %s error = %v, want stale_arrival", operation, err)
 					}
@@ -191,8 +192,8 @@ func TestLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStores(t *testing.T) 
 			}
 
 			t.Run("duplicate_claim", func(t *testing.T) {
-				activation, entityID := seedLoopActivityInstance(t, store, ctx, "review")
-				record := loopActivityStartRecord(ctx, activation, entityID, uuid.NewString())
+				activation, flowInstance, entityID := seedLoopActivityInstance(t, store, ctx, "review")
+				record := loopActivityStartRecord(ctx, activation, flowInstance, entityID, uuid.NewString())
 				if _, inserted, err := store.ClaimActivityAttemptForLoopGeneration(ctx, record); err != nil || !inserted {
 					t.Fatalf("first claim inserted=%v err=%v", inserted, err)
 				}
@@ -204,7 +205,7 @@ func TestLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStores(t *testing.T) 
 	}
 }
 
-func seedLoopActivityInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, stage string) (loopruntime.Activation, string) {
+func seedLoopActivityInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, stage string) (loopruntime.Activation, string, string) {
 	t.Helper()
 	runID := runtimecorrelation.RunIDFromContext(ctx)
 	path := "validation/" + uuid.NewString()
@@ -220,24 +221,27 @@ func seedLoopActivityInstance(t *testing.T, store *workflowInstanceStore, ctx co
 	carrier := runtimeengine.NewStateCarrier(map[string]any{}, nil, buckets)
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "validation", WorkflowVersion: "1.0.0",
-		CurrentState: stage, EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID},
+		CurrentState: stage, EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{
+			"entity_id": entityID, "flow_path": path, "instance_id": runtimeflowidentity.LogicalInstanceID(path),
+		},
 		StateBuckets: carrier.PersistedStateBuckets(),
 	})); err != nil {
 		t.Fatal(err)
 	}
-	return activation, entityID
+	return activation, path, entityID
 }
 
-func loopActivityStartRecord(ctx context.Context, activation loopruntime.Activation, entityID, sourceEventID string) ActivityAttemptRecord {
+func loopActivityStartRecord(ctx context.Context, activation loopruntime.Activation, flowInstance, entityID, sourceEventID string) ActivityAttemptRecord {
 	intent := testNonIdempotentActivityIntent(runtimecorrelation.RunIDFromContext(ctx), sourceEventID, entityID)
+	intent.FlowInstance = flowInstance
 	intent.Generation = activation.Generation()
 	intent.LoopStage = activation.CurrentStage
 	return activityAttemptStartRecord(intent, activityInputHash(intent.Input))
 }
 
-func advanceLoopActivityInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, entityID, operation string) {
+func advanceLoopActivityInstance(t *testing.T, store *workflowInstanceStore, ctx context.Context, flowInstance, operation string) {
 	t.Helper()
-	if err := store.mutateE(ctx, entityID, func(instance *WorkflowInstance) error {
+	if err := store.mutateE(ctx, testWorkflowInstanceRoute(flowInstance), func(instance *WorkflowInstance) error {
 		carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Metadata, instance.StateBuckets)
 		if err != nil {
 			return err

@@ -194,6 +194,15 @@ vocabulary:
       examples:
       - scoring (static flow — scope key and instance path are the same)
       - operating/vert-001 (template instance — scope key is "operating", instance path includes the ID)
+    canonical_instance_route:
+      type: runtime/core/flowidentity.Route
+      row_key: instance_path
+      formula: 'The canonical instance path is the flow scope plus an instance discriminator when one exists. A template instance is `<scope>/<discriminator>`, a singleton is exactly `<scope>`, and a root flow is exactly the run scope.'
+      rules:
+      - Runtime semantic persistence ports that name an instance MUST accept the typed Route, never a string, entity id, or inferred key.
+      - Entity id is a fact about an instance and MUST NOT be accepted or reconstructed as the instance address.
+      - Empty, incomplete, or noncanonical routes fail closed with a typed lookup error carrying the requested route key; missing identity MUST NOT return nil success or fabricate a blank instance.
+      - Fresh stores support only canonical route keys. Historical duplicated singleton keys such as `scout/scout` have no compatibility, migration, or fallback path.
     not_interchangeable: 'These are not interchangeable. Using instance path where scope key is needed
       causes prefix-based ownership bugs. Using scope key where instance path is needed causes
       cross-instance state leakage. The runtime MUST use the correct identity for each context.'
@@ -5223,7 +5232,7 @@ engine:
         capabilities:
         - runtime/bus DurableDependencies and closed event operations
         - RuntimeLogPersistence
-        - opaque runtime/pipeline WorkflowPersistence with its private mutation executor, plus named PipelineCoordinator operations
+        - opaque runtime/pipeline WorkflowPersistence projected from closed selected-store operations, plus named PipelineCoordinator operations
         - sessions.Registry, runtime/llm.LiveSessionAcquirer, and sessions.Resetter as distinct exact roles
         - conversation, manager, effects, schedule, timer, mailbox, tool, budget, ingress, and startup-ownership ports
         - runtime/runfork and runtime/runbundle semantic values owned by their runtime domain packages
@@ -5283,16 +5292,50 @@ engine:
           the store boundary and remains guarded by #1405.
       raw_sql_policy:
         allowed:
-        - boundary: backend selection, store construction, schema/bootstrap, and backend-specific store implementations
-          reason: These layers create or implement the selected backend and may own raw DB/TX mechanics.
+        - boundary: internal/store/construction and internal/store/internal/backend/{postgres,sqlite}
+          reason: The exact serve construction owner creates the process handle; private backend roots own pools, sessions, transactions, locking, dialect conversion, and backend errors.
+        - boundary: private bounded runtime-persistence and domain adapters below internal/store/internal plus repository-private persistence projections below internal/persistence
+          reason: These implementations consume only their declared backend mechanics and expose closed typed operations to the public store facade and runtime consumers.
+        - boundary: internal/store/storetest and declared fixture packages
+          reason: Test-owned raw handles exist only for hostile setup and exact persistence readback; production packages cannot recover them from the typed store facade.
         - boundary: workspace lifecycle and process DB health/close capabilities
           reason: These are explicitly adjacent process/workspace capabilities and are not selected runtime persistence owners.
-        - boundary: Postgres-only runtime raw SQL consumers that are still explicitly tracked by the raw_sql_runtime_consumer_boundary_for_sqlite split
-          reason: SQLite construction must leave runtime.RuntimeDeps.SQLDB nil until each raw-SQL consumer has a separately gated backend-neutral owner.
+        - boundary: public/operator/dashboard/digest/reset-delete/admin consumers explicitly tracked by '#2149'
+          reason: These adjacent consumers are outside runtime execution and cannot be borrowed as runtime persistence authority.
         forbidden:
         - Producer-side runtime behavior must not use raw *sql.DB, *sql.Tx, concrete store type, backend id, or dialect string as capability authority.
         - SQLite selected runtime construction must not pass a raw runtime SQL handle to Postgres-only runtime consumers.
         - Runtime construction must not reconstruct selected pipeline persistence from raw SQL when buildStores failed to provide the opaque WorkflowPersistence value.
+        - The public internal/store package is a typed facade. It MUST NOT import database/sql, retain a raw backend member, export a raw handle/accessor, or expose a generic query, execution, or transaction callback.
+        - Test-only construction and readback authority MUST remain in internal/store/storetest and MUST NOT be available from the production facade.
+      implementation_topology:
+        public_facade: internal/store
+        process_construction_owner: internal/store/construction
+        private_backend_roots:
+        - internal/store/internal/backend/postgres
+        - internal/store/internal/backend/sqlite
+        private_selected_runtime_operations: internal/store/internal/runtimepersistence
+        private_domain_adapters:
+        - internal/store/internal/eventrecord
+        - internal/store/internal/authoractivity
+        - internal/store/internal/authoractivityadapter
+        - internal/store/internal/delivery
+        - internal/store/internal/runforkrevision
+        - internal/store/internal/workspace
+        - internal/persistence/runbundle
+        - internal/persistence/timerobligationadapter
+        fixture_authority: internal/store/storetest
+        rules:
+        - The selected-runtime implementation package is private and composes only closed operation families; it is not importable by runtime, API, CLI, dashboard, or other consumers.
+        - Backend roots retain their raw handle privately. Selected store facades retain only the private backend root and typed operation state; no raw handle is promoted or recoverable.
+        - Moving an implementation file does not grant authority. Every raw or callback-bearing declaration is governed by its exact resolved finding identity.
+      structural_enforcement:
+        owner: internal/store/testdata/persistence_authority_findings.tsv
+        finding_identity: '{kind, raw-or-typed authority, file, enclosing declaration, member/method/context operation, resolved type/signature}'
+        rules:
+        - The registry resolves named aliases, embedded fields, interface methods, function-valued fields, function parameters/results, and context reads/writes.
+        - Unknown or stale findings fail. Regeneration preserves reviewed dispositions and marks new findings unclassified; no file or enclosing-type allowlist exists.
+        - Raw findings are valid only for an exact private backend/adapter, construction, fixture, or explicitly tracked adjacent-2149 disposition.
       dependency_classifications:
       - dependency: internal/store/backendselection and selector parsing
         classification: legitimate backend-selection/construction boundary
@@ -5304,18 +5347,18 @@ engine:
         classification: construction-time projection into exact consumer-owned dependencies; not a semantic owner or runtime service locator
       - dependency: runtime.RuntimeDeps exact typed fields and subsystem groups
         classification: selected core runtime constructor inputs declared by semantic consumers
-      - dependency: runtime.RuntimeDeps.SQLDB and RuntimeSQLDB
-        classification: raw SQL exception; Postgres-only until split owners promote replacements, SQLite runtime handle omitted
+      - dependency: former runtime.RuntimeDeps.SQLDB and RuntimeSQLDB
+        classification: removed by '#2148'; runtime construction exposes no raw selected-store handle
       - dependency: apiv1.OperatorReadOptions and API method options
         classification: typed public-surface capability consumers
       - dependency: dashboard SQL readers and local PostgresStore wrappers
         classification: producer-facing raw/concrete escapes to classify and migrate under #1401/#1402 unless independently gated
       - dependency: ConversationForkReadStore and ConversationForkLifecycleStore
         classification: segregated selected capabilities backed by one shared semantic owner; read availability does not imply lifecycle mutation, while Postgres and local/dev SQLite explicitly wire both roles
-      - dependency: selected-contract run.fork exact execution ports with a temporary RuntimeSQLDB mechanic
-        classification: consumer-owned optional product ports composed once into an opaque selected-contract execution owner; package-private projections give each constructed subsystem only its exact immutable role group, and the remaining raw SQL mechanic is explicitly assigned to #2148 rather than treated as concrete-store capability authority
-      - dependency: private WorkflowPersistence transaction execution, sealed CommitPublish transactions, and backend-local direct transaction helpers
-        classification: mutation/unit-of-work implementation class under #1403/#1405; cross-package producers consume closed named operations while callback and raw transaction helpers stay private to their implementation owners
+      - dependency: selected-contract run.fork exact execution ports
+        classification: consumer-owned optional product ports composed once into an opaque selected-contract execution owner; package-private projections give each constructed subsystem only its exact immutable role group and expose no raw database authority
+      - dependency: closed WorkflowPersistence operations, sealed CommitPublish transactions, and backend-local direct transaction helpers
+        classification: private implementation class under #1403/#1405/#2148; cross-package producers consume closed named operations and typed commit evidence, while raw transaction helpers stay private to selected-store implementations
       - dependency: route planning, event admission/defaulting, delivery authority, startup readiness
         classification: different semantic concepts; explicitly split unless a later gate widens
       rules:
@@ -5330,31 +5373,32 @@ engine:
       - SQLite feature parity for bundle catalog, selected-contract run.fork, destructive reset, preservation cleanup, and startup recovery
       - runtime startup readiness, route planning, event admission/defaulting, delivery authority, and #1394 writer-bypass enforcement
     - name: backend_neutral_runtime_mutation_write_boundary
-      owner: internal/store.SQLiteRuntimeStore.RunRuntimeMutation and internal/store.SQLiteRuntimeStore.RunEventTransaction for SQLite-local selected runtime mutations
+      owner: closed named selected-store operations implemented over private backend roots
       promoted_by: '#1388'
-      sqlite_owner: internal/store.SQLiteRuntimeStore mutation executor
-      postgres_owner: internal/store.PostgresStore normal transaction methods with no global write serialization or SQLite retry semantics
+      confinement_completed_by: '#2148'
+      sqlite_owner: private SQLite backend root selected by each named SQLiteRuntimeStore operation
+      postgres_owner: private PostgreSQL backend root selected by each named PostgresStore operation
       scope: >
-        SQLite local/dev selected runtime mutation writers must enter one canonical backend-neutral mutation boundary before
-        opening SQLite write transactions. The boundary owns process-local SQLite write serialization, elapsed-budgeted
-        SQLITE_BUSY / database-locked retry, context cancellation/deadline handling, active pipeline transaction detection,
-        and exactly-once post-commit action flushing for successful commits. It covers the selected runtime mutation row
+        Every runtime mutation enters one closed named selected-store operation. That operation owns its complete
+        transaction and returns typed commit evidence for declared post-commit work; runtime never selects, joins, or
+        reconstructs a transaction. The private SQLite backend owns process-local write serialization, elapsed-budgeted
+        SQLITE_BUSY / database-locked retry, and context cancellation/deadline handling. It covers the selected runtime mutation row
         families named in this section: event/delivery/replay/receipt, runtime log, mailbox/idempotency, ingress/run
         control/quiescence, session/conversation/turn, schedule/timer, tool entity/human-task, budget/spend, manager/agent,
         and run-completion mutations. Postgres remains the production runtime backend and must not inherit SQLite global
         serialization or retry behavior.
       rules:
       - SQLite runtime mutation producers must not implement local SQLITE_BUSY retry loops or open independent write transactions when a selected runtime store boundary is available.
-      - SQLite WorkflowPersistence must be constructed with the selected private backend transaction executor and must fail closed instead of opening a local fallback transaction when that executor is absent. EventBus, PipelineCoordinator, manager, API, and other cross-package consumers receive only named closed operations and must not receive or invoke a generic mutation callback.
+      - WorkflowPersistence is constructed from a complete closed operation owner and fails closed when any required operation is absent. EventBus, PipelineCoordinator, manager, and other runtime consumers receive only named closed operations and must not receive or invoke a generic mutation callback.
       - SQLite driver busy_timeout must stay short; elapsed retry budget, cancellation, and backoff are owned by the selected mutation boundary rather than by long driver-level waits.
-      - SQLite post-commit action flushing must happen after the selected mutation boundary releases its process-local write serialization lock, so post-commit callbacks can safely re-enter selected runtime mutation APIs.
+      - Typed post-commit evidence is consumed only after the selected mutation boundary releases its process-local write serialization lock; executable callback slices are not transaction authority.
       - SQLite API idempotency callback execution must stay outside the idempotency row write transaction; failed callbacks must not persist completion.
-      - Active pipeline transactions are already inside the selected mutation boundary and must be reused rather than nested.
+      - A runtime operation never asks whether an ambient transaction exists. Cross-domain atomic work is one named selected-store operation; invoking another named mutation cannot implicitly join or reuse its transaction.
       - Schema/bootstrap, bundle catalog, destructive reset, preservation cleanup, fork-specific mutation/recovery, and read-only projections remain separate concepts unless independently gated.
       consumers:
       - runtimebus transactional publish through sealed CommitPublish plans
-      - runtimepipeline.WorkflowPersistence production SQLite construction through NewSQLiteWorkflowPersistence and private workflow transaction ownership
-      - SQLiteRuntimeStore selected runtime mutation methods for the named row families
+      - runtimepipeline.WorkflowPersistence construction from the complete closed selected-store workflow operation owner
+      - PostgresStore and SQLiteRuntimeStore named runtime operations for the declared row families
     - name: event_append_and_run_lifecycle_rows
       owner: events.AdmittedEvent plus runtimebus.CommitPublishOwner and named selected-fork/runtime-log event operations
       sqlite_owner: internal/store.SQLiteRuntimeStore sealed event commit operations
@@ -5376,19 +5420,25 @@ engine:
       - cross-process timer claim/locking semantics owned by #1087
     - name: pipeline_coordination_workflow_instance_and_replay_rows
       owner: runtimepipeline.WorkflowPersistence consumed only by PipelineCoordinator construction; runtime consumers use named PipelineCoordinator operations
-      sqlite_owner: internal/runtime/pipeline.NewSQLiteWorkflowPersistence over the selected SQLite runtime mutation owner
-      postgres_owner: internal/runtime/pipeline.NewPostgresWorkflowPersistence over the selected PostgreSQL database and private backend transaction executor
+      sqlite_owner: internal/store.SQLiteRuntimeStore closed workflow operations projected through runtimepipeline.NewWorkflowPersistence
+      postgres_owner: internal/store.PostgresStore closed workflow operations projected through runtimepipeline.NewWorkflowPersistence
       scope: >
-        SQLite supports explicit local-dev pipeline coordination for workflow instance state, pipeline engine transaction/query
+        SQLite supports explicit local-dev pipeline coordination for workflow instance state, pipeline engine mutation/query
         persistence, background-node receipt settlement, pipeline receipt replay, process-local replay claims, and committed
         replay scope consumption. Production SQLite pipeline writes consume the backend_neutral_runtime_mutation_write_boundary
         instead of owning a separate local retry/serialization policy, so pipeline producers do not branch on backend write
         contention. The concrete workflow instance store is private to runtime/pipeline and cannot escape through RuntimeDeps,
-        subsystem constructors, tests, or service-locator returns. When the selected private backend transaction executor
-        is absent, SQLite WorkflowPersistence is not selected runtime write authority and must fail closed for pipeline
-        mutation entry points. Durable coordinator construction validates the private mutation executor and every required
+        subsystem constructors, tests, or service-locator returns. When any required closed selected-store operation
+        is absent, WorkflowPersistence is invalid and pipeline construction fails closed. Durable coordinator construction validates every required
         workflow role before returning a reachable coordinator. Postgres remains authoritative for
         production cross-runtime transaction and claim semantics.
+      instance_identity:
+        owner: runtimeflowidentity.Route
+        rule: >
+          Every semantic workflow-instance port accepts the exact typed route. The canonical row key is the instance path:
+          scope plus the instance discriminator when one exists; singleton instances use the scope alone and root uses the
+          run scope. Entity id is a fact about an instance and is never its address. Empty or invalid routes fail closed with
+          a typed lookup miss carrying the requested key; no caller or adapter may infer a route from entity state or row shape.
       excludes:
       - tool executor entity and human-task persistence owned by runtime_tool_entity_and_human_task_rows
       - runtime diagnostics/logging owned by #1150
@@ -5468,10 +5518,11 @@ engine:
       postgres_owner: internal/store.PostgresStore.MaterializeMailboxWrite
       scope: >
         PipelineCoordinator owns mailbox_write expression evaluation, deterministic item_id derivation from source_event_id
-        and materializer node, source_event_id/from_agent/flow_instance/payload shaping, and handler transaction context
+        and materializer node, source_event_id/from_agent/flow_instance/payload shaping, and typed handler commit-plan
         propagation. Backend-specific stores own idempotent persisted mailbox row materialization through the same typed
-        owner for explicit SQLite local/dev runtime construction and Postgres production runtime construction. SQLite must
-        keep runtime.RuntimeDeps.SQLDB nil and must not receive a raw pipeline SQL handle as a mailbox_write compatibility seam.
+        owner for explicit SQLite local/dev runtime construction and Postgres production runtime construction. Runtime
+        construction must supply only the typed materialization owner; raw SQL handles and mailbox_write compatibility
+        seams are forbidden for both backends.
       excludes:
       - broad public mailbox decision API behavior owned by api_specification.method_catalog.mailbox.*
       - dashboard and digest mailbox read closure
@@ -5677,27 +5728,26 @@ engine:
         method: conversation.fork
         selected_capability: ConversationForkLifecycle
         postgres_support: supported through the shared conversation fork semantic owner and Postgres transaction/locking adapter
-        sqlite_support: supported for local/dev runtimes through the shared conversation fork semantic owner and SQLiteRuntimeStore.RunRuntimeMutation; production multi-writer SQLite remains unsupported
+        sqlite_support: supported for local/dev runtimes through the shared conversation fork semantic owner and its closed SQLite named operations; production multi-writer SQLite remains unsupported
       conversation_fork_chat:
         method: conversation.fork_chat
         selected_capability: ConversationForkLifecycle plus ForkChatExecutor
         postgres_support: supported through the shared conversation fork semantic owner, Postgres transaction/locking adapter, and separately admitted fork-chat execution
-        sqlite_support: supported for local/dev runtimes through the shared conversation fork semantic owner, SQLiteRuntimeStore.RunRuntimeMutation, and the same separately admitted fork-chat execution; production multi-writer SQLite remains unsupported
-        turn_allocation_concurrency: Postgres acquires a fork-scoped session advisory lock before opening the existing serializable transaction and row lock; SQLite serializes the mutation through SQLiteRuntimeStore.RunRuntimeMutation. Both adapters allocate unique adjacent fork-local turn indexes without handler retries.
+        sqlite_support: supported for local/dev runtimes through the shared conversation fork semantic owner, its closed SQLite named operations, and the same separately admitted fork-chat execution; production multi-writer SQLite remains unsupported
+        turn_allocation_concurrency: Postgres acquires a fork-scoped session advisory lock before opening the operation-owned serializable transaction and row lock; the private SQLite adapter serializes its closed named mutation. Both adapters allocate unique adjacent fork-local turn indexes without handler retries.
       conversation_fork_delete:
         method: conversation.fork_delete
         selected_capability: ConversationForkLifecycle
         postgres_support: supported through the shared conversation fork semantic owner and Postgres transaction adapter
-        sqlite_support: supported for local/dev runtimes through the shared conversation fork semantic owner and SQLiteRuntimeStore.RunRuntimeMutation; production multi-writer SQLite remains unsupported
+        sqlite_support: supported for local/dev runtimes through the shared conversation fork semantic owner and its closed SQLite named operations; production multi-writer SQLite remains unsupported
     raw_sql_runtime_consumer_boundary_for_sqlite:
-      runtime_sql_handle_for_sqlite: omitted
+      runtime_sql_handle: removed
       rule: >
-        Explicit SQLite store construction must leave runtime.RuntimeDeps.SQLDB nil so Postgres-only raw-SQL components are not
-        accidentally treated as SQLite owners. Runtime diagnostics/logging consumes the promoted backend-neutral
-        RuntimeLogPersistence owner instead of a raw SQL handle. mailbox_write materialization consumes the #1186
-        MailboxWriteMaterializationStore owner instead of the raw pipeline SQL database. Any future raw-SQL runtime
-        consumer must receive a separately gated backend-neutral owner before it can participate in explicit SQLite runtime
-        construction.
+        RuntimeDeps has no raw SQL field for either backend. Runtime diagnostics/logging consumes the promoted
+        backend-neutral RuntimeLogPersistence owner; mailbox_write materialization consumes the #1186
+        MailboxWriteMaterializationStore owner; selected-fork execution consumes exact typed ports. Any future persistence
+        consumer must receive a separately gated semantic owner and closed named operation. Raw runtime handles, nil-handle
+        capability tests, and backend-specific reconstruction are forbidden.
     split_boundaries:
     - "Public local/dev SQLite default flip and zero-service swarm run start proof are promoted by #1088."
     - "Docs, CI, repo-wide stale-default closeout, and #1066 parent proof remain split to #1089."
@@ -12137,6 +12187,7 @@ platform_tables:
             instance_id                  TEXT NOT NULL,
             target_alias                 TEXT NOT NULL,
             target_flow_instance         TEXT NOT NULL,
+            expected_generation          BIGINT NOT NULL CHECK (expected_generation > 0),
             expected_publication_sequence BIGINT NOT NULL CHECK (expected_publication_sequence >= 0),
             resolved_run_id              UUID NOT NULL REFERENCES runs(run_id),
             marker_event_id              UUID UNIQUE REFERENCES events(event_id),
@@ -13631,6 +13682,8 @@ platform_tables:
             forked_from_event_id   UUID REFERENCES events(event_id),
             reconstruction_owner  TEXT,
             entity_id             UUID,
+            flow_scope_key        TEXT,
+            flow_instance_id      TEXT,
             flow_instance         TEXT,
             fire_event            TEXT NOT NULL,
             fire_payload          JSONB NOT NULL DEFAULT '{}',
@@ -13652,7 +13705,7 @@ platform_tables:
             status                TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'fired', 'cancelled', 'expired')),
             fired_at              TIMESTAMPTZ,
             created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            CHECK (task_type <> 'workflow_timer' OR (run_id IS NOT NULL AND entity_id IS NOT NULL AND flow_instance = TRIM(flow_instance) AND NULLIF(flow_instance, '') IS NOT NULL)),
+            CHECK (task_type <> 'workflow_timer' OR (run_id IS NOT NULL AND entity_id IS NOT NULL AND flow_scope_key = TRIM(flow_scope_key) AND NULLIF(flow_scope_key, '') IS NOT NULL AND flow_instance_id = TRIM(flow_instance_id) AND NULLIF(flow_instance_id, '') IS NOT NULL AND flow_instance = TRIM(flow_instance) AND NULLIF(flow_instance, '') IS NOT NULL)),
             CHECK (task_type <> 'workflow_timer' OR (timer_name = TRIM(timer_name) AND NULLIF(timer_name, '') IS NOT NULL AND fire_event = TRIM(fire_event) AND NULLIF(fire_event, '') IS NOT NULL)),
             CHECK (task_type <> 'workflow_timer' OR (owner_node IS NULL AND owner_agent = TRIM(owner_agent) AND NULLIF(owner_agent, '') IS NOT NULL)),
             CHECK ((owner_kind = 'system' AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND agent_flow_scope_key IS NULL AND agent_flow_instance_id IS NULL) OR (owner_kind = 'agent' AND owner_node IS NULL AND owner_agent = TRIM(owner_agent) AND NULLIF(owner_agent, '') IS NOT NULL AND agent_name_owner = TRIM(agent_name_owner) AND NULLIF(agent_name_owner, '') IS NOT NULL AND agent_name_source IN ('declared', 'runtime_created') AND agent_route_presence IN ('present', 'root') AND ((agent_route_presence = 'root' AND agent_flow_scope_key IS NULL AND agent_flow_instance_id IS NULL AND flow_instance IS NULL) OR (agent_route_presence = 'present' AND agent_flow_scope_key = TRIM(agent_flow_scope_key) AND NULLIF(agent_flow_scope_key, '') IS NOT NULL AND agent_flow_instance_id = TRIM(agent_flow_instance_id) AND NULLIF(agent_flow_instance_id, '') IS NOT NULL AND flow_instance = TRIM(flow_instance) AND NULLIF(flow_instance, '') IS NOT NULL)))),
@@ -13680,7 +13733,8 @@ platform_tables:
           lifecycle.
         flow_scoped: entity_id NULL, flow_instance NOT NULL, run_id set for runtime-owned flow timers. Tied to flow instance
           inside run_id. Cancelled when flow instance terminates.
-        workflow_timer: task_type=workflow_timer with exact run_id, entity_id, flow_instance, activation serialization,
+        workflow_timer: task_type=workflow_timer with exact run_id, entity_id, typed flow route
+          `{flow_scope_key, flow_instance_id, flow_instance}`, activation serialization,
           owner_agent, event, due coordinate, recurrence facts, status facts, and complete-or-absent fork lineage.
     dead_letters:
       description: Failed events after a terminal delivery disposition. The canonical failure envelope is preserved verbatim from the triggering runtime failure; parent terminalization supplies its typed delivery_parent_terminalized lifecycle-conflict envelope. Lifecycle and retry counters remain dead-letter-owned facts. Every terminal executable delivery, including parent terminalization, carries the exact delivery_id and claim_version pair and is structurally coupled to the committed delivery outcome. Pre-delivery diagnostics leave both fields null.
@@ -13840,7 +13894,7 @@ platform_tables:
             commit-capable. Commit submits the exact durable identity through a detached handoff and releases admission
             only after representation; rollback cancels that admission. Successful selected-store commit is the
             irreversible handoff boundary: subsequent session cleanup, claim release, or other post-commit failures are
-            joined and reported only after every required post-commit action has run, and they never route the reserved
+            joined and reported only after every required typed post-commit effect has settled, and they never route the reserved
             admission through rollback. Pipeline settlement retires its exact claim before submitting the candidate so
             candidate execution cannot observe work already durably settled as still live. Caller cancellation after
             commit cannot cancel the handoff. A process crash after commit is recovered by successor startup enumeration
@@ -14149,7 +14203,7 @@ run_model:
     stalled_run_escalation:
       owner: policy.runtime.stalled_run_escalation
       event_owner: platform_events.catalog.platform.run_stalled
-      diagnosis_owner: internal/store/run_operational_status_read_surface.go.ProjectRunOperationalStatus
+      diagnosis_owner: internal/store/internal/runtimepersistence/run_operational_status_read_surface.go.ProjectRunOperationalStatus
       progress_timestamp_owner: latest events.created_at for the run excluding platform.run_stalled self-alert rows
       default_policy:
         enabled: true
@@ -15994,7 +16048,7 @@ platform_events:
       producer_evidence:
         produced_by_type: platform
         locations:
-        - internal/store/runtime_log_persistence.go
+        - internal/store/internal/runtimepersistence/runtime_log_persistence.go
       routing_class: diagnostic_direct_persisted
       note: Full payload schema defined in platform_tables. Not duplicated here.
     platform.activity_requested:
@@ -16253,7 +16307,7 @@ platform_events:
         locations:
         - internal/runtime/agentcontrol/control.go
         - internal/runtime/manager/runtime.go
-        - internal/store/agent_directive_operations.go
+        - internal/store/internal/runtimepersistence/agent_directive_operations.go
       routing_class: diagnostic_direct_persisted
       scope: global
       payload:
@@ -16348,8 +16402,8 @@ platform_events:
         produced_by_type: platform
         locations:
         - internal/runtime/inbound.go#InboundGateway.handleResolvedWebhook
-        - internal/store/inbound_publication.go#RunInboundPublicationMutation
-        - internal/store/sqlite_inbound_publication.go#RunInboundPublicationMutation
+        - internal/store/internal/runtimepersistence/inbound_publication.go#RunInboundPublicationMutation
+        - internal/store/internal/runtimepersistence/sqlite_inbound_publication.go#RunInboundPublicationMutation
       routing_class: diagnostic_direct_persisted
       scope: entity or global
       payload:
@@ -16460,7 +16514,7 @@ platform_events:
       producer_evidence:
         produced_by_type: platform
         locations:
-        - internal/store/human_task_cards.go#ExpireHumanTaskCardsInMutation
+        - internal/store/internal/runtimepersistence/human_task_cards.go#ExpireHumanTaskCardsInMutation
         - internal/runtime/pipeline/coordinator.go#PipelineCoordinator.expireHumanTaskCards
       routing_class: event_loop_routable
       scope: entity, flow, or global
@@ -18983,7 +19037,7 @@ test_specification:
         After each mutating step and before final assertions, the runner waits
         by reading `/v1/rpc run.diagnose` result.test_quiescence until the
         current run has no active deliveries, no unsettled same-run pipeline
-        receipt work owned by committed post-commit callbacks, no currently due
+        receipt work represented by committed typed post-commit evidence, no currently due
         timer work, and no active session lease/callback evidence that can
         synchronously enqueue more work for the same run.
       timers: >
@@ -20307,10 +20361,10 @@ cli_specification:
                 NOT_IMPORTED: NOT IMPORTED
                 UNKNOWN: UNKNOWN
             operational_state:
-              machine_owner: internal/store/run_operational_status_read_surface.go ProjectRunOperationalStatus and components.schemas.OperationalState
+              machine_owner: internal/store/internal/runtimepersistence/run_operational_status_read_surface.go ProjectRunOperationalStatus and components.schemas.OperationalState
               phrases: {running: running, stalled: stalled, paused: paused, completed: completed, failed: failed, cancelled: cancelled, forked: forked}
             run_blocking_tuples:
-              machine_owner: internal/store/run_operational_status_read_surface.go ProjectRunOperationalStatus
+              machine_owner: internal/store/internal/runtimepersistence/run_operational_status_read_surface.go ProjectRunOperationalStatus
               current_non_empty:
               - state: stalled
                 blocking_layer: scoring_terminal_outcome
@@ -20324,7 +20378,7 @@ cli_specification:
                 reason_phrase: no active deliveries
               absence_rule: Non-stalled states carry empty layer/reason values and omit those rows from human output.
             agent_lifecycle_tuples:
-              machine_owner: internal/store/agent_lifecycle_read_surface.go agentLifecycleBlockingLayer, consuming internal/runtime/deliverylifecycle.StateFromDelivery
+              machine_owner: internal/store/internal/runtimepersistence/agent_lifecycle_read_surface.go agentLifecycleBlockingLayer, consuming internal/runtime/deliverylifecycle.StateFromDelivery
               current:
               - {state: queued, blocking_layer: delivery_queue, state_phrase: queued, layer_phrase: delivery queue}
               - {state: launching, blocking_layer: session_launch, state_phrase: launching, layer_phrase: session launch}
@@ -25532,7 +25586,7 @@ api_specification:
         type: string
         description: 'Operational state of a run. Source of truth:
 
-          internal/store/run_operational_status_read_surface.go
+          internal/store/internal/runtimepersistence/run_operational_status_read_surface.go
 
           ProjectRunOperationalStatus. Values are RunTableStatus values
 
@@ -26376,8 +26430,10 @@ api_specification:
       StageGateDecisionCardAnchor:
         type: object
         additionalProperties: false
-        required: [flow_instance, entity_id, routing_source, stage, stage_activation_id]
+        required: [flow_scope_key, flow_instance_id, flow_instance, entity_id, routing_source, stage, stage_activation_id]
         properties:
+          flow_scope_key: {type: string}
+          flow_instance_id: {type: string}
           flow_instance: {type: string}
           flow_id: {type: string}
           entity_id: {$ref: '#/components/schemas/OpaqueId'}
@@ -26813,7 +26869,7 @@ api_specification:
             type: string
             minLength: 1
             description: >
-              Current producer owner is internal/store/agent_lifecycle_read_surface.go
+              Current producer owner is internal/store/internal/runtimepersistence/agent_lifecycle_read_surface.go
               agentLifecycleBlockingLayer, consuming deliverylifecycle.StateFromDelivery. Current reachable
               state/layer pairs are queued/delivery_queue, launching/session_launch, active/session_execution,
               retrying/delivery_retry, and exhausted/delivery_terminal. The field remains string-valued for
@@ -27872,7 +27928,7 @@ api_specification:
       RunTraceRow:
         description: "One joined trace row. Every row is anchored on an event; delivery,\nsession, and turn fields are sparse\
           \ and present only where the join\nfinds a corresponding row. Matches the runtime's canonical\nRunDebugTraceRow\
-          \ shape (internal/store/run_debug_read_surface.go).\nThe runtime owns the join \u2014 clients MUST consume rows\
+          \ shape (internal/store/internal/runtimepersistence/run_debug_read_surface.go).\nThe runtime owns the join \u2014 clients MUST consume rows\
           \ as-emitted\nand MUST NOT reconstruct the join from separate event/delivery/\nsession/turn lists.\n"
         type: object
         additionalProperties: false
@@ -29650,7 +29706,7 @@ api_specification:
       description: "Persisted composed run trace as an ordered list of joined rows. Each\nrow is anchored on an event and\
         \ carries delivery, session, and turn\nfields where the join finds them. The runtime owns the join \u2014 clients\n\
         MUST consume rows as-emitted and MUST NOT reconstruct the join from\nseparate event/delivery/session/turn lists. Backed\
-        \ by the canonical\nRunDebugTraceRow surface in internal/store/run_debug_read_surface.go.\n"
+        \ by the canonical\nRunDebugTraceRow surface in internal/store/internal/runtimepersistence/run_debug_read_surface.go.\n"
       scope:
         required:
         - read:runs
@@ -29708,7 +29764,7 @@ api_specification:
       - RUN_NOT_FOUND
     run.diagnose:
       tier: must_have
-      description: "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/run_operational_status_read_surface.go\
+      description: "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/internal/runtimepersistence/run_operational_status_read_surface.go\
         \ and concrete failed-delivery evidence from\nRunDebugReport.FailedDeliveries, plus result.test_quiescence from\n\
         RunDebugReport.TestQuiescence for deterministic test assertion barriers. The single canonical owner for\n\"why isn't\
         \ this run progressing?\" routes persisted evidence through\nthe API instead of having every consumer recompute it.\n"
@@ -31440,7 +31496,7 @@ api_specification:
       the geth-style rpc.subscription shape.
     - health.check returns the BundleIdentity block including canonical bundle_hash.
     - mailbox.decide / defer / begin_input / cancel_input mutate only typed decision cards and drafts; mailbox.acknowledge mutates only notice acknowledgment state.
-    - run.diagnose exposes the existing operator-state projection from internal/store/run_operational_status_read_surface.go.ProjectRunOperationalStatus
+    - run.diagnose exposes the existing operator-state projection from internal/store/internal/runtimepersistence/run_operational_status_read_surface.go.ProjectRunOperationalStatus
       over the JSON-RPC API, returning operational_state + blocking_layer + blocking_reason + heuristics. The projection itself
       is the canonical owner and is unchanged; this proof confirms the API surface routes through it (no second interpretation
       layer in the API handler).

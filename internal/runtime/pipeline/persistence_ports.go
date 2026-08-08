@@ -16,7 +16,7 @@ import (
 )
 
 type FlowInstanceTerminationRequest struct {
-	StorageRef   string
+	Route        runtimeflowidentity.Route
 	RunID        string
 	TerminatedAt time.Time
 }
@@ -62,9 +62,7 @@ func (pc *PipelineCoordinator) CommitDynamicFlowRuntimeReadinessReconciliation(
 	if owner == nil {
 		return fmt.Errorf("dynamic flow readiness reconciliation requires flow instance owner")
 	}
-	return pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-		return owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(txctx, observedAt)
-	})
+	return owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(ctx, observedAt)
 }
 
 func (pc *PipelineCoordinator) CommitStandingTargets(ctx context.Context, req StandingTargetMutationRequest, owner StandingFlowInstanceOwner) ([]StandingTargetMutationResult, error) {
@@ -78,97 +76,79 @@ func (pc *PipelineCoordinator) CommitStandingTargets(ctx context.Context, req St
 	if observedAt.IsZero() {
 		return nil, fmt.Errorf("standing target mutation requires observed_at")
 	}
-	results := make([]StandingTargetMutationResult, 0, len(req.Targets))
-	err := pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-		if req.Replace {
-			candidates := make([]StandingServiceCandidate, 0, len(req.Targets))
-			for _, target := range req.Targets {
-				candidates = append(candidates, target.Candidate)
-			}
-			if _, err := pc.workflowStore.ReconcileStandingServiceReplacement(txctx, req.Previous, candidates); err != nil {
-				return err
-			}
-		}
+	if req.Replace {
+		candidates := make([]StandingServiceCandidate, 0, len(req.Targets))
 		for _, target := range req.Targets {
-			reconciliation, found, err := pc.workflowStore.LoadReconciledStandingService(txctx, target.Candidate)
-			if err != nil {
-				return err
-			}
-			if !found {
-				reconciliation, err = pc.workflowStore.ReconcileStandingService(txctx, target.Candidate)
-				if err != nil {
-					return err
-				}
-			}
-			result := StandingTargetMutationResult{Reconciliation: reconciliation, PublicationSequence: reconciliation.PublicationSequence}
-			if reconciliation.EffectiveState == "active" {
-				operationCtx := runtimecorrelation.WithRunID(txctx, reconciliation.RunID)
-				operationCtx = runtimecorrelation.WithBundleSourceFact(operationCtx, target.Candidate.Source)
-				operationCtx = runtimeeffects.WithExecutionMode(operationCtx, executionmode.Live)
-				if reconciliation.Generation > 1 {
-					operationCtx = WithStandingGenerationRebind(operationCtx)
-				}
-				if err := owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(operationCtx, observedAt); err != nil {
-					return err
-				}
-				created, err := owner.EnsureFlowInstance(operationCtx, target.Activation)
-				if err != nil {
-					return err
-				}
-				result.Created = created
-				result.PublicationSequence, err = pc.workflowStore.PublishStandingService(operationCtx, reconciliation.ServiceID, reconciliation.RunID, reconciliation.Generation)
-				if err != nil {
-					return err
-				}
-			}
-			results = append(results, result)
+			candidates = append(candidates, target.Candidate)
 		}
-		return nil
-	})
-	return results, err
+		if _, err := pc.workflowStore.ReconcileStandingServiceReplacement(ctx, req.Previous, candidates); err != nil {
+			return nil, err
+		}
+	}
+	results := make([]StandingTargetMutationResult, 0, len(req.Targets))
+	for _, target := range req.Targets {
+		reconciliation, found, err := pc.workflowStore.LoadReconciledStandingService(ctx, target.Candidate)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			reconciliation, err = pc.workflowStore.ReconcileStandingService(ctx, target.Candidate)
+			if err != nil {
+				return nil, err
+			}
+		}
+		result := StandingTargetMutationResult{Reconciliation: reconciliation, PublicationSequence: reconciliation.PublicationSequence}
+		if reconciliation.EffectiveState == "active" {
+			operationCtx := runtimecorrelation.WithRunID(ctx, reconciliation.RunID)
+			operationCtx = runtimecorrelation.WithBundleSourceFact(operationCtx, target.Candidate.Source)
+			operationCtx = runtimeeffects.WithExecutionMode(operationCtx, executionmode.Live)
+			if err := owner.ReconcileDynamicFlowRuntimeReadinessPlansForRun(operationCtx, observedAt); err != nil {
+				return nil, err
+			}
+			activation := target.Activation
+			activation.StandingGenerationReplacement = reconciliation.Generation > 1
+			created, err := owner.EnsureFlowInstance(operationCtx, activation)
+			if err != nil {
+				return nil, err
+			}
+			result.Created = created
+			result.PublicationSequence, err = pc.workflowStore.PublishStandingService(operationCtx, reconciliation.ServiceID, reconciliation.RunID, reconciliation.Generation)
+			if err != nil {
+				return nil, err
+			}
+		}
+		results = append(results, result)
+	}
+	return results, nil
 }
 
 func (pc *PipelineCoordinator) CommitFlowInstanceTermination(ctx context.Context, req FlowInstanceTerminationRequest) (FlowInstanceTermination, error) {
 	if pc == nil || pc.workflowStore == nil {
 		return FlowInstanceTermination{}, fmt.Errorf("flow instance termination requires workflow persistence")
 	}
-	storageRef := strings.TrimSpace(req.StorageRef)
+	route := runtimeflowidentity.StoredRoute(req.Route.ScopeKey, req.Route.InstanceID, req.Route.InstancePath)
 	runID := strings.TrimSpace(req.RunID)
-	if storageRef == "" || runID == "" {
-		return FlowInstanceTermination{}, fmt.Errorf("flow instance termination requires storage_ref and run_id")
+	if !route.Valid() || runID == "" {
+		return FlowInstanceTermination{}, fmt.Errorf("flow instance termination requires an exact route and run_id")
 	}
-	var result FlowInstanceTermination
-	err := pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-		if err := pc.workflowStore.MarkTerminated(txctx, storageRef, req.TerminatedAt); err != nil {
-			return err
-		}
-		instance, ok, err := pc.workflowStore.Load(txctx, storageRef)
-		if err != nil {
-			return err
-		}
-		if !ok || strings.TrimSpace(instance.Status) != "terminated" || instance.TerminatedAt.IsZero() {
-			return fmt.Errorf("canonical terminal flow instance %s was not persisted", storageRef)
-		}
-		canonicalRef := strings.TrimSpace(instance.StorageRef)
-		route := runtimeflowidentity.StoredRoute("", "", canonicalRef)
-		if !route.Valid() {
-			return fmt.Errorf("derive canonical route identity for flow path %s", canonicalRef)
-		}
-		if pc.flowRoutes == nil {
-			return fmt.Errorf("flow instance termination requires route topology owner")
-		}
-		txctx = runtimecorrelation.WithRunID(txctx, runID)
-		if err := pc.flowRoutes.RemoveFlowInstanceRouteContext(txctx, route); err != nil {
-			return err
-		}
-		result = FlowInstanceTermination{Instance: instance, Route: route}
-		return nil
-	})
-	return result, err
+	instance, err := pc.commitWorkflowTermination(runtimecorrelation.WithRunID(ctx, runID), route, req.TerminatedAt, true)
+	if err != nil {
+		return FlowInstanceTermination{}, err
+	}
+	canonicalRef := strings.TrimSpace(instance.StorageRef)
+	canonicalRoute := runtimeflowidentity.RouteForInstancePath(canonicalRef)
+	if !canonicalRoute.Valid() {
+		return FlowInstanceTermination{}, fmt.Errorf("derive canonical route identity for flow path %s", canonicalRef)
+	}
+	return FlowInstanceTermination{Instance: instance, Route: canonicalRoute}, nil
 }
 
-func (pc *PipelineCoordinator) Load(ctx context.Context, instanceID string) (WorkflowInstance, bool, error) {
-	return pc.workflowStore.Load(ctx, instanceID)
+func (pc *PipelineCoordinator) Load(ctx context.Context, route runtimeflowidentity.Route) (WorkflowInstance, bool, error) {
+	return pc.workflowStore.Load(ctx, route)
+}
+
+func (pc *PipelineCoordinator) ListWorkflowInstances(ctx context.Context) ([]WorkflowInstance, error) {
+	return pc.workflowStore.list(ctx)
 }
 
 func (pc *PipelineCoordinator) StartActivityAttempt(ctx context.Context, record ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {
@@ -203,24 +183,39 @@ func (pc *PipelineCoordinator) MaterializeInitialEntry(ctx context.Context, inst
 	return pc.workflowStore.MaterializeInitialEntry(ctx, instance, occurredAt)
 }
 
-func (pc *PipelineCoordinator) ArmInitialEntryTimers(ctx context.Context, instanceID string) error {
-	return pc.workflowStore.ArmInitialEntryTimers(ctx, instanceID)
+func (pc *PipelineCoordinator) PrepareInitialEntryLifecycle(ctx context.Context, instance WorkflowInstance, occurredAt time.Time) (WorkflowInstance, WorkflowLifecycleMutationPlan, error) {
+	if pc == nil || pc.workflowStore == nil {
+		return WorkflowInstance{}, WorkflowLifecycleMutationPlan{}, fmt.Errorf("workflow instance lifecycle store is required")
+	}
+	normalized, _, lifecycle, err := pc.workflowStore.prepareInitialEntryLifecycle(ctx, instance, occurredAt)
+	return normalized, lifecycle, err
 }
 
-func (pc *PipelineCoordinator) ReconcileInitialEntryTimers(ctx context.Context, instanceID string) error {
-	return pc.workflowStore.ReconcileInitialEntryTimers(ctx, instanceID)
+func (pc *PipelineCoordinator) FinalizeInitialEntryLifecycle(ctx context.Context, committed CommittedWorkflowLifecycleMutation) error {
+	if pc == nil || pc.workflowStore == nil {
+		return fmt.Errorf("workflow instance lifecycle store is required")
+	}
+	return pc.workflowStore.finalizeInitialEntryLifecycle(ctx, committed)
 }
 
-func (pc *PipelineCoordinator) RetireInitialEntryTimerWakeups(ctx context.Context, instanceID string) error {
-	return pc.workflowStore.RetireInitialEntryTimerWakeups(ctx, instanceID)
+func (pc *PipelineCoordinator) ArmInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error {
+	return pc.workflowStore.ArmInitialEntryTimers(ctx, route)
+}
+
+func (pc *PipelineCoordinator) ReconcileInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error {
+	return pc.workflowStore.ReconcileInitialEntryTimers(ctx, route)
+}
+
+func (pc *PipelineCoordinator) RetireInitialEntryTimerWakeups(ctx context.Context, route runtimeflowidentity.Route) error {
+	return pc.workflowStore.RetireInitialEntryTimerWakeups(ctx, route)
 }
 
 func (pc *PipelineCoordinator) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
 	return pc.workflowStore.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, plan, observedAt)
 }
 
-func (pc *PipelineCoordinator) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID, instanceID string) (DynamicFlowRuntimeReadiness, bool, error) {
-	return pc.workflowStore.LoadDynamicFlowRuntimeReadiness(ctx, runID, instanceID)
+func (pc *PipelineCoordinator) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error) {
+	return pc.workflowStore.LoadDynamicFlowRuntimeReadiness(ctx, runID, route)
 }
 
 func (pc *PipelineCoordinator) ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error) {
@@ -235,12 +230,9 @@ func (pc *PipelineCoordinator) MarkDynamicFlowRuntimeTopologyReady(ctx context.C
 	return pc.workflowStore.MarkDynamicFlowRuntimeTopologyReady(ctx, expected, readyAt)
 }
 
-func (pc *PipelineCoordinator) CommitDynamicFlowRuntimeCreationOccurrence(ctx context.Context, req DynamicFlowRuntimeCreationOccurrenceRequest, publisher DynamicFlowRuntimeCreationOccurrencePublisher) error {
-	return pc.workflowStore.CommitDynamicFlowRuntimeCreationOccurrence(ctx, req, publisher)
-}
-
-func (pc *PipelineCoordinator) MarkTerminated(ctx context.Context, storageRef string, terminatedAt time.Time) error {
-	return pc.workflowStore.MarkTerminated(ctx, storageRef, terminatedAt)
+func (pc *PipelineCoordinator) MarkTerminated(ctx context.Context, route runtimeflowidentity.Route, terminatedAt time.Time) error {
+	_, err := pc.commitWorkflowTermination(ctx, route, terminatedAt, false)
+	return err
 }
 
 func (pc *PipelineCoordinator) CommitDecision(ctx context.Context, card decisioncard.Card, decision string, decidedAt time.Time) error {

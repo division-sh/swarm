@@ -18,12 +18,7 @@ import (
 const SemanticFixtureBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 const semanticFixtureRuntimeInstanceID = "00000000-0000-4000-8000-000000000001"
 
-type runLifecycleMutationRunner interface {
-	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
-}
-
 type runLifecycleOperationRunner interface {
-	runLifecycleMutationRunner
 	runtimerunlifecycle.OperationOwner
 	runtimerunlifecycle.CandidateStore
 }
@@ -167,43 +162,34 @@ func MaterializeRun(
 		fixture.EndedAt = fixture.StartedAt
 	}
 	ctx = semanticFixtureContext(ctx, source)
-	err = runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		if _, err := runtimerunlifecycle.Create(txctx, runtimerunlifecycle.CreateRequest{
-			RunID:     fixture.RunID,
-			Origin:    fixture.Origin,
-			Source:    source,
-			StartedAt: fixture.StartedAt.UTC(),
-		}); err != nil {
-			return err
-		}
-		switch fixture.State {
-		case runtimerunlifecycle.StateRunning:
-			return nil
-		case runtimerunlifecycle.StatePaused:
-			_, err := runner.TransitionActiveRun(txctx, runtimerunlifecycle.ActiveTransitionRequest{
-				RunID: fixture.RunID,
-				State: runtimerunlifecycle.StatePaused,
-			})
-			return err
-		case runtimerunlifecycle.StateCompleted:
-			_, err := runner.RequestCompletionCandidate(
-				txctx,
-				runtimerunlifecycle.ImmediateCandidate(fixture.RunID),
-			)
-			return err
-		case runtimerunlifecycle.StateFailed,
-			runtimerunlifecycle.StateCancelled:
-			_, _, err := runner.MarkTerminalRun(txctx, runtimerunlifecycle.TerminalRequest{
-				RunID:   fixture.RunID,
-				State:   fixture.State,
-				Failure: fixture.Failure,
-				EndedAt: fixture.EndedAt.UTC(),
-			})
-			return err
-		default:
-			return fmt.Errorf("semantic run fixture state %q is unsupported", fixture.State)
-		}
-	})
+	if _, err = runner.CreateRun(ctx, runtimerunlifecycle.CreateRequest{
+		RunID:     fixture.RunID,
+		Origin:    fixture.Origin,
+		Source:    source,
+		StartedAt: fixture.StartedAt.UTC(),
+	}); err != nil {
+		return err
+	}
+	switch fixture.State {
+	case runtimerunlifecycle.StateRunning:
+	case runtimerunlifecycle.StatePaused:
+		_, err = runner.TransitionActiveRun(ctx, runtimerunlifecycle.ActiveTransitionRequest{
+			RunID: fixture.RunID,
+			State: runtimerunlifecycle.StatePaused,
+		})
+	case runtimerunlifecycle.StateCompleted:
+		_, err = runner.RequestCompletionCandidate(
+			ctx,
+			runtimerunlifecycle.ImmediateCandidate(fixture.RunID),
+		)
+	case runtimerunlifecycle.StateFailed,
+		runtimerunlifecycle.StateCancelled:
+		_, _, err = runner.MarkTerminalRun(ctx, runtimerunlifecycle.TerminalRequest{
+			RunID: fixture.RunID, State: fixture.State, Failure: fixture.Failure, EndedAt: fixture.EndedAt.UTC(),
+		})
+	default:
+		return fmt.Errorf("semantic run fixture state %q is unsupported", fixture.State)
+	}
 	if err != nil || fixture.State != runtimerunlifecycle.StateCompleted {
 		return err
 	}
@@ -229,7 +215,7 @@ func MaterializeRun(
 
 func EnsureEphemeralRun(
 	ctx context.Context,
-	runner runLifecycleMutationRunner,
+	runner runLifecycleOperationRunner,
 	runID string,
 	startedAt time.Time,
 ) error {
@@ -244,20 +230,18 @@ func EnsureEphemeralRun(
 		startedAt = time.Now().UTC()
 	}
 	ctx = semanticFixtureContext(ctx, source)
-	return runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		_, err := runtimerunlifecycle.Create(txctx, runtimerunlifecycle.CreateRequest{
-			RunID:     strings.TrimSpace(runID),
-			Origin:    runtimerunlifecycle.ScenarioSetupRunOrigin(),
-			Source:    source,
-			StartedAt: startedAt.UTC(),
-		})
-		return err
+	_, err = runner.CreateRun(ctx, runtimerunlifecycle.CreateRequest{
+		RunID:     strings.TrimSpace(runID),
+		Origin:    runtimerunlifecycle.ScenarioSetupRunOrigin(),
+		Source:    source,
+		StartedAt: startedAt.UTC(),
 	})
+	return err
 }
 
 func EnsureRunForAdmittedEvent(
 	ctx context.Context,
-	runner runLifecycleMutationRunner,
+	runner runLifecycleOperationRunner,
 	admitted events.AdmittedEvent,
 	startedAt time.Time,
 ) error {
@@ -274,13 +258,9 @@ func EnsureRunForAdmittedEvent(
 	}
 	switch admitted.RunDisposition() {
 	case events.AdmittedRunRequireActive:
-		return runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-			return runtimerunlifecycle.RequireActive(txctx, runID)
-		})
+		return runner.RequireActiveRun(ctx, runID)
 	case events.AdmittedRunRequirePresent:
-		return runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-			return runtimerunlifecycle.RequirePresent(txctx, runID)
-		})
+		return runner.RequirePresentRun(ctx, runID)
 	case events.AdmittedRunCreateAuthorized:
 	default:
 		return fmt.Errorf(
@@ -309,10 +289,8 @@ func EnsureRunForAdmittedEvent(
 		return err
 	}
 	ctx = semanticFixtureContext(ctx, source)
-	return runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		_, err := runtimerunlifecycle.Create(txctx, request)
-		return err
-	})
+	_, err = runner.CreateRun(ctx, request)
+	return err
 }
 
 func semanticFixtureSource(
@@ -375,83 +353,51 @@ func TerminalizeRun(
 	if runner == nil {
 		return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf("semantic fixture terminal run requires mutation owner")
 	}
-	var (
-		snapshot    runtimerunlifecycle.Snapshot
-		disposition runtimerunlifecycle.MutationDisposition
-	)
-	err := runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		var mutationErr error
-		snapshot, disposition, mutationErr = runner.MarkTerminalRun(txctx, request)
-		return mutationErr
-	})
-	return snapshot, disposition, err
+	return runner.MarkTerminalRun(ctx, request)
 }
 
 func TransitionRun(
 	ctx context.Context,
-	runner runLifecycleMutationRunner,
+	runner runLifecycleOperationRunner,
 	request runtimerunlifecycle.ActiveTransitionRequest,
 ) (runtimerunlifecycle.MutationDisposition, error) {
 	if runner == nil {
 		return "", fmt.Errorf("semantic fixture active transition requires mutation owner")
 	}
-	var disposition runtimerunlifecycle.MutationDisposition
-	err := runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		var mutationErr error
-		disposition, mutationErr = runtimerunlifecycle.TransitionActive(txctx, request)
-		return mutationErr
-	})
-	return disposition, err
+	return runner.TransitionActiveRun(ctx, request)
 }
 
 func ForkRun(
 	ctx context.Context,
-	runner runLifecycleMutationRunner,
+	runner runLifecycleOperationRunner,
 	request runtimerunlifecycle.ForkSourceRequest,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	if runner == nil {
 		return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf("semantic fixture fork transition requires mutation owner")
 	}
-	var (
-		snapshot    runtimerunlifecycle.Snapshot
-		disposition runtimerunlifecycle.MutationDisposition
-	)
-	err := runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		var mutationErr error
-		snapshot, disposition, mutationErr = runtimerunlifecycle.ForkSource(txctx, request)
-		return mutationErr
-	})
-	return snapshot, disposition, err
+	return runner.ForkRunSource(ctx, request)
 }
 
 func ReviseRunSource(
 	ctx context.Context,
-	runner runLifecycleMutationRunner,
+	runner runLifecycleOperationRunner,
 	request runtimerunlifecycle.SourceRevisionRequest,
 ) (runtimerunlifecycle.MutationDisposition, error) {
 	if runner == nil {
 		return "", fmt.Errorf("semantic fixture source revision requires mutation owner")
 	}
-	var disposition runtimerunlifecycle.MutationDisposition
-	err := runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		var mutationErr error
-		disposition, mutationErr = runtimerunlifecycle.ReviseSource(txctx, request)
-		return mutationErr
-	})
-	return disposition, err
+	return runner.ReviseRunSource(ctx, request)
 }
 
 func SyncRunCounters(
 	ctx context.Context,
-	runner runLifecycleMutationRunner,
+	runner runLifecycleOperationRunner,
 	runID string,
 ) error {
 	if runner == nil {
 		return fmt.Errorf("semantic fixture counter synchronization requires mutation owner")
 	}
-	return runner.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
-		return runtimerunlifecycle.SyncCounters(txctx, strings.TrimSpace(runID))
-	})
+	return runner.SyncRunCounters(ctx, strings.TrimSpace(runID))
 }
 
 func ExecuteRunCompletionCandidate(

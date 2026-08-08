@@ -1197,8 +1197,6 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 	topology *DynamicAgentTopologyMutation,
 	lockedCell *agentLifecycleCell,
 	preparedToken runtimeeffects.LifecycleToken,
-	beforeCommit func() error,
-	restoreBeforeCommit func() error,
 ) (context.Context, runtimeeffects.LifecycleToken, chan struct{}, error) {
 	plan, planHash, err := normalizedLifecycleSubordinate(subordinate)
 	if err != nil {
@@ -1271,28 +1269,6 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 		PreviousPhase: previousPhase, Phase: targetPhase, ConfigRevision: revision, RunMode: targetMode,
 		Subordinate: runtimesessions.LifecycleMutationOutcome{Action: plan.Action},
 	}
-	if beforeCommit != nil {
-		// Authority must move first so no successor projection can coexist with
-		// the predecessor mapping. Persistence rejection restores the prior edge.
-		c.mu.Unlock()
-		if err := beforeCommit(); err != nil {
-			if restoreBeforeCommit != nil {
-				err = errors.Join(err, restoreBeforeCommit())
-			}
-			return nil, runtimeeffects.LifecycleToken{}, nil, err
-		}
-		c.mu.Lock()
-		cell = c.cells[identity]
-		if cell == nil || cell != lockedCell ||
-			cell.epoch != previousEpoch || cell.generation != previousGeneration || cell.phase != previousPhase {
-			c.mu.Unlock()
-			var transitionErr error = runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID})
-			if restoreBeforeCommit != nil {
-				transitionErr = errors.Join(transitionErr, restoreBeforeCommit())
-			}
-			return nil, runtimeeffects.LifecycleToken{}, nil, transitionErr
-		}
-	}
 	if c.store != nil {
 		var err error
 		result, err = c.store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), AgentLifecycleTransition{
@@ -1304,9 +1280,6 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 		})
 		if err != nil {
 			c.mu.Unlock()
-			if restoreBeforeCommit != nil {
-				err = errors.Join(err, restoreBeforeCommit())
-			}
 			return nil, runtimeeffects.LifecycleToken{}, nil, err
 		}
 	} else if c.sessions != nil {
@@ -1318,9 +1291,6 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 		})
 		if err != nil {
 			c.mu.Unlock()
-			if restoreBeforeCommit != nil {
-				err = errors.Join(err, restoreBeforeCommit())
-			}
 			return nil, runtimeeffects.LifecycleToken{}, nil, err
 		}
 		result.Subordinate = outcome
@@ -1337,11 +1307,7 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 			result.RuntimeEpoch != nextEpoch || result.Generation != nextGeneration || result.Phase != targetPhase ||
 			result.ConfigRevision != revision || result.RunMode != targetMode {
 			c.mu.Unlock()
-			var transitionErr error = runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_replay_projection_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID, "operation_id": operationID})
-			if restoreBeforeCommit != nil {
-				transitionErr = errors.Join(transitionErr, restoreBeforeCommit())
-			}
-			return nil, runtimeeffects.LifecycleToken{}, nil, transitionErr
+			return nil, runtimeeffects.LifecycleToken{}, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_replay_projection_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID, "operation_id": operationID})
 		}
 	}
 	cell.epoch, cell.generation, cell.phase, cell.configRevision, cell.runMode = result.RuntimeEpoch, result.Generation, result.Phase, result.ConfigRevision, result.RunMode
@@ -1564,30 +1530,29 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopology(
 	trigger string,
 	target AgentLifecyclePhase,
 	topology *DynamicAgentTopologyMutation,
-) error {
-	return c.terminateIdentityWithTopologyCommitHooks(ctx, identity, trigger, target, topology, nil, nil, false)
+) (models.AgentConfig, error) {
+	return c.terminateIdentityWithTopologyExpected(ctx, identity, trigger, target, topology, nil, false)
 }
 
-func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyCommitHooks(
+func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyExpected(
 	ctx context.Context,
 	identity runtimeagentidentity.Identity,
 	trigger string,
 	target AgentLifecyclePhase,
 	topology *DynamicAgentTopologyMutation,
-	beforeCommit func(models.AgentConfig) error,
-	restoreBeforeCommit func(models.AgentConfig) error,
+	expected *models.AgentConfig,
 	deferRouteRetirement bool,
-) error {
+) (models.AgentConfig, error) {
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {
-		return err
+		return models.AgentConfig{}, err
 	}
 	agentID := identity.AgentID()
 	c.mu.Lock()
 	cell := c.cells[identity]
 	if cell == nil || cell.phase == AgentLifecycleTerminated || cell.phase == AgentLifecycleFailed {
 		c.mu.Unlock()
-		return fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
+		return models.AgentConfig{}, fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
 	}
 	c.mu.Unlock()
 	cell.opMu.Lock()
@@ -1596,7 +1561,7 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyCommitHooks(
 	cell = c.cells[identity]
 	if cell == nil {
 		c.mu.Unlock()
-		return fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
+		return models.AgentConfig{}, fmt.Errorf("%w: %s", ErrAgentNotFound, agentID)
 	}
 	epoch, generation, phase, revision := cell.epoch, cell.generation, cell.phase, cell.configRevision
 	execution := cell.execution
@@ -1615,7 +1580,7 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyCommitHooks(
 	})
 	if err != nil {
 		c.mu.Unlock()
-		return err
+		return models.AgentConfig{}, err
 	}
 	operationID := uuid.NewString()
 	now := time.Now().UTC()
@@ -1623,32 +1588,25 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyCommitHooks(
 	operationKind, err := lifecycleTerminationOperationKind(target)
 	if err != nil {
 		c.mu.Unlock()
-		return err
+		return models.AgentConfig{}, err
 	}
-	var commitConfig models.AgentConfig
-	beforeCommitApplied := false
-	restoreCommitHook := func(transitionErr error) error {
-		if !beforeCommitApplied || restoreBeforeCommit == nil {
-			return transitionErr
-		}
-		return errors.Join(transitionErr, restoreBeforeCommit(commitConfig))
+	var previousConfig models.AgentConfig
+	if execution != nil {
+		previousConfig = snapshotExecution(execution).Config
 	}
-	if beforeCommit != nil {
+	if expected != nil {
 		if execution == nil {
 			c.mu.Unlock()
-			return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_generation_not_running", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID})
+			return models.AgentConfig{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_generation_not_running", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID})
 		}
-		commitConfig = snapshotExecution(execution).Config
-		c.mu.Unlock()
-		if err := beforeCommit(commitConfig); err != nil {
-			return err
-		}
-		beforeCommitApplied = true
-		c.mu.Lock()
-		cell = c.cells[identity]
-		if cell == nil || cell.epoch != epoch || cell.generation != generation || cell.phase != phase || cell.execution != execution {
+		expectedRevision, revisionErr := lifecycleConfigRevision(PersistedAgent{Config: *expected})
+		if revisionErr != nil {
 			c.mu.Unlock()
-			return restoreCommitHook(runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID}))
+			return models.AgentConfig{}, fmt.Errorf("validate expected agent configuration: %w", revisionErr)
+		}
+		if expectedRevision != revision {
+			c.mu.Unlock()
+			return models.AgentConfig{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "agent_config_changed", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID})
 		}
 	}
 	if c.store != nil {
@@ -1661,7 +1619,7 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyCommitHooks(
 		})
 		if err != nil {
 			c.mu.Unlock()
-			return restoreCommitHook(err)
+			return models.AgentConfig{}, err
 		}
 		nextEpoch, nextGeneration = result.RuntimeEpoch, result.Generation
 	} else if c.sessions != nil {
@@ -1672,7 +1630,7 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyCommitHooks(
 			TargetPhase: string(target), Plan: plan, Now: now,
 		}); err != nil {
 			c.mu.Unlock()
-			return restoreCommitHook(err)
+			return models.AgentConfig{}, err
 		}
 	}
 	cell.epoch, cell.generation, cell.phase, cell.runMode = nextEpoch, nextGeneration, target, AgentRunModeStopped
@@ -1691,7 +1649,7 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyCommitHooks(
 		if deferRouteRetirement {
 			// The current delivery owns a lease on this route. Fence admission
 			// now, then let releaseLoop retire it after the delivery settles.
-			return nil
+			return previousConfig, nil
 		}
 		c.routes.RemoveAgentRoute(routeToken)
 	}
@@ -1706,7 +1664,7 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyCommitHooks(
 		current.execution = nil
 	}
 	c.mu.Unlock()
-	return nil
+	return previousConfig, nil
 }
 
 func lifecycleTerminationOperationKind(target AgentLifecyclePhase) (string, error) {

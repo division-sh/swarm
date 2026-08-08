@@ -27,11 +27,11 @@ type snapshotRunStore struct {
 	terminalCalls int
 }
 
-func (s *snapshotRunStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
+func (s *snapshotRunStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
 	if s.appendErr != nil {
-		return runtimebus.PreparedPublish{}, s.appendErr
+		return runtimebus.CommittedPublication{}, s.appendErr
 	}
-	return s.InMemoryEventStore.CommitPublish(ctx, plan)
+	return s.InMemoryEventStore.CommitPublication(ctx, command)
 }
 
 func (s *snapshotRunStore) MarkRunTerminal(_ context.Context, runID, status string, failure *runtimefailures.Envelope, endedAt time.Time) (runtimebus.RunLifecycleSnapshot, error) {
@@ -100,8 +100,8 @@ type builderCommitCaptureStore struct {
 	requests []runtimebus.CommitPublishRequest
 }
 
-func (s *builderCommitCaptureStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, request runtimebus.CommitPublishRequest) error {
+func (s *builderCommitCaptureStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublish(ctx, command, nil, func(_ context.Context, request runtimebus.CommitPublishRequest) error {
 		s.requests = append(s.requests, request)
 		return recordBuilderTestDeliveryReceipt(request)
 	})

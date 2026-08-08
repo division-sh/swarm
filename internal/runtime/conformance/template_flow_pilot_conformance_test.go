@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -278,12 +279,11 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		t.Fatal("portfolio-coordinator notify handler missing")
 	}
 	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
-		Source:     source,
-		StateRepo:  fanOutPinRouteStateRepo{},
-		TxRunner:   fanOutPinRouteTxRunner{},
-		Locker:     fanOutPinRouteLocker{},
-		Outbox:     fanOutPinRouteOutbox{},
-		Dispatcher: fanOutPinRouteDispatcher{},
+		Source:        source,
+		StateRepo:     fanOutPinRouteStateRepo{},
+		MutationOwner: fanOutPinRouteMutationOwner{},
+		Locker:        fanOutPinRouteLocker{},
+		Dispatcher:    fanOutPinRouteDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
@@ -339,8 +339,9 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	eb, err := newScopedTestEventBus(t, store, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		Durable: runtimebus.DurableDependencies{
-			ActiveAgents: store,
-			ActiveFlows:  store,
+			ActiveAgents:      store,
+			ActiveFlows:       store,
+			FlowRouteTopology: store,
 		},
 		TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
 			t.Fatal("existing account route descriptors should satisfy fan-out delivery")
@@ -523,38 +524,24 @@ func templateFlowPilotConformanceFindingContains(findings []runtimebootverify.Fi
 
 type fanOutPinRouteStateRepo struct{}
 
-func (fanOutPinRouteStateRepo) LoadState(context.Context, runtimeidentity.EntityID) (runtimeengine.StateSnapshot, bool, error) {
+func (fanOutPinRouteStateRepo) LoadState(context.Context, runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
 	return runtimeengine.StateSnapshot{}, false, nil
 }
 
-func (fanOutPinRouteStateRepo) SaveState(context.Context, runtimeidentity.EntityID, runtimeengine.StateMutation) error {
+func (fanOutPinRouteStateRepo) SaveState(context.Context, runtimeengine.StateAddress, runtimeengine.StateMutation) error {
 	return nil
 }
 
-type fanOutPinRouteTxRunner struct{}
-type fanOutPinRouteTx struct{ ctx context.Context }
+type fanOutPinRouteMutationOwner struct{}
 
-func (fanOutPinRouteTxRunner) Run(ctx context.Context, fn func(runtimeengine.Tx) error) error {
-	return fn(fanOutPinRouteTx{ctx: ctx})
-}
-
-func (t fanOutPinRouteTx) Context() context.Context {
-	if t.ctx == nil {
-		return testAuthorActivityContext(context.Background())
-	}
-	return t.ctx
+func (fanOutPinRouteMutationOwner) CommitEngineMutation(_ context.Context, mutation runtimeengine.EngineMutation) (runtimeengine.CommittedEngineMutation, error) {
+	return runtimeengine.CommittedEngineMutation{EmitIntents: mutation.EmitIntents, ActivityIntents: mutation.ActivityIntents}, nil
 }
 
 type fanOutPinRouteLocker struct{}
 
 func (fanOutPinRouteLocker) WithEntityLock(ctx context.Context, _ runtimeidentity.EntityID, fn func(context.Context) error) error {
 	return fn(ctx)
-}
-
-type fanOutPinRouteOutbox struct{}
-
-func (fanOutPinRouteOutbox) WriteOutbox(context.Context, []runtimeengine.EmitIntent) error {
-	return nil
 }
 
 type fanOutPinRouteDispatcher struct{}
@@ -568,6 +555,15 @@ type fanOutPinRouteMemoryStore struct {
 	flowInstances  []runtimebus.ActiveFlowInstanceDescriptor
 	activeAgents   []runtimebus.ActiveAgentDescriptor
 	deliveryRoutes map[string][]events.DeliveryRoute
+}
+
+func (s *fanOutPinRouteMemoryStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []runtimebus.FlowInstanceRouteRecordSet) error {
+	for _, set := range sets {
+		if !set.Identity.Valid() {
+			return fmt.Errorf("invalid flow-instance route identity: %#v", set.Identity)
+		}
+	}
+	return nil
 }
 
 func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
@@ -591,8 +587,8 @@ func (s *fanOutPinRouteMemoryStore) ListActiveAgentDescriptors(context.Context) 
 	return append([]runtimebus.ActiveAgentDescriptor(nil), s.activeAgents...), nil
 }
 
-func (s *fanOutPinRouteMemoryStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
+func (s *fanOutPinRouteMemoryStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublish(ctx, command, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
 		if s.deliveryRoutes == nil {
 			s.deliveryRoutes = map[string][]events.DeliveryRoute{}
 		}

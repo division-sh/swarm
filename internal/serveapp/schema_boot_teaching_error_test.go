@@ -10,7 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/store"
+	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -47,8 +48,8 @@ func TestServeBootLegacySchemaRendersTeachingError(t *testing.T) {
 		if _, err := pg.Exec(`CREATE TABLE timers (timer_id TEXT PRIMARY KEY, due_at TIMESTAMPTZ NOT NULL)`); err != nil {
 			t.Fatalf("create legacy timers table: %v", err)
 		}
-		pgStore := &store.PostgresStore{DB: pg}
-		request.Stores = storeBundle{Postgres: pgStore, SQLDB: pg, RuntimeSQLDB: pg, Database: pgStore, SchemaBootstrapper: pgStore}
+		pgStore := storetest.NewPostgresStoreForTest(pg)
+		request.Stores = storeBundle{Postgres: pgStore, SQLDB: pg, Database: pgStore, SchemaBootstrapper: pgStore}
 
 		_, err := buildServeRuntimeBundleContext(request)
 		assertLegacySchemaTeachingBootError(t, "postgres", err, "create and select a fresh PostgreSQL database")
@@ -56,15 +57,15 @@ func TestServeBootLegacySchemaRendersTeachingError(t *testing.T) {
 
 	t.Run("sqlite", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "legacy-timers.db")
-		sqliteStore, err := store.NewSQLiteRuntimeStore(path)
+		sqliteStore, sqliteDB, err := storeconstruction.OpenSQLiteRuntime(path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = sqliteStore.Close() })
-		if _, err := sqliteStore.DB.Exec(`CREATE TABLE timers (timer_id TEXT PRIMARY KEY, due_at TIMESTAMP NOT NULL)`); err != nil {
+		if _, err := sqliteDB.Exec(`CREATE TABLE timers (timer_id TEXT PRIMARY KEY, due_at TIMESTAMP NOT NULL)`); err != nil {
 			t.Fatalf("create legacy timers table: %v", err)
 		}
-		request.Stores = storeBundle{SQLDB: sqliteStore.DB, RuntimeSQLDB: sqliteStore.DB, Database: sqliteStore, SchemaBootstrapper: sqliteStore}
+		request.Stores = storeBundle{SQLDB: sqliteDB, Database: sqliteStore, SchemaBootstrapper: sqliteStore}
 
 		_, err = buildServeRuntimeBundleContext(request)
 		assertLegacySchemaTeachingBootError(t, "sqlite", err, "rm -f --")

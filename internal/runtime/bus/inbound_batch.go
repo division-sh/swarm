@@ -2,12 +2,14 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
 type InboundDeliveryBatch struct {
@@ -24,6 +26,27 @@ type InboundDeliveryEvent struct {
 	Authorization runtimeprovideroutput.Authorization
 }
 
+// InboundDeliveryPlan is the immutable runtime half of a closed inbound
+// publication operation. The selected store receives only CommitCommands;
+// PreparedPublications remain EventBus-owned for post-commit dispatch.
+type InboundDeliveryPlan struct {
+	events   []InboundDeliveryEvent
+	prepared []PreparedPublish
+	commands []PublicationCommand
+}
+
+func (p InboundDeliveryPlan) PreparedPublications() []PreparedPublish {
+	return append([]PreparedPublish(nil), p.prepared...)
+}
+
+func (p InboundDeliveryPlan) CommitCommands() []PublicationCommand {
+	return append([]PublicationCommand(nil), p.commands...)
+}
+
+func (p InboundDeliveryPlan) Events() []InboundDeliveryEvent {
+	return append([]InboundDeliveryEvent(nil), p.events...)
+}
+
 // ProviderOutputAuthorizationVerifier is the current immutable verified-pack
 // catalog owner used to reject fabricated or stale normalized outputs before a
 // selected-store mutation begins.
@@ -31,55 +54,98 @@ type ProviderOutputAuthorizationVerifier interface {
 	VerifyProviderOutputAuthorization(runtimeprovideroutput.Authorization) error
 }
 
-// PrepareInboundDeliveryBatchInMutation persists and plans every executable
-// event through the inbound publication mutation that already owns the SQL
-// transaction. It never claims request identity or opens another transaction.
-func (eb *EventBus) PrepareInboundDeliveryBatchInMutation(ctx context.Context, batch InboundDeliveryBatch) ([]PreparedPublish, error) {
+// PrepareInboundDeliveryBatch performs admission and canonical route planning
+// before the selected-store operation starts. No transaction capability is
+// accepted or returned.
+func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch InboundDeliveryBatch) (InboundDeliveryPlan, error) {
 	if eb == nil {
-		return nil, fmt.Errorf("event bus is required")
-	}
-	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
-	if err != nil {
-		return nil, err
+		return InboundDeliveryPlan{}, fmt.Errorf("event bus is required")
 	}
 	validated, err := preflightInboundDeliveryBatch(eb.providerOutputAuthorizationVerifier(), batch)
 	if err != nil {
-		return nil, err
+		return InboundDeliveryPlan{}, err
 	}
-	projection, ok := runtimeauthoractivity.InboundProjectionFromContext(ctx)
-	if !ok {
-		return nil, fmt.Errorf("typed inbound author projection context is required for inbound delivery")
+	plan := InboundDeliveryPlan{events: append([]InboundDeliveryEvent(nil), validated.Events...)}
+	activationOwners := make(map[runtimeflowidentity.Route]int)
+	release := func(cause error) (InboundDeliveryPlan, error) {
+		for _, prepared := range plan.prepared {
+			cause = errors.Join(cause, eb.AbandonPreparedPublish(context.WithoutCancel(ctx), prepared))
+		}
+		return InboundDeliveryPlan{}, cause
 	}
-	wantProjection := runtimeauthoractivity.InboundProjection{
-		SubjectType: validated.AuthorSubjectType,
-		SubjectID:   validated.AuthorSubjectID,
-		Summary:     validated.AuthorSummary,
-	}
-	if projection != wantProjection {
-		return nil, fmt.Errorf("typed inbound author projection context does not match the validated inbound delivery batch")
-	}
-	_, ok = CommitPublishTransactionFromContext(ctx)
-	if !ok {
-		return nil, fmt.Errorf("typed CommitPublish transaction context is required for inbound delivery")
-	}
-	txctx, err := eb.withTransactionRouteOverlay(ctx)
-	if err != nil {
-		return nil, err
-	}
-	prepared := make([]PreparedPublish, 0, len(validated.Events))
 	for _, item := range validated.Events {
-		itemCtx := txctx
+		itemCtx := ctx
 		if item.Kind == runtimeprovideroutput.KindRaw {
 			itemCtx = withoutProviderOutputAuthorization(itemCtx)
 		} else {
 			itemCtx = withProviderOutputAuthorization(itemCtx, item.Authorization)
 		}
-		publication, err := eb.PreparePublishInMutation(itemCtx, item.Event)
+		preparedCtx, admitted, err := eb.admitPublishEvent(itemCtx, item.Event)
+		if err != nil {
+			return release(err)
+		}
+		if err := eb.requireExistingRunActive(preparedCtx, admitted.Event()); err != nil {
+			return release(err)
+		}
+		prepared, command, err := eb.prepareClosedPublication(preparedCtx, eventBusCommitPublishPlan{
+			bus: eb, event: admitted.Event(), admitted: admitted,
+		})
+		if err != nil {
+			return release(err)
+		}
+		ownedActivations := command.Activations[:0]
+		for _, activation := range command.Activations {
+			route := activation.Identity.Route()
+			if _, owned := activationOwners[route]; owned {
+				continue
+			}
+			activationOwners[route] = len(plan.commands)
+			ownedActivations = append(ownedActivations, activation)
+		}
+		command.Activations = ownedActivations
+		if len(command.Activations) == 0 {
+			command.RouteTopology = nil
+		}
+		if err := command.Validate(); err != nil {
+			return release(fmt.Errorf("canonicalize inbound activation ownership: %w", err))
+		}
+		plan.prepared = append(plan.prepared, prepared)
+		plan.commands = append(plan.commands, command)
+	}
+	return plan, nil
+}
+
+func (eb *EventBus) AbandonInboundDeliveryPlan(ctx context.Context, plan InboundDeliveryPlan) error {
+	var result error
+	for _, prepared := range plan.prepared {
+		result = errors.Join(result, eb.AbandonPreparedPublish(ctx, prepared))
+	}
+	return result
+}
+
+// ApplyInboundDeliveryCommit binds selected-store evidence to the exact plans
+// that produced it. Dispatch remains a separate post-commit step.
+func (eb *EventBus) ApplyInboundDeliveryCommit(ctx context.Context, plan InboundDeliveryPlan, committed []CommittedPublication) ([]PreparedPublish, error) {
+	if len(committed) != len(plan.prepared) {
+		return nil, fmt.Errorf("committed inbound publication evidence count differs from prepared batch")
+	}
+	prepared := append([]PreparedPublish(nil), plan.prepared...)
+	for index := range prepared {
+		if err := committed[index].Validate(); err != nil {
+			return nil, fmt.Errorf("validate inbound publication evidence %d: %w", index, err)
+		}
+		var err error
+		prepared[index], err = prepared[index].WithCommitOutcome(committed[index].AppendOutcome)
 		if err != nil {
 			return nil, err
 		}
-		prepared = append(prepared, publication)
+		prepared[index].committedHandoffs = append([]runtimedelivery.DurableHandoffProof(nil), committed[index].DeliveryHandoffs...)
+		if err := eb.finalizeCommittedFlowInstanceActivations(ctx, committed[index].Activations); err != nil {
+			return nil, err
+		}
+		if eb.testLifecycleProbe != nil && !prepared[index].exactDuplicate {
+			eb.notifyTestPublishPersisted(ctx, prepared[index].Event, prepared[index].plan)
+		}
 	}
 	return prepared, nil
 }

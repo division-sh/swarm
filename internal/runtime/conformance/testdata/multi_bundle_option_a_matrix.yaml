@@ -390,7 +390,7 @@ rows:
       - {kind: artifact, path: internal/runtime/manager/flow_activation_test.go}
     proof_refs:
       - {kind: go_test, name: TestActivateFlowInstancePublishesAutoEmitEvent}
-      - {kind: go_test, name: TestActivateFlowInstanceQueuesAutoEmitUntilPostCommitWhenAvailable}
+      - {kind: go_test, name: TestActivateFlowInstancePublishesAutoEmitAfterNamedCommit}
       - {kind: go_test, name: TestEventConstructionClassInvariantMatrix}
 
   - id: empire_post_commit_delivery
@@ -410,8 +410,8 @@ rows:
     owner_refs:
       - {kind: artifact, path: internal/runtime/manager/flow_activation_test.go}
     proof_refs:
-      - {kind: go_test, name: TestDeactivateFlowInstanceQueuesTerminalSideEffectsUntilPostCommitWhenAvailable}
-      - {kind: go_test, name: TestDeactivateFlowInstanceModel_PostCommitSideEffectsFollowTerminalCommit}
+      - {kind: go_test, name: TestDeactivateFlowInstanceReportsPostCommitAgentFailureAfterRouteRetirement}
+      - {kind: go_test, name: TestDeactivateFlowInstanceConsumesTerminalEvidenceAfterNamedCommit}
 
   - id: empire_route_wildcards
     category: runtime_lifecycle

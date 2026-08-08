@@ -50,7 +50,6 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
-	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -59,6 +58,8 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -145,11 +146,11 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 				}
 				if _, err := db.ExecContext(ctx, `
 					INSERT INTO timers (
-						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event,
+						timer_id, run_id, timer_name, entity_id, flow_scope_key, flow_instance_id, flow_instance, fire_event,
 						fire_payload, routing_source, fire_at, owner_agent, owner_kind, task_type, status, created_at
 					)
 					VALUES (
-						$1::uuid, $2::uuid, $3, $4::uuid, 'flow-a/1', 'timer.check',
+						$1::uuid, $2::uuid, $3, $4::uuid, 'flow-a', '1', 'flow-a/1', 'timer.check',
 						'{}'::jsonb, jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $4::text)),
 						$5, 'test-node', 'system', 'workflow_timer', 'active', $6
 					)
@@ -789,9 +790,9 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		guards:  runtimepipeline.NewContractGuardRegistry(loaded.Source),
 		actions: runtimepipeline.NewContractActionRegistry(loaded.Source),
 	}
-	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(sourceBus, db, runtimepipeline.PipelineCoordinatorOptions{
+	workflowStore := runtimepipeline.NewPipelineCoordinatorWithOptions(sourceBus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  workflowOwner,
-		Persistence:             runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Persistence:             runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:            pg,
 		PipelineObligations:     pg.PipelineObligations(),
 		DeliveryStore:           pg,
@@ -800,8 +801,6 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		HumanTasks:              pg,
 		DecisionCardDraftExpiry: pg,
 		HumanTaskExpiry:         pg,
-		GatePublisher:           sourceBus,
-		DirectDecisionPublisher: sourceBus,
 		DeliveryRuntime:         sourceBus,
 		WorkOwner:               workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
@@ -2053,7 +2052,7 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 	bindingID := uuid.NewString()
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now})
 	storetest.RequirePausedRun(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), forkRunID, now)
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, forkEventID, sourceRunID, "selected.proof",
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkEventID, sourceRunID, "selected.proof",
 		eventtest.Producer(events.EventProducerExternal, "selected-proof"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings
@@ -2345,7 +2344,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	bindingID := uuid.NewString()
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: now})
 	storetest.RequirePausedRun(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), forkRunID, now)
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, forkEventID, sourceRunID, "selected.test",
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkEventID, sourceRunID, "selected.test",
 		eventtest.Producer(events.EventProducerExternal, "selected-test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings
@@ -3172,7 +3171,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	if claimed.Snapshot.ActiveSessionID != "" {
 		t.Fatalf("in-progress source delivery active session = %q, want unbound #678 lineage case", claimed.Snapshot.ActiveSessionID)
 	}
-	storetest.InsertChildEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, forkPointEventID, sourceRunID, sourceEventID,
+	storetest.InsertChildEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, forkPointEventID, sourceRunID, sourceEventID,
 		"item.received", eventtest.Producer(events.EventProducerAgent, "validation-coordinator"), []byte(`{}`),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), forkAt)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
@@ -4287,9 +4286,13 @@ func materializeSelectedExecutionForkForTest(
 		t.Fatalf("BuildSelectedContractExecutionModel: %v", err)
 	}
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, loaded.BundleSourceFact)
+	workflowStates, err := selectedContractWorkflowStateProjection(plan, loaded.Source, *model.RecipientPlanning)
+	if err != nil {
+		t.Fatalf("selectedContractWorkflowStateProjection: %v", err)
+	}
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
 		SourceRunID: sourceRunID, At: sourceEventID, ContractSelection: selection, BundleSourceFact: loaded.BundleSourceFact,
-		FrontierAdmission: frontier, RouteTopology: topology, RecipientPlanning: *model.RecipientPlanning,
+		FrontierAdmission: frontier, RouteTopology: topology, RecipientPlanning: *model.RecipientPlanning, WorkflowStates: workflowStates,
 	})
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
@@ -4479,7 +4482,7 @@ func seedSelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db *sql.DB,
 		"level":   "info",
 		"message": "diagnostic platform row must remain lineage-only",
 	})
-	storetest.InsertDiagnosticDirectEventRecordForRun(t, ctx, db, runtimeauthoractivity.DialectPostgres, diagnosticEventID, sourceRunID, "", "runtime", payload, at)
+	storetest.InsertDiagnosticDirectEventRecordForRun(t, ctx, db, authoractivityfixture.DialectPostgres, diagnosticEventID, sourceRunID, "", "runtime", payload, at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance, outcome, reason_code, side_effects, processed_at
@@ -4517,7 +4520,7 @@ func seedSelectedExecutionSourceReplayScopeMarker(t *testing.T, db *sql.DB, sour
 
 func seedSelectedExecutionPostForkSourceEvent(t *testing.T, db *sql.DB, sourceRunID, sourceEventID, entityID string, at time.Time) {
 	t.Helper()
-	storetest.InsertExistingRunRootEventRecord(t, context.Background(), db, runtimeauthoractivity.DialectPostgres, sourceEventID, sourceRunID, "source.after",
+	storetest.InsertExistingRunRootEventRecord(t, context.Background(), db, authoractivityfixture.DialectPostgres, sourceEventID, sourceRunID, "source.after",
 		eventtest.Producer(events.EventProducerExternal, "source-runtime"), []byte(`{}`),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at)
 }

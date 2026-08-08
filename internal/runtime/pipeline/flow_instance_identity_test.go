@@ -62,8 +62,8 @@ func TestFlowInstanceIdentity_CreateEntityUsesScopeKeyForPathAndLogicalInstanceF
 		t.Fatal("expected logical instance_id in state metadata")
 	}
 	flowPath := strings.TrimSpace(asString(state.Metadata["flow_path"]))
-	if flowPath != "child/"+instanceID {
-		t.Fatalf("flow_path = %q, want child/%s", flowPath, instanceID)
+	if flowPath != "child" {
+		t.Fatalf("flow_path = %q, want child", flowPath)
 	}
 	if got := strings.TrimSpace(asString(state.Metadata["storage_ref"])); got != flowPath {
 		t.Fatalf("storage_ref = %q, want %q", got, flowPath)

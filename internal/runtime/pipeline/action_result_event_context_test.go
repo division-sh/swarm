@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"context"
 	"encoding/json"
 	"go/ast"
 	"go/parser"
@@ -128,19 +127,11 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 			}
 			execCtx.Request.ProducerSource = mustActionResultRoutingSource(t, mode, producerRoute)
 			pc := &PipelineCoordinator{module: staticSemanticWorkflowModule{source: actionResultRouteSource(t, mode)}}
-			var intents []runtimeengine.EmitIntent
-			ctx := runtimeengine.WithActionEmitIntentCollector(testAuthorActivityContext(t, context.Background()), &intents)
-			queued, err := pc.queueArtifactRepoResultEvent(ctx, execCtx, tc.eventType, map[string]any{"ok": true})
+			intent, err := pc.artifactRepoResultEvent(execCtx, tc.eventType, map[string]any{"ok": true})
 			if err != nil {
-				t.Fatalf("queueArtifactRepoResultEvent: %v", err)
+				t.Fatalf("artifactRepoResultEvent: %v", err)
 			}
-			if !queued {
-				t.Fatal("queueArtifactRepoResultEvent queued=false, want true")
-			}
-			if len(intents) != 1 {
-				t.Fatalf("queued intents = %d, want 1", len(intents))
-			}
-			emitted := intents[0].Event
+			emitted := intent.Event
 			wantEventType := tc.wantFlowPath + "/" + tc.eventType
 			if got := string(emitted.Type()); got != wantEventType {
 				t.Fatalf("event type = %q, want %q", got, wantEventType)
@@ -171,7 +162,7 @@ func TestArtifactRepoResultEventPreservesScopedProducerSourceRoute(t *testing.T)
 			if got := emitted.ChainDepth(); got != 5 {
 				t.Fatalf("chain_depth = %d, want 5", got)
 			}
-			if got := intents[0].ParentEventID; got != parent.ID() {
+			if got := intent.ParentEventID; got != parent.ID() {
 				t.Fatalf("intent parent_event_id = %q, want %q", got, parent.ID())
 			}
 		})
@@ -282,7 +273,7 @@ func mustActionResultRoutingSource(t testing.TB, mode string, route events.Route
 	return source
 }
 
-func TestRuntimeActionResultEventProducerInventoryOnlyArtifactRepoQueuesResultEvents(t *testing.T) {
+func TestRuntimeActionResultEventProducerInventoryHasNoMutableEmitCollector(t *testing.T) {
 	_, filename, _, ok := stdruntime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller failed")
@@ -328,8 +319,8 @@ func TestRuntimeActionResultEventProducerInventoryOnlyArtifactRepoQueuesResultEv
 		t.Fatalf("walk runtime source: %v", err)
 	}
 
-	if len(calls) != 1 || !strings.HasPrefix(calls[0], filepath.ToSlash("internal/runtime/pipeline/artifact_repo.go:")) {
-		t.Fatalf("QueueActionEmitIntent production calls = %#v, want only artifact_repo.go action result-event producer", calls)
+	if len(calls) != 0 {
+		t.Fatalf("QueueActionEmitIntent production calls = %#v, want none", calls)
 	}
 }
 

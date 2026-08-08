@@ -65,17 +65,88 @@ func RequireSQLite(t testing.TB, ctx context.Context, db *sql.DB, fixture Fixtur
 func RunPostgresMutation(
 	ctx context.Context,
 	db *sql.DB,
-	fn func(context.Context, *sql.Tx) error,
+	fn func(context.Context, *sql.Tx, ActiveRunSourceOwner) error,
 ) error {
-	return runMutation(ctx, db, DialectPostgres, fn)
+	return runMutationWithOwner(ctx, db, DialectPostgres, fn)
 }
 
 func RunSQLiteMutation(
 	ctx context.Context,
 	db *sql.DB,
-	fn func(context.Context, *sql.Tx) error,
+	fn func(context.Context, *sql.Tx, ActiveRunSourceOwner) error,
 ) error {
-	return runMutation(ctx, db, DialectSQLite, fn)
+	return runMutationWithOwner(ctx, db, DialectSQLite, fn)
+}
+
+type ActiveRunSourceOwner interface {
+	RequireActiveRunSource(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
+}
+
+// PostgresCreateRunInMutation gives runtime-package tests a semantic lifecycle
+// fixture without duplicating run-table SQL outside the #2151 fixture owner.
+func PostgresCreateRunInMutation(
+	ctx context.Context,
+	tx *sql.Tx,
+	request runtimerunlifecycle.CreateRequest,
+) (runtimerunlifecycle.MutationDisposition, error) {
+	return (sqlMutation{tx: tx, dialect: DialectPostgres}).Create(ctx, request)
+}
+
+func PostgresSyncCountersInMutation(ctx context.Context, tx *sql.Tx, runID string) error {
+	return (sqlMutation{tx: tx, dialect: DialectPostgres}).SyncCounters(ctx, runID)
+}
+
+func PostgresRequireActiveRunInMutation(ctx context.Context, tx *sql.Tx, runID string) error {
+	return (sqlMutation{tx: tx, dialect: DialectPostgres}).RequireActive(ctx, runID)
+}
+
+func PostgresRequireActiveRunSourceInMutation(
+	ctx context.Context,
+	tx *sql.Tx,
+	runID string,
+) (runtimecorrelation.BundleSourceFact, error) {
+	return (sqlMutation{tx: tx, dialect: DialectPostgres}).RequireActiveSource(ctx, runID)
+}
+
+func PostgresRequestCompletionCandidateInMutation(
+	ctx context.Context,
+	tx *sql.Tx,
+	request runtimerunlifecycle.CandidateRequest,
+) (runtimerunlifecycle.CandidateRequestDisposition, error) {
+	if err := request.Validate(); err != nil {
+		return "", err
+	}
+	if err := (sqlMutation{tx: tx, dialect: DialectPostgres}).RequirePresent(ctx, request.RunID); err != nil {
+		return "", err
+	}
+	return runtimerunlifecycle.CandidateRequested, nil
+}
+
+func PostgresTransitionActiveRunInMutation(
+	ctx context.Context,
+	tx *sql.Tx,
+	request runtimerunlifecycle.ActiveTransitionRequest,
+) (runtimerunlifecycle.MutationDisposition, error) {
+	return (sqlMutation{tx: tx, dialect: DialectPostgres}).TransitionActive(ctx, request)
+}
+
+func PostgresMarkTerminalRunInMutation(
+	ctx context.Context,
+	tx *sql.Tx,
+	request runtimerunlifecycle.TerminalRequest,
+) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return (sqlMutation{tx: tx, dialect: DialectPostgres}).MarkTerminal(ctx, request)
+}
+
+func runMutationWithOwner(
+	ctx context.Context,
+	db *sql.DB,
+	dialect Dialect,
+	fn func(context.Context, *sql.Tx, ActiveRunSourceOwner) error,
+) error {
+	return runMutation(ctx, db, dialect, func(txctx context.Context, tx *sql.Tx) error {
+		return fn(txctx, tx, sqlMutation{tx: tx, dialect: dialect})
+	})
 }
 
 func RevisePostgresSource(
@@ -434,19 +505,7 @@ func runMutation(
 			_ = tx.Rollback()
 		}
 	}()
-	authorDialect := runtimeauthoractivity.DialectPostgres
-	if dialect == DialectSQLite {
-		authorDialect = runtimeauthoractivity.DialectSQLite
-	}
-	txctx, err := runtimeauthoractivity.Begin(ctx, tx, authorDialect)
-	if err != nil {
-		return err
-	}
-	txctx = runtimerunlifecycle.BindMutation(txctx, sqlMutation{tx: tx, dialect: dialect})
-	if err := fn(txctx, tx); err != nil {
-		return err
-	}
-	if err := runtimeauthoractivity.Finalize(txctx); err != nil {
+	if err := fn(ctx, tx); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -463,8 +522,8 @@ func reviseSource(
 	runID string,
 	source runtimecorrelation.BundleSourceFact,
 ) error {
-	return runMutation(ctx, db, dialect, func(txctx context.Context, _ *sql.Tx) error {
-		_, err := runtimerunlifecycle.ReviseSource(txctx, runtimerunlifecycle.SourceRevisionRequest{
+	return runMutation(ctx, db, dialect, func(txctx context.Context, tx *sql.Tx) error {
+		_, err := (sqlMutation{tx: tx, dialect: dialect}).ReviseSource(txctx, runtimerunlifecycle.SourceRevisionRequest{
 			RunID:  strings.TrimSpace(runID),
 			Source: source,
 		})
@@ -525,22 +584,10 @@ func Materialize(ctx context.Context, db *sql.DB, dialect Dialect, fixture Fixtu
 			_ = tx.Rollback()
 		}
 	}()
-	authorDialect := runtimeauthoractivity.DialectPostgres
-	if dialect == DialectSQLite {
-		authorDialect = runtimeauthoractivity.DialectSQLite
-	}
-	txctx, err := runtimeauthoractivity.Begin(ctx, tx, authorDialect)
-	if err != nil {
-		return err
-	}
-	txctx = runtimerunlifecycle.BindMutation(txctx, sqlMutation{tx: tx, dialect: dialect})
-	if _, err := runtimerunlifecycle.Create(txctx, runtimerunlifecycle.CreateRequest{
+	if _, err := (sqlMutation{tx: tx, dialect: dialect}).Create(ctx, runtimerunlifecycle.CreateRequest{
 		RunID: fixture.RunID, Origin: fixture.Origin,
 		Source: source, StartedAt: fixture.StartedAt.UTC(),
 	}); err != nil {
-		return err
-	}
-	if err := runtimeauthoractivity.Finalize(txctx); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -553,6 +600,10 @@ func Materialize(ctx context.Context, db *sql.DB, dialect Dialect, fixture Fixtu
 type sqlMutation struct {
 	tx      *sql.Tx
 	dialect Dialect
+}
+
+func (m sqlMutation) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+	return m.RequireActiveSource(ctx, runID)
 }
 
 func (m sqlMutation) RequirePresent(ctx context.Context, runID string) error {
@@ -653,18 +704,68 @@ func (m sqlMutation) Create(
 	return runtimerunlifecycle.MutationExactNoop, nil
 }
 
-func (sqlMutation) TransitionActive(
-	context.Context,
-	runtimerunlifecycle.ActiveTransitionRequest,
+func (m sqlMutation) TransitionActive(
+	ctx context.Context,
+	request runtimerunlifecycle.ActiveTransitionRequest,
 ) (runtimerunlifecycle.MutationDisposition, error) {
-	return "", errors.New("semantic run fixture adapter only constructs active runs")
+	if err := request.Validate(); err != nil {
+		return "", err
+	}
+	query := `UPDATE runs SET status = ? WHERE run_id = ?`
+	args := []any{request.State, request.RunID}
+	if m.dialect == DialectPostgres {
+		query = `UPDATE runs SET status = $2 WHERE run_id = $1::uuid`
+		args = []any{request.RunID, request.State}
+	}
+	result, err := m.tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return "", err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	if rows != 1 {
+		return "", &runtimerunlifecycle.RunNotFoundError{RunID: request.RunID}
+	}
+	return runtimerunlifecycle.MutationApplied, nil
 }
 
-func (sqlMutation) MarkTerminal(
-	context.Context,
-	runtimerunlifecycle.TerminalRequest,
+func (m sqlMutation) MarkTerminal(
+	ctx context.Context,
+	request runtimerunlifecycle.TerminalRequest,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return runtimerunlifecycle.Snapshot{}, "", errors.New("semantic run fixture adapter forbids terminal transitions")
+	if err := request.Validate(); err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
+	failure, err := marshalFixtureFailure(request.Failure)
+	if err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
+	query := `UPDATE runs SET status = ?, failure = NULLIF(?, ''), ended_at = ? WHERE run_id = ?`
+	args := []any{request.State, failure, request.EndedAt.UTC(), request.RunID}
+	if m.dialect == DialectPostgres {
+		query = `UPDATE runs SET status = $2, failure = NULLIF($3, '')::jsonb, ended_at = $4 WHERE run_id = $1::uuid`
+		args = []any{request.RunID, request.State, failure, request.EndedAt.UTC()}
+	}
+	result, err := m.tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
+	if rows != 1 {
+		return runtimerunlifecycle.Snapshot{}, "", &runtimerunlifecycle.RunNotFoundError{RunID: request.RunID}
+	}
+	endedAt := request.EndedAt.UTC()
+	return runtimerunlifecycle.Snapshot{
+		RunID:   request.RunID,
+		State:   request.State,
+		Failure: request.Failure,
+		EndedAt: &endedAt,
+	}, runtimerunlifecycle.MutationApplied, nil
 }
 
 func (sqlMutation) ForkSource(
@@ -892,5 +993,3 @@ func sourceFact(bundleHash, bundleSource string) (runtimecorrelation.BundleSourc
 		)
 	}
 }
-
-var _ runtimerunlifecycle.Mutation = sqlMutation{}

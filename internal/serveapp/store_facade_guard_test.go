@@ -53,12 +53,10 @@ func selectedStoreFacadeProducerBackendReferences(path, body string) []string {
 	allowed := map[string][]string{
 		filepath.Join("internal", "serveapp", "main.go"): {
 			"*store.PostgresStore",
-			"RuntimeSQLDB",
 			"store.NewPostgresStore",
 			"store.NewSQLiteRuntimeStore",
 		},
 		filepath.Join("internal", "serveapp", "store_facade.go"): {
-			"s.RuntimeSQLDB",
 			"f.stores.SQLDB == nil",
 			"f.stores.SQLDB.Close()",
 			"return f.stores.SQLDB",
@@ -66,17 +64,14 @@ func selectedStoreFacadeProducerBackendReferences(path, body string) []string {
 		filepath.Join("internal", "serveapp", "store_roles.go"): {
 			"var _ selectedConcreteRuntimeStore = (*store.PostgresStore)(nil)",
 			"Name: \"Postgres\"",
-			"Name: \"RuntimeSQLDB\"",
 		},
 	}
 	forbidden := []string{
 		"stores.Postgres",
 		"stores.SQLDB",
-		"stores.RuntimeSQLDB",
 		"*store.PostgresStore",
 		"store.NewPostgresStore",
 		"store.NewSQLiteRuntimeStore",
-		"RuntimeSQLDB",
 		"postgres bool",
 	}
 	var failures []string

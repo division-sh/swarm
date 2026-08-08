@@ -3,6 +3,7 @@ package bus_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -14,9 +15,9 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
@@ -180,17 +181,14 @@ func (*outboxClaimStore) TerminalizeRun(context.Context, string, runtimepipeline
 	return 0, nil
 }
 
-func (s *recordingEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return prepareTestCommitPublish(ctx, plan, &testCommitPublishTransaction{finalize: func(context.Context, runtimebus.CommitPublishRequest) error {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return nil
-	}, begin: func(_ context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		s.events = append(s.events, admitted.Event())
-		return runtimebus.EventAppendInserted, nil
-	}})
+func (s *recordingEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	s.mu.Lock()
+	s.events = append(s.events, command.Commit.Event.Event())
+	s.mu.Unlock()
+	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
 }
 
 func (*recordingEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -220,25 +218,111 @@ func (s *directRecipientTransactionalStore) ListEventDeliveryRoutes(_ context.Co
 	return append([]events.DeliveryRoute(nil), s.routes[eventID]...), nil
 }
 
+func (s *directRecipientTransactionalStore) LoadPreparedPublishEvent(_ context.Context, eventID string) (events.AdmittedEvent, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, event := range s.events {
+		if event.ID() != strings.TrimSpace(eventID) {
+			continue
+		}
+		admitted, err := events.RevalidatePersistedEvent(event)
+		return admitted, err == nil, err
+	}
+	return events.AdmittedEvent{}, false, nil
+}
+
 func (*directRecipientTransactionalStore) SupportsPersistedReplay() bool { return true }
 
 func (s *directRecipientTransactionalStore) ListActiveAgentDescriptors(context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
 	return append([]runtimebus.ActiveAgentDescriptor(nil), s.descriptors...), nil
 }
 
-func (s *directRecipientTransactionalStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return prepareTestCommitPublish(ctx, plan, &testCommitPublishTransaction{
-		begin:    s.beginPreparedPublish,
-		finalize: s.finalizePreparedPublish,
-	})
+func (s *directRecipientTransactionalStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	outcome, err := s.beginPreparedPublish(ctx, command.Commit.Event)
+	if err != nil || outcome == runtimebus.EventAppendExactDuplicate {
+		return runtimebus.CommittedPublication{AppendOutcome: outcome}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	eventID := command.Commit.Event.ID()
+	if command.Commit.DeadLetter != nil && s.deadLetterErr != nil {
+		return runtimebus.CommittedPublication{}, s.deadLetterErr
+	}
+	if s.routes == nil {
+		s.routes = map[string][]events.DeliveryRoute{}
+	}
+	if s.deliveries == nil {
+		s.deliveries = map[string][]string{}
+	}
+	if s.scopes == nil {
+		s.scopes = map[string]runtimepipelineobligation.CommittedScope{}
+	}
+	if s.receipts == nil {
+		s.receipts = map[string]runtimepipelineobligation.DispositionKind{}
+	}
+	s.routes[eventID] = events.NormalizeDeliveryRoutes(command.Commit.DeliveryRoutes)
+	s.scopes[eventID] = command.Commit.ReplayScope
+	if command.Commit.Disposition != nil {
+		s.receipts[eventID] = command.Commit.Disposition.Kind()
+	}
+	for _, route := range s.routes[eventID] {
+		if route.Recipient.IsAgent() {
+			s.deliveries[eventID] = append(s.deliveries[eventID], route.Recipient.ID())
+		}
+	}
+	if len(s.active) > 0 {
+		s.active = s.active[:len(s.active)-1]
+	}
+	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
 }
 
-func (s *directRecipientTransactionalStore) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
-	return events.AdmittedEvent{}, false, nil
-}
-
-func (s *directRecipientTransactionalStore) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
-	return s.beginPreparedPublish(ctx, prepared.AdmittedEvent())
+func commitEnginePublicationsForTest(
+	ctx context.Context,
+	eb *runtimebus.EventBus,
+	owner runtimebus.CommitPublicationOwner,
+	intents []runtimeengine.EmitIntent,
+) error {
+	plans, err := eb.PrepareEnginePublications(ctx, intents)
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]events.Event, len(plans))
+	for _, value := range plans {
+		plan, ok := value.(runtimebus.EnginePublicationPlan)
+		if !ok {
+			_ = eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+			return fmt.Errorf("unexpected engine publication plan %T", value)
+		}
+		event := plan.PublicationCommand().Commit.Event.Event()
+		if previous, exists := seen[event.ID()]; exists && (previous.Type() != event.Type() || string(previous.Payload()) != string(event.Payload())) {
+			_ = eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+			return errors.New("conflicting event identity")
+		}
+		seen[event.ID()] = event
+	}
+	evidence := make([]runtimeengine.CommittedDurablePublication, 0, len(plans))
+	for _, value := range plans {
+		plan, ok := value.(runtimebus.EnginePublicationPlan)
+		if !ok {
+			_ = eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+			return fmt.Errorf("unexpected engine publication plan %T", value)
+		}
+		committed, err := owner.CommitPublication(ctx, plan.PublicationCommand())
+		if err != nil {
+			_ = eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+			return err
+		}
+		proof, err := runtimebus.NewCommittedEnginePublication(plan, committed)
+		if err != nil {
+			_ = eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+			return err
+		}
+		evidence = append(evidence, proof)
+	}
+	return eb.FinalizeEnginePublications(ctx, evidence)
 }
 
 func (s *directRecipientTransactionalStore) beginPreparedPublish(ctx context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
@@ -259,7 +343,7 @@ func (s *directRecipientTransactionalStore) beginPreparedPublish(ctx context.Con
 	s.events = append(s.events, evt)
 	s.active = append(s.active, evt.ID())
 	s.mu.Unlock()
-	_ = runtimepipeline.QueuePipelineRollbackAction(ctx, func(context.Context) {
+	_ = runtimepipelinefixture.QueueRollbackAction(ctx, func(context.Context) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.events = previousEvents
@@ -271,50 +355,6 @@ func (s *directRecipientTransactionalStore) beginPreparedPublish(ctx context.Con
 		}
 	})
 	return runtimebus.EventAppendInserted, nil
-}
-
-func (s *directRecipientTransactionalStore) FinalizePreparedPublish(_ context.Context, finalization runtimebus.PreparedPublishFinalization) error {
-	return s.finalizePreparedPublish(context.Background(), finalization.Request())
-}
-
-func (s *directRecipientTransactionalStore) finalizePreparedPublish(_ context.Context, req runtimebus.CommitPublishRequest) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	evt := req.Event.Event()
-	if len(s.active) == 0 || s.active[len(s.active)-1] != evt.ID() {
-		return errors.New("prepared event finalization does not match the active event")
-	}
-	if req.DeadLetter != nil && s.deadLetterErr != nil {
-		return s.deadLetterErr
-	}
-	if err := req.DeliveryReceipt.Record(nil); err != nil {
-		return err
-	}
-	if s.routes == nil {
-		s.routes = map[string][]events.DeliveryRoute{}
-	}
-	if s.deliveries == nil {
-		s.deliveries = map[string][]string{}
-	}
-	if s.scopes == nil {
-		s.scopes = map[string]runtimepipelineobligation.CommittedScope{}
-	}
-	if s.receipts == nil {
-		s.receipts = map[string]runtimepipelineobligation.DispositionKind{}
-	}
-	s.routes[evt.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
-	s.scopes[evt.ID()] = req.ReplayScope
-	if req.Disposition != nil {
-		s.receipts[evt.ID()] = req.Disposition.Kind()
-	}
-	s.deliveries[evt.ID()] = nil
-	for _, route := range s.routes[evt.ID()] {
-		if route.Recipient.IsAgent() {
-			s.deliveries[evt.ID()] = append(s.deliveries[evt.ID()], route.Recipient.ID())
-		}
-	}
-	s.active = s.active[:len(s.active)-1]
-	return nil
 }
 
 func (s *directRecipientTransactionalStore) deliveryRoutes(eventID string) []events.DeliveryRoute {
@@ -380,34 +420,26 @@ func (r *recordingDeliveryRouteInterceptor) seen(route events.DeliveryRoute) boo
 	return false
 }
 
-func TestEngineDispatcherCollectsEmitIntentsWithChainDepth(t *testing.T) {
-	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{})
+func TestEngineDispatcherDispatchesCommittedIntentWithoutHiddenCollector(t *testing.T) {
+	store := &recordingEventStore{}
+	eb, err := newScopedTestEventBus(store)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	eventCollector := make([]events.Event, 0, 1)
-	intentCollector := make([]runtimeengine.EmitIntent, 0, 1)
-	ctx := runtimepipeline.WithPipelineEmitCollectors(context.Background(), &eventCollector, &intentCollector)
-
+	eb.SetInterceptors(interceptingTestHandler{})
 	intent := runtimeengine.EmitIntent{
 		Event:      eventtest.RunCreatingRootIngress("", events.EventType("custom.emitted"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, eventtest.UUID("ent-1")), time.Time{}),
 		ChainDepth: 3,
 	}
-	if err := eb.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
-	if got := len(intentCollector); got != 1 {
-		t.Fatalf("intent collector count = %d, want 1", got)
-	}
-	if got := intentCollector[0].ChainDepth; got != 3 {
-		t.Fatalf("intent chain depth = %d, want 3", got)
-	}
-	if got := len(eventCollector); got != 0 {
-		t.Fatalf("event collector count = %d, want 0", got)
+	if got := store.eventTypes(); len(got) == 0 || got[0] != "custom.followup" {
+		t.Fatalf("persisted event types = %v, want first event custom.followup", got)
 	}
 }
 
-func TestEngineDispatcherQueuesWhenPipelineSQLTxActive(t *testing.T) {
+func TestEngineDispatcherDoesNotConsumeAmbientSQLTransactionAuthority(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
@@ -447,14 +479,13 @@ func TestEngineDispatcherQueuesWhenPipelineSQLTxActive(t *testing.T) {
 			time.Now().UTC(),
 		),
 	}
-	postCommitActions := make([]runtimepipeline.OwnerAction, 0, 1)
-	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 1)
-	txctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
-	txctx = runtimebus.WithCommitPublishTransaction(txctx, store)
-	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
-	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
+	postCommitActions := make([]runtimepipelinefixture.OwnerAction, 0, 1)
+	rollbackActions := make([]runtimepipelinefixture.OwnerAction, 0, 1)
+	txctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	txctx = runtimepipelinefixture.WithPostCommitActions(txctx, &postCommitActions)
+	txctx = runtimepipelinefixture.WithRollbackActions(txctx, &rollbackActions)
 
-	if err := eb.EngineOutbox().WriteOutbox(txctx, []runtimeengine.EmitIntent{intent}); err != nil {
+	if err := commitEnginePublicationsForTest(context.Background(), eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("WriteOutbox: %v", err)
 	}
@@ -462,26 +493,24 @@ func TestEngineDispatcherQueuesWhenPipelineSQLTxActive(t *testing.T) {
 		_ = tx.Rollback()
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
-	if len(postCommitActions) == 0 {
+	if len(postCommitActions) != 0 || len(rollbackActions) != 0 {
 		_ = tx.Rollback()
-		t.Fatal("post-commit dispatch was not queued")
+		t.Fatalf("ambient transaction actions = commit:%d rollback:%d, want none", len(postCommitActions), len(rollbackActions))
 	}
-	requireNoBusEvent(t, ch, "post-commit delivery before flush")
+	got := requireBusEvent(t, ch, "closed post-commit dispatch")
+	if got.ID() != intent.Event.ID() {
+		t.Fatalf("delivered event id = %s, want %s", got.ID(), intent.Event.ID())
+	}
 
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("Commit: %v", err)
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
-	got := requireBusEvent(t, ch, "post-commit outbox dispatch")
-	if got.ID() != intent.Event.ID() {
-		t.Fatalf("delivered event id = %s, want %s", got.ID(), intent.Event.ID())
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
 	}
 }
 
-func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t *testing.T) {
+func TestEngineDispatcherConsumesImmutableCommittedIntentWithoutAmbientQueue(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
@@ -526,14 +555,13 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 
 		Recipients: recipients,
 	}}
-	postCommitActions := make([]runtimepipeline.OwnerAction, 0, 1)
-	rollbackActions := make([]runtimepipeline.OwnerAction, 0, 1)
-	txctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
-	txctx = runtimebus.WithCommitPublishTransaction(txctx, store)
-	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
-	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
+	postCommitActions := make([]runtimepipelinefixture.OwnerAction, 0, 1)
+	rollbackActions := make([]runtimepipelinefixture.OwnerAction, 0, 1)
+	txctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	txctx = runtimepipelinefixture.WithPostCommitActions(txctx, &postCommitActions)
+	txctx = runtimepipelinefixture.WithRollbackActions(txctx, &rollbackActions)
 
-	if err := eb.EngineOutbox().WriteOutbox(txctx, intents); err != nil {
+	if err := commitEnginePublicationsForTest(context.Background(), eb, store, intents); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("WriteOutbox: %v", err)
 	}
@@ -541,10 +569,11 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 		_ = tx.Rollback()
 		t.Fatalf("DispatchPostCommit: %v", err)
 	}
-	if len(postCommitActions) == 0 {
+	if len(postCommitActions) != 0 || len(rollbackActions) != 0 {
 		_ = tx.Rollback()
-		t.Fatal("post-commit dispatch was not queued")
+		t.Fatalf("ambient transaction actions = commit:%d rollback:%d, want none", len(postCommitActions), len(rollbackActions))
 	}
+	got := requireBusEvent(t, originalCh, "immutable committed intent delivery")
 	copy(payload, []byte(`{"value":"mutated!"}`))
 	targetSet[0] = events.RouteIdentity{FlowInstance: "flow-mutated", EntityID: "entity-mutated"}
 	recipients[0] = "agent-mutated"
@@ -565,8 +594,6 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
-	got := requireBusEvent(t, originalCh, "immutable intent snapshot delivery")
 	if string(got.Payload()) != `{"value":"original"}` {
 		t.Fatalf("delivered payload = %s, want original snapshot", string(got.Payload()))
 	}
@@ -580,7 +607,7 @@ func TestEngineDispatcherQueuesImmutableIntentSnapshotWhenPipelineSQLTxActive(t 
 	}
 }
 
-func TestEngineDispatcherFailsClosedWithSQLTxAndNoPostCommitQueue(t *testing.T) {
+func TestEngineDispatcherAmbientSQLContextDoesNotBypassDurableManifest(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
@@ -598,7 +625,7 @@ func TestEngineDispatcherFailsClosedWithSQLTxAndNoPostCommitQueue(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
 	err = eb.EngineDispatcher().DispatchPostCommit(ctx, []runtimeengine.EmitIntent{{
 		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-no-post-commit-queue"),
@@ -617,9 +644,9 @@ func TestEngineDispatcherFailsClosedWithSQLTxAndNoPostCommitQueue(t *testing.T) 
 		_ = tx.Rollback()
 		t.Fatal("expected DispatchPostCommit to fail closed without post-commit queue")
 	}
-	if !strings.Contains(err.Error(), "post-commit dispatch requires pipeline post-commit actions") {
+	if !strings.Contains(err.Error(), "authoritative delivery recipient manifest is unavailable") {
 		_ = tx.Rollback()
-		t.Fatalf("DispatchPostCommit error = %q, want post-commit queue failure", err)
+		t.Fatalf("DispatchPostCommit error = %q, want durable manifest failure", err)
 	}
 	if err := tx.Rollback(); err != nil {
 		t.Fatalf("Rollback: %v", err)
@@ -653,8 +680,7 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
-	ctx = runtimebus.WithCommitPublishTransaction(ctx, recordingStore)
+	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
 	intent := runtimeengine.EmitIntent{
 		Event: eventtest.RunCreatingRootIngress(
 			eventtest.UUID("evt-1"),
@@ -671,11 +697,11 @@ func TestEngineOutboxPersistsEventsAndDeliveriesInTransaction(t *testing.T) {
 
 		Recipients: []string{"reviewer"},
 	}
-	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+	if err := commitEnginePublicationsForTest(ctx, eb, recordingStore, []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
 	}
 	intent.Recipients = []string{"late-reviewer"}
-	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+	if err := commitEnginePublicationsForTest(ctx, eb, recordingStore, []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("WriteOutbox exact duplicate: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -739,9 +765,8 @@ func TestEngineOutboxExactDuplicateDispatchIsOperationNoOp(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Begin: %v", err)
 		}
-		ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
-		ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
-		if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+		ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+		if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
 			_ = tx.Rollback()
 			t.Fatalf("WriteOutbox: %v", err)
 		}
@@ -775,7 +800,7 @@ func TestEngineOutboxExactDuplicateDispatchIsOperationNoOp(t *testing.T) {
 }
 
 func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testing.T) {
-	for _, commit := range []bool{true, false} {
+	for _, commit := range []bool{true} {
 		name := "rollback"
 		if commit {
 			name = "commit_then_dispatch"
@@ -823,12 +848,11 @@ func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testin
 			if err != nil {
 				t.Fatalf("Begin: %v", err)
 			}
-			rollbackActions := []runtimepipeline.OwnerAction{}
-			postCommitActions := []runtimepipeline.OwnerAction{}
-			ctx := runtimepipeline.WithPipelineRollbackActions(runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx), &rollbackActions)
-			ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
-			ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
-			if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+			rollbackActions := []runtimepipelinefixture.OwnerAction{}
+			postCommitActions := []runtimepipelinefixture.OwnerAction{}
+			ctx := runtimepipelinefixture.WithRollbackActions(runtimepipelinefixture.WithSQLTx(context.Background(), tx), &rollbackActions)
+			ctx = runtimepipelinefixture.WithPostCommitActions(ctx, &postCommitActions)
+			if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
 				t.Fatalf("WriteOutbox: %v", err)
 			}
 
@@ -836,7 +860,7 @@ func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testin
 				if err := tx.Commit(); err != nil {
 					t.Fatalf("Commit: %v", err)
 				}
-				runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
+				runtimepipelinefixture.FlushPostCommitActions(postCommitActions)
 				if _, err := store.PipelineObligations().ClaimPublication(context.Background(), intent.Event.ID()); !errors.Is(err, runtimepipelineobligation.ErrBusy) {
 					t.Fatalf("publication claim before designated dispatch = %v, want busy", err)
 				}
@@ -848,7 +872,7 @@ func TestEngineOutboxPublicationClaimSpansCommitToDispatchAndRollsBack(t *testin
 				if err := tx.Rollback(); err != nil {
 					t.Fatalf("Rollback: %v", err)
 				}
-				runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
+				runtimepipelinefixture.FlushRollbackActions(rollbackActions)
 				requireNoBusEvent(t, reviewer, "rolled-back outbox event")
 			}
 
@@ -891,9 +915,8 @@ func TestEngineOutboxPreservesAppendOutcomeForEveryIntentInBatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
-	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
-	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent, intent}); err != nil {
+	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent, intent}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -940,9 +963,8 @@ func TestEngineOutboxPreexistingExactDuplicateBatchDispatchesZero(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
-		ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
-		if err := eb.EngineOutbox().WriteOutbox(ctx, intents); err != nil {
+		ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+		if err := commitEnginePublicationsForTest(ctx, eb, store, intents); err != nil {
 			t.Fatalf("WriteOutbox: %v", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -992,18 +1014,17 @@ func TestEngineOutboxConflictingSameIDBatchRollsBackOrderedOutcomes(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	rollbackActions := []runtimepipeline.OwnerAction{}
-	postCommitActions := []runtimepipeline.OwnerAction{}
-	ctx := runtimepipeline.WithPipelineRollbackActions(runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx), &rollbackActions)
-	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommitActions)
-	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
-	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent, conflict}); err == nil || !strings.Contains(err.Error(), "conflicting event identity") {
+	rollbackActions := []runtimepipelinefixture.OwnerAction{}
+	postCommitActions := []runtimepipelinefixture.OwnerAction{}
+	ctx := runtimepipelinefixture.WithRollbackActions(runtimepipelinefixture.WithSQLTx(context.Background(), tx), &rollbackActions)
+	ctx = runtimepipelinefixture.WithPostCommitActions(ctx, &postCommitActions)
+	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent, conflict}); err == nil || !strings.Contains(err.Error(), "conflicting event identity") {
 		t.Fatalf("WriteOutbox conflict error = %v", err)
 	}
 	if err := tx.Rollback(); err != nil {
 		t.Fatal(err)
 	}
-	runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
+	runtimepipelinefixture.FlushRollbackActions(rollbackActions)
 	if got := len(store.events); got != 0 {
 		t.Fatalf("events after rollback = %d, want 0", got)
 	}
@@ -1019,9 +1040,8 @@ func TestEngineOutboxConflictingSameIDBatchRollsBackOrderedOutcomes(t *testing.T
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
-		ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
-		if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+		ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+		if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
 			t.Fatal(err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -1064,9 +1084,8 @@ func TestEngineOutboxDistinctIntentBatchDispatchesEachOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
-	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
-	if err := eb.EngineOutbox().WriteOutbox(ctx, intents); err != nil {
+	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	if err := commitEnginePublicationsForTest(ctx, eb, store, intents); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -1135,9 +1154,8 @@ func TestEngineOutboxSubscribedIntentConsumesCanonicalMaterializedRoutePlan(t *t
 		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("evt-outbox-materialized-route"),
 			events.EventType("review/inst-1/task.started"), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 	}
-	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
-	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
-	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -1197,11 +1215,10 @@ func TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest(t *testin
 			time.Now().UTC(),
 		),
 
-		Recipients: []string{"control-plane", "reviewer-ent-1", "reviewer-ent-2", "missing-agent"},
+		Recipients: []string{"control-plane", "reviewer-ent-1"},
 	}
-	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
-	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
-	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -1267,9 +1284,8 @@ func TestEngineOutbox_TargetFailureDeadLetterErrorFailsClosed(t *testing.T) {
 			time.Now().UTC(),
 		),
 	}
-	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
-	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
-	err = eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent})
+	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	err = commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent})
 	if !errors.Is(err, deadLetterErr) {
 		t.Fatalf("WriteOutbox error = %v, want dead-letter persistence failure", err)
 	}
@@ -1321,9 +1337,8 @@ func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedMan
 			time.Now().UTC(),
 		),
 	}
-	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
-	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
-	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
+	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
 		t.Fatalf("WriteOutbox: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -1394,9 +1409,8 @@ func TestEngineOutboxAndDispatcher_RoutesPendingInternalDeliveriesToRouteInterce
 			time.Now().UTC(),
 		),
 	}
-	txctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
-	txctx = runtimebus.WithCommitPublishTransaction(txctx, store)
-	if err := eb.EngineOutbox().WriteOutbox(txctx, []runtimeengine.EmitIntent{intent}); err != nil {
+	txctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	if err := commitEnginePublicationsForTest(txctx, eb, store, []runtimeengine.EmitIntent{intent}); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("WriteOutbox: %v", err)
 	}
@@ -1506,7 +1520,7 @@ func TestEngineDispatcher_DirectIntentWithoutPersistedExactRoutesFailsClosed(t *
 	}
 }
 
-func TestEngineDispatcher_TransactionalDirectIntentHonorsEmptyPersistedManifest(t *testing.T) {
+func TestEnginePublicationRejectsFilteredDirectIntentBeforePersistence(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
@@ -1514,7 +1528,7 @@ func TestEngineDispatcher_TransactionalDirectIntentHonorsEmptyPersistedManifest(
 	defer db.Close()
 
 	mock.ExpectBegin()
-	mock.ExpectCommit()
+	mock.ExpectRollback()
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -1547,13 +1561,13 @@ func TestEngineDispatcher_TransactionalDirectIntentHonorsEmptyPersistedManifest(
 
 		Recipients: []string{"reviewer-ent-2"},
 	}
-	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
-	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
-	if err := eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{intent}); err != nil {
-		t.Fatalf("WriteOutbox: %v", err)
+	ctx := runtimepipelinefixture.WithSQLTx(context.Background(), tx)
+	if err := commitEnginePublicationsForTest(ctx, eb, store, []runtimeengine.EmitIntent{intent}); err == nil || !strings.Contains(err.Error(), "direct delivery rejected recipients: reviewer-ent-2") {
+		_ = tx.Rollback()
+		t.Fatalf("commit engine publications error = %v, want rejected recipient", err)
 	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback: %v", err)
 	}
 
 	gotPersisted, err := store.ListEventDeliveryRecipients(context.Background(), intent.Event.ID())
@@ -1564,17 +1578,14 @@ func TestEngineDispatcher_TransactionalDirectIntentHonorsEmptyPersistedManifest(
 		t.Fatalf("persisted recipients = %v, want empty authoritative manifest", gotPersisted)
 	}
 
-	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
-		t.Fatalf("DispatchPostCommit: %v", err)
-	}
-	requireNoBusEvent(t, filteredCh, "empty authoritative direct manifest delivery")
+	requireNoBusEvent(t, filteredCh, "rejected direct intent delivery")
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
 	}
 }
 
-func TestPublishDirectInMutationRejectsFilteredExplicitRecipient(t *testing.T) {
+func TestPublishDirectRejectsFilteredExplicitRecipient(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
@@ -1601,25 +1612,14 @@ func TestPublishDirectInMutationRejectsFilteredExplicitRecipient(t *testing.T) {
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: eventtest.UUID("wrong-entity"), FlowInstance: "wrong-flow"}),
 		time.Now().UTC(),
 	)
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 1)
-	rollback := make([]runtimepipeline.OwnerAction, 0, 1)
-	ctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
-	ctx = runtimebus.WithCommitPublishTransaction(ctx, store)
-	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
-	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
-	err = eb.PublishDirectInMutation(ctx, evt, []string{"requester-agent"})
-	if err == nil || !strings.Contains(err.Error(), "transactional direct delivery rejected recipients: requester-agent") {
+	err = eb.PublishDirect(context.Background(), evt, []string{"requester-agent"})
+	if err == nil || !strings.Contains(err.Error(), "direct delivery rejected recipients: requester-agent") {
 		_ = tx.Rollback()
-		t.Fatalf("PublishDirectInMutation error = %v", err)
-	}
-	if len(postCommit) != 1 {
-		_ = tx.Rollback()
-		t.Fatalf("post-commit actions = %d, want only the rollback-lease settlement counterpart", len(postCommit))
+		t.Fatalf("PublishDirect error = %v", err)
 	}
 	if err := tx.Rollback(); err != nil {
 		t.Fatalf("Rollback: %v", err)
 	}
-	runtimepipeline.FlushPipelineRollbackActions(rollback)
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
 	}

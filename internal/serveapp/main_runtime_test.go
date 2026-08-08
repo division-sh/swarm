@@ -38,6 +38,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -56,7 +57,6 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -68,6 +68,8 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -632,7 +634,7 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 		t.Fatalf("loadServeRuntimeBundleFromCatalog without selected catalog err = %v, want selected-owner failure", err)
 	}
 
-	stores := selectedPostgresStoreBundle(pg, &config.Config{})
+	stores := selectedPostgresStoreBundle(pg, storetest.DatabaseForTest(pg), &config.Config{})
 	if stores.InboundStore == nil || stores.runtimeDeps().InboundStore == nil {
 		t.Fatal("selected Postgres store bundle missing InboundStore for served webhook ingress")
 	}
@@ -981,7 +983,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	advancedAt := at.Add(10 * time.Second)
 	seedRunForkSelectedExecutionSourceEvent(t, db, advancedSourceRunID, advancedEntityID, advancedSourceEventID, "task.requested", "complete-task", "pending", "Serve Advanced Entity", "serve-advanced-test", advancedAt)
 	reviseServeTestRunSource(t, serve.runtimeWorkContext(ctx), pg, advancedSourceRunID, projection.BundleHash)
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 		advancedAfterEventID, advancedSourceRunID, "source.after", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{EntityID: advancedEntityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity}, advancedAt.Add(time.Second))
 	captureRunForkCLIRevision(t, db, advancedSourceRunID, runforkrevision.FamilyEvents)
@@ -1036,7 +1038,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 	}
 	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, initial.EventID, "node", "starter", "delivered", 1)
 	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", initial.EventID, "platform", "pipeline", "success", 1)
-	entityID := servedJoinEntityID(t, db, initial.RunID)
+	entityID := servedJoinTarget(t, db, initial.RunID)
 
 	arrival := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name": "item.completed", "run_id": initial.RunID, "source_event_id": initial.EventID,
@@ -1092,7 +1094,7 @@ func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t 
 		"idempotency_key": "join-fork-run-" + uuid.NewString(),
 	})
 	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, initial.EventID, "node", "starter", "delivered", 1)
-	entityID := servedJoinEntityID(t, db, initial.RunID)
+	entityID := servedJoinTarget(t, db, initial.RunID)
 	dispatched := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name": "order.dispatched", "run_id": initial.RunID, "source_event_id": initial.EventID,
 		"payload": map[string]any{}, "idempotency_key": "join-fork-dispatch-" + uuid.NewString(),
@@ -2990,7 +2992,7 @@ func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofR
 
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		instance, ok, err := fixture.Workflow.Load(runtimecorrelation.WithRunID(context.Background(), fixture.RunID), fixture.EntityID)
+		instance, ok, err := fixture.Workflow.Load(runtimecorrelation.WithRunID(context.Background(), fixture.RunID), runtimeflowidentity.RouteForInstancePath("root"))
 		if err == nil && ok && instance.CurrentState == "done" {
 			break
 		}
@@ -3377,9 +3379,13 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 		t.Fatalf("store gate activation: %v", err)
 	}
+	instanceMetadata := carrier.PersistedMetadata()
+	instanceMetadata["entity_id"] = entityID
+	instanceMetadata["flow_path"] = "root"
+	instanceMetadata["instance_id"] = "root"
 	if _, err := workflow.MaterializeInitialEntry(runtimecorrelation.WithRunID(ctx, runID), runtimepipeline.WorkflowInstance{
-		InstanceID: entityID, StorageRef: entityID, WorkflowName: "root", WorkflowVersion: "1.0.0",
-		CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: carrier.PersistedMetadata(), StateBuckets: carrier.PersistedStateBuckets(),
+		InstanceID: "root", StorageRef: "root", WorkflowName: "root", WorkflowVersion: "1.0.0",
+		CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: instanceMetadata, StateBuckets: carrier.PersistedStateBuckets(),
 	}, now); err != nil {
 		t.Fatalf("seed gated workflow instance: %v", err)
 	}
@@ -3395,7 +3401,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		t.Fatalf("admit decision card provenance: %v", err)
 	}
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		FlowInstance: "root", EntityID: entityID, Stage: activation.Stage,
+		Route: runtimeflowidentity.RouteForInstancePath("root"), EntityID: entityID, Stage: activation.Stage,
 		StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID),
 	})
 	if err != nil {
@@ -4580,6 +4586,10 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
 		t.Fatalf("store %s run.stop gate activation: %v", rt.Backend, err)
 	}
+	instanceMetadata := carrier.PersistedMetadata()
+	instanceMetadata["entity_id"] = entityID
+	instanceMetadata["flow_path"] = "root"
+	instanceMetadata["instance_id"] = "root"
 
 	var cards decisioncard.Store
 	workflow := rt.Runtime.Pipeline
@@ -4599,8 +4609,8 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		t.Fatalf("unknown run.stop decision-card proof backend %q", rt.Backend)
 	}
 	if _, err := workflow.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID: entityID, StorageRef: entityID, WorkflowName: "root", WorkflowVersion: "1.0.0",
-		CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: carrier.PersistedMetadata(), StateBuckets: carrier.PersistedStateBuckets(),
+		InstanceID: "root", StorageRef: "root", WorkflowName: "root", WorkflowVersion: "1.0.0",
+		CurrentState: "awaiting_review", EnteredStageAt: now, Metadata: instanceMetadata, StateBuckets: carrier.PersistedStateBuckets(),
 	}, now); err != nil {
 		t.Fatalf("seed %s run.stop gated workflow instance: %v", rt.Backend, err)
 	}
@@ -4613,7 +4623,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		t.Fatalf("admit %s run.stop decision-card provenance: %v", rt.Backend, err)
 	}
 	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		FlowInstance: "root", EntityID: entityID, Stage: activation.Stage,
+		Route: runtimeflowidentity.RouteForInstancePath("root"), EntityID: entityID, Stage: activation.Stage,
 		StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID),
 	})
 	if err != nil {
@@ -4680,7 +4690,7 @@ func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedCon
 	default:
 		t.Fatalf("unknown terminal decision-card proof backend %q", rt.Backend)
 	}
-	instance, ok, err := workflow.Load(runtimecorrelation.WithRunID(context.Background(), runID), entityID)
+	instance, ok, err := workflow.Load(runtimecorrelation.WithRunID(context.Background(), runID), runtimeflowidentity.RouteForInstancePath("root"))
 	if err != nil || !ok {
 		t.Fatalf("load %s terminal gate instance: ok=%v err=%v", rt.Backend, ok, err)
 	}
@@ -4930,7 +4940,7 @@ func writeServedJoinProofFixture(t *testing.T) string {
 	return canonicalrouting.CopyServedJoinProof(t)
 }
 
-func servedJoinEntityID(t *testing.T, db *sql.DB, runID string) string {
+func servedJoinTarget(t *testing.T, db *sql.DB, runID string) string {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for time.Now().Before(deadline) {
@@ -7036,7 +7046,7 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 	}()
 	ctx = context.Background()
 	var runStatus, controlStatus, reason, controlledBy string
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT r.status, rc.control_status, COALESCE(rc.reason, ''), COALESCE(rc.controlled_by, '')
 		FROM runs r
 		JOIN run_control_state rc ON rc.run_id = r.run_id
@@ -7049,7 +7059,7 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 	}
 	var deliveryStatus, deliveryReason string
 	var activeSession sql.NullString
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT status, COALESCE(reason_code, ''), current_attempt_version
 		FROM event_deliveries
 		WHERE event_id = ?
@@ -7062,7 +7072,7 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 		t.Fatalf("sqlite serve delivery = %s/%s active=%v, want dead_letter/%s inactive", deliveryStatus, deliveryReason, activeSession.Valid, runtimerunquiescence.ServeAbandonReasonCode)
 	}
 	var deliveryOutcome, deliveryOutcomeReason string
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT o.outcome, COALESCE(o.reason_code, '')
 		FROM event_delivery_outcomes o
 		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
@@ -7076,7 +7086,7 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 		t.Fatalf("sqlite serve delivery outcome = %s/%s, want terminalized/%s", deliveryOutcome, deliveryOutcomeReason, runtimerunquiescence.ServeAbandonReasonCode)
 	}
 	var pipelineOutcome, pipelineReason string
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT outcome, COALESCE(reason_code, '')
 		FROM event_receipts
 		WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'
@@ -7371,7 +7381,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 	if code != serveExitDataIntegrity {
 		t.Fatalf("Run code = %d, want %d\noutput:\n%s", code, serveExitDataIntegrity, out.String())
 	}
-	assertServeRuntimeRunStillActive(t, ctx, &store.PostgresStore{DB: db}, persistedMissingRunID)
+	assertServeRuntimeRunStillActive(t, ctx, storetest.NewPostgresStoreForTest(db), persistedMissingRunID)
 	if strings.Contains(out.String(), "ready") {
 		t.Fatalf("serve reached readiness despite persisted-missing startup recovery failure:\n%s", out.String())
 	}
@@ -7457,9 +7467,9 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 			t.Fatalf("concise recovery output exposed bookkeeping %q:\n%s", forbidden, serve.outputString())
 		}
 	}
-	assertServeRuntimeRunStillActive(t, context.Background(), &store.PostgresStore{DB: db}, persistedRunID)
+	assertServeRuntimeRunStillActive(t, context.Background(), storetest.NewPostgresStoreForTest(db), persistedRunID)
 	for _, target := range orphanTargets {
-		assertServeRuntimeUnavailableBundleRunOrphaned(t, context.Background(), &store.PostgresStore{DB: db}, target.runID, target.cause)
+		assertServeRuntimeUnavailableBundleRunOrphaned(t, context.Background(), storetest.NewPostgresStoreForTest(db), target.runID, target.cause)
 	}
 	if len(stoppedContainers) != 1 || stoppedContainers[0] != "swarm-unavailable-agent" {
 		t.Fatalf("stopped containers = %#v, want only unavailable run container", stoppedContainers)
@@ -7502,9 +7512,9 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	activeSessionID := uuid.NewString()
-	runlifecyclefixture.RequireSQLite(t, ctx, sqliteStore.DB, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour), BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
+	runlifecyclefixture.RequireSQLite(t, ctx, storetest.DatabaseForTest(sqliteStore), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour), BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
 	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "serve-abandon", "agent-a")
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, sqliteStore.DB, runtimeauthoractivity.DialectSQLite,
+	event := storetest.InsertExistingRunRootEventRecord(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a")}
@@ -7515,7 +7525,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 		_ = sqliteStore.Close()
 		t.Fatalf("claim sqlite active delivery: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
+	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO agents (
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
@@ -7526,7 +7536,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash stri
 		_ = sqliteStore.Close()
 		t.Fatalf("seed sqlite delivery agent: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
+	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
@@ -7557,7 +7567,7 @@ func serveDeliveryLifecycleFixtureContext() context.Context {
 func stubServeRuntimeWorkspaceLifecycle(t *testing.T) {
 	t.Helper()
 	oldWorkspaceLifecycle := cliapp.ConfiguredWorkspaceLifecycleForServe
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -7587,12 +7597,12 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 	if err != nil {
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
-	t.Cleanup(func() { _ = runtimePG.DB.Close() })
+	t.Cleanup(func() { _ = storetest.DatabaseForTest(runtimePG).Close() })
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-		return selectedPostgresStoreBundle(runtimePG, cfg), nil
+		return selectedPostgresStoreBundle(runtimePG, storetest.DatabaseForTest(runtimePG), cfg), nil
 	}
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ *sql.DB, _ *config.Config, _ string, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(_ workspace.Lookup, _ *config.Config, _ string, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources, _ cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return workspaceFactory(mountSources), nil
 	}
 	t.Cleanup(func() {
@@ -7615,7 +7625,7 @@ func assertPostgresTableExists(t *testing.T, db *sql.DB, tableName string) {
 
 func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context, runtimePG *store.PostgresStore, runID, source string) {
 	t.Helper()
-	db := runtimePG.DB
+	db := storetest.DatabaseForTest(runtimePG)
 	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "startup-recovery", "agent-a")
 	bundleHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	admissionSource := source
@@ -7626,7 +7636,7 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 	timerID := uuid.NewString()
 	eventID := uuid.NewString()
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: admissionSource})
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 		eventID, runID, events.EventType("startup."+source+".event"), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentity(t, "agent-a", "startup-recovery", "agent-a")}
@@ -7689,14 +7699,14 @@ func reviseServeTestRunSource(
 func assertServeRuntimeRunStillActive(t *testing.T, ctx context.Context, pg *store.PostgresStore, runID string) {
 	t.Helper()
 	var status string
-	if err := pg.DB.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, runID).Scan(&status); err != nil {
+	if err := storetest.DatabaseForTest(pg).QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, runID).Scan(&status); err != nil {
 		t.Fatalf("load run %s: %v", runID, err)
 	}
 	if status != "running" {
 		t.Fatalf("run %s status = %s, want running", runID, status)
 	}
 	var controlRows int
-	if err := pg.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_control_state WHERE run_id = $1::uuid`, runID).Scan(&controlRows); err != nil {
+	if err := storetest.DatabaseForTest(pg).QueryRowContext(ctx, `SELECT COUNT(*) FROM run_control_state WHERE run_id = $1::uuid`, runID).Scan(&controlRows); err != nil {
 		t.Fatalf("count control rows %s: %v", runID, err)
 	}
 	if controlRows != 0 {
@@ -7708,7 +7718,7 @@ func assertServeRuntimeUnavailableBundleRunOrphaned(t *testing.T, ctx context.Co
 	t.Helper()
 	var runStatus, controlStatus, controlReason string
 	var failure []byte
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(pg).QueryRowContext(ctx, `
 		SELECT r.status, r.failure, rc.control_status, COALESCE(rc.reason, '')
 		FROM runs r
 		JOIN run_control_state rc ON rc.run_id = r.run_id
@@ -7720,7 +7730,7 @@ func assertServeRuntimeUnavailableBundleRunOrphaned(t *testing.T, ctx context.Co
 		t.Fatalf("orphaned run %s = %s/failure:%s/%s/%s, want cancelled/no-failure/stopped/%s", runID, runStatus, failure, controlStatus, controlReason, reason)
 	}
 	var deadLetters int
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(pg).QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM event_deliveries
 		WHERE run_id = $1::uuid
@@ -7734,7 +7744,7 @@ func assertServeRuntimeUnavailableBundleRunOrphaned(t *testing.T, ctx context.Co
 		t.Fatalf("orphaned run %s dead-letter deliveries = %d, want 1", runID, deadLetters)
 	}
 	var receipts int
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(pg).QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM event_receipts er
 		JOIN events e ON e.event_id = er.event_id
@@ -7750,7 +7760,7 @@ func assertServeRuntimeUnavailableBundleRunOrphaned(t *testing.T, ctx context.Co
 		t.Fatalf("orphaned run %s platform pipeline receipts = %d, want 1", runID, receipts)
 	}
 	var deliveryOutcomes int
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(pg).QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM event_delivery_outcomes o
 		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
@@ -7766,7 +7776,7 @@ func assertServeRuntimeUnavailableBundleRunOrphaned(t *testing.T, ctx context.Co
 		t.Fatalf("orphaned run %s terminalized delivery outcomes = %d, want 1", runID, deliveryOutcomes)
 	}
 	var sessions int
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(pg).QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM agent_sessions
 		WHERE run_id = $1::uuid
@@ -7780,7 +7790,7 @@ func assertServeRuntimeUnavailableBundleRunOrphaned(t *testing.T, ctx context.Co
 		t.Fatalf("orphaned run %s sessions = %d, want 1", runID, sessions)
 	}
 	var timers int
-	if err := pg.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(pg).QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM timers
 		WHERE run_id = $1::uuid
@@ -7798,7 +7808,7 @@ func TestPrepareServeBundleSourcePersistsCatalogForContractsServe(t *testing.T) 
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
 	bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier12-runtime-tools/test-flow-data-access")
-	fact, err := prepareServeBundleSource(ctx, selectedPostgresStoreBundle(pg, &config.Config{}), bundle, false)
+	fact, err := prepareServeBundleSource(ctx, selectedPostgresStoreBundle(pg, storetest.DatabaseForTest(pg), &config.Config{}), bundle, false)
 	if err != nil {
 		t.Fatalf("prepareServeBundleSource: %v", err)
 	}
@@ -7819,7 +7829,7 @@ func TestPrepareServeBundleSourceDevStampsEphemeralWithoutCatalogRow(t *testing.
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
 	bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier12-runtime-tools/test-flow-data-access")
-	fact, err := prepareServeBundleSource(ctx, selectedPostgresStoreBundle(pg, &config.Config{}), bundle, true)
+	fact, err := prepareServeBundleSource(ctx, selectedPostgresStoreBundle(pg, storetest.DatabaseForTest(pg), &config.Config{}), bundle, true)
 	if err != nil {
 		t.Fatalf("prepareServeBundleSource(dev): %v", err)
 	}
@@ -7953,11 +7963,11 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 	t.Helper()
 	ctx := context.Background()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute), BundleHash: serveRuntimeTestBundleHash})
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 		eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)),
 		events.EventEnvelope{EntityID: entityID, FlowInstance: "flow-a/1", Scope: events.EventScopeEntity}, at)
-	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, &store.PostgresStore{DB: db}, event,
+	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, storetest.NewPostgresStoreForTest(db), event,
 		[]events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient(subscriberID)}})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -8128,10 +8138,10 @@ func TestInitializeStateStoresSQLiteDoesNotCreateGeneratedEntityTables(t *testin
 	if _, err := initializeStateStores(ctx, storeBundle{SchemaBootstrapper: sqliteStore}, bundle); err != nil {
 		t.Fatalf("initializeStateStores(sqlite): %v", err)
 	}
-	if !sqliteMainTestTableExists(t, sqliteStore.DB, "entity_state") {
+	if !sqliteMainTestTableExists(t, storetest.DatabaseForTest(sqliteStore), "entity_state") {
 		t.Fatal("sqlite normal boot missing canonical entity_state table")
 	}
-	if sqliteMainTestTableExists(t, sqliteStore.DB, "products") {
+	if sqliteMainTestTableExists(t, storetest.DatabaseForTest(sqliteStore), "products") {
 		t.Fatal("sqlite normal boot created misleading generated typed entity table products")
 	}
 }
@@ -8146,12 +8156,12 @@ func TestInitializeStateStoresPostgresDoesNotCreateGeneratedEntityTables(t *test
 		t.Fatalf("NewPostgresStore: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := pg.DB.Close(); err != nil {
+		if err := storetest.DatabaseForTest(pg).Close(); err != nil {
 			t.Fatalf("close postgres store: %v", err)
 		}
 	})
 
-	if _, err := initializeStateStores(ctx, selectedPostgresStoreBundle(pg, &config.Config{}), bundle); err != nil {
+	if _, err := initializeStateStores(ctx, selectedPostgresStoreBundle(pg, storetest.DatabaseForTest(pg), &config.Config{}), bundle); err != nil {
 		t.Fatalf("initializeStateStores(postgres): %v", err)
 	}
 	if !postgresMainTestTableExists(t, db, "entity_state") {
@@ -8756,7 +8766,7 @@ func localPreflightReportHasFinding(report cliapp.LocalPreflightReport, code str
 func stubServeWorkspaceLifecycleForTest(t *testing.T) {
 	t.Helper()
 	oldWorkspaceLifecycle := cliapp.ConfiguredWorkspaceLifecycleForServe
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -8841,9 +8851,9 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-		return selectedPostgresStoreBundle(runtimePG, cfg), nil
+		return selectedPostgresStoreBundle(runtimePG, storetest.DatabaseForTest(runtimePG), cfg), nil
 	}
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -8859,7 +8869,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
 	bundleHash := servedEventPublishFixtureBundleHash(t, filepath.Join(cliapp.RepoRoot(), contractsPath))
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a")}

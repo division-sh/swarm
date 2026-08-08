@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -129,7 +128,7 @@ func DefaultDockerConfig() DockerConfig {
 }
 
 type DockerManager struct {
-	db          *sql.DB
+	lookup      Lookup
 	cfg         DockerConfig
 	source      semanticview.Source
 	RunDockerFn func(ctx context.Context, args ...string) (string, error) // test seam
@@ -173,10 +172,10 @@ else
   done
 fi`
 
-func NewDockerManager(db *sql.DB) *DockerManager {
+func NewDockerManager(lookup Lookup) *DockerManager {
 	return &DockerManager{
-		db:  db,
-		cfg: DefaultDockerConfig(),
+		lookup: lookup,
+		cfg:    DefaultDockerConfig(),
 	}
 }
 
@@ -522,43 +521,24 @@ func (m *DockerManager) RuntimeWorkspaceContainers(ctx context.Context) ([]strin
 		}
 	}
 
-	if m.db != nil {
-		runID, ok, err := runtimecurrentstate.RunIDFromContext(ctx)
+	runID, ok, err := runtimecurrentstate.RunIDFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		if m.lookup == nil {
+			return nil, errors.New("runtime workspace container lookup is required")
+		}
+		containers, err := m.lookup.ListRuntimeWorkspaceContainers(ctx, runID)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("list runtime workspace containers: %w", err)
 		}
-		if !ok {
-			out := make([]string, 0, len(set))
-			for c := range set {
-				out = append(out, c)
-			}
-			sort.Strings(out)
-			return out, nil
-		}
-		rows, err := m.db.QueryContext(ctx, `
-			SELECT DISTINCT COALESCE(NULLIF(es.slug, ''), '')
-			FROM entity_state es
-			JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-			WHERE es.run_id = $1::uuid
-			  AND COALESCE(fi.config->>'instance_kind', '') = 'entity'
-		`, runID)
-		if err != nil {
-			return nil, fmt.Errorf("list instance slugs: %w", err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var slug string
-			if scanErr := rows.Scan(&slug); scanErr != nil {
-				return nil, fmt.Errorf("scan instance slug: %w", scanErr)
-			}
-			slug = SanitizeSlug(slug)
+		for _, raw := range containers.EntitySlugs {
+			slug := SanitizeSlug(raw)
 			if slug == "" {
-				continue
+				return nil, errors.New("runtime workspace container lookup returned an empty entity slug")
 			}
 			set[m.EntityContainerName(slug)] = struct{}{}
-		}
-		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("iterate instance slugs: %w", err)
 		}
 	}
 
@@ -1272,25 +1252,20 @@ func (m *DockerManager) LookupEntitySlug(ctx context.Context, entityID string) (
 	if trimmedID == "" {
 		return "", errors.New("entity_id is required")
 	}
-	if m.db == nil {
-		return SanitizeSlug(trimmedID), nil
-	}
 	identity, err := runtimecurrentstate.RequireIdentity(ctx, trimmedID)
 	if err != nil {
 		return "", err
 	}
-	var slug string
-	if err := m.db.QueryRowContext(ctx, `
-		SELECT COALESCE(NULLIF(slug, ''), '')
-		FROM entity_state
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-	`, identity.RunID, identity.EntityID).Scan(&slug); err != nil {
-		return "", fmt.Errorf("lookup instance slug: %w", err)
+	if m.lookup == nil {
+		return "", errors.New("workspace entity lookup is required")
 	}
-	slug = SanitizeSlug(slug)
+	result, err := m.lookup.LookupWorkspaceEntity(ctx, identity)
+	if err != nil {
+		return "", fmt.Errorf("lookup workspace entity: %w", err)
+	}
+	slug := SanitizeSlug(result.Slug)
 	if slug == "" {
-		return SanitizeSlug(trimmedID), nil
+		return "", errors.New("workspace entity lookup returned an empty slug")
 	}
 	return slug, nil
 }

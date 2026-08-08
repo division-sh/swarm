@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,7 +25,6 @@ type HostConfig struct {
 }
 
 type HostManager struct {
-	db     *sql.DB
 	cfg    HostConfig
 	source semanticview.Source
 }
@@ -41,9 +39,8 @@ func DefaultHostConfig() HostConfig {
 	}
 }
 
-func NewHostManager(db *sql.DB) *HostManager {
+func NewHostManager() *HostManager {
 	return &HostManager{
-		db:  db,
 		cfg: DefaultHostConfig(),
 	}
 }

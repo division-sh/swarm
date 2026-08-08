@@ -20,7 +20,6 @@ func (noopPipelineBus) PublishDirect(context.Context, events.Event, []string) er
 }
 func (noopPipelineBus) ResolveSubscribedRecipients(string) []string       { return nil }
 func (noopPipelineBus) LogRuntime(context.Context, RuntimeLogEntry) error { return nil }
-func (noopPipelineBus) EngineOutbox() runtimeengine.OutboxWriter          { return noOpEngineOutbox{} }
 func (noopPipelineBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return noOpEngineDispatcher{}
 }

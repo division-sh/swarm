@@ -6043,7 +6043,7 @@
     },
     {
       "name": "run.diagnose",
-      "description": "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/run_operational_status_read_surface.go and concrete failed-delivery evidence from\nRunDebugReport.FailedDeliveries, plus result.test_quiescence from\nRunDebugReport.TestQuiescence for deterministic test assertion barriers. The single canonical owner for\n\"why isn't this run progressing?\" routes persisted evidence through\nthe API instead of having every consumer recompute it.\n",
+      "description": "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/internal/runtimepersistence/run_operational_status_read_surface.go and concrete failed-delivery evidence from\nRunDebugReport.FailedDeliveries, plus result.test_quiescence from\nRunDebugReport.TestQuiescence for deterministic test assertion barriers. The single canonical owner for\n\"why isn't this run progressing?\" routes persisted evidence through\nthe API instead of having every consumer recompute it.\n",
       "params": [
         {
           "name": "run_id",
@@ -7514,7 +7514,7 @@
     },
     {
       "name": "run.trace",
-      "description": "Persisted composed run trace as an ordered list of joined rows. Each\nrow is anchored on an event and carries delivery, session, and turn\nfields where the join finds them. The runtime owns the join — clients\nMUST consume rows as-emitted and MUST NOT reconstruct the join from\nseparate event/delivery/session/turn lists. Backed by the canonical\nRunDebugTraceRow surface in internal/store/run_debug_read_surface.go.\n",
+      "description": "Persisted composed run trace as an ordered list of joined rows. Each\nrow is anchored on an event and carries delivery, session, and turn\nfields where the join finds them. The runtime owns the join — clients\nMUST consume rows as-emitted and MUST NOT reconstruct the join from\nseparate event/delivery/session/turn lists. Backed by the canonical\nRunDebugTraceRow surface in internal/store/internal/runtimepersistence/run_debug_read_surface.go.\n",
       "params": [
         {
           "name": "run_id",
@@ -9179,7 +9179,7 @@
         "additionalProperties": false,
         "properties": {
           "blocking_layer": {
-            "description": "Current producer owner is internal/store/agent_lifecycle_read_surface.go agentLifecycleBlockingLayer, consuming deliverylifecycle.StateFromDelivery. Current reachable state/layer pairs are queued/delivery_queue, launching/session_launch, active/session_execution, retrying/delivery_retry, and exhausted/delivery_terminal. The field remains string-valued for compatible additive server values; current in-repo producer additions must update the authoritative human-code projection and parity tests in the same change. Delivered is not a current diagnosis state.\n",
+            "description": "Current producer owner is internal/store/internal/runtimepersistence/agent_lifecycle_read_surface.go agentLifecycleBlockingLayer, consuming deliverylifecycle.StateFromDelivery. Current reachable state/layer pairs are queued/delivery_queue, launching/session_launch, active/session_execution, retrying/delivery_retry, and exhausted/delivery_terminal. The field remains string-valued for compatible additive server values; current in-repo producer additions must update the authoritative human-code projection and parity tests in the same change. Delivered is not a current diagnosis state.\n",
             "minLength": 1,
             "type": "string"
           },
@@ -12387,7 +12387,7 @@
         "type": "string"
       },
       "OperationalState": {
-        "description": "Operational state of a run. Source of truth:\ninternal/store/run_operational_status_read_surface.go\nProjectRunOperationalStatus. Values are RunTableStatus values\nlowercased plus \"stalled\" as the projection's special\n\"running-but-not-progressing\" state.\n",
+        "description": "Operational state of a run. Source of truth:\ninternal/store/internal/runtimepersistence/run_operational_status_read_surface.go\nProjectRunOperationalStatus. Values are RunTableStatus values\nlowercased plus \"stalled\" as the projection's special\n\"running-but-not-progressing\" state.\n",
         "enum": [
           "running",
           "stalled",
@@ -12925,7 +12925,7 @@
       },
       "RunTraceRow": {
         "additionalProperties": false,
-        "description": "One joined trace row. Every row is anchored on an event; delivery,\nsession, and turn fields are sparse and present only where the join\nfinds a corresponding row. Matches the runtime's canonical\nRunDebugTraceRow shape (internal/store/run_debug_read_surface.go).\nThe runtime owns the join — clients MUST consume rows as-emitted\nand MUST NOT reconstruct the join from separate event/delivery/\nsession/turn lists.\n",
+        "description": "One joined trace row. Every row is anchored on an event; delivery,\nsession, and turn fields are sparse and present only where the join\nfinds a corresponding row. Matches the runtime's canonical\nRunDebugTraceRow shape (internal/store/internal/runtimepersistence/run_debug_read_surface.go).\nThe runtime owns the join — clients MUST consume rows as-emitted\nand MUST NOT reconstruct the join from separate event/delivery/\nsession/turn lists.\n",
         "properties": {
           "active_session_id": {
             "$ref": "#/components/schemas/OpaqueId"
@@ -13232,6 +13232,12 @@
           "flow_instance": {
             "type": "string"
           },
+          "flow_instance_id": {
+            "type": "string"
+          },
+          "flow_scope_key": {
+            "type": "string"
+          },
           "routing_source": {
             "$ref": "#/components/schemas/DecisionCardRoutingSource"
           },
@@ -13243,6 +13249,8 @@
           }
         },
         "required": [
+          "flow_scope_key",
+          "flow_instance_id",
           "flow_instance",
           "entity_id",
           "routing_source",

@@ -3,43 +3,275 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	timerobligationadapter "github.com/division-sh/swarm/internal/persistence/timerobligationadapter"
+	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/entityquery"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
+	runtimeworkflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
 func newTestWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
-	store := NewPostgresWorkflowPersistence(db, &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectPostgres}).store
+	runner := &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectPostgres}
+	store := newWorkflowPersistenceFixtureStore(runner)
+	registerWorkflowPersistenceFixture(store, db, workflowStoreDialectPostgres, runner)
+	store.readiness = pipelineTestDynamicFlowRuntimeReadinessPersistence{store: store}
+	store.timerActivations = pipelineTestWorkflowTimerPersistence{store: store}
 	store.runLifecycle = &unavailablePipelineTestRunLifecycle{}
-	return store
+	store.timerObligations = pipelineTestTimerObligationReader{db: db, dialect: timerobligationadapter.DialectPostgres}
+	return installPipelineTestActivityJournal(store)
 }
 
 func newTestSQLiteWorkflowInstanceStore(db *sql.DB) *workflowInstanceStore {
-	return &workflowInstanceStore{
-		db:           db,
-		dialect:      workflowStoreDialectSQLite,
-		runLifecycle: &unavailablePipelineTestRunLifecycle{},
-	}
+	reader := &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite}
+	store := newWorkflowPersistenceFixtureStore(reader)
+	registerWorkflowPersistenceFixture(store, db, workflowStoreDialectSQLite, reader)
+	store.readiness = pipelineTestDynamicFlowRuntimeReadinessPersistence{store: store}
+	store.timerActivations = pipelineTestWorkflowTimerPersistence{store: store}
+	store.runLifecycle = &unavailablePipelineTestRunLifecycle{}
+	store.timerObligations = pipelineTestTimerObligationReader{db: db, dialect: timerobligationadapter.DialectSQLite}
+	return installPipelineTestActivityJournal(store)
 }
 
 func newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, runner runtimeMutationRunner) *workflowInstanceStore {
-	store := NewSQLiteWorkflowPersistence(db, runner).store
+	base := &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite}
+	store := newWorkflowPersistenceFixtureStore(base)
+	registerWorkflowPersistenceFixture(store, db, workflowStoreDialectSQLite, runner)
+	if owner, ok := runner.(DynamicFlowRuntimeReadinessPersistence); ok {
+		store.readiness = owner
+	} else {
+		store.readiness = pipelineTestDynamicFlowRuntimeReadinessPersistence{store: store}
+	}
+	if owner, ok := runner.(WorkflowTimerActivationPersistence); ok {
+		store.timerActivations = owner
+	} else {
+		store.timerActivations = pipelineTestWorkflowTimerPersistence{store: store}
+	}
+	if owner, ok := runner.(WorkflowInstancePersistenceReader); ok {
+		store.instanceReader = owner
+	} else {
+		store.instanceReader = pipelineTestWorkflowInstanceReader{db: db, dialect: workflowStoreDialectSQLite}
+	}
+	if owner, ok := runner.(WorkflowEngineMutationOwner); ok {
+		store.engineMutations = owner
+	}
+	if owner, ok := runner.(WorkflowInitialMaterializationCommitOwner); ok {
+		store.initialCommits = owner
+	}
+	store.timerObligations = pipelineTestTimerObligationReader{db: db, dialect: timerobligationadapter.DialectSQLite}
 	if owner, ok := runner.(runtimerunlifecycle.OperationOwner); ok {
 		store.runLifecycle = owner
 	} else {
-		store.runLifecycle = &unavailablePipelineTestRunLifecycle{}
+		store.runLifecycle = &recordingRuntimeMutationRunner{db: db, dialect: workflowStoreDialectSQLite}
 	}
+	return installPipelineTestActivityJournal(store)
+}
+
+func newWorkflowPersistenceFixtureStore(runner *recordingRuntimeMutationRunner) *workflowInstanceStore {
+	store := &workflowInstanceStore{runLifecycle: runner}
+	if owner, ok := any(runner).(entityquery.Reader); ok {
+		store.entityQuery = owner
+	}
+	if owner, ok := any(runner).(runtimeworkflowroute.RecoveryReader); ok {
+		store.routeRecovery = owner
+	}
+	if owner, ok := any(runner).(runtimeactivityresult.Reader); ok {
+		store.activityResults = owner
+	}
+	if owner, ok := any(runner).(GateRouteAdmissionReader); ok {
+		store.gateRoutes = owner
+	}
+	if owner, ok := any(runner).(WorkflowEngineMutationOwner); ok {
+		store.engineMutations = owner
+	}
+	if owner, ok := any(runner).(DecisionCardMutationOwner); ok {
+		store.cardMutations = owner
+	} else {
+		store.cardMutations = &unavailablePipelineTestDecisionCardMutations{}
+	}
+	if owner, ok := any(runner).(WorkflowTimerOccurrenceOwner); ok {
+		store.timerOccurrences = owner
+	}
+	if owner, ok := any(runner).(WorkflowDecisionRouteOwner); ok {
+		store.decisionRoutes = owner
+	}
+	if owner, ok := any(runner).(WorkflowInstancePersistenceReader); ok {
+		store.instanceReader = owner
+	}
+	if owner, ok := any(runner).(WorkflowInitialMaterializationCommitOwner); ok {
+		store.initialCommits = owner
+	}
+	store.standingServices = pipelineTestStandingServices{store: store}
 	return store
+}
+
+type pipelineTestStandingServices struct {
+	StandingServicePersistence
+	store *workflowInstanceStore
+}
+
+func (p pipelineTestStandingServices) StandingRunUsesIntrinsicRecovery(ctx context.Context, runID string) (bool, error) {
+	if p.store == nil || p.store.testDB() == nil {
+		return false, errors.New("pipeline test standing-service reader requires selected store")
+	}
+	query := `SELECT EXISTS (SELECT 1 FROM standing_services WHERE current_run_id = ? AND declaration_present = TRUE AND effective_state IN ('active', 'suspended'))`
+	if !p.store.isSQLite() {
+		query = `SELECT EXISTS (SELECT 1 FROM standing_services WHERE current_run_id = $1::uuid AND declaration_present = TRUE AND effective_state IN ('active', 'suspended'))`
+	}
+	var found bool
+	if err := p.store.testDB().QueryRowContext(ctx, query, strings.TrimSpace(runID)).Scan(&found); err != nil {
+		return false, err
+	}
+	return found, nil
+}
+
+type pipelineTestDynamicFlowRuntimeReadinessPersistence struct {
+	store *workflowInstanceStore
+}
+
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
+	return p.store.legacyReconcileDynamicFlowRuntimeReadinessPlan(ctx, plan, observedAt)
+}
+
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error) {
+	return p.store.legacyLoadDynamicFlowRuntimeReadiness(ctx, runID, route)
+}
+
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error) {
+	return p.store.legacyListDynamicFlowRuntimeReadiness(ctx)
+}
+
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error) {
+	return p.store.legacyListDynamicFlowRuntimeReadinessKeys(ctx)
+}
+
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {
+	return p.store.legacyMarkDynamicFlowRuntimeTopologyReady(ctx, plan, readyAt)
+}
+
+type pipelineTestWorkflowTimerPersistence struct {
+	store *workflowInstanceStore
+}
+
+func (p pipelineTestWorkflowTimerPersistence) LoadWorkflowTimerActivation(ctx context.Context, activationID string) (WorkflowTimerActivation, bool, error) {
+	return p.store.loadWorkflowTimerActivation(ctx, activationID, false)
+}
+
+func (p pipelineTestWorkflowTimerPersistence) ListWorkflowTimerActivations(ctx context.Context, runID, entityID string, activeOnly bool) ([]WorkflowTimerActivation, error) {
+	return p.store.listWorkflowTimerActivations(ctx, runID, entityID, activeOnly)
+}
+
+func (p pipelineTestWorkflowTimerPersistence) CommitWorkflowTimerReconciliation(ctx context.Context, command WorkflowTimerReconciliationCommand) (CommittedWorkflowLifecycleMutation, error) {
+	if err := command.Validate(); err != nil {
+		return CommittedWorkflowLifecycleMutation{}, err
+	}
+	result := CommittedWorkflowLifecycleMutation{}
+	err := p.store.runPipelineMutation(ctx, func(txctx context.Context) error {
+		for _, mutation := range command.Plan.Timers {
+			switch mutation.Kind {
+			case WorkflowTimerMutationInsert:
+				persisted, _, err := p.store.insertWorkflowTimerActivation(txctx, mutation.Activation)
+				if err != nil {
+					return err
+				}
+				result.Wakeups = append(result.Wakeups, persisted.Ref)
+			case WorkflowTimerMutationCancel:
+				persisted, changed, err := p.store.cancelWorkflowTimerActivation(txctx, mutation.Activation.Ref)
+				if err != nil {
+					return err
+				}
+				if changed {
+					result.Cancellations = append(result.Cancellations, persisted.Ref)
+				}
+			}
+		}
+		if command.Plan.RequestCompletionCandidate {
+			return p.store.requestRunCompletionCandidate(txctx, command.RunID)
+		}
+		return nil
+	})
+	if err != nil {
+		return CommittedWorkflowLifecycleMutation{}, err
+	}
+	return result, result.Validate()
+}
+
+type pipelineTestTimerObligationReader struct {
+	db      *sql.DB
+	dialect timerobligationadapter.Dialect
+}
+
+func (s *workflowInstanceStore) standingRunHasLiveWorkTx(ctx context.Context, tx *sql.Tx, runID string, observedAt time.Time) (bool, error) {
+	if s.deliveryStore == nil {
+		return false, fmt.Errorf("inspect standing run live work: delivery lifecycle store is required")
+	}
+	deliverySummary, err := s.deliveryStore.SummarizeRun(ctx, runID)
+	if err != nil {
+		return false, fmt.Errorf("inspect standing run delivery work: %w", err)
+	}
+	if !deliverySummary.Settled() {
+		return true, nil
+	}
+	if s.pipelineStore == nil {
+		return false, fmt.Errorf("inspect standing run pipeline work: pipeline obligation store is required")
+	}
+	pipelineSummary, err := s.pipelineStore.SummarizeRun(ctx, runID)
+	if err != nil {
+		return false, fmt.Errorf("inspect standing run pipeline work: %w", err)
+	}
+	if pipelineSummary.HasOpenWork() {
+		return true, nil
+	}
+	query := `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = ? AND status IN ('active', 'suspended'))`
+	args := []any{runID}
+	dialect := timerobligationadapter.DialectSQLite
+	if !s.isSQLite() {
+		query = `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = $1::uuid AND status IN ('active', 'suspended'))`
+		args = []any{runID}
+		dialect = timerobligationadapter.DialectPostgres
+	}
+	var live bool
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&live); err != nil {
+		return false, fmt.Errorf("inspect standing run live work: %w", err)
+	}
+	if live {
+		return true, nil
+	}
+	scope, err := runtimetimerobligation.Run(runID)
+	if err != nil {
+		return false, err
+	}
+	snapshot, err := timerobligationadapter.Read(ctx, tx, dialect, scope, observedAt)
+	if err != nil {
+		return false, fmt.Errorf("inspect standing run timer work: %w", err)
+	}
+	run, ok := snapshot.Run(runID)
+	if !ok {
+		return false, fmt.Errorf("inspect standing run timer work: snapshot omitted requested run")
+	}
+	return run.Totals().ActiveCount > 0, nil
+}
+
+func (r pipelineTestTimerObligationReader) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
+	if tx, ok := PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		return timerobligationadapter.Read(ctx, tx, r.dialect, scope, observedAt)
+	}
+	return timerobligationadapter.Read(ctx, r.db, r.dialect, scope, observedAt)
 }
 
 func workflowPersistenceForTest(store *workflowInstanceStore) WorkflowPersistence {
@@ -49,16 +281,16 @@ func workflowPersistenceForTest(store *workflowInstanceStore) WorkflowPersistenc
 const testPipelineRunID = "77777777-7777-7777-7777-777777777777"
 
 func seedPipelineEventRecord(t testing.TB, ctx context.Context, db *sql.DB, event events.Event) {
-	seedPipelineEventRecordForDialect(t, ctx, db, runtimeauthoractivity.DialectPostgres, event)
+	seedPipelineEventRecordForDialect(t, ctx, db, authoractivityfixture.DialectPostgres, event)
 }
 
-func seedPipelineEventRecordForDialect(t testing.TB, ctx context.Context, db *sql.DB, dialect runtimeauthoractivity.Dialect, event events.Event) {
+func seedPipelineEventRecordForDialect(t testing.TB, ctx context.Context, db *sql.DB, dialect authoractivityfixture.Dialect, event events.Event) {
 	t.Helper()
 	if runID := strings.TrimSpace(event.RunID()); runID != "" {
 		switch dialect {
-		case runtimeauthoractivity.DialectPostgres:
+		case authoractivityfixture.DialectPostgres:
 			runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
-		case runtimeauthoractivity.DialectSQLite:
+		case authoractivityfixture.DialectSQLite:
 			runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 		default:
 			t.Fatalf("seed canonical pipeline event %s: unsupported dialect %q", event.ID(), dialect)
@@ -89,14 +321,38 @@ func testWorkflowStoreRunContext(t *testing.T, store *workflowInstanceStore) con
 	if store == nil {
 		t.Fatal("test workflow store run context requires store")
 	}
-	if store.db == nil {
+	if store.testDB() == nil {
 		return testPipelineRunContextNoSeed(t)
 	}
-	return testPipelineRunContext(t, store.db)
+	return testPipelineRunContext(t, store.testDB())
 }
 
 func materializedWorkflowInstanceForTest(instance WorkflowInstance) WorkflowInstance {
-	occurredAt := time.Date(2026, time.July, 25, 12, 0, 0, 0, time.UTC)
+	occurredAt := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
+	instance.Metadata = cloneStringAnyMap(instance.Metadata)
+	if instance.Metadata == nil {
+		instance.Metadata = map[string]any{}
+	}
+	if strings.TrimSpace(asString(instance.Metadata["entity_id"])) == "" {
+		for _, candidate := range []string{instance.InstanceID, instance.StorageRef} {
+			if parsed, err := uuid.Parse(strings.TrimSpace(candidate)); err == nil {
+				instance.Metadata["entity_id"] = parsed.String()
+				break
+			}
+		}
+	}
+	storageRef := strings.Trim(strings.TrimSpace(instance.StorageRef), "/")
+	if _, declared := instance.Metadata["flow_path"]; !declared && strings.Contains(storageRef, "/") {
+		instance.Metadata["flow_path"] = storageRef
+		instance.Metadata["instance_id"] = runtimeflowidentity.LogicalInstanceID(storageRef)
+	} else if !declared {
+		canonicalRoute := strings.Trim(strings.TrimSpace(instance.WorkflowName), "/")
+		if canonicalRoute != "" {
+			instance.StorageRef = canonicalRoute
+			instance.InstanceID = runtimeflowidentity.LogicalInstanceID(canonicalRoute)
+			instance.Metadata["instance_id"] = instance.InstanceID
+		}
+	}
 	if instance.EnteredStageAt.IsZero() {
 		instance.EnteredStageAt = occurredAt
 	}
@@ -112,7 +368,7 @@ func configureWorkflowLifecycleForTest(t testing.TB, pc *PipelineCoordinator) {
 		return
 	}
 	if pc.workflowTimers == nil {
-		pc.workflowTimers = newWorkflowTimerLifecycle(pc.workflowStore, pc.SemanticSource(), pc.bus, pc.gatePublisher, pc.workOwner, pc.timerScheduler)
+		pc.workflowTimers = newWorkflowTimerLifecycle(pc.workflowStore, pc.SemanticSource(), pc.bus, pc.workOwner, pc.timerScheduler)
 	}
 	if pc.workflowStore.lifecycleOwner == nil {
 		pc.workflowStore.lifecycleOwner = pipelineWorkflowLifecycleOwner{coordinator: pc}
@@ -125,13 +381,11 @@ func testPipelineCoordinatorRunContext(t *testing.T, pc *PipelineCoordinator) co
 		t.Fatal("test pipeline coordinator run context requires coordinator")
 	}
 	configureWorkflowLifecycleForTest(t, pc)
-	if pc.workflowStore != nil && pc.workflowStore.db != nil {
+	if pc.workflowStore != nil && pc.workflowStore.testDB() != nil {
 		configurePipelineTestDeliveryOwner(t, pc)
 	}
 	var ctx context.Context
-	if pc.db != nil {
-		ctx = testPipelineRunContext(t, pc.db)
-	} else if pc.workflowStore != nil {
+	if pc.workflowStore != nil {
 		ctx = testWorkflowStoreRunContext(t, pc.workflowStore)
 	} else {
 		ctx = testPipelineRunContextNoSeed(t)
@@ -146,17 +400,27 @@ func testPipelineCoordinatorRunContext(t *testing.T, pc *PipelineCoordinator) co
 	return bound
 }
 
-func testWorkflowStateTransitionContext(ctx context.Context, entityID, eventType string) context.Context {
+func testWorkflowSourceEnvelope(flowID, instancePath, entityID string) events.EventEnvelope {
+	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), instancePath)
+	return events.EnvelopeForSourceRoute(envelope, events.RouteIdentity{
+		FlowID:       flowID,
+		FlowInstance: instancePath,
+		EntityID:     entityID,
+	})
+}
+
+func testWorkflowStateTransitionContext(ctx context.Context, route runtimeflowidentity.Route, entityID, eventType string) context.Context {
+	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), route.InstancePath)
 	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(), events.EventType(strings.TrimSpace(eventType)), "test", "", []byte(`{}`), 0,
-		runtimecorrelation.RunIDFromContext(ctx), "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Now().UTC(),
+		runtimecorrelation.RunIDFromContext(ctx), "", envelope, time.Now().UTC(),
 	)
 	return runtimecorrelation.WithInboundEvent(ctx, evt)
 }
 
-func testPersistedWorkflowStateTransitionContext(t *testing.T, store *workflowInstanceStore, ctx context.Context, entityID, eventType string) context.Context {
+func testPersistedWorkflowStateTransitionContext(t *testing.T, store *workflowInstanceStore, ctx context.Context, route runtimeflowidentity.Route, entityID, eventType string) context.Context {
 	t.Helper()
-	transitionCtx := testWorkflowStateTransitionContext(ctx, entityID, eventType)
+	transitionCtx := testWorkflowStateTransitionContext(ctx, route, entityID, eventType)
 	evt, ok := runtimecorrelation.InboundEventFromContext(transitionCtx)
 	if !ok {
 		t.Fatal("test workflow transition context has no inbound event")

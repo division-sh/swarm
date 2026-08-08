@@ -1,6 +1,7 @@
 package authoractivity
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -12,6 +13,15 @@ import (
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
+
+// Mutation is the narrow semantic story boundary used by named selected-store
+// operations. Runtime producers may construct drafts, but they never receive
+// transaction, dialect, or persistence authority.
+type Mutation interface {
+	Record(context.Context, Draft) error
+	PersistedOccurredAt(context.Context, string) (time.Time, bool, error)
+	PersistedAuthorSafeSummary(context.Context, string) (string, bool, error)
+}
 
 const Version = 2
 

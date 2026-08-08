@@ -81,7 +81,7 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 			if entityID == "" {
 				t.Fatal("expected emitted event to carry created entity id")
 			}
-			instance, ok, err := pc.workflowStore.Load(ctx, entityID)
+			instance, ok, err := pc.workflowStore.Load(ctx, testWorkflowInstanceRoute(bus.publishedEvent(0).FlowInstance()))
 			if err != nil {
 				t.Fatalf("load created entity: %v", err)
 			}
@@ -267,7 +267,7 @@ func seedExactOnceEventDelivery(t *testing.T, pc *PipelineCoordinator, ctx conte
 	seedExactOnceEvent(t, store, ctx, evt)
 	owner, ok := store.deliveryStore.(*pipelineTestDeliveryOwner)
 	if !ok {
-		owner = newPipelineTestDeliveryOwner(t, store.db, store.isSQLite())
+		owner = newPipelineTestDeliveryOwner(t, store.testDB(), store.isSQLite())
 		store.deliveryStore = owner
 	}
 	flowID := workflowNodeFlowID(pc.SemanticSource(), nodeID)
@@ -284,10 +284,10 @@ func seedExactOnceEventDelivery(t *testing.T, pc *PipelineCoordinator, ctx conte
 func seedExactOnceEvent(t *testing.T, store *workflowInstanceStore, ctx context.Context, evt events.Event) {
 	t.Helper()
 	if store.isSQLite() {
-		seedPipelineEventRecordForDialect(t, ctx, store.db, "sqlite", evt)
+		seedPipelineEventRecordForDialect(t, ctx, store.testDB(), "sqlite", evt)
 		return
 	}
-	seedPipelineEventRecord(t, ctx, store.db, evt)
+	seedPipelineEventRecord(t, ctx, store.testDB(), evt)
 }
 
 func assertMutationCount(t *testing.T, store *workflowInstanceStore, ctx context.Context, eventID, field, writerID, handlerStep string, want int) {
@@ -297,7 +297,7 @@ func assertMutationCount(t *testing.T, store *workflowInstanceStore, ctx context
 		err error
 	)
 	if store.isSQLite() {
-		err = store.db.QueryRowContext(ctx, `
+		err = store.testDB().QueryRowContext(ctx, `
 			SELECT COUNT(*)
 			FROM entity_mutations
 			WHERE caused_by_event = ?
@@ -306,7 +306,7 @@ func assertMutationCount(t *testing.T, store *workflowInstanceStore, ctx context
 			  AND handler_step = ?
 		`, eventID, field, writerID, handlerStep).Scan(&got)
 	} else {
-		err = store.db.QueryRowContext(ctx, `
+		err = store.testDB().QueryRowContext(ctx, `
 			SELECT COUNT(*)
 			FROM entity_mutations
 			WHERE caused_by_event = $1::uuid
@@ -328,7 +328,7 @@ func assertDeliveryOutcomeCount(t *testing.T, store *workflowInstanceStore, ctx 
 	var got int
 	var err error
 	if store.isSQLite() {
-		err = store.db.QueryRowContext(ctx, `
+		err = store.testDB().QueryRowContext(ctx, `
 			SELECT COUNT(*)
 			FROM event_delivery_outcomes o
 			JOIN event_deliveries d ON d.delivery_id = o.delivery_id
@@ -337,7 +337,7 @@ func assertDeliveryOutcomeCount(t *testing.T, store *workflowInstanceStore, ctx 
 			  AND d.subscriber_id = ?
 		`, eventID, nodeID).Scan(&got)
 	} else {
-		err = store.db.QueryRowContext(ctx, `
+		err = store.testDB().QueryRowContext(ctx, `
 			SELECT COUNT(*)
 			FROM event_delivery_outcomes o
 			JOIN event_deliveries d ON d.delivery_id = o.delivery_id
@@ -359,7 +359,7 @@ func assertDeliveryStatusCount(t *testing.T, store *workflowInstanceStore, ctx c
 	var got int
 	var err error
 	if store.isSQLite() {
-		err = store.db.QueryRowContext(ctx, `
+		err = store.testDB().QueryRowContext(ctx, `
 			SELECT COUNT(*)
 			FROM event_deliveries
 			WHERE event_id = ?
@@ -368,7 +368,7 @@ func assertDeliveryStatusCount(t *testing.T, store *workflowInstanceStore, ctx c
 			  AND status = ?
 		`, eventID, nodeID, status).Scan(&got)
 	} else {
-		err = store.db.QueryRowContext(ctx, `
+		err = store.testDB().QueryRowContext(ctx, `
 			SELECT COUNT(*)
 			FROM event_deliveries
 			WHERE event_id = $1::uuid

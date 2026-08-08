@@ -541,7 +541,7 @@ func selectedContractExecutionRequiredConsumers() []runfork.RunForkSelectedContr
 		{
 			Concept:     "receipts_dead_letters_idempotency",
 			Disposition: runfork.RunForkSelectedContractDispositionFutureOwnerRequired,
-			Owner:       "internal/store/event_receipt_store.go+internal/runtime/deadletters",
+			Owner:       "internal/store/internal/runtimepersistence/event_receipt_side_effects.go+internal/runtime/deadletters",
 			Reason:      "future execution must write fork-local outcomes and must not use source outcomes as suppressors without an approved model",
 		},
 		{

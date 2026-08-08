@@ -23,20 +23,13 @@ import (
 type catalogPersistenceBus struct{}
 
 func (catalogPersistenceBus) Publish(context.Context, events.Event) error { return nil }
-func (catalogPersistenceBus) PublishInMutation(context.Context, events.Event) error {
-	return nil
-}
 func (catalogPersistenceBus) PublishDirect(context.Context, events.Event, []string) error {
-	return nil
-}
-func (catalogPersistenceBus) PublishDirectInMutation(context.Context, events.Event, []string) error {
 	return nil
 }
 func (catalogPersistenceBus) ResolveSubscribedRecipients(string) []string { return nil }
 func (catalogPersistenceBus) LogRuntime(context.Context, runtimepipeline.RuntimeLogEntry) error {
 	return nil
 }
-func (catalogPersistenceBus) EngineOutbox() runtimeengine.OutboxWriter             { return nil }
 func (catalogPersistenceBus) EngineDispatcher() runtimeengine.PostCommitDispatcher { return nil }
 func (catalogPersistenceBus) DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error) {
 	return runtimedelivery.ExecutionAuthority{}, nil
@@ -258,9 +251,9 @@ func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	registerTestAuthorActivityCatalog(t, pg, "score.requested")
 	bus := catalogPersistenceBus{}
-	workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+	workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  &fixtureWorkflowModule{},
-		Persistence:             runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Persistence:             runtimepipeline.NewWorkflowPersistence(pg),
 		RunLifecycle:            pg,
 		PipelineObligations:     pg.PipelineObligations(),
 		DeliveryStore:           pg,
@@ -269,8 +262,6 @@ func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 		HumanTasks:              pg,
 		DecisionCardDraftExpiry: pg,
 		HumanTaskExpiry:         pg,
-		GatePublisher:           bus,
-		DirectDecisionPublisher: bus,
 		DeliveryRuntime:         bus, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
@@ -291,12 +282,28 @@ func newCatalogAssertionHarness(t *testing.T) *runtimeHarness {
 func insertCatalogAssertionEntityState(t *testing.T, h *runtimeHarness, entityID, state string) {
 	t.Helper()
 	if _, err := h.db.ExecContext(h.ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES (
+			$1::text, 'catalog-assertion', 'static',
+			jsonb_build_object(
+				'workflow_version', '1',
+				'instance_id', $1::text,
+				'storage_ref', $1::text,
+				'flow_path', $1::text
+			),
+			'active', now()
+		)
+		ON CONFLICT (instance_id) DO NOTHING
+	`, catalogRuntimeRunID); err != nil {
+		t.Fatalf("insert root flow instance: %v", err)
+	}
+	if _, err := h.db.ExecContext(h.ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'root', 'default', $3,
+			$1::uuid, $2::uuid, $1, 'default', $3,
 			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
 		)
 	`, catalogRuntimeRunID, entityID, state); err != nil {

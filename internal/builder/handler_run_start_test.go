@@ -17,8 +17,8 @@ type runStartAppendStore struct {
 	appended []string
 }
 
-func (s *runStartAppendStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
+func (s *runStartAppendStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublish(ctx, command, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
 		s.appended = append(s.appended, string(req.Event.Event().Type()))
 		return recordBuilderTestDeliveryReceipt(req)
 	})

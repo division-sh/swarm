@@ -22,7 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -36,11 +35,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
-func TestPipelineActivityIntentWriterPersistsDurableActivityRequestEvent(t *testing.T) {
+func TestPipelineActivityIntentWriterValidatesWithoutPersisting(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	bus := &recordingPipelineBus{}
 	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
@@ -53,10 +53,13 @@ func TestPipelineActivityIntentWriterPersistsDurableActivityRequestEvent(t *test
 	if err := writer.WriteActivityIntents(testAuthorActivityContext(t, context.Background()), []runtimeengine.ActivityIntent{intent}); err != nil {
 		t.Fatalf("WriteActivityIntents: %v", err)
 	}
-	if got := bus.outboxCount(); got != 1 {
-		t.Fatalf("outbox intents = %d, want 1", got)
+	if got := bus.outboxCount(); got != 0 {
+		t.Fatalf("outbox intents = %d, want none outside the named engine mutation", got)
 	}
-	request := bus.outboxIntent(0)
+	request, err := activityRequestEmitIntent(intent)
+	if err != nil {
+		t.Fatalf("activityRequestEmitIntent: %v", err)
+	}
 	if got := request.Event.Type(); got != activityRequestEventType {
 		t.Fatalf("request event type = %q, want %q", got, activityRequestEventType)
 	}
@@ -236,11 +239,11 @@ func TestActivityRequestAndResultPreserveMockExecutionMode(t *testing.T) {
 		t.Fatalf("recovered intent execution mode = %q, want mock", recovered.ExecutionMode)
 	}
 
-	var emitted []events.Event
-	ctx := context.WithValue(context.Background(), pipelineEmitCollectorKey{}, &emitted)
-	if err := (pipelineActivityDispatcher{}).publishActivityResult(ctx, recovered, recovered.SuccessEvent, map[string]any{"ok": true}); err != nil {
+	emissions := &pipelineEmissionPlan{}
+	if err := (pipelineActivityDispatcher{emissions: emissions}).publishActivityResult(context.Background(), recovered, recovered.SuccessEvent, map[string]any{"ok": true}); err != nil {
 		t.Fatalf("publishActivityResult: %v", err)
 	}
+	emitted := emissions.immutableEvents()
 	if len(emitted) != 1 || emitted[0].ExecutionMode() != executionmode.Mock {
 		t.Fatalf("result events = %#v, want one mock event", emitted)
 	}
@@ -263,7 +266,7 @@ func TestActivityExecutionContextRejectsCausalModeConflict(t *testing.T) {
 	}
 }
 
-func TestPipelineActivityIntentWriterDefersRuntimeLogUntilPostCommit(t *testing.T) {
+func TestPipelineActivityIntentWriterDoesNotUseAmbientPostCommitAuthority(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	bus := &recordingPipelineBus{}
 	pc := newPreviewPipelineCoordinator(bus, PipelineCoordinatorOptions{
@@ -279,16 +282,15 @@ func TestPipelineActivityIntentWriterDefersRuntimeLogUntilPostCommit(t *testing.
 	if err := writer.WriteActivityIntents(ctx, []runtimeengine.ActivityIntent{testActivityIntent("https://example.com/source")}); err != nil {
 		t.Fatalf("WriteActivityIntents: %v", err)
 	}
-	if got := len(bus.runtimeLogEntries()); got != 0 {
-		t.Fatalf("runtime logs before commit = %d, want 0", got)
+	if got := len(bus.runtimeLogEntries()); got != 1 {
+		t.Fatalf("runtime logs = %d, want immediate non-transactional diagnostic", got)
 	}
-	if got := len(postCommit); got != 1 {
-		t.Fatalf("post-commit actions = %d, want 1", got)
+	if got := len(postCommit); got != 0 {
+		t.Fatalf("post-commit actions = %d, want none", got)
 	}
-	FlushPipelinePostCommitActions(postCommit)
 	logs := bus.runtimeLogEntries()
 	if len(logs) != 1 || logs[0].Action != "intent_persisted" {
-		t.Fatalf("runtime logs after commit = %#v, want one intent_persisted entry", logs)
+		t.Fatalf("runtime logs = %#v, want one intent_persisted entry", logs)
 	}
 }
 
@@ -1572,7 +1574,7 @@ func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *t
 	runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 	runner := &activityCommitAckLossRunner{db: db}
 	store := newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db, runner)
-	activation, entityID := seedLoopActivityInstance(t, store, ctx, "review")
+	activation, flowInstance, entityID := seedLoopActivityInstance(t, store, ctx, "review")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
@@ -1585,17 +1587,35 @@ func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *t
 	bus := &recordingPipelineBus{}
 	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store), PipelineObligations: unavailablePipelineTestObligationOwner{}})
 	intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), entityID)
+	intent.FlowInstance = flowInstance
 	intent.Generation, intent.LoopStage = activation.Generation(), activation.CurrentStage
 	runner.failNext.Store(true)
 	if err := (pipelineActivityDispatcher{coordinator: pc}).executeActivityIntent(ctx, intent); err != nil {
 		t.Fatalf("execute after commit acknowledgment loss: %v", err)
+	}
+	if !runner.ackLost.Load() {
+		callbackErr, _ := runner.callbackErr.Load().(string)
+		t.Fatalf("commit acknowledgment loss was not reached; callback error=%q", callbackErr)
 	}
 	if calls.Load() != 0 {
 		t.Fatalf("provider calls = %d, want no blind dispatch", calls.Load())
 	}
 	record, ok, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent))
 	if err != nil || !ok || record.Status != ActivityAttemptStatusStarted || !record.Generation.Equal(intent.Generation) {
-		t.Fatalf("reconciled claim = %#v found=%v err=%v", record, ok, err)
+		rows, queryErr := db.QueryContext(ctx, `SELECT request_event_id, status FROM activity_attempts ORDER BY request_event_id`)
+		if queryErr != nil {
+			t.Fatalf("reconciled claim = %#v found=%v err=%v; inspect journal: %v", record, ok, err, queryErr)
+		}
+		defer rows.Close()
+		var journalRows []string
+		for rows.Next() {
+			var requestEventID, status string
+			if scanErr := rows.Scan(&requestEventID, &status); scanErr != nil {
+				t.Fatalf("reconciled claim = %#v found=%v err=%v; scan journal: %v", record, ok, err, scanErr)
+			}
+			journalRows = append(journalRows, requestEventID+":"+status)
+		}
+		t.Fatalf("reconciled claim = %#v found=%v err=%v expected=%s journal=%v", record, ok, err, activityRequestEventID(intent), journalRows)
 	}
 	if len(bus.publishes) != 0 {
 		t.Fatalf("published results after indeterminate claim: %#v", bus.publishes)
@@ -1603,8 +1623,10 @@ func TestLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatch(t *t
 }
 
 type activityCommitAckLossRunner struct {
-	db       *sql.DB
-	failNext atomic.Bool
+	db          *sql.DB
+	failNext    atomic.Bool
+	ackLost     atomic.Bool
+	callbackErr atomic.Value
 }
 
 func (r *activityCommitAckLossRunner) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
@@ -1620,15 +1642,15 @@ func (r *activityCommitAckLossRunner) RunRuntimeMutationContext(ctx context.Cont
 	}()
 	postCommit := make([]OwnerAction, 0, 2)
 	txctx := withPipelinePostCommitActions(WithPipelineSQLTxContext(ctx, tx), &postCommit)
-	storyctx, err := runtimeauthoractivity.Begin(txctx, tx, runtimeauthoractivity.DialectSQLite)
+	storyctx, err := authoractivityfixture.Begin(txctx, tx, authoractivityfixture.DialectSQLite)
 	if err != nil {
 		return err
 	}
-	storyctx = bindTestRunLifecycleMutation(storyctx, tx, workflowStoreDialectSQLite)
 	if err := fn(storyctx); err != nil {
+		r.callbackErr.Store(err.Error())
 		return err
 	}
-	if err := runtimeauthoractivity.Finalize(storyctx); err != nil {
+	if err := authoractivityfixture.Finalize(storyctx); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -1637,6 +1659,7 @@ func (r *activityCommitAckLossRunner) RunRuntimeMutationContext(ctx context.Cont
 	committed = true
 	flushPipelinePostCommitActions(postCommit)
 	if r.failNext.Swap(false) {
+		r.ackLost.Store(true)
 		return errors.New("simulated commit acknowledgment loss")
 	}
 	return nil

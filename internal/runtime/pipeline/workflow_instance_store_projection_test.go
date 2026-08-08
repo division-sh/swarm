@@ -18,7 +18,7 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	t.Cleanup(cleanup)
 
 	store := newPostgresWorkflowInstanceStoreForTest(db)
-	storageRef := uuid.NewString()
+	storageRef := "review/inst-1"
 	parentID := uuid.NewString()
 	parentFlowID := "operating"
 	parentFlowInstance := "operating/root"
@@ -55,7 +55,7 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 			"name":                 "Projection Flow",
 			"entity_type":          "workflow_subject",
 			"instance_id":          "inst-1",
-			"flow_path":            "review/inst-1",
+			"flow_path":            storageRef,
 			"instance_kind":        "materialized",
 			"template_version":     "v1",
 			"last_source_event":    "review.started",
@@ -72,7 +72,7 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 		t.Fatalf("upsert workflow instance: %v", err)
 	}
 
-	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), storageRef)
+	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute("review/inst-1"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -103,8 +103,8 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	if got := strings.TrimSpace(asString(loaded.Metadata["parent_entity_id"])); got != parentID {
 		t.Fatalf("Metadata parent_entity_id = %#v, want %q", loaded.Metadata["parent_entity_id"], parentID)
 	}
-	if got := strings.TrimSpace(asString(loaded.Metadata["storage_ref"])); got != storageRef {
-		t.Fatalf("Metadata storage_ref = %#v, want %q", loaded.Metadata["storage_ref"], storageRef)
+	if got := strings.TrimSpace(asString(loaded.Metadata["storage_ref"])); got != "review/inst-1" {
+		t.Fatalf("Metadata storage_ref = %#v, want review/inst-1", loaded.Metadata["storage_ref"])
 	}
 	if got := strings.TrimSpace(asString(loaded.Metadata["subject_id"])); got != "" {
 		t.Fatalf("Metadata subject_id = %#v, want empty", loaded.Metadata["subject_id"])
@@ -127,8 +127,8 @@ func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *tes
 	if err != nil {
 		t.Fatalf("workflowInstancePersistedIdentity(loaded): %v", err)
 	}
-	if identity.StorageRef != storageRef {
-		t.Fatalf("identity.StorageRef = %q, want %q", identity.StorageRef, storageRef)
+	if identity.StorageRef != "review/inst-1" {
+		t.Fatalf("identity.StorageRef = %q, want review/inst-1", identity.StorageRef)
 	}
 	if identity.ScopeKey != "review" {
 		t.Fatalf("identity.ScopeKey = %q, want review", identity.ScopeKey)
@@ -158,7 +158,8 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 	t.Cleanup(cleanup)
 
 	workflowStore := newPostgresWorkflowInstanceStoreForTest(db)
-	storageRef := uuid.NewString()
+	entityID := uuid.NewString()
+	storageRef := "projection-flow"
 	ctx := testWorkflowStoreRunContext(t, workflowStore)
 	instance := WorkflowInstance{
 		InstanceID:      "inst-1",
@@ -175,6 +176,7 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 			"entity_type": "workflow_subject",
 			"slug":        "projection",
 			"name":        "Projection Flow",
+			"entity_id":   entityID,
 		},
 		StateBuckets: map[string]any{
 			"score": float64(9),
@@ -185,7 +187,7 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 		t.Fatalf("upsert workflow instance: %v", err)
 	}
 
-	loaded, ok, err := workflowStore.Load(ctx, storageRef)
+	loaded, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute("projection-flow"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}
@@ -207,7 +209,7 @@ func TestWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityField
 		FROM entity_state es
 		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
 		WHERE es.run_id = $1::uuid AND es.entity_id = $2::uuid
-	`, testPipelineRunID, workflowInstanceRowID(storageRef)).Scan(&currentState, &fieldsRaw, &controlStatus); err != nil {
+	`, testPipelineRunID, workflowInstanceRowID(entityID)).Scan(&currentState, &fieldsRaw, &controlStatus); err != nil {
 		t.Fatalf("query entity_state projection: %v", err)
 	}
 	if got := strings.TrimSpace(currentState); got != "reviewing" {
@@ -275,7 +277,7 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 		t.Fatalf("duplicate create failure = %#v, want canonical already-exists failure", failure)
 	}
 
-	loaded, ok, err := store.Load(ctx, storageRef)
+	loaded, ok, err := store.Load(ctx, testWorkflowInstanceRoute(storageRef))
 	if err != nil {
 		t.Fatalf("load workflow instance after duplicate create: %v", err)
 	}
@@ -346,7 +348,7 @@ func TestWorkflowInstanceStoreProjection_StaticRowsDoNotGainMaterializedFlowPath
 		t.Fatalf("upsert static workflow instance: %v", err)
 	}
 
-	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), storageRef)
+	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute("static-flow"))
 	if err != nil {
 		t.Fatalf("load static workflow instance: %v", err)
 	}
@@ -368,6 +370,9 @@ func TestWorkflowInstanceStoreProjection_StaticRowsDoNotGainMaterializedFlowPath
 	}
 	if identity.InstancePath != "static-flow" {
 		t.Fatalf("identity.InstancePath = %q, want canonical static path", identity.InstancePath)
+	}
+	if identity.StorageRef != "static-flow" {
+		t.Fatalf("identity.StorageRef = %q, want canonical static path", identity.StorageRef)
 	}
 }
 
@@ -404,22 +409,22 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 			name:         "control metadata malformed",
 			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_id = $1`,
 			mutateKey:    "storage",
-			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","transition_history":"bad"}`,
+			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"projection-flow","transition_history":"bad"}`,
 			wantContains: "flow_instances.config transition_history must be an array of workflow transition records",
 		},
 		{
 			name:         "instance id disagrees with flow path",
 			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_id = $1`,
 			mutateKey:    "storage",
-			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-2","storage_ref":"storage-ref","flow_path":"review/inst-1"}`,
+			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-2","storage_ref":"projection-flow","flow_path":"review/inst-1"}`,
 			wantContains: "disagrees with flow_instance_path",
 		},
 		{
-			name:         "slash-only flow path normalizes before fallback",
+			name:         "slash-only flow path fails closed",
 			mutateSQL:    `UPDATE flow_instances SET config = $2::jsonb WHERE instance_id = $1`,
 			mutateKey:    "storage",
-			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"storage-ref","flow_path":"/"}`,
-			wantContains: "",
+			mutateArg:    `{"workflow_version":"1.0.0","instance_id":"inst-1","storage_ref":"projection-flow","flow_path":"/"}`,
+			wantContains: "flow_path",
 		},
 	}
 
@@ -430,6 +435,7 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 
 			store := newPostgresWorkflowInstanceStoreForTest(db)
 			storageRef := "storage-ref"
+			entityID := uuid.NewString()
 			if err := store.upsert(testWorkflowStoreRunContext(t, store), materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID:      "inst-1",
 				StorageRef:      storageRef,
@@ -438,21 +444,22 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 				CurrentState:    "queued",
 				Metadata: map[string]any{
 					"instance_id": "inst-1",
+					"entity_id":   entityID,
 				},
 				StateBuckets: map[string]any{},
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
 
-			mutateID := storageRef
+			mutateID := "projection-flow"
 			if tc.mutateKey == "entity" {
-				mutateID = workflowInstanceRowID(storageRef)
+				mutateID = entityID
 			}
 			if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), tc.mutateSQL, mutateID, tc.mutateArg); err != nil {
 				t.Fatalf("mutate malformed persisted shape: %v", err)
 			}
 
-			loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), storageRef)
+			loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute("projection-flow"))
 			if tc.wantContains == "" {
 				if err != nil {
 					t.Fatalf("load with slash-only flow_path: %v", err)

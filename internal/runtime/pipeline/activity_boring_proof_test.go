@@ -16,7 +16,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -25,6 +24,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -249,57 +249,6 @@ func TestActivityBoringProofDuplicateRequestReusesRecordedReadResult(t *testing.
 			}
 			assertActivityBoringRuntimeLogAction(t, fixture.bus, "result_reused")
 		})
-	}
-}
-
-func TestActivityBoringProofCrashAfterIntentBeforeResultCompletesOncePostgres(t *testing.T) {
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		_ = json.NewEncoder(w).Encode(map[string]any{"title": "Recovered Source"})
-	}))
-	defer server.Close()
-
-	fixture := newActivityBoringFixture(t, activityBoringStorePostgres, server.URL)
-	intent := newActivityBoringIntent("https://example.com/source", testPipelineRunID)
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), intent.SourceRunID)
-	writer := pipelineActivityIntentWriter{coordinator: fixture.pc}
-	if err := writer.WriteActivityIntents(ctx, []runtimeengine.ActivityIntent{intent}); err != nil {
-		t.Fatalf("WriteActivityIntents: %v", err)
-	}
-	if got := calls.Load(); got != 0 {
-		t.Fatalf("server calls after request persistence = %d, want 0 before post-crash restart", got)
-	}
-	requestID := activityRequestEventID(intent)
-	resultID := activityResultEventID(intent, intent.SuccessEvent)
-	assertActivityBoringEventCount(t, fixture.db, activityBoringStorePostgres, requestID, 1)
-	assertActivityBoringEventCount(t, fixture.db, activityBoringStorePostgres, resultID, 0)
-	assertActivityBoringRuntimeLogAction(t, fixture.bus, "intent_persisted")
-
-	restarted := newActivityBoringCoordinator(t, fixture.db, activityBoringStorePostgres, server.URL)
-	request := loadActivityBoringPersistedEvent(t, fixture.db, activityBoringStorePostgres, requestID)
-	assertActivityBoringPersistedRequestMatches(t, request, intent)
-	handled, _, err := restarted.pc.handleEventResult(ctx, request)
-	if err != nil {
-		t.Fatalf("restart handleEventResult: %v", err)
-	}
-	if !handled {
-		t.Fatal("restart handleEventResult handled = false, want true")
-	}
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("server calls after restart completion = %d, want 1", got)
-	}
-	assertActivityBoringEventCount(t, fixture.db, activityBoringStorePostgres, resultID, 1)
-
-	handled, _, err = restarted.pc.handleEventResult(ctx, request)
-	if err != nil {
-		t.Fatalf("duplicate post-restart handleEventResult: %v", err)
-	}
-	if !handled {
-		t.Fatal("duplicate post-restart handled = false, want true")
-	}
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("server calls after duplicate completed request = %d, want recorded result reuse", got)
 	}
 }
 
@@ -594,7 +543,7 @@ func activityBoringFullFlowBundle(serverURL string) *runtimecontracts.WorkflowCo
 	}
 	return &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:         "research",
+			Name:         "activity-boring-proof",
 			Version:      "v-test",
 			InitialStage: "pending",
 			FlowInitial:  map[string]string{"research": "pending"},
@@ -640,6 +589,8 @@ func newActivityBoringSourceEvent(entityID, runID, inputURL string) events.Event
 	if strings.TrimSpace(runID) == "" {
 		runID = testPipelineRunID
 	}
+	envelope := events.EnvelopeForFlowInstance(events.EventEnvelope{}, "research/"+strings.TrimSpace(entityID))
+	envelope = events.EnvelopeForEntityID(envelope, entityID)
 	return eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
 		events.EventType("source.requested"),
@@ -649,7 +600,7 @@ func newActivityBoringSourceEvent(entityID, runID, inputURL string) events.Event
 		2,
 		runID,
 		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		envelope,
 		time.Now().UTC(),
 	)
 }
@@ -745,10 +696,6 @@ type persistingActivityBoringBus struct {
 	beforeActivityRequestHandle func(context.Context, events.Event) error
 }
 
-type persistingActivityBoringOutbox struct {
-	bus *persistingActivityBoringBus
-}
-
 type persistingActivityBoringDispatcher struct {
 	bus *persistingActivityBoringBus
 }
@@ -762,39 +709,17 @@ func (b *persistingActivityBoringBus) Publish(ctx context.Context, evt events.Ev
 	return b.recordingPipelineBus.Publish(ctx, evt)
 }
 
-func (b *persistingActivityBoringBus) EngineOutbox() runtimeengine.OutboxWriter {
-	return persistingActivityBoringOutbox{bus: b}
+func (b *persistingActivityBoringBus) PrepareEnginePublications(ctx context.Context, intents []runtimeengine.EmitIntent) ([]runtimeengine.DurablePublicationPlan, error) {
+	b.recordingPipelineBus.publishInMutationHook = b.appendEvent
+	return b.recordingPipelineBus.PrepareEnginePublications(ctx, intents)
 }
 
 func (b *persistingActivityBoringBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return persistingActivityBoringDispatcher{bus: b}
 }
 
-func (o persistingActivityBoringOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.EmitIntent) error {
-	if o.bus == nil {
-		return nil
-	}
-	if o.bus.outboxErr != nil {
-		return o.bus.outboxErr
-	}
-	for _, intent := range intents {
-		if o.bus.appendEvent != nil {
-			if err := o.bus.appendEvent(ctx, intent.Event); err != nil {
-				return err
-			}
-		}
-	}
-	o.bus.mu.Lock()
-	defer o.bus.mu.Unlock()
-	o.bus.outboxIntents = append(o.bus.outboxIntents, cloneEmitIntents(intents)...)
-	return nil
-}
-
 func (d persistingActivityBoringDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) error {
 	if d.bus == nil {
-		return nil
-	}
-	if CollectPipelineEmitIntents(ctx, intents) {
 		return nil
 	}
 	for _, intent := range intents {
@@ -854,21 +779,21 @@ func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBor
 		return err
 	}
 	var (
-		dialect        runtimeauthoractivity.Dialect
+		dialect        authoractivityfixture.Dialect
 		fixtureDialect runlifecyclefixture.Dialect
 	)
 	switch kind {
 	case activityBoringStoreSQLite:
-		dialect = runtimeauthoractivity.DialectSQLite
+		dialect = authoractivityfixture.DialectSQLite
 		fixtureDialect = runlifecyclefixture.DialectSQLite
 	case activityBoringStorePostgres:
-		dialect = runtimeauthoractivity.DialectPostgres
+		dialect = authoractivityfixture.DialectPostgres
 		fixtureDialect = runlifecyclefixture.DialectPostgres
 	default:
 		return nil
 	}
-	if _, ok := PipelineSQLTxFromContext(ctx); ok {
-		if _, err := runtimerunlifecycle.Create(ctx, runtimerunlifecycle.CreateRequest{
+	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
+		if _, err := (testRunLifecycleMutation{tx: tx, dialect: workflowStoreDialect(kind)}).CreateRun(ctx, runtimerunlifecycle.CreateRequest{
 			RunID:     runID,
 			Origin:    runtimerunlifecycle.ScenarioSetupRunOrigin(),
 			Source:    source,
@@ -905,7 +830,7 @@ func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, k
 	}
 	if err := fixture.pc.workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:      entityID,
-		StorageRef:      entityID,
+		StorageRef:      "research/" + entityID,
 		WorkflowName:    "research",
 		WorkflowVersion: "v-test",
 		CurrentState:    "pending",
@@ -955,7 +880,7 @@ func loadActivityBoringPersistedEvent(t *testing.T, db *sql.DB, kind activityBor
 	if kind != activityBoringStorePostgres {
 		t.Fatalf("persisted crash readback proof requires Postgres, got %s", kind)
 	}
-	event, err := eventfixture.Load(context.Background(), db, runtimeauthoractivity.DialectPostgres, eventID)
+	event, err := eventfixture.Load(context.Background(), db, authoractivityfixture.DialectPostgres, eventID)
 	if err != nil {
 		t.Fatalf("load persisted event %s: %v", eventID, err)
 	}

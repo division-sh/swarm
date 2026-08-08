@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 
@@ -955,6 +956,24 @@ type RunForkSelectedContractExecutionMaterializeRequest struct {
 	FrontierAdmission RunForkContractFrontierAdmission
 	RouteTopology     RunForkSelectedContractRouteTopology
 	RecipientPlanning RunForkSelectedContractRecipientPlanning
+	WorkflowStates    []RunForkSelectedContractWorkflowState
+}
+
+type RunForkSelectedContractWorkflowStateAddressKind string
+
+const (
+	RunForkSelectedContractWorkflowStateRunScope RunForkSelectedContractWorkflowStateAddressKind = "run_scope"
+	RunForkSelectedContractWorkflowStateExact    RunForkSelectedContractWorkflowStateAddressKind = "exact"
+)
+
+type RunForkSelectedContractWorkflowState struct {
+	SourceEventID   string
+	EntityID        string
+	FlowID          string
+	WorkflowVersion string
+	Mode            string
+	AddressKind     RunForkSelectedContractWorkflowStateAddressKind
+	Route           runtimeflowidentity.Route
 }
 
 type RunForkSelectedContractExecutionActivateRequest struct {

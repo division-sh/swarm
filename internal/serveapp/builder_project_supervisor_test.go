@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -25,7 +24,6 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -43,6 +41,7 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -449,9 +448,9 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 		return runtimepkg.BundleContext{
 			BundleSourceFact: mustServeTestEphemeralBundleSourceFact(hash), Source: source, Runtime: &runtimepkg.Runtime{Bus: bus, InboundGateway: gateway}, WorkOwner: workOwner,
 			StandingTargets: []runtimepkg.StandingTarget{{
-				BundleHash: hash, ServiceID: "service-" + alias, FlowID: "telegram-chat", Alias: alias, Provider: "telegram",
+				BundleHash: hash, ServiceID: "43000000-0000-0000-0000-000000000001", PackageKey: "telegram-package", FlowID: "telegram-chat", Alias: alias, Provider: "telegram",
 				RunID: runID, FlowInstance: "telegram-chat/" + strings.TrimPrefix(alias, "chat-"),
-				EntityID: entityID, Generation: 1, SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
+				InstanceID: alias, EntityID: entityID, Generation: 1, PublicationSequence: 1, SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 			}},
 		}, persistence, eventsStore
 	}
@@ -478,13 +477,13 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 	rec := httptest.NewRecorder()
 	runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(rec, req)
 	if rec.Code != http.StatusAccepted {
-		t.Fatalf("selected-context response = %d %q, want 202", rec.Code, rec.Body.String())
+		t.Fatalf("selected-context response = %d %q commit_error=%v, want 202", rec.Code, rec.Body.String(), persistenceB.lastError)
 	}
 	if persistenceA.recorded || len(eventsA.events) != 0 {
 		t.Fatalf("non-selected context A was touched: publication=%v events=%d", persistenceA.recorded, len(eventsA.events))
 	}
 	if !persistenceB.recorded || len(eventsB.events) != 2 {
-		t.Fatalf("selected context B publication/events = %v/%d, want true and raw plus normalized", persistenceB.recorded, len(eventsB.events))
+		t.Fatalf("selected context B publication/events = %v/%d error=%v, want true and raw plus normalized", persistenceB.recorded, len(eventsB.events), persistenceB.lastError)
 	}
 	if got := eventsB.events[0].RunID(); got != contextB.StandingTargets[0].RunID {
 		t.Fatalf("selected event run_id = %q, want %q", got, contextB.StandingTargets[0].RunID)
@@ -734,12 +733,12 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 			open: func(t *testing.T) storeBundle {
 				dsn, _, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				store, err := store.NewPostgresStore(dsn)
+				selected, err := store.NewPostgresStore(dsn)
 				if err != nil {
 					t.Fatalf("NewPostgresStore: %v", err)
 				}
-				t.Cleanup(func() { _ = store.DB.Close() })
-				return selectedPostgresStoreBundle(store, &config.Config{})
+				t.Cleanup(func() { _ = storetest.DatabaseForTest(selected).Close() })
+				return selectedPostgresStoreBundle(selected, storetest.DatabaseForTest(selected), &config.Config{})
 			},
 		},
 	}
@@ -997,8 +996,8 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 				if err != nil {
 					t.Fatalf("NewPostgresStore: %v", err)
 				}
-				t.Cleanup(func() { _ = selected.DB.Close() })
-				return selectedPostgresStoreBundle(selected, &config.Config{})
+				t.Cleanup(func() { _ = storetest.DatabaseForTest(selected).Close() })
+				return selectedPostgresStoreBundle(selected, storetest.DatabaseForTest(selected), &config.Config{})
 			},
 		},
 	}
@@ -1148,8 +1147,8 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 			if err != nil {
 				t.Fatalf("NewPostgresStore: %v", err)
 			}
-			t.Cleanup(func() { _ = selected.DB.Close() })
-			return selectedPostgresStoreBundle(selected, &config.Config{})
+			t.Cleanup(func() { _ = storetest.DatabaseForTest(selected).Close() })
+			return selectedPostgresStoreBundle(selected, storetest.DatabaseForTest(selected), &config.Config{})
 		}},
 	}
 	for _, backend := range backends {
@@ -1358,8 +1357,8 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 			if err != nil {
 				t.Fatalf("NewPostgresStore: %v", err)
 			}
-			t.Cleanup(func() { _ = pg.DB.Close() })
-			return selectedPostgresStoreBundle(pg, &config.Config{})
+			t.Cleanup(func() { _ = storetest.DatabaseForTest(pg).Close() })
+			return selectedPostgresStoreBundle(pg, storetest.DatabaseForTest(pg), &config.Config{})
 		}},
 	}
 	for _, backend := range backends {
@@ -1655,52 +1654,33 @@ func (processIngressCredentialStore) List(context.Context) ([]string, error)    
 func (processIngressCredentialStore) Delete(context.Context, string) error      { return nil }
 
 type processIngressProofStore struct {
-	recorded bool
-	store    runtimebus.EventStore
+	recorded  bool
+	store     runtimebus.EventStore
+	lastError error
 }
 
-type processIngressMutation struct {
-	ctx          context.Context
-	store        runtimebus.EventStore
-	finalization runtimeinbound.Finalization
-	finalized    bool
-}
-
-func (m *processIngressMutation) Context() context.Context { return m.ctx }
-
-func (m *processIngressMutation) FinalizeInboundPublication(_ context.Context, finalization runtimeinbound.Finalization) error {
-	m.finalization = finalization
-	m.finalized = true
-	return nil
-}
-
-func (s *processIngressProofStore) RunInboundPublicationMutation(ctx context.Context, request runtimeinbound.Request, fn func(runtimeinbound.Mutation) error) (runtimeinbound.Record, error) {
+func (s *processIngressProofStore) CommitInboundPublication(ctx context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
+	if err := command.Validate(); err != nil {
+		s.lastError = err
+		return runtimeinbound.CommitResult{}, err
+	}
 	s.recorded = true
-	mutation := &processIngressMutation{store: s.store}
-	transaction, ok := s.store.(runtimebus.CommitPublishTransaction)
+	owner, ok := s.store.(runtimebus.CommitPublicationOwner)
 	if !ok {
-		return runtimeinbound.Record{}, errors.New("process ingress store does not expose its test commit transaction")
+		return runtimeinbound.CommitResult{}, errors.New("process ingress store does not implement closed publication commit")
 	}
-	mutation.ctx = runtimebus.WithCommitPublishTransaction(ctx, transaction)
-	if err := fn(mutation); err != nil {
-		return runtimeinbound.Record{}, err
-	}
-	if !mutation.finalized {
-		return runtimeinbound.Record{}, errors.New("process ingress publication was not finalized")
-	}
-	children := make([]runtimeinbound.EventRecord, len(mutation.finalization.Events))
-	for i, finalized := range mutation.finalization.Events {
-		var routes []events.DeliveryRoute
-		if err := json.Unmarshal(finalized.RecipientManifest, &routes); err != nil {
-			return runtimeinbound.Record{}, fmt.Errorf("decode process ingress recipient manifest: %w", err)
-		}
-		_, recipientFingerprint, recipientCount, err := runtimeinbound.CanonicalRecipientManifest(routes)
+	committed := make([]runtimebus.CommittedPublication, len(command.Publications))
+	children := make([]runtimeinbound.EventRecord, len(command.Finalization.Events))
+	for i, finalized := range command.Finalization.Events {
+		var err error
+		committed[i], err = owner.CommitPublication(ctx, command.Publications[i])
 		if err != nil {
-			return runtimeinbound.Record{}, err
+			s.lastError = err
+			return runtimeinbound.CommitResult{}, err
 		}
 		eventFingerprint, err := runtimeinbound.EventIntegrityFingerprint(finalized.Event, finalized.Kind, finalized.Authorization)
 		if err != nil {
-			return runtimeinbound.Record{}, err
+			return runtimeinbound.CommitResult{}, err
 		}
 		children[i] = runtimeinbound.EventRecord{
 			Ordinal:                      finalized.Ordinal,
@@ -1709,12 +1689,15 @@ func (s *processIngressProofStore) RunInboundPublicationMutation(ctx context.Con
 			Kind:                         finalized.Kind,
 			Authorization:                finalized.Authorization,
 			EventIntegrityFingerprint:    eventFingerprint,
-			RecipientManifestFingerprint: recipientFingerprint,
-			RecipientCount:               recipientCount,
+			RecipientManifestFingerprint: strings.Repeat("0", 64),
+			RecipientCount:               len(command.Publications[i].Commit.DeliveryRoutes),
 			Event:                        finalized.Event,
 		}
 	}
-	return runtimeinbound.Record{Request: request, State: "committed", OutputCount: len(children), Events: children, Created: true}, nil
+	return runtimeinbound.CommitResult{
+		Record:       runtimeinbound.Record{Request: command.Request, State: "committed", OutputCount: len(children), Events: children, Created: true},
+		Publications: committed,
+	}, nil
 }
 func (*processIngressProofStore) LoadInboundPublicationByIdentity(context.Context, string, string, string) (runtimeinbound.Record, bool, error) {
 	return runtimeinbound.Record{}, false, nil
@@ -1725,54 +1708,30 @@ func (*processIngressProofStore) ValidateInboundPublicationIntegrity(context.Con
 
 type processIngressEventStore struct {
 	events []events.Event
-	active []string
 }
 
-func (s *processIngressEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublish(ctx, plan, s.beginPublish, s.finalizePublish)
-}
-
-func (s *processIngressEventStore) beginPublish(_ context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
-	event := admitted.Event()
+func (s *processIngressEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	event := command.Commit.Event.Event()
 	for _, existing := range s.events {
 		if existing.ID() != event.ID() {
 			continue
 		}
 		if !reflect.DeepEqual(existing, event) {
-			return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("event %s conflicts with its committed fixture", event.ID())
+			return runtimebus.CommittedPublication{}, fmt.Errorf("event %s conflicts with its committed fixture", event.ID())
 		}
-		return runtimebus.EventAppendExactDuplicate, nil
+		return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendExactDuplicate}, nil
 	}
 	s.events = append(s.events, event)
-	s.active = append(s.active, event.ID())
-	return runtimebus.EventAppendInserted, nil
-}
-
-func (s *processIngressEventStore) finalizePublish(_ context.Context, req runtimebus.CommitPublishRequest) error {
-	if len(s.active) == 0 || s.active[len(s.active)-1] != req.Event.ID() {
-		return errors.New("prepared event finalization does not match active process ingress event")
-	}
-	if req.DeliveryReceipt == nil {
-		return errors.New("process ingress delivery commit receipt is required")
-	}
-	if err := req.DeliveryReceipt.Record(nil); err != nil {
-		return err
-	}
-	s.active = s.active[:len(s.active)-1]
-	return nil
+	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
 }
 
 func (s *processIngressEventStore) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
 	return events.AdmittedEvent{}, false, nil
 }
 
-func (s *processIngressEventStore) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
-	return s.beginPublish(ctx, prepared.AdmittedEvent())
-}
-
-func (s *processIngressEventStore) FinalizePreparedPublish(ctx context.Context, finalization runtimebus.PreparedPublishFinalization) error {
-	return s.finalizePublish(ctx, finalization.Request())
-}
 func (*processIngressEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, nil
 }
@@ -1835,8 +1794,8 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 			if err != nil {
 				t.Fatalf("NewPostgresStore: %v", err)
 			}
-			t.Cleanup(func() { _ = pg.DB.Close() })
-			return selectedPostgresStoreBundle(pg, &config.Config{})
+			t.Cleanup(func() { _ = storetest.DatabaseForTest(pg).Close() })
+			return selectedPostgresStoreBundle(pg, storetest.DatabaseForTest(pg), &config.Config{})
 		}},
 	}
 	for _, backend := range backends {
@@ -2182,7 +2141,7 @@ func TestRuntimeProjectSupervisorOpenProjectNoAgentSkipsWorkspaceLifecycle(t *te
 		if err != nil {
 			return nil, cliapp.WorkspaceBackendSelection{}, err
 		}
-		lifecycle, err := cliapp.ConfiguredWorkspaceLifecycleForBackend(stores.facade().workspaceDB(), supervisor.cfg, contractsRoot, source, mountSources, decision)
+		lifecycle, err := cliapp.ConfiguredWorkspaceLifecycleForBackend(stores.facade().workspaceLookup(), supervisor.cfg, contractsRoot, source, mountSources, decision)
 		if err != nil {
 			return nil, decision, err
 		}

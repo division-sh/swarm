@@ -335,7 +335,7 @@ func (e *Executor) execAgentHire(ctx context.Context, actor models.AgentConfig, 
 	}
 	if err := syncManagedAgentAuthority(e.authority, manager, actor, cfg); err != nil {
 		syncErr := fmt.Errorf("record hired agent authority: %w", err)
-		if teardownErr := manager.TeardownAgentTarget(cfg.ID, cfg.CanonicalFlowPath(), nil, nil); teardownErr != nil {
+		if _, teardownErr := manager.TeardownAgentTarget(cfg.ID, cfg.CanonicalFlowPath(), &cfg); teardownErr != nil {
 			return nil, errors.Join(syncErr, fmt.Errorf("rollback hired agent after authority failure: %w", teardownErr))
 		}
 		return nil, syncErr
@@ -365,42 +365,18 @@ func (e *Executor) execAgentFire(actor models.AgentConfig, input any) (any, erro
 	if err := authorizeManage(e.authority, actor, targetCfg, manager); err != nil {
 		return nil, err
 	}
-	var priorAuthority managedAgentAuthorityPlan
-	authorityRemoved := false
-	if err := manager.TeardownAgentTarget(
-		in.AgentID,
-		in.FlowInstance,
-		func(current models.AgentConfig) error {
-			if err := authorizeManage(e.authority, actor, current, manager); err != nil {
-				return fmt.Errorf("revalidate serialized fire authority: %w", err)
-			}
-			child, err := current.ConcreteIdentity()
-			if err != nil {
-				return fmt.Errorf("resolve fired agent identity: %w", err)
-			}
-			plan, err := currentManagedAgentAuthorityPlan(e.authority, child)
-			if err != nil {
-				return fmt.Errorf("snapshot fired agent authority: %w", err)
-			}
-			if err := runtimeauthority.RemoveManagedAgent(e.authority, plan.child); err != nil {
-				return fmt.Errorf("remove fired agent authority: %w", err)
-			}
-			priorAuthority = plan
-			authorityRemoved = true
-			return nil
-		},
-		func(models.AgentConfig) error {
-			if !authorityRemoved {
-				return nil
-			}
-			if err := applyManagedAgentAuthority(e.authority, priorAuthority); err != nil {
-				return fmt.Errorf("restore fired agent authority: %w", err)
-			}
-			authorityRemoved = false
-			return nil
-		},
-	); err != nil {
+	child, err := targetCfg.ConcreteIdentity()
+	if err != nil {
+		return nil, fmt.Errorf("resolve fired agent identity: %w", err)
+	}
+	if _, err := currentManagedAgentAuthorityPlan(e.authority, child); err != nil {
+		return nil, fmt.Errorf("snapshot fired agent authority: %w", err)
+	}
+	if _, err := manager.TeardownAgentTarget(in.AgentID, in.FlowInstance, &targetCfg); err != nil {
 		return nil, err
+	}
+	if err := runtimeauthority.RemoveManagedAgent(e.authority, child); err != nil {
+		return nil, fmt.Errorf("project committed fired agent authority: %w", err)
 	}
 	return map[string]any{"status": "fired", "agent_id": in.AgentID}, nil
 }
@@ -434,52 +410,31 @@ func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentC
 	if err := e.ValidateNativeToolAdmission(ctx, updatedCfg); err != nil {
 		return nil, err
 	}
-	if _, err := managedAgentAuthorityPlanForCandidate(manager, actor, updatedCfg); err != nil {
+	authorityPlan, err := managedAgentAuthorityPlanForCandidate(manager, actor, updatedCfg)
+	if err != nil {
 		return nil, fmt.Errorf("validate reconfigured agent authority: %w", err)
 	}
-	// The manager invokes the hook again with the predecessor only when the
-	// serialized handoff must be compensated.
-	handoffAttempted := false
-	handoffApplied := false
-	var priorAuthority managedAgentAuthorityPlan
-	if err := manager.ReconfigureAgentTarget(in.AgentID, in.FlowInstance, in.Config, func(committed models.AgentConfig) error {
-		if handoffAttempted {
-			if !handoffApplied {
-				return nil
-			}
-			if err := applyManagedAgentAuthority(e.authority, priorAuthority); err != nil {
-				return fmt.Errorf("restore prior agent authority: %w", err)
-			}
-			handoffApplied = false
-			return nil
+	if authorityPlan.hasParent {
+		if err := runtimeauthority.ValidateManagedAgent(e.authority, authorityPlan.child, authorityPlan.parent); err != nil {
+			return nil, fmt.Errorf("validate reconfigured agent authority: %w", err)
 		}
-		handoffAttempted = true
-		current, err := manager.ResolveAgentConfig(in.AgentID, in.FlowInstance)
-		if err != nil {
-			return fmt.Errorf("resolve serialized reconfigure target %s: %w", in.AgentID, err)
-		}
-		if err := authorizeManage(e.authority, actor, current, manager); err != nil {
-			return fmt.Errorf("revalidate serialized reconfigure authority: %w", err)
-		}
-		currentIdentity, err := current.ConcreteIdentity()
-		if err != nil {
-			return fmt.Errorf("resolve serialized reconfigure target identity: %w", err)
-		}
-		priorAuthority, err = currentManagedAgentAuthorityPlan(e.authority, currentIdentity)
-		if err != nil {
-			return fmt.Errorf("snapshot prior agent authority: %w", err)
-		}
-		authorityPlan, err := managedAgentAuthorityPlanForCandidate(manager, actor, committed)
-		if err != nil {
-			return fmt.Errorf("validate committed agent authority: %w", err)
-		}
-		if err := applyManagedAgentAuthority(e.authority, authorityPlan); err != nil {
-			return fmt.Errorf("record committed agent authority: %w", err)
-		}
-		handoffApplied = true
-		return nil
-	}); err != nil {
+	}
+	result, err := manager.ReconfigureAgentTarget(in.AgentID, in.FlowInstance, in.Config, &targetCfg)
+	if err != nil {
 		return nil, err
+	}
+	if result.CurrentConfig.ID == "" {
+		return nil, errors.New("reconfigured agent mutation returned no committed configuration")
+	}
+	committedPlan, err := managedAgentAuthorityPlanForCandidate(manager, actor, result.CurrentConfig)
+	if err != nil {
+		return nil, fmt.Errorf("validate committed agent authority: %w", err)
+	}
+	if committedPlan != authorityPlan {
+		return nil, errors.New("committed agent authority differs from the prevalidated transition")
+	}
+	if err := applyManagedAgentAuthority(e.authority, committedPlan); err != nil {
+		return nil, fmt.Errorf("project committed agent authority: %w", err)
 	}
 	return map[string]any{"status": "reconfigured", "agent_id": in.AgentID}, nil
 }

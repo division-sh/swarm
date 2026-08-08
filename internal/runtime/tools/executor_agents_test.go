@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -53,19 +54,12 @@ func (m managerStub) ResolveAgentConfig(agentID, flowInstance string) (models.Ag
 func (managerStub) SpawnAgentForEntity(string, models.AgentConfig) error { return nil }
 func (managerStub) TeardownAgentTarget(
 	_, _ string,
-	beforeCommit func(models.AgentConfig) error,
-	_ func(models.AgentConfig) error,
-) error {
-	if beforeCommit != nil {
-		return beforeCommit(models.AgentConfig{})
-	}
-	return nil
+	_ *models.AgentConfig,
+) (models.AgentTargetMutationResult, error) {
+	return models.AgentTargetMutationResult{Transitioned: true}, nil
 }
-func (managerStub) ReconfigureAgentTarget(_ string, _ string, cfg models.AgentConfig, onCommitted func(models.AgentConfig) error) error {
-	if onCommitted != nil {
-		return onCommitted(cfg)
-	}
-	return nil
+func (managerStub) ReconfigureAgentTarget(_ string, _ string, cfg models.AgentConfig, _ *models.AgentConfig) (models.AgentTargetMutationResult, error) {
+	return models.AgentTargetMutationResult{CurrentConfig: cfg, Transitioned: true}, nil
 }
 
 type publishDirectBusStub struct {
@@ -144,29 +138,26 @@ func (m *captureManagerStub) SpawnAgentForEntity(entityID string, cfg models.Age
 
 func (m *captureManagerStub) TeardownAgentTarget(
 	agentID, flowInstance string,
-	beforeCommit func(models.AgentConfig) error,
-	_ func(models.AgentConfig) error,
-) error {
+	expected *models.AgentConfig,
+) (models.AgentTargetMutationResult, error) {
 	cfg, err := m.ResolveAgentConfig(agentID, flowInstance)
 	if err != nil {
-		return err
+		return models.AgentTargetMutationResult{}, err
 	}
-	if beforeCommit != nil {
-		if err := beforeCommit(cfg); err != nil {
-			return err
-		}
+	if expected != nil && !reflect.DeepEqual(cfg, *expected) {
+		return models.AgentTargetMutationResult{}, errors.New("agent_config_changed")
 	}
 	m.tornDownID = agentID
 	m.teardownCalled = true
 	delete(m.agents, agentID)
-	return nil
+	return models.AgentTargetMutationResult{PreviousConfig: cfg, Transitioned: true}, nil
 }
 
 func (m *captureManagerStub) ReconfigureAgentTarget(
 	agentID, flowInstance string,
 	cfg models.AgentConfig,
-	onCommitted func(models.AgentConfig) error,
-) error {
+	expected *models.AgentConfig,
+) (models.AgentTargetMutationResult, error) {
 	if m.reconfigureArrive != nil {
 		m.reconfigureArrive <- struct{}{}
 	}
@@ -178,8 +169,12 @@ func (m *captureManagerStub) ReconfigureAgentTarget(
 
 	current, err := m.ResolveAgentConfig(agentID, flowInstance)
 	if err != nil {
-		return err
+		return models.AgentTargetMutationResult{}, err
 	}
+	if expected != nil && !reflect.DeepEqual(current, *expected) {
+		return models.AgentTargetMutationResult{}, errors.New("agent_config_changed")
+	}
+	previous := current
 	m.reconfiguredID = agentID
 	m.reconfiguredPatch = cfg
 	m.reconfigureCalled = true
@@ -190,15 +185,10 @@ func (m *captureManagerStub) ReconfigureAgentTarget(
 	current.ID = agentID
 	current, err = withRuntimeToolsTestIdentity(current)
 	if err != nil {
-		return err
-	}
-	if onCommitted != nil {
-		if err := onCommitted(current); err != nil {
-			return err
-		}
+		return models.AgentTargetMutationResult{}, err
 	}
 	m.agents[agentID] = current
-	return nil
+	return models.AgentTargetMutationResult{PreviousConfig: previous, CurrentConfig: current, Transitioned: true}, nil
 }
 
 type staleAuthorizationManagerStub struct {
@@ -230,9 +220,8 @@ func (*staleAuthorizationManagerStub) SpawnAgentForEntity(string, models.AgentCo
 
 func (m *staleAuthorizationManagerStub) TeardownAgentTarget(
 	agentID, flowInstance string,
-	beforeCommit func(models.AgentConfig) error,
-	restoreBeforeCommit func(models.AgentConfig) error,
-) error {
+	expected *models.AgentConfig,
+) (models.AgentTargetMutationResult, error) {
 	if m.teardownArrive != nil {
 		m.teardownArrive <- struct{}{}
 	}
@@ -241,62 +230,47 @@ func (m *staleAuthorizationManagerStub) TeardownAgentTarget(
 	}
 	current, err := m.ResolveAgentConfig(agentID, flowInstance)
 	if err != nil {
-		return err
+		return models.AgentTargetMutationResult{}, err
 	}
-	if beforeCommit != nil {
-		if err := beforeCommit(current); err != nil {
-			return err
-		}
+	if expected != nil && !reflect.DeepEqual(current, *expected) {
+		return models.AgentTargetMutationResult{}, errors.New("agent_config_changed")
 	}
 	if m.teardownFail {
-		if restoreBeforeCommit != nil {
-			if err := restoreBeforeCommit(current); err != nil {
-				return err
-			}
-		}
-		return errors.New("injected teardown persistence failure")
+		return models.AgentTargetMutationResult{}, errors.New("injected teardown persistence failure")
 	}
 	m.stateMu.Lock()
 	delete(m.agents, agentID)
 	m.stateMu.Unlock()
-	return nil
+	return models.AgentTargetMutationResult{PreviousConfig: current, Transitioned: true}, nil
 }
 
 func (m *staleAuthorizationManagerStub) ReconfigureAgentTarget(
 	agentID, flowInstance string,
 	patch models.AgentConfig,
-	onCommitted func(models.AgentConfig) error,
-) error {
+	expected *models.AgentConfig,
+) (models.AgentTargetMutationResult, error) {
 	m.arrivals <- struct{}{}
 	m.reconfigure.Lock()
 	defer m.reconfigure.Unlock()
 
 	current, err := m.ResolveAgentConfig(agentID, flowInstance)
 	if err != nil {
-		return err
+		return models.AgentTargetMutationResult{}, err
+	}
+	if expected != nil && !reflect.DeepEqual(current, *expected) {
+		return models.AgentTargetMutationResult{}, errors.New("agent_config_changed")
 	}
 	candidate := models.MergeAgentConfig(current, patch)
 	if !m.first {
 		m.first = true
-		if err := onCommitted(candidate); err != nil {
-			_ = onCommitted(current)
-			return err
-		}
 		close(m.firstApplied)
 		<-m.releaseFirst
-		if err := onCommitted(current); err != nil {
-			return err
-		}
-		return errors.New("injected persistence failure")
-	}
-	if err := onCommitted(candidate); err != nil {
-		_ = onCommitted(current)
-		return err
+		return models.AgentTargetMutationResult{}, errors.New("injected persistence failure")
 	}
 	m.stateMu.Lock()
 	m.agents[agentID] = candidate
 	m.stateMu.Unlock()
-	return nil
+	return models.AgentTargetMutationResult{PreviousConfig: current, CurrentConfig: candidate, Transitioned: true}, nil
 }
 
 func withRuntimeToolsTestIdentity(cfg models.AgentConfig) (models.AgentConfig, error) {
@@ -353,46 +327,43 @@ func (m *concreteManagerStub) SpawnAgentForEntity(_ string, cfg models.AgentConf
 
 func (m *concreteManagerStub) TeardownAgentTarget(
 	agentID, flowInstance string,
-	beforeCommit func(models.AgentConfig) error,
-	_ func(models.AgentConfig) error,
-) error {
+	expected *models.AgentConfig,
+) (models.AgentTargetMutationResult, error) {
 	cfg, err := m.ResolveAgentConfig(agentID, flowInstance)
 	if err != nil {
-		return err
+		return models.AgentTargetMutationResult{}, err
 	}
-	if beforeCommit != nil {
-		if err := beforeCommit(cfg); err != nil {
-			return err
-		}
+	if expected != nil && !reflect.DeepEqual(cfg, *expected) {
+		return models.AgentTargetMutationResult{}, errors.New("agent_config_changed")
 	}
 	identity, err := cfg.ConcreteIdentity()
 	if err != nil {
-		return err
+		return models.AgentTargetMutationResult{}, err
 	}
 	delete(m.agents, identity)
 	m.tornDown = append(m.tornDown, identity)
-	return nil
+	return models.AgentTargetMutationResult{PreviousConfig: cfg, Transitioned: true}, nil
 }
 
 func (m *concreteManagerStub) ReconfigureAgentTarget(
 	agentID, flowInstance string,
 	cfg models.AgentConfig,
-	onCommitted func(models.AgentConfig) error,
-) error {
+	expected *models.AgentConfig,
+) (models.AgentTargetMutationResult, error) {
 	current, err := m.ResolveAgentConfig(agentID, flowInstance)
 	if err != nil {
-		return err
+		return models.AgentTargetMutationResult{}, err
+	}
+	if expected != nil && !reflect.DeepEqual(current, *expected) {
+		return models.AgentTargetMutationResult{}, errors.New("agent_config_changed")
 	}
 	identity, err := current.ConcreteIdentity()
 	if err != nil {
-		return err
+		return models.AgentTargetMutationResult{}, err
 	}
 	committed := models.MergeAgentConfig(current, cfg)
 	m.agents[identity] = committed
-	if onCommitted != nil {
-		return onCommitted(committed)
-	}
-	return nil
+	return models.AgentTargetMutationResult{PreviousConfig: current, CurrentConfig: committed, Transitioned: true}, nil
 }
 
 func TestAuthorizeManage_AllowsAncestorManagerChain(t *testing.T) {
@@ -529,7 +500,7 @@ func TestExecAgentFire_RemovesOnlySelectedSameSlugAuthority(t *testing.T) {
 	}
 }
 
-func TestExecAgentFire_RevalidatesQueuedActorAtSerializedCommit(t *testing.T) {
+func TestExecAgentFire_RejectsConfigChangedBeforeSerializedCommit(t *testing.T) {
 	const route = "review/inst-1"
 	newAgent := func(id, role string) models.AgentConfig {
 		return models.AgentConfig{
@@ -582,8 +553,8 @@ func TestExecAgentFire_RevalidatesQueuedActorAtSerializedCommit(t *testing.T) {
 	}
 	close(start)
 
-	if err := <-fireErr; err == nil || !strings.Contains(err.Error(), "revalidate serialized fire authority") {
-		t.Fatalf("queued fire error = %v, want serialized authority rejection", err)
+	if err := <-fireErr; err == nil || !strings.Contains(err.Error(), "agent_config_changed") {
+		t.Fatalf("queued fire error = %v, want exact expected-config rejection", err)
 	}
 	stored, err := manager.ResolveAgentConfig(target.ID, route)
 	if err != nil {
@@ -882,7 +853,7 @@ func TestExecAgentReconfigure_RejectsIndirectParentCycleAtCommit(t *testing.T) {
 	}
 }
 
-func TestExecAgentReconfigure_ConcurrentCommitsKeepAuthorityInManagerOrder(t *testing.T) {
+func TestExecAgentReconfigure_ConcurrentCommitsRejectStaleExpectedConfig(t *testing.T) {
 	const route = "review/inst-1"
 	newAgent := func(id, role string) models.AgentConfig {
 		return models.AgentConfig{
@@ -951,8 +922,8 @@ func TestExecAgentReconfigure_ConcurrentCommitsKeepAuthorityInManagerOrder(t *te
 			successfulParent = result.parentID
 			continue
 		}
-		if !strings.Contains(result.err.Error(), "revalidate serialized reconfigure authority") {
-			t.Fatalf("concurrent reconfigure error = %v, want serialized authority denial", result.err)
+		if !strings.Contains(result.err.Error(), "agent_config_changed") {
+			t.Fatalf("concurrent reconfigure error = %v, want expected-config denial", result.err)
 		}
 		denials++
 	}
@@ -982,7 +953,7 @@ func TestExecAgentReconfigure_ConcurrentCommitsKeepAuthorityInManagerOrder(t *te
 	}
 }
 
-func TestExecAgentReconfigure_RevalidatesQueuedActorAtSerializedCommit(t *testing.T) {
+func TestExecAgentReconfigure_PersistenceFailureDoesNotPublishUncommittedAuthority(t *testing.T) {
 	const route = "review/inst-1"
 	newAgent := func(id, role string) models.AgentConfig {
 		return models.AgentConfig{
@@ -1028,9 +999,9 @@ func TestExecAgentReconfigure_RevalidatesQueuedActorAtSerializedCommit(t *testin
 
 	secondErr := make(chan error, 1)
 	go func() {
-		_, err := exec.ExecAgentReconfigureDirect(newParent, map[string]any{
+		_, err := exec.ExecAgentReconfigureDirect(oldParent, map[string]any{
 			"agent_id": target.ID,
-			"config":   map[string]any{"model": "unauthorized-change"},
+			"config":   map[string]any{"model": "committed-after-rollback"},
 		})
 		secondErr <- err
 	}()
@@ -1040,15 +1011,15 @@ func TestExecAgentReconfigure_RevalidatesQueuedActorAtSerializedCommit(t *testin
 	if err := <-firstErr; err == nil || !strings.Contains(err.Error(), "injected persistence failure") {
 		t.Fatalf("first reconfigure error = %v, want injected persistence failure", err)
 	}
-	if err := <-secondErr; err == nil || !strings.Contains(err.Error(), "revalidate serialized reconfigure authority") {
-		t.Fatalf("queued reconfigure error = %v, want serialized authority rejection", err)
+	if err := <-secondErr; err != nil {
+		t.Fatalf("queued reconfigure after rollback: %v", err)
 	}
 	stored, err := manager.ResolveAgentConfig(target.ID, route)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Model != "" || stored.ParentAgent != oldParent.ID {
-		t.Fatalf("queued unauthorized mutation changed target: %+v", stored)
+	if stored.Model != "committed-after-rollback" || stored.ParentAgent != oldParent.ID {
+		t.Fatalf("queued committed mutation = %+v, want prior parent and committed model", stored)
 	}
 	if err := provider.AuthorizeManagement(oldParent, stored); err != nil {
 		t.Fatalf("predecessor parent authority was not restored: %v", err)

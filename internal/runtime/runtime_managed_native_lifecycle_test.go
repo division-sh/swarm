@@ -77,7 +77,9 @@ type managedNativeRecoveryDeliveryStore struct {
 	onClaim    func(context.Context) error
 }
 
-type managedNativeDurableRoles struct{}
+type managedNativeDurableRoles struct {
+	runtimerunlifecycle.OperationOwner
+}
 
 func (managedNativeDurableRoles) RunRuntimeMutationContext(ctx context.Context, fn func(context.Context) error) error {
 	return fn(ctx)

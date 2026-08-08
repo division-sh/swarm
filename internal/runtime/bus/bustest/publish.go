@@ -2,7 +2,6 @@ package bustest
 
 import (
 	"context"
-	"errors"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -12,72 +11,40 @@ import (
 type BeginPublishFunc func(context.Context, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
 type FinalizePublishFunc func(context.Context, runtimebus.CommitPublishRequest) error
 
-// CommitPublish executes the sealed EventBus plan with a test-only transaction.
-// It exists so behavior tests model the selected-store operation without
-// acquiring a raw event writer or database transaction.
+// CommitPublish models the closed selected-store publication operation for
+// tests without exposing a transaction or executable callback to EventBus.
 func CommitPublish(
 	ctx context.Context,
-	plan runtimebus.CommitPublishPlan,
+	command runtimebus.PublicationCommand,
 	begin BeginPublishFunc,
 	finalize FinalizePublishFunc,
-) (runtimebus.PreparedPublish, error) {
-	transaction := &Transaction{Begin: begin, Finalize: finalize}
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
-	rollback := make([]runtimepipeline.OwnerAction, 0, 4)
-	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
-	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
-	prepared, err := plan.PrepareCommitPublish(runtimebus.WithCommitPublishTransaction(ctx, transaction))
-	if err != nil {
-		runtimepipeline.FlushPipelineRollbackActions(rollback)
-		return runtimebus.PreparedPublish{}, err
+) (runtimebus.CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
 	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return prepared, nil
-}
-
-func CommitPublishNoop(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return CommitPublish(ctx, plan, nil, nil)
-}
-
-type Transaction struct {
-	Begin    BeginPublishFunc
-	Finalize FinalizePublishFunc
-	active   []string
-}
-
-func (*Transaction) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
-	return events.AdmittedEvent{}, false, nil
-}
-
-func (t *Transaction) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
 	outcome := runtimebus.EventAppendInserted
 	var err error
-	if t.Begin != nil {
-		outcome, err = t.Begin(ctx, prepared.AdmittedEvent())
+	if begin != nil {
+		outcome, err = begin(ctx, command.Commit.Event)
 	}
-	if err == nil && outcome == runtimebus.EventAppendInserted {
-		t.active = append(t.active, prepared.AdmittedEvent().ID())
+	if err != nil {
+		return runtimebus.CommittedPublication{}, err
 	}
-	return outcome, err
+	result := runtimebus.CommittedPublication{AppendOutcome: outcome, RouteTopology: command.RouteTopology}
+	if outcome == runtimebus.EventAppendExactDuplicate {
+		return result, result.Validate()
+	}
+	if finalize != nil {
+		if err := finalize(ctx, command.Commit); err != nil {
+			return runtimebus.CommittedPublication{}, err
+		}
+	}
+	for _, plan := range command.Activations {
+		result.Activations = append(result.Activations, runtimepipeline.CommittedFlowInstanceActivation{Plan: plan, Created: true})
+	}
+	return result, result.Validate()
 }
 
-func (t *Transaction) FinalizePreparedPublish(ctx context.Context, finalization runtimebus.PreparedPublishFinalization) error {
-	req := finalization.Request()
-	if len(t.active) == 0 || t.active[len(t.active)-1] != req.Event.ID() {
-		return errors.New("prepared event finalization does not match the active event")
-	}
-	if t.Finalize != nil {
-		if err := t.Finalize(ctx, req); err != nil {
-			return err
-		}
-	}
-	if req.DeliveryReceipt != nil {
-		if _, err := req.DeliveryReceipt.Handoffs(); err != nil {
-			if err := req.DeliveryReceipt.Record(nil); err != nil {
-				return err
-			}
-		}
-	}
-	t.active = t.active[:len(t.active)-1]
-	return nil
+func CommitPublishNoop(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return CommitPublish(ctx, command, nil, nil)
 }

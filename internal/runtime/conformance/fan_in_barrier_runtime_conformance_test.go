@@ -31,6 +31,7 @@ import (
 
 type fanInBarrierConformanceStore interface {
 	conformanceDurableEventBusStore
+	runtimepipeline.WorkflowPersistenceOwner
 	runtimepipeline.SchedulePersistence
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 }
@@ -89,7 +90,7 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			name: "sqlite",
 			setup: func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
 				backend := storetest.StartSQLiteRuntimeStore(t)
-				return backend, backend.DB
+				return backend, storetest.DatabaseForTest(backend)
 			},
 		},
 	} {
@@ -154,9 +155,9 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 
 func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, db *sql.DB, source semanticview.Source) fanInBarrierRuntime {
 	t.Helper()
-	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, backend)
+	workflowPersistence := runtimepipeline.NewWorkflowPersistence(backend)
 	if sqliteStore, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, sqliteStore)
+		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 	}
 	var (
 		coordinator *runtimepipeline.PipelineCoordinator
@@ -178,6 +179,18 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 			}
 			return manager.ActivateFlowInstance(ctx, req)
 		},
+		TemplateInstancePlanner: runtimepipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+			if manager == nil {
+				return runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("fan-in barrier instance manager is not initialized")
+			}
+			return manager.PrepareFlowInstanceActivation(ctx, req)
+		}),
+		FlowActivationFinalizer: runtimepipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
+			if manager == nil {
+				return fmt.Errorf("fan-in barrier instance manager is not initialized")
+			}
+			return manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
+		}),
 	}))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -201,7 +214,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		actions: runtimepipeline.NewContractActionRegistry(source),
 	}
 	diagnosticBus := &fanInBarrierDiagnosticBus{EventBus: eventBus}
-	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(diagnosticBus, db, runtimepipeline.PipelineCoordinatorOptions{
+	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(diagnosticBus, runtimepipeline.PipelineCoordinatorOptions{
 		Module: module,
 		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 			if manager == nil {
@@ -218,8 +231,6 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		HumanTasks:              backend,
 		DecisionCardDraftExpiry: backend,
 		HumanTaskExpiry:         backend,
-		GatePublisher:           diagnosticBus,
-		DirectDecisionPublisher: diagnosticBus,
 		DeliveryRuntime:         eventBus,
 		FlowRoutes:              eventBus,
 		TimerScheduleStore:      backend, ReceiverExecution: eventreceiver.NormalExecution(),
@@ -319,7 +330,7 @@ func publishFanInBarrierEvent(t *testing.T, ctx context.Context, eventBus *runti
 
 func loadFanInBarrierPortfolio(t *testing.T, ctx context.Context, pipeline *runtimepipeline.PipelineCoordinator) runtimepipeline.WorkflowInstance {
 	t.Helper()
-	instance, ok, err := pipeline.Load(ctx, "portfolio")
+	instance, ok, err := pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath("portfolio"))
 	if err != nil || !ok {
 		t.Fatalf("load portfolio = found:%v err:%v", ok, err)
 	}

@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestSelectedStoreBundleRoleLedgerCoversStoreBundleFields(t *testing.T) {
@@ -64,9 +64,6 @@ func TestValidateSelectedStoreBundleRolesAcceptsSQLiteBuildStores(t *testing.T) 
 	if err := validateSelectedStoreBundleRoles(storebackend.BackendSQLite, stores); err != nil {
 		t.Fatalf("validate selected sqlite store roles: %v", err)
 	}
-	if stores.RuntimeSQLDB != nil {
-		t.Fatalf("sqlite RuntimeSQLDB = %#v, want nil raw runtime SQL handle", stores.RuntimeSQLDB)
-	}
 }
 
 func TestValidateSelectedStoreBundleRolesAcceptsPostgresSelectedBundle(t *testing.T) {
@@ -76,7 +73,8 @@ func TestValidateSelectedStoreBundleRolesAcceptsPostgresSelectedBundle(t *testin
 	}
 	t.Cleanup(func() { closeDB(db) })
 
-	stores := selectedPostgresStoreBundle(&store.PostgresStore{DB: db}, &config.Config{})
+	selected := storetest.NewPostgresStoreForTest(db)
+	stores := selectedPostgresStoreBundle(selected, db, &config.Config{})
 	if err := validateSelectedStoreBundleRoles(storebackend.BackendPostgres, stores); err != nil {
 		t.Fatalf("validate selected postgres store roles: %v", err)
 	}
@@ -92,19 +90,6 @@ func TestValidateSelectedStoreBundleRolesFailsClosedForMissingRequiredCoreRole(t
 	}
 	if !strings.Contains(err.Error(), "RuntimeLogStore") {
 		t.Fatalf("selected role validation error = %v, want RuntimeLogStore named", err)
-	}
-}
-
-func TestValidateSelectedStoreBundleRolesFailsClosedForSQLiteRawRuntimeSQL(t *testing.T) {
-	stores := buildSQLiteSelectedStoreBundleForRoleTest(t)
-	stores.RuntimeSQLDB = stores.SQLDB
-
-	err := validateSelectedStoreBundleRoles(storebackend.BackendSQLite, stores)
-	if err == nil {
-		t.Fatal("expected selected role validation to reject SQLite raw runtime SQL handle")
-	}
-	if !strings.Contains(err.Error(), "RuntimeSQLDB") {
-		t.Fatalf("selected role validation error = %v, want RuntimeSQLDB named", err)
 	}
 }
 

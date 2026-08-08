@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -31,10 +32,12 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -186,10 +189,10 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 				return storeBundle{}, err
 			}
 			storetest.BootstrapPostgresRuntimeStore(t, pg)
-			db = pg.DB
-			return selectedPostgresStoreBundle(pg, cfg), nil
+			db = storetest.DatabaseForTest(pg)
+			return selectedPostgresStoreBundle(pg, storetest.DatabaseForTest(pg), cfg), nil
 		}
-		cliapp.ConfiguredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+		cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return serveRuntimeWorkspaceStub{}, nil
 		}
 		t.Cleanup(func() {
@@ -767,7 +770,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	}()
 	var runs, instances, entities int
 	var standingRunID string
-	if err := sqliteStore.DB.QueryRow(`
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
 		SELECT current_run_id
 		FROM standing_services
 		WHERE flow_id = 'telegram-ingress'
@@ -776,27 +779,27 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	`).Scan(&standingRunID); err != nil {
 		t.Fatalf("resolve standing run authority: %v", err)
 	}
-	if err := sqliteStore.DB.QueryRow(`
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
 		SELECT COUNT(*)
 		FROM standing_services
 		WHERE flow_id = 'telegram-ingress'
 	`).Scan(&runs); err != nil {
 		t.Fatalf("count standing run authorities: %v", err)
 	}
-	if err := sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-ingress'`).Scan(&instances); err != nil {
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-ingress'`).Scan(&instances); err != nil {
 		t.Fatalf("count standing instances: %v", err)
 	}
-	if err := sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE entity_id = ?`, firstEntity).Scan(&entities); err != nil {
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM entity_state WHERE entity_id = ?`, firstEntity).Scan(&entities); err != nil {
 		t.Fatalf("count standing entities: %v", err)
 	}
 	if runs != 1 || instances != 1 || entities != 1 {
 		t.Fatalf("standing authority counts = runs:%d instances:%d entities:%d, want 1/1/1", runs, instances, entities)
 	}
 	var chatInstances, normalizedEvents, wrongNormalizedRuns int
-	if err := sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&chatInstances); err != nil {
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&chatInstances); err != nil {
 		t.Fatalf("count per-chat instances: %v", err)
 	}
-	if err := sqliteStore.DB.QueryRow(`
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
 		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = ? THEN 0 ELSE 1 END), 0)
 		FROM events WHERE event_name = 'inbound.telegram.text_message'
 	`, standingRunID).Scan(&normalizedEvents, &wrongNormalizedRuns); err != nil {
@@ -806,11 +809,11 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		t.Fatalf("normalized routing = chat_instances:%d events:%d wrong_run:%d, want 2/3/0", chatInstances, normalizedEvents, wrongNormalizedRuns)
 	}
 	var pendingCards int
-	if err := sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = ? AND status = 'pending' AND json_extract(snapshot, '$.decision') = 'standing_review'`, firstEntity).Scan(&pendingCards); err != nil || pendingCards != 1 {
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = ? AND status = 'pending' AND json_extract(snapshot, '$.decision') = 'standing_review'`, firstEntity).Scan(&pendingCards); err != nil || pendingCards != 1 {
 		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
 	}
 	var entityEvents, wrongRunEvents int
-	if err := sqliteStore.DB.QueryRow(`
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
 		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = ? THEN 0 ELSE 1 END), 0)
 		FROM events
 		WHERE entity_id = ?
@@ -931,9 +934,9 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-		return selectedPostgresStoreBundle(runtimePG, cfg), nil
+		return selectedPostgresStoreBundle(runtimePG, storetest.DatabaseForTest(runtimePG), cfg), nil
 	}
-	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -1236,7 +1239,7 @@ func requireStandingLifecycleTelegramCall(t testing.TB, calls <-chan struct{}, b
 	}
 }
 
-func sendStandingTelegramUpdate(t testing.TB, baseURL string, updateID, chatID int) string {
+func sendStandingTelegramUpdate(t testing.TB, baseURL string, updateID, chatID int, diagnostics ...func() string) string {
 	t.Helper()
 	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":%d},"chat":{"id":%d,"type":"private"},"text":"hello %d"}}`, updateID, updateID, chatID, chatID, updateID))
 	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/chat/telegram", bytes.NewReader(body))
@@ -1250,14 +1253,25 @@ func sendStandingTelegramUpdate(t testing.TB, baseURL string, updateID, chatID i
 		t.Fatalf("send webhook: %v", err)
 	}
 	defer resp.Body.Close()
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read webhook response status=%d: %v", resp.StatusCode, err)
+	}
 	var payload map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode webhook response status=%d: %v", resp.StatusCode, err)
+	if err := json.Unmarshal(responseBody, &payload); err != nil {
+		t.Fatalf("decode webhook response status=%d body=%q: %v%s", resp.StatusCode, strings.TrimSpace(string(responseBody)), err, standingWebhookDiagnostics(diagnostics))
 	}
 	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("webhook status=%d payload=%v", resp.StatusCode, payload)
+		t.Fatalf("webhook status=%d payload=%v%s", resp.StatusCode, payload, standingWebhookDiagnostics(diagnostics))
 	}
 	return strings.TrimSpace(fmt.Sprint(payload["entity_id"]))
+}
+
+func standingWebhookDiagnostics(diagnostics []func() string) string {
+	if len(diagnostics) == 0 || diagnostics[0] == nil {
+		return ""
+	}
+	return "\nserve output:\n" + diagnostics[0]()
 }
 
 func requireStandingTelegramCalls(t testing.TB, calls <-chan map[string]any, sqlitePath string, chatIDs ...int) {
@@ -1333,12 +1347,12 @@ func standingPostgresDiagnostics(dsn string) string {
 }
 
 func standingSQLiteDiagnostics(path string) string {
-	store, err := store.NewSQLiteRuntimeStore(path)
+	selected, err := store.NewSQLiteRuntimeStore(path)
 	if err != nil {
 		return err.Error()
 	}
-	defer store.Close()
-	rows, err := store.DB.Query(`SELECT event_name, COUNT(*) FROM events GROUP BY event_name ORDER BY event_name`)
+	defer selected.Close()
+	rows, err := storetest.DatabaseForTest(selected).Query(`SELECT event_name, COUNT(*) FROM events GROUP BY event_name ORDER BY event_name`)
 	if err != nil {
 		return err.Error()
 	}
@@ -1352,7 +1366,7 @@ func standingSQLiteDiagnostics(path string) string {
 		}
 		parts = append(parts, fmt.Sprintf("%s=%d", name, count))
 	}
-	logRows, err := store.DB.Query(`SELECT payload FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at`)
+	logRows, err := storetest.DatabaseForTest(selected).Query(`SELECT payload FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at`)
 	if err == nil {
 		defer logRows.Close()
 		for logRows.Next() {
@@ -1362,7 +1376,7 @@ func standingSQLiteDiagnostics(path string) string {
 			}
 		}
 	}
-	deliveryRows, err := store.DB.Query(`SELECT event_id, subscriber_id, COALESCE(status, '') FROM event_deliveries ORDER BY created_at`)
+	deliveryRows, err := storetest.DatabaseForTest(selected).Query(`SELECT event_id, subscriber_id, COALESCE(status, '') FROM event_deliveries ORDER BY created_at`)
 	if err == nil {
 		defer deliveryRows.Close()
 		for deliveryRows.Next() {
@@ -1372,7 +1386,7 @@ func standingSQLiteDiagnostics(path string) string {
 			}
 		}
 	}
-	receiptRows, err := store.DB.Query(`SELECT event_id, status, COALESCE(failure, '') FROM pipeline_receipts ORDER BY updated_at`)
+	receiptRows, err := storetest.DatabaseForTest(selected).Query(`SELECT event_id, status, COALESCE(failure, '') FROM pipeline_receipts ORDER BY updated_at`)
 	if err == nil {
 		defer receiptRows.Close()
 		for receiptRows.Next() {
@@ -1398,17 +1412,17 @@ func commitReadinessHandoffAuthorActivity(sqlitePath string, rt *runtimepkg.Runt
 	defer selected.Close()
 	scope := runtimeauthoractivity.BundleScope(rt.Options.RuntimeInstanceID, rt.Options.BundleSourceFact.BundleHash())
 	ctx := runtimeauthoractivity.WithScope(context.Background(), scope)
-	tx, err := selected.DB.BeginTx(ctx, nil)
+	tx, err := storetest.DatabaseForTest(selected).BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	story, err := runtimeauthoractivity.Begin(ctx, tx, runtimeauthoractivity.DialectSQLite)
+	story, err := authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
 	}
 	identity := uuid.NewString()
-	if err := runtimeauthoractivity.Record(story, runtimeauthoractivity.Draft{
+	if err := authoractivityfixture.Record(story, runtimeauthoractivity.Draft{
 		Kind: runtimeauthoractivity.KindInboundReceived, Version: runtimeauthoractivity.Version, Transition: "received",
 		SourceOwner: "events", SourceIdentity: identity, DedupKey: "readiness-handoff:" + identity,
 		OccurredAt: time.Now().UTC(), Scope: scope, AuthorSafeSummary: "across head",
@@ -1420,7 +1434,7 @@ func commitReadinessHandoffAuthorActivity(sqlitePath string, rt *runtimepkg.Runt
 		_ = tx.Rollback()
 		return err
 	}
-	if err := runtimeauthoractivity.Finalize(story); err != nil {
+	if err := authoractivityfixture.Finalize(story); err != nil {
 		_ = tx.Rollback()
 		return err
 	}

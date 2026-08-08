@@ -39,8 +39,7 @@ func TestInMemoryCommitterRejectsClosedGenericClasses(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		transaction := &inMemoryCommitPublishTransaction{}
-		if _, err := transaction.BeginPreparedPublish(nil, PreparedPublishEvent{event: admitted}); err == nil {
+		if _, err := (InMemoryEventStore{}).CommitPublication(context.Background(), PublicationCommand{Commit: CommitPublishRequest{Event: admitted}}); err == nil {
 			t.Fatalf("in-memory generic committer accepted %s", event.AdmissionClass())
 		}
 	}
@@ -67,15 +66,9 @@ func TestEveryGenericPublicationSurfaceRejectsClosedEventClasses(t *testing.T) {
 			return eb.PublishDirect(ctx, event, []string{"agent-a"})
 		}},
 		{name: "deferred", run: eb.publishDeferred},
-		{name: "transactional", run: func(ctx context.Context, event events.Event) error {
-			return eb.PublishInMutation(WithCommitPublishTransaction(ctx, &inMemoryCommitPublishTransaction{}), event)
-		}},
-		{name: "transactional_direct", run: func(ctx context.Context, event events.Event) error {
-			return eb.PublishDirectInMutation(WithCommitPublishTransaction(ctx, &inMemoryCommitPublishTransaction{}), event, []string{"agent-a"})
-		}},
-		{name: "engine_outbox", run: func(ctx context.Context, event events.Event) error {
-			ctx = WithCommitPublishTransaction(ctx, &inMemoryCommitPublishTransaction{})
-			return eb.EngineOutbox().WriteOutbox(ctx, []runtimeengine.EmitIntent{{Event: event}})
+		{name: "engine_publication", run: func(ctx context.Context, event events.Event) error {
+			_, err := eb.PrepareEnginePublications(ctx, []runtimeengine.EmitIntent{{Event: event}})
+			return err
 		}},
 	}
 	for _, event := range eventsUnderTest {

@@ -25,7 +25,7 @@ var families = [...]Family{
 	FamilyWorkflowTimer,
 }
 
-func parseFamily(value string) (Family, error) {
+func ParseFamily(value string) (Family, error) {
 	family := Family(strings.TrimSpace(value))
 	for _, candidate := range families {
 		if family == candidate {
@@ -33,6 +33,10 @@ func parseFamily(value string) (Family, error) {
 		}
 	}
 	return "", fmt.Errorf("unknown timer family %q", value)
+}
+
+func AllFamilies() []Family {
+	return append([]Family(nil), families[:]...)
 }
 
 type Scope struct {
@@ -137,7 +141,7 @@ func (s Snapshot) GlobalTotals() FamilyObligation {
 	return total
 }
 
-func zeroFamilies() []FamilyObligation {
+func ZeroFamilies() []FamilyObligation {
 	out := make([]FamilyObligation, 0, len(families))
 	for _, family := range families {
 		out = append(out, FamilyObligation{Family: family})
@@ -145,7 +149,7 @@ func zeroFamilies() []FamilyObligation {
 	return out
 }
 
-func sortedRunIDs(values map[string][]FamilyObligation) []string {
+func SortedRunIDs(values map[string][]FamilyObligation) []string {
 	ids := make([]string, 0, len(values))
 	for runID := range values {
 		ids = append(ids, runID)

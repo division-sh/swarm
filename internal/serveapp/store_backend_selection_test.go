@@ -250,8 +250,8 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 		t.Fatalf("sqlite optional capability RuntimeContexts = %T, want nil classified split/postgres-only capability", apiCaps.RuntimeContexts)
 	}
 	runtimeDeps := stores.runtimeDeps()
-	if runtimeDeps.SQLDB != nil {
-		t.Fatalf("sqlite runtimeDeps SQLDB = %#v, want nil raw runtime SQL handle", runtimeDeps.SQLDB)
+	if _, ok := reflect.TypeOf(runtimeDeps).FieldByName("SQLDB"); ok {
+		t.Fatal("sqlite RuntimeDeps exposes raw SQLDB field")
 	}
 	if runtimeDeps.RuntimeLogStore == nil {
 		t.Fatal("sqlite runtimeDeps RuntimeLogStore missing backend-neutral runtime diagnostics owner")
@@ -313,7 +313,7 @@ func TestSelectedOperatorReadConstructionParityClassifiesSQLitePostgresDelta(t *
 	}
 	t.Cleanup(func() { closeDB(sqliteStores.SQLDB) })
 
-	postgresStores := selectedPostgresStoreBundle(&store.PostgresStore{}, &config.Config{})
+	postgresStores := selectedPostgresStoreBundle(&store.PostgresStore{}, nil, &config.Config{})
 	postgresCaps, err := postgresStores.facade().apiCapabilities(selectedAPICapabilityRequest{})
 	if err != nil {
 		t.Fatalf("postgres apiCapabilities: %v", err)
@@ -444,8 +444,8 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 	}
 	t.Cleanup(func() { closeDB(stores.SQLDB) })
 	runtimeDeps := stores.runtimeDeps()
-	if runtimeDeps.SQLDB != nil {
-		t.Fatalf("sqlite runtimeDeps SQLDB = %#v, want nil raw runtime SQL handle", runtimeDeps.SQLDB)
+	if _, ok := reflect.TypeOf(runtimeDeps).FieldByName("SQLDB"); ok {
+		t.Fatal("sqlite RuntimeDeps exposes raw SQLDB field")
 	}
 	if runtimeDeps.RuntimeLogStore == nil {
 		t.Fatal("sqlite runtimeDeps RuntimeLogStore missing backend-neutral runtime diagnostics owner")

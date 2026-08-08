@@ -28,10 +28,6 @@ type EventPublisher interface {
 	Publish(context.Context, events.Event) error
 }
 
-type EventMutationPublisher interface {
-	PublishInMutation(context.Context, events.Event) error
-}
-
 type mailboxListResult struct {
 	Items      []store.MailboxV1Item `json:"items"`
 	NextCursor string                `json:"next_cursor,omitempty"`

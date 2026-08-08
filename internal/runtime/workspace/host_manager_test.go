@@ -20,7 +20,7 @@ func TestHostManagerValidatesSourcesAndCreatesSystemWorkspacesWithoutDocker(t *t
 		t.Fatalf("write package.yaml: %v", err)
 	}
 	root := filepath.Join(t.TempDir(), "host-workspaces")
-	manager := NewHostManager(nil)
+	manager := NewHostManager()
 	manager.SetConfig(HostConfig{
 		WorkspaceRoot:       root,
 		SharedDataSource:    dataDir,
@@ -50,7 +50,7 @@ func TestHostManagerResolveWorkspaceCreatesScopedHostTargets(t *testing.T) {
 	}
 	root := filepath.Join(t.TempDir(), "host-workspaces")
 	canonicalRoot := canonicalTestPath(t, root)
-	manager := NewHostManager(nil)
+	manager := NewHostManager()
 	manager.SetConfig(HostConfig{
 		WorkspaceRoot:       root,
 		SharedDataSource:    dataDir,
@@ -113,7 +113,7 @@ func TestHostManagerRejectsWorkspaceRootOverlappingReadOnlySources(t *testing.T)
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
-	manager := NewHostManager(nil)
+	manager := NewHostManager()
 	manager.SetConfig(HostConfig{
 		WorkspaceRoot:       root,
 		SharedDataSource:    dataDir,
@@ -146,7 +146,7 @@ func TestHostManagerRejectsSymlinkedWorkspaceRootIntoReadOnlySources(t *testing.
 			if err := os.Symlink(tt.target, rootLink); err != nil {
 				t.Skipf("symlink unavailable: %v", err)
 			}
-			manager := NewHostManager(nil)
+			manager := NewHostManager()
 			manager.SetConfig(HostConfig{
 				WorkspaceRoot:       rootLink,
 				SharedDataSource:    dataDir,
@@ -175,7 +175,7 @@ func TestHostManagerRejectsSymlinkedWorkspaceChildEscape(t *testing.T) {
 	if err := os.Symlink(dataDir, filepath.Join(root, "agents")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	manager := NewHostManager(nil)
+	manager := NewHostManager()
 	manager.SetConfig(HostConfig{
 		WorkspaceRoot:       root,
 		SharedDataSource:    dataDir,
@@ -211,7 +211,7 @@ func TestHostManagerResolveWorkspaceValidatesRootBeforeCreate(t *testing.T) {
 	if err := os.Symlink(dataDir, rootLink); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	manager := NewHostManager(nil)
+	manager := NewHostManager()
 	manager.SetConfig(HostConfig{
 		WorkspaceRoot:       rootLink,
 		SharedDataSource:    dataDir,
@@ -235,7 +235,7 @@ func TestHostManagerResolveWorkspaceValidatesRootBeforeCreate(t *testing.T) {
 }
 
 func TestHostManagerContainerSurfacesAreNoop(t *testing.T) {
-	manager := NewHostManager(nil)
+	manager := NewHostManager()
 	inventory, err := manager.ManagedResetContainerInventory(context.Background())
 	if err != nil {
 		t.Fatalf("ManagedResetContainerInventory: %v", err)

@@ -3,13 +3,15 @@ package workflowlifecycle
 import (
 	"testing"
 	"time"
+
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 )
 
 func TestWorkflowLifecycleEffectConstructionMatrix(t *testing.T) {
 	occurredAt := time.Date(2026, time.July, 25, 12, 0, 0, 0, time.UTC)
 
 	t.Run("initial entry", func(t *testing.T) {
-		effect, err := NewInitialEntry("entity-1", "waiting", occurredAt)
+		effect, err := NewInitialEntry(runtimeflowidentity.RouteForInstancePath("flow/one"), "entity-1", "waiting", occurredAt)
 		if err != nil {
 			t.Fatalf("NewInitialEntry: %v", err)
 		}
@@ -23,7 +25,7 @@ func TestWorkflowLifecycleEffectConstructionMatrix(t *testing.T) {
 	})
 
 	t.Run("accepted event without transition", func(t *testing.T) {
-		effect, err := NewAcceptedEvent("entity-1", "event-1", "review.noted", occurredAt, nil)
+		effect, err := NewAcceptedEvent(runtimeflowidentity.RouteForInstancePath("flow/one"), "entity-1", "event-1", "review.noted", occurredAt, nil)
 		if err != nil {
 			t.Fatalf("NewAcceptedEvent: %v", err)
 		}
@@ -41,7 +43,7 @@ func TestWorkflowLifecycleEffectConstructionMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewTransition: %v", err)
 		}
-		effect, err := NewAcceptedEvent("entity-1", "event-1", "review.approved", occurredAt, &transition)
+		effect, err := NewAcceptedEvent(runtimeflowidentity.RouteForInstancePath("flow/one"), "entity-1", "event-1", "review.approved", occurredAt, &transition)
 		if err != nil {
 			t.Fatalf("NewAcceptedEvent: %v", err)
 		}
@@ -58,42 +60,42 @@ func TestWorkflowLifecycleEffectConstructionMatrix(t *testing.T) {
 		{
 			name: "initial missing instance",
 			make: func() error {
-				_, err := NewInitialEntry("", "waiting", occurredAt)
+				_, err := NewInitialEntry(runtimeflowidentity.RouteForInstancePath("flow/one"), "", "waiting", occurredAt)
 				return err
 			},
 		},
 		{
 			name: "initial missing stage",
 			make: func() error {
-				_, err := NewInitialEntry("entity-1", "", occurredAt)
+				_, err := NewInitialEntry(runtimeflowidentity.RouteForInstancePath("flow/one"), "entity-1", "", occurredAt)
 				return err
 			},
 		},
 		{
 			name: "initial missing occurrence time",
 			make: func() error {
-				_, err := NewInitialEntry("entity-1", "waiting", time.Time{})
+				_, err := NewInitialEntry(runtimeflowidentity.RouteForInstancePath("flow/one"), "entity-1", "waiting", time.Time{})
 				return err
 			},
 		},
 		{
 			name: "accepted event missing identity",
 			make: func() error {
-				_, err := NewAcceptedEvent("entity-1", "", "review.noted", occurredAt, nil)
+				_, err := NewAcceptedEvent(runtimeflowidentity.RouteForInstancePath("flow/one"), "entity-1", "", "review.noted", occurredAt, nil)
 				return err
 			},
 		},
 		{
 			name: "accepted event missing type",
 			make: func() error {
-				_, err := NewAcceptedEvent("entity-1", "event-1", "", occurredAt, nil)
+				_, err := NewAcceptedEvent(runtimeflowidentity.RouteForInstancePath("flow/one"), "entity-1", "event-1", "", occurredAt, nil)
 				return err
 			},
 		},
 		{
 			name: "accepted event missing occurrence time",
 			make: func() error {
-				_, err := NewAcceptedEvent("entity-1", "event-1", "review.noted", time.Time{}, nil)
+				_, err := NewAcceptedEvent(runtimeflowidentity.RouteForInstancePath("flow/one"), "entity-1", "event-1", "review.noted", time.Time{}, nil)
 				return err
 			},
 		},

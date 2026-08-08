@@ -274,48 +274,29 @@ func (e *Executor) emitParentRouteForActor(ctx context.Context, actor models.Age
 		return events.RouteIdentity{}, false, nil
 	}
 	if e.workflowInstances != nil {
-		for _, ref := range emitWorkflowInstanceRefs(actor, flowInstance) {
-			instance, ok, err := e.workflowInstances.Load(ctx, ref)
+		instancePath := strings.Trim(strings.TrimSpace(flowInstance), "/")
+		if instancePath == "" {
+			instancePath = strings.Trim(strings.TrimSpace(actor.CanonicalFlowPath()), "/")
+		}
+		if instancePath != "" {
+			instance, ok, err := e.workflowInstances.Load(ctx, runtimeflowidentity.RouteForInstancePath(instancePath))
 			if err != nil {
 				return events.RouteIdentity{}, false, err
 			}
-			if !ok {
-				continue
+			if ok {
+				parent := runtimeflowidentity.ParentRouteFromMetadata(instance.Metadata).Normalized()
+				return events.RouteIdentity{
+					FlowID:       parent.FlowID,
+					FlowInstance: parent.FlowInstance,
+					EntityID:     parent.EntityID,
+				}.Normalized(), false, nil
 			}
-			parent := runtimeflowidentity.ParentRouteFromMetadata(instance.Metadata).Normalized()
-			return events.RouteIdentity{
-				FlowID:       parent.FlowID,
-				FlowInstance: parent.FlowInstance,
-				EntityID:     parent.EntityID,
-			}.Normalized(), false, nil
 		}
 	}
 	if route, ok := e.staticFlowEntityParentRoute(flowID, inbound); ok {
 		return route, true, nil
 	}
 	return events.RouteIdentity{}, false, nil
-}
-
-func emitWorkflowInstanceRefs(actor models.AgentConfig, flowInstance string) []string {
-	candidates := []string{
-		actor.EffectiveEntityID(),
-		strings.Trim(strings.TrimSpace(flowInstance), "/"),
-		actor.CanonicalFlowPath(),
-	}
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(candidates))
-	for _, candidate := range candidates {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-		if _, ok := seen[candidate]; ok {
-			continue
-		}
-		seen[candidate] = struct{}{}
-		out = append(out, candidate)
-	}
-	return out
 }
 
 func (e *Executor) staticFlowEntityParentRoute(flowID string, inbound events.Event) (events.RouteIdentity, bool) {

@@ -529,5 +529,4 @@ type Store interface {
 	Release(context.Context, Claim) error
 	GlobalWorkPresence(context.Context) (GlobalWorkPresence, error)
 	SummarizeRun(context.Context, string) (RunSummary, error)
-	TerminalizeRun(context.Context, string, Disposition, time.Time) (int, error)
 }

@@ -18,6 +18,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -145,8 +146,17 @@ type runtimeHarness struct {
 }
 
 type catalogWorkflowPersistence interface {
-	Load(context.Context, string) (runtimepipeline.WorkflowInstance, bool, error)
+	Load(context.Context, runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error)
+	ListWorkflowInstances(context.Context) ([]runtimepipeline.WorkflowInstance, error)
 	MaterializeInitialEntry(context.Context, runtimepipeline.WorkflowInstance, time.Time) (runtimepipeline.WorkflowInitialMaterializationResult, error)
+}
+
+func catalogExactWorkflowRoute(instancePath string) runtimeflowidentity.Route {
+	return runtimeflowidentity.RouteForInstancePath(instancePath)
+}
+
+func catalogRootWorkflowRoute() runtimeflowidentity.Route {
+	return catalogExactWorkflowRoute(catalogRuntimeRunID)
 }
 
 type agentFixtureDoc struct {
@@ -186,7 +196,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	loadAgentFixtures(t, fixtureRoot, llmRuntime)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	pg.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
-	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, pg)
+	workflowPersistence := runtimepipeline.NewWorkflowPersistence(pg)
 
 	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), catalogRuntimeRunID))
 	t.Cleanup(cancel)
@@ -194,7 +204,6 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID, BundleHash: authorActivityTestBundleSourceFact.BundleHash(), BundleSource: "ephemeral"})
 
 	rt, err := runtime.NewValidationHarnessRuntime(ctx, runtime.RuntimeDeps{Config: cfg,
-		SQLDB:               db,
 		WorkflowPersistence: workflowPersistence,
 		EventStore:          pg,
 		EventBusDurable: runtimebus.DurableDependencies{
@@ -644,8 +653,11 @@ func (h *runtimeHarness) hasExpectedRootEntityState(ctx context.Context, entityI
 	if h == nil || h.workflow == nil {
 		return false
 	}
-	instance, found, err := h.workflow.Load(ctx, strings.TrimSpace(entityID))
+	instance, found, err := h.workflow.Load(ctx, catalogRootWorkflowRoute())
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return false
+		}
 		h.t.Fatalf("load workflow instance while waiting for emitted-event effects: %v", err)
 	}
 	return found && strings.TrimSpace(instance.CurrentState) == strings.TrimSpace(want)
@@ -691,6 +703,9 @@ func (h *runtimeHarness) hasExpectedEmittedEvents(ctx context.Context, entityID 
 		ORDER BY created_at ASC, event_id ASC
 	`, h.startedAt)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			return false
+		}
 		h.t.Fatalf("query emitted events for wait: %v", err)
 	}
 	defer rows.Close()
@@ -757,7 +772,7 @@ func (h *runtimeHarness) previewHandlerOutcome(evt events.Event) (runtimepipelin
 		EntityID: entityID,
 	}
 	if strings.TrimSpace(entityID) != "" && h.workflow != nil {
-		if instance, ok, err := h.workflow.Load(h.ctx, entityID); err == nil && ok {
+		if instance, ok, err := h.workflow.Load(h.ctx, catalogRootWorkflowRoute()); err == nil && ok {
 			state.Stage = runtimepipeline.NormalizeWorkflowStateID(instance.CurrentState)
 			state.Metadata = cloneStringAnyMap(instance.Metadata)
 		}
@@ -790,7 +805,7 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 	if entityID == "" {
 		return
 	}
-	if _, ok, err := h.workflow.Load(h.ctx, entityID); err == nil && ok {
+	if _, ok, err := h.workflow.Load(h.ctx, catalogRootWorkflowRoute()); err == nil && ok {
 		return
 	}
 	initialState := strings.TrimSpace(h.initialState)
@@ -799,13 +814,18 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 	}
 	ctx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
 	if _, err := h.workflow.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID:      entityID,
-		StorageRef:      entityID,
+		InstanceID:      catalogRuntimeRunID,
+		StorageRef:      catalogRuntimeRunID,
 		WorkflowName:    h.bundle.WorkflowName(),
 		WorkflowVersion: h.bundle.WorkflowVersion(),
 		CurrentState:    initialState,
 		EnteredStageAt:  h.startedAt,
 		CreatedAt:       h.startedAt,
+		Metadata: map[string]any{
+			"entity_id":   entityID,
+			"flow_path":   catalogRuntimeRunID,
+			"instance_id": catalogRuntimeRunID,
+		},
 	}, h.startedAt); err != nil {
 		h.t.Fatalf("seed initial workflow state for %s: %v", entityID, err)
 	}
@@ -829,22 +849,31 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 	if entityID == "" {
 		entityID = runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID)
 	}
-	instance, ok, err := h.workflow.Load(h.ctx, entityID)
+	instance, ok, err := h.workflow.Load(h.ctx, catalogRootWorkflowRoute())
 	if err != nil {
 		h.t.Fatalf("load workflow instance for entity field seeding %s: %v", entityID, err)
 	}
 	if !ok {
 		instance = runtimepipeline.WorkflowInstance{
-			InstanceID:      entityID,
+			InstanceID:      catalogRuntimeRunID,
+			StorageRef:      catalogRuntimeRunID,
 			WorkflowName:    h.bundle.WorkflowName(),
 			WorkflowVersion: h.bundle.WorkflowVersion(),
 			CurrentState:    h.initialState,
 			EnteredStageAt:  h.startedAt,
 			CreatedAt:       h.startedAt,
+			Metadata: map[string]any{
+				"entity_id":   entityID,
+				"flow_path":   catalogRuntimeRunID,
+				"instance_id": catalogRuntimeRunID,
+			},
 		}
 	}
 	if strings.TrimSpace(instance.InstanceID) == "" {
-		instance.InstanceID = entityID
+		instance.InstanceID = catalogRuntimeRunID
+	}
+	if strings.TrimSpace(instance.StorageRef) == "" {
+		instance.StorageRef = catalogRuntimeRunID
 	}
 	if strings.TrimSpace(instance.WorkflowName) == "" {
 		instance.WorkflowName = h.bundle.WorkflowName()
@@ -881,7 +910,7 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 			gates = map[string]any{}
 		}
 		for key, value := range expected.Trigger.GatesBefore {
-			key = strings.TrimSpace(key)
+			key = h.catalogGateKey(h.bundle.WorkflowName(), key)
 			if key == "" {
 				continue
 			}
@@ -895,6 +924,21 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 	if _, err := h.workflow.MaterializeInitialEntry(h.ctx, instance, h.startedAt); err != nil {
 		h.t.Fatalf("seed entity_fields_before for %s: %v", entityID, err)
 	}
+}
+
+func (h *runtimeHarness) catalogGateKey(flowID, key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" || strings.Contains(key, "/") || h == nil || h.bundle == nil {
+		return key
+	}
+	scope := strings.Trim(strings.TrimSpace(semanticview.Wrap(h.bundle).FlowPath(strings.TrimSpace(flowID))), "/")
+	if scope == "" {
+		scope = strings.Trim(strings.TrimSpace(flowID), "/")
+	}
+	if scope == "" {
+		return key
+	}
+	return scope + "/" + key
 }
 
 func triggerPayloadEntityID(payload map[string]any) string {
