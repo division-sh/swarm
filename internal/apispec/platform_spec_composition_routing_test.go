@@ -325,7 +325,8 @@ func TestPlatformSpecE1aRetirementCloseoutIsCanonicalOnly(t *testing.T) {
 	assertScalarContains(t, interFlow, "bind.observe")
 
 	resolutionRules := mustYAMLPath(t, root, "engine", "event_identity", "resolution_rules")
-	assertScalarContains(t, mustMappingValue(t, resolutionRules, "contracts_always_local"), "Exact declarations never use flow prefixes")
+	assertScalarContains(t, mustMappingValue(t, resolutionRules, "contracts_always_local"), "already-normalized exact identity only when it resolves to that same flow")
+	assertScalarContains(t, mustMappingValue(t, resolutionRules, "contracts_always_local"), "Exact subscriptions never cross a flow boundary")
 	assertScalarContains(t, mustMappingValue(t, resolutionRules, "contracts_always_local"), "bind.observe")
 	assertScalarContains(t, mustMappingValue(t, resolutionRules, "handler_lookup_localizes"), "governed import-boundary wildcard observation")
 
@@ -333,9 +334,28 @@ func TestPlatformSpecE1aRetirementCloseoutIsCanonicalOnly(t *testing.T) {
 	assertScalarContains(t, mustYAMLPath(t, crossFlow, "auto_wiring", "ambiguity"), "parent connect or its typed alias/adapter input")
 	subscriptionBoundary := mustMappingValue(t, crossFlow, "subscription_boundary")
 	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "exact"), "hard invalidity")
+	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "same_scope_agent_identity"), "same-scope route carrier")
 	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "inter_flow_delivery"), "parent connect")
 	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "wildcard_observation"), "bind.observe")
-	assertScalarContains(t, mustYAMLPath(t, crossFlow, "contract_authoring_rules", "subscribes_to"), "flow-prefixed exact values are invalid")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "contract_authoring_rules", "subscribes_to"), "already-normalized same-scope identity")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "contract_authoring_rules", "subscribes_to"), "Cross-boundary slash-qualified and full-URI exact values are invalid")
+
+	referenceModel := mustYAMLPath(t, root, "engine", "uri_addressing")
+	assertScalarContains(t, mustMappingValue(t, referenceModel, "resolution"), "flow-owned agent admission may retain an already-normalized same-scope identity")
+	assertScalarContains(t, mustYAMLPath(t, referenceModel, "full_uri", "when"), "Full URIs are not exact subscription authority")
+
+	contractMerger := mustYAMLPath(t, root, "engine", "contract_merger")
+	assertScalarContains(t, mustMappingValue(t, contractMerger, "subscription_resolution"), "fail closed rather than resolving globally")
+	assertScalarContains(t, mustMappingValue(t, contractMerger, "subscription_resolution"), "wildcard_subscription_scope")
+
+	bootSteps := mustYAMLPath(t, root, "engine", "boot_sequence", "steps")
+	resolveSubscriptions := mustSequenceMappingByScalarField(t, bootSteps, "name", "resolve_subscriptions")
+	assertScalarContains(t, mustMappingValue(t, resolveSubscriptions, "action"), "already-normalized same-scope identity")
+	assertScalarContains(t, mustMappingValue(t, resolveSubscriptions, "action"), "full-URI exact values that cross a flow boundary fail closed")
+
+	eventCatalog := mustYAMLPath(t, root, "static_analyzer", "slice_5_dead_declared_event_schema_surface", "active_role_carriers")
+	assertScalarContains(t, mustYAMLPath(t, eventCatalog, "connected_cross_flow_usage", "rule"), "typed compiled connect edge")
+	assertScalarContains(t, mustYAMLPath(t, eventCatalog, "connected_cross_flow_usage", "rule"), "Raw qualified exact subscription text is not a liveness proof")
 
 	lowered := mustYAMLPath(t, root, "contract_formats", "event_schema", "routing_derivation", "route_plan_authority", "lowered_connect_route_plan_consumption")
 	assertScalarContains(t, mustYAMLPath(t, lowered, "unsupported_or_split", "selected_contract_runfork_readiness"), "Closed by #2114")
@@ -371,6 +391,12 @@ func TestPlatformSpecE1aRetirementCloseoutIsCanonicalOnly(t *testing.T) {
 		"#1466 remains open",
 		"not closed by #1473",
 		"Parser/model support beyond source-authority fixtures is follow-up",
+		"Exact declarations never use flow prefixes",
+		"Exact subscriptions always use local names",
+		"flow-prefixed exact values are invalid",
+		"Full URI subscriptions resolve globally",
+		"Paths with / resolve\n        as absolute from root",
+		"cross_flow_qualified_usage",
 	} {
 		if strings.Contains(surface, stale) {
 			t.Fatalf("platform spec retains stale E1a authority/status wording %q", stale)
