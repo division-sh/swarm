@@ -563,6 +563,30 @@ func TestEntityCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 			wantStderr: "unknown field",
 		},
 		{
+			name: "list unknown member exits three",
+			args: []string{"entity", "list"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []any{}, "bogus": 1})
+			},
+			wantCode:   3,
+			wantStderr: "unknown field",
+		},
+		{
+			name: "view unknown member exits three",
+			args: []string{"entity", "view", "entity-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validEntityFullResult("entity-1")
+				result["bogus"] = 1
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "unknown field",
+		},
+		{
 			name: "aggregate unknown rpc exits three",
 			args: []string{"entity", "aggregate"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
@@ -838,6 +862,29 @@ func TestEntityListQuietRendersEntityIDs(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
 	if len(lines) != 2 || lines[0] != "entity-a" || lines[1] != "entity-b" {
 		t.Fatalf("quiet stdout = %q, want entity-a/entity-b lines", stdout.String())
+	}
+}
+
+func TestEntityViewJSONPreservesExplicitEmptyLoops(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		result := validEntityFullResult("entity-1")
+		result["loops"] = []any{}
+		writeJSONRPCResult(t, w, captured.ID, result)
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"loops":[]`) {
+		t.Fatalf("explicitly present empty loops array was dropped by --json:\n%s", stdout.String())
 	}
 }
 

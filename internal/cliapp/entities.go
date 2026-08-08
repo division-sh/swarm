@@ -66,6 +66,21 @@ type entityListResult struct {
 	NextCursor string          `json:"next_cursor,omitempty"`
 }
 
+// UnmarshalJSON rejects unknown properties (entity.list result and rows are
+// additionalProperties: false) so --json cannot silently drop a malformed
+// member.
+func (r *entityListResult) UnmarshalJSON(data []byte) error {
+	type entityListResultAlias entityListResult
+	var shadow entityListResultAlias
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&shadow); err != nil {
+		return err
+	}
+	*r = entityListResult(shadow)
+	return nil
+}
+
 type entitySummary struct {
 	EntityID     string `json:"entity_id"`
 	RunID        string `json:"run_id"`
@@ -80,28 +95,33 @@ type entitySummary struct {
 }
 
 type entityFull struct {
-	Entity      entitySummary          `json:"entity"`
-	Fields      map[string]any         `json:"fields"`
-	Gates       map[string]bool        `json:"gates"`
-	Accumulated map[string]any         `json:"accumulated"`
-	Loops       []entityLoopActivation `json:"loops,omitempty"`
-	loopsNull   bool
+	Entity       entitySummary          `json:"entity"`
+	Fields       map[string]any         `json:"fields"`
+	Gates        map[string]bool        `json:"gates"`
+	Accumulated  map[string]any         `json:"accumulated"`
+	Loops        []entityLoopActivation `json:"loops,omitempty"`
+	loopsPresent bool
+	loopsNull    bool
 }
 
-// UnmarshalJSON preserves whether the loops property was present and rejects
-// null so a schema-invalid server response cannot be normalized into an
-// omitted property by --json.
+// UnmarshalJSON rejects unknown properties (EntityFull and EntitySummary are
+// additionalProperties: false) and preserves whether loops was present, so a
+// schema-invalid response (extra member, or loops: null) fails closed instead
+// of --json normalizing it away.
 func (f *entityFull) UnmarshalJSON(data []byte) error {
 	type entityFullAlias entityFull
 	var shadow struct {
 		entityFullAlias
 		Loops json.RawMessage `json:"loops"`
 	}
-	if err := json.Unmarshal(data, &shadow); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&shadow); err != nil {
 		return err
 	}
 	*f = entityFull(shadow.entityFullAlias)
 	if len(shadow.Loops) > 0 {
+		f.loopsPresent = true
 		if bytes.Equal(bytes.TrimSpace(shadow.Loops), []byte("null")) {
 			f.loopsNull = true
 			return nil
@@ -111,6 +131,25 @@ func (f *entityFull) UnmarshalJSON(data []byte) error {
 		}
 	}
 	return nil
+}
+
+// MarshalJSON retains an explicitly present loops property (including an empty
+// array) instead of letting omitempty drop it, while still omitting the key
+// when the server omitted it.
+func (f entityFull) MarshalJSON() ([]byte, error) {
+	type entityFullAlias entityFull
+	var loops json.RawMessage
+	if f.loopsPresent {
+		encoded, err := json.Marshal(f.Loops)
+		if err != nil {
+			return nil, err
+		}
+		loops = encoded
+	}
+	return json.Marshal(struct {
+		entityFullAlias
+		Loops json.RawMessage `json:"loops,omitempty"`
+	}{entityFullAlias: entityFullAlias(f), Loops: loops})
 }
 
 // entityLoopActivation mirrors loopruntime.PublicActivation so the --json path
