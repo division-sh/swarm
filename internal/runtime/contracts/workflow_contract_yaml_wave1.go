@@ -3,6 +3,7 @@ package contracts
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -824,9 +825,10 @@ func (e *EnumTypeDecl) UnmarshalYAML(node *yaml.Node) error {
 }
 
 // decodeEnumDeclaration parses the canonical enum mapping form
-// (`{values: [...], default: <member>}`). The retired sequence form is
-// rejected with a teaching error carrying the behavior-preserving codemod:
-// enum defaults are explicit, never implied by member order (#1532).
+// (`{values: [...], default: <member>}`). The retired sequence form and the
+// scalar shorthand are rejected with teaching errors carrying the
+// behavior-preserving codemod: enum defaults are explicit, never implied by
+// member order (#1532).
 func decodeEnumDeclaration(node *yaml.Node) ([]string, string, error) {
 	if node == nil || node.Kind == 0 {
 		return nil, "", fmt.Errorf("enum declaration requires the mapping form {values: [...], default: <member>}")
@@ -839,17 +841,31 @@ func decodeEnumDeclaration(node *yaml.Node) ([]string, string, error) {
 		if len(values) == 0 {
 			return nil, "", fmt.Errorf("enum declaration requires at least one value")
 		}
-		return nil, "", fmt.Errorf("enum declaration uses the retired sequence form; convert to the mapping form and add default: %s to preserve behavior (e.g. {values: [...], default: %s})", values[0], values[0])
+		return nil, "", fmt.Errorf("RETIRED: enum declaration uses the sequence form; convert to the mapping form and add default: %s to preserve behavior (e.g. {values: [...], default: %s})", values[0], values[0])
+	}
+	if node.Kind == yaml.ScalarNode {
+		member, err := decodeScalarStringNode(node)
+		if err != nil {
+			return nil, "", err
+		}
+		if member == "" {
+			return nil, "", fmt.Errorf("enum declaration requires the mapping form {values: [...], default: <member>}")
+		}
+		return nil, "", fmt.Errorf("RETIRED: enum declaration uses the scalar shorthand; convert to the mapping form and add default: %s to preserve behavior (e.g. {values: [%s], default: %s})", member, member, member)
 	}
 	if node.Kind != yaml.MappingNode {
 		return nil, "", fmt.Errorf("enum declaration must be a mapping {values: [...], default: <member>}")
 	}
 	var values []string
 	var defaultValue string
-	seen := map[string]bool{}
+	seen := map[string]struct{}{}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		value := node.Content[i+1]
+		if _, duplicate := seen[key]; duplicate {
+			return nil, "", fmt.Errorf("enum declaration repeats key %q; each of values and default may appear once", key)
+		}
+		seen[key] = struct{}{}
 		switch key {
 		case "values":
 			decoded, err := decodeStringListNode(value)
@@ -858,27 +874,30 @@ func decodeEnumDeclaration(node *yaml.Node) ([]string, string, error) {
 			}
 			values = decoded
 		case "default":
-			if value.Kind != yaml.ScalarNode {
-				return nil, "", fmt.Errorf("enum declaration default must be a scalar member")
+			decoded, err := decodeScalarStringNode(value)
+			if err != nil {
+				return nil, "", fmt.Errorf("enum declaration default: %w", err)
 			}
-			defaultValue = strings.TrimSpace(value.Value)
+			defaultValue = decoded
 		default:
-			return nil, "", fmt.Errorf("enum declaration has unknown field %q; the canonical form is {values: [...], default: <member>}", key)
+			return nil, "", NewUndefinedFieldDiagnostic("enum declaration", key, enumDeclarationFields)
 		}
-		seen[key] = true
 	}
 	if len(values) == 0 {
 		return nil, "", fmt.Errorf("enum declaration requires values with at least one member")
 	}
-	if strings.TrimSpace(defaultValue) == "" {
+	if defaultValue == "" {
 		return nil, "", fmt.Errorf("enum declaration requires default; add default: %s to preserve current behavior", values[0])
 	}
-	for _, member := range values {
-		if strings.TrimSpace(member) == defaultValue {
-			return values, defaultValue, nil
-		}
+	if slices.Contains(values, defaultValue) {
+		return values, defaultValue, nil
 	}
 	return nil, "", fmt.Errorf("enum declaration default %q is not a declared member; declared members: %s", defaultValue, strings.Join(values, ", "))
+}
+
+var enumDeclarationFields = map[string]struct{}{
+	"values":  {},
+	"default": {},
 }
 
 func (n *NamedTypeDecl) UnmarshalYAML(node *yaml.Node) error {

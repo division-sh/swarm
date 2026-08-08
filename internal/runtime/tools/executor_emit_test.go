@@ -1407,8 +1407,8 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{
 			Enums: map[string]runtimecontracts.EnumTypeDecl{
-				"ReviewPriority":     {Values: []string{"urgent"}},
-				"ValidationPriority": {Values: []string{"low"}},
+				"ReviewPriority":     {Values: []string{"urgent"}, Default: "urgent"},
+				"ValidationPriority": {Values: []string{"low"}, Default: "low"},
 			},
 			Types: map[string]runtimecontracts.NamedTypeDecl{
 				"ReviewRequest": {
