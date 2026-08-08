@@ -704,7 +704,7 @@ func cloneTypeCatalogDocument(in TypeCatalogDocument) TypeCatalogDocument {
 	if len(in.Enums) > 0 {
 		out.Enums = make(map[string]EnumTypeDecl, len(in.Enums))
 		for key, value := range in.Enums {
-			out.Enums[key] = EnumTypeDecl{Values: append([]string{}, value.Values...)}
+			out.Enums[key] = EnumTypeDecl{Values: append([]string{}, value.Values...), Default: value.Default}
 		}
 	}
 	if len(in.Types) > 0 {

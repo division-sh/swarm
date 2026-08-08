@@ -1314,7 +1314,7 @@ func TestHandleEmitTool_AllowsValidWave1EventPayloadTypes(t *testing.T) {
 				"Label":   {Base: "text"},
 			},
 			Enums: map[string]runtimecontracts.EnumTypeDecl{
-				"Mode": {Values: []string{"fast", "deep"}},
+				"Mode": {Values: []string{"fast", "deep"}, Default: "fast"},
 			},
 			Types: map[string]runtimecontracts.NamedTypeDecl{
 				"ScanDetails": {

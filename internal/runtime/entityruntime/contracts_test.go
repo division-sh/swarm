@@ -331,3 +331,37 @@ func TestContainedOperationTarget_RejectsSetOrMergeIndex(t *testing.T) {
 		})
 	}
 }
+
+func TestEnumDefaultIsOrderInert(t *testing.T) {
+	build := func(values []string) Contract {
+		return Contract{
+			Entity: runtimecontracts.EntityContract{
+				Fields: map[string]runtimecontracts.EntityFieldDecl{
+					"status": {Type: "order_status"},
+				},
+			},
+			Types: runtimecontracts.TypeCatalogDocument{
+				Enums: map[string]runtimecontracts.EnumTypeDecl{
+					"order_status": {Values: values, Default: "draft"},
+				},
+			},
+		}
+	}
+	original := build([]string{"archived", "draft", "published"})
+	permuted := build([]string{"published", "archived", "draft"})
+
+	got, err := defaultValue(original, "order_status", nil)
+	if err != nil {
+		t.Fatalf("defaultValue original: %v", err)
+	}
+	gotPermuted, err := defaultValue(permuted, "order_status", nil)
+	if err != nil {
+		t.Fatalf("defaultValue permuted: %v", err)
+	}
+	if got != "draft" || gotPermuted != "draft" {
+		t.Fatalf("defaults = %q and %q, want the declared default draft regardless of member order", got, gotPermuted)
+	}
+	if got != gotPermuted {
+		t.Fatalf("member order changed the default: %q vs %q", got, gotPermuted)
+	}
+}

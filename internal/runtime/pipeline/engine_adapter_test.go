@@ -2964,7 +2964,7 @@ func TestValidatePipelineEmitPayload_RejectsEnumViolationOnActionSurface(t *test
 		"package.yaml":             "name: action-emit-enum\nversion: 1.0.0\ndescription: Action emit enum proof.\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n- id: child\n  flow: child\n  mode: static\n",
 		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: [parent.trigger]\n  outputs:\n    events: [parent.result]\n",
 		"events.yaml":              "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
-		"types.yaml":               "enums:\n  Mode: [fast, deep]\n",
+		"types.yaml":               "enums:\n  Mode:\n    values: [fast, deep]\n    default: fast\n",
 		"flows/child/package.yaml": "name: child\nversion: 1.0.0\ndescription: child flow\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n",
 		"flows/child/schema.yaml":  "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
 		"flows/child/events.yaml":  "child.start:\n  entity_id: string\nchild.internal:\n  mode: Mode\n  required: [mode]\n",

@@ -3930,3 +3930,37 @@ emit:
 		t.Fatalf("yaml.Unmarshal error = %v, want nested retired target diagnostic", err)
 	}
 }
+
+func TestEnumTypeDeclDecode_RetiresSequenceFormWithTeachingCodemod(t *testing.T) {
+	var decl EnumTypeDecl
+	err := yaml.Unmarshal([]byte(`[low, medium, high]`), &decl)
+	if err == nil || !strings.Contains(err.Error(), "retired sequence form") || !strings.Contains(err.Error(), "default: low") {
+		t.Fatalf("sequence form error = %v, want teaching codemod naming default: low", err)
+	}
+}
+
+func TestEnumTypeDeclDecode_RequiresDefault(t *testing.T) {
+	var decl EnumTypeDecl
+	err := yaml.Unmarshal([]byte("values: [low, medium, high]\n"), &decl)
+	if err == nil || !strings.Contains(err.Error(), "requires default") || !strings.Contains(err.Error(), "default: low") {
+		t.Fatalf("missing default error = %v, want teaching codemod naming default: low", err)
+	}
+}
+
+func TestEnumTypeDeclDecode_RejectsNonMemberDefaultNamingMembers(t *testing.T) {
+	var decl EnumTypeDecl
+	err := yaml.Unmarshal([]byte("values: [low, medium, high]\ndefault: urgent\n"), &decl)
+	if err == nil || !strings.Contains(err.Error(), `default "urgent" is not a declared member`) || !strings.Contains(err.Error(), "low, medium, high") {
+		t.Fatalf("non-member default error = %v, want error naming the declared members", err)
+	}
+}
+
+func TestEnumTypeDeclDecode_AcceptsCanonicalMappingForm(t *testing.T) {
+	var decl EnumTypeDecl
+	if err := yaml.Unmarshal([]byte("values: [low, medium, high]\ndefault: medium\n"), &decl); err != nil {
+		t.Fatalf("canonical mapping form rejected: %v", err)
+	}
+	if !reflect.DeepEqual(decl.Values, []string{"low", "medium", "high"}) || decl.Default != "medium" {
+		t.Fatalf("decoded enum = %#v", decl)
+	}
+}
