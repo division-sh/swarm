@@ -549,6 +549,9 @@ func defaultValue(contract Contract, typeRef string, explicit any) (any, error) 
 		return []any{}, nil
 	case isEnumType(contract, typeRef):
 		enum := contract.Types.Enums[typeName(contract, typeRef)]
+		if strings.TrimSpace(enum.Default) == "" {
+			return "", fmt.Errorf("enum %s has no declared default; every enum must declare default: <member>", typeName(contract, typeRef))
+		}
 		return strings.TrimSpace(enum.Default), nil
 	case isNamedType(contract, typeRef):
 		named := contract.Types.Types[typeName(contract, typeRef)]

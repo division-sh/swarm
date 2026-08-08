@@ -3934,8 +3934,43 @@ emit:
 func TestEnumTypeDeclDecode_RetiresSequenceFormWithTeachingCodemod(t *testing.T) {
 	var decl EnumTypeDecl
 	err := yaml.Unmarshal([]byte(`[low, medium, high]`), &decl)
-	if err == nil || !strings.Contains(err.Error(), "retired sequence form") || !strings.Contains(err.Error(), "default: low") {
+	if err == nil || !strings.Contains(err.Error(), "RETIRED: enum declaration uses the sequence form") || !strings.Contains(err.Error(), "default: low") {
 		t.Fatalf("sequence form error = %v, want teaching codemod naming default: low", err)
+	}
+}
+
+func TestEnumTypeDeclDecode_RetiresScalarShorthandWithTeachingCodemod(t *testing.T) {
+	var decl EnumTypeDecl
+	err := yaml.Unmarshal([]byte(`fast`), &decl)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED: enum declaration uses the scalar shorthand") || !strings.Contains(err.Error(), "default: fast") {
+		t.Fatalf("scalar shorthand error = %v, want teaching codemod naming default: fast", err)
+	}
+}
+
+func TestEnumTypeDeclDecode_RejectsDuplicateKeys(t *testing.T) {
+	var decl EnumTypeDecl
+	err := yaml.Unmarshal([]byte("values: [low, high]\ndefault: low\ndefault: high\n"), &decl)
+	if err == nil || !strings.Contains(err.Error(), `repeats key "default"`) {
+		t.Fatalf("duplicate key error = %v, want duplicate-key rejection", err)
+	}
+}
+
+func TestEnumTypeDeclDecode_UnknownFieldListsValidOptions(t *testing.T) {
+	var decl EnumTypeDecl
+	err := yaml.Unmarshal([]byte("values: [low, high]\ndefualt: low\n"), &decl)
+	if err == nil {
+		t.Fatal("unknown enum field accepted")
+	}
+	diagnostic, ok := AsLoaderDiagnostic(err)
+	if !ok {
+		t.Fatalf("unknown field error = %T %v, want LoaderDiagnostic", err, err)
+	}
+	if diagnostic.Code != "contract_loader.undefined_field" || !strings.Contains(diagnostic.Problem, "defualt") {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+	options := strings.Join(diagnostic.ValidOptions, ",")
+	if !strings.Contains(options, "values") || !strings.Contains(options, "default") {
+		t.Fatalf("valid options = %v, want values and default", diagnostic.ValidOptions)
 	}
 }
 

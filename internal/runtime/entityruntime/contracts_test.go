@@ -365,3 +365,22 @@ func TestEnumDefaultIsOrderInert(t *testing.T) {
 		t.Fatalf("member order changed the default: %q vs %q", got, gotPermuted)
 	}
 }
+
+func TestEnumDefaultMissingFailsFast(t *testing.T) {
+	contract := Contract{
+		Entity: runtimecontracts.EntityContract{
+			Fields: map[string]runtimecontracts.EntityFieldDecl{
+				"status": {Type: "order_status"},
+			},
+		},
+		Types: runtimecontracts.TypeCatalogDocument{
+			Enums: map[string]runtimecontracts.EnumTypeDecl{
+				"order_status": {Values: []string{"archived", "draft", "published"}},
+			},
+		},
+	}
+	_, err := defaultValue(contract, "order_status", nil)
+	if err == nil || !strings.Contains(err.Error(), "order_status") || !strings.Contains(err.Error(), "no declared default") {
+		t.Fatalf("missing enum default error = %v, want fail-fast invariant violation", err)
+	}
+}
