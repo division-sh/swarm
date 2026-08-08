@@ -122,6 +122,7 @@ func TestRunCommandLocalForegroundUsesServeAPITokenFileForEmbeddedClient(t *test
 		"serve_api_token_file": tokenFile,
 	}))
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
+	requestRead := make(chan struct{})
 	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 		expectedToken: "serve-token",
 		strictAuth:    true,
@@ -132,6 +133,7 @@ func TestRunCommandLocalForegroundUsesServeAPITokenFileForEmbeddedClient(t *test
 			case "run.start":
 				return map[string]any{"run_id": "run-token-file", "status": "running"}
 			case "run.get":
+				awaitRunCommandTraceRequest(t, requestRead)
 				run := validDiagnosticRunHeader("run-token-file")
 				run["status"] = "completed"
 				run["ended_at"] = "2026-05-13T10:01:00Z"
@@ -141,7 +143,8 @@ func TestRunCommandLocalForegroundUsesServeAPITokenFileForEmbeddedClient(t *test
 			}
 			return nil
 		},
-		wsRows: []map[string]any{validRunCommandTraceRow("evt-token-file")},
+		wsRows:        []map[string]any{validRunCommandTraceRow("evt-token-file")},
+		wsRequestRead: requestRead,
 	})
 	defer server.Close()
 
@@ -166,6 +169,15 @@ func TestRunCommandLocalForegroundUsesServeAPITokenFileForEmbeddedClient(t *test
 	}
 	assertRunCommandMethods(t, calls, []string{"health.check", "health.check", "run.start", "run.get"})
 	assertRunCommandTraceSubscription(t, wsRequests, "run-token-file", true)
+}
+
+func awaitRunCommandTraceRequest(t *testing.T, requestRead <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-requestRead:
+	case <-time.After(5 * time.Second):
+		t.Error("timed out waiting for subscription request read before terminal run.get")
+	}
 }
 
 func TestStartLocalRunServeConsumesContractPathConfigResolver(t *testing.T) {
