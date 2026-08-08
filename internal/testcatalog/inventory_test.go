@@ -81,7 +81,13 @@ func TestCatalogOwnershipHasNoLegacyClassifierOrSimulator(t *testing.T) {
 	}
 	legacySelector := regexp.MustCompile(`(?m)\bvar\s+tier[0-9]+[A-Za-z0-9_]*(Fixtures|ExcludedFixtures|RetiredFixtures)\b`)
 	for _, relativeRoot := range []string{"internal/cliapp", "internal/runtime/cataloge2e", "internal/runtime/swarmflowtest"} {
-		err := filepath.WalkDir(filepath.Join(root, relativeRoot), func(path string, entry os.DirEntry, err error) error {
+		scanRoot := filepath.Join(root, relativeRoot)
+		if _, err := os.Stat(scanRoot); os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			t.Fatalf("stat %s: %v", relativeRoot, err)
+		}
+		err := filepath.WalkDir(scanRoot, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
