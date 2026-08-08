@@ -193,7 +193,7 @@ func TestBuildBaseContext_PropagatesEntityMaterializationFailure(t *testing.T) {
 		Payload: map[string]any{},
 	}
 	_, err := BuildBaseContext(input)
-	if err == nil || !strings.Contains(err.Error(), "order_status") || !strings.Contains(err.Error(), "no declared member default") {
+	if err == nil || !strings.Contains(err.Error(), "order_status") || !strings.Contains(err.Error(), "no declared default") {
 		t.Fatalf("BuildBaseContext error = %v, want propagated enum-default invariant violation", err)
 	}
 }
