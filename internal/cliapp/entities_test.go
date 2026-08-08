@@ -271,7 +271,7 @@ func TestEntityViewJSONPreservesLoopActivations(t *testing.T) {
 		}
 		result := validEntityFullResult("entity-1")
 		result["loops"] = []map[string]any{
-			{"id": "loop-a", "revision_id": "rev-9", "attempt": 1, "max_attempts": 3, "current_stage": "collecting", "status": "active"},
+			{"id": "loop-a", "revision_id": "rev-9", "attempt": 1, "max_attempts": 3, "current_stage": "collecting", "status": "open"},
 		}
 		writeJSONRPCResult(t, w, captured.ID, result)
 	}))
@@ -283,7 +283,7 @@ func TestEntityViewJSONPreservesLoopActivations(t *testing.T) {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	for _, want := range []string{
-		`"loops":[{"id":"loop-a","revision_id":"rev-9","attempt":1,"max_attempts":3,"current_stage":"collecting","status":"active"}]`,
+		`"loops":[{"id":"loop-a","revision_id":"rev-9","attempt":1,"max_attempts":3,"current_stage":"collecting","status":"open"}]`,
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("entity view --json missing %q:\n%s", want, stdout.String())
@@ -475,6 +475,21 @@ func TestEntityCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 			wantStderr: "fields is required",
 		},
 		{
+			name: "view malformed loop activation exits three",
+			args: []string{"entity", "view", "entity-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validEntityFullResult("entity-1")
+				result["loops"] = []map[string]any{
+					{"id": "loop-a", "revision_id": "rev-9", "attempt": 0, "max_attempts": 0, "current_stage": "collecting", "status": "open"},
+				}
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "attempt bounds are invalid",
+		},
+		{
 			name: "aggregate unknown rpc exits three",
 			args: []string{"entity", "aggregate"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
@@ -538,7 +553,7 @@ func TestEntityViewVerboseShowsBookkeepingAccumulatedAndAbsoluteTimestamps(t *te
 		fields["package_key"] = "."
 		fields["activation"] = "standing"
 		result["loops"] = []map[string]any{
-			{"id": "loop-a", "revision_id": "rev-9", "attempt": 1, "max_attempts": 3, "current_stage": "collecting", "status": "active"},
+			{"id": "loop-a", "revision_id": "rev-9", "attempt": 1, "max_attempts": 3, "current_stage": "collecting", "status": "open"},
 		}
 		writeJSONRPCResult(t, w, captured.ID, result)
 	}))
@@ -549,7 +564,7 @@ func TestEntityViewVerboseShowsBookkeepingAccumulatedAndAbsoluteTimestamps(t *te
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Bookkeeping", "bundle_hash", "package_key", "activation", "Accumulated", "accumulator", "Loops", "loop-a", "attempt 1/3"} {
+	for _, want := range []string{"Bookkeeping", "bundle_hash", "package_key", "activation", "Accumulated", "accumulator", "Loops", "loop-a", "attempt 1/3", "rev-9"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("verbose stdout missing %q:\n%s", want, stdout.String())
 		}

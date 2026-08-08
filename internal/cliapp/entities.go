@@ -468,6 +468,39 @@ func validateEntityFullResult(prefix string, result entityFull) error {
 	if result.Accumulated == nil {
 		return fmt.Errorf("malformed %s: accumulated is required", prefix)
 	}
+	for i, loop := range result.Loops {
+		if err := validateEntityLoopActivation(fmt.Sprintf("%s.loops[%d]", prefix, i), loop); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateEntityLoopActivation mirrors loopruntime.Activation.Validate at the
+// CLI boundary so a malformed loop activation from a non-store server is
+// rejected instead of being rewritten into a schema-invalid --json result or
+// displayed with misleading zero values under --verbose.
+func validateEntityLoopActivation(prefix string, loop entityLoopActivation) error {
+	if strings.TrimSpace(loop.ID) == "" || strings.TrimSpace(loop.RevisionID) == "" {
+		return fmt.Errorf("malformed %s: loop activation identity is incomplete", prefix)
+	}
+	if loop.Attempt <= 0 || loop.MaxAttempts <= 0 || loop.Attempt > loop.MaxAttempts {
+		return fmt.Errorf("malformed %s: attempt bounds are invalid: attempt=%d max=%d", prefix, loop.Attempt, loop.MaxAttempts)
+	}
+	if strings.TrimSpace(loop.CurrentStage) == "" {
+		return fmt.Errorf("malformed %s: current stage is required", prefix)
+	}
+	switch loop.Status {
+	case "open", "closed":
+	default:
+		return fmt.Errorf("malformed %s: status %q is invalid", prefix, loop.Status)
+	}
+	if loop.Status == "open" && loop.CloseReason != "" {
+		return fmt.Errorf("malformed %s: open loop cannot have close reason %q", prefix, loop.CloseReason)
+	}
+	if loop.Status == "closed" && strings.TrimSpace(loop.CloseReason) == "" {
+		return fmt.Errorf("malformed %s: closed loop requires a close reason", prefix)
+	}
 	return nil
 }
 
@@ -616,7 +649,7 @@ func writeEntityLoopSection(out io.Writer, loops []entityLoopActivation) {
 		if strings.TrimSpace(loop.CloseReason) != "" {
 			summary += " · " + loop.CloseReason
 		}
-		rows = append(rows, cliLabeledDetailRow{Label: loop.ID, Value: cliRenderOneLineValue(summary)})
+		rows = append(rows, cliLabeledDetailRow{Label: loop.ID, Value: cliRenderOneLineValue(summary + " · rev " + loop.RevisionID)})
 	}
 	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Loops", Rows: rows})
 }
