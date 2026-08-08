@@ -1224,46 +1224,73 @@ func TestRun_ReportsRuleRecordEvidenceMissingTargetNamesDeclaredFlowTargets(t *t
 }
 
 func TestRun_RecordEvidenceMissingTargetDoesNotLeakOtherFlowTargets(t *testing.T) {
-	child := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
-		Path:  "child",
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"child-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"task.completed": {
-						Action:         runtimecontracts.ActionSpec{ID: "record_evidence"},
-						EvidenceTarget: "child_evidence",
-					},
-				},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"root-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"task.completed": {
-						Action: runtimecontracts.ActionSpec{ID: "record_evidence"},
-					},
-				},
-			},
-		},
-		Children: []runtimecontracts.FlowContractView{child},
-	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: runtimecontracts.FlowTree{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
-		},
-		Nodes:  root.Nodes,
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{},
-	}
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), writeEvidenceLeakProofFixture(t), runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
 	if !reportContains(report.Errors(), "handler_field_compliance", "record_evidence is missing evidence_target; declared evidence targets in flow root: none") {
 		t.Fatalf("expected flow-scoped teaching error without sibling-flow leakage, got %#v", report.Errors())
 	}
+}
+
+// writeEvidenceLeakProofFixture writes a real two-flow bundle: a root node
+// whose record_evidence omits evidence_target and a child-flow node whose
+// record_evidence declares one. The fixture loads through the production
+// loader so nodeSources attribution is real and the flow-scoping filter is
+// load-bearing (deleting it must fail the leak test).
+func writeEvidenceLeakProofFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: evidence-leak-proof
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: child
+    flow: child
+    mode: static
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: evidence-leak-proof
+initial_state: collecting
+terminal_states: [done]
+states: [collecting, done]
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
+evidence.requested:
+  finding: string
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+root-node:
+  id: root-node
+  execution_type: system_node
+  subscribes_to: [evidence.requested]
+  event_handlers:
+    evidence.requested:
+      action: record_evidence
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+name: child
+mode: static
+states: [ready]
+initial_state: ready
+terminal_states: [ready]
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
+child.evidence:
+  finding: string
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
+child-node:
+  id: child-node
+  execution_type: system_node
+  subscribes_to: [child.evidence]
+  event_handlers:
+    child.evidence:
+      action: record_evidence
+      evidence_target: child_evidence
+`)
+	return root
 }
 
 func TestRun_ReportsMailboxWriteMissingMailboxSpec(t *testing.T) {
