@@ -4062,3 +4062,14 @@ func TestEntityContractDecode_RejectsReservedBookkeepingFieldNames(t *testing.T)
 		})
 	}
 }
+
+func TestEntityContractDecode_AllowsDeclaredEntityIDBusinessField(t *testing.T) {
+	var contract EntityContract
+	err := yaml.Unmarshal([]byte("entity_id: {type: text}\n"), &contract)
+	if err != nil {
+		t.Fatalf("yaml.Unmarshal error = %v, want entity_id accepted as declared business data", err)
+	}
+	if _, ok := contract.Fields["entity_id"]; !ok {
+		t.Fatalf("declared entity_id field not retained: %#v", contract.Fields)
+	}
+}

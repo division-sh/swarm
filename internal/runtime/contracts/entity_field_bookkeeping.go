@@ -22,6 +22,11 @@ package contracts
 // (workflow_contract_yaml_wave1.go), so a field present under one of these
 // keys is always platform-injected bookkeeping, never workflow content.
 //
+// `entity_id` is deliberately NOT bookkeeping: the expression contract permits
+// `entity.entity_id` when `entity_id` is declared as business data
+// (platform-spec entity read model), and no runtime injection site writes it
+// into the field surface, so declaring it must remain legal and content-visible.
+//
 // `last_word` is CONTENT: no runtime machinery writes it; flows declare it.
 // This list must stay adjacent to the injection sites; a platform-injected key
 // forgotten here SHOWS UP in default output and is caught by eyes (fail-visible),
@@ -30,7 +35,6 @@ var EntityFieldBookkeepingKeys = []string{
 	"activation",
 	"bundle_hash",
 	"package_key",
-	"entity_id",
 	"last_data_accumulation_event",
 	"last_data_accumulation_source",
 	"fan_out_count",

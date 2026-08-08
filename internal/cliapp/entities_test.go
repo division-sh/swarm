@@ -505,6 +505,21 @@ func TestEntityCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 			wantStderr: "close reason",
 		},
 		{
+			name: "view whitespace-padded loop close reason exits three",
+			args: []string{"entity", "view", "entity-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validEntityFullResult("entity-1")
+				result["loops"] = []map[string]any{
+					{"id": "loop-a", "revision_id": "rev-9", "attempt": 1, "max_attempts": 3, "current_stage": "collecting", "status": "closed", "close_reason": " completed "},
+				}
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "close reason",
+		},
+		{
 			name: "aggregate unknown rpc exits three",
 			args: []string{"entity", "aggregate"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
@@ -612,6 +627,8 @@ func TestEntityViewStatedEmptyStatesAndTruncationAndControlChars(t *testing.T) {
 			t.Errorf("decode request: %v", err)
 		}
 		result := validEntityFullResult("entity-1")
+		entity := result["entity"].(map[string]any)
+		entity["name"] = "Vertical\nOne"
 		result["fields"] = map[string]any{
 			"chats":                         map[string]any{},
 			"empty":                         "   ",
@@ -659,6 +676,9 @@ func TestEntityViewStatedEmptyStatesAndTruncationAndControlChars(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "\nline two") || strings.Contains(stdout.String(), "\x01") {
 		t.Fatalf("control characters leaked into output line discipline:\n%q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "\nOne") {
+		t.Fatalf("embedded newline in entity name broke the header line discipline:\n%q", stdout.String())
 	}
 	unicodeLine := ""
 	for _, line := range strings.Split(stdout.String(), "\n") {

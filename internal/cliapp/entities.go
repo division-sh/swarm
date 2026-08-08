@@ -499,7 +499,7 @@ func validateEntityLoopActivation(prefix string, loop entityLoopActivation) erro
 		return fmt.Errorf("malformed %s: open loop cannot have close reason %q", prefix, loop.CloseReason)
 	}
 	if loop.Status == "closed" {
-		switch strings.TrimSpace(loop.CloseReason) {
+		switch loop.CloseReason {
 		case "completed", "escaped":
 		default:
 			return fmt.Errorf("malformed %s: close reason %q is invalid; must be completed or escaped", prefix, loop.CloseReason)
@@ -614,19 +614,19 @@ func writeEntityFullResult(out io.Writer, result entityFull, opts entityRenderOp
 	entity := result.Entity
 	now := cliRelativeTimeNow()
 	header := []cliLabeledDetailRow{
-		{Label: "run", Value: entity.RunID},
-		{Label: "flow", Value: entity.FlowInstance},
-		{Label: "type", Value: entityDash(entity.EntityType)},
-		{Label: "state", Value: entityDash(entity.CurrentState)},
+		{Label: "run", Value: entityOneLine(entity.RunID)},
+		{Label: "flow", Value: entityOneLine(entity.FlowInstance)},
+		{Label: "type", Value: entityDash(entityOneLine(entity.EntityType))},
+		{Label: "state", Value: entityDash(entityOneLine(entity.CurrentState))},
 		{Label: "revision", Value: fmt.Sprintf("%d", entity.Revision)},
 		{Label: "created", Value: entityTimestampText(now, entity.CreatedAt, opts.verbose)},
 		{Label: "updated", Value: entityTimestampText(now, entity.UpdatedAt, opts.verbose)},
 	}
 	if strings.TrimSpace(entity.Slug) != "" {
-		header = append(header, cliLabeledDetailRow{Label: "slug", Value: entity.Slug})
+		header = append(header, cliLabeledDetailRow{Label: "slug", Value: entityOneLine(entity.Slug)})
 	}
 	if strings.TrimSpace(entity.Name) != "" {
-		header = append(header, cliLabeledDetailRow{Label: "name", Value: entity.Name})
+		header = append(header, cliLabeledDetailRow{Label: "name", Value: entityOneLine(entity.Name)})
 	}
 	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Entity " + entity.EntityID, Rows: header})
 
@@ -663,6 +663,13 @@ func entityListTimestamp(now time.Time, raw string, verbose bool) string {
 		return raw
 	}
 	return formatCLIRelativeTime(now, raw)
+}
+
+// entityOneLine normalizes an unconstrained summary string (run id, flow,
+// type, state, slug, name) so embedded line-breaking characters cannot break
+// the aligned detail-row line discipline.
+func entityOneLine(value string) string {
+	return cliRenderOneLineValue(value)
 }
 
 func entityTimestampText(now time.Time, raw string, verbose bool) string {
