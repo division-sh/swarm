@@ -323,15 +323,61 @@ func (m *Manager) validateControlDatabase(ctx context.Context, db databaseRowQue
 	return true, nil
 }
 
+// resourceLockKey derives the advisory lock key that protects a durable
+// resource intent. It must stay in sync with the derivation used by
+// Reconcile's intents loop when taking the lock before reconciling an intent.
+func resourceLockKey(intent resourceIntent) int64 {
+	if intent.Kind == "template" {
+		return advisoryKey("template:" + intent.Name)
+	}
+	return intent.LeaseKey
+}
+
+// advisoryLockHeld reports whether the resource advisory lock is currently
+// granted to ANY session on the cluster.
+//
+// This is deliberately a cluster-wide tripwire, not a held-by-caller gate:
+// the caller's advisory lock typically lives on a dedicated *sql.Conn (the
+// lease connection), while putIntent writes through a pooled control
+// connection, so pg_backend_pid() scoping is not cleanly expressible here.
+// A write performed while another session owns the lock therefore passes
+// undetected; that wrong-holder class is distinct from the lock-free window
+// this guard enforces. It is also check-then-insert, not atomic: the lock may
+// drop between this EXISTS and the INSERT. Both limitations are fine for the
+// guard's purpose — converting intent-ordering bugs from probabilistic CI
+// flakes into deterministic failures — but it must never be treated as a
+// transactional guarantee.
+func (m *Manager) advisoryLockHeld(ctx context.Context, db databaseRowQueryer, key int64) (bool, error) {
+	var held bool
+	err := db.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM pg_locks
+			WHERE locktype='advisory' AND granted
+			  AND ((classid::bigint << 32) | objid::bigint)=$1
+		)`, key).Scan(&held)
+	if err != nil {
+		return false, fmt.Errorf("inspect advisory lock %d: %w", key, err)
+	}
+	return held, nil
+}
+
 func (m *Manager) putIntent(ctx context.Context, intent resourceIntent) error {
 	if !m.intentMatchesName(intent) {
 		return fmt.Errorf("refuse invalid postgres test resource intent for %q", intent.Name)
 	}
+	lockKey := resourceLockKey(intent)
 	db, err := m.control.Open()
 	if err != nil {
 		return fmt.Errorf("open postgres test control authority: %w", err)
 	}
 	defer db.Close()
+	held, err := m.advisoryLockHeld(ctx, db, lockKey)
+	if err != nil {
+		return err
+	}
+	if !held {
+		return fmt.Errorf("putIntent requires the resource advisory lock %d for %q; acquire before writing durable intent — see Acquire", lockKey, intent.Name)
+	}
 	_, err = db.ExecContext(ctx, `INSERT INTO `+quoteIdent(intentTableName)+`
 		(resource_name, kind, identity, lease_key, template_name) VALUES ($1,$2,$3,$4,$5)`,
 		intent.Name, intent.Kind, intent.Identity, intent.LeaseKey, intent.Template)
@@ -482,10 +528,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		if !m.intentMatchesName(intent) {
 			return fmt.Errorf("invalid postgres test resource intent %q left untouched", intent.Name)
 		}
-		lockKey := intent.LeaseKey
-		if intent.Kind == "template" {
-			lockKey = advisoryKey("template:" + intent.Name)
-		}
+		lockKey := resourceLockKey(intent)
 		lockConn, acquired, err := tryAdvisoryLock(ctx, db, lockKey)
 		if err != nil {
 			return err
