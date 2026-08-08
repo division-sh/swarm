@@ -670,7 +670,7 @@ func writeEntityLoopSection(out io.Writer, loops []entityLoopActivation) {
 		if strings.TrimSpace(loop.CloseReason) != "" {
 			summary += " · " + loop.CloseReason
 		}
-		rows = append(rows, cliLabeledDetailRow{Label: loop.ID, Value: cliRenderOneLineValue(summary + " · rev " + loop.RevisionID)})
+		rows = append(rows, cliLabeledDetailRow{Label: entityOneLine(loop.ID), Value: cliRenderOneLineValue(summary + " · rev " + loop.RevisionID)})
 	}
 	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Loops", Rows: rows})
 }
@@ -734,7 +734,7 @@ func entityFieldRows(fields map[string]any, include func(string) bool) []cliLabe
 	sort.Strings(keys)
 	rows := make([]cliLabeledDetailRow, 0, len(keys))
 	for _, key := range keys {
-		rows = append(rows, cliLabeledDetailRow{Label: key, Value: entityFieldValue(fields[key])})
+		rows = append(rows, cliLabeledDetailRow{Label: entityOneLine(key), Value: entityFieldValue(fields[key])})
 	}
 	return rows
 }
@@ -778,7 +778,7 @@ func writeEntityGatesSection(out io.Writer, gates map[string]bool) {
 	sort.Strings(keys)
 	rows := make([]cliLabeledDetailRow, 0, len(keys))
 	for _, key := range keys {
-		rows = append(rows, cliLabeledDetailRow{Label: key, Value: fmt.Sprintf("%t", gates[key])})
+		rows = append(rows, cliLabeledDetailRow{Label: entityOneLine(key), Value: fmt.Sprintf("%t", gates[key])})
 	}
 	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Gates", Rows: rows})
 }

@@ -638,6 +638,7 @@ func TestEntityViewStatedEmptyStatesAndTruncationAndControlChars(t *testing.T) {
 			"fan_out_count":                 3,
 			"last_data_accumulation_source": "scan.completed",
 			"last_source_event":             "event-9",
+			"label\nwith_newline":           "value",
 		}
 		result["gates"] = map[string]any{"blocked": false, "paused": false}
 		writeJSONRPCResult(t, w, captured.ID, result)
@@ -679,6 +680,9 @@ func TestEntityViewStatedEmptyStatesAndTruncationAndControlChars(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "\nOne") {
 		t.Fatalf("embedded newline in entity name broke the header line discipline:\n%q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "\nwith_newline") {
+		t.Fatalf("embedded newline in field label broke the detail line discipline:\n%q", stdout.String())
 	}
 	unicodeLine := ""
 	for _, line := range strings.Split(stdout.String(), "\n") {
