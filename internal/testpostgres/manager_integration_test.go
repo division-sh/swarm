@@ -291,6 +291,7 @@ func TestManagerReclaimsSandboxInterruptedBetweenCreateAndMetadata(t *testing.T)
 	if err := acquireAdvisoryLock(ctx, creator, resourceLockKey(intent), "interrupted "+name); err != nil {
 		t.Fatal(err)
 	}
+	defer releaseAdvisoryLock(creator, resourceLockKey(intent))
 	if err := manager.putIntent(ctx, intent); err != nil {
 		t.Fatal(err)
 	}
@@ -329,6 +330,7 @@ func TestManagerReclaimsTemplateInterruptedBetweenCreateAndMetadata(t *testing.T
 	if err := acquireAdvisoryLock(ctx, creator, resourceLockKey(intent), "interrupted "+name); err != nil {
 		t.Fatal(err)
 	}
+	defer releaseAdvisoryLock(creator, resourceLockKey(intent))
 	if err := manager.putIntent(ctx, intent); err != nil {
 		t.Fatal(err)
 	}
@@ -604,6 +606,7 @@ func TestManagerReconcileRefreshesCreateWindowAfterTakingLease(t *testing.T) {
 	if err := acquireAdvisoryLock(ctx, creator, resourceLockKey(intent), "create-window "+name); err != nil {
 		t.Fatal(err)
 	}
+	defer releaseAdvisoryLock(creator, resourceLockKey(intent))
 	if err := manager.putIntent(ctx, intent); err != nil {
 		t.Fatal(err)
 	}
@@ -723,13 +726,14 @@ func TestManagerRetiresFailedCreateIntentOnlyAfterExactAbsence(t *testing.T) {
 				leaseKey = 0
 			}
 			name := manager.signedResourceName(prefix, kind, identity)
+			intent := resourceIntent{Name: name, Kind: kind, Identity: identity, LeaseKey: leaseKey}
 			// Mirrors production (Acquire holds the lease for the resource
 			// lifetime): the advisory lock is acquired BEFORE the durable intent
 			// and held through the whole retained/retired assertions, so a
 			// concurrent manager's Reconcile (shared control DB + advisory
 			// keyspace, see NewManager) can never drop the database or retire
 			// the intent underneath this test. #2196.
-			lockKey := resourceLockKey(resourceIntent{Name: name, Kind: kind, Identity: identity, LeaseKey: leaseKey})
+			lockKey := resourceLockKey(intent)
 			creator, err := db.Conn(ctx)
 			if err != nil {
 				t.Fatal(err)
@@ -738,7 +742,7 @@ func TestManagerRetiresFailedCreateIntentOnlyAfterExactAbsence(t *testing.T) {
 			if err := acquireAdvisoryLock(ctx, creator, lockKey, "retain-race "+name); err != nil {
 				t.Fatal(err)
 			}
-			if err := manager.putIntent(ctx, resourceIntent{Name: name, Kind: kind, Identity: identity, LeaseKey: leaseKey}); err != nil {
+			if err := manager.putIntent(ctx, intent); err != nil {
 				t.Fatal(err)
 			}
 			defer manager.deleteIntent(context.Background(), name)
