@@ -911,12 +911,17 @@ func TestDecisionRouteObligationFairnessAdmitsNewWorkBehindFullDeferredPageOnBot
 				setGateRecoveryRouteAttempt(t, selected, eventID, 1)
 			}
 			newEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC())
+			setGateRecoveryRouteAttempt(t, selected, newEventID, 2)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{Interceptors: []runtimebus.EventInterceptor{gateRecoveryFairnessInterceptor{deferred: deferred}}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := bus.SweepPipelineObligations(ctx, 200); err != nil {
+			result, err := bus.SweepPipelineObligations(ctx, 202)
+			if err != nil {
 				t.Fatal(err)
+			}
+			if result.Settled != 201 || result.Examined != 201 || !result.Exhausted || result.Blocked {
+				t.Fatalf("deferred-prefix sweep = %#v", result)
 			}
 			assertGateRecoveryProcessedReceipt(t, selected, newEventID)
 			if got := gateRecoveryPipelineReceiptCount(t, selected, firstGateRecoveryEventID(deferred)); got != 0 {
