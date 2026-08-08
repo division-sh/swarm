@@ -14203,7 +14203,7 @@ run_model:
     stalled_run_escalation:
       owner: policy.runtime.stalled_run_escalation
       event_owner: platform_events.catalog.platform.run_stalled
-      diagnosis_owner: internal/store/run_operational_status_read_surface.go.ProjectRunOperationalStatus
+      diagnosis_owner: internal/store/internal/runtimepersistence/run_operational_status_read_surface.go.ProjectRunOperationalStatus
       progress_timestamp_owner: latest events.created_at for the run excluding platform.run_stalled self-alert rows
       default_policy:
         enabled: true
@@ -16048,7 +16048,7 @@ platform_events:
       producer_evidence:
         produced_by_type: platform
         locations:
-        - internal/store/runtime_log_persistence.go
+        - internal/store/internal/runtimepersistence/runtime_log_persistence.go
       routing_class: diagnostic_direct_persisted
       note: Full payload schema defined in platform_tables. Not duplicated here.
     platform.activity_requested:
@@ -16307,7 +16307,7 @@ platform_events:
         locations:
         - internal/runtime/agentcontrol/control.go
         - internal/runtime/manager/runtime.go
-        - internal/store/agent_directive_operations.go
+        - internal/store/internal/runtimepersistence/agent_directive_operations.go
       routing_class: diagnostic_direct_persisted
       scope: global
       payload:
@@ -16402,8 +16402,8 @@ platform_events:
         produced_by_type: platform
         locations:
         - internal/runtime/inbound.go#InboundGateway.handleResolvedWebhook
-        - internal/store/inbound_publication.go#RunInboundPublicationMutation
-        - internal/store/sqlite_inbound_publication.go#RunInboundPublicationMutation
+        - internal/store/internal/runtimepersistence/inbound_publication.go#RunInboundPublicationMutation
+        - internal/store/internal/runtimepersistence/sqlite_inbound_publication.go#RunInboundPublicationMutation
       routing_class: diagnostic_direct_persisted
       scope: entity or global
       payload:
@@ -16514,7 +16514,7 @@ platform_events:
       producer_evidence:
         produced_by_type: platform
         locations:
-        - internal/store/human_task_cards.go#ExpireHumanTaskCardsInMutation
+        - internal/store/internal/runtimepersistence/human_task_cards.go#ExpireHumanTaskCardsInMutation
         - internal/runtime/pipeline/coordinator.go#PipelineCoordinator.expireHumanTaskCards
       routing_class: event_loop_routable
       scope: entity, flow, or global
@@ -20361,10 +20361,10 @@ cli_specification:
                 NOT_IMPORTED: NOT IMPORTED
                 UNKNOWN: UNKNOWN
             operational_state:
-              machine_owner: internal/store/run_operational_status_read_surface.go ProjectRunOperationalStatus and components.schemas.OperationalState
+              machine_owner: internal/store/internal/runtimepersistence/run_operational_status_read_surface.go ProjectRunOperationalStatus and components.schemas.OperationalState
               phrases: {running: running, stalled: stalled, paused: paused, completed: completed, failed: failed, cancelled: cancelled, forked: forked}
             run_blocking_tuples:
-              machine_owner: internal/store/run_operational_status_read_surface.go ProjectRunOperationalStatus
+              machine_owner: internal/store/internal/runtimepersistence/run_operational_status_read_surface.go ProjectRunOperationalStatus
               current_non_empty:
               - state: stalled
                 blocking_layer: scoring_terminal_outcome
@@ -20378,7 +20378,7 @@ cli_specification:
                 reason_phrase: no active deliveries
               absence_rule: Non-stalled states carry empty layer/reason values and omit those rows from human output.
             agent_lifecycle_tuples:
-              machine_owner: internal/store/agent_lifecycle_read_surface.go agentLifecycleBlockingLayer, consuming internal/runtime/deliverylifecycle.StateFromDelivery
+              machine_owner: internal/store/internal/runtimepersistence/agent_lifecycle_read_surface.go agentLifecycleBlockingLayer, consuming internal/runtime/deliverylifecycle.StateFromDelivery
               current:
               - {state: queued, blocking_layer: delivery_queue, state_phrase: queued, layer_phrase: delivery queue}
               - {state: launching, blocking_layer: session_launch, state_phrase: launching, layer_phrase: session launch}
@@ -25586,7 +25586,7 @@ api_specification:
         type: string
         description: 'Operational state of a run. Source of truth:
 
-          internal/store/run_operational_status_read_surface.go
+          internal/store/internal/runtimepersistence/run_operational_status_read_surface.go
 
           ProjectRunOperationalStatus. Values are RunTableStatus values
 
@@ -26869,7 +26869,7 @@ api_specification:
             type: string
             minLength: 1
             description: >
-              Current producer owner is internal/store/agent_lifecycle_read_surface.go
+              Current producer owner is internal/store/internal/runtimepersistence/agent_lifecycle_read_surface.go
               agentLifecycleBlockingLayer, consuming deliverylifecycle.StateFromDelivery. Current reachable
               state/layer pairs are queued/delivery_queue, launching/session_launch, active/session_execution,
               retrying/delivery_retry, and exhausted/delivery_terminal. The field remains string-valued for
@@ -27928,7 +27928,7 @@ api_specification:
       RunTraceRow:
         description: "One joined trace row. Every row is anchored on an event; delivery,\nsession, and turn fields are sparse\
           \ and present only where the join\nfinds a corresponding row. Matches the runtime's canonical\nRunDebugTraceRow\
-          \ shape (internal/store/run_debug_read_surface.go).\nThe runtime owns the join \u2014 clients MUST consume rows\
+          \ shape (internal/store/internal/runtimepersistence/run_debug_read_surface.go).\nThe runtime owns the join \u2014 clients MUST consume rows\
           \ as-emitted\nand MUST NOT reconstruct the join from separate event/delivery/\nsession/turn lists.\n"
         type: object
         additionalProperties: false
@@ -29706,7 +29706,7 @@ api_specification:
       description: "Persisted composed run trace as an ordered list of joined rows. Each\nrow is anchored on an event and\
         \ carries delivery, session, and turn\nfields where the join finds them. The runtime owns the join \u2014 clients\n\
         MUST consume rows as-emitted and MUST NOT reconstruct the join from\nseparate event/delivery/session/turn lists. Backed\
-        \ by the canonical\nRunDebugTraceRow surface in internal/store/run_debug_read_surface.go.\n"
+        \ by the canonical\nRunDebugTraceRow surface in internal/store/internal/runtimepersistence/run_debug_read_surface.go.\n"
       scope:
         required:
         - read:runs
@@ -29764,7 +29764,7 @@ api_specification:
       - RUN_NOT_FOUND
     run.diagnose:
       tier: must_have
-      description: "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/run_operational_status_read_surface.go\
+      description: "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/internal/runtimepersistence/run_operational_status_read_surface.go\
         \ and concrete failed-delivery evidence from\nRunDebugReport.FailedDeliveries, plus result.test_quiescence from\n\
         RunDebugReport.TestQuiescence for deterministic test assertion barriers. The single canonical owner for\n\"why isn't\
         \ this run progressing?\" routes persisted evidence through\nthe API instead of having every consumer recompute it.\n"
@@ -31496,7 +31496,7 @@ api_specification:
       the geth-style rpc.subscription shape.
     - health.check returns the BundleIdentity block including canonical bundle_hash.
     - mailbox.decide / defer / begin_input / cancel_input mutate only typed decision cards and drafts; mailbox.acknowledge mutates only notice acknowledgment state.
-    - run.diagnose exposes the existing operator-state projection from internal/store/run_operational_status_read_surface.go.ProjectRunOperationalStatus
+    - run.diagnose exposes the existing operator-state projection from internal/store/internal/runtimepersistence/run_operational_status_read_surface.go.ProjectRunOperationalStatus
       over the JSON-RPC API, returning operational_state + blocking_layer + blocking_reason + heuristics. The projection itself
       is the canonical owner and is unchanged; this proof confirms the API surface routes through it (no second interpretation
       layer in the API handler).

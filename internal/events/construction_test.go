@@ -54,10 +54,10 @@ var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
 	{Path: "internal/store/eventfixture/event.go", Scope: "DiagnosticDirectForRun", Constructor: "NewCausalDiagnosticDirectEvent"}:                                     1,
 	{Path: "internal/store/eventfixture/event.go", Scope: "DiagnosticDirectForRun", Constructor: "NewRunScopedDiagnosticDirectEvent"}:                                  1,
 	{Path: "internal/store/eventfixture/event.go", Scope: "DiagnosticDirectForRun", Constructor: "NewStandaloneDiagnosticDirectEvent"}:                                 1,
-	{Path: "internal/store/human_task_cards.go", Scope: "humanTaskExpiredEvent", Constructor: "NewRunScopedRuntimeControlEvent"}:                                       1,
-	{Path: "internal/store/runtime_log_persistence.go", Scope: "runtimeLogEvent", Constructor: "NewCausalDiagnosticDirectEvent"}:                                       1,
-	{Path: "internal/store/runtime_log_persistence.go", Scope: "runtimeLogEvent", Constructor: "NewRunScopedDiagnosticDirectEvent"}:                                    1,
-	{Path: "internal/store/runtime_log_persistence.go", Scope: "runtimeLogEvent", Constructor: "NewStandaloneDiagnosticDirectEvent"}:                                   1,
+	{Path: "internal/store/internal/runtimepersistence/human_task_cards.go", Scope: "humanTaskExpiredEvent", Constructor: "NewRunScopedRuntimeControlEvent"}:           1,
+	{Path: "internal/store/internal/runtimepersistence/runtime_log_persistence.go", Scope: "runtimeLogEvent", Constructor: "NewCausalDiagnosticDirectEvent"}:           1,
+	{Path: "internal/store/internal/runtimepersistence/runtime_log_persistence.go", Scope: "runtimeLogEvent", Constructor: "NewRunScopedDiagnosticDirectEvent"}:        1,
+	{Path: "internal/store/internal/runtimepersistence/runtime_log_persistence.go", Scope: "runtimeLogEvent", Constructor: "NewStandaloneDiagnosticDirectEvent"}:       1,
 }
 
 var productionRootConstructorAllowlist = map[runtimeConstructorCallsite]int{

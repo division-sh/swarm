@@ -1801,6 +1801,10 @@ func (eb *EventBus) CheckDirectRoutes(ctx context.Context, evt events.Event, rou
 			return status, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
+	ctx = events.WithDeliveryContext(ctx, evt.DeliveryContext())
+	if runID := strings.TrimSpace(evt.RunID()); runID != "" {
+		ctx = runtimecorrelation.WithRunID(ctx, runID)
+	}
 	plan, err := eb.planExactDirectRoutePlan(ctx, evt, requested)
 	if err != nil {
 		var unavailable *exactDirectRecipientsUnavailableError

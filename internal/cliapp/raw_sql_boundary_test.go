@@ -116,6 +116,18 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "digest source is an explicit SQL read-model exception pending selected read-owner migration",
 		},
+		"internal/persistence/runbundle/availability.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2148,
+			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.runtime_execution_persistence_authority",
+			Reason:         "private run-bundle availability adapter implements a typed selected-store read port; raw SQL does not escape the adapter",
+		},
+		"internal/persistence/timerobligationadapter/reader.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          2148,
+			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.runtime_execution_persistence_authority",
+			Reason:         "private timer-obligation adapter implements a typed selected-store read port; raw SQL does not escape the adapter",
+		},
 		"internal/testutil/runtimepipelinefixture/context.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          2148,

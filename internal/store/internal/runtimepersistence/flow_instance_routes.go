@@ -740,6 +740,12 @@ func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) (
 		 AND es.entity_id = NULLIF(readiness.plan #>> '{identity,EntityID}', '')::uuid
 		WHERE fi.status = 'active' AND fi.mode = 'template'
 		  AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
+		  AND EXISTS (
+			  SELECT 1
+			  FROM entity_state owned
+			  WHERE owned.run_id = $1::uuid
+			    AND owned.flow_instance = fi.instance_id
+		  )
 		ORDER BY fi.instance_id ASC
 	`, runID)
 	if err != nil {
@@ -769,8 +775,14 @@ func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Conte
 		 AND es.entity_id = json_extract(readiness.plan, '$.identity.EntityID')
 		WHERE fi.status = 'active' AND fi.mode = 'template'
 		  AND LOWER(TRIM(run.status)) IN ('running', 'paused')
+		  AND EXISTS (
+			  SELECT 1
+			  FROM entity_state owned
+			  WHERE owned.run_id = ?
+			    AND owned.flow_instance = fi.instance_id
+		  )
 		ORDER BY fi.instance_id ASC
-	`, runID, runID, runID)
+	`, runID, runID, runID, runID)
 	if err != nil {
 		return nil, fmt.Errorf("list sqlite active flow instance descriptors: %w", err)
 	}

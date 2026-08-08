@@ -29,6 +29,131 @@ type flowInstanceDescriptorAuthorityStore interface {
 	runtimebus.ActiveFlowInstanceDescriptorLister
 }
 
+func TestActiveFlowInstanceDescriptorAuthorityScopesCensusToExactRunBothStores(t *testing.T) {
+	type backendCase struct {
+		name  string
+		setup func(*testing.T) (flowInstanceDescriptorAuthorityStore, *sql.DB, bool)
+	}
+	backends := []backendCase{
+		{
+			name: "postgres",
+			setup: func(t *testing.T) (flowInstanceDescriptorAuthorityStore, *sql.DB, bool) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				return storetest.AdmitPostgresRuntimeStore(t, db), db, false
+			},
+		},
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) (flowInstanceDescriptorAuthorityStore, *sql.DB, bool) {
+				selected := storetest.StartSQLiteRuntimeStore(t)
+				return selected, storetest.Database(selected), true
+			},
+		},
+	}
+
+	for _, backend := range backends {
+		t.Run(backend.name, func(t *testing.T) {
+			selected, db, sqlite := backend.setup(t)
+			runA, runB := uuid.NewString(), uuid.NewString()
+			entityA, entityB := uuid.NewString(), uuid.NewString()
+			source := mustExternalStoreTestBundleSourceFact()
+			bundleHash, bundleSource := source.StorageValues()
+			ctxA := runtimecorrelation.WithRunID(testAuthorActivityContext(), runA)
+			ctxB := runtimecorrelation.WithRunID(testAuthorActivityContext(), runB)
+			if sqlite {
+				runlifecyclefixture.RequireSQLite(t, ctxA, db, runlifecyclefixture.Fixture{
+					Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runA,
+					BundleHash: bundleHash, BundleSource: bundleSource,
+				})
+				runlifecyclefixture.RequireSQLite(t, ctxB, db, runlifecyclefixture.Fixture{
+					Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runB,
+					BundleHash: bundleHash, BundleSource: bundleSource,
+				})
+			} else {
+				runlifecyclefixture.RequirePostgres(t, ctxA, db, runlifecyclefixture.Fixture{
+					Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runA,
+					BundleHash: bundleHash, BundleSource: bundleSource,
+				})
+				runlifecyclefixture.RequirePostgres(t, ctxB, db, runlifecyclefixture.Fixture{
+					Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runB,
+					BundleHash: bundleHash, BundleSource: bundleSource,
+				})
+			}
+
+			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runA, entityA, "account/a", bundleHash, bundleSource)
+			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runB, entityB, "account/b", bundleHash, bundleSource)
+
+			for _, check := range []struct {
+				ctx  context.Context
+				path string
+			}{
+				{ctx: ctxA, path: "account/a"},
+				{ctx: ctxB, path: "account/b"},
+			} {
+				descriptors, err := selected.ListActiveFlowInstanceDescriptors(check.ctx)
+				if err != nil {
+					t.Fatalf("ListActiveFlowInstanceDescriptors(%s): %v", check.path, err)
+				}
+				if len(descriptors) != 1 || descriptors[0].FlowInstance != check.path {
+					t.Fatalf("descriptors for %s = %#v, want exact run-owned descriptor", check.path, descriptors)
+				}
+			}
+		})
+	}
+}
+
+func seedExactFlowInstanceDescriptorOwner(
+	t *testing.T,
+	db *sql.DB,
+	sqlite bool,
+	runID, entityID, instancePath, bundleHash, bundleSource string,
+) {
+	t.Helper()
+	readiness := exactFlowInstanceDescriptorReadinessJSON(
+		t, runID, bundleHash, bundleSource, "account", instancePath, entityID,
+	)
+	if sqlite {
+		if _, err := db.Exec(`
+			INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+			VALUES (?, 'account', 'template', '{}', 'active', CURRENT_TIMESTAMP)
+		`, instancePath); err != nil {
+			t.Fatalf("seed sqlite flow instance %s: %v", instancePath, err)
+		}
+		if _, err := db.Exec(`
+			INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
+			VALUES (?, ?, ?, 'account', 'active', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, entityID, runID, instancePath); err != nil {
+			t.Fatalf("seed sqlite entity state %s: %v", instancePath, err)
+		}
+		if _, err := db.Exec(`
+			INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
+			VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`, runID, instancePath, readiness); err != nil {
+			t.Fatalf("seed sqlite readiness %s: %v", instancePath, err)
+		}
+		return
+	}
+	if _, err := db.Exec(`
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES ($1, 'account', 'template', '{}'::jsonb, 'active', NOW())
+	`, instancePath); err != nil {
+		t.Fatalf("seed postgres flow instance %s: %v", instancePath, err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO entity_state (entity_id, run_id, flow_instance, entity_type, current_state, fields, created_at, updated_at)
+		VALUES ($1::uuid, $2::uuid, $3, 'account', 'active', '{}'::jsonb, NOW(), NOW())
+	`, entityID, runID, instancePath); err != nil {
+		t.Fatalf("seed postgres entity state %s: %v", instancePath, err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
+		VALUES ($1::uuid, $2, $3::jsonb, NOW(), NOW())
+	`, runID, instancePath, readiness); err != nil {
+		t.Fatalf("seed postgres readiness %s: %v", instancePath, err)
+	}
+}
+
 func TestActiveFlowInstanceDescriptorAuthorityPreservesRoutesOnInvalidProvenanceBothStores(t *testing.T) {
 	type backendCase struct {
 		name  string
