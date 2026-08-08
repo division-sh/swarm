@@ -813,7 +813,7 @@ func startForegroundRunTraceObserver(ctx context.Context, wsEndpoint, token, run
 			}
 			select {
 			case <-observerCtx.Done():
-				publishRunTraceTerminationIfPresent(sub, detached)
+				settleRunTraceSubscription(sub, detached)
 				return
 			case row, ok := <-sub.rows:
 				if !ok {
@@ -827,7 +827,7 @@ func startForegroundRunTraceObserver(ctx context.Context, wsEndpoint, token, run
 				select {
 				case rows <- row:
 				case <-observerCtx.Done():
-					publishRunTraceTerminationIfPresent(sub, detached)
+					settleRunTraceSubscription(sub, detached)
 					return
 				case err := <-sub.errs:
 					detached <- runTraceDetachFromError(err, runTraceDetachTransportLost)
@@ -848,9 +848,23 @@ func startForegroundRunTraceObserver(ctx context.Context, wsEndpoint, token, run
 	return &foregroundRunTraceObserver{rows: rows, detached: detached, cancel: cancel, done: done}
 }
 
-func publishRunTraceTerminationIfPresent(sub *runTraceSubscription, detached chan<- runTraceDetach) {
-	if det, terminated := runTraceSubscriptionDetachReason(sub); terminated {
-		detached <- det
+// settleRunTraceSubscription closes and joins the subscription read loop, then
+// publishes the pending detach reason if the read loop reported an error.
+// Closing first makes an in-flight error publication (e.g. queue overflow)
+// durable before the check — its send happens-before close(done). A healthy
+// stream close (no error) stays silent: the cancel path must not synthesize
+// stream_closed for a subscription that closed normally.
+func settleRunTraceSubscription(sub *runTraceSubscription, detached chan<- runTraceDetach) {
+	if sub == nil {
+		return
+	}
+	sub.close()
+	select {
+	case err := <-sub.errs:
+		if err != nil {
+			detached <- runTraceDetachFromError(err, runTraceDetachTransportLost)
+		}
+	default:
 	}
 }
 

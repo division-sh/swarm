@@ -946,3 +946,37 @@ func (w *blockingRunWriter) String() string {
 	defer w.mu.Unlock()
 	return w.buf.String()
 }
+
+func TestSettleRunTraceSubscriptionFindsPendingErrorAfterJoin(t *testing.T) {
+	sub := &runTraceSubscription{
+		errs: make(chan error, 1),
+		done: make(chan struct{}),
+	}
+	sub.errs <- wrapRunTraceObserverError(runTraceDetachQueueOverflow, fmt.Errorf("run.subscribe_trace notification queue overflow"))
+	close(sub.done)
+	detached := make(chan runTraceDetach, 1)
+	settleRunTraceSubscription(sub, detached)
+	select {
+	case det := <-detached:
+		if det.reason != runTraceDetachQueueOverflow {
+			t.Fatalf("reason = %q, want %q", det.reason, runTraceDetachQueueOverflow)
+		}
+	default:
+		t.Fatal("pending subscription error lost after settle; no detach published")
+	}
+}
+
+func TestSettleRunTraceSubscriptionHealthyCloseStaysSilent(t *testing.T) {
+	sub := &runTraceSubscription{
+		errs: make(chan error, 1),
+		done: make(chan struct{}),
+	}
+	close(sub.done)
+	detached := make(chan runTraceDetach, 1)
+	settleRunTraceSubscription(sub, detached)
+	select {
+	case det := <-detached:
+		t.Fatalf("healthy stream close published a detach: %#v", det)
+	default:
+	}
+}
