@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/division-sh/swarm/internal/userfacing"
@@ -22,12 +23,15 @@ const (
 	cliOutputQuietFlagHelp   = "Render only declared load-bearing value(s)"
 	cliOutputNoColorFlag     = "no-color"
 	cliOutputNoColorFlagHelp = "Disable ANSI color in human-readable output"
+	cliOutputVerboseFlag     = "verbose"
+	cliOutputVerboseFlagHelp = "Render the full record: absolute timestamps, bookkeeping fields, and accumulated state"
 )
 
 type cliOutputOptions struct {
 	asJSON  bool
 	quiet   bool
 	noColor bool
+	verbose bool
 }
 
 type cliTextRenderer func(io.Writer)
@@ -174,6 +178,13 @@ func bindCLIOutputFlags(cmd *cobra.Command, opts *cliOutputOptions) {
 	cmd.Flags().BoolVar(&opts.asJSON, cliOutputJSONFlag, false, cliOutputJSONFlagHelp)
 	cmd.Flags().BoolVar(&opts.quiet, cliOutputQuietFlag, false, cliOutputQuietFlagHelp)
 	cmd.Flags().BoolVar(&opts.noColor, cliOutputNoColorFlag, false, cliOutputNoColorFlagHelp)
+}
+
+// bindCLIOutputVerboseFlag binds the shared --verbose flag without sweeping it
+// onto every bindCLIOutputFlags consumer; commands opt into the full record
+// projection explicitly.
+func bindCLIOutputVerboseFlag(cmd *cobra.Command, opts *cliOutputOptions) {
+	cmd.Flags().BoolVar(&opts.verbose, cliOutputVerboseFlag, false, cliOutputVerboseFlagHelp)
 }
 
 func bindCLIOutputFlagSet(fs *flag.FlagSet, opts *cliOutputOptions) {
@@ -369,6 +380,61 @@ func cliDisplayWidth(value string) int {
 		return 0
 	}
 	return utf8.RuneCountInString(value)
+}
+
+// cliRelativeTimeNow is the single owner of "now" for relative-time rendering;
+// tests override it for deterministic output.
+var cliRelativeTimeNow = time.Now
+
+// formatCLIRelativeTime renders an RFC3339 timestamp relative to now
+// ("5m ago"). Unparseable or future timestamps fall back to the raw value;
+// machine output must never consume this helper (use the raw absolute value).
+func formatCLIRelativeTime(now time.Time, raw string) string {
+	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(raw))
+	if err != nil {
+		return raw
+	}
+	elapsed := now.Sub(at)
+	if elapsed < 0 {
+		return raw
+	}
+	switch {
+	case elapsed < time.Minute:
+		return "just now"
+	case elapsed < time.Hour:
+		return fmt.Sprintf("%dm ago", int(elapsed.Minutes()))
+	case elapsed < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(elapsed.Hours()))
+	case elapsed < 30*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(elapsed.Hours()/24))
+	case elapsed < 365*24*time.Hour:
+		return fmt.Sprintf("%dmo ago", int(elapsed.Hours()/(24*30)))
+	default:
+		return fmt.Sprintf("%dy ago", int(elapsed.Hours()/(24*365)))
+	}
+}
+
+const cliOneLineMaxRunes = 200
+
+// cliRenderOneLineValue collapses line-breaking and control characters so a
+// value can never break the CLI's line discipline, then truncates long values
+// at a fixed rune ceiling with a visible truncation marker. The ceiling is a
+// fixed constant, not terminal-width-dependent, so human output stays
+// deterministic across TTY and piped rendering.
+func cliRenderOneLineValue(value string) string {
+	value = strings.Map(cliReplaceLineBreakingRune, strings.TrimSpace(value))
+	runes := []rune(value)
+	if len(runes) <= cliOneLineMaxRunes {
+		return value
+	}
+	return string(runes[:cliOneLineMaxRunes]) + "…"
+}
+
+func cliReplaceLineBreakingRune(r rune) rune {
+	if r < 0x20 {
+		return ' '
+	}
+	return r
 }
 
 func renderCLIOutput(out, errOut io.Writer, opts cliOutputOptions, value any, text cliTextRenderer, quiet cliQuietRenderer) error {
