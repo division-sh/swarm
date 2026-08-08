@@ -7,3 +7,12 @@ expected:
   handler_outcome: success
   entity_state: timed_out
   emitted_events: [task.timed_out]
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.policy_patterns
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

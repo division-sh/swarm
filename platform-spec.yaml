@@ -18741,6 +18741,105 @@ static_analyzer:
 
 test_specification:
   description: Public Swarm-authored test and conformance surfaces.
+  internal_catalog_conformance:
+    id: testing.internal_catalog_claim_inventory
+    promoted_by: '#2143'
+    implementation_status: implemented_first_slice
+    owner: platform-spec.yaml#test_specification.internal_catalog_conformance
+    purpose: >
+      Define the claim-indexed proof contract for the private tests/tier*
+      conformance corpus while it remains transitional internal evidence.
+      Claim identity and governing semantics live here; fixture metadata only
+      declares which canonical claims a discovered fixture is intended to prove.
+    inventory:
+      discovery: Every directory matching tests/tier*/* is a fixture.
+      metadata_owner: Each fixture's expected.yaml top-level conformance block.
+      fail_closed: >
+        A missing expected.yaml or conformance block, an invalid disposition,
+        an unknown or duplicate claim, an unproved active claim, or companion
+        metadata that disagrees with the filesystem is a test failure.
+      dispositions:
+        runtime: >
+          The fixture must pass supported swarm verify and execute its exact
+          expected.yaml assertions through the existing PostgreSQL cataloge2e
+          production loader/runtime/store harness.
+        verify-only: >
+          The fixture proves the declared pass, warning, or reject result from
+          canonical contract loading and verification. Warning and reject rows
+          assert their exact category and teaching evidence.
+        retired: >
+          The fixture names a current reason and replacement, receives no
+          active-claim coverage credit, and has no compatibility execution path.
+      public_companions: >
+        A fixture-local tests/visible-smoke.yaml companion is public swarm test
+        protocol/format evidence only. Mocked RPC readback receives zero catalog
+        runtime or claim credit and never interprets private expected.yaml
+        semantics.
+      executor_boundary: >
+        Production contract loading, verification, runtime, and selected store
+        owners are the only semantic executors. Private catalog simulators,
+        per-tier fixture allowlists, exclusion maps, and mocked result sources
+        must not classify fixtures or satisfy claims.
+      backend_boundary: >
+        All runtime fixtures execute on the existing PostgreSQL catalog harness.
+        The two selected-contract run-fork fixtures are explicitly PostgreSQL
+        product proofs. SQLite run.fork remains typed unsupported under
+        storage_backends.runtime_store_selection.optional_product_capability_matrix
+        and its fail-closed capability tests receive no fixture-execution credit.
+      parent_tail: >
+        Finite grammar matrices, replay-clean both-store restart proof, and
+        convergence on the public deterministic scenario format remain the
+        separately ruled catalog_convergence tail; this inventory does not
+        implement those dimensions.
+    claims:
+      catalog.runtime.primitives:
+        status: active
+        required_disposition: runtime
+        scope: Primitive handler transitions, guards, accumulation, gates, and emissions.
+      catalog.runtime.list_processing:
+        status: active
+        required_disposition: runtime
+        scope: List fan-out, filter, reduce, group, and mapped processing.
+      catalog.runtime.cross_entity:
+        status: active
+        required_disposition: runtime
+        scope: Cross-entity query, clear, and state mutation behavior.
+      catalog.runtime.flow_lifecycle:
+        status: active
+        required_disposition: runtime
+        scope: Flow instance lifecycle and terminal-state behavior.
+      catalog.runtime.event_loop:
+        status: active
+        required_disposition: runtime
+        scope: Event-loop ordering, chaining, guard, and dead-letter behavior.
+      catalog.runtime.composition:
+        status: active
+        required_disposition: runtime
+        scope: Agent, node, gate, and cross-flow composition behavior.
+      catalog.verify.boot_diagnostics:
+        status: active
+        required_disposition: verify-only
+        scope: Canonical loader and boot-verification teaching diagnostics.
+      catalog.runtime.composition_patterns:
+        status: active
+        required_disposition: runtime
+        scope: Multi-step composition, lifecycle, gate, query, and rule patterns.
+      catalog.runtime.policy_patterns:
+        status: active
+        required_disposition: runtime
+        scope: Capacity, counter, guard, threshold, and timeout policy patterns.
+      catalog.runtime.flow_composition:
+        status: active
+        required_disposition: runtime
+        scope: Supported dynamic child-flow composition and receiver selection.
+      catalog.runtime.selected_contract_fork:
+        status: active
+        required_disposition: runtime
+        scope: PostgreSQL selected-contract run-fork execution and fail-closed replay.
+      catalog.runtime.flow_data_access_tools:
+        status: active
+        required_disposition: runtime
+        scope: Declared flow-data tool exposure, reads, and fail-closed isolation.
   deterministic_scenario_runner:
     id: testing.deterministic_scenario_runner_source_authority
     promoted_by: '#1646'

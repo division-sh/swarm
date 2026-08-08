@@ -1,5 +1,4 @@
 task.done:
 timer.check:
   elapsed_hours: number
-task.completed:
 task.timed_out:

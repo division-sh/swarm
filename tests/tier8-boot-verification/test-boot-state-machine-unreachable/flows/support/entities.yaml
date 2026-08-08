@@ -1,1 +1,4 @@
-ticket: {}
+ticket:
+  ticket_id:
+    type: text
+    _unused_reason: template instance identity is supplied when the flow instance is created

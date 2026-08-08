@@ -15,3 +15,9 @@ expected:
     - values.totaled
   entity_fields:
     total: 60
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.list_processing

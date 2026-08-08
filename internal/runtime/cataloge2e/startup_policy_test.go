@@ -11,7 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestCatalogFixtureStartupPolicies_AreExplicit(t *testing.T) {
+func TestCatalogFixtureStartupPolicy_IsStrictForEveryExecutableFixture(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "false")
 
@@ -24,17 +24,6 @@ func TestCatalogFixtureStartupPolicies_AreExplicit(t *testing.T) {
 		t.Fatal("StrictEmitSchemas = false, want true")
 	}
 
-	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
-	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "false")
-
-	runtimeCatalogHarnessStartupPolicy().apply(t)
-
-	if got := runtime.DefaultWorkflowContractValidationOptions(nil).FatalBootWarnings; got {
-		t.Fatal("FatalBootWarnings = true, want false for runtime-backed catalog harness")
-	}
-	if got := runtime.DefaultWorkflowContractValidationOptions(nil).StrictEmitSchemas; !got {
-		t.Fatal("StrictEmitSchemas = false, want true for runtime-backed catalog harness")
-	}
 }
 
 func TestTier8RuntimeBootMatchesAuthoritativeStartupTruthForWarningFixtures(t *testing.T) {

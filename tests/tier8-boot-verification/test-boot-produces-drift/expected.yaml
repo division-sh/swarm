@@ -1,8 +1,8 @@
-trigger:
-  boot: true
-
-expected:
-
-  boot_result: warning
-  error_category: PRODUCES-DRIFT
-  error_contains: "item.surprise"
+conformance:
+  disposition: verify-only
+  verify: warning
+  proves:
+    - catalog.verify.boot_diagnostics
+  diagnostic:
+    category: "produces_drift"
+    contains: "item.surprise"

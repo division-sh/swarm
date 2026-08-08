@@ -1,0 +1,1236 @@
+{
+  "schema": "issue-2143-supported-verify-census/v1",
+  "phase": "before",
+  "revision": "998f2476171f4a0394e932554485bd437cdb048a",
+  "command": "swarm verify --contracts <fixture>",
+  "binary_sha256": "5e8f38347bb4429dea7ce7cf49bd1cf06b91b442bb947d035ccad63d7b2fc4b7",
+  "fixture_count": 155,
+  "exit_code_counts": {
+    "0": 67,
+    "1": 80,
+    "2": 8
+  },
+  "pass_count": 67,
+  "reject_count": 88,
+  "runtime_reject_count": 34,
+  "fixtures": [
+    {
+      "fixture": "tests/tier1-primitives/test-advances-to",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "4ffd157ddd1c1d832eab377fae29b662cb139708602ce80684b4a01f87ae6339"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-advances-to-terminal",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "1d1684c5efd17557d08851673f0ed3b28490bc722595f277db06ace6eb82309c"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-clear-gates",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "a051c2c00ef23468813d3721ed8aadb2465a7f5101fdae1ae39c27efc9f0b9ca"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-compute-standalone",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "7ecbac816539d9784edd05eb154a7020fabf5402ce7266769e36dc8229effaa3"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-data-accumulation-direct",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "624e2ee1657d9a9f565e623c6ca1960461537743d9c9264077ef9a8142cc9c79"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-data-accumulation-literal",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "a832bd7a532a826322bd04516aaad8c419f086010825c0069497e5736b22ed2d"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-data-accumulation-mapped",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "6cf5501f6142172de78b4feb1a93e959962a034b24b0818ad02904ccf620362d"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-emits-multiple",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "f55ab510053f0f3c300c1bd0bd606a4287e9579a8ab4ede3f2e8f24eb839c60f"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-emits-payload-transform",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "44198710264e7bfd385478069df23a1f13370119f1ea6180517b769491613e7b"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-from-filter",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "5505fae0fe4cc623ee72c09a0deb1da0cabece35f8a1fc05947eb0fce30273d2"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-guard-compound-condition",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "f348fccacceb9865d42cbba2a36872ade260f4370998dfb7eaf6950146edde3b"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-guard-discard",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "31689ce58d4a67a790a4fe8876a5eeb094a5bb244b4a54fcedc87b23d6790c61"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-guard-entity-ref",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "4e3ae06fe2a9f4e8a737e535bd5c2b8f58298d67f3fbb711efc67d845f258d1c"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-guard-escalate",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "cb0d98b414524bd9f6251850fe6e72bc6c89d6bd2b3219e71b3c393401ccd5a9"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-guard-kill",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "31689ce58d4a67a790a4fe8876a5eeb094a5bb244b4a54fcedc87b23d6790c61"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-guard-multi",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "f8d3c55f856d93befd4db92c274d91efca5a77bc8842bbb7ed676ad7a92cbb40"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-guard-multi-fail",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "31689ce58d4a67a790a4fe8876a5eeb094a5bb244b4a54fcedc87b23d6790c61"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-guard-pass",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "b491b430a02678ddd9be9f729a3d3d933ad1030dd148d6bbc4f5b2c907797d32"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-guard-policy-ref",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "8dc95e4435c1cb452455aabf6a5d5f2e26bade2e1ac6310546078e8a891a13af"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-guard-reject",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "31689ce58d4a67a790a4fe8876a5eeb094a5bb244b4a54fcedc87b23d6790c61"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-on-complete-first-match",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "018bf174a5e37374dd1d8871fb9e02940e6bd9ffd5dcae66c29fe4441a26cded"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-on-complete-second-match",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "285170193cf051a8dde8f1adf2095f9b81c1864f1ee3755a7eb6620b2b8098c8"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-on-complete-with-state",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "28d5e0eb70d2a270f5a3b5dc22a550ed5d4b20ac971d87d5276f0877584f1e6c"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-payload-transform-multi-source",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "ebf41328d5e93cd61ffa632fb65e050182c85dedbb623576c44d1ef6a506b16b"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-record-evidence",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "bcf5aeeb6e57ab83376e49d708f88380edeec15f06e0714e36bbfdb017646bbe"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-rules-advances-to",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "0e046739470b862a02c3ee21f1e52e33e5a8398385379f1ab3610bfdd958142b"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-rules-data-accumulation",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "0e461f5ef16fc847dc53c3af426331c959c69fbbf3c09cb376800e10e32d9625"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-rules-else",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "340f683f1bd85154b2c7e3b380a663abef3162be475305cb84ad26b3e8db88bd"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-rules-match",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "ab7c5617c7cb020d38a8dae0543cdf56b116186e17088929869f761cfbe952e3"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-rules-no-match",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "5030d494a97f0eddf628d4614f5b471022624696687bc6abdd17fe5ea6942856"
+    },
+    {
+      "fixture": "tests/tier1-primitives/test-sets-gate",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "9a313e9ea9e0c3cdcf62d54e19cae69a5ab4793e07fd1f16c0bbe2d25f7e3a00"
+    },
+    {
+      "fixture": "tests/tier10-policy-patterns/test-policy-capacity-query",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "912e980f673193cc504c1459409169f5f02a1cdb29496e10f6134c5d0a6600ef"
+    },
+    {
+      "fixture": "tests/tier10-policy-patterns/test-policy-counter-escalate",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "55c6aba06a61f8e52987d7b54b8b5b361be907852b7d48db590617a6e45a8f4c"
+    },
+    {
+      "fixture": "tests/tier10-policy-patterns/test-policy-hard-gate-override",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "bf060ffc1f1e7240325cbf3ec68bcd1e225bf67826386c180afc2a3d5d591bcd"
+    },
+    {
+      "fixture": "tests/tier10-policy-patterns/test-policy-multi-guard-partial",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "c6992462e4596676c5930c3f17706951488e37e6517f6717611bff0201d01ade"
+    },
+    {
+      "fixture": "tests/tier10-policy-patterns/test-policy-threshold-three-way",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "0d9efefa0e50369ea2b39042aafa7fa45a101a7bfbd46d109477f404f9ed060c"
+    },
+    {
+      "fixture": "tests/tier10-policy-patterns/test-policy-timeout-elapsed",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "750825c2dcad60e3170a28b8fd606890c8e2877c8457951de3ff4a31141a8870"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-child-flow-absolute-path",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "c5c7dc33b281ef8390f8128508aecc287ec895935140e7bd52c828e9e453bdf2"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-child-flow-loads",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "82a104d9dde56a8358dbfb9faa15bfd3bf21db0670817a59541fae21f6229508"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-child-flow-local-events",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "7d077f3e31ab133f6f546b3470f84967de6d29db44fb6e25f9364ef1ed8d7e15"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-child-flow-pin-wiring",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "f285c234470b301b7cb02127bca97769a34601137d1c48390726d50a0b6828ee"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-child-flow-policy-inherit",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "7fe888790673ed54551fd0b28addc1c2e9d8cc5bac89652759c2dc920c838ec8"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-child-flow-sibling-isolation",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "cddeebe07326d1e90b4adbfdd5975fc6d5f67b7f2353aa0141c867ad14b026b3"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-child-flow-tool-inherit",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "a257c0e5d5027e141ee5ff9a1dd1046af129719c30dba68e748d79d0b0015d4a"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-data-pin-wiring",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "79ee423c26b03e7ed84f07226feb541a8413e0a6c13670f84508ef9c2132c497"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-data-pin-write-conflict",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "31ee127d2fa580c3dd5691e946eacb97edd0f7c516bc62383d2e5ea2b3bb4a47"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-dynamic-flow-instance",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "fdb2ef2d72ab4380ff4c85a470bfbe27d51ed03c35e9398a8652f32e7c1dbc1d"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-gates-in-child-flow",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "050c3777d6c231b72b40aa554b3eb70a1a4f7e6c9038bdb891297ec84949a00b"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-multi-level-policy-inherit",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "5e7761e310143033bb7c4283f8ff6b9c6a1b32ef7b27ee6872240a59410db809"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-nested-three-levels",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "4309d439541da3f52f0628be4d6e5fdc95821733dcc47619cbe5310a130b0358"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-sibling-both-instantiated-isolated",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "41ff6696f6714e0f9057fd2bfeea720153acdf13464ec78b017f719a67ca2cf9"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-subject-id-cross-flow-inherit",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "dc5ccf2625f1a7227321110c124d545123280d43bdb3110c2110020b4728b84d"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-subject-id-first-flow-seeds",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "2384816c1958542f9d2c3387e2b6f71c75dda471d3710cce42f42065afdb2e6d"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-tool-override",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "1d45ce566ac10dc4054025e258814593ccfd22bd054ae285462cf84c51f863b1"
+    },
+    {
+      "fixture": "tests/tier11-flow-composition/test-wildcard-deep-subscription",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "9d5e4f5253487cad3efb019ce627f3f3a697391504284c07c7581de0bf255a7e"
+    },
+    {
+      "fixture": "tests/tier12-runtime-fork/test-non-agent-replay-fail-closed",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "8ff92f530071e3a628be1c87447061c9a8ec21b17eadfe5ca1d0408accabcfb1"
+    },
+    {
+      "fixture": "tests/tier12-runtime-fork/test-selected-contract-fork-execution",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "c9c269ffc46e5fab76a5a0a32fcf8ff228c87bd078c3409ac5dc366c8a2a99c1"
+    },
+    {
+      "fixture": "tests/tier12-runtime-tools/test-flow-data-access",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "e6f6c24574bf2bbfda301d7f249b5e84309e5a65b342a4ed7092479340cffdc5"
+    },
+    {
+      "fixture": "tests/tier3-list-processing/test-fan-out-basic",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "af50b3aecdb18d455812e7d2f4f4a17fa924d4c4eee1f48a31214f64aaa479e1"
+    },
+    {
+      "fixture": "tests/tier3-list-processing/test-fan-out-count",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "4258d2174a9e3a91c819ff97681a574305dcf2039c4d3ad0016d4f2615d15cb3"
+    },
+    {
+      "fixture": "tests/tier3-list-processing/test-fan-out-emit-mapping",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "04ee266882fa0fbc61219103a84c7ea6ecaf140ad59d5ef51cac8788084595ea"
+    },
+    {
+      "fixture": "tests/tier3-list-processing/test-fan-out-empty",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "2a3f310318743f4e86be742aea3180b5335422845e3867f88544c3a6134e8811"
+    },
+    {
+      "fixture": "tests/tier3-list-processing/test-filter-basic",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "ccc3ba13f73a5ce0aaad4766db79e038ce10c7aa8cd5ca2d9fa990f25b92ce7c"
+    },
+    {
+      "fixture": "tests/tier3-list-processing/test-filter-empty",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "c7750ea03d874082f73e8df8aabb2646cc88f6181ef48b3686be2b1babd39a8a"
+    },
+    {
+      "fixture": "tests/tier3-list-processing/test-group-by-standalone",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "8aa8e10273eea9b253ef3f8464ffac5021d069d046d1fc592cf0bf16febd1319"
+    },
+    {
+      "fixture": "tests/tier3-list-processing/test-reduce-count",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "7013390646c88bad18b6b5c4b523e413b704235c8a391c80bc4ec5e8433361df"
+    },
+    {
+      "fixture": "tests/tier3-list-processing/test-reduce-max",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "35c9ee663b76f6966fa3adfbe3f9c38e08241ca65a661c59b06e5290433948cb"
+    },
+    {
+      "fixture": "tests/tier3-list-processing/test-reduce-min",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "777cc41fe9499fe014d94fdfd8ac6172e9e6b5c3d6eaf49932a55ae434a36b4a"
+    },
+    {
+      "fixture": "tests/tier3-list-processing/test-reduce-operation-count",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "76ebccb8a059563d2a0c3b9475a0fa9cfd8842434bd3a0f45d08f85188aa72be"
+    },
+    {
+      "fixture": "tests/tier3-list-processing/test-reduce-pick-or-average",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "534b04eadcc688d8497f9ff79cb4b50df8f93f4a07461b5a7ad1c6ef3ee95823"
+    },
+    {
+      "fixture": "tests/tier3-list-processing/test-reduce-sum",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "3538315ce7b4460c94a8225a6c2ae271d6c18f846c4683609708ee2f9f2a3e0f"
+    },
+    {
+      "fixture": "tests/tier3-list-processing/test-reduce-weighted-average",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "36dad460076df6224bc8e33b1d463ea7d9079a149b240df970b958a6403754a6"
+    },
+    {
+      "fixture": "tests/tier4-cross-entity/test-clear-multiple-targets",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "c323c36d3679fc5dfeba163a8198083d9cee046c6fedda1bff5bd84998418fdf"
+    },
+    {
+      "fixture": "tests/tier4-cross-entity/test-clear-state",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "ec1886ac5ed7e38e3356b725aa6f78301360db44001aab583253fbdb1518f0e0"
+    },
+    {
+      "fixture": "tests/tier4-cross-entity/test-create-entity",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "4d7145edfc10b45673758f16fbea9ac6e628ab3ebcccb458551668d7b91576f3"
+    },
+    {
+      "fixture": "tests/tier4-cross-entity/test-query-filter",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "509434e66510ad6b006046582b57150c2ec45c2dd77a6824e068eb6320311090"
+    },
+    {
+      "fixture": "tests/tier4-cross-entity/test-query-group-by",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "681df91aabb9646526601091672c971065ad3c48a73ed0366d6f823387f4d944"
+    },
+    {
+      "fixture": "tests/tier5-flow-lifecycle/test-auto-emit-on-create",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "b1265d1042e5555c8afb19de98d497117f43a54dd21e4e7c7be5ffdd8f0bf857"
+    },
+    {
+      "fixture": "tests/tier5-flow-lifecycle/test-create-flow-instance",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "f05845bcfdd02d51ededf086207dc8f2be0000d721c06f1ab26c08ca2c59e04e"
+    },
+    {
+      "fixture": "tests/tier5-flow-lifecycle/test-create-flow-instance-config",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "c69280d951e7f31f638cc103edea5e5063588e6585b859aa11e8e3690313c3bb"
+    },
+    {
+      "fixture": "tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "67b04b50821a54520c44775eee5e92a51ea7653a63785b561e4f652d4828d8f4"
+    },
+    {
+      "fixture": "tests/tier5-flow-lifecycle/test-template-no-boot-instance",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "750825c2dcad60e3170a28b8fd606890c8e2877c8457951de3ff4a31141a8870"
+    },
+    {
+      "fixture": "tests/tier5-flow-lifecycle/test-terminal-state-preserves",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "99f734c976e3fec113e1b9004a09e42876a731cb3c4a08bd8facb8395603b27c"
+    },
+    {
+      "fixture": "tests/tier5-flow-lifecycle/test-terminal-state-rejects",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "69d71c1f426f7a2badd93d6a572e4575619deefe4c53d1923f69bbf1b7d99588"
+    },
+    {
+      "fixture": "tests/tier5-flow-lifecycle/test-timer-cancel",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "7554b35da65847f08e63c8b2733f339515cf6e4fc65529dc0848f3b96682cc67"
+    },
+    {
+      "fixture": "tests/tier5-flow-lifecycle/test-timer-fire",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "618cc04339351f8535640d2b196c66009e3445a1fd80a10dd4354c9bf042da7f"
+    },
+    {
+      "fixture": "tests/tier5-flow-lifecycle/test-timer-recurring",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "e7ac0a73fc01bd87954244108792daeccbe2df1b9a159481f10c161118687c71"
+    },
+    {
+      "fixture": "tests/tier5-flow-lifecycle/test-timer-start-on",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "4e554773a2b9ecccdca358bc1cf4a9aa8cb79bc1c70d5edbfdfe24c5d7e7888e"
+    },
+    {
+      "fixture": "tests/tier5-flow-lifecycle/test-wildcard-subscription",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "22a1d6a830f3a8113c301710a23a008211226c27ac6c45883737d6557b553416"
+    },
+    {
+      "fixture": "tests/tier6-event-loop/test-atomicity-commit",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "bda787441cfb588f6ef1a1cfd46b4be38eba6ef0ab8c055464e2b1e5e23e78eb"
+    },
+    {
+      "fixture": "tests/tier6-event-loop/test-atomicity-guard-rollback",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "217d5ed8d573bcaf9954e8a0abeb8db962bf9f63c02cf0aef7785b31bbf1bce6"
+    },
+    {
+      "fixture": "tests/tier6-event-loop/test-atomicity-rollback",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "bc61c329d08e069b97b54f36bd297b81aaf97dd03c04498437f8078e6c7dc43c"
+    },
+    {
+      "fixture": "tests/tier6-event-loop/test-chain-depth-limit",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "e0a62fe555e6505b2a28b4451b3fd0aee69a996ebd3c2ed1c01aade6af17a412"
+    },
+    {
+      "fixture": "tests/tier6-event-loop/test-cross-entity-concurrent",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "b59ae68927ec111f4ae2bc57c38f1281482e39f942f181093d39f8d2068066e0"
+    },
+    {
+      "fixture": "tests/tier6-event-loop/test-dead-letter",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "bc61c329d08e069b97b54f36bd297b81aaf97dd03c04498437f8078e6c7dc43c"
+    },
+    {
+      "fixture": "tests/tier6-event-loop/test-entity-serialization",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "7c5d65864d2bca6915c7c1478d5eb955510cdacc0d4f7e1bac22e8f6859bf620"
+    },
+    {
+      "fixture": "tests/tier6-event-loop/test-event-persisted-before-delivery",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "8677a1a0cfebe9f8bade4f501c72b69690f0910896c16dd982d9a66a2ba7c460"
+    },
+    {
+      "fixture": "tests/tier6-event-loop/test-event-validation",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "bc61c329d08e069b97b54f36bd297b81aaf97dd03c04498437f8078e6c7dc43c"
+    },
+    {
+      "fixture": "tests/tier6-event-loop/test-guards-pre-handler-state",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "217d5ed8d573bcaf9954e8a0abeb8db962bf9f63c02cf0aef7785b31bbf1bce6"
+    },
+    {
+      "fixture": "tests/tier6-event-loop/test-on-complete-atomicity-chain",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "f0f24f7ac1dbfa084570334cc1321e5913783023a7205adce761bc6c0fdc5fc9"
+    },
+    {
+      "fixture": "tests/tier7-composition/test-agent-emits-to-node",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "3fa2ab051c1006b384f5956495a257fff015e0099df37c3b3b5d8b0f1d1bad88"
+    },
+    {
+      "fixture": "tests/tier7-composition/test-dual-delivery",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "f7fc8f351a0e6bb1b9010103b58ba0a6e81ebfcb52b2df007fc3e22024168fc0"
+    },
+    {
+      "fixture": "tests/tier7-composition/test-full-lifecycle",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "0887a786bd5ac4b57eceee0b19e7a7773272daa1202c3f4d52ef7277b96917f7"
+    },
+    {
+      "fixture": "tests/tier7-composition/test-multi-gate-pipeline",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "6195e29707a7a319521c6c74cd554813a6251083d1c06a2e8f00b55763a7a19d"
+    },
+    {
+      "fixture": "tests/tier7-composition/test-two-node-chain",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "736c5702ec59a8dffb21094f11999e6d133400ee5eedb18fa29c5be2f09de787"
+    },
+    {
+      "fixture": "tests/tier7-composition/test-wildcard-cross-flow",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "1c773174449c8ae77fe37bce9cb7781954144eaedca558007ebe2e20143a39ce"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-advances-to-list",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 2,
+      "result": "reject",
+      "output_sha256": "8229fe2099908a10a5dc64b13ed4a66f7270041c46697b339d76c6a5d394245a"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-bare-condition",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "f20e3ab56d7ba7771826214e0710da23f88071e54f137fb889ca6db5f56307ac"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-cel-parse-error",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "3c40f39d1a7b9b97e100e4a91b6be7594da1a967f3b325d335706e75550f7087"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-condition-payload-empty-schema-mismatch",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "db492a1f272d23ca685eb47a313f71ba26ff994a02d5d284ad58185e63dcf195"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-condition-payload-empty-schema-rule-list-mismatch",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "002ff2fc22a9c85f705968227a722a4469d4032b7e789cf67220c0af57663e06"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-condition-payload-mismatch",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "db89a66f29b14509d784de2d8fb1d77bd444269fd20ae6c038774deaa9648710"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-condition-policy",
+      "target_disposition": "verify-only",
+      "target_verify": "warning",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "a3b2ba0878d8135e1db0a8b956eacbcaa0b7af83ff3a6e3541b02ec9fb683f3e"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-create-entity-plus-accumulate",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "833ea925e09818ebbeeaa382ba87df10d9d9ebf047a24fc587d16a8b70bc61b9"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-deprecated-field",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 2,
+      "result": "reject",
+      "output_sha256": "02ef596968bd0af6c6babdcacadc249a02a845aff66e7f2f87f7bf8be067d669"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-dialect-dual",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 2,
+      "result": "reject",
+      "output_sha256": "f18f31bdeea61e53f20553b35df00147f8af7e76feae307b012f2947391876d7"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-dialect-guard",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 2,
+      "result": "reject",
+      "output_sha256": "4751b8e10b6167d6020608ef90a6e3a0b9fa4ff4351f389dd12293a6267ac850"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-emit-mismatch",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "73b4d20869c8514ed78c267a9e08aea4256127b7bee381f9b15c3560638a84fa"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-event-cycle",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "92590370a3b4ecf3221e8fa54e263f4a623aa65604694a494940d4cea53ce0c4"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-event-no-consumer",
+      "target_disposition": "verify-only",
+      "target_verify": "warning",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "a7dcbecc1551b6d653325f39d7dc8f95271d0b52747fa62882f04a16e3534b12"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-event-no-producer",
+      "target_disposition": "verify-only",
+      "target_verify": "warning",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "30640cfb9c1e4679eed8d476ac57b3831f9cd82dc5c942055726bfa1eb70288b"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-event-no-schema",
+      "target_disposition": "verify-only",
+      "target_verify": "warning",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "4990413304c1d37bd09c22e48f1b0c007851ecda4bcf2aba4cedf1dcaf4bb200"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-handler-field-undefined",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 2,
+      "result": "reject",
+      "output_sha256": "58b3eef74e3b74d05a8fdeda723139b4d16c0cb10767e5006266b6f84bd2b15e"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-missing-pin",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "194bafc10236101858b6a59be49e3305d47febfe3f1383dc73be6badb9bfb8b3"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-on-complete-and-rules-mutual-exclusion",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 2,
+      "result": "reject",
+      "output_sha256": "e8833620fecce3a8739edbf3041e9006625c8717941de8f94363092926f8d6dc"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-on-complete-dict",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 2,
+      "result": "reject",
+      "output_sha256": "4be132b25d2f07f1863be2009c22f31720847e95a653773b66f099fd1c634f2e"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-on-complete-state-invalid",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "6049f72459aca565150ebf3a8fd638cb7cad0470d3172a2bcc37aa51d0d322be"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-payload-empty-schema-mismatch",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "49eb6dea24563e33eb5a52a58b8cb87aec019a176050ff1309cb63d9ceac92f8"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-payload-mismatch",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "49eb6dea24563e33eb5a52a58b8cb87aec019a176050ff1309cb63d9ceac92f8"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-permission-tool-mismatch",
+      "target_disposition": "verify-only",
+      "target_verify": "warning",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "076f3a7c1376ef90b4e2ff250330e4360a89bc647fd631c3ef04872e015c8ee4"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-policy-conflict",
+      "target_disposition": "retired",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "ebbe7a591ff585f4bf7a0d2415a5375752a6d8dd776422d96587d887f74be2f4"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-produces-drift",
+      "target_disposition": "verify-only",
+      "target_verify": "warning",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "e1adea0cc4437d243af71ce22b3846c8c9e8775dc4a74533c7780061ee31c5c6"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-prompt-missing",
+      "target_disposition": "verify-only",
+      "target_verify": "warning",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "fc5550a262d502cc5d263359ebd836a3d5430187631d509da5dba240497a78b5"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-prompt-ref",
+      "target_disposition": "verify-only",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "b3aeb15476a262f44e62c954cb4fc8e6dd7cc72686a7d3d08438d42f4e2e031c"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-prompt-ref-stub",
+      "target_disposition": "verify-only",
+      "target_verify": "warning",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "537565958ab9fcff15e3380e8d67f8f88b1c2751e885e1af994bb351bb25c7db"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-prompt-stub",
+      "target_disposition": "verify-only",
+      "target_verify": "warning",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "260c57213e17652857ba7c51c5a9762b20154103ca4c4bf44f5b8a955d75fb89"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-required-agent-missing",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "9a4b32f63f0a19b834a66b097f6885b0e7e7de3ee95c097196f2c15c68d833e3"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-self-emit",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "ddda789f7cc1630880c683e824255c14e6524868f24f122d2882afec67861aa1"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-state-machine-invalid",
+      "target_disposition": "verify-only",
+      "target_verify": "reject",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "75e8e831db4ea68372c3b9e65079683c544c7576682bf3a40656232a9d7d654a"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-state-machine-unreachable",
+      "target_disposition": "verify-only",
+      "target_verify": "warning",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "d78583e9f5bde0802ab9aa79815aca2e763a067dddceb0be0925a4709c75fb78"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-success",
+      "target_disposition": "verify-only",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "f469451f36af3337c825c8ef4734486ad84659d1d7cf84baec4ab247bd0ceb6b"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-boot-tool-missing",
+      "target_disposition": "verify-only",
+      "target_verify": "warning",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "db51f7548eda641a9a4280eda58341a5b553b500e6ae6b7403e8516253b87435"
+    },
+    {
+      "fixture": "tests/tier8-boot-verification/test-platform-mailbox-event-subscription",
+      "target_disposition": "verify-only",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "96c593dc4bdd8e7423cb15cc39e8f3179779c953964404b39ebb38f39c15e835"
+    },
+    {
+      "fixture": "tests/tier9-composition-patterns/test-compose-accumulate-compute-branch",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "15e20a837b35d95bd113aada0264a5bf516c46a37f4d05a4fb542f44ad185746"
+    },
+    {
+      "fixture": "tests/tier9-composition-patterns/test-compose-clear-gates-reenter",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "c86c50ddc3cea27a6bb5f44e3b43474b42fc159bf8e93d82550859c4ba5f354a"
+    },
+    {
+      "fixture": "tests/tier9-composition-patterns/test-compose-create-instance-config",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "eb5073b926724e2c40b515d57990af918cce85c7bb0324413cdeec7c402cbf72"
+    },
+    {
+      "fixture": "tests/tier9-composition-patterns/test-compose-gate-chain-three",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "966c308fe98f4e8044fdd395a81cd60dde2ad399ba2a17f2dbd974fcdf937e7c"
+    },
+    {
+      "fixture": "tests/tier9-composition-patterns/test-compose-gate-data-advance-emit",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "bc0e45b8d886d35a95557a7d6f073d2e637c8320bbec54daaa883285aac0a97c"
+    },
+    {
+      "fixture": "tests/tier9-composition-patterns/test-compose-guard-counter-escalate",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 1,
+      "result": "reject",
+      "output_sha256": "5c68d80a26c3716166fcc441830ca68d21f5476ca99db6de3f80a2240f916219"
+    },
+    {
+      "fixture": "tests/tier9-composition-patterns/test-compose-guard-multi-source",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "3d75a8bb8c7d673f8f885f3dcd1c83488e8da9a1c853ebed1d7deb08b15a4b92"
+    },
+    {
+      "fixture": "tests/tier9-composition-patterns/test-compose-guard-query-capacity",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "2d56a8592c3f4f2d0af7967bc91309e940becf119e981115c43ef83cd28e65d6"
+    },
+    {
+      "fixture": "tests/tier9-composition-patterns/test-compose-lifecycle-seven-states",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "1b33b76ab39276c00f325373472ae66c324124761b0d625608b314b985701501"
+    },
+    {
+      "fixture": "tests/tier9-composition-patterns/test-compose-multi-emit-cross-flow",
+      "target_disposition": "retired",
+      "exit_code": 2,
+      "result": "reject",
+      "output_sha256": "d0b22112138371f5e8bf3c22931550fc30d13d88b10b28a81dd417aae780257d"
+    },
+    {
+      "fixture": "tests/tier9-composition-patterns/test-compose-rules-fanout-data",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "ecc3f2920ada3778dcde6b3f59ede9a8ade6898dc84ec87ddf8c149f010c65e8"
+    },
+    {
+      "fixture": "tests/tier9-composition-patterns/test-compose-rules-per-rule-data",
+      "target_disposition": "runtime",
+      "target_verify": "pass",
+      "exit_code": 0,
+      "result": "pass",
+      "output_sha256": "0d23d3f0597dc140b3104749fdd072c2e53eece12d1a75d63501f81e3614d05c"
+    }
+  ]
+}

@@ -1,6 +1,5 @@
-trigger:
-  boot: true
-
-expected:
-
-  boot_result: success
+conformance:
+  disposition: verify-only
+  verify: pass
+  proves:
+    - catalog.verify.boot_diagnostics

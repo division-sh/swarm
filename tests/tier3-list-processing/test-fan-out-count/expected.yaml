@@ -16,3 +16,12 @@ expected:
     - task.dispatched
   entity_fields:
     fan_out_count: 3
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.list_processing
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

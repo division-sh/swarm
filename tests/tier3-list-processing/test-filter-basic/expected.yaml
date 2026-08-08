@@ -16,3 +16,12 @@ expected:
     filtered:
       - score: 80
       - score: 70
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.list_processing
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

@@ -7,3 +7,11 @@ expected:
   emitted_events: [task.done]
   tool_resolution:
     child_agent: { tool: lookup_data, handler_type: http, url: https://example.test/api/v2/lookup }
+
+conformance:
+  disposition: retired
+  proves:
+    - catalog.runtime.flow_composition
+  retirement:
+    reason: "legacy parent-listener cross-flow subject back-propagation is unsupported"
+    replacement: "the #2114 compiled connect-routing matrix"

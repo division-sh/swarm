@@ -5,3 +5,9 @@ expected:
 
   handler_outcome: success
   agent_received: {}
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.selected_contract_fork

@@ -16,3 +16,9 @@ expected:
     - scores.aggregated
   entity_fields:
     composite: 75
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.list_processing

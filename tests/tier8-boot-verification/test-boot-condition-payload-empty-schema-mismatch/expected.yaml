@@ -1,8 +1,8 @@
-trigger:
-  boot: true
-
-expected:
-
-  boot_result: error
-  error_category: CONDITION-PAYLOAD
-  error_contains: "empty_schema_guard"
+conformance:
+  disposition: verify-only
+  verify: reject
+  proves:
+    - catalog.verify.boot_diagnostics
+  diagnostic:
+    category: "condition_payload_alignment"
+    contains: "empty_schema_guard"

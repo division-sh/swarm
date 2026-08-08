@@ -18,3 +18,12 @@ expected:
   gates:
     g_processed: false
   emitted_events: []
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.event_loop
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

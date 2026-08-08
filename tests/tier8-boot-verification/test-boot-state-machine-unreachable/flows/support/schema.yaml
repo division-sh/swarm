@@ -1,4 +1,6 @@
 name: support
+mode: template
+instance: ticket_id
 initial_state: waiting
 terminal_states: [done]
 states: [waiting, active, review, done]

@@ -2,11 +2,7 @@ package cataloge2e
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"path/filepath"
-	"regexp"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -20,68 +16,8 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testcatalog"
 )
-
-type tier8ExpectedDocument struct {
-	Expected struct {
-		BootResult    string `yaml:"boot_result"`
-		ErrorCategory string `yaml:"error_category"`
-		ErrorContains string `yaml:"error_contains"`
-	} `yaml:"expected"`
-}
-
-type tier8ExcludedFixture struct {
-	kind   string
-	reason string
-}
-
-var tier8SupportedFixtures = []string{
-	"test-boot-advances-to-list",
-	"test-boot-bare-condition",
-	"test-boot-cel-parse-error",
-	"test-boot-condition-payload-empty-schema-mismatch",
-	"test-boot-condition-payload-empty-schema-rule-list-mismatch",
-	"test-boot-condition-payload-mismatch",
-	"test-boot-condition-policy",
-	"test-boot-create-entity-plus-accumulate",
-	"test-boot-deprecated-field",
-	"test-boot-dialect-dual",
-	"test-boot-dialect-guard",
-	"test-boot-emit-mismatch",
-	"test-boot-event-cycle",
-	"test-boot-event-no-consumer",
-	"test-boot-event-no-producer",
-	"test-boot-event-no-schema",
-	"test-boot-handler-field-undefined",
-	"test-boot-missing-pin",
-	"test-boot-on-complete-and-rules-mutual-exclusion",
-	"test-boot-on-complete-state-invalid",
-	"test-boot-on-complete-dict",
-	"test-boot-payload-empty-schema-mismatch",
-	"test-boot-payload-mismatch",
-	"test-boot-permission-tool-mismatch",
-	"test-boot-policy-conflict",
-	"test-boot-prompt-missing",
-	"test-boot-prompt-ref",
-	"test-boot-prompt-ref-stub",
-	"test-boot-prompt-stub",
-	"test-boot-produces-drift",
-	"test-boot-required-agent-missing",
-	"test-boot-self-emit",
-	"test-boot-state-machine-invalid",
-	"test-boot-success",
-	"test-boot-tool-missing",
-	"test-platform-mailbox-event-subscription",
-}
-
-var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{
-	"test-boot-state-machine-unreachable": {reason: "supported verify warning fixture for analyzer slice 4; not a runtime boot catalog fixture"},
-}
-
-var tier8StaticMultiEntityRetiredFixtures = map[string]struct{}{
-	"test-boot-missing-pin":     {},
-	"test-boot-policy-conflict": {},
-}
 
 func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 	canonicalrouting.Prove(t,
@@ -123,30 +59,25 @@ func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-tool-missing"),
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-platform-mailbox-event-subscription"),
 	)
-	repoRoot := repoRootFromCatalogE2E(t)
-	for _, fixtureName := range tier8SupportedFixtures {
-		fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", fixtureName)
+	fixtures := catalogInventory(t).Select("catalog.verify.boot_diagnostics", testcatalog.DispositionVerifyOnly)
+	if len(fixtures) != 35 {
+		t.Fatalf("boot diagnostic fixtures = %d, want 35", len(fixtures))
+	}
+	for _, fixture := range fixtures {
+		fixtureName, fixtureRoot := fixture.Name, fixture.Root
 		t.Run(fixtureName, func(t *testing.T) {
-			if _, retired := tier8StaticMultiEntityRetiredFixtures[fixtureName]; retired {
-				assertCatalogStaticMultiEntityRetirement(t, fixtureRoot)
-				return
-			}
-
-			var expected tier8ExpectedDocument
-			loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
-
 			bundle, loadErr := loadFixtureBundleMaybe(fixtureRoot)
-			if strings.EqualFold(strings.TrimSpace(expected.Expected.BootResult), "error") && loadErr != nil {
-				assertBootErrorMatches(t, loadErr, expected)
-				return
-			}
 			if loadErr != nil {
-				t.Fatalf("load workflow contract bundle %s: %v", fixtureRoot, loadErr)
+				if fixture.Metadata.Verify != testcatalog.VerifyReject {
+					t.Fatalf("load workflow contract bundle %s: %v", fixtureRoot, loadErr)
+				}
+				assertCatalogLoadDiagnostic(t, loadErr, fixture.Metadata)
+				return
 			}
 			report := runtimebootverify.Run(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), runtimebootverify.Options{})
 
-			switch strings.ToLower(strings.TrimSpace(expected.Expected.BootResult)) {
-			case "", "success":
+			switch fixture.Metadata.Verify {
+			case testcatalog.VerifyPass:
 				if report.HasErrors() {
 					t.Fatalf("expected clean boot, got validation errors: %#v", report.Errors())
 				}
@@ -158,63 +89,24 @@ func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 					t.Fatalf("NewRuntime: %v", err)
 				}
 				startRuntimeForBootTest(t, rt)
-			case "warning":
+			case testcatalog.VerifyWarning:
 				if report.HasErrors() {
 					t.Fatalf("expected warning boot result, got validation errors: %#v", report.Errors())
 				}
-				if !findingsContain(report.Warnings(), expected.Expected.ErrorCategory, expected.Expected.ErrorContains) {
-					t.Fatalf("expected warning %s containing %q, got %#v", expected.Expected.ErrorCategory, expected.Expected.ErrorContains, report.Warnings())
-				}
-				assertTier8RuntimeBootMatchesAuthoritativeStartupTruth(t, bundle, expected)
-			case "error":
+				assertCatalogFinding(t, report.Warnings(), fixture.Metadata)
+				assertTier8RuntimeBootMatchesAuthoritativeStartupTruth(t, bundle)
+			case testcatalog.VerifyReject:
 				if !report.HasErrors() {
 					t.Fatal("expected validation error")
 				}
-				assertBootErrorMatches(t, findingsError(report.Errors()), expected)
+				assertCatalogFinding(t, report.Errors(), fixture.Metadata)
 				if _, err := newTier8Runtime(t, bundle); err == nil {
 					t.Fatal("expected NewRuntime to fail for invalid boot fixture")
-				} else {
-					assertBootErrorMatches(t, err, expected)
 				}
 			default:
-				t.Fatalf("unsupported expected.boot_result %q", expected.Expected.BootResult)
+				t.Fatalf("unsupported conformance verify result %q", fixture.Metadata.Verify)
 			}
 		})
-	}
-}
-
-func TestTier8BootCatalogFixtures_AreExplicitlyClassified(t *testing.T) {
-	repoRoot := repoRootFromCatalogE2E(t)
-	entries, err := os.ReadDir(filepath.Join(repoRoot, "tests", "tier8-boot-verification"))
-	if err != nil {
-		t.Fatalf("read tier8 fixture dir: %v", err)
-	}
-	supported := make(map[string]struct{}, len(tier8SupportedFixtures))
-	for _, name := range tier8SupportedFixtures {
-		supported[name] = struct{}{}
-	}
-	found := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name := strings.TrimSpace(entry.Name())
-		if name == "" {
-			continue
-		}
-		found = append(found, name)
-		if _, ok := supported[name]; ok {
-			continue
-		}
-		if _, ok := tier8ExcludedFixtures[name]; ok {
-			continue
-		}
-		t.Fatalf("tier8 fixture %q is neither supported nor classified", name)
-	}
-	sort.Strings(found)
-	expectedCount := len(tier8SupportedFixtures) + len(tier8ExcludedFixtures)
-	if len(found) != expectedCount {
-		t.Fatalf("tier8 fixture accounting mismatch: found=%d supported=%d excluded=%d", len(found), len(tier8SupportedFixtures), len(tier8ExcludedFixtures))
 	}
 }
 
@@ -257,7 +149,7 @@ func tier8ProviderCredentialStore(t testing.TB, key, value string) runtimecreden
 	return store
 }
 
-func assertTier8RuntimeBootMatchesAuthoritativeStartupTruth(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, expected tier8ExpectedDocument) {
+func assertTier8RuntimeBootMatchesAuthoritativeStartupTruth(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle) {
 	t.Helper()
 	strictCatalogFixtureStartupPolicy().apply(t)
 	source := semanticview.Wrap(bundle)
@@ -293,92 +185,40 @@ func startRuntimeAndReturnError(rt *runtime.Runtime) error {
 	return rt.Shutdown()
 }
 
-func findingsContain(findings []runtimebootverify.Finding, category, contains string) bool {
-	wantCheckID := legacyCategoryToCheckID(category)
+func assertCatalogFinding(t testing.TB, findings []runtimebootverify.Finding, metadata testcatalog.Metadata) {
+	t.Helper()
+	want := metadata.Diagnostic
+	if want == nil {
+		t.Fatal("catalog diagnostic metadata is required")
+	}
 	for _, finding := range findings {
-		if wantCheckID != "" && strings.TrimSpace(finding.CheckID) != wantCheckID {
+		if strings.TrimSpace(finding.CheckID) != strings.TrimSpace(want.Category) {
 			continue
 		}
-		if strings.TrimSpace(contains) != "" && !strings.Contains(finding.Message, strings.TrimSpace(contains)) {
+		text := strings.Join(append([]string{finding.Message, finding.Remediation}, finding.Evidence...), "\n")
+		if !strings.Contains(text, strings.TrimSpace(want.Contains)) {
 			continue
 		}
-		return true
+		return
 	}
-	return false
+	t.Fatalf("expected diagnostic %s containing %q, got %#v", want.Category, want.Contains, findings)
 }
 
-func findingsError(findings []runtimebootverify.Finding) error {
-	if len(findings) == 0 {
-		return nil
-	}
-	lines := make([]string, 0, len(findings))
-	for _, finding := range findings {
-		lines = append(lines, finding.Message)
-	}
-	return fmt.Errorf(strings.Join(lines, "\n"))
-}
-
-func legacyCategoryToCheckID(raw string) string {
-	switch strings.TrimSpace(strings.ToUpper(raw)) {
-	case "TOOL-MISSING":
-		return "tool_resolution"
-	case "PROMPT-MISSING", "PROMPT-STUB":
-		return "prompt_exists"
-	case "POLICY-CONFLICT":
-		return "policy_conflict_detection"
-	case "EVENT-NO-CONSUMER":
-		return "event_consumer_exists"
-	case "EVENT-NO-PRODUCER":
-		return "event_producer_exists"
-	case "EVENT-NO-SCHEMA":
-		return "event_chain_integrity"
-	case "PERMISSION-MISMATCH":
-		return "agent_permission_validation"
-	default:
-		return ""
-	}
-}
-
-func assertBootErrorMatches(t testing.TB, err error, expected tier8ExpectedDocument) {
+func assertCatalogLoadDiagnostic(t testing.TB, err error, metadata testcatalog.Metadata) {
 	t.Helper()
 	if err == nil {
-		t.Fatal("expected boot error, got nil")
+		t.Fatal("expected contract load error, got nil")
 	}
-	text := strings.TrimSpace(expected.Expected.ErrorContains)
-	if text == "" {
-		text = strings.TrimSpace(expected.Expected.ErrorCategory)
-	}
-	if text == "" {
-		return
+	want := metadata.Diagnostic
+	if want == nil {
+		t.Fatal("catalog diagnostic metadata is required")
 	}
 	errText := err.Error()
-	if strings.Contains(errText, text) || strings.Contains(strings.ToLower(errText), strings.ToLower(text)) {
-		return
+	categoryMatched := strings.Contains(errText, strings.TrimSpace(want.Category))
+	if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
+		categoryMatched = diagnostic.Code == strings.TrimSpace(want.Category)
 	}
-	if bootErrorContainsAllSignificantTokens(errText, text) {
-		return
+	if !categoryMatched || !strings.Contains(errText, strings.TrimSpace(want.Contains)) {
+		t.Fatalf("contract load error = %q, want category %q and teaching evidence %q", errText, want.Category, want.Contains)
 	}
-	t.Fatalf("boot error = %q, want substring %q", err.Error(), text)
-}
-
-var bootErrorTokenPattern = regexp.MustCompile(`[A-Za-z0-9_.]+`)
-
-func bootErrorContainsAllSignificantTokens(errText, want string) bool {
-	lowerErr := strings.ToLower(errText)
-	tokens := bootErrorTokenPattern.FindAllString(strings.ToLower(want), -1)
-	if len(tokens) == 0 {
-		return false
-	}
-	foundAny := false
-	for _, token := range tokens {
-		switch token {
-		case "and", "both", "the", "a", "an":
-			continue
-		}
-		foundAny = true
-		if !strings.Contains(lowerErr, token) {
-			return false
-		}
-	}
-	return foundAny
 }

@@ -1,8 +1,8 @@
-trigger:
-  boot: true
-
-expected:
-
-  boot_result: warning
-  error_category: EVENT-NO-PRODUCER
-  error_contains: "ghost.event"
+conformance:
+  disposition: verify-only
+  verify: warning
+  proves:
+    - catalog.verify.boot_diagnostics
+  diagnostic:
+    category: "event_producer_exists"
+    contains: "ghost.event"

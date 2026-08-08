@@ -15,3 +15,12 @@ expected:
   entity_fields:
     stage_one_result: pass
     stage_two_result: verified
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.composition_patterns
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

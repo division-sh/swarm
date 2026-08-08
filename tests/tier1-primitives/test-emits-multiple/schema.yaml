@@ -9,4 +9,3 @@ pins:
       - name: item.processed
         event: item.processed
         sink: harness
-      - item.logged

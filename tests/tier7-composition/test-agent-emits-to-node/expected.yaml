@@ -9,3 +9,12 @@ expected:
     - task.acknowledged
     - task.completed
     - task.finalized
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.composition
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

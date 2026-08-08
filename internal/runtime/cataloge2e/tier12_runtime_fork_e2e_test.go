@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -29,18 +28,17 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 )
 
-var tier12RuntimeForkFixtures = []string{
-	"test-non-agent-replay-fail-closed",
-	"test-selected-contract-fork-execution",
-}
-
 func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	canonicalrouting.Prove(t,
 		canonicalrouting.ArtifactID("tests/tier12-runtime-fork/test-non-agent-replay-fail-closed"),
 		canonicalrouting.ArtifactID("tests/tier12-runtime-fork/test-selected-contract-fork-execution"),
 	)
 	repoRoot := repoRootFromCatalogE2E(t)
-	fixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-selected-contract-fork-execution")
+	fixtures := catalogRuntimeFixtures(t, "catalog.runtime.selected_contract_fork")
+	if len(fixtures) != 2 {
+		t.Fatalf("selected-contract fork runtime fixtures = %d, want 2", len(fixtures))
+	}
+	fixtureRoot := catalogRuntimeFixture(t, "catalog.runtime.selected_contract_fork", "test-selected-contract-fork-execution").Root
 
 	var expected catalogExpectedDocument
 	loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
@@ -150,7 +148,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 		t.Fatalf("selected-contract source-advanced branch activation = %#v", result.Activation)
 	}
 	assertSourceRunLifecycle(t, h.db, sourceRunID, "paused", false)
-	negativeFixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-non-agent-replay-fail-closed")
+	negativeFixtureRoot := catalogRuntimeFixture(t, "catalog.runtime.selected_contract_fork", "test-non-agent-replay-fail-closed").Root
 	assertUnsupportedHistoricalReplayFailsClosed(t, negativeFixtureRoot)
 }
 
@@ -176,30 +174,6 @@ func selectedContractExecutionOwnerForCatalogTest(t testing.TB, db *sql.DB, sele
 		t.Fatalf("NewSelectedContractExecutionOwner: %v", err)
 	}
 	return owner
-}
-
-func TestTier12RuntimeForkFixtures_AreExplicitlyClassified(t *testing.T) {
-	repoRoot := repoRootFromCatalogE2E(t)
-	entries, err := os.ReadDir(filepath.Join(repoRoot, "tests", "tier12-runtime-fork"))
-	if err != nil {
-		t.Fatalf("read tier12 fixture dir: %v", err)
-	}
-	supported := make(map[string]struct{}, len(tier12RuntimeForkFixtures))
-	for _, name := range tier12RuntimeForkFixtures {
-		supported[name] = struct{}{}
-	}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name := strings.TrimSpace(entry.Name())
-		if name == "" {
-			continue
-		}
-		if _, ok := supported[name]; !ok {
-			t.Fatalf("tier12 runtime-fork fixture %q is not explicitly classified", name)
-		}
-	}
 }
 
 func selectedContractForkFixtureSelection(t testing.TB, ctx context.Context, repoRoot, fixtureRoot string) (runtimerunforkexecution.ContractBundleSourceLoader, runfork.RunForkContractSelection) {

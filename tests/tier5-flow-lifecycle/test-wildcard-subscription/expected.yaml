@@ -7,3 +7,12 @@ expected:
   entity_state: matched
   emitted_events:
     - match.found
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.flow_lifecycle
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

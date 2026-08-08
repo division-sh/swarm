@@ -1,4 +1,3 @@
 item.evaluated:
   score: integer
-item.passed:
 item.failed:

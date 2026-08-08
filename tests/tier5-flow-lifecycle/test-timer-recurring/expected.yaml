@@ -7,3 +7,9 @@ expected:
   entity_state: monitoring
   emitted_events:
     - timer.tick
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.flow_lifecycle

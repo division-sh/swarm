@@ -7,6 +7,6 @@ description: 'Boot verification: declared workflow state is unreachable from the
   '
 platform_version: ">=0.7.0 <0.8.0"
 flows:
-- id: support
-  flow: support
-  mode: static
+  - id: support
+    flow: support
+    mode: template

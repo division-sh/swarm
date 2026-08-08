@@ -10,3 +10,12 @@ expected:
   handler_outcome: terminal_reject
   entity_state: done
   emitted_events: [task.finished]
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.flow_lifecycle
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

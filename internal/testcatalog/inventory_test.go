@@ -1,0 +1,257 @@
+package testcatalog
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/division-sh/swarm/internal/testplanning"
+)
+
+func TestCatalogRequiredInventory(t *testing.T) {
+	inventory, err := Load(catalogRepoRoot(t))
+	if err != nil {
+		t.Fatalf("load catalog inventory: %v", err)
+	}
+	counts := map[Disposition]int{}
+	verifyCounts := map[VerifyResult]int{}
+	for _, fixture := range inventory.Fixtures {
+		counts[fixture.Metadata.Disposition]++
+		if fixture.Metadata.Disposition == DispositionVerifyOnly {
+			verifyCounts[fixture.Metadata.Verify]++
+		}
+	}
+	if got := len(inventory.Fixtures); got != 155 {
+		t.Fatalf("fixture count = %d, want 155", got)
+	}
+	if counts[DispositionRuntime] != 98 || counts[DispositionVerifyOnly] != 35 || counts[DispositionRetired] != 22 {
+		t.Fatalf("disposition counts = %#v, want runtime=98 verify-only=35 retired=22", counts)
+	}
+	if verifyCounts[VerifyPass] != 3 || verifyCounts[VerifyWarning] != 11 || verifyCounts[VerifyReject] != 21 {
+		t.Fatalf("verify-only counts = %#v, want pass=3 warning=11 reject=21", verifyCounts)
+	}
+	if got := len(inventory.PublicCompanions()); got != 87 {
+		t.Fatalf("public companion count = %d, want 87", got)
+	}
+	if got := len(inventory.Claims); got != 12 {
+		t.Fatalf("canonical claim count = %d, want 12", got)
+	}
+}
+
+func TestCatalogInventoryFailsClosed(t *testing.T) {
+	tests := []struct {
+		name      string
+		spec      string
+		expected  string
+		companion bool
+		want      string
+	}{
+		{name: "missing metadata", expected: "expected: {}\n", want: "missing top-level conformance metadata"},
+		{name: "unknown disposition", expected: fixtureMetadata("other", "pass", "claim.runtime"), want: "invalid disposition"},
+		{name: "unknown field", expected: fixtureMetadata("runtime", "pass", "claim.runtime") + "  unknown: true\n", want: "field unknown"},
+		{name: "unknown claim", expected: fixtureMetadata("runtime", "pass", "claim.unknown"), want: "references unknown claim"},
+		{name: "duplicate claim", expected: "conformance:\n  disposition: runtime\n  verify: pass\n  proves: [claim.runtime, claim.runtime]\n", want: "repeats claim"},
+		{name: "unproved active claim", spec: claimSpec("claim.runtime", "runtime") + claimSpec("claim.other", "runtime"), expected: fixtureMetadata("runtime", "pass", "claim.runtime"), want: "has no non-retired proof fixture"},
+		{name: "companion without metadata", expected: fixtureMetadata("runtime", "pass", "claim.runtime"), companion: true, want: "public companion metadata disagrees"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeInventoryFixture(t, test.spec, test.expected, test.companion)
+			_, err := Load(root)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Load error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestCatalogOwnershipHasNoLegacyClassifierOrSimulator(t *testing.T) {
+	root := catalogRepoRoot(t)
+	forbidden := []string{
+		"executeCatalog" + "HandlerStep",
+		"catalogCase" + "ExecutableNow",
+		"catalogCollect" + "BootIssues",
+		"loadCatalogExpectedField" + "GateManifestations",
+		"TestSwarmTestTier1" + "PositiveEmission",
+		"TestSwarmTestTier3" + "ListProcessing",
+	}
+	legacySelector := regexp.MustCompile(`(?m)\bvar\s+tier[0-9]+[A-Za-z0-9_]*(Fixtures|ExcludedFixtures|RetiredFixtures)\b`)
+	for _, relativeRoot := range []string{"internal/cliapp", "internal/runtime/cataloge2e", "internal/runtime/swarmflowtest"} {
+		err := filepath.WalkDir(filepath.Join(root, relativeRoot), func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || filepath.Ext(path) != ".go" {
+				return nil
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			text := string(raw)
+			for _, symbol := range forbidden {
+				if strings.Contains(text, symbol) {
+					t.Errorf("%s restores non-authoritative catalog owner %s", path, symbol)
+				}
+			}
+			if legacySelector.MatchString(text) {
+				t.Errorf("%s restores a per-tier fixture selector", path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("scan %s: %v", relativeRoot, err)
+		}
+	}
+}
+
+func TestCatalogRequiredCIProofSelection(t *testing.T) {
+	policyFile, err := os.Open(filepath.Join(catalogRepoRoot(t), ".github", "test-proof-plan.yaml"))
+	if err != nil {
+		t.Fatalf("open proof policy: %v", err)
+	}
+	defer policyFile.Close()
+	policy, err := testplanning.LoadPolicy(policyFile)
+	if err != nil {
+		t.Fatalf("load proof policy: %v", err)
+	}
+	requiredUnits := []string{"catalog-required-inventory", "catalog-required-verify"}
+	for _, profileName := range []string{
+		testplanning.ProfilePRCommon,
+		testplanning.ProfilePREscalated,
+		testplanning.ProfileFull,
+		testplanning.ProfileNightly,
+	} {
+		profile := policy.Profiles[profileName]
+		for _, unit := range requiredUnits {
+			if !containsString(profile.Units, unit) {
+				t.Errorf("profile %s omits %s", profileName, unit)
+			}
+		}
+		catalogUnit := "catalog-full"
+		if profileName == testplanning.ProfilePRCommon {
+			catalogUnit = "catalog-required-smoke"
+		}
+		if !containsString(profile.Units, catalogUnit) {
+			t.Errorf("profile %s omits %s", profileName, catalogUnit)
+		}
+	}
+	for _, changedPath := range []string{
+		"internal/runtime/engine.go",
+		"internal/testcatalog/inventory.go",
+		"tests/tier1-primitives/test-advances-to/expected.yaml",
+		"platform-spec.yaml",
+	} {
+		profile, _, err := policy.ResolveProfile("pull_request", []string{changedPath}, "")
+		if err != nil {
+			t.Fatalf("resolve profile for %s: %v", changedPath, err)
+		}
+		if profile != testplanning.ProfilePREscalated {
+			t.Errorf("changed path %s resolved profile %s, want %s", changedPath, profile, testplanning.ProfilePREscalated)
+		}
+	}
+}
+
+func TestCatalogRequiredCensusArtifacts(t *testing.T) {
+	type census struct {
+		Schema             string `json:"schema"`
+		Phase              string `json:"phase"`
+		FixtureCount       int    `json:"fixture_count"`
+		PassCount          int    `json:"pass_count"`
+		RejectCount        int    `json:"reject_count"`
+		RuntimeRejectCount int    `json:"runtime_reject_count"`
+		Fixtures           []struct {
+			Fixture string `json:"fixture"`
+		} `json:"fixtures"`
+	}
+	for _, test := range []struct {
+		phase              string
+		passCount          int
+		rejectCount        int
+		runtimeRejectCount int
+	}{
+		{phase: "before", passCount: 67, rejectCount: 88, runtimeRejectCount: 34},
+		{phase: "after", passCount: 101, rejectCount: 54, runtimeRejectCount: 0},
+	} {
+		t.Run(test.phase, func(t *testing.T) {
+			path := filepath.Join(catalogRepoRoot(t), "internal", "testcatalog", "testdata", "issue-2143-"+test.phase+"-census.json")
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read census artifact: %v", err)
+			}
+			var got census
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatalf("decode census artifact: %v", err)
+			}
+			if got.Schema != "issue-2143-supported-verify-census/v1" || got.Phase != test.phase || got.FixtureCount != 155 || len(got.Fixtures) != 155 {
+				t.Fatalf("census identity = %#v", got)
+			}
+			if got.PassCount != test.passCount || got.RejectCount != test.rejectCount || got.RuntimeRejectCount != test.runtimeRejectCount {
+				t.Fatalf("census counts = pass:%d reject:%d runtime_reject:%d, want %d/%d/%d", got.PassCount, got.RejectCount, got.RuntimeRejectCount, test.passCount, test.rejectCount, test.runtimeRejectCount)
+			}
+			seen := map[string]bool{}
+			for _, row := range got.Fixtures {
+				if row.Fixture == "" || seen[row.Fixture] {
+					t.Fatalf("census has empty or duplicate fixture %q", row.Fixture)
+				}
+				seen[row.Fixture] = true
+			}
+		})
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func catalogRepoRoot(t testing.TB) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve catalog inventory source path")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+}
+
+func writeInventoryFixture(t *testing.T, claims, expected string, companion bool) string {
+	t.Helper()
+	root := t.TempDir()
+	if claims == "" {
+		claims = claimSpec("claim.runtime", "runtime")
+	}
+	spec := "test_specification:\n  internal_catalog_conformance:\n    claims:\n" + claims
+	writeCatalogTestFile(t, filepath.Join(root, "platform-spec.yaml"), spec)
+	fixtureRoot := filepath.Join(root, "tests", "tier1", "test-case")
+	writeCatalogTestFile(t, filepath.Join(fixtureRoot, "expected.yaml"), expected)
+	if companion {
+		writeCatalogTestFile(t, filepath.Join(fixtureRoot, "tests", "visible-smoke.yaml"), "name: smoke\n")
+	}
+	return root
+}
+
+func claimSpec(id, disposition string) string {
+	return "      " + id + ":\n        status: active\n        required_disposition: " + disposition + "\n        scope: test\n"
+}
+
+func fixtureMetadata(disposition, verify, claim string) string {
+	return "conformance:\n  disposition: " + disposition + "\n  verify: " + verify + "\n  proves: [" + claim + "]\n"
+}
+
+func writeCatalogTestFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create test directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+}

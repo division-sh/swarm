@@ -7,3 +7,11 @@ expected:
   handler_outcome: success
   entity_state: done
   emitted_events: [task.logged]
+
+conformance:
+  disposition: retired
+  proves:
+    - catalog.runtime.composition_patterns
+  retirement:
+    reason: "the pre-structured multi-emit handler shape is unsupported"
+    replacement: "TestProducerRoutingRetirementConformance and structured emit authoring"

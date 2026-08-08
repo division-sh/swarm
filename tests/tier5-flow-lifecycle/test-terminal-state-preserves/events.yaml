@@ -2,4 +2,3 @@ task.completed:
 task.updated:
   data: string
 task.finished:
-state.updated:

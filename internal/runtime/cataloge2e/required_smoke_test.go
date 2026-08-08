@@ -6,7 +6,7 @@ import (
 )
 
 func TestCatalogRequiredSmoke(t *testing.T) {
-	t.Run("startup_policies", TestCatalogFixtureStartupPolicies_AreExplicit)
+	t.Run("startup_policies", TestCatalogFixtureStartupPolicy_IsStrictForEveryExecutableFixture)
 	t.Run("tier8_warning_truth", TestTier8RuntimeBootMatchesAuthoritativeStartupTruthForWarningFixtures)
 	t.Run("assertions_causal_entity_ids", TestCatalogCausalEntityIDs_FollowsSourceEventIDChain)
 	t.Run("assertions_handler_outcome_names", func(t *testing.T) {

@@ -5,9 +5,10 @@ planning:
   max_shards: 12
   unknown_package_seconds: 30
 escalation_paths:
-  - ^internal/runtime/cataloge2e/
-  - ^internal/runtime/conformance/
-  - ^internal/runtime/contracts/
+  - ^internal/runtime/
+  - ^internal/testcatalog/
+  - ^internal/cliapp/catalog_conformance_test\.go$
+  - ^internal/cliapp/test_command_test\.go$
   - ^tests/
   - ^platform-spec\.yaml$
   - ^\.github/workflows/
@@ -17,14 +18,18 @@ escalation_paths:
   - ^internal/testtiming/
   - ^cmd/swarm-test-timing/
 special_packages:
+  - github.com/division-sh/swarm/internal/cliapp
   - github.com/division-sh/swarm/internal/runtime/cataloge2e
   - github.com/division-sh/swarm/internal/runtime
   - github.com/division-sh/swarm/internal/store
+  - github.com/division-sh/swarm/internal/testcatalog
 profiles:
   pr-common:
     count_mode: cache-default
     environment_id: ci-postgres-gateway-empty-v1
     units:
+      - catalog-required-inventory
+      - catalog-required-verify
       - catalog-required-smoke
       - runtime-full
       - store-full
@@ -32,6 +37,8 @@ profiles:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     units:
+      - catalog-required-inventory
+      - catalog-required-verify
       - catalog-full
       - runtime-full
       - store-full
@@ -39,6 +46,8 @@ profiles:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     units:
+      - catalog-required-inventory
+      - catalog-required-verify
       - catalog-full
       - runtime-full
       - store-full
@@ -46,10 +55,26 @@ profiles:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     units:
+      - catalog-required-inventory
+      - catalog-required-verify
       - catalog-full
       - runtime-full
       - store-full
 units:
+  catalog-required-inventory:
+    packages:
+      - github.com/division-sh/swarm/internal/testcatalog
+    run: ^TestCatalog(RequiredInventory|InventoryFailsClosed|OwnershipHasNoLegacyClassifierOrSimulator|FixturesUseCanonicalCreateFlowInstanceAuthoring|RequiredCIProofSelection|RequiredCensusArtifacts)$
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  catalog-required-verify:
+    packages:
+      - github.com/division-sh/swarm/internal/cliapp
+    run: ^(TestCatalogRequiredVerifyAll|TestSwarmTestCatalogCompanionsAreProtocolOnly)$
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
   catalog-required-smoke:
     packages:
       - github.com/division-sh/swarm/internal/runtime/cataloge2e

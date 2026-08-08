@@ -1,7 +1,8 @@
-trigger:
-  boot: true
-expected:
-
-  boot_result: warning
-  error_category: PROMPT-STUB
-  error_contains: "TODO"
+conformance:
+  disposition: verify-only
+  verify: warning
+  proves:
+    - catalog.verify.boot_diagnostics
+  diagnostic:
+    category: "prompt_exists"
+    contains: "prompt contains TODO"

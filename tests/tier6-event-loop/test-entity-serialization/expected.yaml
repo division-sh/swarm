@@ -13,3 +13,9 @@ expected:
   emitted_events:
     - step.first_done
     - step.second_done
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.event_loop

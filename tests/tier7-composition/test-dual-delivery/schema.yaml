@@ -1,12 +1,19 @@
 name: test-dual-delivery
 initial_state: pending
-terminal_states: [done]
-states: [pending, done]
+terminal_states:
+- done
+states:
+- pending
+- done
 pins:
   inputs:
-    events: [task.completed]
+    events:
+    - task.completed
   outputs:
     events:
-      - name: task.finalized
-        event: task.finalized
-        sink: harness
+    - name: task.finalized
+      event: task.finalized
+      sink: harness
+    - name: task.audited
+      event: task.audited
+      sink: harness

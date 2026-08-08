@@ -7,3 +7,9 @@ expected:
   entity_state: checked
   emitted_events:
     - timer.check
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.flow_lifecycle

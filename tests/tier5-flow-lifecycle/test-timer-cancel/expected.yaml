@@ -9,3 +9,12 @@ expected:
   handler_outcome: success
   entity_state: cancelled
   emitted_events: [timer.cancelled]
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.flow_lifecycle
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

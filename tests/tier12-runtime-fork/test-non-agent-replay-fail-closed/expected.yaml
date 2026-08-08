@@ -5,3 +5,12 @@ expected:
 
   handler_outcome: success
   entity_state: pending
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.selected_contract_fork
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only

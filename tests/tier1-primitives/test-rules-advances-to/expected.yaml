@@ -9,3 +9,12 @@ expected:
   entity_state: approved
   emitted_events:
     - item.approved
+
+conformance:
+  disposition: runtime
+  verify: pass
+  proves:
+    - catalog.runtime.primitives
+  public_companion:
+    path: tests/visible-smoke.yaml
+    proof_role: protocol-only
