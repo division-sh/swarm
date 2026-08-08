@@ -8,8 +8,10 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/spf13/cobra"
 )
 
@@ -21,6 +23,7 @@ const (
 
 type entityListCommandOptions struct {
 	apiOptions rootCommandOptions
+	output     cliOutputOptions
 
 	runID        string
 	flow         string
@@ -39,6 +42,7 @@ type entityListCommandOptions struct {
 
 type entityViewCommandOptions struct {
 	apiOptions rootCommandOptions
+	output     cliOutputOptions
 
 	runID    string
 	runIDSet bool
@@ -154,6 +158,8 @@ func newEntitiesListCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().IntVar(&listOpts.limit, "limit", 0, "Optional page size, 1-500")
 	cmd.Flags().StringVar(&listOpts.cursor, "cursor", "", "Pagination cursor")
 	bindCLIAPIConnectionFlags(cmd, &listOpts.apiOptions)
+	bindCLIOutputFlags(cmd, &listOpts.output)
+	bindCLIOutputVerboseFlag(cmd, &listOpts.output)
 	return cmd
 }
 
@@ -171,6 +177,8 @@ func newEntityViewCommand(opts rootCommandOptions) *cobra.Command {
 	argcount.SetDiscoveryHint(cmd, "List entity ids with `swarm entity list`.")
 	cmd.Flags().StringVar(&viewOpts.runID, "run-id", "", "Disambiguate entities reused across runs")
 	bindCLIAPIConnectionFlags(cmd, &viewOpts.apiOptions)
+	bindCLIOutputFlags(cmd, &viewOpts.output)
+	bindCLIOutputVerboseFlag(cmd, &viewOpts.output)
 	return cmd
 }
 
@@ -210,8 +218,15 @@ func runEntitiesListCommand(ctx context.Context, out, errOut io.Writer, opts ent
 	if err := validateEntityListResult(result); err != nil {
 		return returnCLIAPIError(errOut, err, entityListAPIErrorClassifier())
 	}
-	writeEntityListResult(out, result)
-	return nil
+	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+		writeEntityListResult(w, result, opts.output.verbose)
+	}, func() ([]string, error) {
+		ids := make([]string, 0, len(result.Entities))
+		for _, entity := range result.Entities {
+			ids = append(ids, entity.EntityID)
+		}
+		return ids, nil
+	})
 }
 
 func runEntityViewCommand(ctx context.Context, out, errOut io.Writer, entityID string, opts entityViewCommandOptions) error {
@@ -257,8 +272,11 @@ func runEntityViewCommand(ctx context.Context, out, errOut io.Writer, entityID s
 	if err := validateEntityFullResult("entity.get result", result); err != nil {
 		return returnCLIAPIError(errOut, err, entityViewAPIErrorClassifier())
 	}
-	writeEntityFullResult(out, result)
-	return nil
+	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+		writeEntityFullResult(w, result, entityRenderOptions{verbose: opts.output.verbose})
+	}, func() ([]string, error) {
+		return []string{result.Entity.EntityID}, nil
+	})
 }
 
 func runEntityAggregateCommand(ctx context.Context, out, errOut io.Writer, opts entityAggregateCommandOptions) error {
@@ -481,22 +499,19 @@ func validateEntityAggregateResult(result entityAggregateResult) error {
 	return nil
 }
 
-func writeEntityListResult(out io.Writer, result entityListResult) {
+func writeEntityListResult(out io.Writer, result entityListResult, verbose bool) {
 	if out == nil {
 		return
 	}
 	rows := make([][]string, 0, len(result.Entities))
 	for _, entity := range result.Entities {
+		updated := entityListTimestamp(cliRelativeTimeNow(), entity.UpdatedAt, verbose)
 		rows = append(rows, []string{
 			entity.EntityID,
-			entity.RunID,
-			entity.FlowInstance,
-			entity.EntityType,
-			entity.CurrentState,
-			fmt.Sprintf("%d", entity.Revision),
-			entity.UpdatedAt,
-			entityDash(entity.Slug),
-			entityDash(entity.Name),
+			entityDash(entity.EntityType),
+			entityDash(entity.CurrentState),
+			entityShortFlow(entity.FlowInstance),
+			updated,
 		})
 	}
 	footers := []string{}
@@ -506,14 +521,10 @@ func writeEntityListResult(out io.Writer, result entityListResult) {
 	writeCLITable(out, cliTable{
 		Columns: []cliTableColumn{
 			{Header: "ENTITY_ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyEntity},
-			{Header: "RUN_ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyRun},
-			{Header: "FLOW", IdentifierFamily: cliIdentifierFamilyFlowInstance},
 			{Header: "TYPE"},
 			{Header: "STATE"},
-			{Header: "REVISION"},
+			{Header: "FLOW", IdentifierFamily: cliIdentifierFamilyFlowInstance},
 			{Header: "UPDATED"},
-			{Header: "SLUG"},
-			{Header: "NAME"},
 		},
 		Rows:         rows,
 		EmptyMessage: "No entities match the current filters.",
@@ -521,28 +532,157 @@ func writeEntityListResult(out io.Writer, result entityListResult) {
 	})
 }
 
-func writeEntityFullResult(out io.Writer, result entityFull) {
+type entityRenderOptions struct {
+	verbose bool
+}
+
+func writeEntityFullResult(out io.Writer, result entityFull, opts entityRenderOptions) {
 	if out == nil {
 		return
 	}
 	entity := result.Entity
-	writeCLITitle(out, fmt.Sprintf("Entity %s", entity.EntityID))
-	writeCLIFieldLine(out,
-		cliDetailField{Key: "run_id", Value: entity.RunID},
-		cliDetailField{Key: "flow", Value: entity.FlowInstance},
-		cliDetailField{Key: "type", Value: entity.EntityType},
-		cliDetailField{Key: "state", Value: entity.CurrentState},
-		cliDetailField{Key: "revision", Value: fmt.Sprintf("%d", entity.Revision)},
-		cliDetailField{Key: "created_at", Value: entity.CreatedAt},
-		cliDetailField{Key: "updated_at", Value: entity.UpdatedAt},
-	)
-	writeCLIFieldLine(out,
-		cliDetailField{Key: "slug", Value: entityDash(entity.Slug)},
-		cliDetailField{Key: "name", Value: entityDash(entity.Name)},
-	)
-	writeCLIFieldLine(out, cliDetailField{Key: "fields", Value: entityCompactJSON(result.Fields)})
-	writeCLIFieldLine(out, cliDetailField{Key: "gates", Value: entityCompactJSON(result.Gates)})
-	writeCLIFieldLine(out, cliDetailField{Key: "accumulated", Value: entityCompactJSON(result.Accumulated)})
+	now := cliRelativeTimeNow()
+	header := []cliLabeledDetailRow{
+		{Label: "run", Value: entity.RunID},
+		{Label: "flow", Value: entity.FlowInstance},
+		{Label: "type", Value: entityDash(entity.EntityType)},
+		{Label: "state", Value: entityDash(entity.CurrentState)},
+		{Label: "revision", Value: fmt.Sprintf("%d", entity.Revision)},
+		{Label: "created", Value: entityTimestampText(now, entity.CreatedAt, opts.verbose)},
+		{Label: "updated", Value: entityTimestampText(now, entity.UpdatedAt, opts.verbose)},
+	}
+	if strings.TrimSpace(entity.Slug) != "" {
+		header = append(header, cliLabeledDetailRow{Label: "slug", Value: entity.Slug})
+	}
+	if strings.TrimSpace(entity.Name) != "" {
+		header = append(header, cliLabeledDetailRow{Label: "name", Value: entity.Name})
+	}
+	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Entity " + entity.EntityID, Rows: header})
+
+	writeEntityFieldSection(out, "Fields", result.Fields, entityContentField, true)
+	writeEntityGatesSection(out, result.Gates)
+	if opts.verbose {
+		writeEntityFieldSection(out, "Bookkeeping", result.Fields, entityBookkeepingField, false)
+		writeEntityFieldSection(out, "Accumulated", result.Accumulated, nil, true)
+	}
+}
+
+func entityListTimestamp(now time.Time, raw string, verbose bool) string {
+	if verbose {
+		return raw
+	}
+	return formatCLIRelativeTime(now, raw)
+}
+
+func entityTimestampText(now time.Time, raw string, verbose bool) string {
+	relative := formatCLIRelativeTime(now, raw)
+	if !verbose {
+		return relative
+	}
+	return relative + " (" + raw + ")"
+}
+
+// entityContentField reports whether a field key is workflow-declared content
+// (default-visible) rather than platform-injected bookkeeping. The platform key
+// set is owned by runtimecontracts.EntityFieldBookkeepingKeys, adjacent to the
+// injection sites; a platform key forgotten there shows up in default output
+// (fail-visible) instead of silently vanishing.
+func entityContentField(key string) bool {
+	return !runtimecontracts.IsEntityFieldBookkeepingKey(key)
+}
+
+func entityBookkeepingField(key string) bool {
+	return runtimecontracts.IsEntityFieldBookkeepingKey(key)
+}
+
+func writeEntityFieldSection(out io.Writer, title string, fields map[string]any, include func(string) bool, stateEmpty bool) {
+	rows := entityFieldRows(fields, include)
+	if len(rows) == 0 {
+		if stateEmpty {
+			writeCLITitle(out, title+"  none")
+		}
+		return
+	}
+	writeCLILabeledDetail(out, cliLabeledDetail{Title: title, Rows: rows})
+}
+
+func entityFieldRows(fields map[string]any, include func(string) bool) []cliLabeledDetailRow {
+	if include == nil {
+		include = func(string) bool { return true }
+	}
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		if include(key) {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	rows := make([]cliLabeledDetailRow, 0, len(keys))
+	for _, key := range keys {
+		rows = append(rows, cliLabeledDetailRow{Label: key, Value: entityFieldValue(fields[key])})
+	}
+	return rows
+}
+
+func entityFieldValue(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return "none"
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	case string:
+		return cliRenderOneLineValue(v)
+	case map[string]any:
+		if len(v) == 0 {
+			return "none"
+		}
+	case []any:
+		if len(v) == 0 {
+			return "none"
+		}
+	}
+	return cliRenderOneLineValue(entityCompactJSON(value))
+}
+
+func writeEntityGatesSection(out io.Writer, gates map[string]bool) {
+	keys := make([]string, 0, len(gates))
+	anyTrue := false
+	for key, value := range gates {
+		keys = append(keys, key)
+		if value {
+			anyTrue = true
+		}
+	}
+	if len(keys) == 0 || !anyTrue {
+		writeCLITitle(out, "Gates  none")
+		return
+	}
+	sort.Strings(keys)
+	rows := make([]cliLabeledDetailRow, 0, len(keys))
+	for _, key := range keys {
+		rows = append(rows, cliLabeledDetailRow{Label: key, Value: fmt.Sprintf("%t", gates[key])})
+	}
+	writeCLILabeledDetail(out, cliLabeledDetail{Title: "Gates", Rows: rows})
+}
+
+const entityFlowSegmentMaxRunes = 16
+
+// entityShortFlow truncates long flow-path segments (e.g. an embedded bundle
+// hash) while preserving the flow structure, so the FLOW column stays
+// scannable. The full flow instance remains available via entity view and
+// --json.
+func entityShortFlow(flow string) string {
+	segments := strings.Split(strings.Trim(flow, "/"), "/")
+	for i, segment := range segments {
+		runes := []rune(segment)
+		if len(runes) > entityFlowSegmentMaxRunes {
+			segments[i] = string(runes[:entityFlowSegmentMaxRunes]) + "…"
+		}
+	}
+	return strings.Join(segments, "/")
 }
 
 func writeEntityAggregateResult(out io.Writer, result entityAggregateResult) {
