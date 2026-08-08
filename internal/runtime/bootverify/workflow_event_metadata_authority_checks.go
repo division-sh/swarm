@@ -188,10 +188,8 @@ func eventMetadataRoleNames(source semanticview.Source, decl deadEventDeclaratio
 			eventMetadataAddEndpointRole(source, producers, endpoint)
 		}
 	}
-	for _, endpoint := range census.Consumers() {
-		if endpointMatchesDeadEventDeclaration(endpoint, decl) {
-			eventMetadataAddEndpointRole(source, consumers, endpoint)
-		}
+	for _, match := range deadEventTypedConsumerMatches(source, census, decl) {
+		eventMetadataAddEndpointRole(source, consumers, match.Consumer)
 	}
 	for _, endpoint := range census.OutputPins() {
 		if endpointMatchesDeadEventDeclaration(endpoint, decl) {
@@ -225,7 +223,7 @@ func endpointMatchesDeadEventDeclaration(endpoint semanticview.AuthoredEventEndp
 	if strings.TrimSpace(decl.FlowID) == "" {
 		return strings.TrimSpace(endpoint.FlowID) == ""
 	}
-	return deadEventSameScope(decl.FlowID, endpoint.FlowID) || strings.Contains(eventidentity.Normalize(endpoint.Event.Authored), "/")
+	return deadEventSameScope(decl.FlowID, endpoint.FlowID)
 }
 
 func eventMetadataAddEndpointRole(source semanticview.Source, names eventMetadataNameIndex, endpoint semanticview.AuthoredEventEndpoint) {
