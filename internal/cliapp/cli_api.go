@@ -160,6 +160,18 @@ func newCLIAPIClient(opts rootCommandOptions) (*cliAPIClient, error) {
 	return &cliAPIClient{endpoint: settings.rpcEndpoint, token: settings.token, target: settings.target, httpClient: client}, nil
 }
 
+func newCLIAPIClientFromConfig(opts rootCommandOptions, cfg cliCommandConfig) (*cliAPIClient, error) {
+	settings, err := resolveCLIAPISettingsFromConfig(opts, cfg)
+	if err != nil {
+		return nil, err
+	}
+	client := opts.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	return &cliAPIClient{endpoint: settings.rpcEndpoint, token: settings.token, target: settings.target, httpClient: client}, nil
+}
+
 type cliAPISettings struct {
 	rpcEndpoint   string
 	token         string
@@ -220,6 +232,11 @@ func resolveCLIAPISettings(opts rootCommandOptions) (cliAPISettings, error) {
 	if err != nil {
 		return cliAPISettings{}, err
 	}
+	return resolveCLIAPISettingsFromConfig(opts, cfg)
+}
+
+func resolveCLIAPISettingsFromConfig(opts rootCommandOptions, cfg cliCommandConfig) (cliAPISettings, error) {
+	opts = opts.ensureRootFlagState()
 	if err := rejectRemovedClientAPIEnvSources(); err != nil {
 		return cliAPISettings{}, err
 	}

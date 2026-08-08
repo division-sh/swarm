@@ -37,14 +37,13 @@ func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministicall
 			"metadata": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
 			"name": runtimecontracts.MustToolInputSchema(
 				runtimecontracts.ToolSchemaString,
-				runtimecontracts.ToolSchemaEnum("fixture"),
+				runtimecontracts.ToolSchemaEnum("zeta", "alpha"),
 			),
 			"nothing":  runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaNull),
 			"optional": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString),
 		}),
 		runtimecontracts.ToolSchemaRequired("accepted", "count", "items", "metadata", "name", "nothing"),
 	))
-
 	tools["acme.create"] = flowLocal
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: tools})
 	first, err := CompileMockResponsePlan(source)
@@ -99,7 +98,7 @@ func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministicall
 		"count":    float64(2),
 		"items":    []any{"", ""},
 		"metadata": map[string]any{},
-		"name":     "fixture",
+		"name":     "zeta",
 		"nothing":  nil,
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -182,7 +181,7 @@ func TestCompileMockResponsePlanFailsClosedWithExactSchemaPath(t *testing.T) {
 		{
 			name:   "uninhabited any schema",
 			schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaAny),
-			want:   "output_schema: unsupported schema type",
+			want:   "output_schema: $: schema has no deterministic inhabitant type",
 		},
 		{
 			name: "integer interval has no inhabitant",
@@ -193,7 +192,7 @@ func TestCompileMockResponsePlanFailsClosedWithExactSchemaPath(t *testing.T) {
 					runtimecontracts.ToolSchemaMaximum(0.8),
 				),
 			}), runtimecontracts.ToolSchemaRequired("value")),
-			want: "output_schema.properties.value: bounds contain no integer",
+			want: "output_schema: $.properties[value]: numeric bounds contain no integer inhabitant",
 		},
 	}
 

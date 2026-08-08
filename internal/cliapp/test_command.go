@@ -3,6 +3,7 @@ package cliapp
 import (
 	"context"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,11 +15,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
@@ -94,6 +98,17 @@ type scenarioStep struct {
 	Target             any
 	TargetFlowInstance any
 	TargetEntityID     any
+	GeneratePayload    bool
+}
+
+type generatedInputFixturePlan struct {
+	flowID          string
+	pinName         string
+	eventKey        string
+	schemaDigest    string
+	identity        string
+	canonicalSchema json.RawMessage
+	payload         json.RawMessage
 }
 
 type scenarioExpect struct {
@@ -176,6 +191,7 @@ func (e scenarioTestValidationError) Unwrap() error {
 type scenarioRunner struct {
 	client       *cliAPIClient
 	bundle       *runtimecontracts.WorkflowContractBundle
+	source       semanticview.Source
 	bundleHash   string
 	contractsDir string
 	timeout      time.Duration
@@ -225,7 +241,11 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	if opts.apiOptions.rootFlags != nil && opts.apiOptions.rootFlags.configPathSet {
 		configPath = opts.apiOptions.rootFlags.configPath
 	}
-	contractsDir, platformSpec, err := resolveScenarioTestSources(RepoRoot, opts.contracts, configPath)
+	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: RepoRoot, ExplicitPath: configPath})
+	if err != nil {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("load runtime config: %w", err))
+	}
+	contractsDir, platformSpec, err := resolveScenarioTestSources(RepoRoot, opts.contracts, configResult.cli)
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, err)
 	}
@@ -240,11 +260,19 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("load contract bundle: %w", err))
 	}
+	providerPacks, err := LoadConfiguredProviderTriggerPacks(RepoRoot, configResult)
+	if err != nil {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("load provider trigger packs: %w", err))
+	}
+	source, err := runtime.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), providerPacks.Catalog)
+	if err != nil {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("compose provider trigger events: %w", err))
+	}
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("compute bundle_hash: %w", err))
 	}
-	client, err := newCLIAPIClient(opts.apiOptions)
+	client, err := newCLIAPIClientFromConfig(opts.apiOptions, configResult.cli)
 	if err != nil {
 		writeCLIAPIError(errOut, err)
 		return commandExitError{code: scenarioTestAPIErrorExitCode(err)}
@@ -252,6 +280,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	runner := scenarioRunner{
 		client:       client,
 		bundle:       bundle,
+		source:       source,
 		bundleHash:   bundleHash,
 		contractsDir: contractsDir,
 		timeout:      opts.timeout,
@@ -268,14 +297,10 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	return nil
 }
 
-func resolveScenarioTestSources(RepoRoot, contractsFlag, configPath string) (string, string, error) {
+func resolveScenarioTestSources(RepoRoot, contractsFlag string, cfg cliCommandConfig) (string, string, error) {
 	RepoRoot = strings.TrimSpace(RepoRoot)
 	if RepoRoot == "" {
 		RepoRoot = "."
-	}
-	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: RepoRoot, ExplicitPath: configPath})
-	if err != nil {
-		return "", "", err
 	}
 	contractsDir := strings.TrimSpace(contractsFlag)
 	if contractsDir == "" {
@@ -287,15 +312,18 @@ func resolveScenarioTestSources(RepoRoot, contractsFlag, configPath string) (str
 			contractsDir = RepoRoot
 		}
 	}
-	contractsDir, err = absFrom(RepoRoot, contractsDir)
+	contractsDir, err := absFrom(RepoRoot, contractsDir)
 	if err != nil {
 		return "", "", err
 	}
-	resolved, err := ResolveCLIContractPlatformSpecPaths(RepoRoot, CLIContractPlatformSpecPathOptions{ConfigPath: configPath})
-	if err != nil {
-		return "", "", err
+	platformSpec := strings.TrimSpace(cfg.Paths.PlatformSpecPath)
+	if platformSpec == "" {
+		platformSpec, err = EmbeddedPlatformSpecPath()
+		if err != nil {
+			return "", "", fmt.Errorf("resolve embedded platform spec: %w", err)
+		}
 	}
-	return contractsDir, resolved.PlatformSpecPath, nil
+	return contractsDir, ResolvePath(RepoRoot, platformSpec), nil
 }
 
 func absFrom(base, path string) (string, error) {
@@ -665,16 +693,21 @@ func parseScenarioStep(node *yaml.Node) (scenarioStep, error) {
 				return scenarioStep{}, fmt.Errorf("publish step target cannot be combined with target_entity_id")
 			}
 		}
+		payload, generatePayload, err := parseScenarioPublishPayload(mappingNode(node)["payload"], m["payload"])
+		if err != nil {
+			return scenarioStep{}, err
+		}
 		return scenarioStep{
 			Action:             "publish",
 			PublishEvent:       eventName,
-			Payload:            m["payload"],
+			Payload:            payload,
 			IdempotencyKey:     m["idempotency_key"],
 			Emitter:            m["emitter"],
 			SourceEventID:      m["source_event_id"],
 			Target:             m["target"],
 			TargetFlowInstance: m["target_flow_instance"],
 			TargetEntityID:     m["target_entity_id"],
+			GeneratePayload:    generatePayload,
 		}, nil
 	}
 	if len(m) != 1 {
@@ -711,6 +744,30 @@ func parseScenarioStep(node *yaml.Node) (scenarioStep, error) {
 		}, nil
 	}
 	return scenarioStep{}, fmt.Errorf("scenario step is empty")
+}
+
+func parseScenarioPublishPayload(node *yaml.Node, decoded any) (any, bool, error) {
+	if node == nil {
+		return nil, false, nil
+	}
+	if node.Kind == yaml.AliasNode {
+		return nil, false, fmt.Errorf("publish payload aliases are not supported; author scalar payload: generate directly")
+	}
+	if node.Kind == yaml.ScalarNode {
+		if node.Tag == "!!str" && node.Value == "generate" {
+			return nil, true, nil
+		}
+		if text, ok := decoded.(string); !ok || !strings.HasPrefix(strings.TrimSpace(text), "${") {
+			return nil, false, fmt.Errorf("publish payload scalar must be exactly \"generate\" or a CEL expression that evaluates to an object")
+		}
+	}
+	if node.Kind == yaml.MappingNode {
+		fields := mappingNode(node)
+		if len(fields) == 1 && fields["generate"] != nil {
+			return nil, false, fmt.Errorf("publish payload generation uses scalar payload: generate; mapping sentinels are unsupported")
+		}
+	}
+	return decoded, false, nil
 }
 
 func normalizeScenarioMailboxAction(value string) string {
@@ -1136,7 +1193,7 @@ func (r scenarioRunner) runInvalidVariants(file scenarioTestFile, doc scenarioDo
 			payloadSpec["set"] = payloadSet
 		}
 		step.Payload = payloadSpec
-		if _, err := r.buildPublishPayload(file, evaluator, step); err == nil {
+		if _, _, err := r.buildPublishPayload(file, evaluator, step); err == nil {
 			return fmt.Errorf("%s: invalid case %s unexpectedly passed pre-mutation validation", file.Path, item.Name)
 		}
 	}
@@ -1152,7 +1209,11 @@ func invalidBasePublishStep(base map[string]any) (scenarioStep, error) {
 	if eventName == "" {
 		return scenarioStep{}, fmt.Errorf("publish must be non-empty")
 	}
-	return scenarioStep{Action: "publish", PublishEvent: eventName, Payload: base["payload"]}, nil
+	payload := base["payload"]
+	if text, ok := payload.(string); ok && text == "generate" {
+		return scenarioStep{}, fmt.Errorf("generated invalid-case bases are not supported; author an explicit payload before applying invalid.set overrides")
+	}
+	return scenarioStep{Action: "publish", PublishEvent: eventName, Payload: payload}, nil
 }
 
 func (r scenarioRunner) runScenarioSetup(ctx context.Context, file scenarioTestFile, evaluator *scenarioExpressionEvaluator, state *scenarioRunState, setup scenarioSetup) error {
@@ -1410,11 +1471,11 @@ func (r scenarioRunner) runScenarioStep(ctx context.Context, file scenarioTestFi
 }
 
 func (r scenarioRunner) runPublishStep(ctx context.Context, file scenarioTestFile, evaluator *scenarioExpressionEvaluator, state *scenarioRunState, step scenarioStep) error {
-	payload, err := r.buildPublishPayload(file, evaluator, step)
+	payload, resolvedEvent, err := r.buildPublishPayload(file, evaluator, step)
 	if err != nil {
 		return scenarioTestValidationError{err: err}
 	}
-	eventName := r.scopedEventName(file.FlowID, step.PublishEvent)
+	eventName := r.scopedEventName(file.FlowID, resolvedEvent)
 	params := map[string]any{
 		"event_name":  eventName,
 		"payload":     payload,
@@ -1507,19 +1568,166 @@ func (r scenarioRunner) scopedEventName(flowID, eventName string) string {
 	return r.bundle.ResolveFlowEventReference(flowID, eventName)
 }
 
-func (r scenarioRunner) buildPublishPayload(file scenarioTestFile, evaluator *scenarioExpressionEvaluator, step scenarioStep) (map[string]any, error) {
+func (r scenarioRunner) buildPublishPayload(file scenarioTestFile, evaluator *scenarioExpressionEvaluator, step scenarioStep) (map[string]any, string, error) {
+	if step.GeneratePayload {
+		plan, err := r.compileGeneratedInputFixture(file, evaluator, step.PublishEvent)
+		if err != nil {
+			return nil, "", err
+		}
+		payload, err := plan.materializePayload()
+		if err != nil {
+			return nil, "", err
+		}
+		return payload, plan.eventKey, nil
+	}
 	payload, err := r.buildPayloadFromSpec(file, evaluator, step.Payload)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	schema, _, ok := runtimecontracts.EventSchemaForFlowEvent(r.bundle, file.FlowID, step.PublishEvent)
 	if !ok {
-		return nil, fmt.Errorf("event %s has no target schema in contract bundle", step.PublishEvent)
+		return nil, "", fmt.Errorf("event %s has no target schema in contract bundle", step.PublishEvent)
 	}
 	if err := runtimeeventschema.ValidatePayloadAgainstSchema(schema.Schema, payload); err != nil {
-		return nil, err
+		return nil, "", err
+	}
+	return payload, step.PublishEvent, nil
+}
+
+func (r scenarioRunner) compileGeneratedInputFixture(file scenarioTestFile, evaluator *scenarioExpressionEvaluator, publishIdentity string) (generatedInputFixturePlan, error) {
+	if r.bundle == nil {
+		return generatedInputFixturePlan{}, fmt.Errorf("generated payload requires a loaded contract bundle")
+	}
+	if evaluator == nil || strings.TrimSpace(evaluator.seed) == "" {
+		return generatedInputFixturePlan{}, fmt.Errorf("generated payload requires a recorded scenario identity")
+	}
+
+	if r.source == nil {
+		return generatedInputFixturePlan{}, fmt.Errorf("generated payload requires the effective semantic source")
+	}
+	census := semanticview.BuildAuthoredEventEndpointCensus(r.source)
+	association := census.ResolveDeclaredInputEndpoint(file.FlowID, publishIdentity)
+	endpoint, ok := association.Endpoint()
+	if !ok {
+		return generatedInputFixturePlan{}, generatedInputEndpointError(census, association)
+	}
+	resolution := semanticview.ResolveEventSchema(r.source, file.FlowID, endpoint.Event.EventKey())
+	if !resolution.HasSchema {
+		return generatedInputFixturePlan{}, fmt.Errorf(
+			"generated payload for flow %q input pin %q event %q has no resolved event schema; declare the event payload or provide an explicit fixture",
+			scenarioFlowLabel(file.FlowID), endpoint.PinName, endpoint.Event.EventKey(),
+		)
+	}
+	if err := resolution.UnresolvedTypeError(); err != nil {
+		return generatedInputFixturePlan{}, fmt.Errorf(
+			"generated payload for flow %q input pin %q event %q: %w",
+			scenarioFlowLabel(file.FlowID), endpoint.PinName, resolution.EventKey, err,
+		)
+	}
+
+	canonicalSchema := runtimeeventschema.CanonicalAcceptanceSchema(resolution.Schema.Schema)
+	canonicalSchemaJSON, err := canonicaljson.Bytes(canonicalSchema)
+	if err != nil {
+		return generatedInputFixturePlan{}, fmt.Errorf(
+			"generated payload for flow %q input pin %q event %q: canonicalize schema: %w",
+			scenarioFlowLabel(file.FlowID), endpoint.PinName, resolution.EventKey, err,
+		)
+	}
+	schemaSum := sha256.Sum256(canonicalSchemaJSON)
+	schemaDigest := "sha256:" + hex.EncodeToString(schemaSum[:])
+	identity := strings.Join([]string{
+		"generated-input-fixture-v1",
+		evaluator.seed,
+		strings.Trim(strings.TrimSpace(file.FlowID), "/"),
+		strings.TrimSpace(endpoint.PinName),
+		strings.TrimSpace(resolution.EventKey),
+		schemaDigest,
+	}, "\x00")
+	generated, err := runtimeeventschema.InhabitDeterministically(resolution.Schema.Schema, runtimeeventschema.InhabitationContext{Identity: identity})
+	if err != nil {
+		return generatedInputFixturePlan{}, fmt.Errorf(
+			"generated payload for flow %q input pin %q event %q: %w",
+			scenarioFlowLabel(file.FlowID), endpoint.PinName, resolution.EventKey, err,
+		)
+	}
+	payload, ok := generated.(map[string]any)
+	if !ok {
+		return generatedInputFixturePlan{}, fmt.Errorf(
+			"generated payload for flow %q input pin %q event %q: input event schema must produce an object, got %T",
+			scenarioFlowLabel(file.FlowID), endpoint.PinName, resolution.EventKey, generated,
+		)
+	}
+	if err := runtimeeventschema.ValidatePayloadAgainstSchema(resolution.Schema.Schema, payload); err != nil {
+		return generatedInputFixturePlan{}, fmt.Errorf(
+			"generated payload for flow %q input pin %q event %q failed canonical post-validation: %w",
+			scenarioFlowLabel(file.FlowID), endpoint.PinName, resolution.EventKey, err,
+		)
+	}
+	payloadJSON, err := canonicaljson.Bytes(payload)
+	if err != nil {
+		return generatedInputFixturePlan{}, fmt.Errorf(
+			"generated payload for flow %q input pin %q event %q: canonicalize payload: %w",
+			scenarioFlowLabel(file.FlowID), endpoint.PinName, resolution.EventKey, err,
+		)
+	}
+	return generatedInputFixturePlan{
+		flowID:          strings.Trim(strings.TrimSpace(file.FlowID), "/"),
+		pinName:         strings.TrimSpace(endpoint.PinName),
+		eventKey:        strings.TrimSpace(resolution.EventKey),
+		schemaDigest:    schemaDigest,
+		identity:        identity,
+		canonicalSchema: append(json.RawMessage(nil), canonicalSchemaJSON...),
+		payload:         append(json.RawMessage(nil), payloadJSON...),
+	}, nil
+}
+
+func (p generatedInputFixturePlan) materializePayload() (map[string]any, error) {
+	if len(p.payload) == 0 {
+		return nil, fmt.Errorf("generated input fixture plan has no admitted payload")
+	}
+	var payload map[string]any
+	if err := canonicaljson.DecodeInto(p.payload, &payload); err != nil {
+		return nil, fmt.Errorf("materialize generated input fixture plan: %w", err)
+	}
+	if payload == nil {
+		return nil, fmt.Errorf("generated input fixture plan payload must be an object")
 	}
 	return payload, nil
+}
+
+func generatedInputEndpointError(census semanticview.AuthoredEventEndpointCensus, association semanticview.EndpointAssociationResult) error {
+	pins := association.Candidates
+	if len(pins) == 0 {
+		for _, endpoint := range census.InputPins() {
+			if strings.TrimSpace(endpoint.FlowID) == strings.TrimSpace(association.FlowID) {
+				pins = append(pins, endpoint)
+			}
+		}
+	}
+	labels := make([]string, 0, len(pins))
+	for _, endpoint := range pins {
+		label := strings.TrimSpace(endpoint.PinName)
+		if eventKey := strings.TrimSpace(endpoint.Event.EventKey()); eventKey != "" {
+			label += " (" + eventKey + ")"
+		}
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+	flow := scenarioFlowLabel(association.FlowID)
+	if association.Status == semanticview.EndpointAssociationAmbiguous {
+		return fmt.Errorf(
+			"generated payload publish %q in flow %q is ambiguous; matching input pins: %s; publish an exact pin name",
+			association.Identity, flow, strings.Join(labels, ", "),
+		)
+	}
+	available := "none"
+	if len(labels) > 0 {
+		available = strings.Join(labels, ", ")
+	}
+	return fmt.Errorf(
+		"generated payload publish %q in flow %q does not resolve to a declared input pin; available input pins: %s",
+		association.Identity, flow, available,
+	)
 }
 
 func (r scenarioRunner) buildPayloadFromSpec(file scenarioTestFile, evaluator *scenarioExpressionEvaluator, spec any) (map[string]any, error) {

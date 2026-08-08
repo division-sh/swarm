@@ -43,12 +43,12 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 		if name == "cli_api.go" {
 			continue
 		}
-		if strings.Contains(source, "newCLIAPIClient(") {
+		if strings.Contains(source, "newCLIAPIClient(") || strings.Contains(source, "newCLIAPIClientFromConfig(") {
 			gotAPIConsumers[name] = struct{}{}
 		}
 	}
 	if diff := missingKeys(wantAPIConsumers, gotAPIConsumers); len(diff) > 0 {
-		t.Fatalf("API-backed command files missing newCLIAPIClient use: %v", diff)
+		t.Fatalf("API-backed command files missing shared CLI API client use: %v", diff)
 	}
 	if diff := missingKeys(gotAPIConsumers, wantAPIConsumers); len(diff) > 0 {
 		t.Fatalf("new API-backed command files must be classified in this guard: %v", diff)

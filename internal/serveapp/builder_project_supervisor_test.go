@@ -40,6 +40,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -763,9 +764,12 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					if _, err := initializeStateStores(context.Background(), stores, bundle); err != nil {
 						t.Fatalf("initializeStateStores: %v", err)
 					}
-					source := semanticview.Wrap(bundle)
-					module := stubWorkflowModule{source: source}
 					providerRegistry := testProviderTriggerCatalog(t)
+					baseSource := semanticview.Wrap(bundle)
+					source := replacementProviderEventSource{
+						Source: baseSource, generation: providerRegistry.Generation(), eventName: "inbound.telegram.text_message",
+					}
+					module := stubWorkflowModule{source: source}
 					oldHash := runtimeContextTestHash("a")
 					newHash := oldHash
 					if changedHash {
@@ -866,8 +870,18 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					if !status.Loaded || supervisor.CurrentRuntime() != candidate {
 						t.Fatalf("replacement status/runtime = %#v/%p, want loaded candidate %p", status, supervisor.CurrentRuntime(), candidate)
 					}
-					if _, ok := manager.LookupBundleHash(newHash); !ok {
+					replacementContext, ok := manager.LookupBundleHash(newHash)
+					if !ok {
 						t.Fatalf("manager does not expose replacement hash %s", newHash)
+					}
+					if _, declared := bundle.EventEntry("inbound.telegram.text_message"); declared {
+						t.Fatal("authored replacement bundle unexpectedly owns imported event")
+					}
+					runtimeGeneration := requireProviderTriggerEventSource(t, candidate.Options.WorkflowModule.SemanticSource(), "inbound.telegram.text_message")
+					managerGeneration := requireProviderTriggerEventSource(t, replacementContext.Source, "inbound.telegram.text_message")
+					supervisorGeneration := requireProviderTriggerEventSource(t, supervisor.CurrentSource(), "inbound.telegram.text_message")
+					if !runtimeGeneration.Equal(providerRegistry.Generation()) || !managerGeneration.Equal(runtimeGeneration) || !supervisorGeneration.Equal(runtimeGeneration) {
+						t.Fatalf("replacement provider-trigger generations differ: catalog=%s runtime=%s manager=%s supervisor=%s", providerRegistry.Generation().Diagnostic(), runtimeGeneration.Diagnostic(), managerGeneration.Diagnostic(), supervisorGeneration.Diagnostic())
 					}
 					if got := maxActive.Load(); got != 1 {
 						t.Fatalf("simultaneous predecessor/candidate system consumers = %d, want one", got)
@@ -949,6 +963,11 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					lookup = rollbackManager.LookupBundleHashStatus(newHash)
 					if !lookup.Loaded() || lookup.Context.Runtime != nil || rollbackSupervisor.CurrentRuntime() != restored {
 						t.Fatalf("precommit rollback authority = %#v/%p, want restored runtime %p", lookup, rollbackSupervisor.CurrentRuntime(), restored)
+					}
+					restoredManagerGeneration := requireProviderTriggerEventSource(t, lookup.Context.Source, "inbound.telegram.text_message")
+					restoredSupervisorGeneration := requireProviderTriggerEventSource(t, rollbackSupervisor.CurrentSource(), "inbound.telegram.text_message")
+					if !restoredManagerGeneration.Equal(providerRegistry.Generation()) || !restoredSupervisorGeneration.Equal(restoredManagerGeneration) {
+						t.Fatalf("restored provider-trigger generations differ: catalog=%s manager=%s supervisor=%s", providerRegistry.Generation().Diagnostic(), restoredManagerGeneration.Diagnostic(), restoredSupervisorGeneration.Diagnostic())
 					}
 					use, _, acquireErr := rollbackManager.AcquireBundleHash(context.Background(), newHash)
 					if acquireErr != nil || use == nil || use.Runtime() != restored {
@@ -1908,6 +1927,43 @@ func (stubWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode  { retu
 func (stubWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry   { return nil }
 func (stubWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry { return nil }
 
+type replacementProviderEventSource struct {
+	semanticview.Source
+	generation triggergeneration.Generation
+	eventName  string
+}
+
+func (s replacementProviderEventSource) SemanticCapabilities() semanticview.Capabilities {
+	return s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.generation, nil)
+}
+
+func (s replacementProviderEventSource) EventEntry(eventType string) (runtimecontracts.EventCatalogEntry, bool) {
+	if strings.TrimSpace(eventType) == s.eventName {
+		return runtimecontracts.EventCatalogEntry{Source: "test_provider_trigger_import"}, true
+	}
+	return s.Source.EventEntry(eventType)
+}
+
+func (s replacementProviderEventSource) EventEntries() map[string]runtimecontracts.EventCatalogEntry {
+	base := s.Source.EventEntries()
+	entries := make(map[string]runtimecontracts.EventCatalogEntry, len(base)+1)
+	for name, entry := range base {
+		entries[name] = entry
+	}
+	entries[s.eventName] = runtimecontracts.EventCatalogEntry{Source: "test_provider_trigger_import"}
+	return entries
+}
+
+func (s replacementProviderEventSource) ResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry {
+	base := s.Source.ResolvedEventCatalog()
+	entries := make(map[string]runtimecontracts.EventCatalogEntry, len(base)+1)
+	for name, entry := range base {
+		entries[name] = entry
+	}
+	entries[s.eventName] = runtimecontracts.EventCatalogEntry{Source: "test_provider_trigger_import"}
+	return entries
+}
+
 type stubWorkspaceLifecycle struct {
 	validateErr error
 	prereqErr   error
@@ -2031,8 +2087,8 @@ func TestRuntimeProjectSupervisorLoadProjectUsesResolvedWorkspaceMountSources(t 
 	}
 
 	var gotMountSources cliapp.WorkspaceMountSources
-	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(context.Context, runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
-		return &runtimepkg.Runtime{}, nil
+	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+		return &runtimepkg.Runtime{Options: deps.Options}, nil
 	})
 	supervisor.mountSources = wantMountSources
 	supervisor.newWorkspaces = func(_ storeBundle, _ string, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error) {
@@ -2050,15 +2106,30 @@ func TestRuntimeProjectSupervisorLoadProjectUsesResolvedWorkspaceMountSources(t 
 	}
 }
 
-func TestRuntimeProjectSupervisorReverifiesProviderCatalogForReplacement(t *testing.T) {
-	projectRoot := writeProjectRoot(t)
+func TestRuntimeProjectSupervisorReverifiesProviderCatalogAndPublishesAdmittedSource(t *testing.T) {
+	projectRoot := canonicalrouting.CopyStandingTelegramServe(t, "http://127.0.0.1:1")
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), projectRoot, runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()))
+	if err != nil {
+		t.Fatalf("NewSwarmWorkflowModule: %v", err)
+	}
 	bootCatalog := testProviderTriggerCatalog(t)
 	candidateCatalog := testProviderTriggerCatalog(t)
 	var gotCatalog *providertriggers.CatalogSnapshot
 	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
 		gotCatalog = deps.Options.ProviderTriggerCatalog
-		return &runtimepkg.Runtime{}, nil
+		effectiveSource, err := runtimepkg.SourceWithProviderTriggerEvents(deps.Options.WorkflowModule.SemanticSource(), deps.Options.ProviderTriggerCatalog)
+		if err != nil {
+			return nil, err
+		}
+		deps.Options.WorkflowModule = stubWorkflowModule{source: effectiveSource}
+		return &runtimepkg.Runtime{Options: deps.Options}, nil
 	})
+	supervisor.loadWorkflow = func(_, contractsRoot, _ string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+		if contractsRoot != projectRoot {
+			return nil, nil, fmt.Errorf("contracts root = %q, want %q", contractsRoot, projectRoot)
+		}
+		return module, bundle, nil
+	}
 	supervisor.providerTriggers = bootCatalog
 	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) { return candidateCatalog, nil }
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
@@ -2069,6 +2140,13 @@ func TestRuntimeProjectSupervisorReverifiesProviderCatalogForReplacement(t *test
 	}
 	if gotCatalog != candidateCatalog {
 		t.Fatalf("replacement provider catalog = %p, want reverified candidate %p (boot=%p)", gotCatalog, candidateCatalog, bootCatalog)
+	}
+	if _, declared := bundle.EventEntry("inbound.telegram.text_message"); declared {
+		t.Fatal("authored replacement bundle unexpectedly owns imported Telegram event")
+	}
+	generation := requireProviderTriggerEventSource(t, supervisor.CurrentSource(), "inbound.telegram.text_message")
+	if !generation.Equal(candidateCatalog.Generation()) {
+		t.Fatalf("replacement source generation = %s, want candidate %s", generation.Diagnostic(), candidateCatalog.Generation().Diagnostic())
 	}
 }
 
@@ -2171,7 +2249,7 @@ func TestRuntimeProjectSupervisorOpenProjectNoAgentSkipsWorkspaceLifecycle(t *te
 
 	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, nil, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
 		gotWorkspace = deps.Options.WorkspaceLifecycle
-		return &runtimepkg.Runtime{}, nil
+		return &runtimepkg.Runtime{Options: deps.Options}, nil
 	})
 	supervisor.ready = &ready
 	supervisor.cfg = &config.Config{LLM: config.LLMConfig{Backend: "anthropic"}}
@@ -2229,8 +2307,8 @@ func TestRuntimeProjectSupervisorLoadProject_PropagatesRuntimeStartFailure(t *te
 	projectRoot := writeProjectRoot(t)
 	var ready atomic.Bool
 	oldRT := &runtimepkg.Runtime{}
-	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(context.Context, runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
-		return &runtimepkg.Runtime{}, nil
+	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+		return &runtimepkg.Runtime{Options: deps.Options}, nil
 	})
 	supervisor.ready = &ready
 	supervisor.currentRoot = "/tmp/old"
@@ -2269,7 +2347,7 @@ func TestRuntimeProjectSupervisorLoadProjectPassesBundleSourceFactToRuntime(t *t
 	var gotSourceFact runtimecorrelation.BundleSourceFact
 	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
 		gotSourceFact = deps.Options.BundleSourceFact
-		return &runtimepkg.Runtime{}, nil
+		return &runtimepkg.Runtime{Options: deps.Options}, nil
 	})
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
 	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }

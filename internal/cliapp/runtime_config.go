@@ -27,6 +27,7 @@ type RuntimeConfigLoadResult struct {
 	Layers      []unifiedConfigLayer
 	KeyOrigins  map[string]unifiedConfigKeyOrigin
 	Diagnostics []unifiedConfigDiagnostic
+	cli         cliCommandConfig
 }
 
 func (r RuntimeConfigLoadResult) Detail() string {
@@ -62,6 +63,7 @@ func LoadRuntimeConfigWithOptions(opts RuntimeConfigLoadOptions) (RuntimeConfigL
 		Layers:      loaded.Layers,
 		KeyOrigins:  loaded.KeyOrigins,
 		Diagnostics: loaded.Diagnostics,
+		cli:         loaded.CLI,
 	}
 	if err != nil {
 		return result, err

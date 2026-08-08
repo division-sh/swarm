@@ -389,6 +389,10 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
+	_, source, err = admittedRuntimeModuleAndSource(newRT)
+	if err != nil {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("retain replacement runtime source: %w", err)
+	}
 	admissionCandidate.catalog = candidateCatalog
 	admissionCandidate.channelPlans = append([]packs.SatisfactionPlan(nil), candidateChannelPlans...)
 	admissionCandidate.channelBindings = append([]packs.OutboundBindingPlan(nil), candidateChannelBindings...)
