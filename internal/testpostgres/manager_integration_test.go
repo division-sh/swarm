@@ -3,6 +3,7 @@ package testpostgres
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
@@ -362,6 +363,14 @@ func TestManagerReconcilesAbruptCreateBeforeMetadataExit(t *testing.T) {
 			assertDatabaseExists(t, manager.admin, name)
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
+			// The child exited holding the resource advisory lock; the Postgres
+			// backend releases the session-scoped lock asynchronously on socket
+			// EOF. Wait for the lock to be free (bounded deadline-poll, no
+			// sleeps) so Reconcile's single try-lock cannot silently skip the
+			// reclaimed resource. #2196
+			if err := waitForAdvisoryLockFree(ctx, manager, name, kind); err != nil {
+				t.Fatal(err)
+			}
 			if err := manager.Reconcile(ctx); err != nil {
 				t.Fatal(err)
 			}
@@ -862,6 +871,40 @@ func assertDatabaseAbsent(t *testing.T, connection Connection, name string) {
 	}
 	if exists {
 		t.Fatalf("database %q still exists", name)
+	}
+}
+
+// waitForAdvisoryLockFree polls until the resource advisory lock is no longer
+// granted by any session. It uses a deadline-poll on the deadline clock (no
+// sleeps) per the deterministic-wait discipline, and reuses the manager's
+// advisory-lock introspection so the poll cannot drift from the guard.
+func waitForAdvisoryLockFree(ctx context.Context, manager *Manager, name, kind string) error {
+	lockKey := advisoryKey("template:" + name)
+	if kind == "sandbox" {
+		identity, ok := manager.verifyResourceName(name, sandboxNamePrefix, "sandbox")
+		if !ok {
+			return fmt.Errorf("verify sandbox resource name %q", name)
+		}
+		lockKey = advisoryKey("sandbox:" + identity)
+	}
+	db, err := manager.admin.Open()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	for {
+		held, err := manager.advisoryLockHeld(ctx, db, lockKey)
+		if err != nil {
+			return err
+		}
+		if !held {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("resource advisory lock %d for %q never released before context deadline", lockKey, name)
+		case <-time.After(25 * time.Millisecond):
+		}
 	}
 }
 
