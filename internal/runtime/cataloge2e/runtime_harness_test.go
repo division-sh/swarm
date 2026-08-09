@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -46,15 +47,15 @@ const (
 )
 
 type catalogTriggerStep struct {
-	Event                         string         `yaml:"event"`
-	Payload                       map[string]any `yaml:"payload"`
-	BarrierBefore                 string         `yaml:"barrier_before"`
-	AssertPersistedBeforeDelivery bool           `yaml:"assert_persisted_before_delivery"`
-	ErrorContains                 string         `yaml:"error_contains"`
-	ReceiptOutcome                string         `yaml:"receipt_outcome"`
-	ReceiptFailureClass           string         `yaml:"receipt_failure_class"`
-	ReceiptFailureDetail          string         `yaml:"receipt_failure_detail"`
-	ReceiptFailureAttributes      map[string]any `yaml:"receipt_failure_attributes"`
+	Event                         string                   `yaml:"event"`
+	Payload                       map[string]any           `yaml:"payload"`
+	BarrierBefore                 catalogTranscriptBarrier `yaml:"barrier_before"`
+	AssertPersistedBeforeDelivery bool                     `yaml:"assert_persisted_before_delivery"`
+	ErrorContains                 string                   `yaml:"error_contains"`
+	ReceiptOutcome                string                   `yaml:"receipt_outcome"`
+	ReceiptFailureClass           string                   `yaml:"receipt_failure_class"`
+	ReceiptFailureDetail          string                   `yaml:"receipt_failure_detail"`
+	ReceiptFailureAttributes      map[string]any           `yaml:"receipt_failure_attributes"`
 	inputKind                     string
 	eventID                       string
 	createdAt                     time.Time
@@ -930,13 +931,6 @@ func waitForCatalogHarnessDB(t testing.TB, db *sql.DB) {
 	t.Fatalf("catalog harness db ping: %v", lastErr)
 }
 
-func (h *runtimeHarness) rootAutoEmitOnCreateEvent() string {
-	if h == nil || h.bundle == nil || h.bundle.RootSchema == nil {
-		return ""
-	}
-	return strings.TrimSpace(h.bundle.RootSchema.AutoEmitOnCreate.Event)
-}
-
 func (h *runtimeHarness) waitForExpectedEmittedEvents(expected catalogExpectedDocument, timeout time.Duration) {
 	h.t.Helper()
 	entityID := h.expectedTriggerEntityID(expected)
@@ -958,7 +952,22 @@ func (h *runtimeHarness) waitForExpectedEmittedEvents(expected catalogExpectedDo
 		}
 		select {
 		case <-ctx.Done():
-			h.t.Fatalf("wait for expected emitted events %v for entity %s: %v", expected.Expected.EmittedEvents, entityID, ctx.Err())
+			observed, readErr := h.catalogOperatorEvents()
+			facts := make([]string, 0, len(observed))
+			for _, event := range observed {
+				deliveries := make([]string, 0, len(event.Deliveries))
+				for _, delivery := range event.Deliveries {
+					fact := delivery.SubscriberType + ":" + delivery.SubscriberID + "=" + delivery.Status
+					if delivery.Failure != nil {
+						fact += "/" + string(delivery.Failure.Class) + "/" + delivery.Failure.Detail.Code
+					}
+					deliveries = append(deliveries, fact)
+				}
+				sort.Strings(deliveries)
+				facts = append(facts, event.EventName+" parent="+event.SourceEventID+" entity="+event.EntityID+" deliveries="+strings.Join(deliveries, ","))
+			}
+			sort.Strings(facts)
+			h.t.Fatalf("wait for expected emitted events %v for entity %s: %v; observed=%v read_error=%v", expected.Expected.EmittedEvents, entityID, ctx.Err(), facts, readErr)
 		case <-ticker.C:
 		}
 	}
@@ -971,7 +980,7 @@ func (h *runtimeHarness) hasExpectedRootEntityState(ctx context.Context, entityI
 	}
 	instance, found, err := h.workflow.Load(ctx, catalogRootWorkflowRoute())
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			return false
 		}
 		h.t.Fatalf("load workflow instance while waiting for emitted-event effects: %v", err)
@@ -1024,7 +1033,7 @@ func (h *runtimeHarness) hasExpectedEmittedEvents(ctx context.Context, entityID 
 		ORDER BY created_at ASC, event_id ASC
 	`), h.startedAt)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			return false
 		}
 		h.t.Fatalf("query emitted events for wait: %v", err)
@@ -1061,7 +1070,9 @@ func (h *runtimeHarness) hasExpectedEmittedEvents(ctx context.Context, entityID 
 		}
 		eventName = normalizeCatalogObservedEventName(eventName, flowPrefix, source, wantNames)
 		if flowPrefix == "" && strings.Contains(eventName, "/") {
-			continue
+			if _, explicitlyExpected := wantNames[eventName]; !explicitlyExpected {
+				continue
+			}
 		}
 		if _, ok := counts[eventName]; !ok {
 			continue
@@ -1069,6 +1080,9 @@ func (h *runtimeHarness) hasExpectedEmittedEvents(ctx context.Context, entityID 
 		counts[eventName]--
 	}
 	if err := rows.Err(); err != nil {
+		if ctx.Err() != nil {
+			return false
+		}
 		h.t.Fatalf("iterate emitted events for wait: %v", err)
 	}
 	for name, remaining := range counts {

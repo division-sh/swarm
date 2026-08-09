@@ -460,7 +460,9 @@ func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs
 		}
 		eventName = normalizeCatalogObservedEventName(eventName, flowPrefix, source, wantNames)
 		if flowPrefix == "" && strings.Contains(eventName, "/") {
-			continue
+			if _, explicitlyExpected := wantNames[eventName]; !explicitlyExpected {
+				continue
+			}
 		}
 		if dedup {
 			if _, ok := seen[eventName]; ok {
@@ -721,37 +723,7 @@ func shouldIgnoreCatalogE2EEvent(eventName string) bool {
 
 func assertDeadLetter(t testing.TB, db *sql.DB, since time.Time, entityID string, want bool) {
 	t.Helper()
-	var count int
-	query := catalogDialectQuery(db, `
-		SELECT COUNT(*)
-		FROM (
-			SELECT 1
-			FROM dead_letters dl
-			WHERE COALESCE(NULLIF(dl.original_payload->>'entity_id', ''), COALESCE(dl.entity_id::text, '')) = $1
-			UNION ALL
-			SELECT 1
-			FROM events e
-			WHERE e.event_name = 'platform.dead_letter'
-			  AND COALESCE(NULLIF(e.payload->>'entity_id', ''), COALESCE(e.entity_id::text, '')) = $1
-		) hits
-	`, `
-		SELECT COUNT(*) FROM (
-			SELECT 1 FROM dead_letters dl
-			WHERE COALESCE(NULLIF(json_extract(dl.original_payload, '$.entity_id'), ''), COALESCE(dl.entity_id, '')) = ?
-			UNION ALL
-			SELECT 1 FROM events e
-			WHERE e.event_name = 'platform.dead_letter'
-			  AND COALESCE(NULLIF(json_extract(e.payload, '$.entity_id'), ''), COALESCE(e.entity_id, '')) = ?
-		) hits
-	`)
-	args := []any{strings.TrimSpace(entityID)}
-	if catalogIsSQLiteDB(db) {
-		args = append(args, strings.TrimSpace(entityID))
-	}
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), query, args...).Scan(&count); err != nil {
-		t.Fatalf("query dead_letters: %v", err)
-	}
-	got := count > 0
+	got := catalogHasDeadLetterRelation(t, db, since, entityID)
 	if got != want {
 		rows, _ := db.QueryContext(testAuthorActivityContext(context.Background()), catalogDialectQuery(db, `
 			SELECT dl.original_event_id::text, COALESCE(dl.entity_id::text, ''),
@@ -776,6 +748,27 @@ func assertDeadLetter(t testing.TB, db *sql.DB, since time.Time, entityID string
 		}
 		t.Fatalf("dead_letter = %v, want %v for entity %q; evidence=%v", got, want, entityID, evidence)
 	}
+}
+
+func catalogHasDeadLetterRelation(t testing.TB, db *sql.DB, since time.Time, entityID string) bool {
+	t.Helper()
+	var count int
+	query := catalogDialectQuery(db, `
+		SELECT COUNT(*)
+		FROM dead_letters dl
+		WHERE COALESCE(NULLIF(dl.original_payload->>'entity_id', ''), COALESCE(dl.entity_id::text, '')) = $1
+		  AND dl.created_at >= $2
+	`, `
+		SELECT COUNT(*)
+		FROM dead_letters dl
+		WHERE COALESCE(NULLIF(json_extract(dl.original_payload, '$.entity_id'), ''), COALESCE(dl.entity_id, '')) = ?
+		  AND dl.created_at >= ?
+	`)
+	args := []any{strings.TrimSpace(entityID), since.UTC()}
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), query, args...).Scan(&count); err != nil {
+		t.Fatalf("query dead_letters: %v", err)
+	}
+	return count > 0
 }
 
 func assertAgentReceived(t testing.TB, db *sql.DB, since time.Time, want map[string][]string) {
@@ -1081,36 +1074,7 @@ func catalogRecognizesHandlerOutcome(raw string) bool {
 
 func assertEntityDeadLetterOutcome(t testing.TB, db *sql.DB, since time.Time, entityID string) bool {
 	t.Helper()
-	var count int
-	query := catalogDialectQuery(db, `
-		SELECT COUNT(*)
-		FROM (
-			SELECT 1
-			FROM dead_letters dl
-			WHERE COALESCE(NULLIF(dl.original_payload->>'entity_id', ''), COALESCE(dl.entity_id::text, '')) = $1
-			UNION ALL
-			SELECT 1
-			FROM events e
-			WHERE e.event_name = 'platform.dead_letter'
-			  AND COALESCE(NULLIF(e.payload->>'entity_id', ''), COALESCE(e.entity_id::text, '')) = $1
-		) hits
-	`, `
-		SELECT COUNT(*) FROM (
-			SELECT 1 FROM dead_letters dl
-			WHERE COALESCE(NULLIF(json_extract(dl.original_payload, '$.entity_id'), ''), COALESCE(dl.entity_id, '')) = ?
-			UNION ALL
-			SELECT 1 FROM events e WHERE e.event_name = 'platform.dead_letter'
-			  AND COALESCE(NULLIF(json_extract(e.payload, '$.entity_id'), ''), COALESCE(e.entity_id, '')) = ?
-		) hits
-	`)
-	args := []any{entityID}
-	if catalogIsSQLiteDB(db) {
-		args = append(args, entityID)
-	}
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), query, args...).Scan(&count); err != nil {
-		t.Fatalf("query dead_letter outcomes: %v", err)
-	}
-	return count > 0
+	return catalogHasDeadLetterRelation(t, db, since, entityID)
 }
 
 func assertChainDepthExceeded(t testing.TB, db *sql.DB, entityID string, want bool) {

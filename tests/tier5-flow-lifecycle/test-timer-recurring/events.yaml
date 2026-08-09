@@ -1,4 +1,7 @@
 monitor.started:
   swarm:
     source: external
+monitor.stopped:
+  swarm:
+    source: external
 timer.tick:

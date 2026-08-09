@@ -2,6 +2,7 @@ package cataloge2e
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,9 +11,11 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -205,6 +208,7 @@ func TestAssertCatalogRuntimeOutcome_IgnoresEntityNonSuccessPreviewProof(t *test
 
 	insertCatalogAssertionEntityState(t, h, entityID, "active")
 	insertCatalogAssertionDeadLetterEvent(t, h, entityID)
+	insertCatalogAssertionDeadLetterRelation(t, h, eventID, entityID)
 	seedCatalogAssertionPublishedEvent(h, eventID, entityID, runtimepipeline.HandlerOutcomeCompleted)
 
 	expected := catalogExpectedDocument{}
@@ -218,6 +222,19 @@ func TestAssertCatalogRuntimeOutcome_IgnoresEntityNonSuccessPreviewProof(t *test
 	}
 
 	assertCatalogRuntimeOutcome(t, h, expected)
+}
+
+func TestCatalogDeadLetterRelation_DiagnosticAloneGetsNoCredit(t *testing.T) {
+	h := newCatalogAssertionHarness(t)
+	entityID := uuid.NewString()
+	insertCatalogAssertionDeadLetterEvent(t, h, entityID)
+
+	if catalogHasDeadLetterRelation(t, h.db, h.startedAt, entityID) {
+		t.Fatal("platform.dead_letter diagnostic received persisted relation credit")
+	}
+	if assertEntityDeadLetterOutcome(t, h.db, h.startedAt, entityID) {
+		t.Fatal("entity diagnostic received persisted relation credit")
+	}
 }
 
 func TestAssertEmittedEvents_AcceptsCrossFlowInheritDispatcherEmission(t *testing.T) {
@@ -325,6 +342,37 @@ func insertCatalogAssertionDeadLetterEvent(t *testing.T, h *runtimeHarness, enti
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		time.Now().UTC(),
 	))
+}
+
+func insertCatalogAssertionDeadLetterRelation(t *testing.T, h *runtimeHarness, eventID, entityID string) {
+	t.Helper()
+	event := eventtest.ExistingRunRootIngress(
+		eventID,
+		"score.requested",
+		"cataloge2e",
+		"",
+		[]byte(`{"entity_id":"`+entityID+`"}`),
+		0,
+		catalogRuntimeRunID,
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().UTC(),
+	)
+	storetest.CommitSemanticEvent(t, testAuthorActivityContext(context.Background()), h.pg, event)
+	failure := runtimefailures.FromError(
+		errors.New("catalog assertion dead letter"),
+		"cataloge2e",
+		"assert_dead_letter_relation",
+	).Failure
+	if err := h.pg.RecordDeadLetter(testAuthorActivityContext(context.Background()), runtimedeadletters.Record{
+		OriginalEventID: event.ID(),
+		OriginalEvent:   string(event.Type()),
+		OriginalPayload: event.Payload(),
+		EntityID:        entityID,
+		Failure:         failure,
+		Timestamp:       time.Now().UTC().Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("record catalog assertion dead letter relation: %v", err)
+	}
 }
 
 func seedCatalogAssertionPublishedEvent(h *runtimeHarness, eventID, entityID string, status runtimepipeline.HandlerOutcomeStatus) {

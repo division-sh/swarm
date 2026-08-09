@@ -1,0 +1,15 @@
+name: worker
+mode: template
+instance: instance_id
+initial_state: idle
+terminal_states: [done]
+states: [idle, started, done]
+instance_variables:
+  instance_id: Worker instance identifier
+auto_emit_on_create:
+  event: auto.started
+pins:
+  inputs:
+    events: [auto.started]
+  outputs:
+    events: []

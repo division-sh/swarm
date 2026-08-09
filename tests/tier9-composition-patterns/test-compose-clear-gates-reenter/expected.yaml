@@ -3,7 +3,8 @@ trigger:
     - event: review.done
       payload: {}
     - event: review.insufficient
-      barrier_before: run_terminal
+      barrier_before:
+        kind: run_terminal
       error_contains: run is not active
       payload: {}
 expected:

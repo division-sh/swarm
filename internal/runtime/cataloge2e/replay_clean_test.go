@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
@@ -25,10 +26,44 @@ import (
 )
 
 const (
-	catalogBarrierRunTerminal      = "run_terminal"
-	catalogReplayTranscriptVersion = replayconformance.TranscriptVersion
-	catalogReplayInputRootIngress  = replayconformance.InputRootIngress
+	catalogBarrierRunTerminal         = "run_terminal"
+	catalogBarrierAutomaticEventCount = "automatic_event_count"
+	catalogReplayTranscriptVersion    = replayconformance.TranscriptVersion
+	catalogReplayInputRootIngress     = replayconformance.InputRootIngress
 )
+
+type catalogTranscriptBarrier struct {
+	Kind    string `yaml:"kind" json:"kind,omitempty"`
+	Event   string `yaml:"event" json:"event,omitempty"`
+	Minimum int    `yaml:"minimum" json:"minimum,omitempty"`
+}
+
+func (b catalogTranscriptBarrier) normalized() catalogTranscriptBarrier {
+	b.Kind = strings.TrimSpace(b.Kind)
+	b.Event = strings.TrimSpace(b.Event)
+	return b
+}
+
+func (b catalogTranscriptBarrier) validate() error {
+	b = b.normalized()
+	switch b.Kind {
+	case "":
+		if b.Event != "" || b.Minimum != 0 {
+			return fmt.Errorf("empty transcript barrier has fields")
+		}
+	case catalogBarrierRunTerminal:
+		if b.Event != "" || b.Minimum != 0 {
+			return fmt.Errorf("run-terminal transcript barrier has unsupported fields")
+		}
+	case catalogBarrierAutomaticEventCount:
+		if b.Event == "" || b.Minimum < 1 {
+			return fmt.Errorf("automatic-event-count transcript barrier requires event and positive minimum")
+		}
+	default:
+		return fmt.Errorf("transcript barrier kind %q is unsupported", b.Kind)
+	}
+	return nil
+}
 
 var catalogReplayCleanExclusions = map[string]string{
 	"tests/tier12-runtime-fork/test-non-agent-replay-fail-closed":     "selected-contract fork",
@@ -52,7 +87,7 @@ type catalogExecutionTranscript struct {
 }
 
 type catalogTranscriptGroup struct {
-	barrierBefore string
+	barrierBefore catalogTranscriptBarrier
 	concurrent    bool
 	steps         []catalogTriggerStep
 }
@@ -104,7 +139,7 @@ func buildCatalogExecutionTranscript(t testing.TB, fixture testcatalog.Fixture) 
 	} else {
 		for _, step := range steps {
 			transcript.groups = append(transcript.groups, catalogTranscriptGroup{
-				barrierBefore: strings.TrimSpace(step.BarrierBefore),
+				barrierBefore: step.BarrierBefore.normalized(),
 				steps:         []catalogTriggerStep{step},
 			})
 		}
@@ -123,28 +158,13 @@ func buildCatalogExecutionTranscript(t testing.TB, fixture testcatalog.Fixture) 
 	transcript.platformSpecDigest = platformSpecDigest
 	transcript.bundleHash = bundleHash
 	transcript.bundleSource = "catalog-fixture:" + fixture.RelativePath
-	if len(transcript.groups) > 0 && len(transcript.groups[0].steps) == 1 &&
-		strings.TrimSpace(transcript.groups[0].steps[0].Event) == "flow.created" &&
-		bundle.RootSchema != nil {
-		if autoEmit := strings.TrimSpace(bundle.RootSchema.AutoEmitOnCreate.Event); autoEmit != "" {
-			autoGroup := catalogTranscriptGroup{steps: []catalogTriggerStep{{
-				Event:              autoEmit,
-				Payload:            cloneStringAnyMap(transcript.groups[0].steps[0].Payload),
-				sourceAgent:        "flow-instance-activator",
-				excludeFromEmitted: false,
-			}}}
-			groups := append([]catalogTranscriptGroup(nil), transcript.groups[:1]...)
-			groups = append(groups, autoGroup)
-			transcript.groups = append(groups, transcript.groups[1:]...)
-		}
-	}
-
 	baseTime := time.Now().UTC().Truncate(time.Microsecond)
 	stepIndex := 0
 	for groupIndex := range transcript.groups {
 		group := &transcript.groups[groupIndex]
-		if group.barrierBefore != "" && group.barrierBefore != catalogBarrierRunTerminal {
-			t.Fatalf("fixture %s has unsupported transcript barrier %q", fixture.Name, group.barrierBefore)
+		group.barrierBefore = group.barrierBefore.normalized()
+		if err := group.barrierBefore.validate(); err != nil {
+			t.Fatalf("fixture %s has invalid transcript barrier: %v", fixture.Name, err)
 		}
 		for index := range group.steps {
 			step := &group.steps[index]
@@ -186,7 +206,6 @@ func catalogTranscriptBytes(t testing.TB, transcript *catalogExecutionTranscript
 		InputKind          string         `json:"input_kind"`
 		Event              string         `json:"event"`
 		Payload            map[string]any `json:"payload,omitempty"`
-		BarrierBefore      string         `json:"barrier_before,omitempty"`
 		ErrorContains      string         `json:"error_contains,omitempty"`
 		EventID            string         `json:"event_id"`
 		CreatedAt          time.Time      `json:"created_at"`
@@ -194,9 +213,9 @@ func catalogTranscriptBytes(t testing.TB, transcript *catalogExecutionTranscript
 		ExcludeFromEmitted bool           `json:"exclude_from_emitted"`
 	}
 	type group struct {
-		BarrierBefore string `json:"barrier_before,omitempty"`
-		Concurrent    bool   `json:"concurrent"`
-		Steps         []step `json:"steps"`
+		BarrierBefore catalogTranscriptBarrier `json:"barrier_before"`
+		Concurrent    bool                     `json:"concurrent"`
+		Steps         []step                   `json:"steps"`
 	}
 	manifest := struct {
 		Version            string                  `json:"version"`
@@ -219,7 +238,7 @@ func catalogTranscriptBytes(t testing.TB, transcript *catalogExecutionTranscript
 		projected := group{BarrierBefore: inputGroup.barrierBefore, Concurrent: inputGroup.concurrent}
 		for _, input := range inputGroup.steps {
 			projected.Steps = append(projected.Steps, step{
-				InputKind: input.inputKind, Event: input.Event, Payload: input.Payload, BarrierBefore: input.BarrierBefore,
+				InputKind: input.inputKind, Event: input.Event, Payload: input.Payload,
 				ErrorContains: input.ErrorContains, EventID: input.eventID, CreatedAt: input.createdAt,
 				SourceAgent: input.sourceAgent, ExcludeFromEmitted: input.excludeFromEmitted,
 			})
@@ -288,6 +307,9 @@ func validateCatalogTranscriptIdentity(repoRoot, fixtureRoot string, bundle *run
 		if len(group.steps) == 0 {
 			return fmt.Errorf("transcript input group %d is empty", groupIndex)
 		}
+		if err := group.barrierBefore.validate(); err != nil {
+			return fmt.Errorf("transcript input group %d barrier: %w", groupIndex, err)
+		}
 	}
 	_, err = catalogReplayRootInputs(transcript)
 	return err
@@ -321,9 +343,15 @@ func executeCatalogTranscript(t *testing.T, fixture testcatalog.Fixture, backend
 	h := newRuntimeHarnessFromTranscript(t, fixture.Root, backend, transcript.runtimeStart, transcript)
 	h.seedEntityFields(transcript.expected)
 	result := catalogExecutionResult{}
-	for _, group := range transcript.groups {
-		if group.barrierBefore == catalogBarrierRunTerminal {
+	for groupIndex, group := range transcript.groups {
+		switch group.barrierBefore.Kind {
+		case "":
+		case catalogBarrierRunTerminal:
 			h.waitForRunTerminal(catalogRuntimePublishTimeout)
+		case catalogBarrierAutomaticEventCount:
+			h.waitForCatalogAutomaticEventCount(group.barrierBefore.Event, group.barrierBefore.Minimum, catalogRuntimePublishTimeout)
+		default:
+			t.Fatalf("unsupported admitted transcript barrier %q", group.barrierBefore.Kind)
 		}
 		if group.concurrent {
 			h.publishConcurrentAndWait(group.steps, catalogRuntimePublishTimeout)
@@ -343,7 +371,9 @@ func executeCatalogTranscript(t *testing.T, fixture testcatalog.Fixture, backend
 				result.outcomes = append(result.outcomes, h.captureCatalogStepOutcome(step, err))
 			}
 		}
-		h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
+		if groupIndex+1 >= len(transcript.groups) || transcript.groups[groupIndex+1].barrierBefore.Kind != catalogBarrierAutomaticEventCount {
+			h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
+		}
 	}
 	h.waitForExpectedEmittedEvents(transcript.expected, catalogRuntimePublishTimeout)
 	h.waitForCatalogStoreQuiescence(catalogRuntimePublishTimeout)
@@ -357,6 +387,63 @@ func executeCatalogTranscript(t *testing.T, fixture testcatalog.Fixture, backend
 	result.projection = projection
 	transcript.requireUnchanged(t)
 	return h, result
+}
+
+func (h *runtimeHarness) waitForCatalogAutomaticEventCount(eventName string, minimum int, timeout time.Duration) {
+	h.t.Helper()
+	eventName = strings.TrimSpace(eventName)
+	if eventName == "" || minimum < 1 {
+		h.t.Fatalf("automatic event-count barrier requires event and positive minimum")
+	}
+	ctx, cancel := context.WithTimeout(h.ctx, timeout)
+	defer cancel()
+	lister, err := h.catalogOperatorEventLister()
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		h.mu.Lock()
+		authoredIDs := cloneCatalogStringSet(h.publishedIDs)
+		h.mu.Unlock()
+		count := 0
+		opts := store.OperatorEventListOptions{
+			Filter: store.OperatorEventListFilter{RunID: catalogRuntimeRunID, EventName: eventName},
+			Limit:  minimum,
+		}
+		for {
+			page, err := lister.ListOperatorEvents(ctx, opts)
+			if err != nil {
+				h.t.Fatalf("load automatic events for transcript barrier: %v", err)
+			}
+			for _, full := range page.Events {
+				eventID := strings.TrimSpace(full.EventID)
+				if _, authored := authoredIDs[eventID]; authored {
+					continue
+				}
+				event, err := full.EventSnapshot()
+				if err != nil {
+					h.t.Fatalf("read automatic event %s for transcript barrier: %v", eventID, err)
+				}
+				if event.AdmissionClass() != events.EventAdmissionRootIngress {
+					count++
+				}
+			}
+			if count >= minimum || strings.TrimSpace(page.NextCursor) == "" {
+				break
+			}
+			opts.Cursor = page.NextCursor
+		}
+		if count >= minimum {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			h.t.Fatalf("wait for at least %d automatic %s events: %v (observed=%d)", minimum, eventName, ctx.Err(), count)
+		case <-ticker.C:
+		}
+	}
 }
 
 func reopenCatalogTranscript(t *testing.T, fixture testcatalog.Fixture, transcript *catalogExecutionTranscript, h *runtimeHarness, baseline catalogExecutionResult) {
@@ -517,15 +604,21 @@ func catalogReplayRootInputs(transcript *catalogExecutionTranscript) ([]replayco
 func (h *runtimeHarness) catalogOperatorEvents() (map[string]store.OperatorEventFull, error) {
 	ctx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), catalogRuntimePublishTimeout)
 	defer cancel()
-	var lister catalogOperatorEventLister
-	if h.pg != nil {
-		lister = h.pg
-	} else if h.sqlite != nil {
-		lister = h.sqlite
-	} else {
-		return nil, fmt.Errorf("catalog selected store is required")
+	lister, err := h.catalogOperatorEventLister()
+	if err != nil {
+		return nil, err
 	}
 	return loadCatalogOperatorEvents(ctx, lister)
+}
+
+func (h *runtimeHarness) catalogOperatorEventLister() (catalogOperatorEventLister, error) {
+	if h.pg != nil {
+		return h.pg, nil
+	}
+	if h.sqlite != nil {
+		return h.sqlite, nil
+	}
+	return nil, fmt.Errorf("catalog selected store is required")
 }
 
 type catalogOperatorEventLister = replayconformance.EventLister

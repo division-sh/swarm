@@ -33,6 +33,10 @@ func TestCatalogReplayTranscriptIdentityAdmissionFailsClosed(t *testing.T) {
 		"wrong run":           func(got *catalogExecutionTranscript) { got.runID = eventtest.UUID("wrong-run") },
 		"unknown input kind":  func(got *catalogExecutionTranscript) { got.groups[0].steps[0].inputKind = "database_snapshot" },
 		"partial input":       func(got *catalogExecutionTranscript) { got.groups[0].steps[0].eventID = "" },
+		"unknown barrier":     func(got *catalogExecutionTranscript) { got.groups[0].barrierBefore.Kind = "callback" },
+		"partial event barrier": func(got *catalogExecutionTranscript) {
+			got.groups[0].barrierBefore = catalogTranscriptBarrier{Kind: catalogBarrierAutomaticEventCount, Event: "timer.tick"}
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

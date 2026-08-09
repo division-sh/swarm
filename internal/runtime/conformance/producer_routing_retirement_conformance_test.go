@@ -54,8 +54,8 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 	}
 	testEntrypoints := repositoryTestEntrypoints(t, repoRoot)
 	wantDispositionCounts := map[string]int{
-		"harness": 95, "negative_removal": 39, "dead_removal": 46,
-		"same_flow": 6, "external": 3, "historical_connect": 8,
+		"harness": 94, "negative_removal": 39, "dead_removal": 46,
+		"same_flow": 7, "external": 3, "historical_connect": 8,
 	}
 	gotDispositionCounts := map[string]int{}
 	seen := map[string]struct{}{}
@@ -134,6 +134,7 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 	}{
 		{id: "B001", fixture: "internal/runtime/testdata/generic-swarm-bundle", flowID: "delivery", flowInstance: "delivery/fixture-instance", nodeID: "delivery-node", trigger: "timer.item.timeout", emitted: "item.completed", runtimeEvent: "delivery/item.completed", disposition: "same_flow"},
 		{id: "B002", fixture: "internal/runtime/testdata/generic-swarm-bundle", flowID: "intake", flowInstance: "intake", nodeID: "intake-router", trigger: "item.created", emitted: "item.processed", runtimeEvent: "intake/item.processed", disposition: "same_flow", payload: map[string]any{"item_id": "item-1", "items": []any{map[string]any{"id": "line-1"}}}},
+		{id: "B103", fixture: "tests/tier5-flow-lifecycle/test-auto-emit-on-create", flowID: "worker", flowInstance: "worker/worker-001", nodeID: "worker", trigger: "auto.started", emitted: "auto.processed", runtimeEvent: "worker/auto.processed", disposition: "same_flow"},
 		{id: "B151", fixture: "tests/tier8-boot-verification/test-boot-event-cycle", nodeID: "test-node", trigger: "cycle.ping", emitted: "cycle.pong", disposition: "same_flow"},
 		{id: "B152", fixture: "tests/tier8-boot-verification/test-boot-event-cycle", nodeID: "test-node", trigger: "cycle.pong", emitted: "cycle.ping", disposition: "same_flow"},
 		{id: "B164", fixture: "tests/tier8-boot-verification/test-boot-permission-tool-mismatch", nodeID: "test-node", trigger: "task.requested", emitted: "task.completed", disposition: "same_flow"},

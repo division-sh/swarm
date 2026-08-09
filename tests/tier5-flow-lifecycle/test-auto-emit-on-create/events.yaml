@@ -1,3 +1,2 @@
 flow.created:
-auto.started:
-auto.processed:
+  instance_id: string

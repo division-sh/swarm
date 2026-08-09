@@ -18932,6 +18932,15 @@ test_specification:
           and automatic-effect barriers live in the transcript. Production-owned
           automatic behavior remains production-owned. Fixture-name branches and
           source- or backend-specific callbacks are forbidden.
+        barriers: >
+          The closed barrier vocabulary is run_terminal and
+          automatic_event_count. An automatic_event_count barrier names one exact
+          event and a positive minimum cardinality; it counts only persisted,
+          non-root-ingress events not authored by the transcript before releasing
+          the next authored input. Unknown, partial, source-specific, or
+          backend-specific barriers fail admission. Bounded recurring behavior is
+          stopped only by an explicit authored event after the cardinality barrier,
+          never by harness injection of the automatic effect itself.
       topology:
         census: '98 runtime rows = 94 replay-clean ordinary rows + 2 selected-contract fork rows + 1 direct tool row + 1 boot-only row.'
         source: One fresh current-schema PostgreSQL selected store and a newly constructed production runtime.

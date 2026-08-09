@@ -1,11 +1,19 @@
 trigger:
-  event: monitor.started
-  payload:
+  sequence:
+    - event: monitor.started
+      payload:
+    - event: monitor.stopped
+      barrier_before:
+        kind: automatic_event_count
+        event: timer.tick
+        minimum: 2
+      payload:
 expected:
 
   handler_outcome: success
   entity_state: done
   emitted_events:
+    - timer.tick
     - timer.tick
 
 conformance:
