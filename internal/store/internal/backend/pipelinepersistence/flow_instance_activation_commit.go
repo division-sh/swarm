@@ -390,7 +390,7 @@ func insertFlowInstanceActivation(
 	if err != nil {
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
-	lifecycle, err := commitWorkflowEngineLifecycle(ctx, tx, runtimeAuthorActivityMutation(story), store.workflowDecisionLifecycleOwner(), postgres, plan.Lifecycle)
+	lifecycle, err := commitWorkflowEngineLifecycle(ctx, tx, runtimeAuthorActivityMutation(story), store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), postgres, plan.Lifecycle)
 	if err != nil {
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}

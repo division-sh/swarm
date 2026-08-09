@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -462,16 +463,9 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 	`, runID, entityID, at); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO timers (
-			run_id, timer_name, entity_id, flow_instance, fire_event, routing_source, execution_mode, fire_at, owner_node, owner_kind, task_type, status, created_at
-		)
-		VALUES ($1::uuid, 'unrelated', $2::uuid, 'flow-other/1', 'timer.fire',
-		        jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-other', 'flow_instance', 'flow-other/1', 'entity_id', $2::text)),
-		        'live', $3, 'other-node', 'system', 'timer', 'active', $4)
-	`, runID, uuid.NewString(), at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed unrelated timer: %v", err)
-	}
+	admitGenericScheduleFixture(t, ctx, pg, testAgentGenericScheduleCommand(
+		t, runID, "other-agent", "flow-other/1", uuid.NewString(), "unrelated", runtimegenericschedule.AbsoluteDue(at.Add(time.Hour)),
+	))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO routing_rules (
 			event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at
@@ -558,16 +552,9 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 	`, runID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed mutation: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO timers (
-			run_id, timer_name, entity_id, flow_instance, fire_event, routing_source, execution_mode, fire_at, owner_node, owner_kind, task_type, status, created_at
-		)
-		VALUES ($1::uuid, 'relevant', $2::uuid, 'flow-a/1', 'timer.fire',
-		        jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $2::text)),
-		        'live', $3, 'node-a', 'system', 'timer', 'active', $4)
-	`, runID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed relevant timer: %v", err)
-	}
+	admitGenericScheduleFixture(t, ctx, pg, testAgentGenericScheduleCommand(
+		t, runID, "node-a", "flow-a/1", entityID, "relevant", runtimegenericschedule.AbsoluteDue(at.Add(time.Hour)),
+	))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO routing_rules (
 			event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at

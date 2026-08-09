@@ -15,7 +15,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	storeworkflowtimer "github.com/division-sh/swarm/internal/store/internal/backend/workflowtimer"
 	"github.com/lib/pq"
 )
 
@@ -63,13 +65,6 @@ type preservationCleanupSessionTarget struct {
 	SessionID string
 	RunID     string
 	AgentID   string
-	Status    string
-}
-
-type preservationCleanupTimerTarget struct {
-	TimerID   string
-	RunID     string
-	TimerName string
 	Status    string
 }
 
@@ -208,23 +203,6 @@ func (s *PreservationPostgresOwner) applyPreservationCleanup(ctx context.Context
 			Changed:        session.Status != "terminated",
 		})
 	}
-	timers, err := lockUnavailableBundlePreservationTimersTx(ctx, tx, activeRunIDs)
-	if err != nil {
-		return preservationcleanup.Result{}, err
-	}
-	for _, timer := range timers {
-		target := targetByRun[timer.RunID]
-		out.Timers = append(out.Timers, preservationcleanup.TimerResult{
-			TimerID:        timer.TimerID,
-			RunID:          timer.RunID,
-			TimerName:      timer.TimerName,
-			PreviousStatus: timer.Status,
-			Status:         preservationcleanup.TimerStatusCancelled,
-			ReasonCode:     target.ReasonCode,
-			Changed:        timer.Status != preservationcleanup.TimerStatusCancelled,
-		})
-	}
-
 	for _, runID := range activeRunIDs {
 		target := targetByRun[runID]
 		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, runID, target.ReasonCode); err != nil {
@@ -242,9 +220,22 @@ func (s *PreservationPostgresOwner) applyPreservationCleanup(ctx context.Context
 			return preservationcleanup.Result{}, err
 		}
 	}
-	for _, timer := range timers {
-		if err := cancelUnavailableBundlePreservationTimerTx(ctx, tx, timer.TimerID); err != nil {
-			return preservationcleanup.Result{}, err
+	for _, runID := range activeRunIDs {
+		target := targetByRun[runID]
+		generic, err := storegenericschedule.CancelRunsTx(ctx, tx, true, []string{runID}, target.ReasonCode, now)
+		if err != nil {
+			return preservationcleanup.Result{}, fmt.Errorf("cancel preservation generic schedules: %w", err)
+		}
+		workflow, err := storeworkflowtimer.CancelRunsTx(ctx, tx, true, []string{runID})
+		if err != nil {
+			return preservationcleanup.Result{}, fmt.Errorf("cancel preservation workflow timers: %w", err)
+		}
+		for _, timer := range append(generic, workflow...) {
+			out.Timers = append(out.Timers, preservationcleanup.TimerResult{
+				Family: timer.Family, TimerID: timer.ActivationID, RunID: timer.RunID, TimerName: timer.TaskID,
+				PreviousStatus: "active", Status: preservationcleanup.TimerStatusCancelled,
+				ReasonCode: target.ReasonCode, Changed: true,
+			})
 		}
 	}
 	for _, run := range runs {
@@ -333,37 +324,6 @@ func lockUnavailableBundlePreservationSessionsTx(ctx context.Context, tx *sql.Tx
 	return out, nil
 }
 
-func lockUnavailableBundlePreservationTimersTx(ctx context.Context, tx *sql.Tx, runIDs []string) ([]preservationCleanupTimerTarget, error) {
-	rows, err := tx.QueryContext(ctx, `
-		SELECT timer_id::text, run_id::text, COALESCE(timer_name, ''), COALESCE(status, '')
-		FROM timers
-		WHERE run_id = ANY($1::uuid[])
-		  AND status = 'active'
-		ORDER BY run_id::text, timer_name, timer_id::text
-		FOR UPDATE
-	`, pq.Array(runIDs))
-	if err != nil {
-		return nil, fmt.Errorf("lock unavailable bundle preservation timers: %w", err)
-	}
-	defer rows.Close()
-	var out []preservationCleanupTimerTarget
-	for rows.Next() {
-		var item preservationCleanupTimerTarget
-		if err := rows.Scan(&item.TimerID, &item.RunID, &item.TimerName, &item.Status); err != nil {
-			return nil, fmt.Errorf("scan unavailable bundle preservation timer: %w", err)
-		}
-		item.TimerID = strings.TrimSpace(item.TimerID)
-		item.RunID = strings.TrimSpace(item.RunID)
-		item.TimerName = strings.TrimSpace(item.TimerName)
-		item.Status = strings.TrimSpace(item.Status)
-		out = append(out, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read unavailable bundle preservation timers: %w", err)
-	}
-	return out, nil
-}
-
 func terminateUnavailableBundlePreservationSessionTx(ctx context.Context, tx *sql.Tx, sessionID, reasonCode string, at time.Time) error {
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE agent_sessions
@@ -380,18 +340,6 @@ func terminateUnavailableBundlePreservationSessionTx(ctx context.Context, tx *sq
 		  AND status IN ('active', 'suspended')
 	`, sessionID, preservationcleanup.SessionTerminationReasonOrphaned, reasonCode, at.UTC()); err != nil {
 		return fmt.Errorf("terminate unavailable bundle preservation session %s: %w", sessionID, err)
-	}
-	return nil
-}
-
-func cancelUnavailableBundlePreservationTimerTx(ctx context.Context, tx *sql.Tx, timerID string) error {
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE timers
-		SET status = 'cancelled'
-		WHERE timer_id = $1::uuid
-		  AND status = 'active'
-	`, timerID); err != nil {
-		return fmt.Errorf("cancel unavailable bundle preservation timer %s: %w", timerID, err)
 	}
 	return nil
 }

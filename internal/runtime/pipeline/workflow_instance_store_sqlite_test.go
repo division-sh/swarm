@@ -12,6 +12,7 @@ import (
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
@@ -346,13 +347,13 @@ func TestWorkflowInstanceStore_runPipelineMutationDoesNotRetryPostgresDialect(t 
 }
 
 type recordingRuntimeMutationRunner struct {
-	db                             *sql.DB
-	dialect                        workflowStoreDialect
-	decisionCards                  decisioncard.Store
-	mu                             sync.Mutex
-	calls                          int32
-	committedScheduleUpserts       []Schedule
-	committedScheduleCancellations []Schedule
+	db                                    *sql.DB
+	dialect                               workflowStoreDialect
+	decisionCards                         decisioncard.Store
+	mu                                    sync.Mutex
+	calls                                 int32
+	committedGenericScheduleActivations   []runtimegenericschedule.Activation
+	committedGenericScheduleCancellations []runtimegenericschedule.Activation
 }
 
 func (r *recordingRuntimeMutationRunner) lifecycleMutation(ctx context.Context) (testRunLifecycleMutation, error) {
@@ -594,6 +595,9 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			timer_id TEXT PRIMARY KEY,
 			run_id TEXT,
 			timer_name TEXT,
+			schedule_scope TEXT,
+			schedule_key TEXT,
+			immutable_hash TEXT,
 			source_timer_id TEXT,
 			forked_from_run_id TEXT,
 			forked_from_event_id TEXT,
@@ -607,8 +611,8 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			routing_source TEXT NOT NULL,
 			execution_mode TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
 			fire_at TIMESTAMP,
+			initial_fire_at TIMESTAMP,
 			recurring BOOLEAN,
-			recurrence_cron TEXT,
 			recurrence_interval TEXT,
 			owner_node TEXT,
 			owner_agent TEXT,
@@ -619,10 +623,24 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			agent_flow_scope_key TEXT,
 			agent_flow_instance_id TEXT,
 			reply_context_id TEXT,
+			task_id TEXT,
+			due_basis_kind TEXT,
+			due_basis_absolute TIMESTAMP,
+			due_basis_duration TEXT,
+			due_basis_cron TEXT,
+			occurrence_event_id TEXT,
+			occurrence_admitted_at TIMESTAMP,
+			accepted_at TIMESTAMP,
+			cancel_cause TEXT,
+			cancelled_at TIMESTAMP,
+			failure_code TEXT,
+			failure_message TEXT,
+			failed_at TIMESTAMP,
 			task_type TEXT,
 			status TEXT,
 			fired_at TIMESTAMP,
-			created_at TIMESTAMP
+			created_at TIMESTAMP,
+			UNIQUE (schedule_scope, schedule_key)
 		)`,
 		`CREATE TABLE entity_mutations (
 			mutation_id TEXT PRIMARY KEY,

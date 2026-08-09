@@ -30,7 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -800,16 +800,12 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					if predecessor.Manager == nil || !predecessor.Manager.IsRunning() || !predecessor.Bus.OutboxSweeperActive() {
 						t.Fatal("full-store predecessor manager/outbox consumers did not start")
 					}
-					if err := predecessor.Scheduler.Register(context.Background(), runtimepipeline.Schedule{
-						OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
-						AgentID:       "replacement-proof",
-						EventType:     "platform.boot",
-						Mode:          "once",
-						At:            time.Now().Add(time.Hour),
-						RoutingSource: events.NewPlatformControlRoutingSource(),
-						ExecutionMode: executionmode.Live,
-					}); err != nil {
-						t.Fatalf("register pending predecessor schedule: %v", err)
+					predecessorWakeup, err := runtimegenericschedule.NewWakeup("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", time.Now().Add(time.Hour))
+					if err != nil {
+						t.Fatalf("build pending predecessor wakeup: %v", err)
+					}
+					if err := predecessor.Scheduler.RegisterGenericScheduleWakeup(context.Background(), predecessorWakeup); err != nil {
+						t.Fatalf("register pending predecessor wakeup: %v", err)
 					}
 					probe := newRuntime(newHash)
 					if err := probe.Start(context.Background()); err == nil || !strings.Contains(err.Error(), "already owned") {
@@ -908,16 +904,12 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					if err := rollbackPredecessor.Start(context.Background()); err != nil {
 						t.Fatalf("start rollback predecessor: %v", err)
 					}
-					if err := rollbackPredecessor.Scheduler.Register(context.Background(), runtimepipeline.Schedule{
-						OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
-						AgentID:       "rollback-proof",
-						EventType:     "platform.boot",
-						Mode:          "once",
-						At:            time.Now().Add(time.Hour),
-						RoutingSource: events.NewPlatformControlRoutingSource(),
-						ExecutionMode: executionmode.Live,
-					}); err != nil {
-						t.Fatalf("register pending rollback schedule: %v", err)
+					rollbackWakeup, err := runtimegenericschedule.NewWakeup("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", time.Now().Add(time.Hour))
+					if err != nil {
+						t.Fatalf("build pending rollback wakeup: %v", err)
+					}
+					if err := rollbackPredecessor.Scheduler.RegisterGenericScheduleWakeup(context.Background(), rollbackWakeup); err != nil {
+						t.Fatalf("register pending rollback wakeup: %v", err)
 					}
 					rollbackFact := mustServeTestEphemeralBundleSourceFact(newHash)
 					rollbackManager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{

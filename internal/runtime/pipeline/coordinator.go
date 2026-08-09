@@ -54,7 +54,7 @@ type PipelineCoordinator struct {
 	instanceActivator      FlowInstanceActivator
 	instanceDeactivator    FlowInstanceDeactivator
 	timerScheduler         *Scheduler
-	timerScheduleStore     SchedulePersistence
+	genericSchedules       GenericScheduleWakeupOwner
 	workflowTimers         *WorkflowTimerLifecycle
 	mailboxMaterializer    MailboxWriteMaterializationStore
 	decisionCards          decisioncard.Store
@@ -97,7 +97,7 @@ type PipelineCoordinatorOptions struct {
 	InstanceActivator                FlowInstanceActivator
 	InstanceDeactivator              FlowInstanceDeactivator
 	TimerScheduler                   *Scheduler
-	TimerScheduleStore               SchedulePersistence
+	GenericSchedules                 GenericScheduleWakeupOwner
 	TimerObligationReader            runtimetimerobligation.Reader
 	MailboxMaterializer              MailboxWriteMaterializationStore
 	DecisionCards                    decisioncard.Store
@@ -220,7 +220,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		instanceActivator:                opts.InstanceActivator,
 		instanceDeactivator:              opts.InstanceDeactivator,
 		timerScheduler:                   opts.TimerScheduler,
-		timerScheduleStore:               opts.TimerScheduleStore,
+		genericSchedules:                 opts.GenericSchedules,
 		mailboxMaterializer:              opts.MailboxMaterializer,
 		decisionCards:                    opts.DecisionCards,
 		proposedEffects:                  opts.ProposedEffects,

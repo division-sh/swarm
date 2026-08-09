@@ -455,7 +455,7 @@ validation-orchestrator:
 `,
 		},
 	})
-	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		WorkflowSource: semanticview.Wrap(bundle),
 	})
 
@@ -1344,7 +1344,7 @@ accounts:
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
-	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
 		WorkflowSource:                 semanticview.Wrap(bundle),
 		AllowInternalLegacyEntityTools: true,
@@ -1450,7 +1450,7 @@ accounts:
 		t.Fatalf("activation result = %#v", activated)
 	}
 
-	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
 		WorkflowSource:                 semanticview.Wrap(bundle),
 		AllowInternalLegacyEntityTools: true,
@@ -2255,7 +2255,7 @@ foreign:
 	ensureEntityToolTestRun(t, db)
 	bus := &entityToolRuntimeLogBus{}
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	exec := runtimetools.NewExecutorWithOptions(bus, nil, runtimetools.ExecutorOptions{
+	exec := runtimetools.NewExecutorWithOptions(bus, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
 		WorkflowSource:                 semanticview.Wrap(bundle),
 		AllowInternalLegacyEntityTools: true,
@@ -2784,7 +2784,7 @@ func newEntityToolTestHarnessWithBundleAndLegacyAccess(t *testing.T, actor model
 	ensureEntityToolTestRun(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID)
-	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
 		WorkflowSource:                 semanticview.Wrap(bundle),
 		AllowInternalLegacyEntityTools: allowInternalLegacy,

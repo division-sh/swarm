@@ -12,6 +12,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -37,7 +38,7 @@ type selectedConcreteRuntimeStore interface {
 	runtimedelivery.Store
 	runtimellm.ConversationPersistence
 	runtimemanager.ManagerPersistence
-	runtimepipeline.SchedulePersistence
+	runtimegenericschedule.Store
 	runtimepipeline.MailboxWriteMaterializationStore
 	runtimetools.MailboxPersistence
 	runtimetools.EntityPersistence
@@ -149,7 +150,7 @@ func selectedStoreBundleRoleLedger() []selectedStoreBundleRoleEntry {
 		{Name: "ManagedCapabilitiesStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "managed capability persistence is an explicit startup dependency"},
 		{Name: "DeliveryStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "executable delivery construction, claim, settlement, and recovery require the selected canonical lifecycle owner"},
 		{Name: "PipelineObligations", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, Issue: 2106, SpecRef: selectedFacadeSpec, Reason: "durable platform-pipeline exclusion, claim, disposition, and summary require the selected canonical owner"},
-		{Name: "ScheduleStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "timer/schedule persistence is required for runtime construction"},
+		{Name: "GenericScheduleStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "generic schedule activation persistence is required for runtime construction"},
 		{Name: "TimerObligationReader", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "timer obligation recovery reads are an explicit startup dependency"},
 		{Name: "MailboxMaterializer", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "mailbox_write materialization is required for runtime construction"},
 		{Name: "MailboxStore", Classification: selectedStoreRoleCoreRuntime, RequiredOn: selectedStoreRoleBoth, SpecRef: selectedFacadeSpec, Reason: "tool mailbox persistence is required for runtime construction"},

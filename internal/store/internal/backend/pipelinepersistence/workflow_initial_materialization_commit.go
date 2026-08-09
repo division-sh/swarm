@@ -103,7 +103,7 @@ func commitWorkflowInitialMaterialization(
 		if err != nil {
 			return err
 		}
-		result.Lifecycle, err = commitWorkflowEngineLifecycle(txctx, tx, runtimeAuthorActivityMutation(story), store.workflowDecisionLifecycleOwner(), postgres, command.Lifecycle)
+		result.Lifecycle, err = commitWorkflowEngineLifecycle(txctx, tx, runtimeAuthorActivityMutation(story), store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), postgres, command.Lifecycle)
 		if err != nil {
 			return err
 		}

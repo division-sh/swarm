@@ -32,8 +32,7 @@ type Executor struct {
 	manager                        Manager
 	managerProvider                ManagerProvider
 	bus                            EventPublisher
-	scheduler                      Scheduler
-	scheduleStore                  SchedulePersistence
+	genericSchedules               GenericScheduleAdmission
 	mailboxStore                   MailboxPersistence
 	entityStore                    EntityPersistence
 	humanTaskStore                 HumanTaskCardStore
@@ -64,21 +63,16 @@ type runtimeToolLogSink interface {
 	LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) error
 }
 
-func NewExecutor(bus EventPublisher, scheduler Scheduler, manager Manager, stores ...SchedulePersistence) *Executor {
-	return NewExecutorWithOptions(bus, scheduler, ExecutorOptions{Manager: manager}, stores...)
+func NewExecutor(bus EventPublisher, schedules GenericScheduleAdmission, manager Manager) *Executor {
+	return NewExecutorWithOptions(bus, ExecutorOptions{Manager: manager, GenericSchedules: schedules})
 }
 
-func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts ExecutorOptions, stores ...SchedulePersistence) *Executor {
-	var scheduleStore SchedulePersistence
-	if len(stores) > 0 {
-		scheduleStore = stores[0]
-	}
+func NewExecutorWithOptions(bus EventPublisher, opts ExecutorOptions) *Executor {
 	exec := &Executor{
 		manager:                        opts.Manager,
 		managerProvider:                opts.ManagerProvider,
 		bus:                            bus,
-		scheduler:                      scheduler,
-		scheduleStore:                  scheduleStore,
+		genericSchedules:               opts.GenericSchedules,
 		mailboxStore:                   opts.MailboxStore,
 		entityStore:                    opts.EntityStore,
 		humanTaskStore:                 opts.HumanTaskStore,

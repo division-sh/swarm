@@ -51,6 +51,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -60,6 +61,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
@@ -7638,7 +7640,6 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 		admissionSource = storerunlifecycle.BundleSourceEphemeral
 	}
 	sessionID := uuid.NewString()
-	timerID := uuid.NewString()
 	eventID := uuid.NewString()
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: admissionSource})
 	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
@@ -7664,10 +7665,17 @@ func seedServeRuntimeUnavailableBundleRunState(t *testing.T, ctx context.Context
 	if _, err := runtimePG.BindAgentSession(claimCtx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("bind delivery session %s: %v", source, err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, timer_name, run_id, owner_kind, fire_event, routing_source, execution_mode, fire_at, status)
-		VALUES ($1::uuid, $2, $3::uuid, 'system', 'timer.fired', '{"kind":"platform_control","route":{}}'::jsonb, 'live', now() + interval '1 hour', 'active')
-	`, timerID, "timer-"+source, runID); err != nil {
+	entityID := uuid.NewString()
+	routingSource, err := events.NewRootRoutingSource(entityID)
+	if err != nil {
+		t.Fatalf("construct timer route %s: %v", source, err)
+	}
+	if _, err := runtimePG.AdmitGenericSchedule(ctx, runtimegenericschedule.AdmissionCommand{
+		ScheduleKey: "timer-" + source, RunID: runID, EntityID: entityID,
+		OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: "serve-startup-recovery",
+		EventType: "timer.fired", Payload: semanticvalue.EmptyObject(), RoutingSource: routingSource,
+		Due: runtimegenericschedule.DelayDue(time.Hour), TaskID: "timer-" + source,
+	}); err != nil {
 		t.Fatalf("seed timer %s: %v", source, err)
 	}
 	if source == storerunlifecycle.BundleSourceDeleted {

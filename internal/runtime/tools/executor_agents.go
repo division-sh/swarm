@@ -11,12 +11,14 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/google/uuid"
 )
 
@@ -182,40 +184,28 @@ func uniqueNonEmptyStrings(in []string) []string {
 }
 
 func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	executionMode := actor.ExecutionMode
-	if causalMode, ok := runtimeeffects.ExecutionModeFromContext(ctx); ok {
-		if causalMode == runtimeeffects.ExecutionModeMock || executionMode == runtimeeffects.ExecutionModeMock {
-			executionMode = runtimeeffects.ExecutionModeMock
-		} else if causalMode != executionMode {
-			return nil, failures.New(failures.ClassAuthorizationDenied, "schedule_execution_mode_conflict", "tool-executor", "schedule.authorize_execution_mode", map[string]any{
-				"action": "schedule_create", "actor_id": actor.ID,
-				"actor_execution_mode": actor.ExecutionMode, "causal_execution_mode": causalMode,
-			})
-		}
-	}
-	if !executionMode.Valid() {
-		return nil, failures.New(failures.ClassAuthorizationDenied, "schedule_execution_mode_missing", "tool-executor", "schedule.authorize_execution_mode", map[string]any{
-			"action": "schedule_create", "actor_id": actor.ID, "actor_execution_mode": actor.ExecutionMode,
-		})
-	}
-	if e.scheduler == nil {
-		return nil, failures.NewDetail("dependency_unavailable", "tool-executor", "schedule.create", map[string]any{"dependency": "scheduler"})
+	if e.genericSchedules == nil {
+		return nil, failures.NewDetail("dependency_unavailable", "tool-executor", "schedule.create", map[string]any{"dependency": "generic_schedule_lifecycle"})
 	}
 	var in struct {
-		AgentID   string `json:"agent_id"`
-		EventType string `json:"event_type"`
-		Mode      string `json:"mode"`
-		Cron      string `json:"cron"`
-		At        string `json:"at"`
-		EntityID  string `json:"entity_id"`
-		TaskID    string `json:"task_id"`
-		Payload   any    `json:"payload"`
+		ScheduleKey string `json:"schedule_key"`
+		AgentID     string `json:"agent_id"`
+		EventType   string `json:"event_type"`
+		Mode        string `json:"mode"`
+		Cron        string `json:"cron"`
+		At          string `json:"at"`
+		EntityID    string `json:"entity_id"`
+		TaskID      string `json:"task_id"`
+		Payload     any    `json:"payload"`
 	}
 	if err := decodeToolInput(input, &in); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(in.Mode) == "" {
 		in.Mode = "once"
+	}
+	if strings.TrimSpace(in.ScheduleKey) == "" {
+		return nil, errors.New("schedule_key is required")
 	}
 	if strings.TrimSpace(in.AgentID) == "" {
 		in.AgentID = actor.ID
@@ -242,12 +232,13 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 		at = parsed
 	}
 
-	payload, err := json.Marshal(in.Payload)
-	if err != nil {
-		return nil, fmt.Errorf("marshal payload: %w", err)
+	payloadInput := in.Payload
+	if payloadInput == nil {
+		payloadInput = map[string]any{}
 	}
-	if len(payload) == 0 || string(payload) == "null" {
-		payload = []byte("{}")
+	payload, err := canonicaljson.FromGo(payloadInput)
+	if err != nil {
+		return nil, fmt.Errorf("admit schedule payload: %w", err)
 	}
 	executionSource, err := runtimepinrouting.AdmitAgentExecutionRoutingSource(e.workflowSource, actor.Identity, entityID)
 	if err != nil {
@@ -269,32 +260,49 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 		return nil, fmt.Errorf("admit schedule event identity: %w", err)
 	}
 
-	schedule := Schedule{
+	var due runtimegenericschedule.DueBasis
+	switch strings.TrimSpace(in.Mode) {
+	case "once":
+		due = runtimegenericschedule.AbsoluteDue(at)
+	case "cron":
+		cron := strings.TrimSpace(in.Cron)
+		if strings.HasPrefix(cron, "@every ") {
+			interval, parseErr := time.ParseDuration(strings.TrimSpace(strings.TrimPrefix(cron, "@every ")))
+			if parseErr != nil {
+				return nil, fmt.Errorf("invalid @every duration: %w", parseErr)
+			}
+			due = runtimegenericschedule.EveryDue(interval)
+		} else {
+			due = runtimegenericschedule.CronDue(cron)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported schedule mode: %s", in.Mode)
+	}
+	command := runtimegenericschedule.AdmissionCommand{
+		ScheduleKey:   in.ScheduleKey,
 		RunID:         runtimecorrelation.RunIDFromContext(ctx),
-		AgentID:       in.AgentID,
-		OwnerKind:     ScheduleOwnerAgent,
+		OwnerID:       in.AgentID,
+		OwnerKind:     runtimegenericschedule.OwnerAgent,
 		AgentIdentity: actor.Identity,
 		EventType:     string(admittedEvent),
-		Mode:          in.Mode,
-		Cron:          in.Cron,
-		At:            at,
 		EntityID:      entityID,
 		FlowInstance:  actor.CanonicalFlowPath(),
 		TaskID:        in.TaskID,
 		Payload:       payload,
 		RoutingSource: routingSource,
-		ExecutionMode: executionMode,
+		Due:           due,
 	}
-	if err := e.scheduler.Register(ctx, schedule); err != nil {
+	result, err := e.genericSchedules.Admit(ctx, command)
+	if err != nil {
 		return nil, err
 	}
-	if e.scheduleStore != nil {
-		if err := e.scheduleStore.UpsertSchedule(ctx, schedule); err != nil {
-			return nil, err
-		}
-	}
-
-	return map[string]any{"status": "scheduled"}, nil
+	return map[string]any{
+		"status":        string(result.Activation.Status),
+		"outcome":       string(result.Outcome),
+		"activation_id": result.Activation.ID,
+		"schedule_key":  result.Activation.Command.ScheduleKey,
+		"due_at":        result.Activation.CurrentDueAt,
+	}, nil
 }
 
 func (e *Executor) execConfigureRouting(ctx context.Context, actor models.AgentConfig, input any) (any, error) {

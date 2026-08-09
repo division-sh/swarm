@@ -13,6 +13,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -70,19 +71,30 @@ const (
 )
 
 type WorkflowScheduleMutation struct {
-	Kind     WorkflowScheduleMutationKind
-	Schedule Schedule
+	Kind        WorkflowScheduleMutationKind
+	Command     runtimegenericschedule.AdmissionCommand
+	CancelCause string
+	CancelledAt time.Time
 }
 
 func (m WorkflowScheduleMutation) Validate(runID string) error {
-	if strings.TrimSpace(m.Schedule.RunID) != strings.TrimSpace(runID) {
+	m.Command = m.Command.Canonical()
+	if strings.TrimSpace(m.Command.RunID) != strings.TrimSpace(runID) {
 		return fmt.Errorf("workflow schedule mutation run disagrees with engine state")
 	}
-	if _, _, err := newGenericScheduledProjection(m.Schedule); err != nil {
+	if err := m.Command.Validate(); err != nil {
 		return err
 	}
 	switch m.Kind {
-	case WorkflowScheduleMutationUpsert, WorkflowScheduleMutationCancel:
+	case WorkflowScheduleMutationUpsert:
+		if strings.TrimSpace(m.CancelCause) != "" || !m.CancelledAt.IsZero() {
+			return fmt.Errorf("workflow schedule admission cannot carry cancellation facts")
+		}
+		return nil
+	case WorkflowScheduleMutationCancel:
+		if strings.TrimSpace(m.CancelCause) == "" || m.CancelledAt.IsZero() {
+			return fmt.Errorf("workflow schedule cancellation requires typed cause and time")
+		}
 		return nil
 	default:
 		return fmt.Errorf("workflow schedule mutation kind %q is unsupported", m.Kind)
@@ -162,10 +174,10 @@ func (p WorkflowLifecycleMutationPlan) Validate(runID string, route runtimeflowi
 }
 
 type CommittedWorkflowLifecycleMutation struct {
-	Wakeups               []timeridentity.WorkflowTimerActivationRef
-	Cancellations         []timeridentity.WorkflowTimerActivationRef
-	ScheduleUpserts       []Schedule
-	ScheduleCancellations []Schedule
+	Wakeups                      []timeridentity.WorkflowTimerActivationRef
+	Cancellations                []timeridentity.WorkflowTimerActivationRef
+	GenericScheduleActivations   []runtimegenericschedule.Activation
+	GenericScheduleCancellations []runtimegenericschedule.Activation
 }
 
 func (r CommittedWorkflowLifecycleMutation) Validate() error {
@@ -188,9 +200,9 @@ func (r CommittedWorkflowLifecycleMutation) Validate() error {
 			seen[ref.ActivationID] = item.name
 		}
 	}
-	for index, schedule := range append(append([]Schedule(nil), r.ScheduleUpserts...), r.ScheduleCancellations...) {
-		if _, _, err := newGenericScheduledProjection(schedule); err != nil {
-			return fmt.Errorf("schedule evidence %d: %w", index, err)
+	for index, activation := range append(append([]runtimegenericschedule.Activation(nil), r.GenericScheduleActivations...), r.GenericScheduleCancellations...) {
+		if err := activation.Validate(); err != nil {
+			return fmt.Errorf("generic schedule evidence %d: %w", index, err)
 		}
 	}
 	return nil
@@ -288,12 +300,12 @@ func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Conte
 		if activation.TimerEventType == joinCompleteEvent {
 			kind = timeridentity.TimerHandleJoinComplete
 		}
-		schedule, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, *instance, activation, kind, mode)
+		command, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, *instance, activation, kind)
 		if err != nil {
 			return err
 		}
-		schedule = scheduleWithRunIDFromContext(ctx, schedule)
-		if workflowLifecycleHasScheduleMutation(plan.Schedules, schedule.TaskID) {
+		command.RunID = workflowTimerRunID(ctx, *instance)
+		if workflowLifecycleHasScheduleMutation(plan.Schedules, command.ScheduleKey) {
 			continue
 		}
 		activation.TimerCancelled = true
@@ -301,7 +313,7 @@ func (pc *PipelineCoordinator) planSupersededWorkflowArtifacts(ctx context.Conte
 			return fmt.Errorf("persist closed join timer cancellation %s: %w", activation.Key(), err)
 		}
 		joinStateChanged = true
-		plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationCancel, Schedule: schedule})
+		plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationCancel, Command: command, CancelCause: "join_closed", CancelledAt: time.Now().UTC()})
 		plan.RequestCompletionCandidate = true
 	}
 	if joinStateChanged {
@@ -319,9 +331,9 @@ func workflowLifecycleHasTimerMutation(items []WorkflowTimerMutation, activation
 	return false
 }
 
-func workflowLifecycleHasScheduleMutation(items []WorkflowScheduleMutation, taskID string) bool {
+func workflowLifecycleHasScheduleMutation(items []WorkflowScheduleMutation, scheduleKey string) bool {
 	for _, item := range items {
-		if strings.TrimSpace(item.Schedule.TaskID) == strings.TrimSpace(taskID) {
+		if strings.TrimSpace(item.Command.ScheduleKey) == strings.TrimSpace(scheduleKey) {
 			return true
 		}
 	}
@@ -460,11 +472,12 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 		if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 			return fmt.Errorf("close join %s on stage exit: %w", activation.Key(), err)
 		}
-		schedule, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, *instance, activation, kind, mode)
+		command, err := joinSchedule(pc.SemanticSource(), instance.WorkflowName, entityID, *instance, activation, kind)
 		if err != nil {
 			return err
 		}
-		plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationCancel, Schedule: scheduleWithRunIDFromContext(ctx, schedule)})
+		command.RunID = workflowTimerRunID(ctx, *instance)
+		plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationCancel, Command: command, CancelCause: "join_stage_exit", CancelledAt: occurredAt})
 		plan.RequestCompletionCandidate = true
 	}
 	now := occurredAt.UTC()
@@ -525,11 +538,12 @@ func (pc *PipelineCoordinator) planWorkflowJoinEffect(ctx context.Context, insta
 		if err := joinruntime.Store(carrier.StateBuckets, activation); err != nil {
 			return fmt.Errorf("persist join %s: %w", activation.Key(), err)
 		}
-		schedule, err := joinSchedule(pc.SemanticSource(), joinPlan.FlowID, entityID, *instance, activation, kind, mode)
+		command, err := joinSchedule(pc.SemanticSource(), joinPlan.FlowID, entityID, *instance, activation, kind)
 		if err != nil {
 			return err
 		}
-		plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationUpsert, Schedule: scheduleWithRunIDFromContext(ctx, schedule)})
+		command.RunID = workflowTimerRunID(ctx, *instance)
+		plan.Schedules = append(plan.Schedules, WorkflowScheduleMutation{Kind: WorkflowScheduleMutationUpsert, Command: command})
 	}
 	instance.StateBuckets = carrier.PersistedStateBuckets()
 	return nil
@@ -633,7 +647,7 @@ func (pc *PipelineCoordinator) finalizeWorkflowLifecycleMutation(ctx context.Con
 	if err := committed.Validate(); err != nil {
 		return err
 	}
-	if len(committed.Wakeups)+len(committed.Cancellations)+len(committed.ScheduleUpserts)+len(committed.ScheduleCancellations) == 0 {
+	if len(committed.Wakeups)+len(committed.Cancellations)+len(committed.GenericScheduleActivations)+len(committed.GenericScheduleCancellations) == 0 {
 		return nil
 	}
 	if pc == nil {
@@ -642,18 +656,12 @@ func (pc *PipelineCoordinator) finalizeWorkflowLifecycleMutation(ctx context.Con
 	if len(committed.Wakeups)+len(committed.Cancellations) > 0 && pc.workflowTimers == nil && pc.timerScheduler != nil {
 		return fmt.Errorf("committed workflow timer evidence requires the lifecycle owner")
 	}
-	for _, schedule := range committed.ScheduleCancellations {
-		if pc.timerScheduler != nil {
-			if err := pc.timerScheduler.CancelExact(schedule); err != nil {
-				return err
-			}
-		}
+	if len(committed.GenericScheduleActivations)+len(committed.GenericScheduleCancellations) > 0 && pc.genericSchedules == nil {
+		return fmt.Errorf("committed generic schedule evidence requires the lifecycle owner")
 	}
-	for _, schedule := range committed.ScheduleUpserts {
-		if pc.timerScheduler != nil {
-			if _, err := ClaimAndRegisterSchedule(ctx, pc.timerScheduleStore, pc.timerScheduler, schedule); err != nil {
-				return err
-			}
+	for _, activation := range append(append([]runtimegenericschedule.Activation(nil), committed.GenericScheduleCancellations...), committed.GenericScheduleActivations...) {
+		if err := pc.genericSchedules.ReconcileWakeup(ctx, activation.ID); err != nil {
+			return err
 		}
 	}
 	if pc.workflowTimers != nil && pc.timerScheduler != nil {

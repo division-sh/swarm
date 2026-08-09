@@ -10,6 +10,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -18,11 +19,9 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
-type Schedule = runtimepipeline.Schedule
-
-const ScheduleOwnerAgent = runtimepipeline.ScheduleOwnerAgent
-
-type SchedulePersistence = runtimepipeline.SchedulePersistence
+type GenericScheduleAdmission interface {
+	Admit(context.Context, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error)
+}
 
 type WorkflowInstanceLoader interface {
 	Load(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error)
@@ -32,11 +31,6 @@ type EventPublisher interface {
 	Publish(ctx context.Context, evt events.Event) error
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
 	PublishDirectRoutes(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) error
-}
-
-type Scheduler interface {
-	Register(context.Context, runtimepipeline.Schedule) error
-	Stop()
 }
 
 type Manager interface {
@@ -69,6 +63,7 @@ type ExecutorOptions struct {
 	ModelRuntimes      llm.AgentRuntimeResolver
 	AuthorityProvider  runtimeauthority.Provider
 	EmitRegistry       *EmitRegistry
+	GenericSchedules   GenericScheduleAdmission
 	// Trusted runtime/test escape hatch for exercising retained legacy handlers.
 	// Actor-authored config must never enable legacy entity tools for normal agents.
 	AllowInternalLegacyEntityTools bool

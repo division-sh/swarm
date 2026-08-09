@@ -2,201 +2,96 @@ package pipeline
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	"github.com/robfig/cron/v3"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 )
-
-type ScheduleOwnerKind string
-
-const (
-	ScheduleOwnerAgent  ScheduleOwnerKind = "agent"
-	ScheduleOwnerSystem ScheduleOwnerKind = "system"
-)
-
-type Schedule struct {
-	Context       events.DeliveryContext
-	RunID         string
-	AgentID       string
-	OwnerKind     ScheduleOwnerKind
-	AgentIdentity agentidentity.Identity
-	EventType     string
-	Mode          string // once | cron
-	Cron          string // supports "@every <duration>" and plain duration string
-	At            time.Time
-	EntityID      string
-	FlowInstance  string
-	TaskID        string
-	Payload       []byte
-	RoutingSource events.RoutingSource
-	ExecutionMode executionmode.Mode
-}
 
 type scheduledProjectionKind uint8
 
 const (
 	scheduledProjectionUnknown scheduledProjectionKind = iota
-	scheduledProjectionGeneric
 	scheduledProjectionWorkflowTimer
+	scheduledProjectionGenericActivation
 )
 
 type scheduledProjection struct {
-	kind     scheduledProjectionKind
-	generic  Schedule
-	workflow WorkflowTimerWakeup
+	kind       scheduledProjectionKind
+	workflow   WorkflowTimerWakeup
+	activation runtimegenericschedule.Wakeup
 }
 
-func newGenericScheduledProjection(sc Schedule) (scheduledProjection, cronSpec, error) {
-	normalized, spec, err := validateSchedule(sc)
-	if err != nil {
-		return scheduledProjection{}, cronSpec{}, err
-	}
-	return scheduledProjection{kind: scheduledProjectionGeneric, generic: normalized}, spec, nil
-}
-
-func newWorkflowTimerScheduledProjection(wakeup WorkflowTimerWakeup) (scheduledProjection, cronSpec, error) {
+func newWorkflowTimerScheduledProjection(wakeup WorkflowTimerWakeup) (scheduledProjection, error) {
 	if err := wakeup.validate(); err != nil {
-		return scheduledProjection{}, cronSpec{}, err
+		return scheduledProjection{}, err
 	}
 	return scheduledProjection{
 		kind:     scheduledProjectionWorkflowTimer,
 		workflow: wakeup,
-	}, cronSpec{}, nil
+	}, nil
+}
+
+func newGenericActivationScheduledProjection(wakeup runtimegenericschedule.Wakeup) (scheduledProjection, error) {
+	if err := wakeup.Validate(); err != nil {
+		return scheduledProjection{}, err
+	}
+	return scheduledProjection{kind: scheduledProjectionGenericActivation, activation: wakeup}, nil
 }
 
 func (p scheduledProjection) key() string {
 	switch p.kind {
-	case scheduledProjectionGeneric:
-		return scheduleKey(p.generic)
 	case scheduledProjectionWorkflowTimer:
 		return workflowTimerTaskFamily + "|" + p.workflow.Occurrence().Activation.ActivationID
+	case scheduledProjectionGenericActivation:
+		return "generic_schedule|" + p.activation.ActivationID()
 	default:
 		return ""
 	}
 }
 
 func (p scheduledProjection) mode() string {
-	if p.kind == scheduledProjectionGeneric {
-		return p.generic.Mode
-	}
-	if p.kind == scheduledProjectionWorkflowTimer {
+	if p.kind == scheduledProjectionWorkflowTimer || p.kind == scheduledProjectionGenericActivation {
 		return "once"
 	}
 	return ""
 }
 
 func (p scheduledProjection) dueAt() time.Time {
-	if p.kind == scheduledProjectionGeneric {
-		return p.generic.At
-	}
 	if p.kind == scheduledProjectionWorkflowTimer {
 		return p.workflow.DueAt()
+	}
+	if p.kind == scheduledProjectionGenericActivation {
+		return p.activation.DueAt()
 	}
 	return time.Time{}
 }
 
 func (p scheduledProjection) clone() scheduledProjection {
-	if p.kind == scheduledProjectionGeneric {
-		p.generic = cloneSchedule(p.generic)
-	}
 	return p
 }
 
 func (p scheduledProjection) fire(
 	ctx context.Context,
-	genericFire func(context.Context, Schedule),
 	workflowTimerFire func(context.Context, WorkflowTimerWakeup),
+	genericActivationFire func(context.Context, runtimegenericschedule.Wakeup),
 ) {
 	switch p.kind {
-	case scheduledProjectionGeneric:
-		if genericFire != nil {
-			genericFire(ctx, p.generic)
-		}
 	case scheduledProjectionWorkflowTimer:
 		if workflowTimerFire == nil {
 			panic("workflow timer scheduler binding became unavailable")
 		}
 		workflowTimerFire(ctx, p.workflow)
-	}
-}
-
-func (s Schedule) EffectiveRunID() string {
-	return strings.TrimSpace(s.RunID)
-}
-
-func (s *Schedule) NormalizeRunID() {
-	if s == nil {
-		return
-	}
-	s.RunID = s.EffectiveRunID()
-}
-
-func (s *Schedule) NormalizeDeliveryContext() {
-	if s == nil {
-		return
-	}
-	s.Context = s.Context.Normalized()
-}
-
-func (s Schedule) EffectiveEntityID() string {
-	return strings.TrimSpace(s.EntityID)
-}
-
-func (s *Schedule) NormalizeEntityID() {
-	if s == nil {
-		return
-	}
-	entityID := s.EffectiveEntityID()
-	s.EntityID = entityID
-}
-
-func (s Schedule) EffectiveFlowInstance() string {
-	return strings.Trim(strings.TrimSpace(s.FlowInstance), "/")
-}
-
-func (s *Schedule) NormalizeFlowInstance() {
-	if s == nil {
-		return
-	}
-	s.FlowInstance = s.EffectiveFlowInstance()
-}
-
-func (s *Schedule) NormalizeOwner() error {
-	if s == nil {
-		return errors.New("schedule is required")
-	}
-	s.OwnerKind = ScheduleOwnerKind(strings.TrimSpace(string(s.OwnerKind)))
-	s.AgentID = strings.TrimSpace(s.AgentID)
-	s.AgentIdentity = s.AgentIdentity.Normalize()
-	switch s.OwnerKind {
-	case ScheduleOwnerAgent:
-		if err := s.AgentIdentity.Validate(); err != nil {
-			return fmt.Errorf("agent-owned schedule requires concrete agent identity: %w", err)
+	case scheduledProjectionGenericActivation:
+		if genericActivationFire == nil {
+			panic("generic schedule lifecycle binding became unavailable")
 		}
-		if s.AgentIdentity.AgentID() != s.AgentID {
-			return errors.New("agent-owned schedule owner does not match concrete agent identity")
-		}
-		if s.AgentIdentity.FlowInstance() != s.EffectiveFlowInstance() {
-			return errors.New("agent-owned schedule flow_instance does not match concrete agent identity")
-		}
-	case ScheduleOwnerSystem:
-		if !s.AgentIdentity.IsZero() {
-			return errors.New("system-owned schedule cannot carry agent identity")
-		}
-	default:
-		return fmt.Errorf("schedule owner_kind %q is invalid", s.OwnerKind)
+		genericActivationFire(ctx, p.activation)
 	}
-	return nil
 }
 
 func (s *Schedule) NormalizeExecutionMode() error {
@@ -211,15 +106,15 @@ func (s *Schedule) NormalizeExecutionMode() error {
 }
 
 type Scheduler struct {
-	mu              sync.Mutex
-	onFire          func(context.Context, Schedule)
-	onWorkflowTimer func(context.Context, WorkflowTimerWakeup)
-	tasks           map[string]*scheduledTask
-	draining        map[*scheduledTask]struct{}
-	reservations    map[string]*PreparedParkedSetRebind
-	transitions     map[*PreparedParkedSetRebind]struct{}
-	stopped         bool
-	owner           worklifetime.Occurrence
+	mu                  sync.Mutex
+	onWorkflowTimer     func(context.Context, WorkflowTimerWakeup)
+	onGenericActivation func(context.Context, runtimegenericschedule.Wakeup)
+	tasks               map[string]*scheduledTask
+	draining            map[*scheduledTask]struct{}
+	reservations        map[string]*PreparedParkedSetRebind
+	transitions         map[*PreparedParkedSetRebind]struct{}
+	stopped             bool
+	owner               worklifetime.Occurrence
 }
 
 type scheduledTask struct {
@@ -280,7 +175,6 @@ type ParkedRebind struct {
 type preparedParkedTask struct {
 	key  string
 	task *scheduledTask
-	spec cronSpec
 }
 
 type preparedParkedSource struct {
@@ -310,18 +204,8 @@ type PreparedParkedSetRebind struct {
 	state     preparedParkedSetState
 }
 
-type cronSpec struct {
-	every    time.Duration
-	schedule cron.Schedule
-}
-
-func NewSchedulerWithWorkOwner(owner worklifetime.Occurrence, callbacks ...func(context.Context, Schedule)) *Scheduler {
-	var cb func(context.Context, Schedule)
-	if len(callbacks) > 0 {
-		cb = callbacks[0]
-	}
+func NewSchedulerWithWorkOwner(owner worklifetime.Occurrence) *Scheduler {
 	return &Scheduler{
-		onFire:       cb,
 		tasks:        make(map[string]*scheduledTask),
 		draining:     make(map[*scheduledTask]struct{}),
 		reservations: make(map[string]*PreparedParkedSetRebind),
@@ -349,23 +233,42 @@ func (s *Scheduler) bindWorkflowTimerLifecycle(callback func(context.Context, Wo
 	return nil
 }
 
-func (s *Scheduler) Register(ctx context.Context, sc Schedule) error {
-	projection, spec, err := newGenericScheduledProjection(sc)
-	if err != nil {
-		return err
+func (s *Scheduler) BindGenericScheduleLifecycle(callback func(context.Context, runtimegenericschedule.Wakeup)) error {
+	if s == nil {
+		return errors.New("generic schedule lifecycle requires a scheduler")
 	}
-	return s.registerProjection(ctx, projection, spec)
+	if callback == nil {
+		return errors.New("generic schedule lifecycle callback is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped {
+		return errors.New("cannot bind generic schedule lifecycle to a stopped scheduler")
+	}
+	if s.onGenericActivation != nil {
+		return errors.New("generic schedule lifecycle is already bound")
+	}
+	s.onGenericActivation = callback
+	return nil
 }
 
 func (s *Scheduler) registerWorkflowTimerWakeup(ctx context.Context, wakeup WorkflowTimerWakeup) error {
-	projection, spec, err := newWorkflowTimerScheduledProjection(wakeup)
+	projection, err := newWorkflowTimerScheduledProjection(wakeup)
 	if err != nil {
 		return err
 	}
-	return s.registerProjection(ctx, projection, spec)
+	return s.registerProjection(ctx, projection)
 }
 
-func (s *Scheduler) registerProjection(ctx context.Context, projection scheduledProjection, spec cronSpec) error {
+func (s *Scheduler) RegisterGenericScheduleWakeup(ctx context.Context, wakeup runtimegenericschedule.Wakeup) error {
+	projection, err := newGenericActivationScheduledProjection(wakeup)
+	if err != nil {
+		return err
+	}
+	return s.registerProjection(ctx, projection)
+}
+
+func (s *Scheduler) registerProjection(ctx context.Context, projection scheduledProjection) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -382,6 +285,10 @@ func (s *Scheduler) registerProjection(ctx context.Context, projection scheduled
 	if projection.kind == scheduledProjectionWorkflowTimer && s.onWorkflowTimer == nil {
 		s.mu.Unlock()
 		return errors.New("workflow timer lifecycle is not bound to scheduler")
+	}
+	if projection.kind == scheduledProjectionGenericActivation && s.onGenericActivation == nil {
+		s.mu.Unlock()
+		return errors.New("generic schedule lifecycle is not bound to scheduler")
 	}
 	key := projection.key()
 	if key == "" {
@@ -411,7 +318,7 @@ func (s *Scheduler) registerProjection(ctx context.Context, projection scheduled
 		}
 		s.tasks[key] = task
 		s.mu.Unlock()
-		s.startTask(key, task, spec)
+		s.startTask(key, task)
 		return nil
 	}
 	standingOwner, _ := worklifetime.StandingProjection(owner)
@@ -421,7 +328,7 @@ func (s *Scheduler) registerProjection(ctx context.Context, projection scheduled
 	}
 	s.tasks[key] = task
 	s.mu.Unlock()
-	s.startTask(key, task, spec)
+	s.startTask(key, task)
 	return nil
 }
 
@@ -451,25 +358,6 @@ func (s *Scheduler) Wait(ctx context.Context) error {
 	return nil
 }
 
-func (s *Scheduler) CancelExact(sc Schedule) error {
-	normalized, _, err := validateSchedule(sc)
-	if err != nil {
-		return err
-	}
-	key := scheduleKey(normalized)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, reserved := s.reservations[key]; reserved {
-		return errors.New("schedule key is reserved by a standing replacement transition")
-	}
-	task, ok := s.tasks[key]
-	if !ok {
-		return nil
-	}
-	s.retireTaskLocked(key, task)
-	return nil
-}
-
 func (s *Scheduler) cancelWorkflowTimerWakeup(ref timeridentity.WorkflowTimerActivationRef) error {
 	ref = ref.Normalize()
 	if ref.ActivationID == "" {
@@ -489,6 +377,56 @@ func (s *Scheduler) cancelWorkflowTimerWakeup(ref timeridentity.WorkflowTimerAct
 		return errors.New("workflow timer key is owned by a different scheduled projection")
 	}
 	s.retireTaskLocked(key, task)
+	return nil
+}
+
+func (s *Scheduler) RetireGenericScheduleWakeup(wakeup runtimegenericschedule.Wakeup) error {
+	if err := wakeup.Validate(); err != nil {
+		return err
+	}
+	key := "generic_schedule|" + wakeup.ActivationID()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, reserved := s.reservations[key]; reserved {
+		return errors.New("generic schedule key is reserved by a standing replacement transition")
+	}
+	task := s.tasks[key]
+	if task == nil {
+		return nil
+	}
+	if task.projection.kind != scheduledProjectionGenericActivation {
+		return errors.New("generic schedule key is owned by a different scheduled projection")
+	}
+	s.retireTaskLocked(key, task)
+	return nil
+}
+
+func (s *Scheduler) StopGenericScheduleWakeups(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	done := make([]<-chan struct{}, 0)
+	for key, task := range s.tasks {
+		if task.projection.kind != scheduledProjectionGenericActivation {
+			continue
+		}
+		s.retireTaskLocked(key, task)
+		done = append(done, task.done)
+	}
+	for task := range s.draining {
+		if task.projection.kind == scheduledProjectionGenericActivation {
+			done = append(done, task.done)
+		}
+	}
+	s.mu.Unlock()
+	for _, taskDone := range done {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-taskDone:
+		}
+	}
 	return nil
 }
 
@@ -602,8 +540,7 @@ func (s *Scheduler) stopWorkflowTimerWakeups(ctx context.Context) error {
 
 // ParkOccurrence withdraws every local timer projection owned by one exact
 // occurrence. Firing and parking linearize under the scheduler lock: an armed
-// projection is restorable, a firing one-shot is consumed, and a firing cron
-// becomes restorable only after its callback settles.
+// projection is restorable and a firing one-shot is consumed.
 func (s *Scheduler) ParkOccurrence(ctx context.Context, owner *worklifetime.StandingOccurrence) (*ParkedOccurrence, error) {
 	if s == nil || owner == nil {
 		return nil, nil
@@ -629,8 +566,7 @@ func (s *Scheduler) ParkOccurrence(ctx context.Context, owner *worklifetime.Stan
 			originalOwner: task.owner,
 			observedState: task.state,
 		}
-		projection.restorable = projection.observedState == scheduledTaskArmed ||
-			(projection.observedState == scheduledTaskFiring && task.projection.mode() == "cron")
+		projection.restorable = projection.observedState == scheduledTaskArmed
 		parked.projections = append(parked.projections, projection)
 		s.retireTaskLocked(key, task)
 	}
@@ -801,7 +737,7 @@ func prepareParkedSet(ctx context.Context, scheduler *Scheduler, bindings []park
 			if executionOwner == nil {
 				return fail(errors.New("parked schedule set requires an exact execution owner"))
 			}
-			normalized, spec, err := validateScheduledProjection(projection.projection.clone())
+			normalized, err := validateScheduledProjection(projection.projection.clone())
 			if err != nil {
 				return fail(fmt.Errorf("validate parked scheduled projection: %w", err))
 			}
@@ -814,7 +750,7 @@ func prepareParkedSet(ctx context.Context, scheduler *Scheduler, bindings []park
 				stop: make(chan struct{}), done: make(chan struct{}), lease: lease,
 				owner: executionOwner, standingOwner: standingOwner, projection: normalized,
 			}
-			transition.tasks = append(transition.tasks, preparedParkedTask{key: normalized.key(), task: task, spec: spec})
+			transition.tasks = append(transition.tasks, preparedParkedTask{key: normalized.key(), task: task})
 		}
 	}
 
@@ -836,6 +772,10 @@ func prepareParkedSet(ctx context.Context, scheduler *Scheduler, bindings []park
 		if prepared.task.projection.kind == scheduledProjectionWorkflowTimer && scheduler.onWorkflowTimer == nil {
 			scheduler.mu.Unlock()
 			return fail(errors.New("target scheduler has no workflow timer lifecycle binding"))
+		}
+		if prepared.task.projection.kind == scheduledProjectionGenericActivation && scheduler.onGenericActivation == nil {
+			scheduler.mu.Unlock()
+			return fail(errors.New("target scheduler has no generic schedule lifecycle binding"))
 		}
 	}
 	for _, key := range transition.keys {
@@ -938,7 +878,7 @@ func (t *PreparedParkedSetRebind) Activate() error {
 	s.mu.Unlock()
 	t.mu.Unlock()
 	for _, prepared := range t.tasks {
-		s.startTask(prepared.key, prepared.task, prepared.spec)
+		s.startTask(prepared.key, prepared.task)
 	}
 	return nil
 }
@@ -1031,27 +971,14 @@ func (s *Scheduler) Stop() {
 	}
 }
 
-func (s *Scheduler) startTask(key string, task *scheduledTask, spec cronSpec) {
-	switch task.projection.mode() {
-	case "once":
-		go func() {
-			defer s.finishTask(key, task)
-			if !task.waitForPrior() {
-				return
-			}
-			s.runOnce(task, key, task.projection)
-		}()
-	case "cron":
-		go func() {
-			defer s.finishTask(key, task)
-			if !task.waitForPrior() {
-				return
-			}
-			s.runCron(task, key, task.projection, spec)
-		}()
-	default:
-		panic("validated schedule mode became unreachable")
-	}
+func (s *Scheduler) startTask(key string, task *scheduledTask) {
+	go func() {
+		defer s.finishTask(key, task)
+		if !task.waitForPrior() {
+			return
+		}
+		s.runOnce(task, key, task.projection)
+	}()
 }
 
 func (task *scheduledTask) waitForPrior() bool {
@@ -1085,55 +1012,8 @@ func (s *Scheduler) runOnce(task *scheduledTask, key string, projection schedule
 		if !s.beginTaskFire(key, task) {
 			return
 		}
-		projection.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), s.onFire, s.onWorkflowTimer)
+		projection.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), s.onWorkflowTimer, s.onGenericActivation)
 		s.endTaskFire(task, false)
-	}
-}
-
-func (s *Scheduler) runCron(task *scheduledTask, key string, projection scheduledProjection, spec cronSpec) {
-	if spec.every > 0 {
-		ticker := time.NewTicker(spec.every)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-task.stop:
-				return
-			case <-task.lease.Context().Done():
-				return
-			case <-ticker.C:
-				if !s.beginTaskFire(key, task) {
-					return
-				}
-				projection.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), s.onFire, s.onWorkflowTimer)
-				if !s.endTaskFire(task, true) {
-					return
-				}
-			}
-		}
-	}
-	for {
-		next := spec.schedule.Next(time.Now())
-		delay := time.Until(next)
-		if delay < 0 {
-			delay = 0
-		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-task.stop:
-			timer.Stop()
-			return
-		case <-task.lease.Context().Done():
-			timer.Stop()
-			return
-		case <-timer.C:
-			if !s.beginTaskFire(key, task) {
-				return
-			}
-			projection.fire(worklifetime.WithOccurrence(task.lease.Context(), task.owner), s.onFire, s.onWorkflowTimer)
-			if !s.endTaskFire(task, true) {
-				return
-			}
-		}
 	}
 }
 
@@ -1192,182 +1072,13 @@ func (s *Scheduler) finishTask(key string, task *scheduledTask) {
 	s.mu.Unlock()
 }
 
-func scheduleKey(sc Schedule) string {
-	fields := agentidentity.StorageFields{}
-	if !sc.AgentIdentity.IsZero() {
-		fields, _ = sc.AgentIdentity.StorageFields()
-	}
-	return strings.Join([]string{
-		strings.TrimSpace(sc.EffectiveRunID()),
-		strings.TrimSpace(sc.AgentID),
-		strings.TrimSpace(string(sc.OwnerKind)),
-		fields.NameOwner,
-		fields.NameSource,
-		fields.RoutePresence,
-		fields.FlowScopeKey,
-		fields.FlowInstanceID,
-		fields.FlowInstancePath,
-		strings.TrimSpace(sc.EventType),
-		strings.TrimSpace(sc.EffectiveEntityID()),
-		strings.TrimSpace(sc.EffectiveFlowInstance()),
-		strings.TrimSpace(sc.TaskID),
-	}, "|")
-}
-
-func cloneSchedule(sc Schedule) Schedule {
-	sc.Payload = append([]byte(nil), sc.Payload...)
-	return sc
-}
-
-func validateSchedule(sc Schedule) (Schedule, cronSpec, error) {
-	if sc.AgentID == "" || sc.EventType == "" {
-		return Schedule{}, cronSpec{}, errors.New("agent_id and event_type are required")
-	}
-	sc.NormalizeRunID()
-	sc.NormalizeDeliveryContext()
-	sc.NormalizeEntityID()
-	sc.NormalizeFlowInstance()
-	if err := sc.NormalizeOwner(); err != nil {
-		return Schedule{}, cronSpec{}, err
-	}
-	if err := sc.NormalizeExecutionMode(); err != nil {
-		return Schedule{}, cronSpec{}, err
-	}
-	var err error
-	sc, err = sc.AdmitEventIdentity()
-	if err != nil {
-		return Schedule{}, cronSpec{}, err
-	}
-	if sc.Mode == "" {
-		sc.Mode = "once"
-	}
-	var spec cronSpec
-	switch sc.Mode {
-	case "once":
-		if sc.At.IsZero() {
-			return Schedule{}, cronSpec{}, errors.New("schedule.at is required for mode=once")
-		}
-	case "cron":
-		var err error
-		spec, err = parseCronSpec(sc.Cron)
-		if err != nil {
-			return Schedule{}, cronSpec{}, err
-		}
-	default:
-		return Schedule{}, cronSpec{}, fmt.Errorf("unsupported schedule mode: %s", sc.Mode)
-	}
-	return sc, spec, nil
-}
-
-func (sc Schedule) ValidateRoutingSource() error {
-	switch sc.RoutingSource.Kind() {
-	case events.RoutingSourceRoot:
-		route := sc.RoutingSource.Route()
-		if route.EntityID != sc.EntityID || sc.FlowInstance != "" {
-			return errors.New("root-owned schedule routing source does not match its persisted entity scope")
-		}
-		if sc.OwnerKind == ScheduleOwnerSystem {
-			return sc.validateSystemJoinDeclaration()
-		}
-	case events.RoutingSourceFlowOwnedControl:
-		route := sc.RoutingSource.Route()
-		if route.FlowInstance != sc.FlowInstance || route.EntityID != sc.EntityID {
-			return errors.New("flow-owned schedule routing source does not match its persisted scope")
-		}
-		if sc.OwnerKind == ScheduleOwnerAgent {
-			flowScopeKey, _, _, present := sc.AgentIdentity.Route.Fields()
-			if !present || route.FlowID != flowScopeKey {
-				return errors.New("flow-owned schedule routing source does not match its concrete agent flow scope")
-			}
-		} else if sc.OwnerKind == ScheduleOwnerSystem {
-			return sc.validateSystemJoinDeclaration()
-		}
-	case events.RoutingSourcePlatformControl:
-		if sc.OwnerKind != ScheduleOwnerSystem || sc.EntityID != "" || sc.FlowInstance != "" {
-			return errors.New("platform-control schedule must be a closed system schedule without flow or entity scope")
-		}
-	default:
-		return errors.New("schedule requires an exact flow-owned or platform-control routing source")
-	}
-	return nil
-}
-
-func (sc Schedule) validateSystemJoinDeclaration() error {
-	var payload map[string]any
-	if err := json.Unmarshal(sc.Payload, &payload); err != nil || payload == nil {
-		return errors.New("flow- or root-owned system schedule requires a join timer handle")
-	}
-	ref, kind, ok := timeridentity.ParseJoinRef(payload)
-	if !ok {
-		return errors.New("flow- or root-owned system schedule requires a valid join timer handle")
-	}
-	handle := timeridentity.JoinTimeoutHandle(ref)
-	expectedEvent := joinTimeoutEvent
-	if kind == timeridentity.TimerHandleJoinComplete {
-		handle = timeridentity.JoinCompleteHandle(ref)
-		expectedEvent = joinCompleteEvent
-	}
-	if strings.TrimSpace(sc.TaskID) != handle.TaskID() {
-		return errors.New("system join schedule task identity does not match its timer handle")
-	}
-	if strings.TrimSpace(sc.AgentID) != runtimeWorkflowID {
-		return errors.New("system join schedule owner does not match the workflow runtime")
-	}
-	if strings.TrimSpace(sc.EventType) != expectedEvent {
-		return errors.New("system join schedule event does not match its timer handle")
-	}
-	if sc.RoutingSource.Route().FlowID != ref.FlowID {
-		return errors.New("system join schedule source flow does not match its timer handle")
-	}
-	return nil
-}
-
-func (sc Schedule) AdmitEventIdentity() (Schedule, error) {
-	if err := sc.ValidateRoutingSource(); err != nil {
-		return Schedule{}, err
-	}
-	admitted, err := events.AdmitRuntimeControlEventType(events.EventType(sc.EventType), sc.RoutingSource)
-	if err != nil {
-		return Schedule{}, err
-	}
-	sc.EventType = string(admitted)
-	return sc, nil
-}
-
-func validateScheduledProjection(projection scheduledProjection) (scheduledProjection, cronSpec, error) {
+func validateScheduledProjection(projection scheduledProjection) (scheduledProjection, error) {
 	switch projection.kind {
-	case scheduledProjectionGeneric:
-		normalized, spec, err := newGenericScheduledProjection(projection.generic)
-		if err != nil {
-			return scheduledProjection{}, cronSpec{}, err
-		}
-		return normalized, spec, nil
 	case scheduledProjectionWorkflowTimer:
 		return newWorkflowTimerScheduledProjection(projection.workflow)
+	case scheduledProjectionGenericActivation:
+		return newGenericActivationScheduledProjection(projection.activation)
 	default:
-		return scheduledProjection{}, cronSpec{}, errors.New("scheduled projection kind is invalid")
+		return scheduledProjection{}, errors.New("scheduled projection kind is invalid")
 	}
-}
-
-func parseCronSpec(expr string) (cronSpec, error) {
-	expr = strings.TrimSpace(expr)
-	if expr == "" {
-		return cronSpec{}, errors.New("schedule.cron is required for mode=cron")
-	}
-	if strings.HasPrefix(expr, "@every ") {
-		d, err := time.ParseDuration(strings.TrimSpace(strings.TrimPrefix(expr, "@every ")))
-		if err != nil {
-			return cronSpec{}, fmt.Errorf("invalid @every duration: %w", err)
-		}
-		if d <= 0 {
-			return cronSpec{}, errors.New("interval must be > 0")
-		}
-		return cronSpec{every: d}, nil
-	}
-	parser := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
-	s, err := parser.Parse(expr)
-	if err == nil {
-		return cronSpec{schedule: s}, nil
-	}
-	return cronSpec{}, fmt.Errorf("invalid cron expression %q", expr)
 }

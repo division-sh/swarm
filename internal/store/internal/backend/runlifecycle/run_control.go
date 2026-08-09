@@ -11,6 +11,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/google/uuid"
 )
@@ -250,7 +251,7 @@ func (s *RunLifecyclePostgresOwner) stopRunControlTx(ctx context.Context, tx *sq
 	if !lifecycleState.Active() {
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: state.RunID, CurrentStatus: state.Status}
 	}
-	abandoned, err := s.quiesceStoppedRunWorkTx(ctx, tx, story, state.RunID, req.Reason, req.Now.UTC())
+	abandoned, cancellations, err := s.quiesceStoppedRunWorkTx(ctx, tx, story, state.RunID, req.Reason, req.Now.UTC())
 	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
@@ -278,6 +279,7 @@ func (s *RunLifecyclePostgresOwner) stopRunControlTx(ctx context.Context, tx *sq
 	state.ControlledBy = req.ControlledBy
 	state.UpdatedAt = req.Now.UTC()
 	state.AbandonedDeliveries = abandoned
+	state.TimerCancellations = cancellations
 	return state, nil
 }
 
@@ -293,19 +295,20 @@ func rejectPostgresStandingRunStopTx(ctx context.Context, tx *sql.Tx, runID stri
 	return fmt.Errorf("run %s is owned by standing service %s; use `swarm standing suspend %s` or `swarm standing reset %s`", runID, serviceID, serviceID, serviceID)
 }
 
-func (s *RunLifecyclePostgresOwner) quiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, runID, reason string, now time.Time) (int, error) {
+func (s *RunLifecyclePostgresOwner) quiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, runID, reason string, now time.Time) (int, []runtimetimercancellation.Ref, error) {
 	deliveries, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, runID, "run_stopped")
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if _, err := s.pipeline.TerminalizeRunTx(ctx, tx, runID, runtimepipelineobligation.DeadLetter("run_stopped", nil), now); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if _, err := terminateActiveRunSessionsTx(ctx, tx, []string{runID}, "run_stopped", now); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	if _, err := cancelActiveRunTimersTx(ctx, tx, []string{runID}); err != nil {
-		return 0, err
+	cancellations, err := cancelActiveRunTimerFamiliesTx(ctx, tx, true, []string{runID}, "run_stopped", now)
+	if err != nil {
+		return 0, nil, err
 	}
-	return len(deliveries), nil
+	return len(deliveries), cancellations, nil
 }

@@ -3,7 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
-	"fmt"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,8 +18,8 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -627,70 +627,77 @@ func TestRunForkRevisionSessionProjectionIgnoresExcludedWriterChurnAndTracksStat
 	}
 }
 
-func TestScheduleNoOpTerminalMutationsDoNotPublishRunForkRevision(t *testing.T) {
+func TestGenericScheduleDuplicateCancellationDoesNotPublishRunForkRevision(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	store := admitTestPostgresStore(t, db)
-
-	tests := []struct {
-		name   string
-		mutate func(context.Context, *PostgresStore, runtimepipeline.Schedule) error
-	}{
-		{
-			name: "mark exact fired",
-			mutate: func(ctx context.Context, store *PostgresStore, schedule runtimepipeline.Schedule) error {
-				return store.MarkScheduleFiredExact(ctx, schedule)
-			},
-		},
-		{
-			name: "cancel exact",
-			mutate: func(ctx context.Context, store *PostgresStore, schedule runtimepipeline.Schedule) error {
-				return store.CancelScheduleExact(ctx, schedule)
-			},
-		},
+	command := testAgentGenericScheduleCommand(
+		t, runID, "revision-agent", "revision-flow/instance", uuid.NewString(), "revision-task",
+		runtimegenericschedule.AbsoluteDue(time.Now().Add(time.Hour)),
+	)
+	admitted, err := store.AdmitGenericSchedule(ctx, command)
+	if err != nil {
+		t.Fatalf("admit generic schedule: %v", err)
 	}
-
-	for index, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			agentID := fmt.Sprintf("revision-agent-%d", index)
-			flowInstance := fmt.Sprintf("revision-flow-%d/instance", index)
-			schedule := runtimepipeline.Schedule{
-				RunID:         runID,
-				AgentID:       agentID,
-				OwnerKind:     runtimepipeline.ScheduleOwnerAgent,
-				AgentIdentity: testAgentIdentity(t, agentID, flowInstance),
-				EventType:     fmt.Sprintf("revision.timer.%d", index),
-				Mode:          "once",
-				At:            time.Now().Add(time.Hour),
-				EntityID:      uuid.NewString(),
-				FlowInstance:  flowInstance,
-				TaskID:        fmt.Sprintf("revision-task-%d", index),
-				Payload:       []byte(`{}`),
-			}
-			schedule = testAgentOwnedSchedule(t, schedule)
-			if err := store.UpsertSchedule(ctx, schedule); err != nil {
-				t.Fatalf("upsert schedule: %v", err)
-			}
-			if err := test.mutate(ctx, store, schedule); err != nil {
-				t.Fatalf("first mutation: %v", err)
-			}
-			var revision int64
-			if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, runID).Scan(&revision); err != nil {
-				t.Fatalf("load revision after terminal mutation: %v", err)
-			}
-			if err := test.mutate(ctx, store, schedule); err != nil {
-				t.Fatalf("duplicate mutation: %v", err)
-			}
-			var afterDuplicate int64
-			if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, runID).Scan(&afterDuplicate); err != nil {
-				t.Fatalf("load revision after duplicate mutation: %v", err)
-			}
-			if afterDuplicate != revision {
-				t.Fatalf("revision after duplicate mutation = %d, want unchanged %d", afterDuplicate, revision)
-			}
-		})
+	var admittedRevision int64
+	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, runID).Scan(&admittedRevision); err != nil {
+		t.Fatalf("load revision after admission: %v", err)
+	}
+	var admittedFact []byte
+	if err := db.QueryRowContext(ctx, `SELECT fact FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND family='timers' AND fact_key=$2 AND revision=$3 AND present`, runID, admitted.Activation.ID, admittedRevision).Scan(&admittedFact); err != nil {
+		t.Fatalf("load projected admission fact: %v", err)
+	}
+	var admission map[string]any
+	if err := json.Unmarshal(admittedFact, &admission); err != nil {
+		t.Fatalf("decode projected admission fact: %v", err)
+	}
+	for field, want := range map[string]string{
+		"schedule_key": command.ScheduleKey, "immutable_hash": admitted.Activation.ImmutableHash,
+		"due_basis_kind": string(command.Due.Kind), "owner_kind": string(command.OwnerKind),
+		"owner_agent": command.OwnerID, "task_id": command.TaskID, "status": string(runtimegenericschedule.StatusActive),
+	} {
+		if got, _ := admission[field].(string); got != want {
+			t.Fatalf("projected admission %s = %q, want %q; fact=%s", field, got, want, admittedFact)
+		}
+	}
+	cancel := runtimegenericschedule.CancelCommand{
+		ActivationID: admitted.Activation.ID, Cause: "test_cancel", CancelledAt: time.Now(),
+	}
+	if _, err := store.CancelGenericSchedule(ctx, cancel); err != nil {
+		t.Fatalf("first cancellation: %v", err)
+	}
+	var revision int64
+	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, runID).Scan(&revision); err != nil {
+		t.Fatalf("load revision after terminal mutation: %v", err)
+	}
+	if revision <= admittedRevision {
+		t.Fatalf("cancellation revision = %d, want after admission revision %d", revision, admittedRevision)
+	}
+	var cancelledFact []byte
+	if err := db.QueryRowContext(ctx, `SELECT fact FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND family='timers' AND fact_key=$2 AND revision=$3 AND present`, runID, admitted.Activation.ID, revision).Scan(&cancelledFact); err != nil {
+		t.Fatalf("load projected cancellation fact: %v", err)
+	}
+	var cancellation map[string]any
+	if err := json.Unmarshal(cancelledFact, &cancellation); err != nil {
+		t.Fatalf("decode projected cancellation fact: %v", err)
+	}
+	if got, _ := cancellation["status"].(string); got != string(runtimegenericschedule.StatusCancelled) {
+		t.Fatalf("projected cancellation status = %q, want cancelled; fact=%s", got, cancelledFact)
+	}
+	if got, _ := cancellation["cancel_cause"].(string); got != cancel.Cause {
+		t.Fatalf("projected cancel cause = %q, want %q; fact=%s", got, cancel.Cause, cancelledFact)
+	}
+	if _, err := store.CancelGenericSchedule(ctx, cancel); err != nil {
+		t.Fatalf("duplicate cancellation: %v", err)
+	}
+	var afterDuplicate int64
+	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, runID).Scan(&afterDuplicate); err != nil {
+		t.Fatalf("load revision after duplicate mutation: %v", err)
+	}
+	if afterDuplicate != revision {
+		t.Fatalf("revision after duplicate cancellation = %d, want unchanged %d", afterDuplicate, revision)
 	}
 }
 
@@ -699,12 +706,12 @@ func TestRunForkRevisionDeletionPublishesTombstoneAndUnrevisionedDriftFailsClose
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	timerID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "revision.delete", events.EventProducerPlatform, "revision-test", "", "", time.Now().UTC())
-	if _, err := db.ExecContext(ctx, `INSERT INTO timers (timer_id,run_id,timer_name,fire_event,routing_source,execution_mode,fire_at,owner_agent,owner_kind,task_type,status) VALUES ($1::uuid,$2::uuid,'revision-delete','timer.fire','{"kind":"platform_control","route":{}}'::jsonb,'live',NOW(),'agent-a','system','timer','active')`, timerID, runID); err != nil {
-		t.Fatalf("seed timer: %v", err)
-	}
+	timer := admitGenericScheduleFixture(t, ctx, admitTestPostgresStore(t, db), testRootGenericScheduleCommand(
+		t, runID, uuid.NewString(), "revision-delete", runtimegenericschedule.DelayDue(time.Hour),
+	))
+	timerID := timer.ID
 	firstRevision := captureRunForkTestRevision(t, db, runID)
 	if _, err := db.ExecContext(ctx, `DELETE FROM timers WHERE timer_id=$1::uuid`, timerID); err != nil {
 		t.Fatalf("delete timer: %v", err)

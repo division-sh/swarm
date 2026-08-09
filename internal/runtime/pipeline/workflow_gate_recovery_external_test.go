@@ -91,7 +91,6 @@ type gateRecoveryStoreCase struct {
 
 type gateRecoverySelectedStore interface {
 	scopedTestDurableStore
-	runtimepipeline.SchedulePersistence
 }
 
 type gateRecoveryDecisionStore interface {

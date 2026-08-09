@@ -141,14 +141,6 @@ func (s *PostgresStore) CancelDecisionCardInput(ctx context.Context, req decisio
 	return s.decisionPostgresOwner.CancelDecisionCardInput(ctx, req)
 }
 
-func (s *PostgresStore) CancelScheduleExact(ctx context.Context, sc pipeline.Schedule) error {
-	return s.schedulePostgresOwner.CancelScheduleExact(ctx, sc)
-}
-
-func (s *PostgresStore) CancelScheduleExactTerminal(ctx context.Context, sc pipeline.Schedule) error {
-	return s.schedulePostgresOwner.CancelScheduleExactTerminal(ctx, sc)
-}
-
 func (s *PostgresStore) ClaimActivityAttemptForLoopGeneration(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
 	return s.activityPostgresOwner.ClaimActivityAttemptForLoopGeneration(ctx, record)
 }
@@ -163,10 +155,6 @@ func (s *PostgresStore) ClaimReplyContext(ctx context.Context, id string, replyE
 
 func (s *PostgresStore) ClaimRunForkSelectedContractRuntimeExecution(ctx context.Context, issued runfork.SelectedContractRuntimeExecution, owner string, lease time.Duration) (effects.Authority, error) {
 	return s.runForkPostgresOwner.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, owner, lease)
-}
-
-func (s *PostgresStore) ClaimSchedule(ctx context.Context, sc pipeline.Schedule) (bool, error) {
-	return s.schedulePostgresOwner.ClaimSchedule(ctx, sc)
 }
 
 func (s *PostgresStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) error {
@@ -243,10 +231,6 @@ func (s *PostgresStore) CompleteHumanTaskOutcome(ctx context.Context, cardID str
 
 func (s *PostgresStore) CompleteProposedEffectRoute(ctx context.Context, cardID string, routeEventID string, at time.Time) (decisioncard.ProposedEffectContinuation, error) {
 	return s.decisionPostgresOwner.CompleteProposedEffectRoute(ctx, cardID, routeEventID, at)
-}
-
-func (s *PostgresStore) CompleteScheduleFireExact(ctx context.Context, sc pipeline.Schedule) error {
-	return s.schedulePostgresOwner.CompleteScheduleFireExact(ctx, sc)
 }
 
 func (s *PostgresStore) ContinueRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
@@ -565,10 +549,6 @@ func (s *PostgresStore) LoadActiveConversation(ctx context.Context, identity age
 	return s.lLMPostgresOwner.LoadActiveConversation(ctx, identity)
 }
 
-func (s *PostgresStore) LoadActiveSchedules(ctx context.Context) ([]pipeline.Schedule, error) {
-	return s.schedulePostgresOwner.LoadActiveSchedules(ctx)
-}
-
 func (s *PostgresStore) LoadActiveWorkflowRoute(ctx context.Context, instancePath string) (workflowroute.RecoveryRecord, error) {
 	return s.pipelinePostgresOwner.LoadActiveWorkflowRoute(ctx, instancePath)
 }
@@ -765,10 +745,6 @@ func (s *PostgresStore) MarkMailboxItemNotified(ctx context.Context, id string) 
 	return s.mailboxPostgresOwner.MarkMailboxItemNotified(ctx, id)
 }
 
-func (s *PostgresStore) MarkScheduleFiredExact(ctx context.Context, sc pipeline.Schedule) error {
-	return s.schedulePostgresOwner.MarkScheduleFiredExact(ctx, sc)
-}
-
 func (s *PostgresStore) MarkTerminalRun(ctx context.Context, request runlifecycle.TerminalRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error) {
 	return s.runLifecyclePostgresOwner.MarkTerminalRun(ctx, request)
 }
@@ -838,7 +814,7 @@ func (s *PostgresStore) QuiesceRunForkSelectedContractRuntimeExecution(ctx conte
 }
 
 func (s *PostgresStore) Read(ctx context.Context, scope timerobligation.Scope, observedAt time.Time) (timerobligation.Snapshot, error) {
-	return s.schedulePostgresOwner.Read(ctx, scope, observedAt)
+	return s.timerObligationPostgresReader.Read(ctx, scope, observedAt)
 }
 
 func (s *PostgresStore) ReadResetInventory(ctx context.Context) (destructivereset.Inventory, error) {
@@ -846,7 +822,7 @@ func (s *PostgresStore) ReadResetInventory(ctx context.Context) (destructiverese
 }
 
 func (s *PostgresStore) ReadTimerObligations(ctx context.Context, scope timerobligation.Scope, observedAt time.Time) (timerobligation.Snapshot, error) {
-	return s.schedulePostgresOwner.ReadTimerObligations(ctx, scope, observedAt)
+	return s.timerObligationPostgresReader.ReadTimerObligations(ctx, scope, observedAt)
 }
 
 func (s *PostgresStore) ReconcileDirectiveOperation(ctx context.Context, operationID string, now time.Time, ttl time.Duration) (agentcontrol.DirectiveOperation, bool, error) {
@@ -911,14 +887,6 @@ func (s *PostgresStore) RegisterCompletionCandidateSink(ctx context.Context, sco
 
 func (s *PostgresStore) Release(ctx context.Context, lease *sessions.Lease) error {
 	return s.lLMPostgresOwner.Release(ctx, lease)
-}
-
-func (s *PostgresStore) ReleaseSchedule(ctx context.Context, sc pipeline.Schedule) error {
-	return s.schedulePostgresOwner.ReleaseSchedule(ctx, sc)
-}
-
-func (s *PostgresStore) ReleaseScheduleClaims(ctx context.Context) error {
-	return s.schedulePostgresOwner.ReleaseScheduleClaims(ctx)
 }
 
 func (s *PostgresStore) RenewClaim(ctx context.Context, claim deliverylifecycle.Claim) (deliverylifecycle.Snapshot, error) {
@@ -1157,10 +1125,6 @@ func (s *PostgresStore) UpsertRoutingRule(ctx context.Context, rule manager.Pers
 	return s.routingPostgresOwner.UpsertRoutingRule(ctx, rule)
 }
 
-func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc pipeline.Schedule) error {
-	return s.schedulePostgresOwner.UpsertSchedule(ctx, sc)
-}
-
 func (s *PostgresStore) ValidateInboundPublicationIntegrity(ctx context.Context) error {
 	return s.eventPostgresOwner.ValidateInboundPublicationIntegrity(ctx)
 }
@@ -1233,14 +1197,6 @@ func (s *SQLiteRuntimeStore) CancelDecisionCardInput(ctx context.Context, req de
 	return s.decisionSQLiteOwner.CancelDecisionCardInput(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) CancelScheduleExact(ctx context.Context, sc pipeline.Schedule) error {
-	return s.scheduleSQLiteOwner.CancelScheduleExact(ctx, sc)
-}
-
-func (s *SQLiteRuntimeStore) CancelScheduleExactTerminal(ctx context.Context, sc pipeline.Schedule) error {
-	return s.scheduleSQLiteOwner.CancelScheduleExactTerminal(ctx, sc)
-}
-
 func (s *SQLiteRuntimeStore) ClaimActivityAttemptForLoopGeneration(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
 	return s.activitySQLiteOwner.ClaimActivityAttemptForLoopGeneration(ctx, record)
 }
@@ -1255,10 +1211,6 @@ func (s *SQLiteRuntimeStore) ClaimReplyContext(ctx context.Context, id string, r
 
 func (s *SQLiteRuntimeStore) ClaimRunForkSelectedContractRuntimeExecution(ctx context.Context, issued runfork.SelectedContractRuntimeExecution, owner string, lease time.Duration) (effects.Authority, error) {
 	return s.runForkSQLiteOwner.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, owner, lease)
-}
-
-func (s *SQLiteRuntimeStore) ClaimSchedule(ctx context.Context, sc pipeline.Schedule) (bool, error) {
-	return s.scheduleSQLiteOwner.ClaimSchedule(ctx, sc)
 }
 
 func (s *SQLiteRuntimeStore) CloseRunForkSelectedContractRuntimeExecution(ctx context.Context, executionID string) error {
@@ -1335,10 +1287,6 @@ func (s *SQLiteRuntimeStore) CompleteHumanTaskOutcome(ctx context.Context, cardI
 
 func (s *SQLiteRuntimeStore) CompleteProposedEffectRoute(ctx context.Context, cardID string, routeEventID string, at time.Time) (decisioncard.ProposedEffectContinuation, error) {
 	return s.decisionSQLiteOwner.CompleteProposedEffectRoute(ctx, cardID, routeEventID, at)
-}
-
-func (s *SQLiteRuntimeStore) CompleteScheduleFireExact(ctx context.Context, sc pipeline.Schedule) error {
-	return s.scheduleSQLiteOwner.CompleteScheduleFireExact(ctx, sc)
 }
 
 func (s *SQLiteRuntimeStore) ContinueRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
@@ -1617,10 +1565,6 @@ func (s *SQLiteRuntimeStore) LoadActiveConversation(ctx context.Context, identit
 	return s.lLMSQLiteOwner.LoadActiveConversation(ctx, identity)
 }
 
-func (s *SQLiteRuntimeStore) LoadActiveSchedules(ctx context.Context) ([]pipeline.Schedule, error) {
-	return s.scheduleSQLiteOwner.LoadActiveSchedules(ctx)
-}
-
 func (s *SQLiteRuntimeStore) LoadActiveWorkflowRoute(ctx context.Context, instancePath string) (workflowroute.RecoveryRecord, error) {
 	return s.pipelineSQLiteOwner.LoadActiveWorkflowRoute(ctx, instancePath)
 }
@@ -1789,10 +1733,6 @@ func (s *SQLiteRuntimeStore) MarkMailboxItemNotified(ctx context.Context, id str
 	return s.mailboxSQLiteOwner.MarkMailboxItemNotified(ctx, id)
 }
 
-func (s *SQLiteRuntimeStore) MarkScheduleFiredExact(ctx context.Context, sc pipeline.Schedule) error {
-	return s.scheduleSQLiteOwner.MarkScheduleFiredExact(ctx, sc)
-}
-
 func (s *SQLiteRuntimeStore) MarkTerminalRun(ctx context.Context, request runlifecycle.TerminalRequest) (runlifecycle.Snapshot, runlifecycle.MutationDisposition, error) {
 	return s.runLifecycleSQLiteOwner.MarkTerminalRun(ctx, request)
 }
@@ -1846,11 +1786,11 @@ func (s *SQLiteRuntimeStore) QuiesceRunForkSelectedContractRuntimeExecution(ctx 
 }
 
 func (s *SQLiteRuntimeStore) Read(ctx context.Context, scope timerobligation.Scope, observedAt time.Time) (timerobligation.Snapshot, error) {
-	return s.scheduleSQLiteOwner.Read(ctx, scope, observedAt)
+	return s.timerObligationSQLiteReader.Read(ctx, scope, observedAt)
 }
 
 func (s *SQLiteRuntimeStore) ReadTimerObligations(ctx context.Context, scope timerobligation.Scope, observedAt time.Time) (timerobligation.Snapshot, error) {
-	return s.scheduleSQLiteOwner.ReadTimerObligations(ctx, scope, observedAt)
+	return s.timerObligationSQLiteReader.ReadTimerObligations(ctx, scope, observedAt)
 }
 
 func (s *SQLiteRuntimeStore) ReconcileDirectiveOperation(ctx context.Context, operationID string, now time.Time, ttl time.Duration) (agentcontrol.DirectiveOperation, bool, error) {
@@ -1911,14 +1851,6 @@ func (s *SQLiteRuntimeStore) RegisterCompletionCandidateSink(ctx context.Context
 
 func (s *SQLiteRuntimeStore) Release(ctx context.Context, lease *sessions.Lease) error {
 	return s.lLMSQLiteOwner.Release(ctx, lease)
-}
-
-func (s *SQLiteRuntimeStore) ReleaseSchedule(arg0 context.Context, arg1 pipeline.Schedule) error {
-	return s.scheduleSQLiteOwner.ReleaseSchedule(arg0, arg1)
-}
-
-func (s *SQLiteRuntimeStore) ReleaseScheduleClaims(arg0 context.Context) error {
-	return s.scheduleSQLiteOwner.ReleaseScheduleClaims(arg0)
 }
 
 func (s *SQLiteRuntimeStore) RenewClaim(ctx context.Context, claim deliverylifecycle.Claim) (deliverylifecycle.Snapshot, error) {
@@ -2139,10 +2071,6 @@ func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec llm.Con
 
 func (s *SQLiteRuntimeStore) UpsertFlowInstanceRoute(ctx context.Context, route bus.FlowInstanceRouteRecord) error {
 	return s.pipelineSQLiteOwner.UpsertFlowInstanceRoute(ctx, route)
-}
-
-func (s *SQLiteRuntimeStore) UpsertSchedule(ctx context.Context, sc pipeline.Schedule) error {
-	return s.scheduleSQLiteOwner.UpsertSchedule(ctx, sc)
 }
 
 func (s *SQLiteRuntimeStore) ValidateInboundPublicationIntegrity(ctx context.Context) error {

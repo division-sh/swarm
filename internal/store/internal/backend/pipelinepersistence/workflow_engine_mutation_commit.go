@@ -501,7 +501,7 @@ func commitWorkflowEngineMutation(
 			return err
 		}
 		runtimeStory := runtimeAuthorActivityMutation(story)
-		result.Lifecycle, err = commitWorkflowEngineLifecycle(txctx, tx, runtimeStory, store.workflowDecisionLifecycleOwner(), postgres, command.Lifecycle)
+		result.Lifecycle, err = commitWorkflowEngineLifecycle(txctx, tx, runtimeStory, store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), postgres, command.Lifecycle)
 		if err != nil {
 			return err
 		}

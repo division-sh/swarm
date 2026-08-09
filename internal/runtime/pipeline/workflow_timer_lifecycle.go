@@ -10,7 +10,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -171,19 +170,6 @@ func workflowTimerShouldStartOnTransition(timer runtimecontracts.WorkflowTimerCo
 	}
 	startTrigger, ok := workflowTimerStartTrigger(timer)
 	return ok && workflowTimerLifecycleMatches(startTrigger, nextStage, sourceEvent)
-}
-
-func scheduleWithRunIDFromContext(ctx context.Context, sc Schedule) Schedule {
-	if strings.TrimSpace(sc.RunID) == "" {
-		sc.RunID = runtimecorrelation.RunIDFromContext(ctx)
-	}
-	if strings.TrimSpace(sc.RunID) == "" {
-		if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
-			sc.RunID = strings.TrimSpace(inbound.RunID())
-		}
-	}
-	sc.NormalizeRunID()
-	return sc
 }
 
 func workflowTimerDuration(timer runtimecontracts.WorkflowTimerContract, policy map[string]any) time.Duration {

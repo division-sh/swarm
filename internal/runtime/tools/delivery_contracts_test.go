@@ -36,7 +36,7 @@ review_subject:
   metadata: metadata
 `)
 
-	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		WorkflowSource: semanticview.Wrap(bundle),
 	})
 	defs := exec.ToolDefinitionsForActor(actor)
@@ -107,7 +107,7 @@ signal:
 		},
 	})
 
-	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		WorkflowSource: semanticview.Wrap(bundle),
 	})
 	defs := exec.ToolDefinitionsForActor(actor)
@@ -151,7 +151,7 @@ vertical:
 		},
 	})
 
-	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		WorkflowSource: semanticview.Wrap(bundle),
 	})
 	defs := exec.ToolDefinitionsForActor(lifecycle)
@@ -197,7 +197,7 @@ validation_case:
 		},
 	})
 
-	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		WorkflowSource: semanticview.Wrap(bundle),
 	})
 	defs := exec.ToolDefinitionsForActor(lifecycle)

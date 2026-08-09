@@ -331,7 +331,7 @@ func (rt *Runtime) startupTimerObligationReader() (runtimetimerobligation.Reader
 	if rt == nil {
 		return nil, nil
 	}
-	if rt.scheduleStore != nil {
+	if rt.GenericSchedules != nil {
 		reader := rt.timerObligationReader
 		if reader == nil {
 			return nil, fmt.Errorf("inspect timer obligations: selected schedule store lacks timer obligation authority")

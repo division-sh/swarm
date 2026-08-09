@@ -203,9 +203,6 @@ func (a WorkflowTimerActivation) validate() error {
 	if err := json.Unmarshal(a.Payload, &payload); err != nil || payload == nil {
 		return fmt.Errorf("workflow timer business payload must be a JSON object")
 	}
-	if _, reserved := payload["__schedule_task_id"]; reserved {
-		return fmt.Errorf("workflow timer business payload cannot carry generic schedule identity")
-	}
 	lineageFacts := 0
 	for _, fact := range []string{a.SourceTimerID, a.ForkedFromRunID, a.ForkedFromEventID, a.ReconstructionOwner} {
 		if fact != "" {

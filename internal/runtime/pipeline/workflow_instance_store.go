@@ -30,18 +30,6 @@ import (
 	"github.com/lib/pq"
 )
 
-type SchedulePersistence interface {
-	UpsertSchedule(ctx context.Context, sc Schedule) error
-	CancelScheduleExact(ctx context.Context, sc Schedule) error
-	CancelScheduleExactTerminal(ctx context.Context, sc Schedule) error
-	LoadActiveSchedules(ctx context.Context) ([]Schedule, error)
-	MarkScheduleFiredExact(ctx context.Context, sc Schedule) error
-	CompleteScheduleFireExact(ctx context.Context, sc Schedule) error
-	ClaimSchedule(ctx context.Context, sc Schedule) (bool, error)
-	ReleaseSchedule(ctx context.Context, sc Schedule) error
-	ReleaseScheduleClaims(ctx context.Context) error
-}
-
 func (s *workflowInstanceStore) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
 	if s == nil || s.timerObligations == nil {
 		return runtimetimerobligation.Snapshot{}, fmt.Errorf("timer obligation reader requires workflow store")

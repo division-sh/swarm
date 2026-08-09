@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -24,6 +23,7 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -40,6 +40,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -124,7 +125,7 @@ type RuntimeDeps struct {
 	ManagedCapabilitiesStore       managedcapabilities.Persistence
 	DeliveryStore                  runtimedelivery.Store
 	PipelineObligations            runtimepipelineobligation.Store
-	ScheduleStore                  runtimepipeline.SchedulePersistence
+	GenericScheduleStore           runtimegenericschedule.Store
 	TimerObligationReader          runtimetimerobligation.Reader
 	MailboxMaterializer            runtimepipeline.MailboxWriteMaterializationStore
 	DecisionCards                  decisioncard.Store
@@ -241,7 +242,6 @@ type Runtime struct {
 	startupOwnership           runtimestartupownership.Store
 	runLifecycleCandidates     runtimerunlifecycle.CandidateOwner
 	deliveryStore              runtimedelivery.Store
-	scheduleStore              runtimepipeline.SchedulePersistence
 	timerObligationReader      runtimetimerobligation.Reader
 	mailboxStore               runtimetools.MailboxPersistence
 	effectsStore               runtimeeffects.Store
@@ -254,6 +254,7 @@ type Runtime struct {
 	Pipeline           *runtimepipeline.PipelineCoordinator
 	SystemNodes        []runtimepipeline.BackgroundNode
 	Scheduler          *runtimepipeline.Scheduler
+	GenericSchedules   *runtimegenericschedule.Lifecycle
 	Workspace          workspace.Lifecycle
 	Budget             *BudgetTracker
 	Credentials        runtimecredentials.Store
@@ -1018,7 +1019,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		startupOwnership:          runtimeDeps.StartupOwnership,
 		runLifecycleCandidates:    runtimeDeps.RunLifecycleCandidates,
 		deliveryStore:             runtimeDeps.DeliveryStore,
-		scheduleStore:             runtimeDeps.ScheduleStore,
 		timerObligationReader:     runtimeDeps.TimerObligationReader,
 		mailboxStore:              runtimeDeps.MailboxStore,
 		effectsStore:              runtimeDeps.EffectsStore,
@@ -1081,37 +1081,20 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		rt.RunControl = runtimeruncontrol.NewController(runtimeDeps.RunControlStore, rt.Bus, runtimeruncontrol.Options{})
 		rt.Bus.SetRunDispatchGate(rt.RunControl)
 	}
-	rt.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(workOccurrence, func(taskCtx context.Context, sc runtimepipeline.Schedule) {
-		callbackCtx, cancel := context.WithTimeout(taskCtx, 10*time.Second)
-		defer cancel()
-		callbackCtx = events.WithDeliveryContext(callbackCtx, sc.Context)
-		scheduled, constructErr := scheduledEvent(sc)
-		if constructErr == nil {
-			constructErr = rt.Bus.Publish(callbackCtx, scheduled)
+	rt.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(workOccurrence)
+	if runtimeDeps.GenericScheduleStore != nil {
+		genericSchedules, err := runtimegenericschedule.NewLifecycle(
+			runtimeDeps.GenericScheduleStore,
+			rt.Scheduler,
+			rt.Bus,
+			rt.Bus.EngineDispatcher(),
+			genericScheduleRuntimeLogger{logger: rt.Logger},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("build generic schedule lifecycle: %w", err)
 		}
-		if constructErr != nil {
-			if rt.Logger != nil {
-				handleRuntimeLogPersistenceError("scheduler", "publish_failed", rt.Logger.Error(callbackCtx, "scheduler", "publish_failed", map[string]any{
-					"agent_id":   sc.AgentID,
-					"event_type": sc.EventType,
-					"run_id":     sc.EffectiveRunID(),
-					"entity_id":  sc.EffectiveEntityID(),
-				}, constructErr))
-			}
-		}
-		if runtimeDeps.ScheduleStore != nil {
-			if err := runtimeDeps.ScheduleStore.CompleteScheduleFireExact(callbackCtx, sc); err != nil {
-				if rt.Logger != nil {
-					handleRuntimeLogPersistenceError("scheduler", "mark_fired_failed", rt.Logger.Error(callbackCtx, "scheduler", "mark_fired_failed", map[string]any{
-						"agent_id":   sc.AgentID,
-						"event_type": sc.EventType,
-						"run_id":     sc.EffectiveRunID(),
-						"entity_id":  sc.EffectiveEntityID(),
-					}, err))
-				}
-			}
-		}
-	})
+		rt.GenericSchedules = genericSchedules
+	}
 	if runtimeDeps.WorkflowPersistence.Valid() {
 		channelActivityTools, err := compiledChannelActivityTools(opts.ChannelOutboundBindings)
 		if err != nil {
@@ -1142,7 +1125,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 				return managerRef.DeactivateFlowInstanceModel(ctx, req)
 			},
 			TimerScheduler:          rt.Scheduler,
-			TimerScheduleStore:      runtimeDeps.ScheduleStore,
+			GenericSchedules:        rt.GenericSchedules,
 			TimerObligationReader:   runtimeDeps.TimerObligationReader,
 			MailboxMaterializer:     runtimeDeps.MailboxMaterializer,
 			DecisionCards:           runtimeDeps.DecisionCards,
@@ -1225,7 +1208,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		}
 	}
 
-	rt.ToolExecutor = runtimetools.NewExecutorWithOptions(rt.Bus, rt.Scheduler, runtimetools.ExecutorOptions{
+	rt.ToolExecutor = runtimetools.NewExecutorWithOptions(rt.Bus, runtimetools.ExecutorOptions{
 		Config:             cfg,
 		Credentials:        rt.Credentials,
 		ManagedCredentials: rt.ManagedCredentials,
@@ -1240,10 +1223,11 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		ModelRuntimes:      rt.LLMRuntimes,
 		AuthorityProvider:  rt.Authority,
 		EmitRegistry:       rt.EmitRegistry,
+		GenericSchedules:   rt.GenericSchedules,
 		ManagerProvider: func() runtimetools.Manager {
 			return managerRef
 		},
-	}, runtimeDeps.ScheduleStore)
+	})
 	credentialValidationOptions := runtimebootverify.Options{
 		Credentials:        rt.Credentials,
 		ManagedCredentials: rt.ManagedCredentials,
@@ -1392,52 +1376,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 
 	workOccurrenceOwned = false
 	return rt, nil
-}
-
-func scheduleEventPayload(sc runtimepipeline.Schedule) []byte {
-	payload := sc.Payload
-	if len(payload) == 0 {
-		payload = []byte("{}")
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal(payload, &decoded); err != nil || decoded == nil {
-		return payload
-	}
-	delete(decoded, "__schedule_task_id")
-	if _, present := decoded["timer_handle"]; present {
-		handle, ok := timeridentity.ParseTimerHandle(decoded)
-		if !ok || handle.Kind == timeridentity.TimerHandleWorkflowTimer {
-			delete(decoded, "timer_handle")
-		}
-	}
-	entityID := strings.TrimSpace(sc.EffectiveEntityID())
-	if _, ok := decoded["entity_id"]; !ok {
-		if entityID != "" {
-			decoded["entity_id"] = entityID
-		}
-	}
-	flowInstance := strings.TrimSpace(sc.EffectiveFlowInstance())
-	if _, ok := decoded["flow_instance"]; !ok {
-		if flowInstance != "" {
-			decoded["flow_instance"] = flowInstance
-		}
-	}
-	encoded, err := json.Marshal(decoded)
-	if err != nil {
-		return payload
-	}
-	return encoded
-}
-
-func scheduledEvent(sc runtimepipeline.Schedule) (events.Event, error) {
-	return events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{Facts: events.EventFacts{
-		ID: uuid.NewString(), Type: events.EventType(sc.EventType), Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime.scheduler"},
-		TaskID: sc.TaskID, Payload: scheduleEventPayload(sc), RoutingSource: sc.RoutingSource, CreatedAt: time.Now(), ExecutionMode: sc.ExecutionMode,
-		Envelope: events.EventEnvelope{
-			EntityID:     sc.EffectiveEntityID(),
-			FlowInstance: sc.EffectiveFlowInstance(),
-		},
-	}, RunID: sc.EffectiveRunID()})
 }
 
 func (rt *Runtime) Start(ctx context.Context) error {
@@ -1659,29 +1597,19 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	} else if rt.Scheduler != nil {
 		restoredFamilies := make([]string, 0, 2)
 		scheduleRestoreStatus := "ok"
-		if rt.scheduleStore != nil {
+		if rt.GenericSchedules != nil {
 			startupRecoveryDecision.ScheduleRestoreAttempted = true
-			schedules, err := rt.scheduleStore.LoadActiveSchedules(ctx)
+			reconciled, err := rt.GenericSchedules.Restore(ctx)
 			if err != nil {
 				rt.emitBootProgress(11, "schedule_restoration", "FAILED", err.Error())
-				return fmt.Errorf("load schedules failed: %w", err)
+				return fmt.Errorf("restore generic schedules: %w", err)
 			}
-			results := restoreStartupTimerSchedules(ctx, rt.scheduleStore, rt.Scheduler, rt.Logger, schedules)
-			timerReplayCount, timerSkipCount, timerDropCount, _ := summarizeStartupTimerRecovery(results)
-			startupRecoveryDecision.ScheduleReplayCount = timerReplayCount
-			startupRecoveryDecision.ScheduleSkipCount = timerSkipCount
-			startupRecoveryDecision.ScheduleDropCount = timerDropCount
-			if err := ensureBootWorkflowSchedules(ctx, rt.scheduleStore, rt.Scheduler, rt.Pipeline, schedules); err != nil {
-				if rt.Logger != nil {
-					handleRuntimeLogPersistenceError("scheduler", "ensure_boot_timers_failed", rt.Logger.Error(ctx, "scheduler", "ensure_boot_timers_failed", nil, err))
-				}
+			startupRecoveryDecision.ScheduleReplayCount = reconciled
+			if err := ensureBootWorkflowSchedules(ctx, rt.GenericSchedules, rt.Pipeline); err != nil {
+				rt.emitBootProgress(11, "schedule_restoration", "FAILED", err.Error())
+				return fmt.Errorf("ensure boot generic schedules: %w", err)
 			}
-			if startupRecoveryDecision.Outcome != startupRecoveryOutcomeDegraded && startupRecoveryDecision.ScheduleDropCount > 0 {
-				startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
-				startupRecoveryDecision.ReasonCode = startupRecoveryReasonScheduleRestore
-				startupRecoveryDecision.Failure = newStartupRecoveryFailure(runtimefailures.ClassDependencyUnavailable, "schedule_restore_failed", "restore_schedules", map[string]any{"dropped_count": startupRecoveryDecision.ScheduleDropCount}, nil)
-			}
-			restoredFamilies = append(restoredFamilies, fmt.Sprintf("%d generic schedules restored, %d skipped, %d dropped", startupRecoveryDecision.ScheduleReplayCount, startupRecoveryDecision.ScheduleSkipCount, startupRecoveryDecision.ScheduleDropCount))
+			restoredFamilies = append(restoredFamilies, "generic schedules reconciled")
 		}
 		if rt.Pipeline != nil {
 			if !workflowTimerRestoreReady {
@@ -2057,6 +1985,11 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("workflow timer lifecycle shutdown: %w", err))
 		}
 	}
+	if rt.GenericSchedules != nil {
+		if err := rt.GenericSchedules.Stop(drainCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("generic schedule lifecycle shutdown: %w", err))
+		}
+	}
 	if rt.Scheduler != nil {
 		rt.Scheduler.Stop()
 		if err := rt.Scheduler.Wait(drainCtx); err != nil {
@@ -2099,11 +2032,6 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions, releaseOwnership bool) 
 	if rt.runLifecycleRegistration != nil {
 		rt.runLifecycleRegistration.Release()
 		rt.runLifecycleRegistration = nil
-	}
-	if rt.scheduleStore != nil {
-		if err := rt.scheduleStore.ReleaseScheduleClaims(context.Background()); err != nil {
-			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("release schedule claims: %w", err))
-		}
 	}
 	if releaseOwnership && lease != nil && !borrowedLease {
 		if err := lease.Release(context.Background()); err != nil {
@@ -2249,122 +2177,66 @@ func (rt *Runtime) verifyBootPublished(ch <-chan *worklifetime.EventDelivery) er
 
 var bootWorkflowTimerPolicyPlaceholder = regexp.MustCompile(`\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}`)
 
-func ensureBootWorkflowSchedules(ctx context.Context, store runtimepipeline.SchedulePersistence, scheduler *runtimepipeline.Scheduler, workflow runtimepipeline.WorkflowRuntime, activeSnapshots ...[]runtimepipeline.Schedule) error {
-	if store == nil || workflow == nil {
+func ensureBootWorkflowSchedules(ctx context.Context, schedules *runtimegenericschedule.Lifecycle, workflow runtimepipeline.WorkflowRuntime) error {
+	if schedules == nil || workflow == nil {
 		return nil
 	}
 	source := workflow.SemanticSource()
 	if source == nil {
 		return nil
 	}
-	activeSchedules, err := activeScheduleSnapshot(ctx, store, activeSnapshots...)
-	if err != nil {
-		return err
-	}
-	now := time.Now().UTC()
 	for _, timer := range source.WorkflowTimers() {
-		sc, ok := bootWorkflowTimerSchedule(source, timer, now)
+		command, ok, err := bootWorkflowTimerSchedule(source, timer)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			continue
 		}
-		if active, ok := activeScheduleExactMatch(activeSchedules, sc); ok {
-			if _, err := runtimepipeline.ClaimAndRegisterSchedule(ctx, store, scheduler, active); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := store.UpsertSchedule(ctx, sc); err != nil {
-			return err
-		}
-		if _, err := runtimepipeline.ClaimAndRegisterSchedule(ctx, store, scheduler, sc); err != nil {
+		if _, err := schedules.Admit(ctx, command); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func activeScheduleSnapshot(ctx context.Context, store runtimepipeline.SchedulePersistence, snapshots ...[]runtimepipeline.Schedule) ([]runtimepipeline.Schedule, error) {
-	if len(snapshots) > 0 {
-		return append([]runtimepipeline.Schedule(nil), snapshots[0]...), nil
-	}
-	if store == nil {
-		return nil, nil
-	}
-	return store.LoadActiveSchedules(ctx)
-}
-
-func activeScheduleExactMatch(active []runtimepipeline.Schedule, target runtimepipeline.Schedule) (runtimepipeline.Schedule, bool) {
-	normalizeScheduleIdentity(&target)
-	for _, candidate := range active {
-		normalizeScheduleIdentity(&candidate)
-		if strings.TrimSpace(candidate.AgentID) != strings.TrimSpace(target.AgentID) {
-			continue
-		}
-		if strings.TrimSpace(candidate.EventType) != strings.TrimSpace(target.EventType) {
-			continue
-		}
-		if strings.TrimSpace(candidate.TaskID) != strings.TrimSpace(target.TaskID) {
-			continue
-		}
-		if candidate.RunID != target.RunID {
-			continue
-		}
-		if candidate.EntityID != target.EntityID {
-			continue
-		}
-		if candidate.FlowInstance != target.FlowInstance {
-			continue
-		}
-		return candidate, true
-	}
-	return runtimepipeline.Schedule{}, false
-}
-
-func normalizeScheduleIdentity(sc *runtimepipeline.Schedule) {
-	if sc == nil {
-		return
-	}
-	sc.NormalizeRunID()
-	sc.NormalizeEntityID()
-	sc.NormalizeFlowInstance()
-}
-
-func bootWorkflowTimerSchedule(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract, now time.Time) (runtimepipeline.Schedule, bool) {
+func bootWorkflowTimerSchedule(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract) (runtimegenericschedule.AdmissionCommand, bool, error) {
 	startTrigger, err := timeridentity.ParseStartTrigger(timer.StartOn)
 	if err != nil || !startTrigger.IsBoot() {
-		return runtimepipeline.Schedule{}, false
+		return runtimegenericschedule.AdmissionCommand{}, false, nil
 	}
 	cancelTrigger, err := timeridentity.ParseCancelTrigger(timer.CancelOn)
 	if err != nil || cancelTrigger.Valid() {
-		return runtimepipeline.Schedule{}, false
+		return runtimegenericschedule.AdmissionCommand{}, false, nil
 	}
 	owner := strings.TrimSpace(timer.Owner)
 	eventType := strings.TrimSpace(timer.Event)
 	if owner == "" || eventType == "" {
-		return runtimepipeline.Schedule{}, false
+		return runtimegenericschedule.AdmissionCommand{}, false, nil
 	}
 	interval := bootWorkflowTimerDuration(source, timer)
 	if interval <= 0 {
-		return runtimepipeline.Schedule{}, false
+		return runtimegenericschedule.AdmissionCommand{}, false, nil
 	}
 	handle := timeridentity.WorkflowTimerHandle(timer.ID)
-	sc := runtimepipeline.Schedule{
-		AgentID:       owner,
-		OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
+	payload, err := canonicaljson.FromGo(workflowTimerPayloadMap(timer))
+	if err != nil {
+		return runtimegenericschedule.AdmissionCommand{}, false, fmt.Errorf("admit boot timer payload: %w", err)
+	}
+	command := runtimegenericschedule.AdmissionCommand{
+		ScheduleKey:   handle.TaskID(),
+		OwnerID:       owner,
+		OwnerKind:     runtimegenericschedule.OwnerSystem,
 		EventType:     eventType,
-		Mode:          "once",
-		At:            now.Add(interval),
 		TaskID:        handle.TaskID(),
-		Payload:       workflowTimerPayload(timer),
+		Payload:       payload,
 		RoutingSource: events.NewPlatformControlRoutingSource(),
-		ExecutionMode: executionmode.Live,
+		Due:           runtimegenericschedule.DelayDue(interval),
 	}
 	if timer.Recurring {
-		sc.Mode = "cron"
-		sc.Cron = "@every " + interval.String()
-		sc.At = time.Time{}
+		command.Due = runtimegenericschedule.EveryDue(interval)
 	}
-	return sc, true
+	return command, true, nil
 }
 
 func bootWorkflowTimerDuration(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract) time.Duration {
@@ -2395,12 +2267,12 @@ func bootWorkflowTimerRenderedDelay(source semanticview.Source, timer runtimecon
 	})
 }
 
-func workflowTimerPayload(timer runtimecontracts.WorkflowTimerContract) []byte {
+func workflowTimerPayloadMap(timer runtimecontracts.WorkflowTimerContract) map[string]any {
 	handle := timeridentity.WorkflowTimerHandle(timer.ID)
 	if !handle.Valid() {
-		return mustJSON(map[string]any{})
+		return map[string]any{}
 	}
-	return mustJSON(handle.PayloadMetadata())
+	return handle.PayloadMetadata()
 }
 
 func runtimeEnvBool(key string, fallback bool) bool {

@@ -15,7 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/google/uuid"
@@ -209,7 +209,7 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 		t.Run(name, func(t *testing.T) {
 			catalog := runtimeAdmissionTestCatalog(t, "a")
 			predecessor := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
-			predecessor.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(predecessor.WorkOwner)
+			predecessor.Runtime.Scheduler = runtimeContextTestScheduler(t, predecessor.WorkOwner, nil)
 			manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), predecessor)
 			if err != nil {
 				t.Fatal(err)
@@ -234,13 +234,13 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 				t.Fatalf("begin Manager-composed replacement work: %v", err)
 			}
 			ownerCtx := managerWork.Context()
-			replacementSchedules := []runtimepipeline.Schedule{
-				runtimeContextSystemSchedule(runtimepipeline.Schedule{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"}),
-				runtimeContextSystemSchedule(runtimepipeline.Schedule{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"}),
+			replacementSchedules := []runtimegenericschedule.Wakeup{
+				runtimeContextTestWakeup(t, "future-once", time.Now().Add(time.Hour)),
+				runtimeContextTestWakeup(t, "recurring", time.Now().Add(time.Hour)),
 			}
-			for _, schedule := range replacementSchedules {
-				if err := predecessor.Runtime.Scheduler.Register(ownerCtx, schedule); err != nil {
-					t.Fatalf("register %s schedule: %v", schedule.Mode, err)
+			for _, wakeup := range replacementSchedules {
+				if err := predecessor.Runtime.Scheduler.RegisterGenericScheduleWakeup(ownerCtx, wakeup); err != nil {
+					t.Fatalf("register %s schedule: %v", wakeup.ActivationID(), err)
 				}
 			}
 			if err := managerWork.Done(); err != nil {
@@ -280,7 +280,7 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 			var candidatePublished atomic.Bool
 			var candidateActive atomic.Int32
 			var candidateOverlap atomic.Bool
-			candidate.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(candidate.WorkOwner, func(context.Context, runtimepipeline.Schedule) {
+			candidate.Runtime.Scheduler = runtimeContextTestScheduler(t, candidate.WorkOwner, func(context.Context, runtimegenericschedule.Wakeup) {
 				if candidateActive.Add(1) > 1 {
 					candidateOverlap.Store(true)
 				}
@@ -340,9 +340,11 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 				t.Fatalf("prepare replacement publication: %v", err)
 			}
 			preparedStanding := prepared.publication.standing[serviceID]
-			adoptedCandidateTimer := replacementSchedules[1]
-			adoptedCandidateTimer.Cron = "@every 1ms"
-			if err := candidate.Runtime.Scheduler.Register(
+			adoptedCandidateTimer, err := runtimegenericschedule.NewWakeup(replacementSchedules[1].ActivationID(), time.Now().Add(time.Millisecond))
+			if err != nil {
+				t.Fatalf("create adopted candidate wakeup: %v", err)
+			}
+			if err := candidate.Runtime.Scheduler.RegisterGenericScheduleWakeup(
 				worklifetime.WithOccurrence(context.Background(), preparedStanding), adoptedCandidateTimer,
 			); err != nil {
 				t.Fatalf("register adopted candidate timer: %v", err)
@@ -387,7 +389,7 @@ func TestRuntimeContextReplacementAggregateFailureLeavesNoPartialCandidateAndRet
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	state := runtimeAdmissionTestState(t, catalog)
 	predecessor := testBundleContext(t, runtimeContextTestHashA, "standing.aggregate")
-	predecessor.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(predecessor.WorkOwner)
+	predecessor.Runtime.Scheduler = runtimeContextTestScheduler(t, predecessor.WorkOwner, nil)
 	predecessor.StandingTargets = aggregateReplacementStandingTargets(t, runtimeContextTestHashA, catalog)
 	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, state, predecessor)
 	if err != nil {
@@ -395,19 +397,16 @@ func TestRuntimeContextReplacementAggregateFailureLeavesNoPartialCandidateAndRet
 	}
 	for _, target := range predecessor.StandingTargets {
 		owner := manager.contexts[runtimeContextTestHashA].standing[target.ServiceID]
-		if err := predecessor.Runtime.Scheduler.Register(
+		if err := predecessor.Runtime.Scheduler.RegisterGenericScheduleWakeup(
 			worklifetime.WithOccurrence(context.Background(), owner),
-			runtimeContextSystemSchedule(runtimepipeline.Schedule{
-				RunID: target.RunID, AgentID: "timer-agent", EventType: "timer.once", Mode: "once",
-				At: time.Now().Add(time.Hour), TaskID: target.ServiceID,
-			}),
+			runtimeContextTestWakeup(t, target.ServiceID, time.Now().Add(time.Hour)),
 		); err != nil {
 			t.Fatalf("register predecessor schedule for %s: %v", target.ServiceID, err)
 		}
 	}
 
 	failedCandidate := testBundleContext(t, runtimeContextTestHashA, "standing.aggregate")
-	failedCandidate.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(failedCandidate.WorkOwner)
+	failedCandidate.Runtime.Scheduler = runtimeContextTestScheduler(t, failedCandidate.WorkOwner, nil)
 	failedCandidate.StandingTargets = aggregateReplacementStandingTargets(t, runtimeContextTestHashA, catalog)
 	if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, failedCandidate); err != nil {
 		t.Fatalf("begin aggregate replacement: %v", err)
@@ -435,7 +434,7 @@ func TestRuntimeContextReplacementAggregateFailureLeavesNoPartialCandidateAndRet
 	}
 
 	retryCandidate := testBundleContext(t, runtimeContextTestHashA, "standing.aggregate")
-	retryCandidate.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(retryCandidate.WorkOwner)
+	retryCandidate.Runtime.Scheduler = runtimeContextTestScheduler(t, retryCandidate.WorkOwner, nil)
 	retryCandidate.StandingTargets = aggregateReplacementStandingTargets(t, runtimeContextTestHashA, catalog)
 	retryPublication, err := manager.PrepareBundleHashReplacementPublicationWithAdmission(runtimeContextTestHashA, retryCandidate, nil, state)
 	if err != nil {
@@ -479,7 +478,7 @@ func aggregateReplacementStandingTargets(t *testing.T, bundleHash string, catalo
 func TestStandingServiceTransitionRollbackRestoresExactOwnerSchedulesBeforeAdmission(t *testing.T) {
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
-	contextDef.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(contextDef.WorkOwner)
+	contextDef.Runtime.Scheduler = runtimeContextTestScheduler(t, contextDef.WorkOwner, nil)
 	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
 	if err != nil {
 		t.Fatal(err)
@@ -497,13 +496,12 @@ func TestStandingServiceTransitionRollbackRestoresExactOwnerSchedulesBeforeAdmis
 		t.Fatalf("begin rollback Manager work: %v", err)
 	}
 	ownerCtx := managerWork.Context()
-	for _, schedule := range []runtimepipeline.Schedule{
-		{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"},
-		{RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"},
+	for _, wakeup := range []runtimegenericschedule.Wakeup{
+		runtimeContextTestWakeup(t, "future-once", time.Now().Add(time.Hour)),
+		runtimeContextTestWakeup(t, "recurring", time.Now().Add(time.Hour)),
 	} {
-		schedule = runtimeContextSystemSchedule(schedule)
-		if err := contextDef.Runtime.Scheduler.Register(ownerCtx, schedule); err != nil {
-			t.Fatalf("register %s schedule: %v", schedule.Mode, err)
+		if err := contextDef.Runtime.Scheduler.RegisterGenericScheduleWakeup(ownerCtx, wakeup); err != nil {
+			t.Fatalf("register %s schedule: %v", wakeup.ActivationID(), err)
 		}
 	}
 	if err := managerWork.Done(); err != nil {
@@ -545,7 +543,7 @@ func TestStandingServiceTransitionRollbackRestoresExactOwnerSchedulesBeforeAdmis
 func TestStandingServiceTransitionRollbackFailsClosedWhenOriginalManagerRetires(t *testing.T) {
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
-	contextDef.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(contextDef.WorkOwner)
+	contextDef.Runtime.Scheduler = runtimeContextTestScheduler(t, contextDef.WorkOwner, nil)
 	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
 	if err != nil {
 		t.Fatal(err)
@@ -562,9 +560,7 @@ func TestStandingServiceTransitionRollbackFailsClosedWhenOriginalManagerRetires(
 	if err != nil {
 		t.Fatalf("begin rollback Manager work: %v", err)
 	}
-	if err := contextDef.Runtime.Scheduler.Register(managerWork.Context(), runtimeContextSystemSchedule(runtimepipeline.Schedule{
-		RunID: "run-primary", AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "retired-manager-cron",
-	})); err != nil {
+	if err := contextDef.Runtime.Scheduler.RegisterGenericScheduleWakeup(managerWork.Context(), runtimeContextTestWakeup(t, "retired-manager", time.Now().Add(time.Hour))); err != nil {
 		t.Fatalf("register Manager-composed schedule: %v", err)
 	}
 	if err := managerWork.Done(); err != nil {
@@ -599,7 +595,7 @@ func TestStandingServiceTransitionRollbackFailsClosedWhenOriginalManagerRetires(
 func TestPreparedStandingSuccessorOwnsSchedulesBeforePublication(t *testing.T) {
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
-	contextDef.Runtime.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(contextDef.WorkOwner)
+	contextDef.Runtime.Scheduler = runtimeContextTestScheduler(t, contextDef.WorkOwner, nil)
 	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
 	if err != nil {
 		t.Fatal(err)
@@ -623,13 +619,12 @@ func TestPreparedStandingSuccessorOwnsSchedulesBeforePublication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepare standing successor: %v", err)
 	}
-	for _, schedule := range []runtimepipeline.Schedule{
-		{RunID: successorRunID, AgentID: "timer-agent", EventType: "timer.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: "future-once"},
-		{RunID: successorRunID, AgentID: "timer-agent", EventType: "timer.cron", Mode: "cron", Cron: "@every 1h", TaskID: "recurring-cron"},
+	for _, wakeup := range []runtimegenericschedule.Wakeup{
+		runtimeContextTestWakeup(t, "successor-once", time.Now().Add(time.Hour)),
+		runtimeContextTestWakeup(t, "successor-recurring", time.Now().Add(time.Hour)),
 	} {
-		schedule = runtimeContextSystemSchedule(schedule)
-		if err := contextDef.Runtime.Scheduler.Register(prepared.WorkContext(context.Background()), schedule); err != nil {
-			t.Fatalf("register prepared %s schedule: %v", schedule.Mode, err)
+		if err := contextDef.Runtime.Scheduler.RegisterGenericScheduleWakeup(prepared.WorkContext(context.Background()), wakeup); err != nil {
+			t.Fatalf("register prepared %s schedule: %v", wakeup.ActivationID(), err)
 		}
 	}
 	successorTargets := append([]StandingTarget(nil), contextDef.StandingTargets...)
@@ -653,11 +648,26 @@ func TestPreparedStandingSuccessorOwnsSchedulesBeforePublication(t *testing.T) {
 	}
 }
 
-func runtimeContextSystemSchedule(schedule runtimepipeline.Schedule) runtimepipeline.Schedule {
-	schedule.OwnerKind = runtimepipeline.ScheduleOwnerSystem
-	schedule.RoutingSource = events.NewPlatformControlRoutingSource()
-	schedule.ExecutionMode = executionmode.Live
-	return schedule
+func runtimeContextTestScheduler(t *testing.T, owner worklifetime.Occurrence, callback func(context.Context, runtimegenericschedule.Wakeup)) *runtimepipeline.Scheduler {
+	t.Helper()
+	scheduler := runtimepipeline.NewSchedulerWithWorkOwner(owner)
+	if callback == nil {
+		callback = func(context.Context, runtimegenericschedule.Wakeup) {}
+	}
+	if err := scheduler.BindGenericScheduleLifecycle(callback); err != nil {
+		t.Fatalf("bind generic schedule lifecycle: %v", err)
+	}
+	return scheduler
+}
+
+func runtimeContextTestWakeup(t *testing.T, key string, dueAt time.Time) runtimegenericschedule.Wakeup {
+	t.Helper()
+	activationID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("runtime-context:"+key)).String()
+	wakeup, err := runtimegenericschedule.NewWakeup(activationID, dueAt)
+	if err != nil {
+		t.Fatalf("create generic schedule wakeup: %v", err)
+	}
+	return wakeup
 }
 
 func TestRuntimeContextManagerBlockedStandingDescendantLeavesReplacementUnavailable(t *testing.T) {

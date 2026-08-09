@@ -10,8 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 func testAgentMemoryIdentity(t testing.TB, runID, agentID, flowInstance string) agentmemory.Identity {
@@ -69,33 +67,6 @@ func testAgentDeliveryRoute(t testing.TB, agentID, flowInstance string) events.D
 	t.Helper()
 	identity := testAgentIdentity(t, agentID, flowInstance)
 	return events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
-}
-
-func testAgentOwnedSchedule(t testing.TB, schedule runtimepipeline.Schedule) runtimepipeline.Schedule {
-	t.Helper()
-	if !schedule.ExecutionMode.Valid() {
-		schedule.ExecutionMode = executionmode.Live
-	}
-	if strings.TrimSpace(schedule.FlowInstance) == "" {
-		schedule.FlowInstance = "store-schedule"
-	}
-	if strings.TrimSpace(schedule.EntityID) == "" {
-		schedule.EntityID = "00000000-0000-4000-8000-000000000001"
-	}
-	schedule.OwnerKind = runtimepipeline.ScheduleOwnerAgent
-	schedule.AgentIdentity = testAgentIdentity(t, schedule.AgentID, schedule.FlowInstance)
-	flowID, _, flowInstance, present := schedule.AgentIdentity.Route.Fields()
-	if !present {
-		t.Fatal("test agent schedule requires an explicit flow route")
-	}
-	routingSource, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
-		FlowID: flowID, FlowInstance: flowInstance, EntityID: schedule.EntityID,
-	})
-	if err != nil {
-		t.Fatalf("construct test agent schedule routing source: %v", err)
-	}
-	schedule.RoutingSource = routingSource
-	return schedule
 }
 
 func seedTestAgentRow(

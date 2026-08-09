@@ -69,7 +69,7 @@ func TestExecutorHTTPToolNeverRefreshesAndRedispatchesAfterUnauthorized(t *testi
 		Status:       runtimemanagedcredentials.StatusConnected,
 		ExpiresAt:    time.Now().Add(time.Hour),
 	})
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		WorkflowSource:     managedCredentialSource(server.URL+"/api", "github", []string{"repo.read"}),
 		ManagedCredentials: store,
 	})
@@ -126,7 +126,7 @@ func TestExecutorHTTPToolRejectsInstallationIDInputOutsideActivityPath(t *testin
 	if _, err := ValidateToolImplementations(source); err != nil {
 		t.Fatalf("ValidateToolImplementations: %v", err)
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		WorkflowSource: source,
 		ManagedCredentials: runtimemanagedcredentials.NewMemoryStore(runtimemanagedcredentials.Record{
 			Key:            "github_app",
@@ -180,7 +180,7 @@ func TestExecutorHTTPToolRefreshesManagedCredentialBeforeUse(t *testing.T) {
 		Status:       runtimemanagedcredentials.StatusConnected,
 		ExpiresAt:    time.Now().Add(-time.Minute),
 	})
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		WorkflowSource:     managedCredentialSource(server.URL+"/api", "github", []string{"repo.read"}),
 		ManagedCredentials: store,
 	})
@@ -210,7 +210,7 @@ func TestExecutorHTTPToolManagedCredentialFailuresAreFailClosedAndRedacted(t *te
 
 	t.Run("missing", func(t *testing.T) {
 		serverCalled = false
-		exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		exec := NewExecutorWithOptions(nil, ExecutorOptions{
 			WorkflowSource:     managedCredentialSource(server.URL, "missing", nil),
 			ManagedCredentials: runtimemanagedcredentials.NewMemoryStore(),
 		})
@@ -230,7 +230,7 @@ func TestExecutorHTTPToolManagedCredentialFailuresAreFailClosedAndRedacted(t *te
 			Scopes:      []string{"repo.read"},
 			Status:      runtimemanagedcredentials.StatusConnected,
 		})
-		exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		exec := NewExecutorWithOptions(nil, ExecutorOptions{
 			WorkflowSource:     managedCredentialSource(server.URL, "github", []string{"repo.write"}),
 			ManagedCredentials: store,
 		})
@@ -250,7 +250,7 @@ func TestExecutorHTTPToolManagedCredentialFailuresAreFailClosedAndRedacted(t *te
 			ClientSecret: "client-secret",
 			Status:       runtimemanagedcredentials.StatusConnected,
 		})
-		exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		exec := NewExecutorWithOptions(nil, ExecutorOptions{
 			WorkflowSource:     managedCredentialSource(server.URL, "github", nil),
 			ManagedCredentials: store,
 		})
@@ -284,7 +284,7 @@ func TestExecutorHTTPToolUsesImportedManagedCredentialBinding(t *testing.T) {
 		Scopes:      []string{"repo.read"},
 		Status:      runtimemanagedcredentials.StatusConnected,
 	})
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, ManagedCredentials: store})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, ManagedCredentials: store})
 	if _, err := exec.Execute(models.WithActor(ctx, managedCredentialActor()), "send_provider", map[string]any{}); err != nil {
 		t.Fatalf("Execute(send_provider): %v", err)
 	}
@@ -307,7 +307,7 @@ func TestExecutorHTTPToolRejectsAmbientManagedCredentialFallback(t *testing.T) {
 		AccessToken: "ambient-token",
 		Status:      runtimemanagedcredentials.StatusConnected,
 	})
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, ManagedCredentials: store})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, ManagedCredentials: store})
 	_, err := exec.Execute(models.WithActor(ctx, managedCredentialActor()), "send_provider", map[string]any{})
 	requireToolFailure(t, err, runtimefailures.ClassAuthenticationNeeded, "managed_credential_required")
 }
@@ -339,7 +339,7 @@ func TestExecutorHTTPToolManagedCredentialServedAndMCPTransportsUseSameOwner(t *
 	}))
 	defer server.Close()
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		WorkflowSource: managedCredentialSource(server.URL, "github", nil),
 		ManagedCredentials: runtimemanagedcredentials.NewMemoryStore(runtimemanagedcredentials.Record{
 			Key:         "github",

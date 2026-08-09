@@ -17,9 +17,11 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -69,18 +71,35 @@ type publishDirectBusStub struct {
 }
 
 type captureScheduleScheduler struct {
-	schedule Schedule
+	command runtimegenericschedule.AdmissionCommand
+	calls   int
 }
 
-func (s *captureScheduleScheduler) Register(_ context.Context, schedule Schedule) error {
-	if err := schedule.ValidateRoutingSource(); err != nil {
-		return err
+func (s *captureScheduleScheduler) Admit(_ context.Context, command runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error) {
+	if err := command.Validate(); err != nil {
+		return runtimegenericschedule.AdmissionResult{}, err
 	}
-	s.schedule = schedule
-	return nil
+	now := time.Now().UTC()
+	due, err := command.Due.FirstDue(now)
+	if err != nil {
+		return runtimegenericschedule.AdmissionResult{}, err
+	}
+	hash, err := command.ImmutableHash()
+	if err != nil {
+		return runtimegenericschedule.AdmissionResult{}, err
+	}
+	activation := runtimegenericschedule.Activation{
+		ID: "3fcdf85b-30e9-41db-ace4-c82c330b5760", Command: command, ImmutableHash: hash,
+		AdmittedAt: now, InitialDueAt: due, CurrentDueAt: due,
+		Status: runtimegenericschedule.StatusActive,
+	}
+	if err := activation.Validate(); err != nil {
+		return runtimegenericschedule.AdmissionResult{}, err
+	}
+	s.command = command
+	s.calls++
+	return runtimegenericschedule.AdmissionResult{Outcome: runtimegenericschedule.AdmissionCreated, Activation: activation}, nil
 }
-
-func (*captureScheduleScheduler) Stop() {}
 
 func (b *publishDirectBusStub) Publish(context.Context, events.Event) error { return nil }
 
@@ -432,7 +451,7 @@ func TestExecAgentFire_UsesAuthorizedManagerLifecyclePath(t *testing.T) {
 			Role: "worker", ManagerFallback: "manager", FlowPath: "review/inst-1",
 		},
 	}}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		Manager: manager, AuthorityProvider: runtimeauthority.NewSourceProvider(source), WorkflowSource: source,
 	})
 
@@ -485,7 +504,7 @@ func TestExecAgentFire_RemovesOnlySelectedSameSlugAuthority(t *testing.T) {
 		workerA.Identity:  workerA,
 		workerB.Identity:  workerB,
 	}}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
 
 	if _, err := exec.ExecAgentFireDirect(managerA, map[string]any{
 		"agent_id": "worker", "flow_instance": "review/inst-a",
@@ -532,7 +551,7 @@ func TestExecAgentFire_RejectsConfigChangedBeforeSerializedCommit(t *testing.T) 
 		teardownArrive: arrived,
 		teardownStart:  start,
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
 
 	fireErr := make(chan error, 1)
 	go func() {
@@ -597,7 +616,7 @@ func TestExecAgentFire_PersistenceFailureRestoresPriorAuthority(t *testing.T) {
 		},
 		teardownFail: true,
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
 
 	_, err := exec.ExecAgentFireDirect(parent, map[string]any{
 		"agent_id": target.ID, "flow_instance": route,
@@ -626,7 +645,7 @@ func TestExecAgentReconfigure_UsesAuthorizedManagerLifecyclePath(t *testing.T) {
 	manager := &captureManagerStub{agents: map[string]models.AgentConfig{
 		"worker-1": {ID: "worker-1", Role: "worker", ManagerFallback: "manager", FlowPath: "review/inst-1"},
 	}}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		Manager: manager, AuthorityProvider: runtimeauthority.NewSourceProvider(source), WorkflowSource: source,
 	})
 
@@ -697,7 +716,7 @@ func TestExecAgentReconfigure_RejectsInvalidParentCandidatesBeforeMutation(t *te
 				agents[tc.parentConfig.ID] = *tc.parentConfig
 			}
 			manager := &captureManagerStub{agents: agents, allowCrossRoute: tc.allowCrossRoute}
-			exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+			exec := NewExecutorWithOptions(nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
 
 			_, err := exec.ExecAgentReconfigureDirect(oldParent, map[string]any{
 				"agent_id": target.ID, "flow_instance": route,
@@ -749,7 +768,7 @@ func TestExecAgentReconfigure_ParentCandidateAndAuthorityGraphAgree(t *testing.T
 			ignoredFallback.ID: ignoredFallback,
 			target.ID:          target,
 		}}
-		exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+		exec := NewExecutorWithOptions(nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
 
 		if _, err := exec.ExecAgentReconfigureDirect(oldParent, map[string]any{
 			"agent_id": target.ID, "flow_instance": route,
@@ -785,7 +804,7 @@ func TestExecAgentReconfigure_ParentCandidateAndAuthorityGraphAgree(t *testing.T
 			oldParent.ID: oldParent,
 			target.ID:    target,
 		}}
-		exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+		exec := NewExecutorWithOptions(nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
 
 		if _, err := exec.ExecAgentReconfigureDirect(oldParent, map[string]any{
 			"agent_id": target.ID, "flow_instance": route, "config": map[string]any{"model": "fast"},
@@ -832,7 +851,7 @@ func TestExecAgentReconfigure_RejectsIndirectParentCycleAtCommit(t *testing.T) {
 		first.ID:  first,
 		second.ID: second,
 	}}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
 
 	_, err := exec.ExecAgentReconfigureDirect(root, map[string]any{
 		"agent_id": first.ID,
@@ -886,7 +905,7 @@ func TestExecAgentReconfigure_ConcurrentCommitsRejectStaleExpectedConfig(t *test
 		reconfigureArrive: arrivals,
 		reconfigureStart:  start,
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
 
 	type reconfigureResult struct {
 		parentID string
@@ -984,7 +1003,7 @@ func TestExecAgentReconfigure_PersistenceFailureDoesNotPublishUncommittedAuthori
 		firstApplied: make(chan struct{}),
 		releaseFirst: make(chan struct{}),
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider})
 
 	firstErr := make(chan error, 1)
 	go func() {
@@ -1069,7 +1088,7 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 			},
 		},
 	}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{Manager: manager, AuthorityProvider: provider, WorkflowSource: source})
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{Manager: manager, AuthorityProvider: provider, WorkflowSource: source})
 	actor := models.AgentConfig{
 		ExecutionMode: "mock",
 		ID:            "control",
@@ -1102,7 +1121,7 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 func TestExecSchedulePreservesRootAgentRoutingSource(t *testing.T) {
 	scheduler := &captureScheduleScheduler{}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
-	exec := NewExecutorWithOptions(nil, scheduler, ExecutorOptions{WorkflowSource: source})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, GenericSchedules: scheduler})
 	actor := models.AgentConfig{
 		ExecutionMode: runtimeeffects.ExecutionModeLive,
 		ID:            "root-agent",
@@ -1110,22 +1129,99 @@ func TestExecSchedulePreservesRootAgentRoutingSource(t *testing.T) {
 		EntityID:      "entity-root",
 	}
 
-	if _, err := exec.execSchedule(context.Background(), actor, map[string]any{
-		"event_type": "root.timer.fired",
-		"mode":       "once",
-		"at":         time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
-		"payload":    map[string]any{"reason": "root-owned"},
+	ctx := runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002163")
+	if _, err := exec.execSchedule(ctx, actor, map[string]any{
+		"schedule_key": "root-proof",
+		"event_type":   "root.timer.fired",
+		"mode":         "once",
+		"at":           time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+		"payload":      map[string]any{"reason": "root-owned"},
 	}); err != nil {
 		t.Fatalf("execSchedule(root agent): %v", err)
 	}
-	if scheduler.schedule.RoutingSource.Kind() != events.RoutingSourceRoot {
-		t.Fatalf("schedule routing source kind = %q, want root", scheduler.schedule.RoutingSource.Kind().StorageCode())
+	if scheduler.command.RoutingSource.Kind() != events.RoutingSourceRoot {
+		t.Fatalf("schedule routing source kind = %q, want root", scheduler.command.RoutingSource.Kind().StorageCode())
 	}
-	if got := scheduler.schedule.RoutingSource.Route(); got != (events.RouteIdentity{EntityID: "entity-root"}) {
+	if got := scheduler.command.RoutingSource.Route(); got != (events.RouteIdentity{EntityID: "entity-root"}) {
 		t.Fatalf("schedule routing source route = %#v, want exact root entity", got)
 	}
-	if scheduler.schedule.FlowInstance != "" {
-		t.Fatalf("schedule flow instance = %q, want absent for root agent", scheduler.schedule.FlowInstance)
+	if scheduler.command.FlowInstance != "" {
+		t.Fatalf("schedule flow instance = %q, want absent for root agent", scheduler.command.FlowInstance)
+	}
+}
+
+func TestExecScheduleAdmissionGatesAndTypedDueBasis(t *testing.T) {
+	actor := models.AgentConfig{
+		ID:       "root-agent",
+		Identity: toolTestRootAgentIdentity(t, "root-agent"),
+		EntityID: "entity-root",
+	}
+	ctx := runtimecorrelation.WithRunID(context.Background(), "00000000-0000-4000-8000-000000002163")
+	newExecutor := func() (*Executor, *captureScheduleScheduler) {
+		t.Helper()
+		scheduler := &captureScheduleScheduler{}
+		return NewExecutorWithOptions(nil, ExecutorOptions{
+			WorkflowSource:   semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+			GenericSchedules: scheduler,
+		}), scheduler
+	}
+	for _, tc := range []struct {
+		name  string
+		input map[string]any
+	}{
+		{name: "missing key", input: map[string]any{
+			"event_type": "root.timer.fired", "mode": "once", "at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+		}},
+		{name: "different agent", input: map[string]any{
+			"schedule_key": "foreign-agent", "agent_id": "other", "event_type": "root.timer.fired",
+			"mode": "once", "at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+		}},
+		{name: "different entity", input: map[string]any{
+			"schedule_key": "foreign-entity", "entity_id": "entity-other", "event_type": "root.timer.fired",
+			"mode": "once", "at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exec, scheduler := newExecutor()
+			if _, err := exec.execSchedule(ctx, actor, tc.input); err == nil {
+				t.Fatal("schedule admission gate accepted invalid request")
+			}
+			if scheduler.calls != 0 {
+				t.Fatalf("rejected request reached generic admission %d time(s)", scheduler.calls)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name     string
+		input    map[string]any
+		wantKind runtimegenericschedule.DueBasisKind
+	}{
+		{name: "absolute", wantKind: runtimegenericschedule.DueAbsolute, input: map[string]any{
+			"schedule_key": "absolute", "event_type": "root.timer.fired", "mode": "once",
+			"at": time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+		}},
+		{name: "cron", wantKind: runtimegenericschedule.DueCron, input: map[string]any{
+			"schedule_key": "cron", "event_type": "root.timer.fired", "mode": "cron", "cron": "17 * * * *",
+		}},
+		{name: "every", wantKind: runtimegenericschedule.DueEvery, input: map[string]any{
+			"schedule_key": "every", "event_type": "root.timer.fired", "mode": "cron", "cron": "@every 15m",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exec, scheduler := newExecutor()
+			result, err := exec.execSchedule(ctx, actor, tc.input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scheduler.calls != 1 || scheduler.command.Due.Kind != tc.wantKind {
+				t.Fatalf("typed admission = calls:%d command:%#v", scheduler.calls, scheduler.command)
+			}
+			projection, ok := result.(map[string]any)
+			if !ok || projection["activation_id"] == "" || projection["outcome"] != string(runtimegenericschedule.AdmissionCreated) || projection["schedule_key"] != tc.input["schedule_key"] {
+				t.Fatalf("schedule result = %#v", result)
+			}
+		})
 	}
 	if scheduler.schedule.ExecutionMode != runtimeeffects.ExecutionModeLive {
 		t.Fatalf("schedule execution mode = %q, want live", scheduler.schedule.ExecutionMode)
@@ -1203,7 +1299,7 @@ func TestExecAgentMessage_PublishesOnlyResolvedSameSlugRoute(t *testing.T) {
 		workerB.Identity: workerB,
 	}}
 	bus := &publishDirectBusStub{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{
 		Manager: manager, AuthorityProvider: runtimeauthority.NewSourceProvider(source), WorkflowSource: source,
 	})
 	actor := models.AgentConfig{
@@ -1274,7 +1370,7 @@ func TestExecAgentHire_DeniesDelegatedPermissionEscalation(t *testing.T) {
 		},
 	})
 	manager := &captureManagerStub{}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		Manager:           manager,
 		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 		WorkflowSource:    source,
@@ -1425,7 +1521,7 @@ func TestExecAgentHire_DeniesDelegatedToolEscalation(t *testing.T) {
 		},
 	})
 	manager := &captureManagerStub{}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		Manager:           manager,
 		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 		WorkflowSource:    source,
@@ -1468,7 +1564,7 @@ func TestExecAgentHire_DeniesRoleBasedEmitEscalation(t *testing.T) {
 		},
 	})
 	manager := &captureManagerStub{}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		Manager:           manager,
 		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 		WorkflowSource:    source,
@@ -1507,7 +1603,7 @@ func TestExecAgentHire_AllowsDelegablePrivileges(t *testing.T) {
 		},
 	})
 	manager := &captureManagerStub{}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		Manager:           manager,
 		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 		WorkflowSource:    source,
@@ -1573,7 +1669,7 @@ func TestExecAgentHire_RejectsUnresolvedParentBeforeSpawn(t *testing.T) {
 		},
 	})
 	manager := &captureManagerStub{}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		Manager:           manager,
 		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 		WorkflowSource:    source,
@@ -1613,7 +1709,7 @@ func TestExecAgentHire_RejectsSelfParentBeforeSpawn(t *testing.T) {
 		},
 	})
 	manager := &captureManagerStub{}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		Manager:           manager,
 		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 		WorkflowSource:    source,
@@ -1642,6 +1738,47 @@ func TestExecAgentHire_RejectsSelfParentBeforeSpawn(t *testing.T) {
 	}
 }
 
+func TestExecAgentHire_FailsClosedWhenNativeToolFallbackIsNotAdmitted(t *testing.T) {
+	t.Parallel()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"manager": {ID: "manager", Role: "manager"},
+			"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
+		},
+	})
+	manager := &captureManagerStub{}
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
+		Manager:           manager,
+		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
+		WorkflowSource:    source,
+	})
+
+	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "manager-1",
+		Role:          "manager",
+		Permissions:   []string{"agent_hire"},
+		NativeTools:   models.NativeToolConfig{FileIO: true},
+		FlowPath:      "review/inst-1",
+	}, map[string]any{
+		"config": map[string]any{
+			"id":               "worker-1",
+			"role":             "worker",
+			"manager_fallback": "manager",
+			"native_tools": map[string]any{
+				"file_io": true,
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "native_tools.file_io") {
+		t.Fatalf("ExecAgentHireDirect error = %v, want native_tools.file_io admission failure", err)
+	}
+	if manager.spawnCalled {
+		t.Fatal("expected native tool admission failure before spawning")
+	}
+}
+
 func TestExecAgentHire_PreservesMemoryPresenceAndProvenance(t *testing.T) {
 	t.Parallel()
 
@@ -1662,7 +1799,7 @@ func TestExecAgentHire_PreservesMemoryPresenceAndProvenance(t *testing.T) {
 				},
 			})
 			manager := &captureManagerStub{}
-			exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+			exec := NewExecutorWithOptions(nil, ExecutorOptions{
 				Manager:           manager,
 				AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 				WorkflowSource:    source,
@@ -1709,7 +1846,7 @@ func TestExecAgentHire_RejectsMemoryWithoutFlowInstanceOwner(t *testing.T) {
 		},
 	})
 	manager := &captureManagerStub{}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		Manager:           manager,
 		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 		WorkflowSource:    source,
@@ -1763,7 +1900,7 @@ func TestExecAgentHireRejectsRetiredAndInvalidMemoryModeInputs(t *testing.T) {
 					"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
 				},
 			})
-			exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+			exec := NewExecutorWithOptions(nil, ExecutorOptions{
 				Manager:           &captureManagerStub{},
 				AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 				WorkflowSource:    source,
@@ -1801,7 +1938,7 @@ func TestExecAgentReconfigure_DeniesNativeToolEscalation(t *testing.T) {
 			},
 		},
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		Manager:           manager,
 		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 		WorkflowSource:    source,
@@ -1831,6 +1968,55 @@ func TestExecAgentReconfigure_DeniesNativeToolEscalation(t *testing.T) {
 	}
 }
 
+func TestExecAgentReconfigure_FailsClosedWhenNativeToolFallbackIsNotAdmitted(t *testing.T) {
+	t.Parallel()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"manager": {ID: "manager", Role: "manager"},
+			"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
+		},
+	})
+	manager := &captureManagerStub{
+		agents: map[string]models.AgentConfig{
+			"worker-1": {
+				ID:              "worker-1",
+				Role:            "worker",
+				ManagerFallback: "manager",
+				FlowPath:        "review/inst-1",
+			},
+		},
+	}
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
+		Manager:           manager,
+		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
+		WorkflowSource:    source,
+	})
+
+	_, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "manager-1",
+		Identity:      agentidentitytest.Runtime(t, "manager-1", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
+		Role:          "manager",
+		Permissions:   []string{"agent_reconfigure"},
+		NativeTools:   models.NativeToolConfig{FileIO: true},
+		FlowPath:      "review/inst-1",
+	}, map[string]any{
+		"agent_id": "worker-1",
+		"config": map[string]any{
+			"native_tools": map[string]any{
+				"file_io": true,
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "native_tools.file_io") {
+		t.Fatalf("ExecAgentReconfigureDirect error = %v, want native_tools.file_io admission failure", err)
+	}
+	if manager.reconfigureCalled {
+		t.Fatal("expected native tool admission failure before reconfigure")
+	}
+}
+
 func TestExecAgentReconfigure_PreservesMemoryPresence(t *testing.T) {
 	t.Parallel()
 
@@ -1856,7 +2042,7 @@ func TestExecAgentReconfigure_PreservesMemoryPresence(t *testing.T) {
 					Memory: agentmemory.Authored(true), FlowPath: "review/inst-1",
 				},
 			}}
-			exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+			exec := NewExecutorWithOptions(nil, ExecutorOptions{
 				Manager: manager, AuthorityProvider: runtimeauthority.NewSourceProvider(source), WorkflowSource: source,
 			})
 			_, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{

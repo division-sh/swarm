@@ -2137,7 +2137,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
 		"selected_http": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass("write_or_unknown")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: http.MethodPost, URL: target.URL, TimeoutSeconds: 5})),
 	}})
-	executor := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{WorkflowSource: source})
+	executor := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{WorkflowSource: source})
 	actorIdentity := selectedContractTestAgentIdentity(t, "selected-tool-agent", "global")
 	actor := runtimeactors.AgentConfig{
 		ID: "selected-tool-agent", Identity: actorIdentity, FlowPath: actorIdentity.FlowInstance(),
@@ -2604,7 +2604,7 @@ func TestStartSelectedContractAgentRuntimeGatewayReturnsGeneratedBinding(t *test
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", staleContainerURL)
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
-	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{})
+	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{})
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
 	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, testGatewayWorkOwner(t), nil)
 	if err != nil {
@@ -2655,7 +2655,7 @@ func TestStartSelectedContractAgentRuntimeGatewayRejectsRetiredTokenEnv(t *testi
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", staleContainerURL)
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "operator-token")
 
-	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{})
+	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{})
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
 	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, testGatewayWorkOwner(t), nil)
 	if err == nil || !strings.Contains(err.Error(), "SWARM_TOOL_GATEWAY_TOKEN is retired") || !strings.Contains(err.Error(), "ToolGatewayBinding") {

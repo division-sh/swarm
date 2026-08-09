@@ -16,9 +16,12 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	timerobligationstore "github.com/division-sh/swarm/internal/store/internal/backend/timerobligation"
+	storeworkflowtimer "github.com/division-sh/swarm/internal/store/internal/backend/workflowtimer"
 	"github.com/google/uuid"
 )
 
@@ -542,7 +545,8 @@ func (s *standingServiceAdapter) SuspendStandingService(ctx context.Context, ope
 			return err
 		}
 		now := time.Now().UTC()
-		if err := s.quiesceStandingRunTx(txctx, tx, current.RunID, current.BundleHash, "standing_suspended", "cancelled", now); err != nil {
+		cancellations, err := s.quiesceStandingRunTx(txctx, tx, current.RunID, current.BundleHash, "standing_suspended", "cancelled", now)
+		if err != nil {
 			return err
 		}
 		if err := s.queueDeliveryContinuationSignal(txctx); err != nil {
@@ -563,6 +567,7 @@ func (s *standingServiceAdapter) SuspendStandingService(ctx context.Context, ope
 		result.Transition = "suspended"
 		result.EffectiveState = "suspended"
 		result.Reason = operation.Reason
+		result.TimerCancellations = cancellations
 		return s.insertStandingJournalTx(txctx, tx, result, current.EffectiveState, operation.Actor, now)
 	})
 	return result, err
@@ -627,6 +632,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 	}
 	var result runtimepipeline.StandingServiceReconciliation
 	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var cancellations []runtimetimercancellation.Ref
 		current, found, err := s.loadStandingServiceTx(txctx, tx, operation.ServiceID)
 		if err != nil {
 			return err
@@ -647,7 +653,8 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 			return err
 		}
 		if currentState.Active() {
-			if err := s.quiesceStandingRunTx(txctx, tx, current.RunID, current.BundleHash, "standing_reset", "cancelled", now); err != nil {
+			cancellations, err = s.quiesceStandingRunTx(txctx, tx, current.RunID, current.BundleHash, "standing_reset", "cancelled", now)
+			if err != nil {
 				return err
 			}
 			if err := s.queueDeliveryContinuationSignal(txctx); err != nil {
@@ -697,6 +704,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 		}
 		candidate := runtimepipeline.StandingServiceCandidate{ServiceID: current.ServiceID, PackageKey: current.PackageKey, FlowID: current.FlowID, InstanceID: current.InstanceID, EntityID: current.EntityID, Source: source}
 		result = standingResult(candidate, nextRunID, nextGeneration, current.PublicationSequence, "reset", effectiveState, operation.Reason)
+		result.TimerCancellations = cancellations
 		return s.insertStandingJournalTx(txctx, tx, result, current.EffectiveState, operation.Actor, now)
 	})
 	return result, err
@@ -1170,7 +1178,8 @@ func (s *standingServiceAdapter) orphanStandingServiceTx(ctx context.Context, tx
 		return runtimepipeline.StandingServiceReconciliation{}, standingResetRequiredError(current, "removed declaration points at a terminal generation")
 	}
 	now := time.Now().UTC()
-	if err := s.quiesceStandingRunTx(ctx, tx, current.RunID, current.BundleHash, "standing_declaration_removed", "orphaned", now); err != nil {
+	cancellations, err := s.quiesceStandingRunTx(ctx, tx, current.RunID, current.BundleHash, "standing_declaration_removed", "orphaned", now)
+	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
 	if err := s.setStandingRunPausedTx(ctx, tx, current.RunID, "standing_declaration_removed", "runtime", now); err != nil {
@@ -1189,6 +1198,7 @@ func (s *standingServiceAdapter) orphanStandingServiceTx(ctx context.Context, tx
 	result.Transition = "orphaned"
 	result.EffectiveState = "orphaned"
 	result.Reason = "standing_declaration_removed"
+	result.TimerCancellations = cancellations
 	if err := s.insertStandingJournalTx(ctx, tx, result, current.EffectiveState, "runtime", now); err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
@@ -1254,13 +1264,13 @@ func (s *standingServiceAdapter) standingRunHasLiveWorkTx(ctx context.Context, t
 	return run.Totals().ActiveCount > 0, nil
 }
 
-func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *sql.Tx, runID, bundleHash, reason, sessionReason string, now time.Time) error {
+func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *sql.Tx, runID, bundleHash, reason, sessionReason string, now time.Time) ([]runtimetimercancellation.Ref, error) {
 	if !s.validRunLifecycleMutation(tx) {
-		return fmt.Errorf("quiesce standing run: standing transaction owner is required")
+		return nil, fmt.Errorf("quiesce standing run: standing transaction owner is required")
 	}
 	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, bundleHash)
 	if err != nil {
-		return fmt.Errorf("quiesce standing run scope: %w", err)
+		return nil, fmt.Errorf("quiesce standing run scope: %w", err)
 	}
 	ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	var deliveryErr error
@@ -1270,7 +1280,7 @@ func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *s
 		_, deliveryErr = s.postgresStore.TerminalizeRunDeliveriesTx(ctx, tx, s.story, runID, reason)
 	}
 	if deliveryErr != nil {
-		return fmt.Errorf("terminalize standing deliveries: %w", deliveryErr)
+		return nil, fmt.Errorf("terminalize standing deliveries: %w", deliveryErr)
 	}
 	disposition := runtimepipelineobligation.DeadLetter(reason, nil)
 	var pipelineErr error
@@ -1280,24 +1290,34 @@ func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *s
 		_, pipelineErr = s.postgresStore.TerminalizeRunTx(ctx, tx, runID, disposition, now)
 	}
 	if pipelineErr != nil {
-		return fmt.Errorf("terminalize standing pipeline obligations: %w", pipelineErr)
+		return nil, fmt.Errorf("terminalize standing pipeline obligations: %w", pipelineErr)
 	}
 	if s.isSQLite() {
 		if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'terminated', termination_reason = ?, termination_detail = ?, terminated_at = COALESCE(terminated_at, ?), lease_holder = NULL, lease_expires_at = NULL, updated_at = ? WHERE run_id = ? AND status IN ('active', 'suspended')`, sessionReason, reason, now, now, runID); err != nil {
-			return fmt.Errorf("terminate sqlite standing sessions: %w", err)
+			return nil, fmt.Errorf("terminate sqlite standing sessions: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE timers SET status = 'cancelled' WHERE run_id = ? AND status = 'active'`, runID); err != nil {
-			return fmt.Errorf("cancel sqlite standing timers: %w", err)
+		generic, err := storegenericschedule.CancelRunsTx(ctx, tx, false, []string{runID}, reason, now)
+		if err != nil {
+			return nil, fmt.Errorf("cancel sqlite standing generic schedules: %w", err)
 		}
-		return nil
+		workflow, err := storeworkflowtimer.CancelRunsTx(ctx, tx, false, []string{runID})
+		if err != nil {
+			return nil, fmt.Errorf("cancel sqlite standing workflow timers: %w", err)
+		}
+		return append(generic, workflow...), nil
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'terminated', termination_reason = $2, termination_detail = $3, terminated_at = COALESCE(terminated_at, $4), lease_holder = NULL, lease_expires_at = NULL, updated_at = $4 WHERE run_id = $1::uuid AND status IN ('active', 'suspended')`, runID, sessionReason, reason, now); err != nil {
-		return fmt.Errorf("terminate standing sessions: %w", err)
+		return nil, fmt.Errorf("terminate standing sessions: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE timers SET status = 'cancelled' WHERE run_id = $1::uuid AND status = 'active'`, runID); err != nil {
-		return fmt.Errorf("cancel standing timers: %w", err)
+	generic, err := storegenericschedule.CancelRunsTx(ctx, tx, true, []string{runID}, reason, now)
+	if err != nil {
+		return nil, fmt.Errorf("cancel standing generic schedules: %w", err)
 	}
-	return nil
+	workflow, err := storeworkflowtimer.CancelRunsTx(ctx, tx, true, []string{runID})
+	if err != nil {
+		return nil, fmt.Errorf("cancel standing workflow timers: %w", err)
+	}
+	return append(generic, workflow...), nil
 }
 
 func (s *standingServiceAdapter) setStandingRunPausedTx(ctx context.Context, tx *sql.Tx, runID, reason, actor string, now time.Time) error {

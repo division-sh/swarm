@@ -197,7 +197,7 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "market-research-agent",
@@ -384,7 +384,7 @@ func criteriaCitationEmitTestExecutorWithAgent(t testing.TB, agent runtimecontra
 	source := semanticview.Wrap(bundle)
 	emitRegistry := NewEmitRegistry(source, nil)
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "cto-agent",
@@ -461,7 +461,7 @@ func TestHandleEmitTool_PreservesInboundChildFlowOwnerAndExecutionMode(t *testin
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
 		ExecutionMode: "mock",
 		ID:            "business-research-agent",
@@ -536,7 +536,7 @@ func TestHandleEmitTool_DoesNotAdoptForeignInboundFlowOwner(t *testing.T) {
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "business-research-agent",
@@ -605,7 +605,7 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "discovery-coordinator",
@@ -675,7 +675,7 @@ func TestHandleEmitTool_TargetsParentRouteForChildPinOutput(t *testing.T) {
 		FlowInstance: "root",
 		EntityID:     "11111111-1111-1111-1111-111111111111",
 	}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{
 		WorkflowSource: source,
 		EmitRegistry:   emitRegistry,
 		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
@@ -766,7 +766,7 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{
 		WorkflowSource: source,
 		EmitRegistry:   emitRegistry,
 		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
@@ -840,7 +840,7 @@ func TestHandleEmitTool_StaticChildPinOutputTargetsDeliveryEntity(t *testing.T) 
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analyzer",
@@ -911,7 +911,7 @@ func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analyzer",
@@ -960,7 +960,7 @@ func TestHandleEmitTool_RootSchemaPinOutputStillRequiresTarget(t *testing.T) {
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "root-agent",
@@ -996,7 +996,7 @@ func TestHandleEmitTool_RoutesTypedSameFlowOutputToNodeConsumer(t *testing.T) {
 	store := newEmitRoutePlanStore()
 	eventBus := newEmitRoutePlanEventBus(t, store, source)
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "root-agent", Identity: toolTestRootAgentIdentity(t, "root-agent"), Role: "root-agent", EntityID: eventtest.UUID("root-agent-cycle-source"), EmitEvents: []string{"cycle.ping"}}
-	exec := NewExecutorWithOptions(eventBus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
+	exec := NewExecutorWithOptions(eventBus, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
 
 	out, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_cycle_ping", map[string]any{})
 	if err != nil {
@@ -1030,7 +1030,7 @@ func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t
 	if tools := emitRegistry.GenerateEmitToolsForActor(actor, nil); !emitToolDefinitionsContain(tools, "emit_deploy_done") {
 		t.Fatalf("generated emit tools = %#v, want emit_deploy_done", tools)
 	}
-	exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	exec := NewExecutorWithOptions(eb, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RunCreatingRootIngress(
 		eventtest.UUID("emit-connected-output-parent"),
@@ -1093,7 +1093,7 @@ func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflig
 		EntityID:      runtimeflowidentity.EntityID("producer-entity"),
 		EmitEvents:    []string{"producer/deploy.done"},
 	}
-	exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(eb, ExecutorOptions{
 		WorkflowSource: source,
 		EmitRegistry:   emitRegistry,
 		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
@@ -1159,7 +1159,7 @@ func TestHandleEmitTool_RootReceiverConnectRejectsMissingOrIncompleteParentIdent
 				EntityID:      runtimeflowidentity.EntityID("producer-entity"),
 				EmitEvents:    []string{"producer/deploy.done"},
 			}
-			exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{
+			exec := NewExecutorWithOptions(eb, ExecutorOptions{
 				WorkflowSource:    source,
 				EmitRegistry:      NewEmitRegistry(source, nil),
 				WorkflowInstances: emitWorkflowInstanceLoader{rows: tc.rows},
@@ -1198,7 +1198,7 @@ func TestHandleEmitTool_FailsClosedForConnectedOutputWithoutCanonicalRouteAuthor
 		EntityID:      runtimeflowidentity.EntityID("producer-entity"),
 		EmitEvents:    []string{"deploy.done"},
 	}
-	exec := NewExecutorWithOptions(eb, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	exec := NewExecutorWithOptions(eb, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RunCreatingRootIngress(
 		eventtest.UUID("emit-missing-route-parent"),
@@ -1249,7 +1249,7 @@ func TestHandleEmitTool_FailsClosedOnUndeclaredPayloadField(t *testing.T) {
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "market-research-agent",
@@ -1285,7 +1285,7 @@ func TestHandleEmitTool_AllowsDeclaredTemplateIDBusinessPayload(t *testing.T) {
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "repo-agent",
@@ -1350,7 +1350,7 @@ func TestHandleEmitTool_AllowsValidWave1EventPayloadTypes(t *testing.T) {
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "market-research-agent",
@@ -1446,7 +1446,7 @@ func TestHandleEmitTool_ResolvesDuplicateLeafScopedSchemasThroughActor(t *testin
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 
 	reviewActor := models.AgentConfig{
 		ExecutionMode: "live",
@@ -1545,7 +1545,7 @@ func TestHandleEmitTool_FailsClosedOnSameActorDuplicateLeafScopedSchemas(t *test
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "dual-scope-agent",
@@ -1591,7 +1591,7 @@ func TestHandleEmitTool_FailsClosedOnNamedTypeViolation(t *testing.T) {
 	emitRegistry := NewEmitRegistry(source, nil)
 
 	bus := &publishBusCapture{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "market-research-agent",

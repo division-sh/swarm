@@ -11,7 +11,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
@@ -23,6 +22,7 @@ import (
 	storeeffect "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	storeevent "github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence"
+	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
@@ -68,7 +68,8 @@ type SQLiteRuntimeStore struct {
 	replySQLiteOwner             *storereplycontext.ReplySQLiteOwner
 	runForkSQLiteOwner           *storerunfork.RunForkSQLiteOwner
 	runLifecycleSQLiteOwner      *storerunlifecycle.RunLifecycleSQLiteOwner
-	scheduleSQLiteOwner          *storetimerobligation.ScheduleSQLiteOwner
+	timerObligationSQLiteReader  *storetimerobligation.SQLiteReader
+	genericScheduleSQLiteOwner   *storegenericschedule.SQLiteOwner
 
 	schema                *SQLiteSchemaStore
 	backend               *sqlitebackend.Backend
@@ -86,7 +87,6 @@ var _ runtimebus.EventStore = (*SQLiteRuntimeStore)(nil)
 var _ runtimebus.ActiveFlowInstanceDescriptorLister = (*SQLiteRuntimeStore)(nil)
 var _ runtimebus.RunLifecycleReadPersistence = (*SQLiteRuntimeStore)(nil)
 var _ runtimemanager.ManagerPersistence = (*SQLiteRuntimeStore)(nil)
-var _ runtimepipeline.SchedulePersistence = (*SQLiteRuntimeStore)(nil)
 var _ runtimetools.MailboxPersistence = (*SQLiteRuntimeStore)(nil)
 var _ runtimeingress.Store = (*SQLiteRuntimeStore)(nil)
 var _ runtimeruncontrol.Store = (*SQLiteRuntimeStore)(nil)
@@ -144,6 +144,9 @@ func (s *SQLiteRuntimeStore) SetNowFnForTest(nowFn func() time.Time) {
 		nowFn = time.Now
 	}
 	s.nowFn = nowFn
+	if s.genericScheduleSQLiteOwner != nil {
+		s.genericScheduleSQLiteOwner.SetNowFnForTest(nowFn)
+	}
 }
 
 func (s *SQLiteRuntimeStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {

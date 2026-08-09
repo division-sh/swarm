@@ -15,10 +15,12 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/store/testutil/mutationlogfixture"
+	"github.com/google/uuid"
 )
 
 type pipelineTestPublicationPlan struct {
@@ -163,8 +165,8 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 		return CommittedWorkflowEngineMutation{}, err
 	}
 	r.mu.Lock()
-	r.committedScheduleUpserts = append(r.committedScheduleUpserts, result.Lifecycle.ScheduleUpserts...)
-	r.committedScheduleCancellations = append(r.committedScheduleCancellations, result.Lifecycle.ScheduleCancellations...)
+	r.committedGenericScheduleActivations = append(r.committedGenericScheduleActivations, result.Lifecycle.GenericScheduleActivations...)
+	r.committedGenericScheduleCancellations = append(r.committedGenericScheduleCancellations, result.Lifecycle.GenericScheduleCancellations...)
 	r.mu.Unlock()
 	return result, nil
 }
@@ -378,11 +380,21 @@ func commitPipelineTestWorkflowLifecycle(ctx context.Context, store *workflowIns
 		}
 	}
 	for _, mutation := range plan.Schedules {
+		activation, err := pipelineTestGenericScheduleActivation(mutation.Command)
+		if err != nil {
+			return CommittedWorkflowLifecycleMutation{}, err
+		}
 		switch mutation.Kind {
 		case WorkflowScheduleMutationUpsert:
-			result.ScheduleUpserts = append(result.ScheduleUpserts, mutation.Schedule)
+			result.GenericScheduleActivations = append(result.GenericScheduleActivations, activation)
 		case WorkflowScheduleMutationCancel:
-			result.ScheduleCancellations = append(result.ScheduleCancellations, mutation.Schedule)
+			activation.Status = runtimegenericschedule.StatusCancelled
+			activation.CancelCause = mutation.CancelCause
+			activation.CancelledAt = mutation.CancelledAt
+			if err := activation.Validate(); err != nil {
+				return CommittedWorkflowLifecycleMutation{}, err
+			}
+			result.GenericScheduleCancellations = append(result.GenericScheduleCancellations, activation)
 		default:
 			return CommittedWorkflowLifecycleMutation{}, fmt.Errorf("pipeline test workflow schedule mutation %q is unsupported", mutation.Kind)
 		}
@@ -412,6 +424,32 @@ func commitPipelineTestWorkflowLifecycle(ctx context.Context, store *workflowIns
 		}
 	}
 	return result, nil
+}
+
+func pipelineTestGenericScheduleActivation(command runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.Activation, error) {
+	command = command.Canonical()
+	if err := command.Validate(); err != nil {
+		return runtimegenericschedule.Activation{}, err
+	}
+	scope, err := command.ScopeKey()
+	if err != nil {
+		return runtimegenericschedule.Activation{}, err
+	}
+	hash, err := command.ImmutableHash()
+	if err != nil {
+		return runtimegenericschedule.Activation{}, err
+	}
+	admittedAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	dueAt, err := command.Due.FirstDue(admittedAt)
+	if err != nil {
+		return runtimegenericschedule.Activation{}, err
+	}
+	activation := runtimegenericschedule.Activation{
+		ID:      uuid.NewSHA1(uuid.NameSpaceOID, []byte(scope+"\x1f"+command.ScheduleKey)).String(),
+		Command: command, ImmutableHash: hash, AdmittedAt: admittedAt,
+		InitialDueAt: dueAt, CurrentDueAt: dueAt, Status: runtimegenericschedule.StatusActive,
+	}
+	return activation, activation.Validate()
 }
 
 func pipelineTestInitialReadinessEqual(ctx context.Context, dialect workflowStoreDialect, record WorkflowInitialMaterializationRecord) (bool, error) {

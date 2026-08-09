@@ -11,9 +11,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -27,8 +29,7 @@ type replyContinuationStoreTestSurface interface {
 	replyContextStoreTestSurface
 	runtimetools.MailboxPersistence
 	MaterializeMailboxWrite(context.Context, runtimepipeline.MailboxWriteMaterialization) error
-	UpsertSchedule(context.Context, runtimepipeline.Schedule) error
-	LoadActiveSchedules(context.Context) ([]runtimepipeline.Schedule, error)
+	runtimegenericschedule.Store
 }
 
 func TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext(t *testing.T) {
@@ -108,38 +109,37 @@ func TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext(t 
 				t.Fatalf("agent mailbox readback = %#v err=%v", item, err)
 			}
 
-			schedule := runtimepipeline.Schedule{
-				Context:   deliveryContext,
-				RunID:     runID,
-				AgentID:   "provider-agent",
-				EventType: "provider.resume",
-				Mode:      "once",
-				At:        now.Add(10 * time.Minute),
-				TaskID:    "reply-resume",
-				Payload:   []byte(`{"resume":true}`),
-			}
-			schedule = testAgentOwnedSchedule(t, schedule)
-			if err := store.UpsertSchedule(ctx, schedule); err != nil {
-				t.Fatalf("UpsertSchedule: %v", err)
-			}
-			schedules, err := store.LoadActiveSchedules(ctx)
+			identity := testAgentIdentity(t, "provider-agent", "provider/account-a")
+			routing, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+				FlowID: "provider", FlowInstance: identity.FlowInstance(), EntityID: record.Origin.EntityID,
+			})
 			if err != nil {
-				t.Fatalf("LoadActiveSchedules: %v", err)
+				t.Fatalf("build reply schedule routing source: %v", err)
 			}
-			foundSchedule := false
-			for _, loaded := range schedules {
-				if loaded.TaskID == schedule.TaskID {
-					foundSchedule = loaded.Context.ReplyContextID() == record.ID
-				}
+			command := runtimegenericschedule.AdmissionCommand{
+				ScheduleKey: "reply-resume", RunID: runID, EntityID: record.Origin.EntityID,
+				FlowInstance: identity.FlowInstance(), OwnerKind: runtimegenericschedule.OwnerAgent,
+				OwnerID: identity.AgentID(), AgentIdentity: identity, EventType: "provider.resume",
+				Payload:       semanticvalue.MustObject(map[string]semanticvalue.Value{"resume": semanticvalue.Bool(true)}),
+				RoutingSource: routing, ReplyContext: record.ID,
+				Due: runtimegenericschedule.AbsoluteDue(now.Add(10 * time.Minute)), TaskID: "reply-resume",
 			}
-			if !foundSchedule {
-				t.Fatalf("one-shot schedule did not restore reply context: %#v", schedules)
+			admitted, err := store.AdmitGenericSchedule(events.WithDeliveryContext(ctx, deliveryContext), command)
+			if err != nil {
+				t.Fatalf("AdmitGenericSchedule: %v", err)
 			}
-			recurring := schedule
+			loadedSchedule, found, err := store.LoadGenericScheduleActivation(ctx, admitted.Activation.ID)
+			if err != nil {
+				t.Fatalf("LoadGenericScheduleActivation: %v", err)
+			}
+			if !found || loadedSchedule.Command.ReplyContext != record.ID {
+				t.Fatalf("one-shot schedule did not restore reply context: found=%v activation=%#v", found, loadedSchedule)
+			}
+			recurring := command
+			recurring.ScheduleKey = "reply-recurring"
 			recurring.TaskID = "reply-recurring"
-			recurring.Mode = "cron"
-			recurring.Cron = "@every 1h"
-			if err := store.UpsertSchedule(ctx, recurring); err == nil {
+			recurring.Due = runtimegenericschedule.EveryDue(time.Hour)
+			if _, err := store.AdmitGenericSchedule(ctx, recurring); err == nil {
 				t.Fatal("recurring schedule with open reply context unexpectedly accepted")
 			}
 

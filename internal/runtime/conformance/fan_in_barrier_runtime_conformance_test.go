@@ -34,9 +34,12 @@ import (
 type fanInBarrierConformanceStore interface {
 	conformanceDurableEventBusStore
 	runtimepipeline.WorkflowPersistenceOwner
-	runtimepipeline.SchedulePersistence
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 }
+
+type fanInBarrierGenericScheduleWakeups struct{}
+
+func (fanInBarrierGenericScheduleWakeups) ReconcileWakeup(context.Context, string) error { return nil }
 
 type fanInBarrierRuntime struct {
 	bus         *runtimebus.EventBus
@@ -236,7 +239,7 @@ func newFanInBarrierRuntime(t *testing.T, backend fanInBarrierConformanceStore, 
 		HumanTaskExpiry:         backend,
 		DeliveryRuntime:         eventBus,
 		FlowRoutes:              eventBus,
-		TimerScheduleStore:      backend, ReceiverExecution: eventreceiver.NormalExecution(),
+		GenericSchedules:        fanInBarrierGenericScheduleWakeups{}, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, nil, runtimemanager.AgentManagerOptions{

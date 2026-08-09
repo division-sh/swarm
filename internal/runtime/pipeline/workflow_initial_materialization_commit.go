@@ -80,8 +80,8 @@ func (r CommittedWorkflowInitialMaterialization) Validate() error {
 func emptyCommittedWorkflowLifecycleMutation(committed CommittedWorkflowLifecycleMutation) bool {
 	return len(committed.Wakeups) == 0 &&
 		len(committed.Cancellations) == 0 &&
-		len(committed.ScheduleUpserts) == 0 &&
-		len(committed.ScheduleCancellations) == 0
+		len(committed.GenericScheduleActivations) == 0 &&
+		len(committed.GenericScheduleCancellations) == 0
 }
 
 // WorkflowInitialMaterializationCommitOwner is the selected-store owner for

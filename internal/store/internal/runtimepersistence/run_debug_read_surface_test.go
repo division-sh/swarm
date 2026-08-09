@@ -13,6 +13,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -311,17 +312,13 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 	if err := acknowledgePipelineEventFixture(ctx, pg, readyEventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt ready event: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO timers (
-			timer_id, run_id, timer_name, fire_event, fire_payload,
-			routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, created_at
-		)
-		VALUES
-			(gen_random_uuid(), $1::uuid, 'due', 'quiescence.timeout', '{}'::jsonb, '{"kind":"platform_control","route":{}}'::jsonb, 'live', now() - interval '1 minute', 'timer-agent', 'system', 'timer', 'active', now()),
-			(gen_random_uuid(), $2::uuid, 'settled', 'quiescence.timeout', '{}'::jsonb, '{"kind":"platform_control","route":{}}'::jsonb, 'live', now() - interval '1 minute', 'timer-agent', 'system', 'timer', 'fired', now())
-	`, blockedRunID, readyRunID); err != nil {
-		t.Fatalf("seed timers: %v", err)
-	}
+	admitGenericScheduleFixture(t, ctx, pg, testRootGenericScheduleCommand(
+		t, blockedRunID, uuid.NewString(), "quiescence-due", runtimegenericschedule.AbsoluteDue(now.Add(-time.Minute)),
+	))
+	settled := admitGenericScheduleFixture(t, ctx, pg, testRootGenericScheduleCommand(
+		t, readyRunID, uuid.NewString(), "quiescence-settled", runtimegenericschedule.AbsoluteDue(now.Add(-time.Minute)),
+	))
+	cancelGenericScheduleFixture(t, ctx, pg, settled, "test_settled", now)
 	quiescenceIdentity := testAgentIdentity(t, "quiescence-agent", "quiescence")
 	quiescenceFields := testAgentIdentityStorageFields(t, quiescenceIdentity)
 	seedTestAgentRow(t, ctx, db, true, quiescenceIdentity, "active")

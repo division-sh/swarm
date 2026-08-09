@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -223,27 +224,15 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileTimerActiveTh
 	if err := acknowledgePipelineEventFixture(ctx, pg, fixture.EventID); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
-	timerID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO timers (
-			timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-			routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'wait', $3::uuid, '', 'example.timeout', '{}'::jsonb,
-			'{"kind":"platform_control","route":{}}'::jsonb, 'live',
-			now() + interval '1 minute', 'timer-agent', 'system', 'timer', 'active', now()
-		)
-	`, timerID, fixture.RunID, fixture.EntityID); err != nil {
-		t.Fatalf("seed active timer: %v", err)
-	}
+	timer := admitGenericScheduleFixture(t, ctx, pg, testRootGenericScheduleCommand(
+		t, fixture.RunID, fixture.EntityID, "run-completion-wait", runtimegenericschedule.DelayDue(time.Minute),
+	))
 	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion active timer: %v", err)
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
 
-	if _, err := db.ExecContext(ctx, `UPDATE timers SET status = 'fired', fired_at = now() WHERE timer_id = $1::uuid`, timerID); err != nil {
-		t.Fatalf("settle timer: %v", err)
-	}
+	cancelGenericScheduleFixture(t, ctx, pg, timer, "test_settled", time.Now().UTC())
 	if err := executeRunCompletionCandidateForEvent(ctx, pg, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
 		t.Fatalf("ConvergeNormalRunCompletion settled timer: %v", err)
 	}

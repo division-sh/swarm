@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -20,6 +21,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
@@ -69,9 +71,11 @@ func TestWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStores(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
 			bundle := workflowJoinLifecycleBundle()
+			schedules := &recordingGenericScheduleWakeupOwner{}
 			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-				Module:      &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)},
-				Persistence: workflowPersistenceForTest(store),
+				Module:           &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)},
+				Persistence:      workflowPersistenceForTest(store),
+				GenericSchedules: schedules,
 			})
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
@@ -97,8 +101,11 @@ func TestWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStores(t *testing.T) {
 				t.Fatalf("selected-store join activation = %#v, found=%v error=%v", activation, found, loadErr)
 			}
 			upserts, _ := committedWorkflowSchedulesForTest(t, store)
-			if len(upserts) != 1 || upserts[0].EventType != joinTimeoutEvent {
+			if len(upserts) != 1 || upserts[0].Command.EventType != joinTimeoutEvent {
 				t.Fatalf("selected-store join schedules = %#v, want one timeout", upserts)
+			}
+			if len(schedules.activationIDs) != 1 || schedules.activationIDs[0] != upserts[0].ID {
+				t.Fatalf("selected-store join wakeup reconciliation = %#v, want activation %s", schedules.activationIDs, upserts[0].ID)
 			}
 		})
 	}
@@ -165,12 +172,12 @@ func TestArmWorkflowJoinPersistsActivationAndScheduleAtomically(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db := newSQLiteWorkflowInstanceStoreTestDB(t)
 			store := newSQLiteWorkflowInstanceStoreForTest(t, db)
-			schedules := &recordingSchedulePersistence{}
+			schedules := &recordingGenericScheduleWakeupOwner{}
 			bundle := workflowJoinLifecycleBundle()
 			pc := &PipelineCoordinator{
-				module:             &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)},
-				workflowStore:      store,
-				timerScheduleStore: schedules,
+				module:           &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)},
+				workflowStore:    store,
+				genericSchedules: schedules,
 			}
 			entityID := FlowInstanceEntityID("orders/order-1")
 			runID := uuid.NewString()
@@ -205,10 +212,10 @@ func TestArmWorkflowJoinPersistsActivationAndScheduleAtomically(t *testing.T) {
 				t.Fatalf("schedules = %d, want 1", got)
 			}
 			schedule := upserts[0]
-			if schedule.EventType != tc.wantEvent || schedule.EntityID != entityID {
+			if schedule.Command.EventType != tc.wantEvent || schedule.Command.EntityID != entityID {
 				t.Fatalf("schedule = %#v", schedule)
 			}
-			handle, ok := timeridentity.ParseTimerHandle(parsePayloadMap(schedule.Payload))
+			handle, ok := timeridentity.ParseTimerHandle(parsePayloadMap(genericSchedulePayloadForTest(t, schedule)))
 			if !ok || handle.Kind != tc.wantKind || handle.Join.JoinID != "awaiting" {
 				t.Fatalf("timer handle = %#v, %v", handle, ok)
 			}
@@ -233,8 +240,8 @@ func TestArmWorkflowJoinPostgresParity(t *testing.T) {
 			runlifecyclefixture.RequirePostgres(t, testAuthorActivityContext(t, context.Background()), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID})
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 			store := newPostgresWorkflowInstanceStoreForTest(db)
-			schedules := &recordingSchedulePersistence{}
-			pc := &PipelineCoordinator{module: &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(workflowJoinLifecycleBundle())}, workflowStore: store, timerScheduleStore: schedules}
+			schedules := &recordingGenericScheduleWakeupOwner{}
+			pc := &PipelineCoordinator{module: &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(workflowJoinLifecycleBundle())}, workflowStore: store, genericSchedules: schedules}
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": tc.members}})); err != nil {
@@ -256,7 +263,7 @@ func TestArmWorkflowJoinPostgresParity(t *testing.T) {
 				t.Fatalf("activation = %#v, %v, %v", activation, ok, err)
 			}
 			upserts, _ := committedWorkflowSchedulesForTest(t, store)
-			if len(upserts) != 1 || upserts[0].EventType != tc.wantEvent {
+			if len(upserts) != 1 || upserts[0].Command.EventType != tc.wantEvent {
 				t.Fatalf("schedule parity = schedules:%#v", upserts)
 			}
 		})
@@ -279,11 +286,11 @@ func TestWorkflowJoinCustomCompletionControlsExpectedZeroOnBothStores(t *testing
 			bundle.Semantics.Joins[0].Spec = spec
 			bundle.Semantics.NodeHandlers["join-node"] = node.EventHandlers
 
-			schedules := &recordingSchedulePersistence{}
+			schedules := &recordingGenericScheduleWakeupOwner{}
 			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-				Module:             &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)},
-				Persistence:        workflowPersistenceForTest(store),
-				TimerScheduleStore: schedules,
+				Module:           &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)},
+				Persistence:      workflowPersistenceForTest(store),
+				GenericSchedules: schedules,
 			})
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
@@ -309,7 +316,7 @@ func TestWorkflowJoinCustomCompletionControlsExpectedZeroOnBothStores(t *testing
 				t.Fatalf("custom zero activation = %#v, %v, %v, want open", activation, ok, err)
 			}
 			upserts, _ := committedWorkflowSchedulesForTest(t, store)
-			if len(upserts) != 1 || upserts[0].EventType != joinTimeoutEvent {
+			if len(upserts) != 1 || upserts[0].Command.EventType != joinTimeoutEvent {
 				t.Fatalf("custom zero schedules = %#v, want timeout", upserts)
 			}
 		})
@@ -381,11 +388,11 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 			bundle.Semantics.NodeHandlers["join-node"] = node.EventHandlers
 			bundle.Semantics.EffectiveNodes["join-node"] = runtimecontracts.SystemNodeEffectiveSemantics{ID: "join-node", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(node)}
 
-			schedules := &recordingSchedulePersistence{}
+			schedules := &recordingGenericScheduleWakeupOwner{}
 			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-				Module:             &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)},
-				Persistence:        workflowPersistenceForTest(store),
-				TimerScheduleStore: schedules,
+				Module:           &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)},
+				Persistence:      workflowPersistenceForTest(store),
+				GenericSchedules: schedules,
 			})
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
@@ -445,7 +452,7 @@ type workflowJoinStoreCase struct {
 	open func(*testing.T) (*workflowInstanceStore, context.Context)
 }
 
-func committedWorkflowSchedulesForTest(t *testing.T, store *workflowInstanceStore) ([]Schedule, []Schedule) {
+func committedWorkflowSchedulesForTest(t *testing.T, store *workflowInstanceStore) ([]runtimegenericschedule.Activation, []runtimegenericschedule.Activation) {
 	t.Helper()
 	runner, ok := store.engineMutations.(*recordingRuntimeMutationRunner)
 	if !ok || runner == nil {
@@ -453,7 +460,16 @@ func committedWorkflowSchedulesForTest(t *testing.T, store *workflowInstanceStor
 	}
 	runner.mu.Lock()
 	defer runner.mu.Unlock()
-	return append([]Schedule(nil), runner.committedScheduleUpserts...), append([]Schedule(nil), runner.committedScheduleCancellations...)
+	return append([]runtimegenericschedule.Activation(nil), runner.committedGenericScheduleActivations...), append([]runtimegenericschedule.Activation(nil), runner.committedGenericScheduleCancellations...)
+}
+
+func genericSchedulePayloadForTest(t *testing.T, activation runtimegenericschedule.Activation) json.RawMessage {
+	t.Helper()
+	payload, err := canonicaljson.Encode(activation.Command.Payload)
+	if err != nil {
+		t.Fatalf("encode generic schedule payload: %v", err)
+	}
+	return payload
 }
 
 func workflowJoinStoreCases() []workflowJoinStoreCase {
@@ -503,7 +519,11 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			store, ctx := tc.store(t)
 			bundle := workflowJoinLifecycleBundle()
 			bus := &recordingPipelineBus{}
-			pc := newWorkflowJoinPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)}, Persistence: workflowPersistenceForTest(store)})
+			schedules := &recordingGenericScheduleWakeupOwner{}
+			pc := newWorkflowJoinPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{
+				Module:      &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)},
+				Persistence: workflowPersistenceForTest(store), GenericSchedules: schedules,
+			})
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
 			now := time.Now().UTC()
@@ -573,6 +593,10 @@ func TestWorkflowJoinArrivalTimeoutRaceHasOneCloseWinnerOnBothStores(t *testing.
 			if closed.CloseReason == joinruntime.CloseReasonTimeout && instance.CurrentState != "attention" {
 				t.Fatalf("timeout close state = %s", instance.CurrentState)
 			}
+			_, cancellations := committedWorkflowSchedulesForTest(t, store)
+			if len(cancellations) != 1 || len(schedules.activationIDs) != 1 || schedules.activationIDs[0] != cancellations[0].ID {
+				t.Fatalf("join close wakeup reconciliation = ids:%#v cancellations:%#v", schedules.activationIDs, cancellations)
+			}
 		})
 	}
 }
@@ -598,8 +622,8 @@ func TestWorkflowJoinArmArrivalRaceIsEarlyOrAdmittedOnBothStores(t *testing.T) {
 			store, ctx := tc.store(t)
 			bundle := workflowJoinLifecycleBundle()
 			bus := &recordingPipelineBus{}
-			schedules := &recordingSchedulePersistence{}
-			pc := newWorkflowJoinPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)}, Persistence: workflowPersistenceForTest(store), TimerScheduleStore: schedules})
+			schedules := &recordingGenericScheduleWakeupOwner{}
+			pc := newWorkflowJoinPipelineCoordinator(bus, store.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)}, Persistence: workflowPersistenceForTest(store), GenericSchedules: schedules})
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: "orders", WorkflowVersion: "1.0.0", CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Metadata: map[string]any{"entity_id": entityID, "expected": []any{"a", "b"}}})); err != nil {
@@ -680,9 +704,9 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.store(t)
 			bundle := workflowJoinLifecycleBundle()
-			schedules := &recordingSchedulePersistence{}
+			schedules := &recordingGenericScheduleWakeupOwner{}
 			newCoordinator := func() *PipelineCoordinator {
-				return newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)}, Persistence: workflowPersistenceForTest(store), TimerScheduleStore: schedules})
+				return newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)}, Persistence: workflowPersistenceForTest(store), GenericSchedules: schedules})
 			}
 			pc := newCoordinator()
 			path := "orders/" + uuid.NewString()
@@ -744,13 +768,13 @@ func TestWorkflowJoinPersistedArrivalClassificationOnBothStores(t *testing.T) {
 			}
 			runner := store.engineMutations.(*recordingRuntimeMutationRunner)
 			runner.mu.Lock()
-			cancellations := append([]Schedule(nil), runner.committedScheduleCancellations...)
+			cancellations := append([]runtimegenericschedule.Activation(nil), runner.committedGenericScheduleCancellations...)
 			runner.mu.Unlock()
-			if len(cancellations) != 1 || cancellations[0].EventType != joinTimeoutEvent {
+			if len(cancellations) != 1 || cancellations[0].Command.EventType != joinTimeoutEvent {
 				t.Fatalf("closed-operation timeout cancellations = %#v", cancellations)
 			}
-			if schedules.cancelOwned != 0 || len(schedules.cancelTx) != 0 {
-				t.Fatalf("legacy schedule callback survived = count:%d tx:%#v", schedules.cancelOwned, schedules.cancelTx)
+			if len(schedules.activationIDs) == 0 {
+				t.Fatal("committed schedule evidence was not reconciled through the lifecycle owner")
 			}
 		})
 	}
@@ -776,9 +800,9 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.store(t)
 			bundle := workflowJoinLifecycleBundle()
-			schedules := &recordingSchedulePersistence{}
+			schedules := &recordingGenericScheduleWakeupOwner{}
 			newCoordinator := func() *PipelineCoordinator {
-				return newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)}, Persistence: workflowPersistenceForTest(store), TimerScheduleStore: schedules})
+				return newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)}, Persistence: workflowPersistenceForTest(store), GenericSchedules: schedules})
 			}
 			pc := newCoordinator()
 			path := "orders/" + uuid.NewString()
@@ -794,20 +818,25 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			}
 			runner := store.engineMutations.(*recordingRuntimeMutationRunner)
 			runner.mu.Lock()
-			committedSchedules := append([]Schedule(nil), runner.committedScheduleUpserts...)
+			committedSchedules := append([]runtimegenericschedule.Activation(nil), runner.committedGenericScheduleActivations...)
 			runner.mu.Unlock()
-			if len(committedSchedules) != 1 || committedSchedules[0].EventType != joinCompleteEvent {
+			if len(committedSchedules) != 1 || committedSchedules[0].Command.EventType != joinCompleteEvent {
 				t.Fatalf("closed-operation completion schedules = %#v", committedSchedules)
 			}
-			if len(schedules.schedules) != 0 {
-				t.Fatalf("legacy schedule callback survived = %#v", schedules.schedules)
+			armed, ok, err := store.Load(ctx, testWorkflowInstanceRoute(path))
+			if err != nil || !ok {
+				t.Fatalf("load armed zero join = %v, %v", ok, err)
 			}
-			if schedules.cancelOwned != 0 {
-				t.Fatalf("pending expected-zero completion was canceled before fire: %#v", schedules.cancels)
+			armedCarrier, err := runtimeengine.StateCarrierFromPersisted(armed.Metadata, armed.StateBuckets)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := pc.reconcileClosedJoinSchedules(ctx, testWorkflowInstanceRoute(path), entityID, armedCarrier); err != nil {
+				t.Fatalf("reconcile pending zero join: %v", err)
 			}
 			schedule := committedSchedules[0]
 			pc = newCoordinator()
-			fire := eventtest.RunCreatingRootIngress("join-zero-fire", events.EventType(schedule.EventType), "", schedule.TaskID, schedule.Payload, 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
+			fire := eventtest.RunCreatingRootIngress("join-zero-fire", events.EventType(schedule.Command.EventType), "", schedule.Command.TaskID, genericSchedulePayloadForTest(t, schedule), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
 			result, err = pc.executeAuthoritativeNodeHandler(ctx, fire, workflowTriggerContext{Event: fire, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID)})
 			if err != nil || !result.Handled {
 				t.Fatalf("completion fire = handled:%v err:%v", result.Handled, err)
@@ -831,13 +860,10 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 				t.Fatalf("zero completion lifecycle = state:%s history:%#v", instance.CurrentState, instance.TransitionHistory)
 			}
 			runner.mu.Lock()
-			cancellations := append([]Schedule(nil), runner.committedScheduleCancellations...)
+			cancellations := append([]runtimegenericschedule.Activation(nil), runner.committedGenericScheduleCancellations...)
 			runner.mu.Unlock()
-			if len(cancellations) != 1 || cancellations[0].TaskID != schedule.TaskID {
+			if len(cancellations) != 1 || cancellations[0].Command.TaskID != schedule.Command.TaskID {
 				t.Fatalf("closed-operation expected-zero cancellation = %#v", cancellations)
-			}
-			if schedules.cancelOwned != 0 {
-				t.Fatalf("legacy expected-zero cancellation callback survived: %d", schedules.cancelOwned)
 			}
 		})
 	}
@@ -863,11 +889,11 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.store(t)
 			bundle := workflowJoinLifecycleBundle()
-			schedules := &recordingSchedulePersistence{}
+			schedules := &recordingGenericScheduleWakeupOwner{}
 			pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{
-				Module:             &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)},
-				Persistence:        workflowPersistenceForTest(store),
-				TimerScheduleStore: schedules,
+				Module:           &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)},
+				Persistence:      workflowPersistenceForTest(store),
+				GenericSchedules: schedules,
 			})
 			path := "orders/" + uuid.NewString()
 			entityID := FlowInstanceEntityID(path)
@@ -881,7 +907,7 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 				t.Fatalf("arm zero join: %v", err)
 			}
 			upserts, _ := committedWorkflowSchedulesForTest(t, store)
-			if len(upserts) != 1 || upserts[0].EventType != joinCompleteEvent {
+			if len(upserts) != 1 || upserts[0].Command.EventType != joinCompleteEvent {
 				t.Fatalf("completion schedules = %#v", upserts)
 			}
 			completion := upserts[0]
@@ -890,7 +916,7 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 				t.Fatalf("exit join stage: %v", err)
 			}
 			_, cancellations := committedWorkflowSchedulesForTest(t, store)
-			if len(cancellations) != 1 || cancellations[0].EventType != joinCompleteEvent {
+			if len(cancellations) != 1 || cancellations[0].Command.EventType != joinCompleteEvent {
 				t.Fatalf("completion cancellations = %#v", cancellations)
 			}
 
@@ -907,7 +933,7 @@ func TestWorkflowJoinExpectedZeroStageExitCancelsPendingCompletionOnBothStores(t
 				t.Fatalf("exited zero activation = %#v, %v, %v", activation, ok, err)
 			}
 
-			fire := eventtest.RunCreatingRootIngress("join-zero-after-exit", events.EventType(completion.EventType), "", completion.TaskID, completion.Payload, 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
+			fire := eventtest.RunCreatingRootIngress("join-zero-after-exit", events.EventType(completion.Command.EventType), "", completion.Command.TaskID, genericSchedulePayloadForTest(t, completion), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
 			result, err := pc.executeAuthoritativeNodeHandler(ctx, fire, workflowTriggerContext{Event: fire, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID)})
 			if err != nil || result.Handled {
 				t.Fatalf("late discarded completion fire = handled:%v err:%v, want unhandled", result.Handled, err)

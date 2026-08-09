@@ -8,10 +8,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
@@ -43,7 +46,8 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		eventID     string
 		untouchedID string
 		sessionID   string
-		timerID     string
+		generic     runtimegenericschedule.Activation
+		workflow    workflowTimerDDLProofRow
 	}
 	seeded := map[string]seededRun{}
 	for _, source := range []runbundle.AvailabilitySource{
@@ -52,7 +56,6 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 	} {
 		runID := uuid.NewString()
 		sessionID := uuid.NewString()
-		timerID := uuid.NewString()
 		requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(pg.backend.ConstructionHandle())), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: testCanonicalBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
 		if _, err := pg.backend.ExecContext(ctx, `
 			INSERT INTO agent_sessions (
@@ -77,11 +80,17 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		}); err != nil || snapshot.Status != runtimedelivery.StatusFailed {
 			t.Fatalf("seed retryable delivery %s: snapshot=%#v err=%v", source, snapshot, err)
 		}
-		if _, err := pg.backend.ExecContext(ctx, `
-			INSERT INTO timers (timer_id, timer_name, run_id, fire_event, routing_source, execution_mode, fire_at, owner_kind, status)
-			VALUES ($1::uuid, $2, $3::uuid, 'timer.fired', '{"kind":"platform_control","route":{}}'::jsonb, 'live', now() + interval '1 hour', 'system', 'active')
-		`, timerID, aggregateWorkflowTimerTaskID(timerID), runID); err != nil {
-			t.Fatalf("seed timer %s: %v", source, err)
+		runCtx := runtimecorrelation.WithRunID(ctx, runID)
+		admitted, err := pg.AdmitGenericSchedule(runCtx, testAgentGenericScheduleCommand(
+			t, runID, "agent-a", "preservation", uuid.NewString(), "preservation-"+source.String(),
+			runtimegenericschedule.AbsoluteDue(now.Add(time.Hour)),
+		))
+		if err != nil {
+			t.Fatalf("seed generic schedule %s: %v", source, err)
+		}
+		workflow := newWorkflowTimerDDLProofRow(runID)
+		if err := insertWorkflowTimerDDLProofRow(runCtx, pg.backend.ConstructionHandle(), pg, workflow); err != nil {
+			t.Fatalf("seed workflow timer %s: %v", source, err)
 		}
 		if source.IsDeleted() {
 			runlifecyclefixture.CorruptPostgresSource(
@@ -95,7 +104,10 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		target := preservationcleanup.RunTarget{RunID: runID, BundleSource: source, BundleHash: testCanonicalBundleHash, ReasonCode: cause}
 		targets = append(targets, target)
 		byRun[runID] = target
-		seeded[source.String()] = seededRun{runID: runID, eventID: eventID, untouchedID: untouchedID, sessionID: sessionID, timerID: timerID}
+		seeded[source.String()] = seededRun{
+			runID: runID, eventID: eventID, untouchedID: untouchedID, sessionID: sessionID,
+			generic: admitted.Activation, workflow: workflow,
+		}
 	}
 
 	result, err := pg.ApplyUnavailableBundleStartupPreservationCleanup(ctx, preservationcleanup.Request{
@@ -107,8 +119,8 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 	if err != nil {
 		t.Fatalf("ApplyUnavailableBundleStartupPreservationCleanup: %v", err)
 	}
-	if len(result.Runs) != 2 || len(result.Deliveries) != 4 || len(result.Sessions) != 2 || len(result.Timers) != 2 || result.PipelineReceiptCount != 4 {
-		t.Fatalf("cleanup result = runs:%d deliveries:%d sessions:%d timers:%d pipeline:%d, want 2/4/2/2/4", len(result.Runs), len(result.Deliveries), len(result.Sessions), len(result.Timers), result.PipelineReceiptCount)
+	if len(result.Runs) != 2 || len(result.Deliveries) != 4 || len(result.Sessions) != 2 || len(result.Timers) != 4 || result.PipelineReceiptCount != 4 {
+		t.Fatalf("cleanup result = runs:%d deliveries:%d sessions:%d timers:%d pipeline:%d, want 2/4/2/4/4", len(result.Runs), len(result.Deliveries), len(result.Sessions), len(result.Timers), result.PipelineReceiptCount)
 	}
 
 	for source, item := range seeded {
@@ -121,7 +133,14 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		assertUnavailableBundlePreservationReceipt(t, ctx, pg, item.untouchedID, "agent-a", target.ReasonCode)
 		assertUnavailableBundlePreservationReceipt(t, ctx, pg, item.untouchedID, activeRunQuiescencePipelineSubscriberID, target.ReasonCode)
 		assertUnavailableBundlePreservationSession(t, ctx, pg, item.sessionID, target.ReasonCode)
-		assertUnavailableBundlePreservationTimer(t, ctx, pg, item.timerID)
+		assertUnavailableBundlePreservationTimerResult(
+			t, ctx, pg, result.Timers, runtimetimercancellation.FamilyGenericSchedule,
+			item.generic.ID, item.runID, target.ReasonCode,
+		)
+		assertUnavailableBundlePreservationTimerResult(
+			t, ctx, pg, result.Timers, runtimetimercancellation.FamilyWorkflowTimer,
+			item.workflow.timerID, item.runID, target.ReasonCode,
+		)
 	}
 	var eventCount int
 	if err := pg.backend.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&eventCount); err != nil {
@@ -216,6 +235,29 @@ func assertUnavailableBundlePreservationSession(t *testing.T, ctx context.Contex
 	if status != "terminated" || reason != preservationcleanup.SessionTerminationReasonOrphaned || detail != wantDetail || !terminatedAt.Valid {
 		t.Fatalf("session %s = %s/%s/%s ended:%v, want terminated/orphaned/%s/ended", sessionID, status, reason, detail, terminatedAt.Valid, wantDetail)
 	}
+}
+
+func assertUnavailableBundlePreservationTimerResult(
+	t *testing.T,
+	ctx context.Context,
+	pg *PostgresStore,
+	results []preservationcleanup.TimerResult,
+	family runtimetimercancellation.Family,
+	timerID, runID, reason string,
+) {
+	t.Helper()
+	matched := false
+	for _, result := range results {
+		if result.Family == family && result.TimerID == timerID {
+			matched = result.RunID == runID && result.PreviousStatus == "active" &&
+				result.Status == "cancelled" && result.ReasonCode == reason && result.Changed
+			break
+		}
+	}
+	if !matched {
+		t.Fatalf("preservation timer result missing exact %s/%s cancellation: %#v", family, timerID, results)
+	}
+	assertUnavailableBundlePreservationTimer(t, ctx, pg, timerID)
 }
 
 func assertUnavailableBundlePreservationTimer(t *testing.T, ctx context.Context, pg *PostgresStore, timerID string) {

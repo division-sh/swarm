@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
+
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/google/uuid"
@@ -95,6 +97,7 @@ type StandingServiceReconciliation struct {
 	BundleSource                 string
 	Reason                       string
 	DeliveryContinuationRequired bool
+	TimerCancellations           []runtimetimercancellation.Ref
 }
 
 type StandingServiceOperation struct {
