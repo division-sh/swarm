@@ -121,25 +121,32 @@ func TestSelectedExecutionBindsExactOwnerAndCausalMode(t *testing.T) {
 	}
 }
 
-func TestSelectedExecutionRejectsModeAndOwnerDrift(t *testing.T) {
+func TestSelectedExecutionBindsEachCausalModeAndRejectsOwnerDrift(t *testing.T) {
 	authority, admission, controller := selectedReceiverState(t, executionmode.Live)
 	variant, err := SelectedContractForkExecution(authority, admission, controller, runtimecorrelation.RuntimeLineage{})
 	if err != nil {
 		t.Fatalf("construct selected receiver execution: %v", err)
 	}
-	if _, err := variant.Bind(context.Background(), executionmode.Mock); err == nil || !strings.Contains(err.Error(), "conflicts with event mode") {
-		t.Fatalf("selected receiver mode mismatch = %v", err)
-	}
-
-	ctx, err := variant.Bind(context.Background(), executionmode.Live)
+	ctx, err := variant.Bind(context.Background(), executionmode.Mock)
 	if err != nil {
-		t.Fatalf("bind selected receiver: %v", err)
+		t.Fatalf("bind mock-causal selected receiver: %v", err)
+	}
+	if err := variant.ValidateBound(ctx, executionmode.Mock); err != nil {
+		t.Fatalf("validate mock-causal selected receiver: %v", err)
+	}
+	boundAuthority, ok := runtimeeffects.AuthorityFromContext(ctx)
+	if !ok || boundAuthority.ExecutionMode != executionmode.Mock {
+		t.Fatalf("bound selected authority = %#v, %v; want mock mode", boundAuthority, ok)
+	}
+	if authority.ExecutionMode != executionmode.Live {
+		t.Fatalf("container authority mode mutated to %q, want live default", authority.ExecutionMode)
 	}
 	foreign := authority
 	foreign.ID = uuid.NewString()
 	foreign.SelectedFork.ExecutionID = foreign.ID
+	foreign.ExecutionMode = executionmode.Mock
 	ctx = runtimeeffects.WithAuthority(ctx, foreign)
-	if err := variant.ValidateBound(ctx, executionmode.Live); err == nil || !strings.Contains(err.Error(), "authority") {
+	if err := variant.ValidateBound(ctx, executionmode.Mock); err == nil || !strings.Contains(err.Error(), "authority") {
 		t.Fatalf("selected receiver owner drift = %v", err)
 	}
 }

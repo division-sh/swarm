@@ -58,7 +58,13 @@ func ExistingRunRootIngress(id string, eventType events.EventType, sourceAgent, 
 // ExistingRunRootIngressWithRoutingSource builds an existing-run fixture with
 // an explicit admitted producer-source fact for routing and replay tests.
 func ExistingRunRootIngressWithRoutingSource(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID string, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time) events.Event {
-	facts := fixtureFacts(id, eventType, events.EventProducerExternal, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live)
+	return ExistingRunRootIngressWithRoutingSourceAndMode(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, envelope, source, createdAt, executionmode.Live)
+}
+
+// ExistingRunRootIngressWithRoutingSourceAndMode builds an existing-run
+// fixture with explicit routing authority and causal execution mode.
+func ExistingRunRootIngressWithRoutingSourceAndMode(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID string, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time, mode executionmode.Mode) events.Event {
+	facts := fixtureFacts(id, eventType, events.EventProducerExternal, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, mode)
 	facts.RoutingSource = source
 	return mustEvent(events.NewExistingRunRootIngressEvent(events.ExistingRunRootIngressEventInput{Facts: facts, RunID: runID}))
 }

@@ -108,8 +108,8 @@ func (v ExecutionVariant) Validate() error {
 }
 
 // Bind installs only receiver-owned state. The event's causal mode is always
-// canonical; selected authority mode is an integrity constraint, not a second
-// source of mode truth.
+// canonical; selected authority identity is fixed while its mode is projected
+// from each admitted event.
 func (v ExecutionVariant) Bind(ctx context.Context, mode executionmode.Mode) (context.Context, error) {
 	if !v.Configured() {
 		return nil, errors.New("receiver execution owner is not configured")
@@ -125,13 +125,11 @@ func (v ExecutionVariant) Bind(ctx context.Context, mode executionmode.Mode) (co
 	if v.Kind() == ExecutionNormal {
 		return ctx, nil
 	}
-	if v.authority.ExecutionMode != mode {
-		return nil, fmt.Errorf("selected receiver authority mode %q conflicts with event mode %q", v.authority.ExecutionMode, mode)
-	}
+	authority := v.authorityForMode(mode)
 	if hasRuntimeLineage(v.lineage) {
 		ctx = runtimecorrelation.WithRuntimeLineage(ctx, v.lineage)
 	}
-	ctx = runtimeeffects.WithAuthority(ctx, v.authority)
+	ctx = runtimeeffects.WithAuthority(ctx, authority)
 	ctx = runtimeeffects.WithController(ctx, v.controller)
 	ctx = managedexecution.WithAdmission(ctx, v.admission)
 	return ctx, nil
@@ -176,7 +174,7 @@ func (v ExecutionVariant) ValidateBound(ctx context.Context, mode executionmode.
 	authority, authorityOK := runtimeeffects.AuthorityFromContext(ctx)
 	admission, admissionOK := managedexecution.FromContext(ctx)
 	controller, controllerOK := runtimeeffects.ControllerFromContext(ctx)
-	if !authorityOK || !reflect.DeepEqual(authority, v.authority) {
+	if !authorityOK || !reflect.DeepEqual(authority, v.authorityForMode(mode)) {
 		return errors.New("selected receiver authority is missing or conflicts with its owner")
 	}
 	if !admissionOK || !reflect.DeepEqual(admission, v.admission) {
@@ -186,6 +184,12 @@ func (v ExecutionVariant) ValidateBound(ctx context.Context, mode executionmode.
 		return errors.New("selected receiver effect controller is missing or conflicts with its owner")
 	}
 	return nil
+}
+
+func (v ExecutionVariant) authorityForMode(mode executionmode.Mode) runtimeeffects.Authority {
+	authority := v.authority
+	authority.ExecutionMode = mode
+	return authority
 }
 
 func IsBound(ctx context.Context) bool {

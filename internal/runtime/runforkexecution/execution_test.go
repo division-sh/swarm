@@ -515,7 +515,8 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002200, 0).UTC()
-	seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, "item.received", at,
+	seedSelectedExecutionSourceRunWithPrimaryRouteAndMode(t, db, sourceRunID, entityID, sourceEventID, "item.received", at,
+		executionmode.Mock,
 		events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("source-only-node")}, nil, loaded.BundleSourceFact)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
@@ -556,12 +557,12 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		t.Fatalf("fork event id = %q, source = %q", forkEventID, sourceEventID)
 	}
 
-	var forkEventRun, forkEventName, forkSourceEvent string
+	var forkEventRun, forkEventName, forkSourceEvent, forkExecutionMode string
 	if err := db.QueryRowContext(ctx, `
-		SELECT run_id::text, event_name, COALESCE(source_event_id::text, '')
+		SELECT run_id::text, event_name, COALESCE(source_event_id::text, ''), execution_mode
 		FROM events
 		WHERE event_id = $1::uuid
-	`, forkEventID).Scan(&forkEventRun, &forkEventName, &forkSourceEvent); err != nil {
+	`, forkEventID).Scan(&forkEventRun, &forkEventName, &forkSourceEvent, &forkExecutionMode); err != nil {
 		t.Fatalf("load fork event: %v", err)
 	}
 	if forkEventRun != result.Materialization.ForkRunID || forkEventName != "item.received" {
@@ -569,6 +570,9 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	}
 	if forkSourceEvent == sourceEventID {
 		t.Fatalf("fork event source_event_id copied source event %s; lineage must be explicit table evidence", sourceEventID)
+	}
+	if forkExecutionMode != string(executionmode.Mock) {
+		t.Fatalf("fork event execution mode = %q, want mock causal mode", forkExecutionMode)
 	}
 
 	var lineageCount int
@@ -665,18 +669,18 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		t.Fatalf("fork outcomes = receipts:%d targetNodeDeliveries:%d sourceNodeDeliveries:%d, want target node only", forkReceipts, targetNodeDeliveries, sourceNodeDeliveries)
 	}
 
-	var emittedFollowUps int
+	var emittedFollowUps, mockFollowUps int
 	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
+		SELECT COUNT(*), COUNT(*) FILTER (WHERE execution_mode = 'mock')
 		FROM events
 		WHERE run_id = $1::uuid
 		  AND event_name = 'item.processed'
 		  AND source_event_id = $2::uuid
-	`, result.Materialization.ForkRunID, forkEventID).Scan(&emittedFollowUps); err != nil {
+	`, result.Materialization.ForkRunID, forkEventID).Scan(&emittedFollowUps, &mockFollowUps); err != nil {
 		t.Fatalf("count emitted follow-ups: %v", err)
 	}
-	if emittedFollowUps != 1 {
-		t.Fatalf("fork follow-up events = %d, want 1", emittedFollowUps)
+	if emittedFollowUps != 1 || mockFollowUps != 1 {
+		t.Fatalf("fork follow-up events = total:%d mock:%d, want one mock-causal event", emittedFollowUps, mockFollowUps)
 	}
 
 	var sourceStatus, forkStatus, forkEntityState string
@@ -4442,9 +4446,27 @@ func seedSelectedExecutionSourceRunWithPrimaryRoute(
 ) events.Event {
 	routingSource := eventtest.ConcreteTemplateRoutingSource("flow_a", "flow-a/1", entityID)
 	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1")
-	return seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
+	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		t, db, sourceRunID, entityID, sourceEventID, eventName, at,
-		primaryRoute, extraRoutes, routingSource, envelope, sourceFacts...,
+		executionmode.Live, primaryRoute, extraRoutes, routingSource, envelope, sourceFacts...,
+	)
+}
+
+func seedSelectedExecutionSourceRunWithPrimaryRouteAndMode(
+	t *testing.T,
+	db *sql.DB,
+	sourceRunID, entityID, sourceEventID, eventName string,
+	at time.Time,
+	mode executionmode.Mode,
+	primaryRoute events.DeliveryRoute,
+	extraRoutes []events.DeliveryRoute,
+	sourceFacts ...runtimecorrelation.BundleSourceFact,
+) events.Event {
+	routingSource := eventtest.ConcreteTemplateRoutingSource("flow_a", "flow-a/1", entityID)
+	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1")
+	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
+		t, db, sourceRunID, entityID, sourceEventID, eventName, at,
+		mode, primaryRoute, extraRoutes, routingSource, envelope, sourceFacts...,
 	)
 }
 
@@ -4453,6 +4475,24 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
 	db *sql.DB,
 	sourceRunID, entityID, sourceEventID, eventName string,
 	at time.Time,
+	primaryRoute events.DeliveryRoute,
+	extraRoutes []events.DeliveryRoute,
+	routingSource events.RoutingSource,
+	envelope events.EventEnvelope,
+	sourceFacts ...runtimecorrelation.BundleSourceFact,
+) events.Event {
+	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
+		t, db, sourceRunID, entityID, sourceEventID, eventName, at,
+		executionmode.Live, primaryRoute, extraRoutes, routingSource, envelope, sourceFacts...,
+	)
+}
+
+func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
+	t *testing.T,
+	db *sql.DB,
+	sourceRunID, entityID, sourceEventID, eventName string,
+	at time.Time,
+	mode executionmode.Mode,
 	primaryRoute events.DeliveryRoute,
 	extraRoutes []events.DeliveryRoute,
 	routingSource events.RoutingSource,
@@ -4474,8 +4514,8 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
 		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), Source: sourceFact,
 	})
-	event := eventtest.ExistingRunRootIngressWithRoutingSource(sourceEventID, events.EventType(eventName), "source-runtime", "", payload, 0, sourceRunID,
-		envelope, routingSource, at)
+	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(sourceEventID, events.EventType(eventName), "source-runtime", "", payload, 0, sourceRunID,
+		envelope, routingSource, at, mode)
 	routes := append([]events.DeliveryRoute{primaryRoute}, extraRoutes...)
 	commitRunForkTestEvent(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), event, routes)
 	if _, err := db.ExecContext(ctx, `
