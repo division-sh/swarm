@@ -46,7 +46,18 @@ type BundleCatalogDetail struct {
 }
 
 type BundleCatalogAgentsResult struct {
-	Agents []BundleCatalogAgentDefinition `json:"agents"`
+	Agents     []BundleCatalogAgentDefinition `json:"agents"`
+	NextCursor string                         `json:"next_cursor,omitempty"`
+}
+
+type BundleCatalogAgentListOptions struct {
+	BundleHash string
+	Limit      int
+	Cursor     string
+}
+
+type bundleCatalogAgentCursor struct {
+	AgentID string `json:"agent_id"`
 }
 
 type BundleCatalogAgentDefinition struct {
@@ -225,8 +236,68 @@ func (s *PostgresStore) LoadBundleCatalogRuntimeRecord(ctx context.Context, bund
 	return out, nil
 }
 
-func (s *PostgresStore) ListBundleCatalogAgents(ctx context.Context, bundleHash string) (BundleCatalogAgentsResult, error) {
-	detail, err := s.LoadBundleCatalog(ctx, bundleHash)
+func defaultBundleCatalogAgentListOptions(opts BundleCatalogAgentListOptions) BundleCatalogAgentListOptions {
+	opts.Cursor = strings.TrimSpace(opts.Cursor)
+	if opts.Limit <= 0 {
+		opts.Limit = 200
+	}
+	if opts.Limit > 500 {
+		opts.Limit = 500
+	}
+	return opts
+}
+
+func paginateBundleCatalogAgents(agents []BundleCatalogAgentDefinition, opts BundleCatalogAgentListOptions) (BundleCatalogAgentsResult, error) {
+	opts = defaultBundleCatalogAgentListOptions(opts)
+	if opts.Cursor != "" {
+		afterAgentID, err := decodeBundleCatalogAgentCursor(opts.Cursor)
+		if err != nil {
+			return BundleCatalogAgentsResult{}, err
+		}
+		for len(agents) > 0 && agents[0].AgentID != afterAgentID {
+			agents = agents[1:]
+		}
+		if len(agents) > 0 {
+			agents = agents[1:]
+		}
+	}
+	if agents == nil {
+		agents = []BundleCatalogAgentDefinition{}
+	}
+	page := agents
+	if len(page) > opts.Limit {
+		page = page[:opts.Limit]
+	}
+	result := BundleCatalogAgentsResult{Agents: page}
+	if len(agents) > opts.Limit {
+		result.NextCursor = encodeBundleCatalogAgentCursor(agents[opts.Limit-1])
+	}
+	return result, nil
+}
+
+func encodeBundleCatalogAgentCursor(agent BundleCatalogAgentDefinition) string {
+	raw, _ := json.Marshal(bundleCatalogAgentCursor{AgentID: strings.TrimSpace(agent.AgentID)})
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func decodeBundleCatalogAgentCursor(cursor string) (string, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(cursor))
+	if err != nil {
+		return "", ErrInvalidBundleCatalogAgentCursor
+	}
+	var decoded bundleCatalogAgentCursor
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return "", ErrInvalidBundleCatalogAgentCursor
+	}
+	agentID := strings.TrimSpace(decoded.AgentID)
+	if agentID == "" {
+		return "", ErrInvalidBundleCatalogAgentCursor
+	}
+	return agentID, nil
+}
+
+func (s *PostgresStore) ListBundleCatalogAgents(ctx context.Context, opts BundleCatalogAgentListOptions) (BundleCatalogAgentsResult, error) {
+	detail, err := s.LoadBundleCatalog(ctx, opts.BundleHash)
 	if err != nil {
 		return BundleCatalogAgentsResult{}, err
 	}
@@ -234,10 +305,7 @@ func (s *PostgresStore) ListBundleCatalogAgents(ctx context.Context, bundleHash 
 	if err != nil {
 		return BundleCatalogAgentsResult{}, err
 	}
-	if agents == nil {
-		agents = []BundleCatalogAgentDefinition{}
-	}
-	return BundleCatalogAgentsResult{Agents: agents}, nil
+	return paginateBundleCatalogAgents(agents, opts)
 }
 
 type bundleCatalogScanner interface {

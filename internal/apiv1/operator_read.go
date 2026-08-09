@@ -72,7 +72,7 @@ type AgentUsageReadStore interface {
 type BundleCatalogReadStore interface {
 	ListBundleCatalog(context.Context, store.BundleCatalogListOptions) (store.BundleCatalogListResult, error)
 	LoadBundleCatalog(context.Context, string) (store.BundleCatalogDetail, error)
-	ListBundleCatalogAgents(context.Context, string) (store.BundleCatalogAgentsResult, error)
+	ListBundleCatalogAgents(context.Context, store.BundleCatalogAgentListOptions) (store.BundleCatalogAgentsResult, error)
 }
 
 type BundleDeleteExecutor interface {
@@ -449,13 +449,16 @@ func OperatorBundleCatalogHandlers(opts OperatorReadOptions) map[string]MethodHa
 			if err != nil {
 				return nil, err
 			}
-			bundleHash, err := requiredBundleHashParam(req.Params, "bundle_hash")
+			listOpts, err := bundleCatalogAgentListOptionsFromParams(req.Params)
 			if err != nil {
 				return nil, err
 			}
-			result, err := reads.ListBundleCatalogAgents(ctx, bundleHash)
+			result, err := reads.ListBundleCatalogAgents(ctx, listOpts)
+			if errors.Is(err, store.ErrInvalidBundleCatalogAgentCursor) {
+				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid bundle catalog agent cursor"})
+			}
 			if errors.Is(err, store.ErrBundleNotFound) {
-				return nil, NewApplicationError(BundleNotFoundCode, false, map[string]any{"bundle_hash": bundleHash})
+				return nil, NewApplicationError(BundleNotFoundCode, false, map[string]any{"bundle_hash": listOpts.BundleHash})
 			}
 			if err != nil {
 				return nil, err
@@ -1773,6 +1776,21 @@ func bundleCatalogListOptionsFromParams(params map[string]any) (store.BundleCata
 	}
 	if out.Limit, err = boundedIntegerParam(params, "limit", 1, 500); err != nil {
 		return store.BundleCatalogListOptions{}, err
+	}
+	return out, nil
+}
+
+func bundleCatalogAgentListOptionsFromParams(params map[string]any) (store.BundleCatalogAgentListOptions, error) {
+	out := store.BundleCatalogAgentListOptions{}
+	var err error
+	if out.BundleHash, err = requiredBundleHashParam(params, "bundle_hash"); err != nil {
+		return store.BundleCatalogAgentListOptions{}, err
+	}
+	if out.Cursor, _, err = optionalStringParam(params, "cursor"); err != nil {
+		return store.BundleCatalogAgentListOptions{}, err
+	}
+	if out.Limit, err = boundedIntegerParam(params, "limit", 1, 500); err != nil {
+		return store.BundleCatalogAgentListOptions{}, err
 	}
 	return out, nil
 }

@@ -15672,8 +15672,8 @@ multi_bundle_persistence:
         result: BundleDetail
       bundle.agents:
         kind: read
-        params: bundle_hash
-        result: Agent definitions from the persisted bundle bytes
+        params: bundle_hash, limit?, cursor?
+        result: Agent definitions from the persisted bundle bytes, bounded to at most limit agents per page (default 200, max 500) with an opaque next_cursor when more pages remain
       bundle.register:
         kind: mutate
         params: BundleRegistrationEnvelopeV1 content_yaml, BundleRegisterDataBlobV1 data_blob?, idempotency_key?
@@ -20201,6 +20201,7 @@ cli_specification:
           event_publish_source_event: {command: swarm event publish, selector: 'flag:source-event-id', family: event, mode: full_only, safety: mutating}
           conversation_view_session: {command: swarm conversation view, selector: 'arg:session-id', family: session, mode: full_only}
           conversation_view_cursor: {command: swarm conversation view, selector: 'flag:cursor', family: none, mode: different_concept, scope_rule: opaque pagination cursor}
+          bundle_agents_cursor: {command: swarm bundle agents, selector: 'flag:cursor', family: none, mode: different_concept, scope_rule: opaque pagination cursor}
           conversation_turn_session: {command: swarm conversation turn, selector: 'arg:session-id', family: session, mode: full_only}
           conversation_turn_turn: {command: swarm conversation turn, selector: 'arg:turn-id-or-prefix', family: turn, mode: resolver_scoped, scope_rule: full session ID required}
           forkchat_new_session: {command: swarm forkchat new, selector: 'arg:source-session-id', family: session, mode: full_only, safety: mutating}
@@ -25317,6 +25318,9 @@ api_specification:
             type: array
             items:
               $ref: '#/components/schemas/BundleAgentDefinition'
+          next_cursor:
+            type: string
+            description: Opaque cursor to request the next page of agents; absent when the result is the final page.
       BundleRegistrationEnvelopeV1:
         type: object
         additionalProperties: false
@@ -29055,6 +29059,18 @@ api_specification:
         required: true
         schema:
           $ref: '#/components/schemas/BundleHash'
+      - name: limit
+        required: false
+        description: Maximum number of agent definitions to return in this page (default 200, max 500).
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+      - name: cursor
+        required: false
+        description: Opaque cursor returned by a previous bundle.agents result to resume the next page.
+        schema:
+          type: string
       result:
         name: result
         required: true

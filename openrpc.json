@@ -1645,6 +1645,24 @@
           "schema": {
             "$ref": "#/components/schemas/BundleHash"
           }
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "description": "Maximum number of agent definitions to return in this page (default 200, max 500).",
+          "schema": {
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "cursor",
+          "required": false,
+          "description": "Opaque cursor returned by a previous bundle.agents result to resume the next page.",
+          "schema": {
+            "type": "string"
+          }
         }
       ],
       "result": {
@@ -9882,6 +9900,10 @@
               "$ref": "#/components/schemas/BundleAgentDefinition"
             },
             "type": "array"
+          },
+          "next_cursor": {
+            "description": "Opaque cursor to request the next page of agents; absent when the result is the final page.",
+            "type": "string"
           }
         },
         "required": [

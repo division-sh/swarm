@@ -99,7 +99,8 @@ type bundleDetail struct {
 }
 
 type bundleAgentsResult struct {
-	Agents []bundleAgentDefinition `json:"agents"`
+	Agents     []bundleAgentDefinition `json:"agents"`
+	NextCursor string                  `json:"next_cursor,omitempty"`
 }
 
 type bundleRegistrationResult struct {
@@ -209,7 +210,7 @@ func newBundleShowCommand(opts rootCommandOptions) *cobra.Command {
 }
 
 func newBundleAgentsCommand(opts rootCommandOptions) *cobra.Command {
-	agentsOpts := bundleHashCommandOptions{apiOptions: opts}
+	agentsOpts := bundleAgentsCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "agents <bundle-hash>",
 		Short: "List the agents a bundle declares.",
@@ -218,13 +219,46 @@ func newBundleAgentsCommand(opts rootCommandOptions) *cobra.Command {
 			if err := agentsOpts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
+			agentsOpts.limitSet = cmd.Flags().Changed("limit")
+			agentsOpts.cursorSet = cmd.Flags().Changed("cursor")
 			return runBundleAgentsCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), agentsOpts, args[0])
 		},
 	}
 	argcount.SetDiscoveryHint(cmd, "List bundle hashes with `swarm bundle list`.")
+	cmd.Flags().IntVar(&agentsOpts.limit, "limit", 0, "Max agents to return per page (1-500, default 200)")
+	cmd.Flags().StringVar(&agentsOpts.cursor, "cursor", "", "Opaque cursor returned by a previous bundle agents result")
 	bindCLIOutputFlags(cmd, &agentsOpts.output)
 	bindCLIAPIConnectionFlags(cmd, &agentsOpts.apiOptions)
 	return cmd
+}
+
+type bundleAgentsCommandOptions struct {
+	apiOptions rootCommandOptions
+	output     cliOutputOptions
+
+	limit  int
+	cursor string
+
+	limitSet  bool
+	cursorSet bool
+}
+
+func (opts bundleAgentsCommandOptions) params() (map[string]any, error) {
+	params := map[string]any{}
+	if opts.limitSet {
+		if opts.limit < 1 || opts.limit > 500 {
+			return nil, fmt.Errorf("--limit must be between 1 and 500")
+		}
+		params["limit"] = opts.limit
+	}
+	cursor, err := optionalNonEmptyFlag("--cursor", opts.cursor, opts.cursorSet)
+	if err != nil {
+		return nil, err
+	}
+	if cursor != "" {
+		params["cursor"] = cursor
+	}
+	return params, nil
 }
 
 func newBundleBuildCommand(RepoRoot string) *cobra.Command {
@@ -362,11 +396,15 @@ func runBundleShowCommand(ctx context.Context, out, errOut io.Writer, opts bundl
 	})
 }
 
-func runBundleAgentsCommand(ctx context.Context, out, errOut io.Writer, opts bundleHashCommandOptions, rawBundleHash string) error {
+func runBundleAgentsCommand(ctx context.Context, out, errOut io.Writer, opts bundleAgentsCommandOptions, rawBundleHash string) error {
 	if strings.TrimSpace(rawBundleHash) == "" {
 		return returnCLIValidationError(errOut, fmt.Errorf("bundle hash is required"))
 	}
 	if err := validateBundleIdentifierInput(rawBundleHash); err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	params, err := opts.params()
+	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
@@ -379,22 +417,49 @@ func runBundleAgentsCommand(ctx context.Context, out, errOut io.Writer, opts bun
 	if err != nil {
 		return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
 	}
-	var result bundleAgentsResult
-	if err := client.call(ctx, bundleAgentsMethod, map[string]any{"bundle_hash": bundleHash}, &result); err != nil {
-		return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
+
+	accumulated := bundleAgentsResult{}
+	for {
+		pageParams := cloneBundleAgentsParams(params)
+		pageParams["bundle_hash"] = bundleHash
+		if accumulated.NextCursor != "" {
+			pageParams["cursor"] = accumulated.NextCursor
+		}
+		var page bundleAgentsResult
+		if err := client.call(ctx, bundleAgentsMethod, pageParams, &page); err != nil {
+			return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
+		}
+		if err := validateBundleAgentsResult(page); err != nil {
+			return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
+		}
+		accumulated.Agents = append(accumulated.Agents, page.Agents...)
+		accumulated.NextCursor = page.NextCursor
+		// Auto-loop all pages by default so a finite bundle's whole agent list
+		// is rendered in one output. When the caller supplies --cursor for
+		// single-page control, stop after the requested page.
+		if accumulated.NextCursor == "" || opts.cursorSet {
+			break
+		}
 	}
-	if err := validateBundleAgentsResult(result); err != nil {
-		return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
-	}
-	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
-		writeBundleAgentsHuman(w, result)
+	accumulated.NextCursor = ""
+
+	return renderCLIOutput(out, errOut, opts.output, accumulated, func(w io.Writer) {
+		writeBundleAgentsHuman(w, accumulated)
 	}, func() ([]string, error) {
-		values := make([]string, 0, len(result.Agents))
-		for _, agent := range result.Agents {
+		values := make([]string, 0, len(accumulated.Agents))
+		for _, agent := range accumulated.Agents {
 			values = append(values, agent.AgentID)
 		}
 		return values, nil
 	})
+}
+
+func cloneBundleAgentsParams(params map[string]any) map[string]any {
+	cloned := make(map[string]any, len(params)+1)
+	for key, value := range params {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func runBundleBuildCommand(ctx context.Context, out, errOut io.Writer, opts bundleBuildCommandOptions) error {

@@ -111,8 +111,8 @@ func (s *SQLiteRuntimeStore) LoadBundleCatalog(ctx context.Context, bundleHash s
 	return scanned.toDetail()
 }
 
-func (s *SQLiteRuntimeStore) ListBundleCatalogAgents(ctx context.Context, bundleHash string) (BundleCatalogAgentsResult, error) {
-	detail, err := s.LoadBundleCatalog(ctx, bundleHash)
+func (s *SQLiteRuntimeStore) ListBundleCatalogAgents(ctx context.Context, opts BundleCatalogAgentListOptions) (BundleCatalogAgentsResult, error) {
+	detail, err := s.LoadBundleCatalog(ctx, opts.BundleHash)
 	if err != nil {
 		return BundleCatalogAgentsResult{}, err
 	}
@@ -120,10 +120,7 @@ func (s *SQLiteRuntimeStore) ListBundleCatalogAgents(ctx context.Context, bundle
 	if err != nil {
 		return BundleCatalogAgentsResult{}, err
 	}
-	if agents == nil {
-		agents = []BundleCatalogAgentDefinition{}
-	}
-	return BundleCatalogAgentsResult{Agents: agents}, nil
+	return paginateBundleCatalogAgents(agents, opts)
 }
 
 func scanSQLiteBundleCatalogRow(row bundleCatalogScanner) (bundleCatalogRow, error) {

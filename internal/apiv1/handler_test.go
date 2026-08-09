@@ -1308,15 +1308,39 @@ func (s *fakeBundleCatalogReadStore) LoadBundleCatalog(_ context.Context, bundle
 	return detail, nil
 }
 
-func (s *fakeBundleCatalogReadStore) ListBundleCatalogAgents(_ context.Context, bundleHash string) (store.BundleCatalogAgentsResult, error) {
-	if s.missing[bundleHash] {
+func (s *fakeBundleCatalogReadStore) ListBundleCatalogAgents(_ context.Context, opts store.BundleCatalogAgentListOptions) (store.BundleCatalogAgentsResult, error) {
+	if s.missing[opts.BundleHash] {
 		return store.BundleCatalogAgentsResult{}, store.ErrBundleNotFound
 	}
-	result, ok := s.agents[bundleHash]
+	result, ok := s.agents[opts.BundleHash]
 	if !ok {
 		return store.BundleCatalogAgentsResult{}, store.ErrBundleNotFound
 	}
-	return result, nil
+	agents := result.Agents
+	if opts.Cursor != "" {
+		for len(agents) > 0 && agents[0].AgentID != opts.Cursor {
+			agents = agents[1:]
+		}
+		if len(agents) > 0 {
+			agents = agents[1:]
+		}
+	}
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 200
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	page := agents
+	if len(page) > limit {
+		page = page[:limit]
+	}
+	out := store.BundleCatalogAgentsResult{Agents: page}
+	if len(agents) > limit {
+		out.NextCursor = agents[limit-1].AgentID
+	}
+	return out, nil
 }
 
 func (s *fakeBundleCatalogReadStore) UpsertBundleCatalog(_ context.Context, req store.BundleCatalogUpsert) (store.BundleCatalogUpsertResult, error) {

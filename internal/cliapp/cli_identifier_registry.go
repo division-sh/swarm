@@ -288,6 +288,7 @@ var cliIdentifierInputRegistry = []cliIdentifierInputRegistration{
 
 	{Command: "swarm conversation view", Selector: "arg:session-id", Family: cliIdentifierFamilySession, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm conversation view", Selector: "flag:cursor", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "opaque pagination cursor"},
+	{Command: "swarm bundle agents", Selector: "flag:cursor", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "opaque pagination cursor"},
 	{Command: "swarm conversation turn", Selector: "arg:session-id", Family: cliIdentifierFamilySession, Mode: cliIdentifierModeFullOnly},
 	{Command: "swarm conversation turn", Selector: "arg:turn-id-or-prefix", Family: cliIdentifierFamilyTurn, Mode: cliIdentifierModeResolverScoped, ScopeRule: "full session ID required"},
 	{Command: "swarm forkchat new", Selector: "arg:source-session-id", Family: cliIdentifierFamilySession, Mode: cliIdentifierModeFullOnly, Safety: "mutating"},

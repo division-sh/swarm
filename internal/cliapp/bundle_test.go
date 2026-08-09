@@ -302,6 +302,60 @@ func TestBundleDeletePartialFailureRendersAndExitsRuntime(t *testing.T) {
 	}
 }
 
+func TestBundleAgentsAutoLoopsPagesAndSinglePageCursorControl(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	bundleHash := validBundleHash("c")
+	pageCount := 0
+	var requests []jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		requests = append(requests, req)
+		pageCount++
+		switch pageCount {
+		case 1:
+			writeJSONRPCResult(t, w, req.ID, map[string]any{
+				"agents": []map[string]any{
+					validBundleAgent("agent-one"),
+					validBundleAgent("agent-two"),
+				},
+				"next_cursor": "page-one-cursor",
+			})
+		case 2:
+			writeJSONRPCResult(t, w, req.ID, map[string]any{
+				"agents":      []map[string]any{validBundleAgent("agent-three")},
+				"next_cursor": "",
+			})
+		default:
+			t.Errorf("unexpected extra page %d", pageCount)
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"agents": []map[string]any{}})
+		}
+	}))
+	defer server.Close()
+
+	// Auto-loop: no --cursor -> the CLI fetches all pages into one render.
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "agents", bundleHash, "--limit", "2", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("auto-loop code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode auto-loop stdout json: %v\n%s", err, stdout.String())
+	}
+	agents, ok := decoded["agents"].([]any)
+	if !ok || len(agents) != 3 {
+		t.Fatalf("auto-loop agents = %#v, want 3 accumulated agents", decoded["agents"])
+	}
+	if decoded["next_cursor"] != nil {
+		t.Fatalf("auto-loop next_cursor = %#v, want absent after exhausting pages", decoded["next_cursor"])
+	}
+	assertBundleRequest(t, requests[0], bundleAgentsMethod, map[string]any{"bundle_hash": bundleHash, "limit": float64(2)})
+	assertBundleRequest(t, requests[1], bundleAgentsMethod, map[string]any{"bundle_hash": bundleHash, "limit": float64(2), "cursor": "page-one-cursor"})
+}
+
 func TestBundleAgentsJSONUsesCanonicalModelField(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	bundleHash := validBundleHash("f")

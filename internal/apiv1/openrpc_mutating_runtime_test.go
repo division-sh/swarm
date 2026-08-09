@@ -1226,7 +1226,7 @@ func (s *mutatingProbeBundleCatalog) LoadBundleCatalog(_ context.Context, bundle
 	return detail, nil
 }
 
-func (s *mutatingProbeBundleCatalog) ListBundleCatalogAgents(context.Context, string) (store.BundleCatalogAgentsResult, error) {
+func (s *mutatingProbeBundleCatalog) ListBundleCatalogAgents(context.Context, store.BundleCatalogAgentListOptions) (store.BundleCatalogAgentsResult, error) {
 	return store.BundleCatalogAgentsResult{Agents: []store.BundleCatalogAgentDefinition{}}, nil
 }
 

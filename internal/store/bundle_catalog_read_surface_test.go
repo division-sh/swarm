@@ -90,12 +90,15 @@ agents:
 		t.Fatalf("detail = %#v", detail)
 	}
 
-	agents, err := pg.ListBundleCatalogAgents(ctx, newerHash)
+	agents, err := pg.ListBundleCatalogAgents(ctx, BundleCatalogAgentListOptions{BundleHash: newerHash})
 	if err != nil {
 		t.Fatalf("ListBundleCatalogAgents: %v", err)
 	}
 	if len(agents.Agents) != 2 {
 		t.Fatalf("agents = %#v, want two definitions", agents.Agents)
+	}
+	if agents.NextCursor != "" {
+		t.Fatalf("next_cursor = %q, want empty for a 2-agent bundle at default limit", agents.NextCursor)
 	}
 	if agents.Agents[0].AgentID != "researcher" || agents.Agents[0].FlowInstance != "" || agents.Agents[0].Model != "cheap" {
 		t.Fatalf("root agent = %#v", agents.Agents[0])
@@ -144,9 +147,44 @@ func TestBundleCatalogReadSurfaceMissingCursorAndMalformedProjection(t *testing.
 	`, badHash, `{"agents":{"bad":{"status":"running"}}}`); err != nil {
 		t.Fatalf("seed malformed bundle: %v", err)
 	}
-	_, err := pg.ListBundleCatalogAgents(ctx, badHash)
+	_, err := pg.ListBundleCatalogAgents(ctx, BundleCatalogAgentListOptions{BundleHash: badHash})
 	if err == nil || !strings.Contains(err.Error(), "runtime field") {
 		t.Fatalf("ListBundleCatalogAgents malformed error = %v, want runtime field rejection", err)
+	}
+}
+
+func TestBundleCatalogAgentsPaginationUsesAgentIDCursor(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := admitTestPostgresStore(t, db)
+	ctx := testAuthorActivityContext()
+
+	hash := "bundle-v1:sha256:4444444444444444444444444444444444444444444444444444444444444444"
+	parsed := `{"agents":{"a1":{"model":"m1"},"a2":{"model":"m2"},"a3":{"model":"m3"}}}`
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
+		VALUES ($1, 'name: paged', $2::jsonb)
+	`, hash, parsed); err != nil {
+		t.Fatalf("seed paged bundle: %v", err)
+	}
+
+	page1, err := pg.ListBundleCatalogAgents(ctx, BundleCatalogAgentListOptions{BundleHash: hash, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListBundleCatalogAgents page 1: %v", err)
+	}
+	if len(page1.Agents) != 2 || page1.Agents[0].AgentID != "a1" || page1.Agents[1].AgentID != "a2" || page1.NextCursor == "" {
+		t.Fatalf("page 1 = %#v, want two agents + next_cursor", page1)
+	}
+
+	page2, err := pg.ListBundleCatalogAgents(ctx, BundleCatalogAgentListOptions{BundleHash: hash, Limit: 2, Cursor: page1.NextCursor})
+	if err != nil {
+		t.Fatalf("ListBundleCatalogAgents page 2: %v", err)
+	}
+	if len(page2.Agents) != 1 || page2.Agents[0].AgentID != "a3" || page2.NextCursor != "" {
+		t.Fatalf("page 2 = %#v, want a3 + empty next_cursor", page2)
+	}
+
+	if _, err := pg.ListBundleCatalogAgents(ctx, BundleCatalogAgentListOptions{BundleHash: hash, Cursor: "not-a-cursor"}); !errors.Is(err, ErrInvalidBundleCatalogAgentCursor) {
+		t.Fatalf("ListBundleCatalogAgents invalid cursor error = %v, want ErrInvalidBundleCatalogAgentCursor", err)
 	}
 }
 
