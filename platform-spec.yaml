@@ -21938,19 +21938,32 @@ cli_specification:
         exact_input_owner: >-
           Generation resolves exactly one effective input pin from the scenario flow scope and authored publish identity through
           the canonical endpoint census. Zero or multiple matches fail closed with candidate pin names. A global event-name map
-          is not input authority.
+          is not input authority. Inline and file-backed fixtures retain their existing declared-event eligibility rather than
+          acquiring generated-input eligibility.
         effective_source_owner: >-
           The command resolves unified configuration once, loads configured provider-trigger packs from that same snapshot, and
           composes the bundle source through internal/runtime.SourceWithProviderTriggerEvents before endpoint census and schema
-          resolution. Imported normalized events remain absent from the authored WorkflowContractBundle. The authored bundle is
-          retained only for authored operations and canonical bundle hashing; no imported event is copied or redeclared there.
+          resolution. Generated, inline, and file-backed payloads resolve their canonical event key and validate through one
+          semanticview.ResolveEventSchema path over this same effective source; only generated payloads additionally require an
+          exact input-pin census match.
+          Imported normalized events remain absent from the authored WorkflowContractBundle. The authored bundle is retained only
+          for authored operations and canonical bundle hashing; no imported event is copied or redeclared there.
         canonical_inhabitant_owner: internal/runtime/eventschema.InhabitDeterministically
         canonical_schema_owner: internal/runtime/semanticview.ResolveEventSchema plus internal/runtime/eventschema canonical acceptance and validation
         deterministic_values: >-
-          The bounded inhabitant emits the first authored enum literal; required object fields only in sorted order; minimum-size
-          arrays or empty arrays; false; the finite number nearest zero inside inclusive bounds; null for explicit null; canonical
-          UUID/date-time format witnesses; and ordinary strings as empty when minLength is absent or zero, otherwise exactly
-          minLength ASCII `0` characters. Connector mock-response generation and generated event input consume this same owner.
+          The bounded inhabitant emits the first authored enum literal; required object fields plus recursively required equality
+          dependencies/targets in sorted dependency order, while omitting every other optional field; minimum-size arrays or empty
+          arrays; false; the finite number nearest zero inside inclusive bounds; null for explicit null; canonical UUID/date-time
+          format witnesses; and ordinary strings as empty when minLength is absent or zero, otherwise exactly minLength ASCII `0`
+          characters. Missing, cyclic, or schema-incompatible equality targets fail closed. Connector mock-response generation and
+          generated event input consume this same owner.
+        aggregate_cost_budget: >-
+          One 262144-unit aggregate budget spans the complete recursive inhabitant. Every scalar/container and object-property or
+          array-element slot consumes structural cost; every generated or copied string additionally consumes both rune count and
+          byte count. Enum subtrees and equality copies consume their complete semantic cost before cloning, while arrays,
+          objects, properties/elements, and strings consume cost before allocation or materialization. Exhaustion fails at the
+          exact value path with the explicit-fixture teaching exit; local depth, collection-size, and string-length caps do not
+          replace this aggregate bound.
         pattern_rule: >-
           The inhabitant never reads, parses, compiles, branches on, retries for, or searches a string pattern. It chooses exactly
           one candidate from enum, admitted format, or non-pattern length facts and submits that candidate to the complete canonical
@@ -21961,9 +21974,10 @@ cli_specification:
           event identity, canonical schema evidence, and generated JSON. Fixture identity derives from scenario identity plus exact
           pin identity, and reruns are byte-identical. Unrelated unsupported inputs are not eagerly inhabited.
         publication_boundary: >-
-          Generated payloads enter at the normalized event layer, pass complete canonical validation, and mutate runtime only
-          through the ordinary public /v1/rpc event.publish request. Normalized provider-event schemas are one-way and cannot
-          authorize reconstruction of raw webhook bodies, signatures, delivery ids, predicates, or provider envelopes.
+          Generated payloads enter at the normalized event layer, and generated, inline, and file-backed payloads all pass complete
+          canonical validation against the resolved effective input schema before mutating runtime only through the ordinary public
+          /v1/rpc event.publish request. Normalized provider-event schemas are one-way and cannot authorize reconstruction of raw
+          webhook bodies, signatures, delivery ids, predicates, or provider envelopes.
         served_effective_source_retention: >-
           Runtime construction is the admission owner for the effective workflow module/source. Initial served BundleContexts and
           project replacement BundleContexts retain the exact module/source admitted in Runtime.Options.WorkflowModule; API

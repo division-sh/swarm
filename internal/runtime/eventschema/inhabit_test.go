@@ -1,6 +1,7 @@
 package eventschema
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -215,6 +216,82 @@ func TestInhabitDeterministicallyResolvesEqualityDependencies(t *testing.T) {
 	}
 	if err := ValidateValueAgainstSchema(schema, got); err != nil {
 		t.Fatalf("equality inhabitant failed validation: %v", err)
+	}
+}
+
+func TestInhabitDeterministicallyRejectsAggregateExpansionBeforeCopyOrAllocation(t *testing.T) {
+	nested := map[string]any{"type": "string"}
+	for range 4 {
+		nested = map[string]any{
+			"type":     "array",
+			"minItems": 20,
+			"maxItems": 20,
+			"items":    nested,
+		}
+	}
+
+	wideProperties := make(map[string]any, 20_000)
+	wideRequired := make([]any, 0, 20_000)
+	for index := range 20_000 {
+		name := fmt.Sprintf("field_%05d", index)
+		wideProperties[name] = map[string]any{"type": "boolean"}
+		wideRequired = append(wideRequired, name)
+	}
+
+	tests := []struct {
+		name       string
+		schema     map[string]any
+		pathPrefix string
+	}{
+		{
+			name:       "nested multiplicative arrays",
+			schema:     nested,
+			pathPrefix: "$.items[",
+		},
+		{
+			name: "large enum clone",
+			schema: map[string]any{
+				"type": "string",
+				"enum": []any{strings.Repeat("x", 150_000)},
+			},
+			pathPrefix: "$.enum[0]",
+		},
+		{
+			name: "equality copy",
+			schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"copy":   map[string]any{"type": "string", "x-swarm-equalTo": "source"},
+					"source": map[string]any{"type": "string", "minLength": MaxInhabitedStringRunes},
+				},
+				"required": []any{"copy"},
+			},
+			pathPrefix: "$.properties[copy]",
+		},
+		{
+			name: "wide required object",
+			schema: map[string]any{
+				"type":       "object",
+				"properties": wideProperties,
+				"required":   wideRequired,
+			},
+			pathPrefix: "$.properties[",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := InhabitDeterministically(test.schema, InhabitationContext{Identity: "aggregate-budget"})
+			if err == nil {
+				t.Fatalf("InhabitDeterministically unexpectedly succeeded with %T", got)
+			}
+			if got != nil {
+				t.Fatalf("partial inhabitant = %#v", got)
+			}
+			if !strings.HasPrefix(err.Error(), test.pathPrefix) || !strings.Contains(err.Error(), "aggregate cost budget") || !strings.Contains(err.Error(), "provide an explicit fixture for this field") {
+				t.Fatalf("error = %v, want exact path prefix %q and aggregate-budget teaching exit", err, test.pathPrefix)
+			}
+		})
 	}
 }
 
