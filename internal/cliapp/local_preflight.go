@@ -437,8 +437,34 @@ func (r *LocalPreflightReport) checkContractSecrets(ctx context.Context, source 
 		if requiredBy := formatSecretRequirements(record.RequiredBy); requiredBy != "" {
 			message += " for " + requiredBy
 		}
+		message = appendContractSecretEffectReachability(message, record.RequiredBy, effectReachability)
 		r.add(localPreflightContractSecretPrerequisite, "missing_contract_secret", severity, LocalPreflightStatusFailed, message, fmt.Sprintf("run `swarm secrets set %s` or provide the matching environment variable", record.Key))
 	}
+}
+
+func appendContractSecretEffectReachability(message string, requiredBy []secretRequirement, reachability runtimebootverify.SourceBootEffectReachability) string {
+	if liveAgents := reachability.LiveAgentIDs(); len(liveAgents) > 0 {
+		message += " (reachable from live agents " + strings.Join(liveAgents, ", ") + ")"
+	}
+	sites := []string{}
+	seen := map[string]struct{}{}
+	for _, requirement := range requiredBy {
+		if strings.TrimSpace(requirement.Kind) != "tool" {
+			continue
+		}
+		for _, site := range reachability.LiveWorkflowActivitySites(requirement.Name) {
+			if _, duplicate := seen[site]; duplicate {
+				continue
+			}
+			seen[site] = struct{}{}
+			sites = append(sites, site)
+		}
+	}
+	if len(sites) > 0 {
+		sort.Strings(sites)
+		message += " (reachable from live workflow activities " + strings.Join(sites, ", ") + ")"
+	}
+	return message
 }
 
 func (r *LocalPreflightReport) checkWorkspace(ctx context.Context, cfg *config.Config, source semanticview.Source, contractsRoot string, mountSources WorkspaceMountSources, backend WorkspaceBackendSelection, claudeCLICommand string, claudeExecutionRequired bool) {

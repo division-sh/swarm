@@ -6061,6 +6061,14 @@ engine:
               configured live adapter and mock adapter are typed lazy slots, not a context-switched runtime multiplexer.
               Fully mocked sources never construct or consult the unreachable live adapter. Mixed sources bind exact mocked
               agents to MockRuntime and all other agents to the configured live adapter.
+            turn_mode_admission:
+              owner: internal/runtime/agents.LLMAgent.OnEvent
+              rule: >
+                The actor's resolved execution selection controls the concrete turn adapter and may only narrow causal
+                authority. A live event delivered to an exact mock actor executes as mock and every child/effect remains
+                mock. A mock-causal event delivered to a live-selected actor is rejected before conversation mutation,
+                provider invocation, or tool execution; no receiver may promote mock causality to live execution.
+              proof: TestLLMAgentOnEventPreventsMockCausalityFromEscalatingToLive
             construction_consumers:
               - internal/runtime/runtime.go ordinary managed runtime
               - internal/runtime/runforkexecution/agent_runtime_materialization.go selected-contract served and standalone runtime
@@ -6105,14 +6113,17 @@ engine:
               inputs:
                 - every declared agent resolved through internal/runtime/llm/selection.ResolveAgentExecutionSelection
                 - the immutable exact providerconnectors.MockResponsePlan compiled from the effective source
+                - every effective declarative workflow activity from runtime/contracts.WorkflowContractBundle.ActivitySites
               rule: >
                 Static and managed outbound tool credentials are required exactly when that tool's transport remains
                 reachable. A source with any live-selected agent retains every outbound tool credential requirement. An
                 all-mock source waives only a provider_connector tool whose exact effective declaration is admitted by the
-                compiled response plan; absent, mismatched, scoped-conflicting, ordinary HTTP, native, exec, MCP, listener,
-                workspace, inbound signing, and other non-tool requirements remain fail-closed. Agent-free sources retain
-                every requirement. A credential key shared by a waived tool and any surviving requirement remains required.
-                Process-global execution mode is not credential-admission authority.
+                compiled response plan and which is absent from every declarative workflow activity site. Declarative
+                activity sites remain live-reachable from non-agent ingress, including operator publication, regardless of
+                the agent census. Absent or mismatched responders, scoped conflicts, ordinary HTTP, native, exec, MCP,
+                listener, workspace, inbound signing, and other non-tool requirements remain fail-closed. Agent-free sources
+                retain every requirement. A credential key shared by a waived tool and any surviving requirement remains
+                required. Process-global execution mode is not credential-admission authority.
               consumers:
                 - internal/runtime/workflow_validation.go for swarm verify and serve validation
                 - internal/cliapp/local_preflight.go for doctor contract-secret admission
@@ -6121,7 +6132,8 @@ engine:
                 - internal/runtime/runtime.go for final runtime boot credential admission
               diagnostics: >
                 Mixed-source failures name the exact surviving tool requirement and the sorted live-selected agents that
-                keep outbound effects reachable. Secret and managed-token values are never exposed.
+                keep outbound effects reachable. Declarative-activity failures name the exact effective node/handler site.
+                Secret and managed-token values are never exposed.
             workspace_classifier_rule: >
               The workspace backend classifier consumes each effective source-registry entry's Mock.Configured fact. An
               exact mocked agent contributes no claude_cli process-execution reason, but retains ordinary workspace

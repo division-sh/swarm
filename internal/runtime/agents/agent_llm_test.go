@@ -291,6 +291,7 @@ type boardTestRuntime struct {
 	steps         []*llm.Response
 	errs          []error
 	call          int
+	modes         []runtimeeffects.ExecutionMode
 	startTools    []string
 	continueTools []string
 	inputs        []string
@@ -308,10 +309,12 @@ func (r *boardTestRuntime) StartSession(_ context.Context, agentID, systemPrompt
 	}, nil
 }
 
-func (r *boardTestRuntime) ContinueSession(_ context.Context, s *llm.Session, message llm.Message) (*llm.Response, error) {
+func (r *boardTestRuntime) ContinueSession(ctx context.Context, s *llm.Session, message llm.Message) (*llm.Response, error) {
 	if s != nil {
 		r.continueTools = toolNamesForAgentTest(s.Tools)
 	}
+	mode, _ := runtimeeffects.ExecutionModeFromContext(ctx)
+	r.modes = append(r.modes, mode)
 	r.inputs = append(r.inputs, strings.TrimSpace(message.Content))
 	if r.call < len(r.errs) && r.errs[r.call] != nil {
 		err := r.errs[r.call]
@@ -365,6 +368,46 @@ func TestLLMAgent_OnEvent_UsesSinglePostStepExecutionPath(t *testing.T) {
 	}
 	if rt.call != 1 {
 		t.Fatalf("runtime call count = %d, want 1", rt.call)
+	}
+}
+
+func TestLLMAgentOnEventPreventsMockCausalityFromEscalatingToLive(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		agentMode   runtimeeffects.ExecutionMode
+		inboundMode runtimeeffects.ExecutionMode
+		wantMode    runtimeeffects.ExecutionMode
+		wantReject  bool
+	}{
+		{name: "live input to live agent remains live", agentMode: runtimeeffects.ExecutionModeLive, inboundMode: runtimeeffects.ExecutionModeLive, wantMode: runtimeeffects.ExecutionModeLive},
+		{name: "live input to mock agent narrows to mock", agentMode: runtimeeffects.ExecutionModeMock, inboundMode: runtimeeffects.ExecutionModeLive, wantMode: runtimeeffects.ExecutionModeMock},
+		{name: "mock input to mock agent remains mock", agentMode: runtimeeffects.ExecutionModeMock, inboundMode: runtimeeffects.ExecutionModeMock, wantMode: runtimeeffects.ExecutionModeMock},
+		{name: "mock input to live agent is rejected", agentMode: runtimeeffects.ExecutionModeLive, inboundMode: runtimeeffects.ExecutionModeMock, wantReject: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runtime := &boardTestRuntime{steps: []*llm.Response{{Message: llm.Message{Role: "assistant", Content: "handled"}}}}
+			agent := mustBuildLLMAgent(t, models.AgentConfig{ID: "mode-agent", Role: "worker", ExecutionMode: tc.agentMode}, runtime, nil, nil)
+			evt := eventtest.RunCreatingRootIngressWithMode(
+				"mode-event", "work.requested", "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}, tc.inboundMode,
+			)
+
+			_, err := agent.OnEvent(context.Background(), evt)
+			if tc.wantReject {
+				if err == nil || !strings.Contains(err.Error(), "mock_causal_live_agent_forbidden") {
+					t.Fatalf("OnEvent error = %v, want mock-causal live-agent rejection", err)
+				}
+				if runtime.call != 0 || len(runtime.modes) != 0 {
+					t.Fatalf("rejected delivery reached runtime: calls=%d modes=%v", runtime.call, runtime.modes)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("OnEvent: %v", err)
+			}
+			if runtime.call != 1 || len(runtime.modes) != 1 || runtime.modes[0] != tc.wantMode {
+				t.Fatalf("runtime execution = calls:%d modes:%v, want one %q turn", runtime.call, runtime.modes, tc.wantMode)
+			}
+		})
 	}
 }
 

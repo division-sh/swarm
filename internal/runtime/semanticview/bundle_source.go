@@ -374,6 +374,9 @@ func (s bundleSource) NodeEventHandler(nodeID, eventType string) (runtimecontrac
 func (s bundleSource) NodeEntries() map[string]runtimecontracts.SystemNodeContract {
 	return s.bundle.NodeEntries()
 }
+func (s bundleSource) ActivitySites() []runtimecontracts.ActivitySite {
+	return s.bundle.ActivitySites()
+}
 func (s bundleSource) AgentEntries() map[string]runtimecontracts.AgentRegistryEntry {
 	return runtimecontracts.EffectiveAgentRegistryEntries(s.bundle.AgentEntries())
 }

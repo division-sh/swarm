@@ -122,14 +122,15 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	turnMode, err := admitAgentTurnExecutionMode(a.cfg, evt)
+	if err != nil {
+		return nil, err
+	}
 	a.applyPromptForEvent(evt)
 	a.prepareConversationForInvocation(evt)
-	if !a.cfg.ExecutionMode.Valid() {
-		return nil, fmt.Errorf("agent %s has no resolved execution mode", strings.TrimSpace(a.cfg.ID))
-	}
 
 	ctx = models.WithActor(ctx, a.cfg)
-	ctx = runtimeeffects.WithExecutionMode(ctx, a.cfg.ExecutionMode)
+	ctx = runtimeeffects.WithExecutionMode(ctx, turnMode)
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
 	ctx = agentmemory.WithExecution(ctx, a.cfg.Memory, agentmemory.Identity{RunID: evt.RunID(), Agent: a.cfg.Identity})
@@ -161,6 +162,25 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	}
 	_ = resp
 	return nil, nil
+}
+
+func admitAgentTurnExecutionMode(cfg models.AgentConfig, evt events.Event) (runtimeeffects.ExecutionMode, error) {
+	agentID := strings.TrimSpace(cfg.ID)
+	if !cfg.ExecutionMode.Valid() {
+		return "", fmt.Errorf("agent %s has no resolved execution mode", agentID)
+	}
+	inboundMode := evt.ExecutionMode()
+	if !inboundMode.Valid() {
+		return "", fmt.Errorf("agent %s received event %s without a typed causal execution mode", agentID, strings.TrimSpace(evt.ID()))
+	}
+	if inboundMode == runtimeeffects.ExecutionModeMock && cfg.ExecutionMode == runtimeeffects.ExecutionModeLive {
+		return "", runtimefailures.New(runtimefailures.ClassAuthorizationDenied, "mock_causal_live_agent_forbidden", "llm-agent", "admit_event", map[string]any{
+			"action":   "agent_event_delivery",
+			"agent_id": agentID,
+			"event_id": strings.TrimSpace(evt.ID()),
+		})
+	}
+	return cfg.ExecutionMode, nil
 }
 
 func (a *LLMAgent) applyTurnToolDefinitions(ctx context.Context) {

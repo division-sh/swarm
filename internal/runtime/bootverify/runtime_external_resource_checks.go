@@ -29,14 +29,16 @@ func (c *checkerContext) credentials() []Finding {
 	}
 	for _, item := range missing {
 		requiredBy := make([]string, 0, len(item.RequiredBy))
-		hasToolRequirement := false
+		toolRequirements := []string{}
 		for _, ref := range item.RequiredBy {
 			requiredBy = append(requiredBy, strings.TrimSpace(ref.Kind)+" "+strings.TrimSpace(ref.Name))
-			hasToolRequirement = hasToolRequirement || strings.TrimSpace(ref.Kind) == "tool"
+			if strings.TrimSpace(ref.Kind) == "tool" {
+				toolRequirements = append(toolRequirements, strings.TrimSpace(ref.Name))
+			}
 		}
 		message := fmtCredentialWarning(item.Key, requiredBy)
-		if hasToolRequirement {
-			message = appendLiveAgentReachability(message, c.opts.EffectReachability.LiveAgentIDs())
+		if len(toolRequirements) > 0 {
+			message = appendLiveEffectReachability(message, c.opts.EffectReachability, toolRequirements)
 		}
 		c.credentialFindings = append(c.credentialFindings, Finding{
 			CheckID:  "credential_key_exists",
@@ -57,10 +59,14 @@ func (c *checkerContext) credentials() []Finding {
 	}
 	for _, item := range managed {
 		requiredBy := make([]string, 0, len(item.RequiredBy))
+		toolRequirements := []string{}
 		for _, ref := range item.RequiredBy {
 			requiredBy = append(requiredBy, strings.TrimSpace(ref.Kind)+" "+strings.TrimSpace(ref.Name))
+			if strings.TrimSpace(ref.Kind) == "tool" {
+				toolRequirements = append(toolRequirements, strings.TrimSpace(ref.Name))
+			}
 		}
-		message := appendLiveAgentReachability(fmtManagedCredentialWarning(item, requiredBy), c.opts.EffectReachability.LiveAgentIDs())
+		message := appendLiveEffectReachability(fmtManagedCredentialWarning(item, requiredBy), c.opts.EffectReachability, toolRequirements)
 		c.credentialFindings = append(c.credentialFindings, Finding{
 			CheckID:  "managed_credential_state",
 			Severity: "warning",
@@ -77,6 +83,26 @@ func appendLiveAgentReachability(message string, liveAgentIDs []string) string {
 	}
 	sort.Strings(liveAgentIDs)
 	return message + " (reachable from live agents " + strings.Join(liveAgentIDs, ", ") + ")"
+}
+
+func appendLiveEffectReachability(message string, reachability SourceBootEffectReachability, toolIDs []string) string {
+	message = appendLiveAgentReachability(message, reachability.LiveAgentIDs())
+	sites := []string{}
+	seen := map[string]struct{}{}
+	for _, toolID := range toolIDs {
+		for _, site := range reachability.LiveWorkflowActivitySites(toolID) {
+			if _, duplicate := seen[site]; duplicate {
+				continue
+			}
+			seen[site] = struct{}{}
+			sites = append(sites, site)
+		}
+	}
+	if len(sites) == 0 {
+		return message
+	}
+	sort.Strings(sites)
+	return message + " (reachable from live workflow activities " + strings.Join(sites, ", ") + ")"
 }
 
 func MissingStaticCredentialRequirements(ctx context.Context, source semanticview.Source, opts Options) ([]runtimecredentials.Descriptor, error) {
