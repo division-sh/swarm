@@ -557,6 +557,10 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Names:  []string{"mode"},
 		Reason: "flow composition mode is an authoring-view concept, not ConversationMode",
 	},
+	"entities.go\x00writeEntityLoopSection": {
+		Names:  []string{"status"},
+		Reason: "loop activation status is loopruntime.Status rendered as data, a separate loop-lifecycle taxonomy, not a registered run/agent status family",
+	},
 	"local_preflight.go\x00WriteLocalPreflightText": {
 		Names:  []string{"mode"},
 		Reason: "preflight mode is a typed diagnostic rendering input, not a registered conversation mode",

@@ -21949,14 +21949,18 @@ cli_specification:
               exception_rule: group_help
             entities_list:
               command: swarm entity list
-              classification: split
-              owner_issue: '#1913'
-              reason: entity list table/default text consumes the shared display renderer; full shared output-mode route-through remains tracked by the active registry split-owner child.
+              classification: shared_output
+              fact_owner: /v1/rpc entity.list
+              json_shape: entity.list result object (entities with entity_id, run_id, flow_instance, entity_type, current_state, revision, created_at, updated_at, slug, name; next_cursor)
+              quiet_values:
+              - entity_id, one per returned entity, in API result order
             entity_view:
               command: swarm entity view
-              classification: split
-              owner_issue: '#1913'
-              reason: entity detail shell consumes the shared display renderer; full shared output-mode route-through remains tracked by the active registry split-owner child.
+              classification: shared_output
+              fact_owner: /v1/rpc entity.get
+              json_shape: entity.get result object (entity with entity_id, run_id, flow_instance, entity_type, current_state, revision, created_at, updated_at, slug, name; fields; gates; accumulated; loops when present)
+              quiet_values:
+              - entity_id
             entity_aggregate:
               command: swarm entity aggregate
               classification: split
@@ -25108,7 +25112,7 @@ cli_specification:
         required: false
         api_param: cursor
       output:
-        table: ENTITY_ID / RUN_ID / FLOW / TYPE / STATE / REVISION / UPDATED / SLUG / NAME plus next_cursor when present
+        table: ENTITY_ID / RUN / FLOW / TYPE / STATE / REVISION / UPDATED / SLUG / NAME plus next_cursor when present
         empty: No entities match the filter.
       exit_codes:
         success: 0

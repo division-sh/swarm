@@ -325,7 +325,7 @@ func TestCLIIdentifierDisplayColumnsUseFamilyAwareOwner(t *testing.T) {
 		"diagnostics.go\x00SESSION":        cliIdentifierFamilySession,
 		"diagnostics.go\x00EVENT ID":       cliIdentifierFamilyEvent,
 		"entities.go\x00ENTITY_ID":         cliIdentifierFamilyEntity,
-		"entities.go\x00RUN_ID":            cliIdentifierFamilyRun,
+		"entities.go\x00RUN":               cliIdentifierFamilyRun,
 		"entities.go\x00FLOW":              cliIdentifierFamilyFlowInstance,
 		"events.go\x00EVENT ID":            cliIdentifierFamilyEvent,
 		"events.go\x00RUN":                 cliIdentifierFamilyRun,

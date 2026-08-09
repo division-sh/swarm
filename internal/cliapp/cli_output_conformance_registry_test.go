@@ -60,6 +60,8 @@ var cliOutputSharedOwnerProofs = map[string]cliOutputSharedOwnerProof{
 	"swarm forkchat delete":              {Constructor: "newForkChatDeleteCommand", Runner: "runForkChatDeleteCommand"},
 	"swarm describe":                     {Constructor: "newDescribeCommand", Runner: "runDescribeCommandWithOutput"},
 	"swarm describe routes":              {Constructor: "newDescribeRoutesCommand", Runner: "runDescribeRoutesCommandWithOutput"},
+	"swarm entity list":                  {Constructor: "newEntitiesListCommand", Runner: "runEntitiesListCommand"},
+	"swarm entity view":                  {Constructor: "newEntityViewCommand", Runner: "runEntityViewCommand"},
 }
 
 var cliOutputGrandfatheredNonSharedRows = map[string]string{
@@ -114,8 +116,6 @@ var cliOutputGrandfatheredNonSharedRows = map[string]string{
 	"swarm bundle build":           "split",
 	"swarm forkchat":               "exception",
 	"swarm entity":                 "exception",
-	"swarm entity list":            "split",
-	"swarm entity view":            "split",
 	"swarm entity aggregate":       "split",
 	"swarm logs":                   "split",
 	"swarm incidents":              "split",
@@ -134,6 +134,8 @@ var cliOutputExpectedFactOwners = map[string]string{
 	"swarm agent view":       "/v1/rpc agent.get",
 	"swarm agent diagnose":   "/v1/rpc agent.diagnose",
 	"swarm agent deliveries": "/v1/rpc agent.delivery_lifecycle",
+	"swarm entity list":      "/v1/rpc entity.list",
+	"swarm entity view":      "/v1/rpc entity.get",
 }
 
 var cliOutputSharedDisplayProofs = map[string][]string{
@@ -156,7 +158,7 @@ var cliOutputSharedDisplayProofs = map[string][]string{
 	"writeDiagnosticRunTraceDeliveryDetail":  {"writeCLITable"},
 	"writeDiagnosticRunTraceDeliverySummary": {"writeCLITable"},
 	"writeEntityAggregateResult":             {"writeCLITable"},
-	"writeEntityFullResult":                  {"writeCLIFieldLine"},
+	"writeEntityFullResult":                  {"writeCLILabeledDetail"},
 	"writeEntityListResult":                  {"writeCLITable"},
 	"writeEventDeadLetterLine":               {"writeCLIFieldLine"},
 	"writeEventDetailResult":                 {"writeCLIFieldLine"},

@@ -5311,7 +5311,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if entityListCode != 0 {
 		t.Fatalf("entities list readback code=%d stderr=%s stdout=%s", entityListCode, entityListStderr, entityListStdout)
 	}
-	for _, want := range []string{entityID, runID, "done"} {
+	for _, want := range []string{entityID, "done"} {
 		if !strings.Contains(entityListStdout, want) {
 			t.Fatalf("entities list readback missing %q:\n%s", want, entityListStdout)
 		}
@@ -5320,7 +5320,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if entityViewCode != 0 {
 		t.Fatalf("entity view readback code=%d stderr=%s stdout=%s", entityViewCode, entityViewStderr, entityViewStdout)
 	}
-	for _, want := range []string{entityID, "state=done", "fields={}"} {
+	for _, want := range []string{entityID, "done", "Fields  none"} {
 		if !strings.Contains(entityViewStdout, want) {
 			t.Fatalf("entity view readback missing %q:\n%s", want, entityViewStdout)
 		}

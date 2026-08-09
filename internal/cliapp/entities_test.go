@@ -63,7 +63,7 @@ func TestEntitiesListUsesEntityListV1RPCWithFilters(t *testing.T) {
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
-	for _, want := range []string{"ENTITY_ID", "RUN_ID", "entity-1", "run-1", "flows/review", "vertical", "collecting", "next_cursor=entity-cursor-2"} {
+	for _, want := range []string{"ENTITY_ID", "entity-1", "flows/review", "vertical", "collecting", "next_cursor=entity-cursor-2"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -141,7 +141,7 @@ func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("entities list code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"ENTITY_ID", "RUN_ID", entityA, entityB, "vertical", "discovered", "pending"} {
+	for _, want := range []string{"ENTITY_ID", entityA, entityB, "vertical", "discovered", "pending"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("entities list stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -156,7 +156,7 @@ func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("entity view code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Entity " + entityA, "type=vertical state=discovered", `fields={"vertical_name":"Healthcare"}`} {
+	for _, want := range []string{"Entity " + entityA, "vertical", "discovered", "vertical_name", "Healthcare"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("entity view stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -208,14 +208,57 @@ func TestEntityViewUsesEntityGetAndRendersEntityNativeDetail(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Entity entity-1",
-		"run_id=run-1 flow=flows/review type=vertical state=collecting revision=3",
-		"slug=vertical-1 name=Vertical One",
-		`fields={"score":7}`,
-		`gates={"ready":true}`,
-		`accumulated={"accumulator":{"count":2},"notes":["a",{"text":"probe"}],"score":3}`,
+		"run-1",
+		"flows/review",
+		"vertical",
+		"collecting",
+		"score",
+		"ready",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	for _, absent := range []string{"accumulator", `"accumulated"`, `fields={"score":7}`} {
+		if strings.Contains(stdout.String(), absent) {
+			t.Fatalf("stdout should not contain %q:\n%s", absent, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestEntityViewJSONIsDataComplete(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, validEntityFullResult("entity-1"))
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1", "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{
+		`"entity_id":"entity-1"`,
+		`"run_id":"run-1"`,
+		`"slug":"vertical-1"`,
+		`"name":"Vertical One"`,
+		`"revision":3`,
+		`"created_at":"2026-05-20T01:00:00Z"`,
+		`"updated_at":"2026-05-20T01:05:00Z"`,
+		`"fields":{"score":7}`,
+		`"gates":{"ready":true}`,
+		`"accumulated":{"accumulator":{"count":2},"notes":["a",{"text":"probe"}],"score":3}`,
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("entity view --json missing %q:\n%s", want, stdout.String())
 		}
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
@@ -451,6 +494,430 @@ func TestEntityCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.wantStderr)
 			}
 		})
+	}
+}
+
+func TestEntityViewGatesRenderFalseValuesInDefaultOutput(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		result := validEntityFullResult("entity-1")
+		result["gates"] = map[string]any{"approved": false}
+		writeJSONRPCResult(t, w, captured.ID, result)
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "approved") || !strings.Contains(stdout.String(), "false") {
+		t.Fatalf("Ruling A: a declared false gate must render its name and value in default output:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "Gates  none") {
+		t.Fatalf("populated gate map must not render as none:\n%s", stdout.String())
+	}
+}
+
+func TestEntityViewEmptyGatesRenderNone(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		result := validEntityFullResult("entity-1")
+		result["gates"] = map[string]any{}
+		writeJSONRPCResult(t, w, captured.ID, result)
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Gates  none") {
+		t.Fatalf("empty gates map should render as stated none:\n%s", stdout.String())
+	}
+}
+
+func TestEntityViewAccumulatedStatedPresenceAndVerboseExpansion(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		result := validEntityFullResult("entity-1")
+		writeJSONRPCResult(t, w, captured.ID, result)
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Accumulated  3 keys (--verbose to expand)") {
+		t.Fatalf("Ruling B: populated accumulated must be stated in default output:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1", "--verbose"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("verbose code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"Accumulated", "accumulator", "notes", "score"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("verbose stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestEntityViewEmptyAccumulatedRendersNone(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		result := validEntityFullResult("entity-1")
+		result["accumulated"] = map[string]any{}
+		writeJSONRPCResult(t, w, captured.ID, result)
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "Accumulated  none") {
+		t.Fatalf("empty accumulated should render as stated none:\n%s", stdout.String())
+	}
+}
+
+func TestEntityViewLoopsRenderAsDataUnderVerbose(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		result := validEntityFullResult("entity-1")
+		result["loops"] = []map[string]any{
+			{"id": "loop-a", "revision_id": "rev-9", "attempt": 1, "max_attempts": 3, "current_stage": "collecting", "status": "unusual"},
+		}
+		writeJSONRPCResult(t, w, captured.ID, result)
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if strings.Contains(stdout.String(), "Loops") {
+		t.Fatalf("default output should not render loops:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1", "--verbose"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("verbose code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"Loops", "loop-a", "unusual", "attempt 1/3", "rev-9", "collecting"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("verbose stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestEntityViewVerboseShowsBookkeepingAndAbsoluteTimestamps(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		result := validEntityFullResult("entity-1")
+		fields := result["fields"].(map[string]any)
+		fields["bundle_hash"] = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		fields["activation"] = "standing"
+		writeJSONRPCResult(t, w, captured.ID, result)
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1", "--verbose"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"Bookkeeping", "bundle_hash", "activation", "2026-05-20T01:05:00Z"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("verbose stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("default code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, absent := range []string{"Bookkeeping", "bundle_hash", "activation", "2026-05-20T01:05:00Z"} {
+		if strings.Contains(stdout.String(), absent) {
+			t.Fatalf("default stdout should not contain %q:\n%s", absent, stdout.String())
+		}
+	}
+}
+
+func TestEntityViewStatedEmptyStatesAndTruncationAndControlChars(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		result := validEntityFullResult("entity-1")
+		entity := result["entity"].(map[string]any)
+		entity["name"] = "Vertical\nOne"
+		result["fields"] = map[string]any{
+			"chats":               map[string]any{},
+			"empty":               "   ",
+			"long":                strings.Repeat("x", 300),
+			"broken":              "line one\nline two\tand a control \x01 byte",
+			"unicode_separators":  "a\u2028b\u2029c\u0085d",
+			"fan_out_count":       3,
+			"label\nwith_newline": "value",
+		}
+		result["gates"] = map[string]any{}
+		result["accumulated"] = map[string]any{}
+		writeJSONRPCResult(t, w, captured.ID, result)
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	chatsLine, emptyLine := "", ""
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if strings.Contains(line, "chats") {
+			chatsLine = line
+		}
+		if strings.Contains(line, "empty") {
+			emptyLine = line
+		}
+	}
+	if !strings.Contains(chatsLine, "none") {
+		t.Fatalf("empty collection value should render as none:\n%s", stdout.String())
+	}
+	if !strings.Contains(emptyLine, "none") {
+		t.Fatalf("empty string field should render as none:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "fan_out_count") {
+		t.Fatalf("platform bookkeeping key leaked into default Fields:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "…") {
+		t.Fatalf("long value missing truncation marker:\n%s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "\nline two") || strings.Contains(stdout.String(), "\x01") {
+		t.Fatalf("control characters leaked into output line discipline:\n%q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "\nOne") {
+		t.Fatalf("embedded newline in entity name broke the header line discipline:\n%q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "\nwith_newline") {
+		t.Fatalf("embedded newline in field label broke the detail line discipline:\n%q", stdout.String())
+	}
+	unicodeLine := ""
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if strings.Contains(line, "unicode_separators") {
+			unicodeLine = line
+			break
+		}
+	}
+	if !strings.Contains(unicodeLine, "a b c d") {
+		t.Fatalf("unicode line/paragraph separators not collapsed to spaces:\n%q", stdout.String())
+	}
+}
+
+func TestEntityViewQuietRendersEntityID(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, validEntityFullResult("entity-1"))
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "view", "entity-1", "--run-id", "run-1", "--quiet"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "entity-1" {
+		t.Fatalf("quiet stdout = %q, want entity-1", stdout.String())
+	}
+}
+
+func TestEntityListQuietRendersEntityIDs(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, map[string]any{
+			"entities": []map[string]any{validEntitySummary("entity-a"), validEntitySummary("entity-b")},
+		})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "list", "--quiet"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 2 || lines[0] != "entity-a" || lines[1] != "entity-b" {
+		t.Fatalf("quiet stdout = %q, want entity-a/entity-b lines", stdout.String())
+	}
+}
+
+func TestEntityListUnscopedRetainsRunColumn(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, map[string]any{
+			"entities": []map[string]any{validEntitySummary("entity-1")},
+		})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "list"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"ENTITY_ID", "RUN", "entity-1", "run-1"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("unscoped list missing %q:\n%s", want, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "list", "--run-id", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("scoped code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if strings.Contains(stdout.String(), "RUN") {
+		t.Fatalf("run-scoped list should not repeat the RUN column:\n%s", stdout.String())
+	}
+}
+
+func TestEntityListFlowTruncationPreservesDistinguishingSegments(t *testing.T) {
+	sharedHash := strings.Repeat("a", 64)
+	flowA := "ingress/" + sharedHash + "/slot-1"
+	flowB := "ingress/" + sharedHash + "/slot-2"
+	renderedA := entityShortFlow(flowA)
+	renderedB := entityShortFlow(flowB)
+	if renderedA == renderedB {
+		t.Fatalf("instances differing past a shared prefix must render distinct cells:\nA=%s\nB=%s", renderedA, renderedB)
+	}
+	if !strings.Contains(renderedA, "ingress/") || !strings.Contains(renderedA, "slot-1") {
+		t.Fatalf("instance-discriminating segments must stay intact:\n%s", renderedA)
+	}
+	if !strings.Contains(renderedA, "…") || !strings.Contains(renderedB, "…") {
+		t.Fatalf("hash-bearing segment must be truncated:\nA=%s\nB=%s", renderedA, renderedB)
+	}
+}
+
+func TestEntityListVerboseTimestampsAreRelativePlusAbsolute(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, map[string]any{
+			"entities": []map[string]any{validEntitySummary("entity-1")},
+		})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "list", "--run-id", "run-1", "--verbose"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "2026-05-20T01:05:00Z") {
+		t.Fatalf("verbose list missing absolute timestamp:\n%s", stdout.String())
+	}
+}
+
+func TestEntityOutputModesRejectCollisionBeforeRequest(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		writeJSONRPCResult(t, w, "unexpected", map[string]any{"entities": []any{}})
+	}))
+	defer server.Close()
+
+	for _, args := range [][]string{
+		{"entity", "list", "--json", "--quiet"},
+		{"entity", "view", "entity-1", "--json", "--quiet"},
+	} {
+		calls.Store(0)
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
+		if code != 2 {
+			t.Fatalf("%v code = %d, want 2 stdout=%s stderr=%s", args, code, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "mutually exclusive") {
+			t.Fatalf("%v stderr = %q, want collision error", args, stderr.String())
+		}
+		if calls.Load() != 0 {
+			t.Fatalf("%v RPC calls = %d, want 0 (collision must fail before any API call)", args, calls.Load())
+		}
+	}
+}
+
+func TestFormatCLIRelativeTime(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		raw  string
+		want string
+	}{
+		{raw: "2026-08-08T11:59:50Z", want: "just now"},
+		{raw: "2026-08-08T11:57:00Z", want: "3m ago"},
+		{raw: "2026-08-08T09:00:00Z", want: "3h ago"},
+		{raw: "2026-08-05T12:00:00Z", want: "3d ago"},
+		{raw: "2026-05-20T01:05:00Z", want: "2mo ago"},
+		{raw: "2020-01-01T00:00:00Z", want: "6y ago"},
+		{raw: "not-a-timestamp", want: "not-a-timestamp"},
+		{raw: "2026-08-08T12:00:30Z", want: "just now"},
+		{raw: "2026-08-09T12:00:00Z", want: "2026-08-09T12:00:00Z"},
+	} {
+		if got := formatCLIRelativeTime(now, tc.raw); got != tc.want {
+			t.Errorf("formatCLIRelativeTime(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
 	}
 }
 
