@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -577,7 +576,7 @@ func deriveWorkflowEventPolicy(source semanticview.Source, eventType string, dri
 	}
 }
 
-func (pc *PipelineCoordinator) BackgroundNodes(_ any, _ *sql.DB) []BackgroundNode {
+func (pc *PipelineCoordinator) BackgroundNodes() []BackgroundNode {
 	return nil
 }
 
@@ -680,6 +679,10 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEvent(ctx context.Context, ev
 }
 
 func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Context, evt events.Event) (bool, error) {
+	return pc.dispatchWorkflowNodeEventResultWithEmissionPlan(ctx, evt, nil)
+}
+
+func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResultWithEmissionPlan(ctx context.Context, evt events.Event, emissions *pipelineEmissionPlan) (bool, error) {
 	eventType := strings.TrimSpace(string(evt.Type()))
 	if eventType == "" {
 		return false, nil
@@ -690,7 +693,7 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Conte
 		if !pc.workflowNodeDeliveryRouteMatches(ctx, nodeID, evt.TargetRoute()) {
 			continue
 		}
-		handled, err := pc.executeNodeHandlerPlanResult(ctx, nodeID, evt)
+		handled, err := pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, nodeID, evt, emissions)
 		if err != nil {
 			return handledAny || handled, err
 		}
@@ -726,7 +729,12 @@ func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(nodeID string, 
 	}
 	flowID := strings.TrimSpace(workflowNodeFlowID(source, nodeID))
 	if flowID == "" {
-		return false
+		rootScope := strings.Trim(strings.TrimSpace(source.WorkflowName()), "/")
+		targetPath := strings.Trim(strings.TrimSpace(target.FlowInstance), "/")
+		if rootScope == "" || targetPath != rootScope {
+			return false
+		}
+		return target.FlowID == "" || strings.Trim(strings.TrimSpace(target.FlowID), "/") == rootScope
 	}
 	if target.FlowID != "" {
 		return target.FlowID == flowID && pc.workflowNodeDeliveryTargetFlowInstanceMatches(source, flowID, target.FlowInstance)
@@ -760,6 +768,7 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryTargetFlowInstanceMatches(sou
 type FlowInstanceRouteOwner interface {
 	HasFlowInstanceRoute(runtimeflowidentity.Route) bool
 	RemoveFlowInstanceRouteContext(context.Context, runtimeflowidentity.Route) error
+	RetireCommittedFlowInstanceRoute(runtimeflowidentity.Route) error
 }
 
 func (pc *PipelineCoordinator) hasMaterializedFlowInstanceRoute(source semanticview.Source, flowID, instancePath string) bool {

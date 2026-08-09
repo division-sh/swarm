@@ -29,8 +29,8 @@ func TestExecutorBoundedLoopEscapesAtStampedCapAndRejectsPriorRevision(t *testin
 		Stages: []runtimecontracts.WorkflowStageContract{{ID: "queued"}, {ID: "drafting"}, {ID: "review"}, {ID: "escalated"}},
 	}})
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source: source, StateRepo: stubStateRepo{}, TxRunner: stubRunner{}, Locker: stubLocker{},
-		Outbox: stubOutbox{}, Dispatcher: stubDispatcher{},
+		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{},
+		Dispatcher: stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +182,7 @@ func TestLoopReturningCarrierAdmissionRejectsPriorAndAcceptsCurrentGeneration(t 
 		},
 	})
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source: source, StateRepo: stubStateRepo{}, TxRunner: stubRunner{}, Locker: stubLocker{}, Outbox: stubOutbox{}, Dispatcher: stubDispatcher{},
+		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatal(err)

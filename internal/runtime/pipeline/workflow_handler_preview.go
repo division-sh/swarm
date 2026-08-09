@@ -69,8 +69,6 @@ func (previewBus) ResolveSubscribedRecipients(string) []string { return nil }
 
 func (previewBus) LogRuntime(context.Context, RuntimeLogEntry) error { return nil }
 
-func (previewBus) EngineOutbox() runtimeengine.OutboxWriter { return noOpEngineOutbox{} }
-
 func (previewBus) EngineDispatcher() runtimeengine.PostCommitDispatcher {
 	return noOpEngineDispatcher{}
 }

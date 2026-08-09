@@ -17,6 +17,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	storepkg "github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 type boundedProviderCredentialStore struct{}
@@ -88,12 +89,12 @@ func ensureBoundedStandingTarget(t *testing.T, ctx context.Context, persistence 
 
 	switch selected := persistence.(type) {
 	case *storepkg.PostgresStore:
-		if err := selected.DB.QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`, runID, entityID).Scan(&flowInstance); err != nil {
+		if err := storetest.DatabaseForTest(selected).QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`, runID, entityID).Scan(&flowInstance); err != nil {
 			t.Fatalf("load postgres bounded provider flow instance: %v", err)
 		}
-		insertPostgresStandingFixture(t, ctx, selected.DB, serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)
+		insertPostgresStandingFixture(t, ctx, storetest.DatabaseForTest(selected), serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)
 	case *storepkg.SQLiteRuntimeStore:
-		if err := selected.DB.QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = ? AND entity_id = ?`, runID, entityID).Scan(&flowInstance); err != nil {
+		if err := storetest.DatabaseForTest(selected).QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = ? AND entity_id = ?`, runID, entityID).Scan(&flowInstance); err != nil {
 			t.Fatalf("load sqlite bounded provider flow instance: %v", err)
 		}
 		insertSQLiteStandingFixture(t, ctx, selected, serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)
@@ -181,8 +182,16 @@ func insertPostgresStandingFixture(t *testing.T, ctx context.Context, db *sql.DB
 func insertSQLiteStandingFixture(t *testing.T, ctx context.Context, selected *storepkg.SQLiteRuntimeStore, serviceID, packageKey, flowID, instanceID, entityID, runID, bundleHash, bundleSource string) {
 	t.Helper()
 	now := time.Now().UTC()
-	err := selected.RunRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if _, err := tx.ExecContext(txctx, `
+	db := storetest.DatabaseForTest(selected)
+	if db == nil {
+		t.Fatal("sqlite standing fixture database is required")
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin sqlite standing fixture: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
 			INSERT INTO standing_services (
 				service_id, package_key, flow_id, instance_id, entity_id, declaration_present,
 				operator_override, effective_state, current_bundle_hash, current_bundle_source,
@@ -191,16 +200,16 @@ func insertSQLiteStandingFixture(t *testing.T, ctx context.Context, selected *st
 			) VALUES (?, ?, ?, ?, ?, TRUE, 'none', 'active', ?, ?, 1, 1, ?, 'published', 1, ?, ?)
 			ON CONFLICT(service_id) DO NOTHING
 		`, serviceID, packageKey, flowID, instanceID, entityID, bundleHash, bundleSource, runID, now, now); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(txctx, `
+		t.Fatalf("seed sqlite standing service: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
 			INSERT INTO standing_service_generations (service_id, generation, run_id, created_at)
 			VALUES (?, 1, ?, ?)
 			ON CONFLICT(service_id, generation) DO NOTHING
-		`, serviceID, runID, now)
-		return err
-	})
-	if err != nil {
-		t.Fatalf("seed sqlite standing service: %v", err)
+		`, serviceID, runID, now); err != nil {
+		t.Fatalf("seed sqlite standing generation: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit sqlite standing fixture: %v", err)
 	}
 }

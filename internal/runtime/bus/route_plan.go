@@ -7,6 +7,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 )
 
 type routePlanSource uint8
@@ -202,6 +204,9 @@ type RoutePlan struct {
 	BlockedByCycle       bool
 	CycleEscalation      *events.Event
 	ReplyContextConsumed bool
+	ActivationPlans      []runtimepipeline.FlowInstanceActivationPlan
+	ReplyCreations       []runtimereplycontext.Record
+	ReplyClaims          []runtimereplycontext.ClaimCommand
 }
 
 type RoutePlanLiveRecipient struct {
@@ -251,6 +256,9 @@ func (p RoutePlan) Normalized() RoutePlan {
 	p.RoutedRecipients = append([]Subscriber(nil), p.RoutedRecipients...)
 	p.SubscribedRecipients = uniqueStrings(p.SubscribedRecipients)
 	p.ExtraDetail = cloneStringAnyMap(p.ExtraDetail)
+	p.ActivationPlans = append([]runtimepipeline.FlowInstanceActivationPlan(nil), p.ActivationPlans...)
+	p.ReplyCreations = append([]runtimereplycontext.Record(nil), p.ReplyCreations...)
+	p.ReplyClaims = append([]runtimereplycontext.ClaimCommand(nil), p.ReplyClaims...)
 	p.ContradictionReason = strings.TrimSpace(p.ContradictionReason)
 	if p.CycleEscalation != nil {
 		evt := *p.CycleEscalation
@@ -264,6 +272,9 @@ func (p RoutePlan) Normalized() RoutePlan {
 		p.DeliveryIntents = nil
 		p.RoutedRecipients = nil
 		p.SubscribedRecipients = nil
+		p.ActivationPlans = nil
+		p.ReplyCreations = nil
+		p.ReplyClaims = nil
 	}
 	return p
 }

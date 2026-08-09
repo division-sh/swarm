@@ -37,7 +37,7 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 			name: "sqlite",
 			open: func(t *testing.T, ctx context.Context) (agentDiagnosePaginationStore, *sql.DB, bool) {
 				selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return selected, selected.DB, true
+				return selected, storetest.Database(selected), true
 			},
 		},
 		{

@@ -71,12 +71,13 @@ func TestEnsureHandlerEntityIDUsesCanonicalPrimaryForEntityMaterializingHandler(
 		},
 	}
 
-	entityID, evt, resolveErr := ensureHandlerEntityID(source, "", handler, "", eventtest.RunCreatingRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+	runID := "77777777-7777-4777-8777-777777777777"
+	entityID, evt, resolveErr := ensureHandlerEntityID(source, "", handler, "", eventtest.RunCreatingRootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}))
 	if resolveErr != nil {
 		t.Fatalf("ensureHandlerEntityID: %v", resolveErr)
 	}
 
-	if entityID != FlowInstanceEntityID("root") {
+	if entityID != FlowInstanceEntityID(runID) {
 		t.Fatalf("entityID = %q, want canonical root primary", entityID)
 	}
 	if got := evt.EntityID(); got == "" || got != entityID {

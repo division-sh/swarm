@@ -2,7 +2,6 @@ package mutationlog
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -10,19 +9,10 @@ import (
 	"time"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/google/uuid"
 )
 
 func ErrInvalidMutationLogWriter(message string) error {
 	return fmt.Errorf("mutation log completeness violation: %s", strings.TrimSpace(message))
-}
-
-type DBTX interface {
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 type Record struct {
@@ -53,84 +43,6 @@ type ProjectionMutation struct {
 	NewValue any
 }
 
-func Insert(ctx context.Context, db DBTX, rec Record) error {
-	if db == nil {
-		return ErrInvalidMutationLogWriter("mutation log DB is required")
-	}
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return ErrInvalidMutationLogWriter(err.Error())
-	}
-	tx, ok := db.(*sql.Tx)
-	if !ok {
-		return ErrInvalidMutationLogWriter("PostgreSQL mutation log writes require the existing persistence transaction")
-	}
-	entityID := strings.TrimSpace(rec.EntityID)
-	field := strings.TrimSpace(rec.Field)
-	writerType := strings.TrimSpace(rec.WriterType)
-	writerID := strings.TrimSpace(rec.WriterID)
-	if entityID == "" || field == "" || writerType == "" || writerID == "" {
-		return ErrInvalidMutationLogWriter("entity_id, field, writer_type, and writer_id are required")
-	}
-
-	runID, err := runtimecurrentstate.RequireRunID(ctx)
-	if err != nil {
-		return ErrInvalidMutationLogWriter(err.Error())
-	}
-	runFact, err := runtimerunlifecycle.RequireActiveSource(ctx, runID)
-	if err != nil {
-		return err
-	}
-	contextFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
-	if !ok {
-		return fmt.Errorf("mutation log bundle source fact is required")
-	}
-	if !runFact.Matches(contextFact) {
-		return fmt.Errorf("mutation log bundle source fact does not match active run")
-	}
-
-	oldValue, err := jsonbArg(rec.OldValue)
-	if err != nil {
-		return err
-	}
-	newValue, err := jsonbArg(rec.NewValue)
-	if err != nil {
-		return err
-	}
-
-	causedByEvent := ""
-	if inbound, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
-		if parsed := validUUIDString(inbound.ID()); parsed != "" {
-			causedByEvent = parsed
-		}
-	}
-
-	mutationID := uuid.NewString()
-	occurredAt := time.Now().UTC()
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			mutation_id, run_id, entity_id, field, old_value, new_value,
-			caused_by_event, writer_type, writer_id, handler_step, created_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, $3::uuid, $4, $5::jsonb, $6::jsonb,
-			NULLIF($7, '')::uuid, $8, $9, NULLIF($10, ''), $11
-		)
-	`, mutationID, runID, entityID, field, oldValue, newValue, causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep), occurredAt)
-	if err != nil {
-		return err
-	}
-	if field != "current_state" {
-		return nil
-	}
-	draft, admitted, err := AuthorActivityDraft(ctx, runID, mutationID, rec, occurredAt)
-	if err != nil {
-		return err
-	}
-	if !admitted {
-		return nil
-	}
-	return runtimeauthoractivity.Record(ctx, draft)
-}
 func AuthorActivityDraft(ctx context.Context, runID, mutationID string, rec Record, occurredAt time.Time) (runtimeauthoractivity.Draft, bool, error) {
 	if strings.TrimSpace(rec.Field) != "current_state" {
 		return runtimeauthoractivity.Draft{}, false, nil
@@ -216,19 +128,6 @@ func BuildEntityStateDiffRecords(entityID string, before, after EntityStateProje
 	}
 	records = append(records, accRecords...)
 	return records, nil
-}
-
-func InsertEntityStateDiff(ctx context.Context, db DBTX, entityID string, before, after EntityStateProjection, writer Writer) error {
-	records, err := BuildEntityStateDiffRecords(entityID, before, after, writer)
-	if err != nil {
-		return err
-	}
-	for _, rec := range records {
-		if err := Insert(ctx, db, rec); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func ReconstructEntityStateProjection(records []ProjectionMutation) (EntityStateProjection, error) {
@@ -423,38 +322,4 @@ func deleteProjectionMapValue(target map[string]any, path []string) bool {
 		delete(target, segment)
 	}
 	return len(target) == 0
-}
-
-func validUUIDString(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	if _, err := uuid.Parse(raw); err != nil {
-		return ""
-	}
-	return raw
-}
-
-func jsonbArg(value any) (any, error) {
-	switch typed := value.(type) {
-	case nil:
-		return nil, nil
-	case json.RawMessage:
-		if len(typed) == 0 {
-			return nil, nil
-		}
-		return string(typed), nil
-	case []byte:
-		if len(typed) == 0 {
-			return nil, nil
-		}
-		return string(typed), nil
-	default:
-		raw, err := json.Marshal(value)
-		if err != nil {
-			return nil, err
-		}
-		return string(raw), nil
-	}
 }

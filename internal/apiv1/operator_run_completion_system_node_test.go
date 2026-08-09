@@ -45,9 +45,9 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	handler := eventPublishTestHandler(t, pg, bus, source)
 
 	module := newRunCompletionSystemNodeModule(t, source)
-	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, completeAPITestDurableWorkflowOptions(t, pg, bus, runtimepipeline.PipelineCoordinatorOptions{
+	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, completeAPITestDurableWorkflowOptions(t, pg, bus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:              module,
-		Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		DeliveryStore:       pg,
 		DeliveryRuntime:     bus,
 		PipelineObligations: pg.PipelineObligations(),

@@ -205,7 +205,7 @@ func newHostRelayExecutor(t *testing.T) (*Executor, models.AgentConfig, *workspa
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
-	manager := workspace.NewHostManager(nil)
+	manager := workspace.NewHostManager()
 	manager.SetConfig(workspace.HostConfig{
 		WorkspaceRoot:       workspaceRoot,
 		SharedDataSource:    dataDir,

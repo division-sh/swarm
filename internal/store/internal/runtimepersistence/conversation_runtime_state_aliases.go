@@ -1,0 +1,10 @@
+package runtimepersistence
+
+import sessionstore "github.com/division-sh/swarm/internal/store/internal/backend/sessions"
+
+type ConversationRuntimeStateDescriptor = sessionstore.ConversationRuntimeStateDescriptor
+type ConversationRuntimeLastTurnDescriptor = sessionstore.ConversationRuntimeLastTurnDescriptor
+type ConversationRuntimeWatchdogDescriptor = sessionstore.ConversationRuntimeWatchdogDescriptor
+
+var DecodeConversationRuntimeStateDescriptor = sessionstore.DecodeConversationRuntimeStateDescriptor
+var ValidateConversationRuntimeWatchdogDescriptor = sessionstore.ValidateConversationRuntimeWatchdogDescriptor

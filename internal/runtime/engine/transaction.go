@@ -79,9 +79,8 @@ func NormalizeFailure(err error, component, operation string) *failures.Error {
 			err,
 		).(*failures.Error)
 	case errors.Is(err, ErrMissingStateRepo),
-		errors.Is(err, ErrMissingTransaction),
+		errors.Is(err, ErrMissingMutationOwner),
 		errors.Is(err, ErrMissingEntityLocker),
-		errors.Is(err, ErrMissingOutbox),
 		errors.Is(err, ErrMissingDispatcher),
 		errors.Is(err, ErrEmitPersistencePrerequisite):
 		return failures.Wrap(
@@ -133,22 +132,4 @@ func SetExecutionFailure(result *ExecutionResult, err error, component, operatio
 	envelope := failure.Failure
 	result.Failure = &envelope
 	result.FailureDisposition = FailureDispositionFor(failure)
-}
-
-func PersistAndDispatch(ctx context.Context, runner TransactionRunner, outbox OutboxWriter, dispatcher PostCommitDispatcher, intents []EmitIntent) error {
-	if runner == nil {
-		return ErrMissingTransaction
-	}
-	if outbox == nil {
-		return ErrMissingOutbox
-	}
-	if dispatcher == nil {
-		return ErrMissingDispatcher
-	}
-	if err := runner.Run(ctx, func(tx Tx) error {
-		return outbox.WriteOutbox(tx.Context(), intents)
-	}); err != nil {
-		return err
-	}
-	return dispatcher.DispatchPostCommit(ctx, intents)
 }

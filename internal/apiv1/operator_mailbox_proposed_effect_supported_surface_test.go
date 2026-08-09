@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
@@ -41,7 +40,7 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 			name: "sqlite",
 			open: func(t *testing.T) (any, *sql.DB) {
 				selected := storetest.StartSQLiteRuntimeStoreWithContext(t, context.Background())
-				return selected, selected.DB
+				return selected, storetest.DatabaseForTest(selected)
 			},
 		},
 		{
@@ -81,12 +80,15 @@ func TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores(t *t
 			activityNode := runtimecontracts.SystemNodeContract{
 				ID: "activity-runtime", ExecutionType: runtimecontracts.SystemNodeExecutionType,
 				SubscribesTo: []string{"mailbox.card_decided", "platform.activity_requested"},
+				Produces:     []string{"send_support_reply.succeeded", "send_support_reply.failed"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"mailbox.card_decided":        {},
 					"platform.activity_requested": {},
 				},
 			}
 			bundle.Nodes[activityNode.ID] = activityNode
+			bundle.Events["send_support_reply.succeeded"] = runtimecontracts.EventCatalogEntry{}
+			bundle.Events["send_support_reply.failed"] = runtimecontracts.EventCatalogEntry{}
 			if bundle.Semantics.NodeHandlers == nil {
 				bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
 			}
@@ -180,9 +182,9 @@ func newProposedEffectMailboxHandler(
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, persistence.(apiTestRuntimeMutationOwner))
+	workflowPersistence := runtimepipeline.NewWorkflowPersistence(persistence.(apiTestRuntimeMutationOwner))
 	if sqliteStore, ok := persistence.(*store.SQLiteRuntimeStore); ok {
-		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, sqliteStore)
+		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 	}
 	deliveryOwner := persistence.(runtimedelivery.Store)
 	obligationOwner := persistence.(interface {
@@ -193,18 +195,13 @@ func newProposedEffectMailboxHandler(
 	if !ok {
 		t.Fatal("persistence store does not implement decisioncard.Store")
 	}
-	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, completeAPITestDurableWorkflowOptions(t, persistence, bus, runtimepipeline.PipelineCoordinatorOptions{
+	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(bus, completeAPITestDurableWorkflowOptions(t, persistence, bus, runtimepipeline.PipelineCoordinatorOptions{
 		Module: newRunCompletionSystemNodeModule(t, source), Persistence: workflowPersistence,
 		DecisionCards: cards, ProposedEffects: persistence.(decisioncard.ProposedEffectStore),
 		DeliveryStore: deliveryOwner, DeliveryRuntime: bus, PipelineObligations: obligationOwner,
-		GatePublisher: bus, DirectDecisionPublisher: bus,
 		RunLifecycle: runLifecycle, BundleSourceFact: fact,
 	}))
 
-	bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
-		Identity: runtimebustest.Identity(t, "workflow-runtime", ""),
-	})
-	runtimebustest.Subscribe(t, bus, "workflow-runtime", events.EventType("mailbox.card_decided"), events.EventType("platform.activity_requested"))
 	mailbox, ok := persistence.(MailboxAPIStore)
 	if !ok {
 		t.Fatal("persistence store does not implement MailboxAPIStore")

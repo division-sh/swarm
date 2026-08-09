@@ -308,7 +308,7 @@ func TestImportBoundaryWildcardTemplateSourceGrantMaterializesAcrossSurfaces(t *
 			if eb.RouteTable().HasFlowInstanceRoute(mismatchedIdentity) {
 				t.Fatal("EventBus mismatched identity was reported present")
 			}
-			if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: mismatchedIdentity}); err == nil || !strings.Contains(err.Error(), "is owned by scope") {
+			if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: mismatchedIdentity}); err == nil || !strings.Contains(err.Error(), "identity is inconsistent") {
 				t.Fatalf("EventBus mismatched add error = %v, want complete-owner conflict", err)
 			}
 			deleteCalls := len(store.deleteCalls)

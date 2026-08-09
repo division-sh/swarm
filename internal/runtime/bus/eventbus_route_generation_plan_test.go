@@ -80,7 +80,7 @@ func TestEventBusSubscribedPublishDoesNotCrossAgentRouteGenerations(t *testing.T
 	}
 }
 
-func TestEventBusPublishInMutationDoesNotCrossAgentRouteGenerations(t *testing.T) {
+func TestEventBusPublishDoesNotCrossAgentRouteGenerations(t *testing.T) {
 	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
 	barrier := routeGenerationPlanBarrier{started: make(chan struct{}, 1), release: make(chan struct{})}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{barrier}})
@@ -96,15 +96,13 @@ func TestEventBusPublishInMutationDoesNotCrossAgentRouteGenerations(t *testing.T
 
 	mutationDone := make(chan error, 1)
 	go func() {
-		mutationDone <- runConnectRoutePlanCommitScope(context.Background(), store, func(commitCtx context.Context) error {
-			return eb.PublishInMutation(commitCtx, evt)
-		})
+		mutationDone <- eb.Publish(context.Background(), evt)
 	}()
 	requireRouteGenerationSignal(t, barrier.started, "post-commit interceptor")
 	newCh := eb.ReplaceAgentRoute(newToken, testAgentSubscriptionAdmission(t, newToken.AgentID, events.EventType("test.route_generation_mutation")))
 	close(barrier.release)
-	if err := requireRouteGenerationResult(t, mutationDone, "RunEventMutation"); err != nil {
-		t.Fatalf("RunEventMutation: %v", err)
+	if err := requireRouteGenerationResult(t, mutationDone, "Publish"); !errors.Is(err, errAuthoritativeDeliveryIncomplete) {
+		t.Fatalf("Publish error = %v, want authoritative delivery incomplete", err)
 	}
 	assertNoRouteGenerationEvent(t, oldCh, "detached predecessor")
 	assertNoRouteGenerationEvent(t, newCh, "transactional successor")

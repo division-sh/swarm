@@ -1,0 +1,987 @@
+package agentpersistence
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	"github.com/google/uuid"
+)
+
+var _ runtimemanager.AgentLifecyclePersistence = (*AgentPostgresOwner)(nil)
+var _ runtimemanager.AgentLifecyclePersistence = (*AgentSQLiteOwner)(nil)
+var _ runtimemanager.AgentLifecycleStateReader = (*AgentPostgresOwner)(nil)
+var _ runtimemanager.AgentLifecycleStateReader = (*AgentSQLiteOwner)(nil)
+var _ runtimemanager.AgentLifecycleDiagnosticPersistence = (*AgentPostgresOwner)(nil)
+var _ runtimemanager.AgentLifecycleDiagnosticPersistence = (*AgentSQLiteOwner)(nil)
+
+func (s *AgentPostgresOwner) LoadAgentLifecycleState(
+	ctx context.Context,
+	identity runtimeagentidentity.Identity,
+) (runtimemanager.AgentLifecycleState, bool, error) {
+	fields, err := IdentityFields(identity)
+	if err != nil {
+		return runtimemanager.AgentLifecycleState{}, false, err
+	}
+	var state runtimemanager.AgentLifecycleState
+	var generation int64
+	err = s.backend.QueryRowContext(ctx, `
+		SELECT agent_id, lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
+		       lifecycle_config_revision, lifecycle_run_mode
+		FROM agents
+		WHERE agent_id = $1 AND agent_name_owner = $2 AND agent_name_source = $3
+		  AND agent_route_presence = $4 AND flow_scope_key = $5
+		  AND flow_instance_id = $6 AND flow_instance = $7
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(
+		&state.AgentID,
+		&state.RuntimeEpoch,
+		&generation,
+		&state.Phase,
+		&state.ConfigRevision,
+		&state.RunMode,
+	)
+	if err == sql.ErrNoRows {
+		return runtimemanager.AgentLifecycleState{}, false, nil
+	}
+	if err != nil {
+		return runtimemanager.AgentLifecycleState{}, false, err
+	}
+	state.Identity = identity.Normalize()
+	state.Generation = uint64(generation)
+	return state, true, nil
+}
+
+func (s *AgentSQLiteOwner) LoadAgentLifecycleState(
+	ctx context.Context,
+	identity runtimeagentidentity.Identity,
+) (runtimemanager.AgentLifecycleState, bool, error) {
+	fields, err := IdentityFields(identity)
+	if err != nil {
+		return runtimemanager.AgentLifecycleState{}, false, err
+	}
+	var state runtimemanager.AgentLifecycleState
+	var generation int64
+	err = s.backend.QueryRowContext(ctx, `
+		SELECT agent_id, lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase,
+		       lifecycle_config_revision, lifecycle_run_mode
+		FROM agents
+		WHERE agent_id = ? AND agent_name_owner = ? AND agent_name_source = ?
+		  AND agent_route_presence = ? AND flow_scope_key = ?
+		  AND flow_instance_id = ? AND flow_instance = ?
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(
+		&state.AgentID,
+		&state.RuntimeEpoch,
+		&generation,
+		&state.Phase,
+		&state.ConfigRevision,
+		&state.RunMode,
+	)
+	if err == sql.ErrNoRows {
+		return runtimemanager.AgentLifecycleState{}, false, nil
+	}
+	if err != nil {
+		return runtimemanager.AgentLifecycleState{}, false, err
+	}
+	state.Identity = identity.Normalize()
+	state.Generation = uint64(generation)
+	return state, true, nil
+}
+
+func (s *AgentPostgresOwner) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]runtimemanager.AgentLifecycleDiagnostic, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.backend.QueryContext(ctx, `
+		SELECT outbox_id::text, operation_id::text,
+		       agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		       flow_scope_key, flow_instance_id, flow_instance,
+		       event_name, payload, created_at
+		FROM agent_lifecycle_diagnostic_outbox
+		WHERE projected_at IS NULL
+		ORDER BY created_at, outbox_id
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAgentLifecycleDiagnostics(rows)
+}
+
+func (s *AgentSQLiteOwner) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]runtimemanager.AgentLifecycleDiagnostic, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.backend.QueryContext(ctx, `
+		SELECT outbox_id, operation_id,
+		       agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		       flow_scope_key, flow_instance_id, flow_instance,
+		       event_name, payload, created_at
+		FROM agent_lifecycle_diagnostic_outbox
+		WHERE projected_at IS NULL
+		ORDER BY created_at, outbox_id
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanAgentLifecycleDiagnostics(rows)
+}
+
+func scanAgentLifecycleDiagnostics(rows *sql.Rows) ([]runtimemanager.AgentLifecycleDiagnostic, error) {
+	out := make([]runtimemanager.AgentLifecycleDiagnostic, 0)
+	for rows.Next() {
+		var item runtimemanager.AgentLifecycleDiagnostic
+		var raw []byte
+		var rawCreatedAt any
+		var nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID, flowInstance string
+		if err := rows.Scan(
+			&item.OutboxID,
+			&item.OperationID,
+			&item.AgentID,
+			&nameOwner,
+			&nameSource,
+			&routePresence,
+			&flowScopeKey,
+			&flowInstanceID,
+			&flowInstance,
+			&item.EventName,
+			&raw,
+			&rawCreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		identity, err := IdentityFromColumns(
+			item.AgentID,
+			nameOwner,
+			nameSource,
+			routePresence,
+			flowScopeKey,
+			flowInstanceID,
+			flowInstance,
+		)
+		if err != nil {
+			return nil, err
+		}
+		item.Identity = identity
+		createdAt, _, err := sqliteTime(rawCreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("decode lifecycle diagnostic created_at: %w", err)
+		}
+		item.CreatedAt = createdAt
+		if err := json.Unmarshal(raw, &item.Payload); err != nil {
+			return nil, fmt.Errorf("decode lifecycle diagnostic payload: %w", err)
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *AgentPostgresOwner) MarkAgentLifecycleDiagnosticProjected(ctx context.Context, outboxID string, at time.Time) error {
+	res, err := s.backend.ExecContext(ctx, `UPDATE agent_lifecycle_diagnostic_outbox SET projected_at = $2 WHERE outbox_id = $1::uuid AND projected_at IS NULL`, outboxID, at.UTC())
+	return requireSingleLifecycleDiagnosticProjection(res, err)
+}
+
+func (s *AgentSQLiteOwner) MarkAgentLifecycleDiagnosticProjected(ctx context.Context, outboxID string, at time.Time) error {
+	return s.backend.RunTransaction(ctx, "sqlite mark lifecycle diagnostic projected", func(txctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(txctx, `UPDATE agent_lifecycle_diagnostic_outbox SET projected_at = ? WHERE outbox_id = ? AND projected_at IS NULL`, at.UTC(), outboxID)
+		return requireSingleLifecycleDiagnosticProjection(res, err)
+	})
+}
+
+func requireSingleLifecycleDiagnosticProjection(res sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return fmt.Errorf("lifecycle diagnostic projection conflict")
+	}
+	return nil
+}
+
+func (s *AgentPostgresOwner) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	var err error
+	req, err = normalizeLifecycleTransition(req)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	var result runtimemanager.AgentLifecycleTransitionResult
+	err = s.runPostgresLifecycleMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		fingerprint, err := req.Identity.Fingerprint()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "swarm:agent-lifecycle:"+fingerprint); err != nil {
+			return err
+		}
+		previous, exists, err := loadPostgresLifecycleCell(txctx, tx, req.Identity)
+		if err != nil {
+			return err
+		}
+		if err := AuthorizePostgresDynamicAgentTopologyMutation(txctx, tx, req); err != nil {
+			return err
+		}
+		var ok bool
+		if result, ok, err = loadPostgresLifecycleOperationResult(txctx, tx, req); err != nil || ok {
+			return err
+		}
+		if err := validateLifecycleExpectation(req, previous, exists); err != nil {
+			return err
+		}
+		result = lifecycleResult(req, previous, exists)
+		result.Subordinate, err = applyPostgresLifecycleSubordinate(txctx, tx, req)
+		if err != nil {
+			return err
+		}
+		if err := applyPostgresLifecycleCell(txctx, tx, req, result); err != nil {
+			return err
+		}
+		if err := insertPostgresLifecycleEvidence(txctx, tx, req, result); err != nil {
+			return err
+		}
+		if err := story.Record(txctx, agentLifecycleAuthorActivityDraft(req, result)); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	return result, nil
+}
+
+func (s *AgentSQLiteOwner) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	var err error
+	req, err = normalizeLifecycleTransition(req)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	var result runtimemanager.AgentLifecycleTransitionResult
+	err = s.runSQLiteLifecycleMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		previous, exists, err := loadSQLiteLifecycleCell(txctx, tx, req.Identity)
+		if err != nil {
+			return err
+		}
+		if err := AuthorizeSQLiteDynamicAgentTopologyMutation(txctx, tx, req); err != nil {
+			return err
+		}
+		var ok bool
+		result, ok, err = loadSQLiteLifecycleOperationResult(txctx, tx, req)
+		if err != nil || ok {
+			return err
+		}
+		if err := validateLifecycleExpectation(req, previous, exists); err != nil {
+			return err
+		}
+		result = lifecycleResult(req, previous, exists)
+		result.Subordinate, err = applySQLiteLifecycleSubordinate(txctx, tx, req)
+		if err != nil {
+			return err
+		}
+		if err := applySQLiteLifecycleCellTx(txctx, tx, req, result); err != nil {
+			return err
+		}
+		if err := insertSQLiteLifecycleEvidenceTx(txctx, tx, req, result); err != nil {
+			return err
+		}
+		if err := story.Record(txctx, agentLifecycleAuthorActivityDraft(req, result)); err != nil {
+			return err
+		}
+		return nil
+	})
+	return result, err
+}
+
+func (s *AgentPostgresOwner) runPostgresLifecycleMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
+		if err != nil {
+			return err
+		}
+		if err := operation(txctx, tx, story); err != nil {
+			return err
+		}
+		if _, err := privaterunforkrevision.CaptureCurrentTransaction(txctx, tx); err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
+	})
+}
+
+func (s *AgentSQLiteOwner) runSQLiteLifecycleMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return s.backend.RunTransaction(ctx, "sqlite commit agent lifecycle transition", func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
+		if err != nil {
+			return err
+		}
+		if err := operation(txctx, tx, story); err != nil {
+			return err
+		}
+		return story.Finalize(txctx)
+	})
+}
+
+func agentLifecycleAuthorActivityDraft(req runtimemanager.AgentLifecycleTransition, result runtimemanager.AgentLifecycleTransitionResult) runtimeauthoractivity.Draft {
+	previousGeneration := result.PreviousGeneration
+	nextGeneration := result.Generation
+	return runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindAgentLifecycle, Transition: string(result.Phase),
+		SourceOwner: "agent_lifecycle_transition_facts", SourceIdentity: result.TransitionID,
+		DedupKey: "agent-transition:" + result.TransitionID, OccurredAt: req.Now.UTC(), AgentID: result.AgentID,
+		Projection: runtimeauthoractivity.Projection{
+			SubjectType: "agent", SubjectID: result.AgentID, PreviousPhase: string(result.PreviousPhase),
+			NextPhase: string(result.Phase), PreviousGeneration: &previousGeneration, NextGeneration: &nextGeneration,
+			RunMode: string(result.RunMode),
+		},
+	}
+}
+
+type lifecycleCell struct {
+	Epoch      int64
+	Generation uint64
+	Phase      runtimemanager.AgentLifecyclePhase
+}
+
+func normalizeLifecycleTransition(req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransition, error) {
+	req.Identity = req.Identity.Normalize()
+	if err := req.Identity.Validate(); err != nil {
+		return runtimemanager.AgentLifecycleTransition{}, err
+	}
+	req.AgentID = strings.TrimSpace(req.AgentID)
+	if req.AgentID != req.Identity.AgentID() {
+		return runtimemanager.AgentLifecycleTransition{}, fmt.Errorf("lifecycle transition agent_id disagrees with identity")
+	}
+	if req.Agent != nil {
+		agentIdentity, err := req.Agent.Config.ConcreteIdentity()
+		if err != nil {
+			return runtimemanager.AgentLifecycleTransition{}, err
+		}
+		if agentIdentity != req.Identity {
+			return runtimemanager.AgentLifecycleTransition{}, fmt.Errorf("lifecycle transition agent config identity changed")
+		}
+	}
+	plan, err := req.Subordinate.Normalize()
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransition{}, err
+	}
+	req.Subordinate = plan
+	if err := validateLifecycleTransition(req); err != nil {
+		return runtimemanager.AgentLifecycleTransition{}, err
+	}
+	return req, nil
+}
+
+func validateLifecycleTransition(req runtimemanager.AgentLifecycleTransition) error {
+	for name, value := range map[string]string{
+		"operation_id": req.OperationID, "operation_kind": req.OperationKind, "request_hash": req.RequestHash,
+		"agent_id": req.AgentID, "trigger": req.Trigger, "config_revision": req.ConfigRevision,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("%s is required", name)
+		}
+	}
+	if _, err := uuid.Parse(req.OperationID); err != nil {
+		return fmt.Errorf("operation_id must be a UUID: %w", err)
+	}
+	if req.TargetEpoch <= 0 || req.TargetGeneration == 0 || req.TargetPhase == "" || req.RunMode == "" {
+		return fmt.Errorf("complete target lifecycle state is required")
+	}
+	if req.Now.IsZero() {
+		return fmt.Errorf("lifecycle transition time is required")
+	}
+	return nil
+}
+
+func validateLifecycleExpectation(req runtimemanager.AgentLifecycleTransition, previous lifecycleCell, exists bool) error {
+	if !exists {
+		if req.OperationKind == "spawn" && req.ExpectedGeneration == 0 && req.ExpectedPhase == "" {
+			return nil
+		}
+		return lifecycleConflict(req, previous, false)
+	}
+	if previous.Epoch != req.ExpectedEpoch || previous.Generation != req.ExpectedGeneration || previous.Phase != req.ExpectedPhase {
+		return lifecycleConflict(req, previous, true)
+	}
+	return nil
+}
+
+func lifecycleConflict(req runtimemanager.AgentLifecycleTransition, current lifecycleCell, exists bool) error {
+	return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle-store", req.OperationKind, map[string]any{
+		"agent_id": req.AgentID, "expected_epoch": req.ExpectedEpoch, "expected_generation": req.ExpectedGeneration,
+		"expected_phase": req.ExpectedPhase, "current_exists": exists, "current_epoch": current.Epoch,
+		"current_generation": current.Generation, "current_phase": current.Phase,
+	})
+}
+
+func lifecycleResult(req runtimemanager.AgentLifecycleTransition, previous lifecycleCell, exists bool) runtimemanager.AgentLifecycleTransitionResult {
+	previousPhase := runtimemanager.AgentLifecyclePhase("absent")
+	if exists {
+		previousPhase = previous.Phase
+	}
+	return runtimemanager.AgentLifecycleTransitionResult{
+		OperationID: req.OperationID, TransitionID: uuid.NewString(), Identity: req.Identity, AgentID: req.AgentID,
+		PreviousEpoch: previous.Epoch, RuntimeEpoch: req.TargetEpoch,
+		PreviousGeneration: previous.Generation, Generation: req.TargetGeneration,
+		PreviousPhase: previousPhase, Phase: req.TargetPhase, ConfigRevision: req.ConfigRevision, RunMode: req.RunMode,
+		Subordinate: runtimesessions.LifecycleMutationOutcome{Action: req.Subordinate.Action},
+	}
+}
+
+type lifecycleSessionRow struct {
+	SessionID    string
+	RunID        string
+	FlowInstance string
+	Status       string
+}
+
+func applyPostgresLifecycleSubordinate(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition) (runtimesessions.LifecycleMutationOutcome, error) {
+	outcome := runtimesessions.LifecycleMutationOutcome{Action: req.Subordinate.Action}
+	if req.Subordinate.Action == runtimesessions.LifecycleMutationNone {
+		return outcome, nil
+	}
+	fields, err := IdentityFields(req.Identity)
+	if err != nil {
+		return outcome, err
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT session_id::text, run_id::text, flow_instance, status
+		FROM agent_sessions
+		WHERE agent_id = $1 AND agent_name_owner = $2 AND agent_name_source = $3
+		  AND agent_route_presence = $4 AND flow_scope_key = $5
+		  AND flow_instance_id = $6 AND flow_instance = $7
+		  AND status IN ('active', 'suspended')
+		ORDER BY session_id
+		FOR UPDATE
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
+	if err != nil {
+		return outcome, fmt.Errorf("lock lifecycle subordinate session set: %w", err)
+	}
+	defer rows.Close()
+	var selected []lifecycleSessionRow
+	for rows.Next() {
+		var row lifecycleSessionRow
+		if err := rows.Scan(&row.SessionID, &row.RunID, &row.FlowInstance, &row.Status); err != nil {
+			return outcome, err
+		}
+		selected = append(selected, row)
+	}
+	if err := rows.Err(); err != nil {
+		return outcome, err
+	}
+	if err := rows.Close(); err != nil {
+		return outcome, err
+	}
+	for _, row := range selected {
+		mutation, err := applyPostgresLifecycleSessionMutation(ctx, tx, req, row)
+		if err != nil {
+			return outcome, err
+		}
+		outcome.Sessions = append(outcome.Sessions, mutation)
+	}
+	return outcome, nil
+}
+
+func applyPostgresLifecycleSessionMutation(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, row lifecycleSessionRow) (runtimesessions.LifecycleSessionMutation, error) {
+	fields, err := IdentityFields(req.Identity)
+	if err != nil {
+		return runtimesessions.LifecycleSessionMutation{}, err
+	}
+	mutation := runtimesessions.LifecycleSessionMutation{
+		PreviousSessionID: row.SessionID, RunID: row.RunID, FlowInstance: row.FlowInstance, PreviousStatus: row.Status,
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE agent_sessions
+		SET status = 'terminated', termination_reason = $2, termination_detail = NULLIF($3, ''),
+		    successor_session_id = NULL, terminated_at = $4, lease_holder = NULL, lease_expires_at = NULL, updated_at = $4
+		WHERE session_id = $1::uuid AND status IN ('active', 'suspended')
+	`, row.SessionID, req.Subordinate.TerminationReason.String(), req.Subordinate.TerminationDetail, req.Now.UTC()); err != nil {
+		return mutation, fmt.Errorf("terminate lifecycle subordinate session %s: %w", row.SessionID, err)
+	}
+	if req.Subordinate.Action != runtimesessions.LifecycleMutationRotateCurrentSet {
+		return mutation, nil
+	}
+	mutation.SuccessorSessionID = runtimesessions.LifecycleSuccessorSessionID(req.OperationID, row.SessionID)
+	mutation.SuccessorStatus = row.Status
+	runtimeState, err := json.Marshal(map[string]any{
+		"summary": req.Subordinate.CheckpointSummary, "retries_from_session_id": row.SessionID,
+		"rotation_operation_id": req.OperationID,
+	})
+	if err != nil {
+		return mutation, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, memory_source,
+			conversation, turn_count, runtime_state, lease_holder, lease_expires_at,
+			status, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
+			'[]'::jsonb, 0, $10::jsonb, NULL, NULL, $11, $12, $12
+		)
+	`, mutation.SuccessorSessionID, row.RunID, fields.AgentID, fields.NameOwner,
+		fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
+		fields.FlowInstanceID, fields.FlowInstancePath, string(runtimeState),
+		row.Status, req.Now.UTC()); err != nil {
+		return mutation, fmt.Errorf("insert lifecycle subordinate successor for %s: %w", row.SessionID, err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET successor_session_id = $2::uuid, updated_at = $3 WHERE session_id = $1::uuid AND status = 'terminated'`, row.SessionID, mutation.SuccessorSessionID, req.Now.UTC()); err != nil {
+		return mutation, fmt.Errorf("link lifecycle subordinate successor for %s: %w", row.SessionID, err)
+	}
+	return mutation, nil
+}
+
+func applySQLiteLifecycleSubordinate(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition) (runtimesessions.LifecycleMutationOutcome, error) {
+	outcome := runtimesessions.LifecycleMutationOutcome{Action: req.Subordinate.Action}
+	if req.Subordinate.Action == runtimesessions.LifecycleMutationNone {
+		return outcome, nil
+	}
+	fields, err := IdentityFields(req.Identity)
+	if err != nil {
+		return outcome, err
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT session_id, run_id, flow_instance, status
+		FROM agent_sessions
+		WHERE agent_id = ? AND agent_name_owner = ? AND agent_name_source = ?
+		  AND agent_route_presence = ? AND flow_scope_key = ?
+		  AND flow_instance_id = ? AND flow_instance = ?
+		  AND status IN ('active', 'suspended')
+		ORDER BY session_id
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
+	if err != nil {
+		return outcome, fmt.Errorf("lock sqlite lifecycle subordinate session set: %w", err)
+	}
+	var selected []lifecycleSessionRow
+	for rows.Next() {
+		var row lifecycleSessionRow
+		if err := rows.Scan(&row.SessionID, &row.RunID, &row.FlowInstance, &row.Status); err != nil {
+			_ = rows.Close()
+			return outcome, err
+		}
+		selected = append(selected, row)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return outcome, err
+	}
+	if err := rows.Close(); err != nil {
+		return outcome, err
+	}
+	for _, row := range selected {
+		mutation := runtimesessions.LifecycleSessionMutation{
+			PreviousSessionID: row.SessionID, RunID: row.RunID, FlowInstance: row.FlowInstance, PreviousStatus: row.Status,
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE agent_sessions
+			SET status = 'terminated', termination_reason = ?, termination_detail = ?, successor_session_id = NULL,
+			    terminated_at = ?, lease_holder = NULL, lease_expires_at = NULL, updated_at = ?
+			WHERE session_id = ? AND status IN ('active', 'suspended')
+		`, req.Subordinate.TerminationReason.String(), nullString(req.Subordinate.TerminationDetail), req.Now.UTC(), req.Now.UTC(), row.SessionID); err != nil {
+			return outcome, fmt.Errorf("terminate sqlite lifecycle subordinate session %s: %w", row.SessionID, err)
+		}
+		if req.Subordinate.Action == runtimesessions.LifecycleMutationRotateCurrentSet {
+			mutation.SuccessorSessionID = runtimesessions.LifecycleSuccessorSessionID(req.OperationID, row.SessionID)
+			mutation.SuccessorStatus = row.Status
+			runtimeState, err := json.Marshal(map[string]any{
+				"summary": req.Subordinate.CheckpointSummary, "retries_from_session_id": row.SessionID,
+				"rotation_operation_id": req.OperationID,
+			})
+			if err != nil {
+				return outcome, err
+			}
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO agent_sessions (
+					session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+					agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+					memory_enabled, memory_source,
+					conversation, turn_count, runtime_state, lease_holder, lease_expires_at,
+					status, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', '[]', 0, ?, NULL, NULL, ?, ?, ?)
+			`, mutation.SuccessorSessionID, row.RunID, fields.AgentID, fields.NameOwner,
+				fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
+				fields.FlowInstanceID, fields.FlowInstancePath,
+				string(runtimeState), row.Status, req.Now.UTC(), req.Now.UTC()); err != nil {
+				return outcome, fmt.Errorf("insert sqlite lifecycle subordinate successor for %s: %w", row.SessionID, err)
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET successor_session_id = ?, updated_at = ? WHERE session_id = ? AND status = 'terminated'`, mutation.SuccessorSessionID, req.Now.UTC(), row.SessionID); err != nil {
+				return outcome, fmt.Errorf("link sqlite lifecycle subordinate successor for %s: %w", row.SessionID, err)
+			}
+		}
+		outcome.Sessions = append(outcome.Sessions, mutation)
+	}
+	return outcome, nil
+}
+
+func loadPostgresLifecycleCell(
+	ctx context.Context,
+	tx *sql.Tx,
+	identity runtimeagentidentity.Identity,
+) (lifecycleCell, bool, error) {
+	fields, err := IdentityFields(identity)
+	if err != nil {
+		return lifecycleCell{}, false, err
+	}
+	var cell lifecycleCell
+	var generation int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
+		FROM agents
+		WHERE agent_id = $1 AND agent_name_owner = $2 AND agent_name_source = $3
+		  AND agent_route_presence = $4 AND flow_scope_key = $5
+		  AND flow_instance_id = $6 AND flow_instance = $7
+		FOR UPDATE
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(
+		&cell.Epoch,
+		&generation,
+		&cell.Phase,
+	)
+	if err == sql.ErrNoRows {
+		return lifecycleCell{}, false, nil
+	}
+	if err != nil {
+		return lifecycleCell{}, false, err
+	}
+	cell.Generation = uint64(generation)
+	return cell, true, nil
+}
+
+func loadSQLiteLifecycleCell(
+	ctx context.Context,
+	tx *sql.Tx,
+	identity runtimeagentidentity.Identity,
+) (lifecycleCell, bool, error) {
+	fields, err := IdentityFields(identity)
+	if err != nil {
+		return lifecycleCell{}, false, err
+	}
+	var cell lifecycleCell
+	var generation int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase
+		FROM agents
+		WHERE agent_id = ? AND agent_name_owner = ? AND agent_name_source = ?
+		  AND agent_route_presence = ? AND flow_scope_key = ?
+		  AND flow_instance_id = ? AND flow_instance = ?
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath).Scan(
+		&cell.Epoch,
+		&generation,
+		&cell.Phase,
+	)
+	if err == sql.ErrNoRows {
+		return lifecycleCell{}, false, nil
+	}
+	if err != nil {
+		return lifecycleCell{}, false, err
+	}
+	cell.Generation = uint64(generation)
+	return cell, true, nil
+}
+
+func loadPostgresLifecycleOperationResult(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, bool, error) {
+	var requestHash string
+	var raw []byte
+	err := tx.QueryRowContext(ctx, `SELECT request_hash, result FROM agent_lifecycle_operations WHERE operation_id = $1::uuid`, req.OperationID).Scan(&requestHash, &raw)
+	return decodeLifecycleOperationResult(req, requestHash, raw, err)
+}
+
+func loadSQLiteLifecycleOperationResult(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, bool, error) {
+	var requestHash string
+	var raw []byte
+	err := tx.QueryRowContext(ctx, `SELECT request_hash, result FROM agent_lifecycle_operations WHERE operation_id = ?`, req.OperationID).Scan(&requestHash, &raw)
+	return decodeLifecycleOperationResult(req, requestHash, raw, err)
+}
+
+func decodeLifecycleOperationResult(req runtimemanager.AgentLifecycleTransition, requestHash string, raw []byte, err error) (runtimemanager.AgentLifecycleTransitionResult, bool, error) {
+	if err == sql.ErrNoRows {
+		return runtimemanager.AgentLifecycleTransitionResult{}, false, nil
+	}
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, false, err
+	}
+	if requestHash != req.RequestHash {
+		return runtimemanager.AgentLifecycleTransitionResult{}, true, runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "lifecycle_operation_request_conflict", "agent-lifecycle-store", req.OperationKind, map[string]any{"operation_id": req.OperationID})
+	}
+	var result runtimemanager.AgentLifecycleTransitionResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, true, fmt.Errorf("decode lifecycle operation result: %w", err)
+	}
+	if result.Identity.Normalize() != req.Identity {
+		return runtimemanager.AgentLifecycleTransitionResult{}, true, runtimefailures.New(
+			runtimefailures.ClassConflictingDuplicate,
+			"lifecycle_operation_identity_conflict",
+			"agent-lifecycle-store",
+			req.OperationKind,
+			map[string]any{"operation_id": req.OperationID},
+		)
+	}
+	result.Replayed = true
+	return result, true, nil
+}
+
+func applyPostgresLifecycleCell(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, result runtimemanager.AgentLifecycleTransitionResult) error {
+	fields, err := IdentityFields(req.Identity)
+	if err != nil {
+		return err
+	}
+	if req.Agent != nil {
+		projection, err := ProjectPersistedAgentConfig(req.Agent.Config, req.Agent.ParentAgentID)
+		if err != nil {
+			return err
+		}
+		startedAt := req.Agent.StartedAt
+		if startedAt.IsZero() {
+			startedAt = req.Now
+		}
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO agents (
+				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, flow_instance,
+				role, model, llm_backend, memory_enabled, memory_source, parent_agent_id, entity_id,
+				config, subscriptions, emit_events, tools, permissions, runtime_descriptor, status, turn_count, last_active_at, created_at,
+				lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_config_revision, lifecycle_run_mode, lifecycle_last_transition_id)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULLIF($13,''), NULLIF($14,'')::uuid,
+				$15::jsonb, $16::jsonb, $17::jsonb, $18::jsonb, $19::jsonb, $20::jsonb, $21, 0, $22, $23,
+				$24, $25, $26, $27, $28, $29::uuid)
+			ON CONFLICT (
+				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, flow_instance
+			) DO UPDATE SET role=EXCLUDED.role, model=EXCLUDED.model,
+				llm_backend=EXCLUDED.llm_backend, memory_enabled=EXCLUDED.memory_enabled, memory_source=EXCLUDED.memory_source, parent_agent_id=EXCLUDED.parent_agent_id,
+				entity_id=EXCLUDED.entity_id, config=EXCLUDED.config, subscriptions=EXCLUDED.subscriptions, emit_events=EXCLUDED.emit_events,
+				tools=EXCLUDED.tools, permissions=EXCLUDED.permissions, runtime_descriptor=EXCLUDED.runtime_descriptor, status=EXCLUDED.status,
+				last_active_at=EXCLUDED.last_active_at, lifecycle_phase=EXCLUDED.lifecycle_phase,
+				lifecycle_generation=EXCLUDED.lifecycle_generation, lifecycle_runtime_epoch=EXCLUDED.lifecycle_runtime_epoch,
+				lifecycle_config_revision=EXCLUDED.lifecycle_config_revision, lifecycle_run_mode=EXCLUDED.lifecycle_run_mode,
+				lifecycle_last_transition_id=EXCLUDED.lifecycle_last_transition_id
+		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+			projection.Role, projection.Model, projection.LLMBackend, projection.MemoryEnabled, projection.MemorySource,
+			projection.ParentAgentID, projection.EntityID, string(projection.ConfigJSON), string(projection.SubscriptionsJSON), string(projection.EmitEventsJSON),
+			string(projection.ToolsJSON), string(projection.PermissionsJSON), string(projection.RuntimeDescriptor), lifecycleAgentStatus(req), req.Now.UTC(), startedAt.UTC(),
+			string(req.TargetPhase), req.TargetGeneration, req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID)
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE agents
+		SET status=$8, lifecycle_phase=$9, lifecycle_generation=$10,
+		    lifecycle_runtime_epoch=$11, lifecycle_config_revision=$12,
+		    lifecycle_run_mode=$13, lifecycle_last_transition_id=$14::uuid,
+		    last_active_at=$15
+		WHERE agent_id=$1 AND agent_name_owner=$2 AND agent_name_source=$3
+		  AND agent_route_presence=$4 AND flow_scope_key=$5
+		  AND flow_instance_id=$6 AND flow_instance=$7
+	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+		lifecycleAgentStatus(req), string(req.TargetPhase), req.TargetGeneration,
+		req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID,
+		req.Now.UTC())
+	return err
+}
+
+func applySQLiteLifecycleCellTx(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, result runtimemanager.AgentLifecycleTransitionResult) error {
+	fields, err := IdentityFields(req.Identity)
+	if err != nil {
+		return err
+	}
+	if req.Agent != nil {
+		projection, err := ProjectPersistedAgentConfig(req.Agent.Config, req.Agent.ParentAgentID)
+		if err != nil {
+			return err
+		}
+		startedAt := req.Agent.StartedAt
+		if startedAt.IsZero() {
+			startedAt = req.Now
+		}
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO agents (
+				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, flow_instance,
+				role, model, llm_backend, memory_enabled, memory_source, parent_agent_id, entity_id,
+				config, subscriptions, emit_events, tools, permissions, runtime_descriptor, status, turn_count, last_active_at, created_at,
+				lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_config_revision, lifecycle_run_mode, lifecycle_last_transition_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(
+				agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+				flow_scope_key, flow_instance_id, flow_instance
+			) DO UPDATE SET role=excluded.role, model=excluded.model,
+				llm_backend=excluded.llm_backend, memory_enabled=excluded.memory_enabled, memory_source=excluded.memory_source, parent_agent_id=excluded.parent_agent_id,
+				entity_id=excluded.entity_id, config=excluded.config, subscriptions=excluded.subscriptions, emit_events=excluded.emit_events,
+				tools=excluded.tools, permissions=excluded.permissions, runtime_descriptor=excluded.runtime_descriptor, status=excluded.status,
+				last_active_at=excluded.last_active_at, lifecycle_phase=excluded.lifecycle_phase,
+				lifecycle_generation=excluded.lifecycle_generation, lifecycle_runtime_epoch=excluded.lifecycle_runtime_epoch,
+				lifecycle_config_revision=excluded.lifecycle_config_revision, lifecycle_run_mode=excluded.lifecycle_run_mode,
+				lifecycle_last_transition_id=excluded.lifecycle_last_transition_id
+		`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+			fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
+			projection.Role, projection.Model, projection.LLMBackend, projection.MemoryEnabled, projection.MemorySource,
+			nullString(projection.ParentAgentID), nullUUID(projection.EntityID), string(projection.ConfigJSON), string(projection.SubscriptionsJSON),
+			string(projection.EmitEventsJSON), string(projection.ToolsJSON), string(projection.PermissionsJSON), string(projection.RuntimeDescriptor), lifecycleAgentStatus(req),
+			req.Now.UTC(), startedAt.UTC(), string(req.TargetPhase), req.TargetGeneration, req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID)
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE agents
+		SET status=?, lifecycle_phase=?, lifecycle_generation=?,
+		    lifecycle_runtime_epoch=?, lifecycle_config_revision=?,
+		    lifecycle_run_mode=?, lifecycle_last_transition_id=?, last_active_at=?
+		WHERE agent_id=? AND agent_name_owner=? AND agent_name_source=?
+		  AND agent_route_presence=? AND flow_scope_key=?
+		  AND flow_instance_id=? AND flow_instance=?
+	`, lifecycleAgentStatus(req), string(req.TargetPhase), req.TargetGeneration,
+		req.TargetEpoch, req.ConfigRevision, string(req.RunMode), result.TransitionID,
+		req.Now.UTC(), fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID,
+		fields.FlowInstancePath)
+	return err
+}
+
+func lifecycleAgentStatus(req runtimemanager.AgentLifecycleTransition) string {
+	switch req.TargetPhase {
+	case runtimemanager.AgentLifecycleTerminated:
+		return "terminated"
+	case runtimemanager.AgentLifecycleFailed:
+		return "failed"
+	default:
+		if req.Agent != nil && strings.TrimSpace(req.Agent.Status) != "" {
+			return agentPersistedStatus(req.Agent.Status)
+		}
+		return "active"
+	}
+}
+
+func insertPostgresLifecycleEvidence(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, result runtimemanager.AgentLifecycleTransitionResult) error {
+	raw, _ := json.Marshal(result)
+	fields, err := IdentityFields(req.Identity)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO agent_lifecycle_operations (
+			operation_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			operation_kind, request_hash, expected_epoch, expected_generation,
+			target_generation, target_phase, config_revision, run_mode, state,
+			result, created_at, updated_at, completed_at
+		) VALUES (
+			$1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+			'succeeded',$17::jsonb,$18,$18,$18
+		)
+	`, req.OperationID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID,
+		fields.FlowInstancePath, req.OperationKind, req.RequestHash,
+		req.ExpectedEpoch, req.ExpectedGeneration, req.TargetGeneration,
+		string(req.TargetPhase), req.ConfigRevision, string(req.RunMode),
+		string(raw), req.Now.UTC()); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO agent_lifecycle_transition_facts (
+			transition_id, operation_id, agent_id, agent_name_owner,
+			agent_name_source, agent_route_presence, flow_scope_key,
+			flow_instance_id, flow_instance, trigger, previous_phase, next_phase,
+			previous_generation, next_generation, runtime_epoch, config_revision,
+			run_mode, created_at
+		) VALUES (
+			$1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18
+		)
+	`, result.TransitionID, req.OperationID, fields.AgentID, fields.NameOwner,
+		fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
+		fields.FlowInstanceID, fields.FlowInstancePath, req.Trigger,
+		string(result.PreviousPhase), string(result.Phase),
+		result.PreviousGeneration, result.Generation, result.RuntimeEpoch,
+		result.ConfigRevision, string(result.RunMode), req.Now.UTC()); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO agent_lifecycle_diagnostic_outbox (
+			outbox_id, operation_id, agent_id, agent_name_owner,
+			agent_name_source, agent_route_presence, flow_scope_key,
+			flow_instance_id, flow_instance, event_name, payload, created_at
+		) VALUES (
+			$1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,
+			'platform.agent_lifecycle_transition',$10::jsonb,$11
+		)
+	`, uuid.NewString(), req.OperationID, fields.AgentID, fields.NameOwner,
+		fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
+		fields.FlowInstanceID, fields.FlowInstancePath, string(raw), req.Now.UTC())
+	return err
+}
+
+func insertSQLiteLifecycleEvidenceTx(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, result runtimemanager.AgentLifecycleTransitionResult) error {
+	raw, _ := json.Marshal(result)
+	fields, err := IdentityFields(req.Identity)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO agent_lifecycle_operations (
+			operation_id, agent_id, agent_name_owner, agent_name_source,
+			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+			operation_kind, request_hash, expected_epoch, expected_generation,
+			target_generation, target_phase, config_revision, run_mode, state,
+			result, created_at, updated_at, completed_at
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'succeeded',?,?,?,?)
+	`, req.OperationID, fields.AgentID, fields.NameOwner, fields.NameSource,
+		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID,
+		fields.FlowInstancePath, req.OperationKind, req.RequestHash,
+		req.ExpectedEpoch, req.ExpectedGeneration, req.TargetGeneration,
+		string(req.TargetPhase), req.ConfigRevision, string(req.RunMode),
+		string(raw), req.Now.UTC(), req.Now.UTC(), req.Now.UTC()); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO agent_lifecycle_transition_facts (
+			transition_id, operation_id, agent_id, agent_name_owner,
+			agent_name_source, agent_route_presence, flow_scope_key,
+			flow_instance_id, flow_instance, trigger, previous_phase, next_phase,
+			previous_generation, next_generation, runtime_epoch, config_revision,
+			run_mode, created_at
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+	`, result.TransitionID, req.OperationID, fields.AgentID, fields.NameOwner,
+		fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
+		fields.FlowInstanceID, fields.FlowInstancePath, req.Trigger,
+		string(result.PreviousPhase), string(result.Phase),
+		result.PreviousGeneration, result.Generation, result.RuntimeEpoch,
+		result.ConfigRevision, string(result.RunMode), req.Now.UTC()); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO agent_lifecycle_diagnostic_outbox (
+			outbox_id, operation_id, agent_id, agent_name_owner,
+			agent_name_source, agent_route_presence, flow_scope_key,
+			flow_instance_id, flow_instance, event_name, payload, created_at
+		) VALUES (?,?,?,?,?,?,?,?,?,'platform.agent_lifecycle_transition',?,?)
+	`, uuid.NewString(), req.OperationID, fields.AgentID, fields.NameOwner,
+		fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
+		fields.FlowInstanceID, fields.FlowInstancePath, string(raw), req.Now.UTC())
+	return err
+}

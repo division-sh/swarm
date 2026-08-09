@@ -1,0 +1,249 @@
+package runforkpersistence
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
+	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
+	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
+	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	storeeffect "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
+	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
+	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
+	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
+	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	storefailurecodec "github.com/division-sh/swarm/internal/store/internal/failurecodec"
+	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
+	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
+	storeerrors "github.com/division-sh/swarm/internal/store/internal/storeerrors"
+)
+
+type schemaAdmissionOwner interface {
+	requireCurrentSchema() error
+}
+
+type rowQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+type eventCommitOwner interface {
+	AppendAdmittedEventTxOutcome(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
+}
+
+type runLifecycleCandidateHandoffReservation = storerunhandoff.CandidateHandoff
+type APIIdempotencyConflictError = storeapiidempotency.APIIdempotencyConflictError
+type EntityReadParamError = storeerrors.EntityReadParamError
+type persistedAgentProjection = storeagent.PersistedAgentProjection
+
+var ErrConversationForkNotFound = storeerrors.ErrConversationForkNotFound
+var ErrInvalidConversationForkCursor = storeerrors.ErrInvalidConversationForkCursor
+var ErrInvalidConversationCursor = storeerrors.ErrInvalidConversationCursor
+var ErrTurnNotFound = storeerrors.ErrTurnNotFound
+var ErrEventNotFound = storeerrors.ErrEventNotFound
+var ErrSessionNotFound = storeerrors.ErrSessionNotFound
+var agentIdentityFields = storeagent.IdentityFields
+var hydratePersistedAgentConfig = storeagent.HydrateAgentConfig
+var decodeStoredFailure = storefailurecodec.Decode
+var DecodeConversationRuntimeStateDescriptor = storeoperatorsurface.DecodeConversationRuntimeStateDescriptor
+var projectOperatorConversationSummaryMetadata = storeoperatorsurface.ProjectOperatorConversationSummaryMetadata
+
+func traceTimePtr(value time.Time) *time.Time { return storeoperatorsurface.TraceTimePtr(value) }
+
+type OperatorConversationToolCall = storeoperatorsurface.OperatorConversationToolCall
+type OperatorConversationToolResult = storeoperatorsurface.OperatorConversationToolResult
+type OperatorConversationTurn = storeoperatorsurface.OperatorConversationTurn
+type OperatorConversationTurnBlock = storeoperatorsurface.OperatorConversationTurnBlock
+type OperatorConversationActivity = storeoperatorsurface.OperatorConversationActivity
+type OperatorConversationActivityCounts = storeoperatorsurface.OperatorConversationActivityCounts
+type OperatorConversationSummary = storeoperatorsurface.OperatorConversationSummary
+type OperatorConversationTokenUsage = storeoperatorsurface.OperatorConversationTokenUsage
+type OperatorConversationTurnListItem = storeoperatorsurface.OperatorConversationTurnListItem
+type OperatorConversationTurnListOptions = storeoperatorsurface.OperatorConversationTurnListOptions
+type OperatorConversationTurnListResult = storeoperatorsurface.OperatorConversationTurnListResult
+type OperatorPublicConversationTurn = storeoperatorsurface.OperatorPublicConversationTurn
+type OperatorPublicConversationTurnDetail = storeoperatorsurface.OperatorPublicConversationTurnDetail
+
+var operatorConversationQuerySources = storeoperatorsurface.OperatorConversationQuerySources
+var sqliteOperatorConversationQuerySources = storeoperatorsurface.SQLiteOperatorConversationQuerySources
+var cloneRawMessage = storeoperatorsurface.CloneRawMessage
+var cloneConversationToolCalls = storeoperatorsurface.CloneConversationToolCalls
+var cloneConversationToolResults = storeoperatorsurface.CloneConversationToolResults
+var operatorConversationReadQueryError = storeoperatorsurface.OperatorConversationReadQueryError
+
+type RunForkPostgresOwner struct {
+	*storerunlifecycle.RunLifecyclePostgresOwner
+	*storedecision.DecisionPostgresOwner
+	*storedelivery.DeliveryPostgresOwner
+	*storeeffect.EffectPostgresOwner
+	*storepipeline.PipelinePostgresOwner
+
+	backend        *postgresbackend.Backend
+	requireCurrent func() error
+	events         eventCommitOwner
+}
+
+type RunForkSQLiteOwner struct {
+	*storerunlifecycle.RunLifecycleSQLiteOwner
+	*storedecision.DecisionSQLiteOwner
+	*storedelivery.DeliverySQLiteOwner
+	*storeeffect.EffectSQLiteOwner
+	*storepipeline.PipelineSQLiteOwner
+
+	backend        *sqlitebackend.Backend
+	requireCurrent func() error
+	nowFn          func() time.Time
+	events         eventCommitOwner
+}
+
+func NewPostgres(
+	backend *postgresbackend.Backend,
+	requireCurrent func() error,
+	lifecycle *storerunlifecycle.RunLifecyclePostgresOwner,
+	decision *storedecision.DecisionPostgresOwner,
+	delivery *storedelivery.DeliveryPostgresOwner,
+	effects *storeeffect.EffectPostgresOwner,
+	pipeline *storepipeline.PipelinePostgresOwner,
+	events eventCommitOwner,
+) (*RunForkPostgresOwner, error) {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil {
+		return nil, errors.New("run-fork PostgreSQL owner dependencies are required")
+	}
+	return &RunForkPostgresOwner{
+		RunLifecyclePostgresOwner: lifecycle,
+		DecisionPostgresOwner:     decision,
+		DeliveryPostgresOwner:     delivery,
+		EffectPostgresOwner:       effects,
+		PipelinePostgresOwner:     pipeline,
+		backend:                   backend,
+		requireCurrent:            requireCurrent,
+		events:                    events,
+	}, nil
+}
+
+func NewSQLite(
+	backend *sqlitebackend.Backend,
+	requireCurrent func() error,
+	lifecycle *storerunlifecycle.RunLifecycleSQLiteOwner,
+	decision *storedecision.DecisionSQLiteOwner,
+	delivery *storedelivery.DeliverySQLiteOwner,
+	effects *storeeffect.EffectSQLiteOwner,
+	pipeline *storepipeline.PipelineSQLiteOwner,
+	events eventCommitOwner,
+	now func() time.Time,
+) (*RunForkSQLiteOwner, error) {
+	if backend == nil || !backend.Valid() || requireCurrent == nil || lifecycle == nil || decision == nil || delivery == nil || effects == nil || pipeline == nil || events == nil {
+		return nil, errors.New("run-fork SQLite owner dependencies are required")
+	}
+	if now == nil {
+		now = time.Now
+	}
+	return &RunForkSQLiteOwner{
+		RunLifecycleSQLiteOwner: lifecycle,
+		DecisionSQLiteOwner:     decision,
+		DeliverySQLiteOwner:     delivery,
+		EffectSQLiteOwner:       effects,
+		PipelineSQLiteOwner:     pipeline,
+		backend:                 backend,
+		requireCurrent:          requireCurrent,
+		nowFn:                   now,
+		events:                  events,
+	}, nil
+}
+
+func reserveRunLifecycleCandidateHandoff(ctx context.Context) (*runLifecycleCandidateHandoffReservation, error) {
+	return storerunhandoff.ReserveCandidateHandoff(ctx)
+}
+
+func requirePostgresRunActive(ctx context.Context, tx *sql.Tx, runID string) error {
+	return storerunstate.RequirePostgresActiveTx(ctx, tx, runID)
+}
+
+func requireSQLiteRunActive(ctx context.Context, tx *sql.Tx, runID string) error {
+	return storerunstate.RequireSQLiteActiveTx(ctx, tx, runID)
+}
+
+func workflowCommitJSONEqual(actual, expected []byte) bool {
+	actualValue, actualErr := runtimecanonicaljson.Decode(actual)
+	expectedValue, expectedErr := runtimecanonicaljson.Decode(expected)
+	if actualErr != nil || expectedErr != nil {
+		return false
+	}
+	actualCanonical, actualErr := runtimecanonicaljson.Encode(actualValue)
+	expectedCanonical, expectedErr := runtimecanonicaljson.Encode(expectedValue)
+	return actualErr == nil && expectedErr == nil && bytes.Equal(actualCanonical, expectedCanonical)
+}
+
+var postgresDeliveryAdapter = mustDeliveryAdapter(storedelivery.DialectPostgres)
+
+func mustDeliveryAdapter(dialect storedelivery.Dialect) *storedelivery.Adapter {
+	adapter, err := storedelivery.NewAdapter(dialect)
+	if err != nil {
+		panic(err)
+	}
+	return adapter
+}
+
+func (s *RunForkPostgresOwner) requireCurrentSchema() error { return s.requireCurrent() }
+func (s *RunForkSQLiteOwner) requireCurrentSchema() error   { return s.requireCurrent() }
+func (s *RunForkSQLiteOwner) now() time.Time                { return s.nowFn().UTC() }
+
+func (s *RunForkSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return s.backend.RunTransaction(ctx, label, operation)
+}
+
+func sqliteTimeValue(raw any) (time.Time, bool, error) {
+	switch value := raw.(type) {
+	case nil:
+		return time.Time{}, false, nil
+	case time.Time:
+		return value.UTC(), !value.IsZero(), nil
+	case string:
+		return parseSQLiteTime(value)
+	case []byte:
+		return parseSQLiteTime(string(value))
+	default:
+		return time.Time{}, false, fmt.Errorf("unsupported SQLite time value %T", raw)
+	}
+}
+
+func parseSQLiteTime(raw string) (time.Time, bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false, nil
+	}
+	formats := []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999 -0700 MST",
+		"2006-01-02 15:04:05.999999 -0700 MST",
+		"2006-01-02 15:04:05 -0700 MST",
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02 15:04:05Z07:00",
+		"2006-01-02 15:04:05",
+	}
+	var lastErr error
+	for _, layout := range formats {
+		parsed, err := time.Parse(layout, raw)
+		if err == nil {
+			return parsed.UTC(), true, nil
+		}
+		lastErr = err
+	}
+	return time.Time{}, false, lastErr
+}

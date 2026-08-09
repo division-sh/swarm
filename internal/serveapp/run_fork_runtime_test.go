@@ -17,13 +17,12 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
-	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -37,7 +36,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunUsesCanonicalPlannerJSON(t *testing.T)
 	at := time.Unix(1700000300, 0).UTC()
 	ctx := context.Background()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli",
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "fork.cli",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 	var buf bytes.Buffer
@@ -83,10 +82,13 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 	at := time.Unix(1700000305, 0).UTC()
 	ctx := context.Background()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.pending",
+	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "fork.cli.pending",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
-	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, &store.PostgresStore{DB: db}, event,
-		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("cli-agent"), AgentIdentity: servedRuntimeRootIdentity(t, "cli-agent")}})
+	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, storetest.NewPostgresStoreForTest(db), event,
+		[]events.DeliveryRoute{{
+			Recipient:     events.MustAgentDeliveryRecipient("cli-agent"),
+			AgentIdentity: servedRuntimeRootIdentity(t, "cli-agent"),
+		}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 
 	var buf bytes.Buffer
@@ -120,9 +122,9 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 	at := time.Unix(1700000307, 0).UTC()
 	ctx := context.Background()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "flow-a/work.begin",
+	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "flow-a/work.begin",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
-	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, &store.PostgresStore{DB: db}, event,
+	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, storetest.NewPostgresStoreForTest(db), event,
 		[]events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("source-node")}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 
@@ -409,7 +411,20 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 		t.Fatalf("count typed fork-local runtime diagnostics: %v", err)
 	}
 	if typedRuntimeDiagnostics == 0 {
-		t.Fatalf("typed fork-local runtime diagnostics = 0, want selected execution runtime logs parented to fork event")
+		var persistedRuntimeDiagnostics string
+		if err := db.QueryRowContext(context.Background(), `
+			SELECT COALESCE(jsonb_agg(jsonb_build_object(
+				'event_id', event_id,
+				'run_id', run_id,
+				'source_event_id', source_event_id,
+				'payload', payload
+			) ORDER BY created_at)::text, '[]')
+			FROM events
+			WHERE event_name = 'platform.runtime_log'
+		`).Scan(&persistedRuntimeDiagnostics); err != nil {
+			t.Fatalf("load typed fork-local runtime diagnostics: %v", err)
+		}
+		t.Fatalf("typed fork-local runtime diagnostics = 0, want selected execution runtime logs parented to fork event; persisted=%s", persistedRuntimeDiagnostics)
 	}
 	var diagnosticLineageRows int
 	if err := db.QueryRowContext(context.Background(), `
@@ -436,7 +451,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvance
 	afterEventID := uuid.NewString()
 	at := time.Unix(1700000313, 0).UTC()
 	seedRunForkCLISelectedExecutionSource(t, db, sourceRunID, entityID, sourceEventID, at)
-	storetest.InsertExistingRunRootEventRecord(t, context.Background(), db, runtimeauthoractivity.DialectPostgres, afterEventID, sourceRunID, "source.after",
+	storetest.InsertExistingRunRootEventRecord(t, context.Background(), db, authoractivityfixture.DialectPostgres, afterEventID, sourceRunID, "source.after",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at.Add(time.Second))
 	captureRunForkCLIRevision(t, db, sourceRunID, runforkrevision.FamilyEvents)
@@ -481,7 +496,7 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	at := time.Unix(1700000310, 0).UTC()
 	ctx := context.Background()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.materialize",
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "fork.cli.materialize",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -725,8 +740,11 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingRejectsDeliveryReplay
 	ctx := context.Background()
 	seedRunForkCLIActivationSourceWithoutRevision(t, db, runID, entityID, eventID, at)
 	event := storetest.LoadCanonicalEventRecord(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), eventID)
-	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, &store.PostgresStore{DB: db}, event,
-		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("safe-agent"), AgentIdentity: servedRuntimeRootIdentity(t, "safe-agent")}})
+	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, storetest.NewPostgresStoreForTest(db), event,
+		[]events.DeliveryRoute{{
+			Recipient:     events.MustAgentDeliveryRecipient("safe-agent"),
+			AgentIdentity: servedRuntimeRootIdentity(t, "safe-agent"),
+		}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 	repo := cliapp.RepoRoot()
 	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
@@ -810,7 +828,7 @@ func seedRunForkCLIActivationSourceWithoutRevision(t *testing.T, db *sql.DB, run
 	t.Helper()
 	ctx := context.Background()
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute), BundleHash: "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", BundleSource: storerunlifecycle.BundleSourceEphemeral})
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "fork.cli.activate",
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "fork.cli.activate",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -846,7 +864,7 @@ func seedRunForkCLISelectedExecutionSource(t *testing.T, db *sql.DB, runID, enti
 func seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db *sql.DB, runID, eventID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	storetest.InsertDiagnosticDirectEventRecordForRun(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, runID, "", "runtime",
+	storetest.InsertDiagnosticDirectEventRecordForRun(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "", "runtime",
 		[]byte(`{"level":"info","message":"diagnostic platform row must remain lineage-only"}`), at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (

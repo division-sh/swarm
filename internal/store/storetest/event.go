@@ -9,18 +9,19 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
-	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
-	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
-	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/eventrecord/sqlite"
+	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
+	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -36,7 +37,7 @@ func InsertCanonicalEventRecord(
 	t testing.TB,
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	event events.Event,
 ) runtimebus.EventAppendOutcome {
 	t.Helper()
@@ -60,12 +61,12 @@ func InsertCanonicalEventRecord(
 		found    bool
 	)
 	switch dialect {
-	case runtimeauthoractivity.DialectPostgres:
+	case authoractivityfixture.DialectPostgres:
 		inserted, err = eventrecordpostgres.Insert(ctx, db, record)
 		if err == nil && !inserted {
 			existing, found, err = eventrecordpostgres.Load(ctx, db, record.EventID)
 		}
-	case runtimeauthoractivity.DialectSQLite:
+	case authoractivityfixture.DialectSQLite:
 		inserted, err = eventrecordsqlite.Insert(ctx, db, record)
 		if err == nil && !inserted {
 			existing, found, err = eventrecordsqlite.Load(ctx, db, record.EventID)
@@ -98,16 +99,16 @@ func CommitDeliveryObligationsForPersistedEvent(
 	t.Helper()
 	var (
 		db      *sql.DB
-		adapter *runtimedelivery.Adapter
+		adapter *deliveryadapter.Adapter
 		err     error
 	)
 	switch selected := selectedStore.(type) {
 	case *store.PostgresStore:
-		db = selected.DB
-		adapter, err = runtimedelivery.NewAdapter(runtimedelivery.DialectPostgres)
+		db = DatabaseForTest(selected)
+		adapter, err = deliveryadapter.NewAdapter(deliveryadapter.DialectPostgres)
 	case *store.SQLiteRuntimeStore:
-		db = selected.DB
-		adapter, err = runtimedelivery.NewAdapter(runtimedelivery.DialectSQLite)
+		db = DatabaseForTest(selected)
+		adapter, err = deliveryadapter.NewAdapter(deliveryadapter.DialectSQLite)
 	default:
 		t.Fatalf("persisted event delivery fixture store %T is unsupported", selectedStore)
 	}
@@ -171,9 +172,9 @@ func LoadCanonicalEventRecord(t testing.TB, ctx context.Context, selectedStore a
 	)
 	switch selected := selectedStore.(type) {
 	case *store.PostgresStore:
-		record, found, err = eventrecordpostgres.Load(ctx, selected.DB, eventID)
+		record, found, err = eventrecordpostgres.Load(ctx, DatabaseForTest(selected), eventID)
 	case *store.SQLiteRuntimeStore:
-		record, found, err = eventrecordsqlite.Load(ctx, selected.DB, eventID)
+		record, found, err = eventrecordsqlite.Load(ctx, DatabaseForTest(selected), eventID)
 	default:
 		t.Fatalf("canonical event readback store %T is unsupported", selectedStore)
 	}
@@ -191,7 +192,7 @@ func InsertExistingRunRootEventRecord(
 	t testing.TB,
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	eventID string,
 	runID string,
 	eventType events.EventType,
@@ -212,7 +213,7 @@ func InsertChildEventRecord(
 	t testing.TB,
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	eventID string,
 	runID string,
 	parentEventID string,
@@ -234,7 +235,7 @@ func InsertDiagnosticDirectEventRecord(
 	t testing.TB,
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	eventID string,
 	producerID string,
 	payload []byte,
@@ -252,7 +253,7 @@ func InsertDiagnosticDirectEventRecordForRun(
 	t testing.TB,
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	eventID string,
 	runID string,
 	parentEventID string,
@@ -343,16 +344,16 @@ func commitSemanticEventWithInitialFacts(
 
 	var (
 		db              *sql.DB
-		deliveryAdapter *runtimedelivery.Adapter
+		deliveryAdapter *deliveryadapter.Adapter
 		insert          func(context.Context, *sql.Tx, eventrecord.Record) (bool, error)
 		load            func(context.Context, *sql.Tx, string) (eventrecord.Record, bool, error)
 		postgres        bool
 	)
 	switch selected := selectedStore.(type) {
 	case *store.PostgresStore:
-		db = selected.DB
+		db = DatabaseForTest(selected)
 		postgres = true
-		deliveryAdapter, err = runtimedelivery.NewAdapter(runtimedelivery.DialectPostgres)
+		deliveryAdapter, err = deliveryadapter.NewAdapter(deliveryadapter.DialectPostgres)
 		insert = func(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (bool, error) {
 			return eventrecordpostgres.Insert(ctx, tx, record)
 		}
@@ -360,8 +361,8 @@ func commitSemanticEventWithInitialFacts(
 			return eventrecordpostgres.Load(ctx, tx, eventID)
 		}
 	case *store.SQLiteRuntimeStore:
-		db = selected.DB
-		deliveryAdapter, err = runtimedelivery.NewAdapter(runtimedelivery.DialectSQLite)
+		db = DatabaseForTest(selected)
+		deliveryAdapter, err = deliveryadapter.NewAdapter(deliveryadapter.DialectSQLite)
 		insert = func(ctx context.Context, tx *sql.Tx, record eventrecord.Record) (bool, error) {
 			return eventrecordsqlite.Insert(ctx, tx, record)
 		}
@@ -377,7 +378,7 @@ func commitSemanticEventWithInitialFacts(
 	if db == nil || deliveryAdapter == nil {
 		t.Fatalf("semantic event fixture store %T is not initialized", selectedStore)
 	}
-	runner, ok := selectedStore.(runLifecycleMutationRunner)
+	runner, ok := selectedStore.(runLifecycleOperationRunner)
 	if !ok {
 		t.Fatalf("semantic event fixture store %T has no run lifecycle mutation owner", selectedStore)
 	}
@@ -460,10 +461,10 @@ func commitSemanticEventWithInitialFacts(
 	return runtimebus.EventAppendInserted
 }
 
-func deliveryFixtureAuthority(t testing.TB, ctx context.Context, tx *sql.Tx, runID string, adapter *runtimedelivery.Adapter) runtimedelivery.ExecutionAuthority {
+func deliveryFixtureAuthority(t testing.TB, ctx context.Context, tx *sql.Tx, runID string, adapter *deliveryadapter.Adapter) runtimedelivery.ExecutionAuthority {
 	t.Helper()
 	query := `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=$1::uuid`
-	if adapter.Dialect() == runtimedelivery.DialectSQLite {
+	if adapter.Dialect() == deliveryadapter.DialectSQLite {
 		query = `SELECT bundle_hash, bundle_source FROM runs WHERE run_id=?`
 	}
 	var bundleHash, bundleSource string
@@ -593,11 +594,11 @@ func insertPipelineDispositionFixture(
 		return fmt.Errorf("pipeline disposition fixture affected %d rows, want 1", rows)
 	}
 	if disposition.Successful() {
-		dialect := runtimedelivery.DialectSQLite
+		dialect := deliveryadapter.DialectSQLite
 		if postgres {
-			dialect = runtimedelivery.DialectPostgres
+			dialect = deliveryadapter.DialectPostgres
 		}
-		adapter, err := runtimedelivery.NewAdapter(dialect)
+		adapter, err := deliveryadapter.NewAdapter(dialect)
 		if err != nil {
 			return err
 		}

@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -208,7 +209,10 @@ type ExecutionRequest struct {
 	EntityID    identity.EntityID
 	NodeID      identity.NodeID
 	FlowID      identity.FlowID
-	Event       events.Event
+	// Route is the exact workflow-instance persistence identity selected by
+	// the runtime boundary. ProducerSource remains event-source authority.
+	Route runtimeflowidentity.Route
+	Event events.Event
 	// ProducerSource is admitted once at the handler boundary and copied by
 	// every runtime event produced by this execution.
 	ProducerSource events.RoutingSource
@@ -217,6 +221,9 @@ type ExecutionRequest struct {
 	HandlerEventKey string
 	Handler         runtimecontracts.SystemNodeEventHandler
 	State           StateSnapshot
+	// InitialFieldValues is the exact authored create-entity projection that the
+	// persistence owner records separately from subsequent handler mutations.
+	InitialFieldValues map[string]any
 	// ExpectedComputeModuleTraces carries prior deterministic module evidence
 	// for supported replay. Nil means normal execution; a non-nil empty slice
 	// means replay mode with zero expected module executions. When present,
@@ -226,6 +233,18 @@ type ExecutionRequest struct {
 	ChainDepth                  int
 	MaxDepth                    int
 	Preview                     bool
+	// DeferCommittedDispatch returns committed emission and activity evidence to
+	// the caller instead of dispatching it. Intercepting runtimes use this to
+	// compose one immutable evaluation result without context-carried collectors.
+	DeferCommittedDispatch bool
+}
+
+func (r ExecutionRequest) StateAddress() StateAddress {
+	return StateAddress{
+		FlowID:   identity.NormalizeFlowID(r.FlowID.String()),
+		Route:    r.Route,
+		EntityID: identity.NormalizeEntityID(r.EntityID.String()),
+	}
 }
 
 type ExecutionContext struct {
@@ -374,9 +393,10 @@ type StateMutation struct {
 	TriggerEventType string
 	TriggeredAt      time.Time
 	StateCarrier
-	ClearGates       []string
-	SetGate          string
-	DataAccumulation runtimecontracts.WorkflowDataAccumulation
+	ClearGates         []string
+	SetGate            string
+	DataAccumulation   runtimecontracts.WorkflowDataAccumulation
+	InitialFieldValues map[string]any
 }
 
 func (m StateMutation) MetadataBucket() values.Bucket {

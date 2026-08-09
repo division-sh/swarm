@@ -498,8 +498,7 @@ func TestEventBusResetPreservesPendingOperationUntilPriorRetirementSucceeds(t *t
 	if err != nil {
 		t.Fatalf("claim pending publication: %v", err)
 	}
-	bus.stagePendingOutboxOperation(
-		context.Background(),
+	bus.stageCommittedOutboxOperation(
 		runtimeengine.EmitIntent{Event: event},
 		EventAppendInserted,
 		claim,
@@ -545,8 +544,7 @@ func TestRecoveredPublicationRejectsForeignSourceBeforePendingRelease(t *testing
 	if err != nil {
 		t.Fatalf("claim pending publication: %v", err)
 	}
-	bus.stagePendingOutboxOperation(
-		context.Background(),
+	bus.stageCommittedOutboxOperation(
 		runtimeengine.EmitIntent{Event: event},
 		EventAppendInserted,
 		claim,
@@ -604,8 +602,7 @@ func TestEventBusResetAttemptsEveryTerminalPendingReleaseAndAggregatesEvidence(t
 		if err != nil {
 			t.Fatalf("claim pending publication %s: %v", eventID, err)
 		}
-		bus.stagePendingOutboxOperation(
-			context.Background(),
+		bus.stageCommittedOutboxOperation(
 			runtimeengine.EmitIntent{Event: event},
 			EventAppendInserted,
 			claim,

@@ -11,6 +11,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	storepkg "github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
@@ -20,7 +21,7 @@ func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
-	storetest.RequireSQLiteRun(t, ctx, sqliteStore.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	storetest.CommitSemanticEvent(t, ctx, sqliteStore, eventtest.PersistedProjection(
 		eventID,
 		"mailbox.review_requested",
@@ -34,11 +35,11 @@ func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T
 		time.Now().UTC(),
 	))
 	itemID := uuid.NewString()
-	tx, err := sqliteStore.DB.BeginTx(ctx, nil)
+	tx, err := storetest.DatabaseForTest(sqliteStore).BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("BeginTx: %v", err)
 	}
-	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
 	for i := 0; i < 2; i++ {
 		if err := sqliteStore.MaterializeMailboxWrite(txctx, runtimepipeline.MailboxWriteMaterialization{
 			ItemID:        itemID,

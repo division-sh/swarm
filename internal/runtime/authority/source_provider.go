@@ -171,6 +171,33 @@ func (p *sourceProvider) UpsertManagedAgent(identity, parent agentidentity.Ident
 	return nil
 }
 
+func (p *sourceProvider) ValidateManagedAgent(identity, parent agentidentity.Identity) error {
+	if p == nil {
+		return nil
+	}
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return fmt.Errorf("managed agent identity: %w", err)
+	}
+	parent = parent.Normalize()
+	if err := parent.Validate(); err != nil {
+		return fmt.Errorf("managed parent identity: %w", err)
+	}
+	same, err := agentidentity.Equal(identity, parent)
+	if err != nil {
+		return err
+	}
+	if same {
+		return fmt.Errorf("managed agent identity cannot be its own parent")
+	}
+	if identity.Route != parent.Route {
+		return fmt.Errorf("managed agent and parent must have the same concrete route")
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.validateManagedParentUpdateLocked(identity, parent)
+}
+
 func (p *sourceProvider) validateManagedParentUpdateLocked(identity, parent agentidentity.Identity) error {
 	current := parent
 	visited := map[agentidentity.Identity]struct{}{}

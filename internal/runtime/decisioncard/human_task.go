@@ -114,7 +114,3 @@ type HumanTaskStore interface {
 	LoadHumanTaskContinuation(context.Context, string) (HumanTaskContinuation, error)
 	CompleteHumanTaskOutcome(context.Context, string, string, time.Time) (HumanTaskContinuation, error)
 }
-
-type HumanTaskExpiryStore interface {
-	ExpireHumanTaskCardsInMutation(context.Context, time.Time, int) ([]events.Event, error)
-}

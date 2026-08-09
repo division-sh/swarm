@@ -102,6 +102,7 @@ type selectedContractAgentRuntimePreflight struct {
 func selectedContractManagerOptions(options runtimemanager.AgentManagerOptions, bus *runtimebus.EventBus, ports *selectedContractExecutionPorts, pipeline *runtimepipeline.PipelineCoordinator) runtimemanager.AgentManagerOptions {
 	roles := ports.managerRoles
 	roles.AgentRoutes = bus
+	roles.FlowActivation = bus
 	roles.RouteInstaller = bus
 	roles.RouteVerifier = bus
 	roles.RouteRestorer = bus

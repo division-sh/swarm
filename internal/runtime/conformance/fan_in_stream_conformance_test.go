@@ -49,12 +49,11 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
-		Source:     source,
-		StateRepo:  fanOutPinRouteStateRepo{},
-		TxRunner:   fanOutPinRouteTxRunner{},
-		Locker:     fanOutPinRouteLocker{},
-		Outbox:     fanOutPinRouteOutbox{},
-		Dispatcher: fanOutPinRouteDispatcher{},
+		Source:        source,
+		StateRepo:     fanOutPinRouteStateRepo{},
+		MutationOwner: fanOutPinRouteMutationOwner{},
+		Locker:        fanOutPinRouteLocker{},
+		Dispatcher:    fanOutPinRouteDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
@@ -114,8 +113,8 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 	backend := storetest.StartSQLiteRuntimeStore(t)
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	seedFanInBarrierRun(t, ctx, backend, backend.DB, runID)
-	runtime := newFanInBarrierRuntime(t, backend, backend.DB, source)
+	seedFanInBarrierRun(t, ctx, backend, storetest.Database(backend), runID)
+	runtime := newFanInBarrierRuntime(t, backend, storetest.Database(backend), source)
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	if _, err := runtime.pipeline.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      templatefanin.ReceiverFlowInstance,
@@ -143,10 +142,10 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 	})
 
 	var requestPayloadRaw, reportPayloadRaw string
-	if err := backend.DB.QueryRowContext(ctx, `SELECT payload FROM events WHERE event_id = ?`, requestEventID).Scan(&requestPayloadRaw); err != nil {
+	if err := storetest.Database(backend).QueryRowContext(ctx, `SELECT payload FROM events WHERE event_id = ?`, requestEventID).Scan(&requestPayloadRaw); err != nil {
 		t.Fatalf("load producer request payload: %v", err)
 	}
-	if err := backend.DB.QueryRowContext(ctx, `SELECT payload FROM events WHERE event_name LIKE 'operating/%/operating.reported'`).Scan(&reportPayloadRaw); err != nil {
+	if err := storetest.Database(backend).QueryRowContext(ctx, `SELECT payload FROM events WHERE event_name LIKE 'operating/%/operating.reported'`).Scan(&reportPayloadRaw); err != nil {
 		t.Fatalf("load producer-driven report payload: %v", err)
 	}
 	var requestPayload, reportPayload map[string]any
@@ -202,12 +201,11 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
-		Source:     source,
-		StateRepo:  fanOutPinRouteStateRepo{},
-		TxRunner:   fanOutPinRouteTxRunner{},
-		Locker:     fanOutPinRouteLocker{},
-		Outbox:     fanOutPinRouteOutbox{},
-		Dispatcher: fanOutPinRouteDispatcher{},
+		Source:        source,
+		StateRepo:     fanOutPinRouteStateRepo{},
+		MutationOwner: fanOutPinRouteMutationOwner{},
+		Locker:        fanOutPinRouteLocker{},
+		Dispatcher:    fanOutPinRouteDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
@@ -253,8 +251,8 @@ type fanInStreamMemoryStore struct {
 	scopes         map[string]runtimepipelineobligation.CommittedScope
 }
 
-func (s *fanInStreamMemoryStore) CommitPublish(ctx context.Context, plan bus.CommitPublishPlan) (bus.PreparedPublish, error) {
-	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req bus.CommitPublishRequest) error {
+func (s *fanInStreamMemoryStore) CommitPublication(ctx context.Context, command bus.PublicationCommand) (bus.CommittedPublication, error) {
+	return runtimebustest.CommitPublish(ctx, command, nil, func(_ context.Context, req bus.CommitPublishRequest) error {
 		event := req.Event.Event()
 		if s.events == nil {
 			s.events = map[string]events.Event{}

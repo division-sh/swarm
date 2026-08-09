@@ -19,6 +19,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -195,9 +196,9 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 		oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
 			storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-			return selectedPostgresStoreBundle(runtimePG, cfg), nil
+			return selectedPostgresStoreBundle(runtimePG, storetest.DatabaseForTest(runtimePG), cfg), nil
 		}
-		cliapp.ConfiguredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
+		cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return serveRuntimeWorkspaceStub{}, nil
 		}
 		t.Cleanup(func() {
@@ -216,13 +217,16 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	first.waitForReadyLine()
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
 	singletonTarget := loadStandingMemoryTarget(t, backend, storeLocation, "memory-singleton")
-	entity := sendStandingTelegramUpdate(t, firstURL, 101, 42)
+	firstDiagnostics := func() string {
+		return first.outputString() + "\ndiagnostics: " + standingMemoryStoreDiagnostics(backend, storeLocation)
+	}
+	entity := sendStandingTelegramUpdate(t, firstURL, 101, 42, firstDiagnostics)
 	requireStandingTelegramCalls(t, telegramCalls, standingMemoryDiagnosticsLocation(backend, storeLocation), 42)
-	if got := sendStandingTelegramUpdate(t, firstURL, 102, 42); got != entity {
+	if got := sendStandingTelegramUpdate(t, firstURL, 102, 42, firstDiagnostics); got != entity {
 		t.Fatalf("A2 entity = %q, want A1 entity %q", got, entity)
 	}
 	requireStandingTelegramCalls(t, telegramCalls, standingMemoryDiagnosticsLocation(backend, storeLocation), 42)
-	if got := sendStandingTelegramUpdate(t, firstURL, 103, 84); got != entity {
+	if got := sendStandingTelegramUpdate(t, firstURL, 103, 84, firstDiagnostics); got != entity {
 		t.Fatalf("B1 entity = %q, want standing entity %q", got, entity)
 	}
 	requireStandingTelegramCalls(t, telegramCalls, standingMemoryDiagnosticsLocation(backend, storeLocation), 84)
@@ -565,6 +569,13 @@ func standingMemoryDiagnosticsLocation(backend, location string) string {
 		return "postgres:" + location
 	}
 	return location
+}
+
+func standingMemoryStoreDiagnostics(backend, location string) string {
+	if backend == "postgres" {
+		return standingPostgresDiagnostics(location)
+	}
+	return standingSQLiteDiagnostics(location)
 }
 
 func requireStandingMemoryTelegramCall(t testing.TB, process *serveRuntimeTestProcess, calls <-chan map[string]any, storeLocation string, chatID int) {

@@ -57,7 +57,7 @@ func TestDecisionCardSemanticZonesCannotBypassValueAdmission(t *testing.T) {
 			},
 		},
 		{
-			path: "internal/store/decision_cards.go",
+			path: "internal/store/internal/backend/decisionpersistence/decision_cards.go",
 			forbidden: []string{
 				"json.Marshal(card.Snapshot", "json.Marshal(card.Provenance", "json.Marshal(req.Fields",
 				"json.Unmarshal(snapshot", "json.Unmarshal(provenance", "json.Unmarshal(fields", "json.Unmarshal(payload",
@@ -65,7 +65,7 @@ func TestDecisionCardSemanticZonesCannotBypassValueAdmission(t *testing.T) {
 			},
 		},
 		{
-			path: "internal/store/proposed_effect_cards.go",
+			path: "internal/store/internal/backend/decisionpersistence/proposed_effect_cards.go",
 			forbidden: []string{
 				"Input map[string]any", "json.Unmarshal(", "json.NewDecoder(", ".UseNumber()", ".WriteJSON(",
 			},

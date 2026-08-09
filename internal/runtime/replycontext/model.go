@@ -135,6 +135,31 @@ const (
 	ClaimTerminal   ClaimOutcome = "already_terminal"
 )
 
+// ClaimCommand is the complete semantic input for claiming one reply context
+// in the same selected-store operation that persists the reply event. The
+// expected record makes stale planner reads fail closed.
+type ClaimCommand struct {
+	Expected     Record
+	ReplyEventID string
+}
+
+func (c ClaimCommand) Normalized() ClaimCommand {
+	c.Expected = c.Expected.Normalized()
+	c.ReplyEventID = strings.TrimSpace(c.ReplyEventID)
+	return c
+}
+
+func (c ClaimCommand) Validate() error {
+	c = c.Normalized()
+	if err := c.Expected.Validate(); err != nil {
+		return fmt.Errorf("reply claim expected context: %w", err)
+	}
+	if c.ReplyEventID == "" {
+		return fmt.Errorf("reply claim requires reply event id")
+	}
+	return nil
+}
+
 type Store interface {
 	CreateReplyContext(context.Context, Record) error
 	LoadReplyContext(context.Context, string) (Record, error)

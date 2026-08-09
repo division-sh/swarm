@@ -901,8 +901,8 @@ func (s conformanceRecoveryFailureEventStore) RegisterAuthorActivityEventCatalog
 	return s.store.RegisterAuthorActivityEventCatalog(scope, descriptors)
 }
 
-func (s conformanceRecoveryFailureEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return s.store.CommitPublish(ctx, plan)
+func (s conformanceRecoveryFailureEventStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return s.store.CommitPublication(ctx, command)
 }
 
 func (s conformanceRecoveryFailureEventStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
@@ -1045,8 +1045,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 			Backend: "anthropic",
 		},
 	},
-		SQLDB:                       db,
-		WorkflowPersistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		WorkflowPersistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		EventStore:                  pg,
 		EventBusDurable:             conformanceDurableEventBusDependencies(pg),
 		RunLifecycleCandidates:      pg,
@@ -1138,8 +1137,7 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 			Backend: "anthropic",
 		},
 	},
-		SQLDB:                       db,
-		WorkflowPersistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		WorkflowPersistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		EventStore:                  eventStore,
 		EventBusDurable:             conformanceDurableEventBusDependencies(pg),
 		RunLifecycleCandidates:      pg,
@@ -1260,8 +1258,7 @@ func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityRead
 			Backend: "anthropic",
 		},
 	},
-		SQLDB:                       db,
-		WorkflowPersistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		WorkflowPersistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		EventStore:                  pg,
 		EventBusDurable:             conformanceDurableEventBusDependencies(pg),
 		RunLifecycleCandidates:      pg,
@@ -1558,8 +1555,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 			Backend: "anthropic",
 		},
 	},
-		SQLDB:                       db,
-		WorkflowPersistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+		WorkflowPersistence:         runtimepipeline.NewWorkflowPersistence(pg),
 		EventStore:                  pg,
 		EventBusDurable:             conformanceDurableEventBusDependencies(pg),
 		RunLifecycleCandidates:      pg,
@@ -1888,9 +1884,9 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 	if err != nil {
 		t.Fatalf("construct workflow mutation event bus: %v", err)
 	}
-	pipeline := runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, db, runtimepipeline.PipelineCoordinatorOptions{
+	pipeline := runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  module,
-		Persistence:             runtimepipeline.NewPostgresWorkflowPersistence(db, selected),
+		Persistence:             runtimepipeline.NewWorkflowPersistence(selected),
 		RunLifecycle:            selected,
 		PipelineObligations:     selected.PipelineObligations(),
 		DeliveryStore:           selected,
@@ -1899,23 +1895,22 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 		HumanTasks:              selected,
 		DecisionCardDraftExpiry: selected,
 		HumanTaskExpiry:         selected,
-		GatePublisher:           eventBus,
-		DirectDecisionPublisher: eventBus,
 		DeliveryRuntime:         eventBus, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
 	entityID := uuid.NewString()
 	enteredAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	if _, err := pipeline.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID:      entityID,
-		StorageRef:      entityID,
+		InstanceID:      "mutation-flow",
+		StorageRef:      "mutation-flow",
 		WorkflowName:    "mutation-flow",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "done",
 		EnteredStageAt:  enteredAt,
 		CreatedAt:       enteredAt,
 		Metadata: map[string]any{
-			"status": "closed",
+			"entity_id": entityID,
+			"status":    "closed",
 			"gates": map[string]any{
 				"g_done": true,
 			},
@@ -2007,14 +2002,14 @@ func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *test
 func requireCanonicalConversationSurface(t *testing.T, ctx context.Context, pg *store.PostgresStore) {
 	t.Helper()
 	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	requireTableColumns(t, ctx, pg.DB, "agent_turns", "turn_id", "turn_blocks")
-	requireTableColumns(t, ctx, pg.DB, "agent_conversation_audits", "session_id")
+	requireTableColumns(t, ctx, storetest.DatabaseForTest(pg), "agent_turns", "turn_id", "turn_blocks")
+	requireTableColumns(t, ctx, storetest.DatabaseForTest(pg), "agent_conversation_audits", "session_id")
 }
 
 func requireCanonicalRuntimeLogSurface(t *testing.T, ctx context.Context, pg *store.PostgresStore) {
 	t.Helper()
 	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	requireTableColumns(t, ctx, pg.DB, "events", "event_id", "event_name", "payload", "scope", "created_at")
+	requireTableColumns(t, ctx, storetest.DatabaseForTest(pg), "events", "event_id", "event_name", "payload", "scope", "created_at")
 }
 
 func requireMutationSurface(t *testing.T, db *sql.DB) {

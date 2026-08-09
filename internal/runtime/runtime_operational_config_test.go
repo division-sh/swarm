@@ -54,8 +54,8 @@ type recoveryGuardEventLease struct{}
 
 func (recoveryGuardEventLease) Release(context.Context) error { return nil }
 
-func (*recoveryGuardEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublishNoop(ctx, plan)
+func (*recoveryGuardEventStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublishNoop(ctx, command)
 }
 func (*recoveryGuardEventStore) UpsertCommittedReplayScope(context.Context, string, runtimepipelineobligation.CommittedScope) error {
 	return nil
@@ -89,8 +89,8 @@ func (s *recoveryGuardEventStore) ReconcileDirectiveOperations(context.Context, 
 
 type minimalRuntimeEventStore struct{}
 
-func (*minimalRuntimeEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublishNoop(ctx, plan)
+func (*minimalRuntimeEventStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublishNoop(ctx, command)
 }
 func (*minimalRuntimeEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
 	return nil, nil
@@ -193,8 +193,7 @@ func TestNewRuntimeRejectsInvalidArtifactRootEnv(t *testing.T) {
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
 
 	_, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
-		SQLDB:               db,
-		WorkflowPersistence: runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}),
+		WorkflowPersistence: startupRecoveryWorkflowPersistence(db, nil),
 		EventStore:          &minimalRuntimeEventStore{},
 		EventBusDurable:     runtimeTestSyntheticDurableDependencies(deliveryStore),
 		DeliveryStore:       deliveryStore,

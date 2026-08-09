@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +15,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -26,7 +26,6 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
@@ -35,12 +34,86 @@ var authorActivityTestBundleSourceFact = mustExternalTestBundleSourceFact("bundl
 
 var externalRuntimeTestEventBusOwners sync.Map
 
-type testAuthorActivityCatalogRegistrar interface {
-	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
+type externalTestFlowInstanceActivationOwner struct {
+	mu       sync.Mutex
+	activate runtimepipeline.FlowInstanceActivator
+	pending  map[runtimeflowidentity.Route]runtimepipeline.FlowInstanceActivationRequest
 }
 
-type externalRuntimeTestMutationOwner interface {
-	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
+func newExternalTestFlowInstanceActivationOwner(activate runtimepipeline.FlowInstanceActivator) *externalTestFlowInstanceActivationOwner {
+	return &externalTestFlowInstanceActivationOwner{
+		activate: activate,
+		pending:  make(map[runtimeflowidentity.Route]runtimepipeline.FlowInstanceActivationRequest),
+	}
+}
+
+func (o *externalTestFlowInstanceActivationOwner) PrepareFlowInstanceActivation(_ context.Context, req runtimepipeline.FlowInstanceActivationRequest) (runtimepipeline.FlowInstanceActivationPlan, error) {
+	if req.OccurredAt.IsZero() {
+		req.OccurredAt = req.TriggerEvent.CreatedAt()
+	}
+	if strings.TrimSpace(req.InitialState) == "" {
+		if schema, ok := req.ContractBundle.FlowSchemaByID(req.Instance.TemplateID); ok {
+			req.InitialState = schema.LoweredInitialState()
+		}
+	}
+	if strings.TrimSpace(req.InitialState) == "" {
+		req.InitialState = "pending"
+	}
+	metadata := make(map[string]any, len(req.Metadata)+6)
+	for key, value := range req.Metadata {
+		metadata[key] = value
+	}
+	metadata["entity_id"] = req.Instance.EntityID
+	metadata["instance_id"] = req.Instance.InstanceID
+	metadata["flow_path"] = req.Instance.InstancePath
+	metadata["parent_entity_id"] = req.Instance.ParentEntityID
+	parentRoute := req.Instance.ParentRoute.Normalized()
+	if parentRoute.FlowID != "" {
+		metadata["parent_flow_id"] = parentRoute.FlowID
+	}
+	if parentRoute.FlowInstance != "" {
+		metadata["parent_flow_instance"] = parentRoute.FlowInstance
+	}
+	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+	readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+		Identity: req.Instance, RunID: req.TriggerEvent.RunID(),
+		BundleHash: bundleHash, BundleSource: bundleSource,
+		WorkflowVersion: req.ContractBundle.WorkflowVersion(),
+	}
+	instance := runtimepipeline.WorkflowInstance{
+		InstanceID: req.Instance.InstanceID, StorageRef: req.Instance.InstancePath,
+		WorkflowName: req.Instance.TemplateID, WorkflowVersion: req.ContractBundle.WorkflowVersion(),
+		CurrentState: req.InitialState, Config: req.Config, Metadata: metadata,
+		EnteredStageAt: req.OccurredAt, CreatedAt: req.OccurredAt, RuntimeReadiness: &readiness,
+	}
+	plan := runtimepipeline.FlowInstanceActivationPlan{
+		Instance: instance, Identity: req.Instance, Readiness: readiness, OccurredAt: req.OccurredAt,
+	}
+	if err := plan.Validate(); err != nil {
+		return runtimepipeline.FlowInstanceActivationPlan{}, err
+	}
+	o.mu.Lock()
+	o.pending[req.Instance.Route()] = req
+	o.mu.Unlock()
+	return plan, nil
+}
+
+func (o *externalTestFlowInstanceActivationOwner) FinalizeCommittedFlowInstanceActivation(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
+	plan := committed.Plan
+	o.mu.Lock()
+	req, ok := o.pending[plan.Identity.Route()]
+	if ok {
+		delete(o.pending, plan.Identity.Route())
+	}
+	o.mu.Unlock()
+	if !ok || o.activate == nil {
+		return nil
+	}
+	return o.activate(ctx, req)
+}
+
+type testAuthorActivityCatalogRegistrar interface {
+	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
 
 type externalRuntimeTestWorkflowOwner interface {
@@ -78,19 +151,13 @@ func newExternalRuntimeTestPipelineCoordinator(
 	if opts.HumanTaskExpiry == nil {
 		opts.HumanTaskExpiry = owner
 	}
-	if opts.GatePublisher == nil {
-		opts.GatePublisher = bus
-	}
-	if opts.DirectDecisionPublisher == nil {
-		opts.DirectDecisionPublisher = bus
-	}
 	if opts.DeliveryRuntime == nil {
 		opts.DeliveryRuntime = bus
 	}
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()
 	}
-	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, opts)
+	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, opts)
 	if coordinator == nil {
 		t.Fatal("construct durable pipeline coordinator with complete workflow owners")
 	}
@@ -153,7 +220,7 @@ func externalRuntimeTestManagerBusRoles(bus *runtimebus.EventBus) runtimemanager
 	return runtimemanager.PersistenceRoles{
 		AgentRoutes: bus, RouteInstaller: bus, RouteVerifier: bus,
 		RouteRestorer: bus, RouteRetirer: bus, RouteRemover: bus,
-		CreationPublisher: bus, DeliveryRuntime: bus,
+		FlowActivation: bus, CreationPublisher: bus, DeliveryRuntime: bus,
 	}
 }
 
@@ -189,6 +256,14 @@ func newScopedTestEventBus(t *testing.T, store runtimebus.EventStore, opts runti
 	}
 	if opts.BundleSourceFact.Validate() != nil {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
+	}
+	if opts.TemplateInstanceActivator != nil && opts.TemplateInstancePlanner == nil {
+		owner := newExternalTestFlowInstanceActivationOwner(opts.TemplateInstanceActivator)
+		opts.TemplateInstancePlanner = owner
+		opts.FlowActivationFinalizer = owner
+	}
+	if opts.FlowActivationFinalizer == nil {
+		opts.FlowActivationFinalizer, _ = opts.TemplateInstancePlanner.(runtimepipeline.CommittedFlowInstanceActivationFinalizer)
 	}
 
 	if registrar, ok := store.(testAuthorActivityCatalogRegistrar); ok {
@@ -332,53 +407,9 @@ func ownRuntimeTestAgentManager(t testing.TB, manager *runtimemanager.AgentManag
 
 func testAuthorActivityEventDescriptors(t *testing.T, opts runtimebus.EventBusOptions) []runtimeauthoractivity.EventDescriptor {
 	t.Helper()
-	if opts.ContractBundle == nil {
-		return nil
-	}
-	resolved := opts.ContractBundle.ResolvedEventCatalog()
-	authored := opts.ContractBundle.AuthoredResolvedEventCatalog()
-	byName := make(map[string]runtimeauthoractivity.EventDescriptor, len(resolved)+len(authored))
-	add := func(name string, descriptor runtimeauthoractivity.EventDescriptor) {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			return
-		}
-		descriptor.EventType = name
-		if previous, ok := byName[name]; ok && previous != descriptor {
-			t.Fatalf("author activity test descriptor %q conflicts: %#v != %#v", name, previous, descriptor)
-		}
-		byName[name] = descriptor
-	}
-	for name, entry := range resolved {
-		disposition := runtimeauthoractivity.StoryDifferent
-		if _, ok := authored[name]; ok {
-			disposition = runtimeauthoractivity.StoryAuthored
-		}
-		add(name, runtimeauthoractivity.EventDescriptor{Disposition: disposition, AuthorSummaryField: strings.TrimSpace(entry.AuthorSummaryField)})
-	}
-	census := semanticview.BuildAuthoredEventEndpointCensus(opts.ContractBundle)
-	endpoints := append(census.Producers(), census.Consumers()...)
-	endpoints = append(endpoints, census.InputPins()...)
-	endpoints = append(endpoints, census.OutputPins()...)
-	for _, endpoint := range endpoints {
-		proof := endpoint.Event
-		if !proof.HasSchema {
-			continue
-		}
-		disposition := runtimeauthoractivity.StoryDifferent
-		if _, ok := authored[strings.TrimSpace(proof.CatalogKey)]; ok {
-			disposition = runtimeauthoractivity.StoryAuthored
-		}
-		add(proof.EventKey(), runtimeauthoractivity.EventDescriptor{Disposition: disposition, AuthorSummaryField: strings.TrimSpace(proof.Entry.AuthorSummaryField)})
-	}
-	names := make([]string, 0, len(byName))
-	for name := range byName {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	descriptors := make([]runtimeauthoractivity.EventDescriptor, 0, len(names))
-	for _, name := range names {
-		descriptors = append(descriptors, byName[name])
+	descriptors, err := runtimepkg.AuthorActivityEventDescriptors(opts.ContractBundle)
+	if err != nil {
+		t.Fatalf("project author activity event descriptors: %v", err)
 	}
 	return descriptors
 }

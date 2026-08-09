@@ -60,6 +60,7 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/versionmetadata"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
@@ -119,7 +120,7 @@ func (noWorkspaceStartupRecoveryContainers) StopManagedContainer(context.Context
 type storeBundle struct {
 	Postgres                       *store.PostgresStore
 	SQLDB                          *sql.DB
-	RuntimeSQLDB                   *sql.DB
+	WorkspaceLookup                workspace.Lookup
 	Database                       apiv1.Pinger
 	RuntimeLogStore                runtime.RuntimeLogPersistence
 	SchemaBootstrapper             store.SchemaBootstrapper
@@ -323,12 +324,12 @@ func selectedPostgresContractExecutionOwner(pg *store.PostgresStore, persistence
 		FlowRoutes: pg,
 	}
 	return runtimerunforkexecution.NewSelectedContractExecutionOwner(
-		pg.DB, persistence, pg, pg, pg, pg, durable, pg.PipelineObligations(), pg, managerRoles,
+		persistence, pg, pg, pg, pg, durable, pg.PipelineObligations(), pg, managerRoles,
 		pg, pg, pg, pg, pg, pg, pg, pg, pg, pg, pg, pg, pg,
 	)
 }
 
-func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) storeBundle {
+func selectedPostgresStoreBundle(pg *store.PostgresStore, constructionDB *sql.DB, cfg *config.Config) storeBundle {
 	if pg == nil {
 		return storeBundle{}
 	}
@@ -336,11 +337,11 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) st
 		cfg = &config.Config{}
 	}
 	pg.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
-	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(pg.DB, pg)
+	workflowPersistence := runtimepipeline.NewWorkflowPersistence(pg)
 	bundle := storeBundle{
 		Postgres:           pg,
-		SQLDB:              pg.DB,
-		RuntimeSQLDB:       pg.DB,
+		SQLDB:              constructionDB,
+		WorkspaceLookup:    pg,
 		Database:           pg,
 		RuntimeLogStore:    pg,
 		SchemaBootstrapper: pg,
@@ -721,7 +722,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}
 	bootIdentity := loaded.bootIdentity
 	bootIdentity.BundleHash = bundleSourceFact.BundleHash()
-	workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(req.Stores.SQLDB, req.Config, loaded.contractsRoot, loaded.source, req.MountSources, req.WorkspaceBackend)
+	workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(req.Stores.WorkspaceLookup, req.Config, loaded.contractsRoot, loaded.source, req.MountSources, req.WorkspaceBackend)
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("configure workspaces: %w", err)
 	}
@@ -1970,7 +1971,7 @@ func runServeUnavailableBundleStartupRecovery(
 	if recoveryStore == nil {
 		return 0
 	}
-	recoveryWorkspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(storeFacade.workspaceDB(), cfg, loaded.contractsRoot, source, mountSources, workspaceBackend)
+	recoveryWorkspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(storeFacade.workspaceLookup(), cfg, loaded.contractsRoot, source, mountSources, workspaceBackend)
 	if err != nil {
 		presenter.fail(5, "recovery_workspace", err)
 		return 1
@@ -2195,21 +2196,21 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		if err != nil {
 			return storeBundle{}, err
 		}
-		pg, err := store.NewPostgresStore(dsn)
+		pg, constructionDB, err := storeconstruction.OpenPostgres(dsn)
 		if err != nil {
 			return storeBundle{}, err
 		}
 		if err := pg.Ping(ctx); err != nil {
 			return storeBundle{}, err
 		}
-		bundle := selectedPostgresStoreBundle(pg, cfg)
+		bundle := selectedPostgresStoreBundle(pg, constructionDB, cfg)
 		if err := validateSelectedStoreBundleRoles(selection.Backend, bundle); err != nil {
-			closeDB(pg.DB)
+			closeDB(constructionDB)
 			return storeBundle{}, err
 		}
 		return bundle, nil
 	case storebackend.BackendSQLite:
-		sqliteStore, err := store.NewSQLiteRuntimeStore(selection.SQLitePath)
+		sqliteStore, constructionDB, err := storeconstruction.OpenSQLiteRuntime(selection.SQLitePath)
 		if err != nil {
 			return storeBundle{}, err
 		}
@@ -2218,10 +2219,11 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			return storeBundle{}, err
 		}
 		sqliteStore.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
-		workflowPersistence := runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore)
+		workflowPersistence := runtimepipeline.NewWorkflowPersistence(sqliteStore)
 		bundle := storeBundle{
-			SQLDB:              sqliteStore.DB,
-			Database:           sqlDBPinger{db: sqliteStore.DB},
+			SQLDB:              constructionDB,
+			WorkspaceLookup:    sqliteStore,
+			Database:           sqlDBPinger{db: constructionDB},
 			RuntimeLogStore:    sqliteStore,
 			SchemaBootstrapper: sqliteStore,
 			EventStore:         sqliteStore,

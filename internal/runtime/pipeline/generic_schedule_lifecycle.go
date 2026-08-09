@@ -26,16 +26,11 @@ func (pc *PipelineCoordinator) persistGenericSchedule(ctx context.Context, sched
 	if pc.timerScheduler == nil {
 		return nil
 	}
-	register := func(registerCtx context.Context) {
-		if _, err := ClaimAndRegisterSchedule(registerCtx, pc.timerScheduleStore, pc.timerScheduler, schedule); err != nil {
-			pc.logRuntimeWarn(registerCtx, runtimeWorkflowID, "generic_schedule_register_failed", "", schedule.EventType, schedule.AgentID, schedule.EffectiveEntityID(), map[string]any{
-				"task_id": strings.TrimSpace(schedule.TaskID),
-				"mode":    strings.TrimSpace(schedule.Mode),
-			}, err)
-		}
-	}
-	if !queuePipelinePostCommitAction(ctx, func(actionCtx context.Context) { register(withoutSQLTxContext(actionCtx)) }) {
-		register(ctx)
+	if _, err := ClaimAndRegisterSchedule(ctx, pc.timerScheduleStore, pc.timerScheduler, schedule); err != nil {
+		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "generic_schedule_register_failed", "", schedule.EventType, schedule.AgentID, schedule.EffectiveEntityID(), map[string]any{
+			"task_id": strings.TrimSpace(schedule.TaskID),
+			"mode":    strings.TrimSpace(schedule.Mode),
+		}, err)
 	}
 	return nil
 }
@@ -53,16 +48,11 @@ func (pc *PipelineCoordinator) cancelGenericSchedule(ctx context.Context, schedu
 	if pc.timerScheduler == nil {
 		return nil
 	}
-	cancel := func(actionCtx context.Context) {
-		if err := pc.timerScheduler.CancelExact(schedule); err != nil {
-			pc.logRuntimeWarn(actionCtx, runtimeWorkflowID, "generic_schedule_cancel_failed", "", schedule.EventType, schedule.AgentID, schedule.EffectiveEntityID(), map[string]any{
-				"task_id": strings.TrimSpace(schedule.TaskID),
-				"mode":    strings.TrimSpace(schedule.Mode),
-			}, err)
-		}
-	}
-	if !queuePipelinePostCommitAction(ctx, cancel) {
-		cancel(ctx)
+	if err := pc.timerScheduler.CancelExact(schedule); err != nil {
+		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "generic_schedule_cancel_failed", "", schedule.EventType, schedule.AgentID, schedule.EffectiveEntityID(), map[string]any{
+			"task_id": strings.TrimSpace(schedule.TaskID),
+			"mode":    strings.TrimSpace(schedule.Mode),
+		}, err)
 	}
 	return nil
 }

@@ -245,26 +245,22 @@ type sealedFlowPackageRouteStore struct {
 	routes map[string][]events.DeliveryRoute
 }
 
-func (s *sealedFlowPackageRouteStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return prepareTestCommitPublish(ctx, plan, &testCommitPublishTransaction{
-		begin: func(_ context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
-			if s.events == nil {
-				s.events = map[string]events.Event{}
-			}
-			if _, exists := s.events[admitted.ID()]; exists {
-				return runtimebus.EventAppendExactDuplicate, nil
-			}
-			s.events[admitted.ID()] = admitted.Event()
-			return runtimebus.EventAppendInserted, nil
-		},
-		finalize: func(ctx context.Context, req runtimebus.CommitPublishRequest) error {
-			if err := s.InsertEventDeliveryRoutes(ctx, req.Event.ID(), req.DeliveryRoutes); err != nil {
-				delete(s.events, req.Event.ID())
-				return err
-			}
-			return nil
-		},
-	})
+func (s *sealedFlowPackageRouteStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	if s.events == nil {
+		s.events = map[string]events.Event{}
+	}
+	if _, exists := s.events[command.Commit.Event.ID()]; exists {
+		return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendExactDuplicate}, nil
+	}
+	s.events[command.Commit.Event.ID()] = command.Commit.Event.Event()
+	if err := s.InsertEventDeliveryRoutes(ctx, command.Commit.Event.ID(), command.Commit.DeliveryRoutes); err != nil {
+		delete(s.events, command.Commit.Event.ID())
+		return runtimebus.CommittedPublication{}, err
+	}
+	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
 }
 
 func (s *sealedFlowPackageRouteStore) InsertEventDeliveries(_ context.Context, eventID string, agentIDs []string) error {

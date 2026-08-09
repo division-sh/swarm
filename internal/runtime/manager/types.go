@@ -231,6 +231,7 @@ type DeliveryRuntimeOwner interface {
 // consumed by AgentManager. No role is discovered from Bus or ManagerStore.
 type PersistenceRoles struct {
 	AgentRoutes          AgentRouteBus
+	FlowActivation       FlowInstanceActivationCommitter
 	RouteInstaller       FlowInstanceRouteContextInstaller
 	RouteVerifier        FlowInstanceRouteContextVerifier
 	RouteRestorer        PersistedFlowInstanceRouteRestorer

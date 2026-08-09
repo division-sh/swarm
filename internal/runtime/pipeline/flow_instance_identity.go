@@ -1,12 +1,54 @@
 package pipeline
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/google/uuid"
 )
+
+func workflowInstanceRouteForPath(instancePath string) (runtimeflowidentity.Route, error) {
+	route := runtimeflowidentity.RouteForInstancePath(instancePath)
+	if !route.Valid() {
+		return runtimeflowidentity.Route{}, fmt.Errorf("workflow instance route requires an exact instance path")
+	}
+	return route, nil
+}
+
+func workflowInstanceRouteForExecution(source semanticview.Source, flowID, explicitPath string) (runtimeflowidentity.Route, error) {
+	flowID = strings.TrimSpace(flowID)
+	instancePath := strings.Trim(strings.TrimSpace(explicitPath), "/")
+	expectedScope := runtimeflowidentity.ScopeKey(source, flowID)
+	if instancePath == "" && source != nil {
+		if schema, ok := source.FlowSchemaByID(flowID); ok && !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") && flowID != strings.TrimSpace(source.WorkflowName()) {
+			instancePath = expectedScope
+		}
+	}
+	if instancePath == "" {
+		return runtimeflowidentity.Route{}, fmt.Errorf("workflow instance route is unavailable for flow %q", flowID)
+	}
+	rootRunScope := source != nil && flowID == strings.TrimSpace(source.WorkflowName())
+	if rootRunScope {
+		if _, err := uuid.Parse(instancePath); err == nil {
+			return runtimeflowidentity.StoredRoute(instancePath, runtimeflowidentity.LogicalInstanceID(instancePath), instancePath), nil
+		}
+	}
+	if expectedScope == "" || (instancePath != expectedScope && !strings.HasPrefix(instancePath, expectedScope+"/")) {
+		return runtimeflowidentity.Route{}, fmt.Errorf("workflow instance route %q is outside flow scope %q", instancePath, expectedScope)
+	}
+	return runtimeflowidentity.StoredRoute(expectedScope, runtimeflowidentity.LogicalInstanceID(instancePath), instancePath), nil
+}
+
+func workflowInstanceRouteForPersisted(source semanticview.Source, instance WorkflowInstance) (runtimeflowidentity.Route, error) {
+	route := StoredFlowInstance(source, instance).Route()
+	if !route.Valid() {
+		return runtimeflowidentity.Route{}, fmt.Errorf("persisted workflow instance is missing its canonical route")
+	}
+	return route, nil
+}
 
 type FlowInstanceIdentity struct {
 	runtimeflowidentity.Instance
@@ -44,6 +86,7 @@ func workflowInstanceIdentity(source semanticview.Source, instance WorkflowInsta
 
 func workflowInstancePersistedIdentity(source semanticview.Source, instance WorkflowInstance) (runtimeflowidentity.Persisted, error) {
 	flowPath := strings.Trim(strings.TrimSpace(asString(instance.Metadata["flow_path"])), "/")
+	hasStoredPath := flowPath != ""
 	instanceID := strings.TrimSpace(asString(instance.Metadata["instance_id"]))
 	if instanceID == "" && flowPath == "" {
 		instanceID = strings.TrimSpace(instance.InstanceID)
@@ -63,6 +106,10 @@ func workflowInstancePersistedIdentity(source semanticview.Source, instance Work
 	)
 	if err != nil {
 		return runtimeflowidentity.Persisted{}, err
+	}
+	persisted.HasStoredPath = hasStoredPath
+	if !hasStoredPath {
+		persisted.InstanceID = runtimeflowidentity.LogicalInstanceID(persisted.InstancePath)
 	}
 	persisted.ParentRoute = runtimeflowidentity.ParentRouteFromMetadata(instance.Metadata)
 	return persisted, nil

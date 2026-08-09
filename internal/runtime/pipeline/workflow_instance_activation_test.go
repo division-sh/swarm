@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,17 +20,20 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
 type workflowInitialMaterializationTestOwner struct {
-	effects int
+	effects   int
+	emissions int
 }
 
 type concurrentWorkflowInitialMaterializationTestOwner struct {
@@ -38,21 +41,43 @@ type concurrentWorkflowInitialMaterializationTestOwner struct {
 	effects int
 }
 
-type workflowCreationOccurrenceTestPublisher struct{}
+func (o *workflowInitialMaterializationTestOwner) PrepareWorkflowLifecycleMutation(_ context.Context, _ *WorkflowInstance, _ []runtimeworkflowlifecycle.Effect, _ bool) (PreparedWorkflowLifecycleMutation, error) {
+	return PreparedWorkflowLifecycleMutation{Emissions: make([]runtimeengine.EmitIntent, o.emissions)}, nil
+}
 
-func (workflowCreationOccurrenceTestPublisher) PublishInMutation(context.Context, events.Event) error {
+func TestWorkflowInitialMaterializationRejectsUnownedLifecycleEmissions(t *testing.T) {
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
+	store.lifecycleOwner = &workflowInitialMaterializationTestOwner{emissions: 1}
+	ctx := sqliteExactOnceRunContext(t, db)
+	instance := WorkflowInstance{
+		InstanceID: "inst-1", StorageRef: "review/inst-1", WorkflowName: "review",
+		WorkflowVersion: "1.0.0", CurrentState: "pending",
+		Metadata: map[string]any{"instance_id": "inst-1", "flow_path": "review/inst-1"},
+	}
+	if _, err := store.MaterializeInitialEntry(ctx, instance, time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC)); err == nil {
+		t.Fatal("initial materialization accepted lifecycle emissions outside its atomic commit")
+	} else if !strings.Contains(err.Error(), "lifecycle emissions outside its atomic commit") {
+		t.Fatalf("initial materialization error = %v", err)
+	}
+	if _, found, err := store.Load(ctx, testWorkflowInstanceRoute(instance.StorageRef)); err != nil || found {
+		t.Fatalf("rejected initial materialization persisted state: found=%v err=%v", found, err)
+	}
+}
+
+func (o *workflowInitialMaterializationTestOwner) FinalizeWorkflowLifecycleMutation(_ context.Context, _ CommittedWorkflowLifecycleMutation) error {
+	o.effects++
 	return nil
 }
 
-func (o *workflowInitialMaterializationTestOwner) ApplyWorkflowLifecycleEffects(_ context.Context, effects []runtimeworkflowlifecycle.Effect) error {
-	o.effects += len(effects)
-	return nil
+func (*concurrentWorkflowInitialMaterializationTestOwner) PrepareWorkflowLifecycleMutation(_ context.Context, _ *WorkflowInstance, _ []runtimeworkflowlifecycle.Effect, _ bool) (PreparedWorkflowLifecycleMutation, error) {
+	return PreparedWorkflowLifecycleMutation{}, nil
 }
 
-func (o *concurrentWorkflowInitialMaterializationTestOwner) ApplyWorkflowLifecycleEffects(_ context.Context, effects []runtimeworkflowlifecycle.Effect) error {
+func (o *concurrentWorkflowInitialMaterializationTestOwner) FinalizeWorkflowLifecycleMutation(_ context.Context, _ CommittedWorkflowLifecycleMutation) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.effects += len(effects)
+	o.effects++
 	return nil
 }
 
@@ -62,27 +87,27 @@ func (o *concurrentWorkflowInitialMaterializationTestOwner) effectCount() int {
 	return o.effects
 }
 
-func (*workflowInitialMaterializationTestOwner) ArmInitialEntryTimers(context.Context, string) error {
+func (*workflowInitialMaterializationTestOwner) ArmInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
 	return nil
 }
 
-func (*concurrentWorkflowInitialMaterializationTestOwner) ArmInitialEntryTimers(context.Context, string) error {
+func (*concurrentWorkflowInitialMaterializationTestOwner) ArmInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
 	return nil
 }
 
-func (*workflowInitialMaterializationTestOwner) ReconcileInitialEntryTimers(context.Context, string) error {
+func (*workflowInitialMaterializationTestOwner) ReconcileInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
 	return nil
 }
 
-func (*concurrentWorkflowInitialMaterializationTestOwner) ReconcileInitialEntryTimers(context.Context, string) error {
+func (*concurrentWorkflowInitialMaterializationTestOwner) ReconcileInitialEntryTimers(context.Context, runtimeflowidentity.Route) error {
 	return nil
 }
 
-func (*workflowInitialMaterializationTestOwner) RetireInitialEntryTimerWakeups(context.Context, string) error {
+func (*workflowInitialMaterializationTestOwner) RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.Route) error {
 	return nil
 }
 
-func (*concurrentWorkflowInitialMaterializationTestOwner) RetireInitialEntryTimerWakeups(context.Context, string) error {
+func (*concurrentWorkflowInitialMaterializationTestOwner) RetireInitialEntryTimerWakeups(context.Context, runtimeflowidentity.Route) error {
 	return nil
 }
 
@@ -140,7 +165,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			if first != WorkflowInitialMaterializationCreated {
 				t.Fatalf("first materialization = %d, want created", first)
 			}
-			persisted, found, err := store.Load(ctx, instance.StorageRef)
+			persisted, found, err := store.Load(ctx, testWorkflowInstanceRoute(instance.StorageRef))
 			if err != nil {
 				t.Fatalf("load persisted initial materialization: %v", err)
 			}
@@ -178,7 +203,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			if owner.effects != 1 {
 				t.Fatalf("initial-entry effects = %d, want exactly 1", owner.effects)
 			}
-			afterReplay, found, err := store.Load(ctx, instance.StorageRef)
+			afterReplay, found, err := store.Load(ctx, testWorkflowInstanceRoute(instance.StorageRef))
 			if err != nil || !found {
 				t.Fatalf("load progressed workflow after replay: found=%v err=%v", found, err)
 			}
@@ -195,11 +220,24 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			}
 
 			runID := runtimecorrelation.RunIDFromContext(ctx)
+			deleteEntityQuery := `DELETE FROM entity_state WHERE run_id = ? AND flow_instance = ?`
+			if !store.isSQLite() {
+				deleteEntityQuery = `DELETE FROM entity_state WHERE run_id = $1::uuid AND flow_instance = $2`
+			}
+			if _, err := store.testDB().ExecContext(ctx, deleteEntityQuery, runID, instance.StorageRef); err != nil {
+				t.Fatalf("remove materialized entity state: %v", err)
+			}
+			if _, err := store.MaterializeInitialEntry(ctx, instance, occurredAt); err == nil {
+				t.Fatal("creation replay accepted an incomplete persisted snapshot")
+			} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate {
+				t.Fatalf("incomplete snapshot failure = %#v, want conflicting duplicate", failure)
+			}
+
 			deleteQuery := `DELETE FROM workflow_instance_initial_materializations WHERE run_id = ? AND instance_id = ?`
 			if !store.isSQLite() {
 				deleteQuery = `DELETE FROM workflow_instance_initial_materializations WHERE run_id = $1::uuid AND instance_id = $2`
 			}
-			if _, err := store.db.ExecContext(ctx, deleteQuery, runID, instance.StorageRef); err != nil {
+			if _, err := store.testDB().ExecContext(ctx, deleteQuery, runID, instance.StorageRef); err != nil {
 				t.Fatalf("remove immutable creation record: %v", err)
 			}
 			if _, err := store.MaterializeInitialEntry(ctx, instance, occurredAt); err == nil {
@@ -244,8 +282,8 @@ func TestWorkflowInitialMaterializationConcurrentExactReplayPostgres(t *testing.
 	}
 	defer lockTx.Rollback()
 	if _, err := lockTx.ExecContext(ctx,
-		`SELECT pg_advisory_xact_lock(hashtext($1))`,
-		"workflow-instance:"+storageRef,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		fmt.Sprintf("%d:%s%s", len(runtimecorrelation.RunIDFromContext(ctx)), runtimecorrelation.RunIDFromContext(ctx), storageRef),
 	); err != nil {
 		t.Fatalf("hold instance lock: %v", err)
 	}
@@ -410,7 +448,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("first materialization: result=%d err=%v", result, err)
 			}
-			readiness, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, instance.StorageRef)
+			readiness, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(instance.StorageRef))
 			if err != nil || !found {
 				t.Fatalf("load readiness: found=%v err=%v", found, err)
 			}
@@ -429,21 +467,31 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				t.Fatalf("mark topology ready: %v", err)
 			}
 			creationEvent := workflowReadinessCreationEventForTest(t, plan)
-			if err := store.CommitDynamicFlowRuntimeCreationOccurrence(ctx, DynamicFlowRuntimeCreationOccurrenceRequest{
+			if err := (DynamicFlowRuntimeCreationOccurrenceRequest{
 				RunID:        runID,
 				InstancePath: instance.StorageRef,
 				Plan:         plan,
 				Event:        creationEvent,
 				OccurredAt:   readyAt.Add(time.Second),
-			}, workflowCreationOccurrenceTestPublisher{}); err != nil {
-				t.Fatalf("commit creation occurrence: %v", err)
+			}).Validate(); err != nil {
+				t.Fatalf("validate creation occurrence: %v", err)
 			}
 			items, err := store.ListDynamicFlowRuntimeReadiness(ctx)
 			if err != nil || len(items) != 1 {
 				t.Fatalf("list readiness: items=%#v err=%v", items, err)
 			}
-			if items[0].TopologyReadyAt.IsZero() || items[0].CreationEventEmittedAt.IsZero() {
-				t.Fatalf("completed readiness = %#v", items[0])
+			if items[0].TopologyReadyAt.IsZero() || !items[0].CreationEventEmittedAt.IsZero() {
+				t.Fatalf("topology-only readiness = %#v", items[0])
+			}
+			if err := store.markDynamicFlowRuntimeReadiness(
+				ctx,
+				runID,
+				instance.StorageRef,
+				"creation_event_emitted_at",
+				nil,
+				readyAt.Add(time.Second),
+			); err != nil {
+				t.Fatalf("mark creation occurrence emitted: %v", err)
 			}
 			revisedSourceFact, err := runtimecorrelation.NewPersistedBundleSourceFact(
 				"bundle-v1:sha256:" + strings.Repeat("c", 64),
@@ -458,7 +506,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if err != nil || !reconciled {
 				t.Fatalf("reconcile same-version revised-source readiness plan: changed=%v err=%v", reconciled, err)
 			}
-			revised, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, instance.StorageRef)
+			revised, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, runtimeflowidentity.RouteForInstancePath(instance.StorageRef))
 			if err != nil || !found {
 				t.Fatalf("load revised readiness: found=%v err=%v", found, err)
 			}
@@ -480,7 +528,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if err := store.MarkDynamicFlowRuntimeTopologyReady(revisedCtx, plan, readyAt.Add(4*time.Second)); err == nil {
 				t.Fatal("stale topology plan marked revised readiness complete")
 			}
-			stillRevised, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, instance.StorageRef)
+			stillRevised, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, runtimeflowidentity.RouteForInstancePath(instance.StorageRef))
 			if err != nil || !found {
 				t.Fatalf("load readiness after stale topology completion: found=%v err=%v", found, err)
 			}
@@ -519,7 +567,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if changed, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(revisedCtx, revisedNoAutoPlan, readyAt.Add(5*time.Second)); err != nil || !changed {
 				t.Fatalf("reconcile revised no-auto readiness: changed=%v err=%v", changed, err)
 			}
-			revisedNoAuto, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, noAutoInstance.StorageRef)
+			revisedNoAuto, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, runtimeflowidentity.RouteForInstancePath(noAutoInstance.StorageRef))
 			if err != nil || !found {
 				t.Fatalf("load revised no-auto readiness: found=%v err=%v", found, err)
 			}
@@ -536,9 +584,9 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				runtimerunlifecycle.StateCancelled,
 			)
 			if store.isSQLite() {
-				runlifecyclefixture.RequireSQLite(t, ctx, store.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: nextRunID, StartedAt: occurredAt.Add(time.Hour), BundleHash: bundleHash, BundleSource: bundleSource})
+				runlifecyclefixture.RequireSQLite(t, ctx, store.testDB(), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: nextRunID, StartedAt: occurredAt.Add(time.Hour), BundleHash: bundleHash, BundleSource: bundleSource})
 			} else {
-				runlifecyclefixture.RequirePostgres(t, ctx, store.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: nextRunID, BundleHash: bundleHash, BundleSource: bundleSource})
+				runlifecyclefixture.RequirePostgres(t, ctx, store.testDB(), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: nextRunID, BundleHash: bundleHash, BundleSource: bundleSource})
 			}
 			nextPlan := plan
 			nextPlan.RunID = nextRunID
@@ -550,17 +598,17 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			nextPlan.CreationEvent = &nextCreationEvent
 			nextInstance := instance
 			nextInstance.RuntimeReadiness = &nextPlan
-			nextContext := WithStandingGenerationRebind(runtimecorrelation.WithRunID(ctx, nextRunID))
+			nextContext := runtimecorrelation.WithRunID(ctx, nextRunID)
 			result, err = store.MaterializeInitialEntry(nextContext, nextInstance, occurredAt.Add(time.Hour))
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("successor generation materialization: result=%d err=%v", result, err)
 			}
-			if prior, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, instance.StorageRef); err != nil || !found || prior.CreationEventEmittedAt.IsZero() {
+			if prior, found, err := store.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(instance.StorageRef)); err != nil || !found || prior.CreationEventEmittedAt.IsZero() {
 				t.Fatalf("retired generation readiness changed: found=%v readiness=%#v err=%v", found, prior, err)
 			} else if prior.Eligible() {
 				t.Fatal("retired generation readiness remained eligible")
 			}
-			if successor, found, err := store.LoadDynamicFlowRuntimeReadiness(nextContext, nextRunID, instance.StorageRef); err != nil || !found || !successor.TopologyReadyAt.IsZero() {
+			if successor, found, err := store.LoadDynamicFlowRuntimeReadiness(nextContext, nextRunID, runtimeflowidentity.RouteForInstancePath(instance.StorageRef)); err != nil || !found || !successor.TopologyReadyAt.IsZero() {
 				t.Fatalf("successor generation readiness: found=%v readiness=%#v err=%v", found, successor, err)
 			}
 			items, err = store.ListDynamicFlowRuntimeReadiness(nextContext)
@@ -588,7 +636,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if err := store.MarkDynamicFlowRuntimeTopologyReady(nextContext, nextPlan, occurredAt.Add(2*time.Hour)); err == nil {
 				t.Fatal("terminal successor accepted topology completion")
 			}
-			if successor, found, err := store.LoadDynamicFlowRuntimeReadiness(nextContext, nextRunID, instance.StorageRef); err != nil || !found {
+			if successor, found, err := store.LoadDynamicFlowRuntimeReadiness(nextContext, nextRunID, runtimeflowidentity.RouteForInstancePath(instance.StorageRef)); err != nil || !found {
 				t.Fatalf("load terminal successor readiness: found=%v err=%v", found, err)
 			} else if successor.Eligible() {
 				t.Fatal("terminal successor readiness remained eligible")
@@ -625,17 +673,17 @@ func transitionWorkflowActivationRunForTest(
 	state runtimerunlifecycle.State,
 ) {
 	t.Helper()
-	if store == nil || store.runtimeMutation == nil {
+	if store == nil || store.testRuntimeMutation() == nil {
 		t.Fatal("workflow activation run transition requires runtime mutation owner")
 	}
-	if err := store.runtimeMutation.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
+	if err := store.testRuntimeMutation().RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 		if state == runtimerunlifecycle.StateCancelled {
-			_, _, err := runtimerunlifecycle.MarkTerminal(txctx, runtimerunlifecycle.TerminalRequest{
+			_, _, err := store.runLifecycle.MarkTerminalRun(txctx, runtimerunlifecycle.TerminalRequest{
 				RunID: runID, State: state, EndedAt: time.Now().UTC(),
 			})
 			return err
 		}
-		_, err := runtimerunlifecycle.TransitionActive(txctx, runtimerunlifecycle.ActiveTransitionRequest{
+		_, err := store.runLifecycle.TransitionActiveRun(txctx, runtimerunlifecycle.ActiveTransitionRequest{
 			RunID: runID, State: state,
 		})
 		return err
@@ -750,7 +798,7 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 			return err
 		},
 	}
-	pc.workflowTimers = newWorkflowTimerLifecycle(store, pc.SemanticSource(), pc.bus, pc.gatePublisher, pc.workOwner, pc.timerScheduler)
+	pc.workflowTimers = newWorkflowTimerLifecycle(store, pc.SemanticSource(), pc.bus, pc.workOwner, pc.timerScheduler)
 	store.lifecycleOwner = pipelineWorkflowLifecycleOwner{coordinator: pc}
 	trigger := eventtest.RunCreatingRootIngress(
 		"",
@@ -1339,19 +1387,20 @@ opco.ceo_ready:
       emit: opco.ceo_ready
 `,
 	})
+	entityID := FlowInstanceEntityID("operating/inst-1")
 	evt := handlerTestRootIngress(
 		uuid.NewString(),
 		events.EventType("opco.product_initialization_requested"),
 		"",
 		"",
-		[]byte(`{"entity_id":"ent-operating"}`),
+		mustJSON(map[string]any{"entity_id": entityID}),
 		0,
 		testPipelineRunID,
 		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-operating"), "operating/inst-1"),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "operating/inst-1"),
 		time.Time{},
 	)
-	evt = eventtest.TargetRouted(evt, events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: "ent-operating"})
+	evt = eventtest.TargetRouted(evt, events.RouteIdentity{FlowID: "operating", FlowInstance: "operating/inst-1", EntityID: "11111111-1111-1111-1111-111111111111"})
 
 	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "lifecycle-orchestrator", evt)
 	if !resolved.Matched {
@@ -1365,7 +1414,6 @@ opco.ceo_ready:
 	bus := &recordingPipelineBus{}
 	pc := &PipelineCoordinator{
 		bus:            bus,
-		db:             db,
 		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
@@ -1447,7 +1495,6 @@ states: [initializing, ready]
 	workflowStore := newPostgresWorkflowInstanceStoreForTest(db)
 	pc := &PipelineCoordinator{
 		bus:            &recordingPipelineBus{},
-		db:             db,
 		workflowStore:  workflowStore,
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
@@ -1455,13 +1502,17 @@ states: [initializing, ready]
 	}
 	ctx := testPipelineCoordinatorRunContext(t, pc)
 	if err := workflowStore.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      entityID,
-		StorageRef:      entityID,
+		InstanceID:      "inst-1",
+		StorageRef:      "operating/inst-1",
 		WorkflowName:    "operating",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "initializing",
-		Metadata:        map[string]any{},
-		StateBuckets:    map[string]any{},
+		Metadata: map[string]any{
+			"entity_id":   entityID,
+			"flow_path":   "operating/inst-1",
+			"instance_id": "inst-1",
+		},
+		StateBuckets: map[string]any{},
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -1476,7 +1527,7 @@ states: [initializing, ready]
 		t.Fatal("executeNodeHandlerPlanResult handled = false, want true")
 	}
 
-	instance, ok, err := workflowStore.Load(ctx, entityID)
+	instance, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute("operating/inst-1"))
 	if err != nil {
 		t.Fatalf("load workflow instance: %v", err)
 	}

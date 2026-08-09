@@ -17,6 +17,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -55,7 +56,7 @@ type authorActivityTestCatalogRegistrar interface {
 }
 
 type apiTestRuntimeMutationOwner interface {
-	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
+	runtimepipeline.WorkflowPersistenceOwner
 }
 
 type apiTestDurableEventStore interface {

@@ -149,16 +149,19 @@ func (*unavailablePipelineTestDecisionCardDraftExpiry) ExpireDecisionCardInputDr
 
 type unavailablePipelineTestHumanTaskExpiry struct{}
 
-func (*unavailablePipelineTestHumanTaskExpiry) ExpireHumanTaskCardsInMutation(context.Context, time.Time, int) ([]events.Event, error) {
+func (*unavailablePipelineTestHumanTaskExpiry) ListDueHumanTaskExpiryEvents(context.Context, time.Time, int) ([]events.Event, error) {
 	return nil, nil
 }
-
-type unavailablePipelineTestGatePublisher struct{ WorkflowGateMutationPublisher }
-type unavailablePipelineTestDirectDecisionPublisher struct {
-	DecisionCardDirectMutationPublisher
+func (*unavailablePipelineTestHumanTaskExpiry) CommitHumanTaskExpirations(context.Context, HumanTaskExpiryCommand) (CommittedHumanTaskExpiry, error) {
+	return CommittedHumanTaskExpiry{}, errors.New("human-task expiry is unavailable")
 }
+
+type unavailablePipelineTestStandingServices struct{ StandingServicePersistence }
+type unavailablePipelineTestDecisionCardMutations struct{ DecisionCardMutationOwner }
 type unavailablePipelineTestDeliveryRuntime struct{ WorkflowDeliveryRuntime }
-type unavailablePipelineTestRunLifecycle struct{}
+type unavailablePipelineTestRunLifecycle struct {
+	runtimerunlifecycle.OperationOwner
+}
 
 func (*unavailablePipelineTestRunLifecycle) RequestCompletionCandidate(context.Context, runtimerunlifecycle.CandidateRequest) (runtimerunlifecycle.CandidateRequestDisposition, error) {
 	return "", nil
@@ -200,20 +203,6 @@ func completeDurablePipelineTestOptions(bus Bus, opts PipelineCoordinatorOptions
 	if opts.HumanTaskExpiry == nil {
 		opts.HumanTaskExpiry = &unavailablePipelineTestHumanTaskExpiry{}
 	}
-	if opts.GatePublisher == nil {
-		if publisher, ok := bus.(WorkflowGateMutationPublisher); ok {
-			opts.GatePublisher = publisher
-		} else {
-			opts.GatePublisher = &unavailablePipelineTestGatePublisher{}
-		}
-	}
-	if opts.DirectDecisionPublisher == nil {
-		if publisher, ok := bus.(DecisionCardDirectMutationPublisher); ok {
-			opts.DirectDecisionPublisher = publisher
-		} else {
-			opts.DirectDecisionPublisher = &unavailablePipelineTestDirectDecisionPublisher{}
-		}
-	}
 	if opts.DeliveryRuntime == nil {
 		if runtime, ok := bus.(WorkflowDeliveryRuntime); ok {
 			opts.DeliveryRuntime = runtime
@@ -222,13 +211,58 @@ func completeDurablePipelineTestOptions(bus Bus, opts PipelineCoordinatorOptions
 		}
 	}
 	if opts.RunLifecycle == nil {
-		opts.RunLifecycle = &unavailablePipelineTestRunLifecycle{}
+		if opts.Persistence.store != nil && opts.Persistence.store.runLifecycle != nil {
+			opts.RunLifecycle = opts.Persistence.store.runLifecycle
+		} else {
+			opts.RunLifecycle = &unavailablePipelineTestRunLifecycle{}
+		}
 	}
 	return opts
 }
 
 func newDurablePipelineCoordinatorForTest(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
-	return NewPipelineCoordinatorWithOptions(bus, db, completeDurablePipelineTestOptions(bus, opts))
+	if opts.Persistence.Configured() && !opts.Persistence.Valid() {
+		panic("pipeline test configured incomplete workflow persistence: " + strings.Join(missingWorkflowPersistenceTestRoles(opts.Persistence), ", "))
+	}
+	pc := NewPipelineCoordinatorWithOptions(bus, completeDurablePipelineTestOptions(bus, opts))
+	if pc != nil && pc.workflowStore != nil && opts.Persistence.store != nil {
+		fixture := opts.Persistence.store.testFixture()
+		registerWorkflowPersistenceFixture(pc.workflowStore, fixture.db, fixture.dialect, fixture.runner)
+	}
+	return pc
+}
+
+func missingWorkflowPersistenceTestRoles(p WorkflowPersistence) []string {
+	if p.store == nil {
+		return []string{"store"}
+	}
+	roles := []struct {
+		name    string
+		missing bool
+	}{
+		{"entity_query", p.store.entityQuery == nil},
+		{"route_recovery", p.store.routeRecovery == nil},
+		{"activity_results", p.store.activityResults == nil},
+		{"activity_journal", p.store.activityJournal == nil},
+		{"gate_routes", p.store.gateRoutes == nil},
+		{"timer_obligations", p.store.timerObligations == nil},
+		{"engine_mutations", p.store.engineMutations == nil},
+		{"card_mutations", p.store.cardMutations == nil},
+		{"timer_occurrences", p.store.timerOccurrences == nil},
+		{"timer_activations", p.store.timerActivations == nil},
+		{"readiness", p.store.readiness == nil},
+		{"standing_services", p.store.standingServices == nil},
+		{"decision_routes", p.store.decisionRoutes == nil},
+		{"instance_reader", p.store.instanceReader == nil},
+		{"initial_commits", p.store.initialCommits == nil},
+	}
+	missing := make([]string, 0, len(roles))
+	for _, role := range roles {
+		if role.missing {
+			missing = append(missing, role.name)
+		}
+	}
+	return missing
 }
 
 func TestPipelineCoordinatorRequiresCanonicalObligationOwner(t *testing.T) {
@@ -237,9 +271,9 @@ func TestPipelineCoordinatorRequiresCanonicalObligationOwner(t *testing.T) {
 		t.Fatal("explicit preview coordinator was not constructed")
 	}
 
-	if durable := NewPipelineCoordinatorWithOptions(previewBus{}, nil, PipelineCoordinatorOptions{
+	if durable := NewPipelineCoordinatorWithOptions(previewBus{}, PipelineCoordinatorOptions{
 		Module:      module,
-		Persistence: WorkflowPersistence{store: &workflowInstanceStore{db: new(sql.DB)}},
+		Persistence: WorkflowPersistence{store: &workflowInstanceStore{}},
 	}); durable != nil {
 		t.Fatal("durable coordinator accepted incomplete persistence roles")
 	}
@@ -250,10 +284,10 @@ func TestRuntimePipelineRejectsUnconfiguredReceiverExecution(t *testing.T) {
 	module := staticSemanticWorkflowModule{source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})}
 	opts := completeDurablePipelineTestOptions(previewBus{}, PipelineCoordinatorOptions{
 		Module:      module,
-		Persistence: WorkflowPersistence{store: &workflowInstanceStore{db: new(sql.DB)}},
+		Persistence: WorkflowPersistence{store: &workflowInstanceStore{}},
 	})
 	opts.ReceiverExecution = eventreceiver.ExecutionVariant{}
-	if coordinator := NewPipelineCoordinatorWithOptions(previewBus{}, nil, opts); coordinator != nil {
+	if coordinator := NewPipelineCoordinatorWithOptions(previewBus{}, opts); coordinator != nil {
 		t.Fatal("runtime Pipeline accepted unconfigured receiver execution")
 	}
 

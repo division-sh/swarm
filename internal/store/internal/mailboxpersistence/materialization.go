@@ -1,0 +1,139 @@
+package mailboxpersistence
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/google/uuid"
+)
+
+func (s *MailboxPostgresOwner) MaterializeMailboxWrite(ctx context.Context, item runtimepipeline.MailboxWriteMaterialization) error {
+	if s == nil || s.backend == nil {
+		return fmt.Errorf("postgres store is required")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	item, err := normalizeMailboxWriteMaterialization(item)
+	if err != nil {
+		return err
+	}
+	err = s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(txctx, `
+		INSERT INTO mailbox (
+			item_id, entity_id, flow_instance, scope, item_type, source_event_id,
+			from_agent, severity, summary, payload, status, notified, reply_context_id, created_at
+		)
+		VALUES (
+			$1::uuid, NULLIF($2,'')::uuid, NULLIF($3,''), $4, $5, $6::uuid,
+			$7, $8, NULLIF($9,''), $10::jsonb, 'pending', false, NULLIF($11,''), now()
+		)
+		ON CONFLICT (item_id) DO NOTHING
+		`, item.ItemID, item.EntityID, item.FlowInstance, item.Scope, item.ItemType, item.SourceEventID, item.FromAgent, item.Severity, item.Summary, string(item.Payload), item.ReplyContextID)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("materialize postgres mailbox_write: %w", err)
+	}
+	return nil
+}
+
+func (s *MailboxSQLiteOwner) MaterializeMailboxWrite(ctx context.Context, item runtimepipeline.MailboxWriteMaterialization) error {
+	if s == nil || s.backend == nil {
+		return fmt.Errorf("sqlite runtime store is required")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	item, err := normalizeMailboxWriteMaterialization(item)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	return s.backend.RunTransaction(ctx, "sqlite mailbox_write materialization", func(txctx context.Context, tx *sql.Tx) error {
+		_, err := tx.ExecContext(txctx, `
+			INSERT INTO mailbox (
+				item_id, entity_id, flow_instance, scope, item_type, source_event_id,
+				from_agent, severity, summary, payload, status, notified, reply_context_id, created_at
+			)
+			VALUES (?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, 'pending', 0, NULLIF(?, ''), ?)
+			ON CONFLICT(item_id) DO NOTHING
+		`, item.ItemID, item.EntityID, item.FlowInstance, item.Scope, item.ItemType, item.SourceEventID, item.FromAgent, item.Severity, item.Summary, string(item.Payload), item.ReplyContextID, now)
+		if err != nil {
+			return fmt.Errorf("materialize sqlite mailbox_write: %w", err)
+		}
+		return nil
+	})
+}
+
+func normalizeMailboxWriteMaterialization(item runtimepipeline.MailboxWriteMaterialization) (runtimepipeline.MailboxWriteMaterialization, error) {
+	item.ItemID = strings.TrimSpace(item.ItemID)
+	item.EntityID = strings.TrimSpace(item.EntityID)
+	item.FlowInstance = strings.Trim(strings.TrimSpace(item.FlowInstance), "/")
+	item.Scope = strings.ToLower(strings.TrimSpace(item.Scope))
+	item.ItemType = strings.TrimSpace(item.ItemType)
+	item.SourceEventID = strings.TrimSpace(item.SourceEventID)
+	item.FromAgent = strings.TrimSpace(item.FromAgent)
+	item.Severity = normalizeMailboxSeverity(item.Severity)
+	item.Summary = strings.TrimSpace(item.Summary)
+	item.ReplyContextID = strings.TrimSpace(item.ReplyContextID)
+	if item.ItemID == "" {
+		return item, fmt.Errorf("mailbox_write item_id is required")
+	}
+	if _, err := uuid.Parse(item.ItemID); err != nil {
+		return item, fmt.Errorf("mailbox_write item_id: %w", err)
+	}
+	if item.SourceEventID == "" {
+		return item, fmt.Errorf("mailbox_write source_event_id is required")
+	}
+	if _, err := uuid.Parse(item.SourceEventID); err != nil {
+		return item, fmt.Errorf("mailbox_write source_event_id: %w", err)
+	}
+	if item.EntityID != "" {
+		if _, err := uuid.Parse(item.EntityID); err != nil {
+			return item, fmt.Errorf("mailbox_write entity_id: %w", err)
+		}
+	}
+	if item.ItemType == "" {
+		return item, fmt.Errorf("mailbox_write item_type is required")
+	}
+	if item.FromAgent == "" {
+		return item, fmt.Errorf("mailbox_write from_agent is required")
+	}
+	if item.Summary == "" {
+		return item, fmt.Errorf("mailbox_write summary is required")
+	}
+	if len(item.Payload) == 0 || string(item.Payload) == "null" {
+		item.Payload = json.RawMessage(`{}`)
+	}
+	if !json.Valid(item.Payload) {
+		return item, fmt.Errorf("mailbox_write payload must be valid JSON")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(item.Payload, &payload); err != nil {
+		return item, fmt.Errorf("mailbox_write payload must be a JSON object: %w", err)
+	}
+	if err := decisioncard.ValidateNoticeShape(item.ItemType, payload); err != nil {
+		return item, err
+	}
+	derivedScope := "global"
+	switch {
+	case item.EntityID != "":
+		derivedScope = "entity"
+	case item.FlowInstance != "":
+		derivedScope = "flow"
+	}
+	if item.Scope == "" {
+		item.Scope = derivedScope
+	}
+	if item.Scope != derivedScope {
+		return item, fmt.Errorf("mailbox_write scope %q does not match materialization fields %q", item.Scope, derivedScope)
+	}
+	return item, nil
+}

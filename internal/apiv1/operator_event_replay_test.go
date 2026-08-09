@@ -14,7 +14,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -28,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
@@ -202,7 +202,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 			name: "sqlite",
 			open: func(t *testing.T, ctx context.Context) fixture {
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return fixture{store: sqliteStore, db: sqliteStore.DB, sqlite: true}
+				return fixture{store: sqliteStore, db: storetest.DatabaseForTest(sqliteStore), sqlite: true}
 			},
 		},
 		{
@@ -276,9 +276,9 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				if _, err := updateCompleteReplayChainDepth(ctx, f.db, f.sqlite, originalID, -1); err == nil {
 					t.Fatal("event schema admitted negative chain_depth")
 				}
-				dialect := runtimeauthoractivity.DialectPostgres
+				dialect := authoractivityfixture.DialectPostgres
 				if f.sqlite {
-					dialect = runtimeauthoractivity.DialectSQLite
+					dialect = authoractivityfixture.DialectSQLite
 				}
 				eventtestsql.CorruptEventStore(t, ctx, f.db, dialect, eventtestsql.EventCorruptionClaim{
 					Invariant: "store.event_record.canonical_readback",
@@ -347,7 +347,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			name: "sqlite",
 			open: func(t *testing.T, ctx context.Context) fixture {
 				s := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return fixture{store: s, db: s.DB}
+				return fixture{store: s, db: storetest.DatabaseForTest(s)}
 			},
 		},
 		{
@@ -554,7 +554,7 @@ func TestOpaqueMissingEventIDReturnsNotFoundAcrossOperatorConsumersParity(t *tes
 			name: "sqlite",
 			open: func(t *testing.T, ctx context.Context) fixture {
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return fixture{store: sqliteStore, db: sqliteStore.DB}
+				return fixture{store: sqliteStore, db: storetest.DatabaseForTest(sqliteStore)}
 			},
 		},
 		{
@@ -1360,7 +1360,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 	t.Helper()
 	eventID := uuid.NewString()
 	runID := uuid.NewString()
-	storetest.RequirePostgresRun(t, ctx, pg.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	storetest.RequirePostgresRun(t, ctx, storetest.DatabaseForTest(pg), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	semanticEvent := eventtest.PersistedProjection(
 		eventID,
 		events.EventType(eventName),
@@ -1392,7 +1392,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 			if err != nil {
 				t.Fatalf("claim original delivery %s %s: %v", eventID, subscriber, err)
 			}
-			sessionID := seedOperatorReplayDeliverySession(t, ctx, pg.DB, false, runID, route.AgentIdentity)
+			sessionID := seedOperatorReplayDeliverySession(t, ctx, storetest.DatabaseForTest(pg), false, runID, route.AgentIdentity)
 			if _, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 				t.Fatalf("bind original delivery %s %s: %v", eventID, subscriber, err)
 			}

@@ -3,7 +3,6 @@ package pipeline
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/providerconnectors"
+	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
@@ -43,37 +43,15 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 	if len(intents) == 0 || w.coordinator == nil || w.coordinator.bus == nil {
 		return nil
 	}
-	outbox := w.coordinator.bus.EngineOutbox()
-	if outbox == nil {
-		return fmt.Errorf("activity intent writer requires pipeline outbox")
-	}
 	immediate := make([]runtimeengine.ActivityIntent, 0, len(intents))
 	for _, intent := range intents {
 		intent = intent.Normalized()
-		if intent.ApprovalDecision == "" {
-			immediate = append(immediate, intent)
-			continue
+		if intent.ApprovalDecision != "" {
+			return fmt.Errorf("approved activity %s requires the selected workflow engine commit owner", intent.ActivityID)
 		}
-		if _, ok := PipelineSQLTxFromContext(ctx); !ok {
-			return fmt.Errorf("approved activity %s must be materialized in the workflow mutation", intent.ActivityID)
-		}
-		store := w.coordinator.proposedEffects
-		if store == nil {
-			return fmt.Errorf("proposed-effect continuation store is required for approved activity %s", intent.ActivityID)
-		}
-		card, continuation, err := w.coordinator.buildProposedEffectCard(ctx, intent)
-		if err != nil {
-			return err
-		}
-		if err := store.CreateProposedEffectCard(ctx, card, continuation); err != nil {
-			return err
-		}
+		immediate = append(immediate, intent)
 	}
-	requests, err := activityRequestEmitIntents(immediate)
-	if err != nil {
-		return err
-	}
-	if err := outbox.WriteOutbox(ctx, requests); err != nil {
+	if _, err := activityRequestEmitIntents(immediate); err != nil {
 		return err
 	}
 	for _, intent := range intents {
@@ -102,17 +80,7 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 			EntityID:  intent.EntityID.String(),
 			Detail:    detail,
 		}
-		logIntent := func(actionCtx context.Context) {
-			actionCtx = WithoutPipelineSQLTxContext(actionCtx)
-			_ = w.coordinator.bus.LogRuntime(actionCtx, entry)
-		}
-		if _, txActive := PipelineSQLTxFromContext(ctx); txActive {
-			if !QueuePipelinePostCommitAction(ctx, logIntent) {
-				return fmt.Errorf("activity intent runtime log requires a post-commit action queue")
-			}
-			continue
-		}
-		if err := w.coordinator.bus.LogRuntime(WithoutPipelineSQLTxContext(ctx), entry); err != nil {
+		if err := w.coordinator.bus.LogRuntime(ctx, entry); err != nil {
 			return err
 		}
 	}
@@ -122,6 +90,7 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 type pipelineActivityDispatcher struct {
 	coordinator *PipelineCoordinator
 	client      *http.Client
+	emissions   *pipelineEmissionPlan
 }
 
 func (d pipelineActivityDispatcher) DispatchActivities(ctx context.Context, intents []runtimeengine.ActivityIntent) error {
@@ -447,26 +416,28 @@ func (d pipelineActivityDispatcher) admitReadOnlyActivityGeneration(ctx context.
 	}
 	unlock := d.coordinator.lockWorkflowEntity(intent.EntityID.String())
 	defer unlock()
-	return d.coordinator.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-		instance, ok, err := d.coordinator.workflowStore.Load(txctx, intent.EntityID.String())
-		if err != nil {
-			return err
-		}
-		current := false
-		if ok {
-			current, err = workflowLoopGenerationCurrent(&instance, intent.Generation, intent.LoopStage)
-		}
-		if err != nil {
-			return err
-		}
-		if !current {
-			return runtimefailures.New(runtimefailures.ClassStaleArrival, "activity_loop_generation_stale", "activity-runtime", "admit_read_only_activity", map[string]any{
-				"activity_id": intent.ActivityID, "loop_id": intent.Generation.LoopID,
-				"revision_id": intent.Generation.RevisionID, "expected_stage": intent.LoopStage,
-			})
-		}
-		return nil
-	})
+	route, err := workflowInstanceRouteForExecution(d.coordinator.SemanticSource(), intent.FlowID.String(), intent.FlowInstance)
+	if err != nil {
+		return fmt.Errorf("activity state route: %w", err)
+	}
+	instance, ok, err := d.coordinator.workflowStore.Load(ctx, route)
+	if err != nil {
+		return err
+	}
+	current := false
+	if ok {
+		current, err = workflowLoopGenerationCurrent(&instance, intent.Generation, intent.LoopStage)
+	}
+	if err != nil {
+		return err
+	}
+	if !current {
+		return runtimefailures.New(runtimefailures.ClassStaleArrival, "activity_loop_generation_stale", "activity-runtime", "admit_read_only_activity", map[string]any{
+			"activity_id": intent.ActivityID, "loop_id": intent.Generation.LoopID,
+			"revision_id": intent.Generation.RevisionID, "expected_stage": intent.LoopStage,
+		})
+	}
+	return nil
 }
 
 func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx context.Context, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry, mockResponse *providerconnectors.AdmittedMockResponse) error {
@@ -604,61 +575,13 @@ func activityDependencyFailure(err error, tool, operation string) error {
 	return runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "activity_journal_operation_failed", "activity-runtime", operation, map[string]any{"tool": strings.TrimSpace(tool)}, err)
 }
 
-type activityRecordedResult struct {
-	EventID   string
-	EventType string
-	Payload   json.RawMessage
-}
+type activityRecordedResult = runtimeactivityresult.Record
 
 func (d pipelineActivityDispatcher) recordedActivityResult(ctx context.Context, intent runtimeengine.ActivityIntent) (activityRecordedResult, bool, error) {
-	if d.coordinator == nil || d.coordinator.db == nil {
+	if d.coordinator == nil || d.coordinator.workflowStore == nil {
 		return activityRecordedResult{}, false, nil
 	}
-	db := d.coordinator.db
-	successID := activityResultEventID(intent, intent.SuccessEvent)
-	failureID := activityResultEventID(intent, intent.FailureEvent)
-	var (
-		rows *sql.Rows
-		err  error
-	)
-	if d.coordinator.workflowStore != nil && d.coordinator.workflowStore.isSQLite() {
-		rows, err = db.QueryContext(ctx, `
-			SELECT event_id, event_name, payload
-			FROM events
-			WHERE event_id IN (?, ?)
-		`, successID, failureID)
-	} else {
-		rows, err = db.QueryContext(ctx, `
-			SELECT event_id::text, event_name, payload::text
-			FROM events
-			WHERE event_id IN ($1::uuid, $2::uuid)
-		`, successID, failureID)
-	}
-	if err != nil {
-		return activityRecordedResult{}, false, fmt.Errorf("lookup recorded activity result %s: %w", intent.ActivityID, err)
-	}
-	defer rows.Close()
-	var found []activityRecordedResult
-	for rows.Next() {
-		var result activityRecordedResult
-		var payload string
-		if err := rows.Scan(&result.EventID, &result.EventType, &payload); err != nil {
-			return activityRecordedResult{}, false, fmt.Errorf("scan recorded activity result %s: %w", intent.ActivityID, err)
-		}
-		result.Payload = json.RawMessage(payload)
-		found = append(found, result)
-	}
-	if err := rows.Err(); err != nil {
-		return activityRecordedResult{}, false, fmt.Errorf("iterate recorded activity result %s: %w", intent.ActivityID, err)
-	}
-	switch len(found) {
-	case 0:
-		return activityRecordedResult{}, false, nil
-	case 1:
-		return found[0], true, nil
-	default:
-		return activityRecordedResult{}, false, fmt.Errorf("activity request %s has both success and failure results recorded", activityRequestEventID(intent))
-	}
+	return d.coordinator.workflowStore.recordedActivityResult(ctx, intent)
 }
 
 func (d pipelineActivityDispatcher) logActivityRuntime(ctx context.Context, intent runtimeengine.ActivityIntent, action string, detail map[string]any) {
@@ -693,6 +616,10 @@ func (d pipelineActivityDispatcher) logActivityRuntime(ctx context.Context, inte
 }
 
 func (pc *PipelineCoordinator) handleActivityRequestEvent(ctx context.Context, evt events.Event) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
+	return pc.handleActivityRequestEventWithEmissionPlan(ctx, evt, nil)
+}
+
+func (pc *PipelineCoordinator) handleActivityRequestEventWithEmissionPlan(ctx context.Context, evt events.Event, emissions *pipelineEmissionPlan) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
 	if pc == nil || evt.Type() != activityRequestEventType {
 		return false, runtimepipelineobligation.Continue(), nil
 	}
@@ -700,7 +627,7 @@ func (pc *PipelineCoordinator) handleActivityRequestEvent(ctx context.Context, e
 	if err != nil {
 		return true, runtimepipelineobligation.Continue(), err
 	}
-	dispatcher := pipelineActivityDispatcher{coordinator: pc}
+	dispatcher := pipelineActivityDispatcher{coordinator: pc, emissions: emissions}
 	if failure := dispatcher.activityContractPinFailure(ctx, intent, pc.SemanticSource()); failure != nil {
 		if failure.Class == runtimefailures.ClassDependencyUnavailable {
 			return true, runtimepipelineobligation.ReleaseForRetry(failure.Detail.Code, failure), nil
@@ -1531,8 +1458,8 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 	if err != nil {
 		return fmt.Errorf("construct activity result event: %w", err)
 	}
-	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
-		*collector = append(*collector, evt)
+	if d.emissions != nil {
+		d.emissions.appendEvent(evt)
 		d.logActivityRuntime(ctx, intent, "result_published", map[string]any{
 			"activity_id":       intent.ActivityID,
 			"tool":              intent.Tool,

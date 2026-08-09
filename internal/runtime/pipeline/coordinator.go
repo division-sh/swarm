@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -29,49 +29,51 @@ import (
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/google/uuid"
 )
 
-type pipelineEmitCollectorKey struct{}
-type pipelineEmitIntentCollectorKey struct{}
+type RunBundleAvailabilityReader interface {
+	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
+}
+
 type PipelineCoordinator struct {
 	bus Bus
-	db  *sql.DB
 
 	mu sync.Mutex
 
 	entityLockMu sync.Mutex
 	entityLocks  map[string]*sync.Mutex
 
-	module                  WorkflowModule
-	workflowStore           *workflowInstanceStore
-	expressionEval          *workflowExpressionEvaluator
-	instanceActivator       FlowInstanceActivator
-	instanceDeactivator     FlowInstanceDeactivator
-	timerScheduler          *Scheduler
-	timerScheduleStore      SchedulePersistence
-	workflowTimers          *WorkflowTimerLifecycle
-	mailboxMaterializer     MailboxWriteMaterializationStore
-	decisionCards           decisioncard.Store
-	proposedEffects         decisioncard.ProposedEffectStore
-	humanTasks              decisioncard.HumanTaskStore
-	decisionDraftExpiry     DecisionCardDraftExpiry
-	humanTaskExpiry         HumanTaskExpiry
-	gatePublisher           WorkflowGateMutationPublisher
-	directDecisionPublisher DecisionCardDirectMutationPublisher
-	deliveryStore           runtimedelivery.Store
-	deliveryRuntime         WorkflowDeliveryRuntime
-	flowRoutes              FlowInstanceRouteOwner
-	credentials             runtimecredentials.Store
-	managedCredentials      runtimemanagedcredentials.Store
-	mockConnectorResponses  *providerconnectors.MockResponsePlan
-	channelActivityTools    map[string]ChannelActivityTarget
-	artifactRoot            string
-	bundleSourceFact        runtimecorrelation.BundleSourceFact
-	runBundleAvailability   RunBundleAvailabilityReader
-	decisionCardCadence     decisioncard.CadencePolicy
+	module                 WorkflowModule
+	workflowStore          *workflowInstanceStore
+	expressionEval         *workflowExpressionEvaluator
+	instanceActivator      FlowInstanceActivator
+	instanceDeactivator    FlowInstanceDeactivator
+	timerScheduler         *Scheduler
+	timerScheduleStore     SchedulePersistence
+	workflowTimers         *WorkflowTimerLifecycle
+	mailboxMaterializer    MailboxWriteMaterializationStore
+	decisionCards          decisioncard.Store
+	proposedEffects        decisioncard.ProposedEffectStore
+	humanTasks             decisioncard.HumanTaskStore
+	decisionDraftExpiry    DecisionCardDraftExpiry
+	humanTaskExpiry        HumanTaskExpiry
+	deliveryStore          runtimedelivery.Store
+	deadLetters            runtimedeadletters.Persistence
+	deliveryRuntime        WorkflowDeliveryRuntime
+	flowRoutes             FlowInstanceRouteOwner
+	credentials            runtimecredentials.Store
+	managedCredentials     runtimemanagedcredentials.Store
+	mockConnectorResponses *providerconnectors.MockResponsePlan
+	channelActivityTools   map[string]ChannelActivityTarget
+	artifactRoot           string
+	bundleSourceFact       runtimecorrelation.BundleSourceFact
+	runBundleAvailability  RunBundleAvailabilityReader
+	decisionCardCadence    decisioncard.CadencePolicy
 
 	testEntityStateHook              func(entityID, state string)
 	testWorkflowNodeHandlerStartHook WorkflowNodeHandlerStartHook
@@ -90,19 +92,19 @@ type PipelineCoordinatorOptions struct {
 	Module                           WorkflowModule
 	Persistence                      WorkflowPersistence
 	DeliveryStore                    runtimedelivery.Store
+	DeadLetters                      runtimedeadletters.Persistence
 	PipelineObligations              runtimepipelineobligation.Store
 	InstanceActivator                FlowInstanceActivator
 	InstanceDeactivator              FlowInstanceDeactivator
 	TimerScheduler                   *Scheduler
 	TimerScheduleStore               SchedulePersistence
+	TimerObligationReader            runtimetimerobligation.Reader
 	MailboxMaterializer              MailboxWriteMaterializationStore
 	DecisionCards                    decisioncard.Store
 	ProposedEffects                  decisioncard.ProposedEffectStore
 	HumanTasks                       decisioncard.HumanTaskStore
 	DecisionCardDraftExpiry          DecisionCardDraftExpiry
 	HumanTaskExpiry                  HumanTaskExpiry
-	GatePublisher                    WorkflowGateMutationPublisher
-	DirectDecisionPublisher          DecisionCardDirectMutationPublisher
 	DeliveryRuntime                  WorkflowDeliveryRuntime
 	FlowRoutes                       FlowInstanceRouteOwner
 	RunLifecycle                     runtimerunlifecycle.OperationOwner
@@ -159,10 +161,6 @@ type DecisionCardDraftExpiry interface {
 	ExpireDecisionCardInputDrafts(context.Context, time.Time) (int, error)
 }
 
-type HumanTaskExpiry interface {
-	ExpireHumanTaskCardsInMutation(context.Context, time.Time, int) ([]events.Event, error)
-}
-
 type WorkflowDeliveryRuntime interface {
 	DeliveryAuthority() (runtimedelivery.ExecutionAuthority, error)
 	AcquireDeliveryContinuation(string) (worklifetime.DeliveryContinuation, error)
@@ -178,15 +176,15 @@ func copyActivityToolEntries(in map[string]ChannelActivityTarget) map[string]Cha
 	return out
 }
 
-func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions) *PipelineCoordinator {
-	return newPipelineCoordinatorWithOptions(bus, db, opts, true)
+func NewPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions) *PipelineCoordinator {
+	return newPipelineCoordinatorWithOptions(bus, opts, true)
 }
 
 func newPreviewPipelineCoordinator(bus Bus, opts PipelineCoordinatorOptions) *PipelineCoordinator {
-	return newPipelineCoordinatorWithOptions(bus, nil, opts, false)
+	return newPipelineCoordinatorWithOptions(bus, opts, false)
 }
 
-func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordinatorOptions, requireObligationOwner bool) *PipelineCoordinator {
+func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions, requireObligationOwner bool) *PipelineCoordinator {
 	if bus == nil {
 		return nil
 	}
@@ -205,9 +203,9 @@ func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 			return nil
 		}
 		if opts.DeliveryStore == nil || opts.PipelineObligations == nil || opts.DecisionCards == nil ||
-			opts.ProposedEffects == nil || opts.HumanTasks == nil || opts.GatePublisher == nil ||
+			opts.ProposedEffects == nil || opts.HumanTasks == nil ||
 			opts.DecisionCardDraftExpiry == nil || opts.HumanTaskExpiry == nil ||
-			opts.DirectDecisionPublisher == nil || opts.DeliveryRuntime == nil || opts.RunLifecycle == nil {
+			opts.DeliveryRuntime == nil || opts.RunLifecycle == nil {
 			return nil
 		}
 	}
@@ -217,7 +215,6 @@ func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 	}
 	coordinator := &PipelineCoordinator{
 		bus:                              bus,
-		db:                               db,
 		module:                           module,
 		expressionEval:                   newWorkflowExpressionEvaluator(),
 		instanceActivator:                opts.InstanceActivator,
@@ -230,9 +227,8 @@ func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		humanTasks:                       opts.HumanTasks,
 		decisionDraftExpiry:              opts.DecisionCardDraftExpiry,
 		humanTaskExpiry:                  opts.HumanTaskExpiry,
-		gatePublisher:                    opts.GatePublisher,
-		directDecisionPublisher:          opts.DirectDecisionPublisher,
 		deliveryStore:                    opts.DeliveryStore,
+		deadLetters:                      opts.DeadLetters,
 		deliveryRuntime:                  opts.DeliveryRuntime,
 		flowRoutes:                       opts.FlowRoutes,
 		credentials:                      credentials,
@@ -255,21 +251,32 @@ func newPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 	var workflowStore *workflowInstanceStore
 	if storeTemplate != nil {
 		workflowStore = &workflowInstanceStore{
-			db:              storeTemplate.db,
-			dialect:         storeTemplate.dialect,
-			runtimeMutation: storeTemplate.runtimeMutation,
-			deliveryStore:   opts.DeliveryStore,
-			pipelineStore:   opts.PipelineObligations,
-			decisionCards:   opts.DecisionCards,
-			gateEvents:      opts.GatePublisher,
-			lifecycleOwner:  pipelineWorkflowLifecycleOwner{coordinator: coordinator},
-			runLifecycle:    opts.RunLifecycle,
-			deliverySignals: make(map[runtimedelivery.ExecutionAuthority]func()),
+			entityQuery:      storeTemplate.entityQuery,
+			routeRecovery:    storeTemplate.routeRecovery,
+			activityResults:  storeTemplate.activityResults,
+			activityJournal:  storeTemplate.activityJournal,
+			gateRoutes:       storeTemplate.gateRoutes,
+			timerObligations: storeTemplate.timerObligations,
+			engineMutations:  storeTemplate.engineMutations,
+			cardMutations:    storeTemplate.cardMutations,
+			timerOccurrences: storeTemplate.timerOccurrences,
+			timerActivations: storeTemplate.timerActivations,
+			readiness:        storeTemplate.readiness,
+			standingServices: storeTemplate.standingServices,
+			decisionRoutes:   storeTemplate.decisionRoutes,
+			instanceReader:   storeTemplate.instanceReader,
+			initialCommits:   storeTemplate.initialCommits,
+			deliveryStore:    opts.DeliveryStore,
+			pipelineStore:    opts.PipelineObligations,
+			decisionCards:    opts.DecisionCards,
+			lifecycleOwner:   pipelineWorkflowLifecycleOwner{coordinator: coordinator},
+			runLifecycle:     opts.RunLifecycle,
+			deliverySignals:  make(map[runtimedelivery.ExecutionAuthority]func()),
 		}
 	}
 	coordinator.workflowStore = workflowStore
 	if workflowStore != nil {
-		coordinator.workflowTimers = newWorkflowTimerLifecycle(workflowStore, coordinator.SemanticSource(), bus, opts.GatePublisher, opts.WorkOwner, opts.TimerScheduler)
+		coordinator.workflowTimers = newWorkflowTimerLifecycle(workflowStore, coordinator.SemanticSource(), bus, opts.WorkOwner, opts.TimerScheduler)
 	}
 	return coordinator
 }
@@ -297,7 +304,7 @@ func (pc *PipelineCoordinator) FinalizeSelectedReceiverAdmission(admission manag
 	return nil
 }
 
-func NewPipelineCoordinator(bus Bus, db *sql.DB) *PipelineCoordinator {
+func NewPipelineCoordinator(bus Bus) *PipelineCoordinator {
 	panic("pipeline: workflow module is required")
 }
 
@@ -370,22 +377,38 @@ func (pc *PipelineCoordinator) expireHumanTaskCards(ctx context.Context, expiry 
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return errors.New("human-task expiry requires the selected workflow store")
 	}
-	publisher := pc.gatePublisher
-	if publisher == nil {
-		return errors.New("human-task expiry requires transactional event publication")
+	planner, ok := pc.bus.(EnginePublicationPlanner)
+	if !ok {
+		return errors.New("human-task expiry requires the publication planner")
 	}
-	return pc.workflowStore.runPipelineMutation(ctx, func(txctx context.Context) error {
-		expiredEvents, err := expiry.ExpireHumanTaskCardsInMutation(txctx, now, limit)
-		if err != nil {
-			return err
-		}
-		for _, evt := range expiredEvents {
-			if err := publisher.PublishInMutation(txctx, evt); err != nil {
-				return fmt.Errorf("publish human-task expiry event: %w", err)
-			}
-		}
-		return nil
-	})
+	expiredEvents, err := expiry.ListDueHumanTaskExpiryEvents(ctx, now, limit)
+	if err != nil || len(expiredEvents) == 0 {
+		return err
+	}
+	intents := make([]runtimeengine.EmitIntent, 0, len(expiredEvents))
+	for _, event := range expiredEvents {
+		intents = append(intents, runtimeengine.EmitIntent{Event: event})
+	}
+	plans, err := planner.PrepareEnginePublications(ctx, intents)
+	if err != nil {
+		return err
+	}
+	if len(plans) != len(intents) {
+		releaseErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+		return errors.Join(fmt.Errorf("human-task expiry planner returned %d plans for %d events", len(plans), len(intents)), releaseErr)
+	}
+	committed, err := expiry.CommitHumanTaskExpirations(ctx, HumanTaskExpiryCommand{ObservedAt: now, Limit: limit, Publications: plans})
+	if err != nil {
+		return errors.Join(err, planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
+	}
+	if err := planner.FinalizeEnginePublications(ctx, committed.Publications); err != nil {
+		return err
+	}
+	dispatcher := pc.bus.EngineDispatcher()
+	if dispatcher == nil {
+		return errors.New("human-task expiry requires post-commit dispatcher")
+	}
+	return dispatcher.DispatchPostCommit(context.WithoutCancel(ctx), intents)
 }
 
 func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
@@ -431,9 +454,9 @@ func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, 
 	if !handled {
 		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
-	emitted := make([]events.Event, 0, 4)
-	ictx := context.WithValue(ctx, pipelineEmitCollectorKey{}, &emitted)
-	handled, outcome, err := pc.handleEventResult(ictx, evt)
+	emissions := &pipelineEmissionPlan{}
+	handled, outcome, err := pc.handleEventResultWithEmissionPlan(ctx, evt, emissions)
+	emitted := emissions.immutableEvents()
 	if !outcome.ContinueDispatch() {
 		// A non-consuming event-wide policy has no node-delivery authority.
 		// Only an exact node route or a consuming platform policy may settle
@@ -490,10 +513,14 @@ func (pc *PipelineCoordinator) handleEvent(ctx context.Context, evt events.Event
 }
 
 func (pc *PipelineCoordinator) handleEventResult(ctx context.Context, evt events.Event) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
+	return pc.handleEventResultWithEmissionPlan(ctx, evt, nil)
+}
+
+func (pc *PipelineCoordinator) handleEventResultWithEmissionPlan(ctx context.Context, evt events.Event, emissions *pipelineEmissionPlan) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
 	if evt.Type() == activityRequestEventType {
-		return pc.handleActivityRequestEvent(ctx, evt)
+		return pc.handleActivityRequestEventWithEmissionPlan(ctx, evt, emissions)
 	}
-	handled, err := pc.dispatchWorkflowNodeEventResult(ctx, evt)
+	handled, err := pc.dispatchWorkflowNodeEventResultWithEmissionPlan(ctx, evt, emissions)
 	if err == nil {
 		return handled, runtimepipelineobligation.Continue(), nil
 	}
@@ -507,6 +534,10 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlan(ctx context.Context, nodeI
 }
 
 func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context, nodeID string, evt events.Event) (bool, error) {
+	return pc.executeNodeHandlerPlanResultWithEmissionPlan(ctx, nodeID, evt, nil)
+}
+
+func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx context.Context, nodeID string, evt events.Event, emissions *pipelineEmissionPlan) (bool, error) {
 	if pc == nil {
 		return false, nil
 	}
@@ -583,14 +614,38 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 			return false, fmt.Errorf("renew workflow node delivery claim: %w", heartbeatErr)
 		}
 		executionCtx := heartbeat.Context()
+		executionCtx = runtimecorrelation.WithInboundEvent(executionCtx, evt)
+		nodeFlowID := workflowNodeFlowID(source, nodeID)
+		instancePath := evt.FlowInstance()
+		if source != nil && strings.TrimSpace(nodeFlowID) == strings.TrimSpace(source.WorkflowName()) {
+			instancePath = evt.RunID()
+		} else if source != nil {
+			if schema, ok := source.FlowSchemaByID(nodeFlowID); ok && !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+				instancePath = runtimeflowidentity.ScopeKey(source, nodeFlowID)
+			} else if target := route.Target.Normalized(); !target.Empty() {
+				instancePath = target.FlowInstance
+			}
+		}
+		stateRoute, err := workflowInstanceRouteForExecution(source, nodeFlowID, instancePath)
+		if err != nil {
+			_ = heartbeat.Stop()
+			return false, err
+		}
+		currentState, err := pc.currentWorkflowState(executionCtx, stateRoute, workflowEventEntityID(evt))
+		if err != nil {
+			_ = heartbeat.Stop()
+			return false, err
+		}
 		result, err := pc.executeNodeContractHandler(executionCtx, nodeID, handler, workflowTriggerContext{
 			Event:           evt,
 			HandlerEventKey: handlerEventKey,
-			State:           pc.currentWorkflowState(executionCtx, workflowEventEntityID(evt)),
-		}, false)
+			State:           currentState,
+		}, false, emissions != nil)
 		if err == nil {
+			for _, emitted := range result.Emissions {
+				emissions.appendEvent(emitted)
+			}
 			pc.notifyTestLifecycleHandlerCompleted(executionCtx, nodeID, evt, "completed")
-			pc.recordInterceptedEmitDeadLetters(executionCtx, evt, nodeID, result.Outcome)
 			sideEffects := []string{"handler_completed"}
 			settlementGuard, settleErr := heartbeat.BeginSettlement()
 			if settleErr != nil {
@@ -775,7 +830,7 @@ func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context,
 	}
 }
 
-func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Context, trigger events.Event, nodeID string, outcome *handlerExecutionOutcome) {
+func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Context, trigger events.Event, nodeID string, outcome *handlerExecutionOutcome, emissions *pipelineEmissionPlan) {
 	if pc == nil || outcome == nil || len(outcome.InterceptedEmits) == 0 {
 		return
 	}
@@ -798,9 +853,10 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			Failure:         failure.Failure,
 			ChainDepth:      intercepted.ChainDepth,
 			HandlerNode:     firstNonEmptyString(nodeID+":"+eventType, nodeID),
+			Timestamp:       time.Now().UTC().Format(time.RFC3339Nano),
 		}
-		if pc.db != nil {
-			if err := recordPipelineDeadLetter(ctx, pc.db, rec); err != nil {
+		if pc.deadLetters != nil {
+			if err := pc.deadLetters.RecordDeadLetter(ctx, rec); err != nil {
 				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_persist_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
 					"intercepted_event_type": eventType,
 					"handler_node":           nodeID,
@@ -818,25 +874,20 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			"handler_node":     nodeID,
 			"timestamp":        time.Now().UTC().Format(time.RFC3339Nano),
 		}
-		if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
+		if emissions != nil {
 			emitted, err := newPipelineRuntimeDiagnostic(events.LineageFromEvent(trigger), "platform.dead_letter", entityID, "", deadLetterPayload)
 			if err != nil {
 				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_construct_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, nil, err)
 				continue
 			}
-			*collector = append(*collector, emitted)
+			emissions.appendEvent(emitted)
 			continue
 		}
-		publishDeadLetter := func(actionCtx context.Context) {
-			if err := pc.publish(actionCtx, "platform.dead_letter", entityID, deadLetterPayload); err != nil {
-				pc.logRuntimeWarn(actionCtx, "workflow-runtime", "intercepted_emit_dead_letter_publish_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
-					"intercepted_event_type": eventType,
-					"handler_node":           nodeID,
-				}, err)
-			}
-		}
-		if !queuePipelinePostCommitAction(ctx, publishDeadLetter) {
-			publishDeadLetter(ctx)
+		if err := pc.publish(ctx, "platform.dead_letter", entityID, deadLetterPayload); err != nil {
+			pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_publish_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
+				"intercepted_event_type": eventType,
+				"handler_node":           nodeID,
+			}, err)
 		}
 	}
 }
@@ -908,10 +959,6 @@ func (pc *PipelineCoordinator) publish(ctx context.Context, eventType, entityID 
 	if err != nil {
 		return err
 	}
-	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
-		*collector = append(*collector, emitted)
-		return nil
-	}
 	if pc.bus != nil {
 		if err := pc.bus.Publish(ctx, emitted); err != nil {
 			return err
@@ -936,10 +983,6 @@ func (pc *PipelineCoordinator) publishDirect(ctx context.Context, eventType, ent
 	emitted, err := newPipelineRuntimeDiagnostic(events.LineageFromEvent(inbound), eventType, entityID, flowInstance, payload)
 	if err != nil {
 		return err
-	}
-	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
-		*collector = append(*collector, emitted)
-		return nil
 	}
 	if pc.bus != nil {
 		if err := pc.bus.PublishDirect(ctx, emitted, recipients); err != nil {

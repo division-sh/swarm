@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
@@ -82,6 +83,11 @@ type connectRoutePlanConcurrentLifecycleStore struct {
 type connectRoutePlanStaleSnapshotStore struct {
 	*connectRoutePlanLifecycleStore
 	mutations int
+	mutating  bool
+}
+
+func (s *connectRoutePlanDescriptorStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []FlowInstanceRouteRecordSet) error {
+	return validateFlowInstanceRouteTopology(sets)
 }
 
 type connectRoutePlanNodeInterceptor struct {
@@ -211,6 +217,8 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 			for _, subscriberType := range []string{"node", "agent"} {
 				name := strings.Join([]string{producerMode, map[bool]string{false: "flow", true: "root"}[rootReceiver], subscriberType}, "/")
 				t.Run(name, func(t *testing.T) {
+					runID := uuid.NewString()
+					ctx := runtimecorrelation.WithRunID(context.Background(), runID)
 					source := connectReceiverPinCollisionSource(producerMode, rootReceiver, subscriberType, false)
 					store := newTargetRouteMemoryStore()
 					routeTable, err := DeriveRouteTable(source)
@@ -255,7 +263,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 						envelope = events.EnvelopeForTargetRoute(envelope, events.RouteIdentity{EntityID: rootEntityID})
 					}
 					eventID := uuid.NewString()
-					evt := connectRoutePlanStaticProducerEvent(eventID, eventType, "", "", []byte(`{}`), 0, "", "", envelope, time.Now().UTC())
+					evt := connectRoutePlanStaticProducerEvent(eventID, eventType, "", "", []byte(`{}`), 0, runID, "", envelope, time.Now().UTC())
 					if subscriberType == "agent" {
 						flowPath := "consumer"
 						entityID := evt.EntityID()
@@ -270,7 +278,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 						}
 					}
 
-					plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+					plan, err := eb.CheckPublishRecipientPlan(ctx, evt)
 					if err != nil {
 						t.Fatalf("CheckPublishRecipientPlan: %v", err)
 					}
@@ -280,7 +288,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsClosedAcrossSupportedSurfaces(
 					if len(plan.DeliveryRoutes) != 0 {
 						t.Fatalf("delivery routes = %#v, want none", plan.DeliveryRoutes)
 					}
-					if err := eb.Publish(context.Background(), evt); err != nil {
+					if err := eb.Publish(ctx, evt); err != nil {
 						t.Fatalf("Publish classified target failure: %v", err)
 					}
 					if routes := store.routes[eventID]; len(routes) != 0 {
@@ -356,7 +364,7 @@ func TestConnectRoutePlanReceiverPinCollisionFailsBeforeReplyContextMutation(t *
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
 	replyStore := &connectRoutePlanReplyMutationStore{}
-	resolver := newConnectRoutePlanResolver(source, routeTable, nil, nil, replyStore)
+	resolver := newConnectRoutePlanResolver(source, routeTable, nil, nil, nil, replyStore)
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(), "producer/work.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
 		Source: events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-entity")},
 	}, time.Now().UTC())
@@ -443,6 +451,7 @@ func connectReceiverPinCollisionSource(producerMode string, rootReceiver bool, s
 	if !rootReceiver {
 		return semanticview.Wrap(bundle)
 	}
+	bundle.Semantics.Name = "root"
 	bundle.Semantics.CompositionConnects[0].To = ".work_accepted"
 	bundle.Semantics.CompositionConnects[1].To = ".work_audited"
 	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{Events: connectRoutePlanInputEvents(inputs), EventPins: inputs}}}
@@ -488,17 +497,16 @@ func connectReceiverPinLegalSource(shape string) semanticview.Source {
 	}, connects))
 }
 
-func runConnectRoutePlanCommitScope(ctx context.Context, transaction CommitPublishTransaction, fn func(context.Context) error) error {
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 2)
-	rollback := make([]runtimepipeline.OwnerAction, 0, 2)
-	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
-	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
-	ctx = WithCommitPublishTransaction(ctx, transaction)
+func runConnectRoutePlanCommitScope(ctx context.Context, _ any, fn func(context.Context) error) error {
+	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 2)
+	rollback := make([]runtimepipelinefixture.OwnerAction, 0, 2)
+	ctx = runtimepipelinefixture.WithPostCommitActions(ctx, &postCommit)
+	ctx = runtimepipelinefixture.WithRollbackActions(ctx, &rollback)
 	if err := fn(ctx); err != nil {
-		runtimepipeline.FlushPipelineRollbackActions(rollback)
+		runtimepipelinefixture.FlushRollbackActions(rollback)
 		return err
 	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
+	runtimepipelinefixture.FlushPostCommitActions(postCommit)
 	return nil
 }
 
@@ -546,11 +554,13 @@ func (s *connectRoutePlanConcurrentLifecycleStore) ListActiveFlowInstanceDescrip
 
 func (s *connectRoutePlanStaleSnapshotStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]ActiveFlowInstanceDescriptor, error) {
 	descriptors, err := s.connectRoutePlanLifecycleStore.ListActiveFlowInstanceDescriptors(ctx)
-	if err != nil || s.mutations <= 0 || s.bus == nil {
+	if err != nil || s.mutations <= 0 || s.bus == nil || s.mutating {
 		return descriptors, err
 	}
 	ordinal := s.mutations
 	s.mutations--
+	s.mutating = true
+	defer func() { s.mutating = false }()
 	if err := s.bus.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
 		Identity: runtimeflowidentity.DeriveRoute("consumer", fmt.Sprintf("stale-%d", ordinal)),
 	}); err != nil {
@@ -561,10 +571,10 @@ func (s *connectRoutePlanStaleSnapshotStore) ListActiveFlowInstanceDescriptors(c
 
 func (s *connectRoutePlanConcurrentLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for _, descriptor := range s.flowInstances {
 		descriptor = descriptor.Normalized()
 		if descriptor.InstanceID == req.Instance.InstanceID || descriptor.FlowInstance == req.Instance.InstancePath {
+			s.mu.Unlock()
 			return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "connect-route-plan-test", "activate", map[string]any{"flow_instance": req.Instance.InstancePath})
 		}
 	}
@@ -577,6 +587,7 @@ func (s *connectRoutePlanConcurrentLifecycleStore) Activate(ctx context.Context,
 		AddressFields: connectRoutePlanActivationAddressFields(req.Metadata),
 	})
 	bus := s.bus
+	s.mu.Unlock()
 	if bus == nil {
 		return nil
 	}
@@ -1115,7 +1126,7 @@ func TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution(t *testing.T) {
 	}
 }
 
-func TestEventBusPublishInMutation_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
+func TestEventBusPublish_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
 		From: "producer.deploy_done",
 		To:   "consumer.deploy_completed",
@@ -1130,13 +1141,8 @@ func TestEventBusPublishInMutation_ConnectRoutePlanPersistsSharedRoutePlan(t *te
 		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	want := connectRoutePlanStaticDeliveryRoute()
-	postCommitActions := make([]runtimepipeline.OwnerAction, 0, 1)
-	ctx := runtimepipeline.WithPipelinePostCommitActions(context.Background(), &postCommitActions)
-
-	if err := runConnectRoutePlanCommitScope(ctx, store, func(commitCtx context.Context) error {
-		return eb.PublishInMutation(commitCtx, evt)
-	}); err != nil {
-		t.Fatalf("PublishInMutation: %v", err)
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
 	}
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
@@ -1147,13 +1153,12 @@ func TestEventBusPublishInMutation_ConnectRoutePlanPersistsSharedRoutePlan(t *te
 	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
 		t.Fatalf("committed replay scope = %q, want subscribed", got)
 	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 	if got := store.receipts[eventID]; got != "processed" {
 		t.Fatalf("pipeline receipt = %q, want processed", got)
 	}
 }
 
-func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
+func TestEnginePublication_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
 		From: "producer.deploy_done",
 		To:   "consumer.deploy_completed",
@@ -1169,10 +1174,11 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 
 	want := connectRoutePlanStaticDeliveryRoute()
 
-	planned, err := (engineOutbox{bus: eb}).deliveryPlanForIntent(context.Background(), runtimeengine.EmitIntent{Event: evt})
+	plans, err := eb.PrepareEnginePublications(context.Background(), []runtimeengine.EmitIntent{{Event: evt}})
 	if err != nil {
-		t.Fatalf("deliveryPlanForIntent: %v", err)
+		t.Fatalf("PrepareEnginePublications: %v", err)
 	}
+	planned := plans[0].(EnginePublicationPlan).prepared.plan
 	if planned.AuthorityState != RoutePlanAuthorityCanonicalMatched || planned.AuthorityOwner != routePlanSourceConnectRoutePlan {
 		t.Fatalf("outbox route plan authority = %q/%q, want matched connect route plan", planned.AuthorityState, planned.AuthorityOwner)
 	}
@@ -1180,10 +1186,11 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 		t.Fatalf("outbox route plan delivery routes = %#v, want %#v", planned.DeliveryRoutes(), want)
 	}
 
-	if err := runConnectRoutePlanCommitScope(context.Background(), store, func(commitCtx context.Context) error {
-		return eb.EngineOutbox().WriteOutbox(commitCtx, []runtimeengine.EmitIntent{{Event: evt}})
-	}); err != nil {
-		t.Fatalf("WriteOutbox: %v", err)
+	if err := eb.ReleaseEnginePublications(context.Background(), plans); err != nil {
+		t.Fatalf("release inspection plan: %v", err)
+	}
+	if err := commitSourceMutationEnginePublications(context.Background(), eb, []runtimeengine.EmitIntent{{Event: evt}}); err != nil {
+		t.Fatalf("commit engine publication: %v", err)
 	}
 	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
 		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
@@ -1196,7 +1203,7 @@ func TestEngineOutbox_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	}
 }
 
-func TestEngineOutbox_ExactDuplicateReusesDurableConnectRouteBeforeDescriptorLookup(t *testing.T) {
+func TestEnginePublication_ExactDuplicateReusesDurableConnectRouteBeforeDescriptorLookup(t *testing.T) {
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelect, false)
 	store := &connectRoutePlanDescriptorStore{
 		targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -1218,9 +1225,7 @@ func TestEngineOutbox_ExactDuplicateReusesDurableConnectRouteBeforeDescriptorLoo
 	evt := connectRoutePlanStaticProducerEvent(eventID,
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 	write := func() error {
-		return runConnectRoutePlanCommitScope(context.Background(), store, func(commitCtx context.Context) error {
-			return eb.EngineOutbox().WriteOutbox(commitCtx, []runtimeengine.EmitIntent{{Event: evt}})
-		})
+		return commitSourceMutationEnginePublications(context.Background(), eb, []runtimeengine.EmitIntent{{Event: evt}})
 	}
 	if err := write(); err != nil {
 		t.Fatalf("initial WriteOutbox: %v", err)
@@ -1477,6 +1482,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateCreatesMissingTemplateIns
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "drift")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
 	}
+	store.flowInstanceDescriptorCalls = 0
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
 	}, nil); err != nil {
@@ -1525,109 +1531,6 @@ func TestCompiledConnectEvaluationStaleSnapshotReevaluatesBeforeMutation(t *test
 	routes := store.routes[evt.ID()]
 	if len(routes) != 1 || routes[0].ConnectClaim.Empty() {
 		t.Fatalf("persisted routes = %#v, want one stamped connect route", routes)
-	}
-}
-
-func TestCompiledConnectEvaluationPostCheckGenerationMutationCannotInterleaveLifecycleOrReply(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		staged bool
-	}{
-		{name: "base route table"},
-		{name: "transaction-staged route table", staged: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, false)
-			routeTable, err := DeriveRouteTable(source)
-			if err != nil {
-				t.Fatalf("derive base route table: %v", err)
-			}
-			ctx := context.Background()
-			generationOwner := routeTable
-			if tc.staged {
-				staged, err := DeriveRouteTable(source)
-				if err != nil {
-					t.Fatalf("derive transaction-staged route table: %v", err)
-				}
-				ctx = context.WithValue(ctx, transactionRouteOverlayKey{}, &transactionRouteOverlay{table: staged})
-				generationOwner = staged
-			}
-
-			replyStore := &connectRoutePlanReplyMutationStore{}
-			activationEntered := make(chan struct{})
-			releaseActivation := make(chan struct{})
-			var activations atomic.Int32
-			resolver := connectRoutePlanResolver{
-				source:     source,
-				routeTable: routeTable,
-				lifecycle: newTemplateInstanceLifecycleOwner(source, routeTable, nil, func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
-					close(activationEntered)
-					<-releaseActivation
-					activations.Add(1)
-					return nil
-				}),
-				replyStore: replyStore,
-			}
-			activation := runtimepipeline.FlowInstanceActivationRequest{}
-			evaluated := connectRoutePlanDispatch{
-				lifecycleApplications: []connectLifecycleApplication{{
-					decision: TemplateInstanceLifecycleDecision{
-						Action:     templateInstanceLifecycleActionPreviewCreate,
-						activation: &activation,
-					},
-				}},
-				replyApplications: []connectReplyApplication{{
-					kind:   connectReplyApplicationCreate,
-					record: runtimereplycontext.Record{ID: "generation-linearization"},
-				}},
-			}
-
-			staleSnapshot := resolver.captureSnapshot(ctx)
-			if err := generationOwner.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
-				Identity: runtimeflowidentity.DeriveRoute("consumer", "before-apply"),
-			}); err != nil {
-				t.Fatalf("advance route generation before apply: %v", err)
-			}
-			if err := resolver.applyEvaluationAtSnapshot(ctx, staleSnapshot, events.Event{}, evaluated); !errors.As(err, new(staleConnectRoutePlanSnapshotError)) {
-				t.Fatalf("stale apply error = %v, want typed stale snapshot", err)
-			}
-			if activations.Load() != 0 || replyStore.creates != 0 {
-				t.Fatalf("stale apply effects = activations:%d replies:%d, want none", activations.Load(), replyStore.creates)
-			}
-
-			currentSnapshot := resolver.captureSnapshot(ctx)
-			applyDone := make(chan error, 1)
-			go func() {
-				applyDone <- resolver.applyEvaluationAtSnapshot(ctx, currentSnapshot, events.Event{}, evaluated)
-			}()
-			<-activationEntered
-
-			mutationStarted := make(chan struct{})
-			mutationDone := make(chan error, 1)
-			go func() {
-				close(mutationStarted)
-				mutationDone <- generationOwner.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
-					Identity: runtimeflowidentity.DeriveRoute("consumer", "during-apply"),
-				})
-			}()
-			<-mutationStarted
-			select {
-			case err := <-mutationDone:
-				t.Fatalf("route generation mutation interleaved before lifecycle/reply completion: %v", err)
-			case <-time.After(50 * time.Millisecond):
-			}
-
-			close(releaseActivation)
-			if err := <-applyDone; err != nil {
-				t.Fatalf("generation-linearized apply: %v", err)
-			}
-			if err := <-mutationDone; err != nil {
-				t.Fatalf("route generation mutation after apply: %v", err)
-			}
-			if activations.Load() != 1 || replyStore.creates != 1 {
-				t.Fatalf("linearized apply effects = activations:%d replies:%d, want one each", activations.Load(), replyStore.creates)
-			}
-		})
 	}
 }
 
@@ -1951,7 +1854,7 @@ func TestTemplateInstanceLifecycleUsesResolutionModeWithoutContractPolicyFallbac
 				source = connectRoutePlanCarriedKeyResolutionSource(t, tc.mode)
 			}
 			plan := mustInstanceKeyConnectRoutePlan(t, source)
-			owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil)
+			owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil, nil)
 			materialization, decision, handled, err := owner.Materialize(context.Background(), evt, plan, values, descriptors)
 			if err != nil {
 				t.Fatalf("Materialize: %v", err)
@@ -1982,7 +1885,7 @@ func TestTemplateInstanceLifecycleDecisionAndActivationConfigContainNoPolicyFact
 	}
 	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
 		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-	owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil)
+	owner := newTemplateInstanceLifecycleOwner(source, nil, nil, nil, nil)
 	request, decision, failure := owner.activationRequest(evt, plan, instanceContract, []runtimecontracts.TemplateInstanceKeyValue{{
 		Field: plan.InstanceKey().Field(),
 		Value: "acct-1",
@@ -2129,6 +2032,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 				InstanceID:    "one",
 				EntityID:      eventtest.UUID("ent-1"),
 				FlowInstance:  "account/one",
+				FlowTemplate:  "account",
 				AddressFields: map[string]string{"entity.account_id": "acct-1"},
 			}},
 		},
@@ -2185,6 +2089,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceA
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("account", "drift")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
 	}
+	store.flowInstanceDescriptorCalls = 0
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
 	}, nil); err != nil {
@@ -2316,6 +2221,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 				InstanceID:    "one",
 				EntityID:      eventtest.UUID("ent-1"),
 				FlowInstance:  "account/one",
+				FlowTemplate:  "account",
 				AddressFields: map[string]string{"entity.account_id": "acct-1"},
 			}},
 		},
@@ -2419,6 +2325,7 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("account", "drift")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
 	}
+	store.flowInstanceDescriptorCalls = 0
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: missing, Scope: runtimepipelineobligation.ScopeSubscribed,
 	}, nil); err != nil {
@@ -2470,8 +2377,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionDoesNotReuseUnr
 	if routes := eb.RouteTable().MaterializedRoutes(store.activations[0].Instance.Route()); len(routes) != 0 {
 		t.Fatalf("materialized routes after failed activation = %#v, want none", routes)
 	}
-	if routes := store.routes[eventID]; len(routes) != 0 {
-		t.Fatalf("persisted delivery routes = %#v, want none when activation failure is preserved", routes)
+	if routes := store.routes[eventID]; len(routes) != 1 {
+		t.Fatalf("persisted delivery routes = %#v, want the durable route to survive process-local activation failure", routes)
 	}
 }
 
@@ -3032,6 +2939,7 @@ func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescri
 	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "two")}); err != nil {
 		t.Fatalf("AddFlowInstanceRoute(two): %v", err)
 	}
+	store.flowInstanceDescriptorCalls = 0
 
 	if _, err := eb.RecoverPersistedPipeline(context.Background(), runtimepipelineobligation.ClaimedWork{
 		Event: evt, Scope: runtimepipelineobligation.ScopeSubscribed,
@@ -3549,7 +3457,7 @@ func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventN
 		}}, nil)),
 		generation: generation, authorizations: []runtimeprovideroutput.Authorization{authorization},
 	}
-	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil)
+	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil, nil)
 	externalSource, err := events.NewExternalIngressRoutingSource("consumer", eventtest.UUID("provider-ingress"), events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {
 		t.Fatalf("external routing source: %v", err)

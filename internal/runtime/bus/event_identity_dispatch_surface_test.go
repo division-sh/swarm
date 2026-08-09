@@ -38,11 +38,9 @@ import (
 
 type completeEventDispatchStore interface {
 	runtimebus.EventStore
+	runtimepipeline.WorkflowPersistenceOwner
 	runtimedelivery.Store
 	runtimemanager.ManagerPersistence
-	interface {
-		RunRuntimeMutationContext(context.Context, func(context.Context) error) error
-	}
 	runtimerunlifecycle.OperationOwner
 	decisioncard.Store
 	decisioncard.ProposedEffectStore
@@ -246,7 +244,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	switch backend {
 	case "sqlite":
 		sqlite := storetest.StartSQLiteRuntimeStore(t)
-		selected, db = sqlite, sqlite.DB
+		selected, db = sqlite, storetest.DatabaseForTest(sqlite)
 	case "postgres":
 		_, postgresDB, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
@@ -264,11 +262,11 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	runID, eventID := uuid.NewString(), uuid.NewString()
 	if origin.Kind() == runtimerunlifecycle.OriginStandingGeneration {
 		runID = runtimeflowidentity.StandingGenerationRunID(origin.ServiceID(), origin.Generation())
-		workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+		workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
 		if backend == "sqlite" {
-			workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected.(*store.SQLiteRuntimeStore))
+			workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected.(*store.SQLiteRuntimeStore))
 		}
-		workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, db, runtimepipeline.PipelineCoordinatorOptions{
+		workflow := runtimepipeline.NewPipelineCoordinatorWithOptions(bus, runtimepipeline.PipelineCoordinatorOptions{
 			Module:                  standingDispatchWorkflowModule{},
 			Persistence:             workflowPersistence,
 			RunLifecycle:            selected,
@@ -279,8 +277,6 @@ func newCompleteEventDispatchFixtureWithOrigin(
 			HumanTasks:              selected,
 			DecisionCardDraftExpiry: selected,
 			HumanTaskExpiry:         selected,
-			GatePublisher:           bus,
-			DirectDecisionPublisher: bus,
 			DeliveryRuntime:         bus,
 			ReceiverExecution:       eventreceiver.NormalExecution(),
 		})

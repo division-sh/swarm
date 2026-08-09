@@ -78,6 +78,10 @@ func workflowLoopGenerationCurrent(instance *WorkflowInstance, generation attemp
 		(strings.TrimSpace(expectedStage) == "" || activation.CurrentStage == strings.TrimSpace(expectedStage)), nil
 }
 
+func WorkflowLoopGenerationCurrent(metadata, stateBuckets map[string]any, generation attemptgeneration.Generation, expectedStage string) (bool, error) {
+	return workflowLoopGenerationCurrent(&WorkflowInstance{Metadata: metadata, StateBuckets: stateBuckets}, generation, expectedStage)
+}
+
 func loopPlanOwnsStage(source semanticview.Source, flowID, loopID, stage string) bool {
 	for _, plan := range semanticview.WorkflowLoops(source) {
 		if strings.TrimSpace(plan.ID) != strings.TrimSpace(loopID) || !loopFlowIDMatches(source, plan.FlowID, flowID) {

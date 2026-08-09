@@ -2,7 +2,6 @@ package runforkexecution
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"time"
@@ -51,8 +50,8 @@ type SelectedContractRuntimeExecutionLifecycle interface {
 // selected-fork event commit.
 type SelectedContractReplayPersistence interface {
 	EnsureRunForkNoPostForkCommittedReplayScopeMarkers(context.Context, string, string) error
-	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string) ([]runfork.RunForkSelectedContractSourceEvent, error)
-	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.EventAppendOutcome, error)
+	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, []runfork.RunForkSelectedContractWorkflowState) ([]runfork.RunForkSelectedContractSourceEvent, error)
+	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error)
 }
 
 // SelectedContractExecutionOwner is an opaque construction value. Only this
@@ -63,7 +62,6 @@ type SelectedContractExecutionOwner struct {
 }
 
 type selectedContractExecutionPorts struct {
-	db                      *sql.DB
 	workflow                runtimepipeline.WorkflowPersistence
 	fork                    SelectedContractForkLifecycle
 	runtimeExecution        SelectedContractRuntimeExecutionLifecycle
@@ -89,7 +87,6 @@ type selectedContractExecutionPorts struct {
 }
 
 func NewSelectedContractExecutionOwner(
-	db *sql.DB,
 	workflow runtimepipeline.WorkflowPersistence,
 	fork SelectedContractForkLifecycle,
 	runtimeExecution SelectedContractRuntimeExecutionLifecycle,
@@ -117,7 +114,6 @@ func NewSelectedContractExecutionOwner(
 		name  string
 		value any
 	}{
-		{"database", db},
 		{"fork lifecycle", fork}, {"runtime execution lifecycle", runtimeExecution}, {"replay persistence", replay},
 		{"event store", events},
 		{"event run lifecycle", busDurable.RunLifecycle}, {"event delivery lifecycle", busDurable.DeliveryLifecycle},
@@ -146,7 +142,7 @@ func NewSelectedContractExecutionOwner(
 		return SelectedContractExecutionOwner{}, errors.New("selected-contract execution requires valid workflow persistence")
 	}
 	return SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{
-		db: db, workflow: workflow, fork: fork, runtimeExecution: runtimeExecution, replay: replay,
+		workflow: workflow, fork: fork, runtimeExecution: runtimeExecution, replay: replay,
 		events: events, busDurable: busDurable, pipelineObligations: pipelineObligations,
 		manager: manager, managerRoles: managerRoles, effects: effects, completion: completion,
 		completionHeartbeat: completionHeartbeat, liveSessions: liveSessions, managedCapabilities: managedCapabilities,

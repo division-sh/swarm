@@ -73,6 +73,8 @@ type EventBus struct {
 	logger                      LoggerHook
 	semanticSource              semanticview.Source
 	templateInstanceActivator   runtimepipeline.FlowInstanceActivator
+	templateInstancePlanner     runtimepipeline.FlowInstanceActivationPlanner
+	flowActivationFinalizer     runtimepipeline.CommittedFlowInstanceActivationFinalizer
 	payloadValidator            PayloadValidator
 	recipientPlanAdmissionGuard PublishRecipientPlanAdmissionGuard
 	recipientPlanMaterializer   PublishRecipientPlanMaterializer
@@ -209,8 +211,6 @@ func (t *PipelineParentTransition) Done() {
 
 type LocalDelivery = worklifetime.EventDelivery
 
-type transactionRouteOverlayKey struct{}
-
 func (eb *EventBus) PipelineObligationOwner() runtimepipelineobligation.Store {
 	if eb == nil {
 		return nil
@@ -223,35 +223,6 @@ func (eb *EventBus) RunLifecycleCandidateOwner() runtimerunlifecycle.OperationOw
 		return nil
 	}
 	return eb.durable.RunLifecycle
-}
-
-type transactionRouteOverlay struct {
-	table *RouteTable
-}
-
-func (eb *EventBus) withTransactionRouteOverlay(ctx context.Context) (context.Context, error) {
-	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); !active {
-		return ctx, nil
-	}
-	if overlay, _ := ctx.Value(transactionRouteOverlayKey{}).(*transactionRouteOverlay); overlay != nil && overlay.table != nil {
-		return ctx, nil
-	}
-	table, err := DeriveRouteTable(eb.semanticSource)
-	if err != nil {
-		return nil, fmt.Errorf("derive transaction-local route table: %w", err)
-	}
-	return context.WithValue(ctx, transactionRouteOverlayKey{}, &transactionRouteOverlay{table: table}), nil
-}
-
-func transactionRouteTableFromContext(ctx context.Context) *RouteTable {
-	if ctx == nil {
-		return nil
-	}
-	overlay, _ := ctx.Value(transactionRouteOverlayKey{}).(*transactionRouteOverlay)
-	if overlay == nil {
-		return nil
-	}
-	return overlay.table
 }
 
 type PublishRecipientPlan struct {
@@ -301,6 +272,8 @@ type EventBusOptions struct {
 	ContractBundle              semanticview.Source
 	RouteTable                  *RouteTable
 	TemplateInstanceActivator   runtimepipeline.FlowInstanceActivator
+	TemplateInstancePlanner     runtimepipeline.FlowInstanceActivationPlanner
+	FlowActivationFinalizer     runtimepipeline.CommittedFlowInstanceActivationFinalizer
 	PayloadValidator            PayloadValidator
 	RecipientPlanAdmissionGuard PublishRecipientPlanAdmissionGuard
 	RecipientPlanMaterializer   PublishRecipientPlanMaterializer
@@ -545,6 +518,8 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		interceptorProvider:         opts.InterceptorProvider,
 		semanticSource:              semanticSource,
 		templateInstanceActivator:   opts.TemplateInstanceActivator,
+		templateInstancePlanner:     opts.TemplateInstancePlanner,
+		flowActivationFinalizer:     opts.FlowActivationFinalizer,
 		payloadValidator:            opts.PayloadValidator,
 		recipientPlanAdmissionGuard: opts.RecipientPlanAdmissionGuard,
 		recipientPlanMaterializer:   opts.RecipientPlanMaterializer,
@@ -593,7 +568,7 @@ func (eb *EventBus) rebuildRoutePlanners() {
 	if eb == nil {
 		return
 	}
-	eb.connectRoutePlanner = newConnectRoutePlanResolver(eb.semanticSource, eb.routeTable, eb.PinRoutingDescriptors, eb.templateInstanceActivator, eb.durable.ReplyContext)
+	eb.connectRoutePlanner = newConnectRoutePlanResolver(eb.semanticSource, eb.routeTable, eb.PinRoutingDescriptors, eb.templateInstanceActivator, eb.templateInstancePlanner, eb.durable.ReplyContext)
 	eb.connectRoutePlanner.loadAgents = eb.activeAgentDescriptors
 	eb.deliveryPlanner = eb.newEventBusDeliveryPlanner()
 }
@@ -799,13 +774,9 @@ func (eb *EventBus) deriveFlowInstanceRouteTopology(
 	include *FlowInstanceRouteMaterializationRequest,
 	exclude runtimeflowidentity.Route,
 ) (*RouteTable, []runtimeflowidentity.Route, error) {
-	staged := transactionRouteTableFromContext(ctx)
-	if staged == nil {
-		var err error
-		staged, err = DeriveRouteTable(table.source)
-		if err != nil {
-			return nil, nil, fmt.Errorf("derive persisted flow-instance route table: %w", err)
-		}
+	staged, err := DeriveRouteTable(table.source)
+	if err != nil {
+		return nil, nil, fmt.Errorf("derive persisted flow-instance route table: %w", err)
 	}
 	descriptors, err := eb.activeFlowInstanceDescriptorsForSemanticSource(ctx, lister)
 	if err != nil {
@@ -947,13 +918,21 @@ func (eb *EventBus) StageFlowInstanceRouteContext(ctx context.Context, req FlowI
 }
 
 func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowInstanceRouteMaterializationRequest) error {
+	if err := eb.StageFlowInstanceRouteContext(ctx, req); err != nil {
+		return err
+	}
+	return eb.PublishPersistedFlowInstanceRoute(req)
+}
+
+func (eb *EventBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) error {
+	return eb.RemoveFlowInstanceRouteContext(context.Background(), identity)
+}
+
+// RetireCommittedFlowInstanceRoute applies selected-store commit evidence to
+// process-local routing. Durable route retirement has already committed.
+func (eb *EventBus) RetireCommittedFlowInstanceRoute(identity runtimeflowidentity.Route) error {
 	if eb == nil {
 		return errors.New("event bus is required")
-	}
-	var err error
-	ctx, err = eb.admitBundleSourceFact(ctx)
-	if err != nil {
-		return err
 	}
 	eb.mu.RLock()
 	table := eb.routeTable
@@ -961,85 +940,7 @@ func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowIns
 	if table == nil {
 		return errors.New("route table is not initialized")
 	}
-	req = req.Normalized()
-	hadRoute := table.HasFlowInstanceRoute(req.Identity)
-	if _, txActive := runtimepipeline.PipelineSQLTxFromContext(ctx); txActive && !hadRoute {
-		staged := transactionRouteTableFromContext(ctx)
-		if staged == nil {
-			var err error
-			staged, err = DeriveRouteTable(table.source)
-			if err != nil {
-				return fmt.Errorf("derive transaction-local flow-instance route table: %w", err)
-			}
-		}
-		hadStagedRoute := staged.HasFlowInstanceRoute(req.Identity)
-		if err := staged.addFlowInstanceRouteForContext(ctx, req); err != nil {
-			return err
-		}
-		routes := staged.MaterializedRoutes(req.Identity)
-		persister := eb.durable.FlowRoutes
-		if persister == nil {
-			return errors.New("transactional flow-instance route persistence is required")
-		}
-		for _, route := range routes {
-			if err := persister.UpsertFlowInstanceRoute(ctx, route); err != nil {
-				return err
-			}
-		}
-		if !hadStagedRoute {
-			postCommitCtx := runtimepipeline.WithoutPipelineSQLConnContext(
-				runtimepipeline.WithoutPipelineSQLTxContext(context.WithoutCancel(ctx)),
-			)
-			if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(context.Context) {
-				if err := table.AddFlowInstanceRoute(req); err != nil {
-					_ = eb.LogRuntime(postCommitCtx, runtimepipeline.RuntimeLogEntry{
-						Level: "error", Message: "Post-commit flow-instance route publication failed",
-						Component: "eventbus", Action: "flow_instance_route_post_commit_publish_failed",
-						Detail: map[string]any{"instance_path": req.Identity.InstancePath, "error": err.Error()},
-					})
-				}
-			}) {
-				return errors.New("transactional flow-instance route requires post-commit publication owner")
-			}
-		}
-		return nil
-	}
-	if err := table.addFlowInstanceRouteForContext(ctx, req); err != nil {
-		return err
-	}
-	addedRoute := !hadRoute && table.HasFlowInstanceRoute(req.Identity)
-	if addedRoute {
-		if _, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok {
-			if !runtimepipeline.QueuePipelineRollbackAction(ctx, func(context.Context) {
-				_ = table.RemoveFlowInstanceRoute(req.Identity)
-			}) {
-				_ = table.removeFlowInstanceRouteForContext(ctx, req.Identity)
-				return errors.New("flow-instance route rollback action is required in pipeline transaction")
-			}
-		}
-	}
-	persister := eb.durable.FlowRoutes
-	if persister == nil {
-		return nil
-	}
-	routes := table.MaterializedRoutes(req.Identity)
-	if len(routes) == 0 {
-		return nil
-	}
-	for _, route := range routes {
-		if err := persister.UpsertFlowInstanceRoute(ctx, route); err != nil {
-			if addedRoute {
-				_ = eb.durable.FlowRouteRollback.RollbackFlowInstanceRoute(ctx, route.Identity)
-				_ = table.removeFlowInstanceRouteForContext(ctx, route.Identity)
-			}
-			return err
-		}
-	}
-	return nil
-}
-
-func (eb *EventBus) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) error {
-	return eb.RemoveFlowInstanceRouteContext(context.Background(), identity)
+	return table.removeFlowInstanceRouteForContext(context.Background(), identity)
 }
 
 func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity runtimeflowidentity.Route) error {
@@ -1085,17 +986,6 @@ func (eb *EventBus) RemoveFlowInstanceRouteContext(ctx context.Context, identity
 	identities = append(identities, owner)
 	sort.Slice(identities, func(i, j int) bool { return identities[i].InstancePath < identities[j].InstancePath })
 	sets := flowInstanceRouteTopologyRecordSets(staged, identities)
-	if _, active := runtimepipeline.PipelineSQLTxFromContext(ctx); active {
-		if err := persister.ReplaceFlowInstanceRouteTopology(ctx, sets); err != nil {
-			return err
-		}
-		if !runtimepipeline.QueuePipelinePostCommitAction(ctx, func(context.Context) {
-			_ = table.RemoveFlowInstanceRoute(owner)
-		}) {
-			return errors.New("flow-instance route removal requires post-commit process retirement owner")
-		}
-		return nil
-	}
 	if err := persister.ReplaceFlowInstanceRouteTopology(ctx, sets); err != nil {
 		return err
 	}

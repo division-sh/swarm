@@ -13,9 +13,10 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	runforkrevision "github.com/division-sh/swarm/internal/runtime/runforkrevision"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -205,7 +206,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			at := time.Now().UTC()
 			storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 			if !tc.explicitSelector {
-				storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, uuid.NewString(), runID, "platform.precursor",
+				storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, uuid.NewString(), runID, "platform.precursor",
 					eventtest.Producer(events.EventProducerExternal, "platform"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at.Add(-time.Second))
 				captureRunForkRevision(t, ctx, db, runID)
 			}
@@ -232,7 +233,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 					}
 				}
 			} else {
-				storetest.InsertCanonicalEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres, event)
+				storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, event)
 			}
 			captureRunForkRevision(t, ctx, db, runID)
 

@@ -1,0 +1,403 @@
+package schemastore
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+)
+
+func TestSchemaFieldTypeToDDL(t *testing.T) {
+	cases := []struct {
+		schemaType string
+		wantDDL    string
+	}{
+		{schemaType: "text", wantDDL: "TEXT"},
+		{schemaType: "string", wantDDL: "TEXT"},
+		{schemaType: "integer", wantDDL: "BIGINT"},
+		{schemaType: "float", wantDDL: "DOUBLE PRECISION"},
+		{schemaType: "numeric", wantDDL: "NUMERIC"},
+		{schemaType: "numeric(12,2)", wantDDL: "NUMERIC(12,2)"},
+		{schemaType: "boolean", wantDDL: "BOOLEAN"},
+		{schemaType: "jsonb", wantDDL: "JSONB"},
+		{schemaType: "timestamp", wantDDL: "TIMESTAMPTZ"},
+		{schemaType: "uuid", wantDDL: "UUID"},
+		{schemaType: "text[]", wantDDL: "TEXT[]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.schemaType, func(t *testing.T) {
+			got, err := SchemaFieldTypeToDDL(tc.schemaType)
+			if err != nil {
+				t.Fatalf("SchemaFieldTypeToDDL(%q): %v", tc.schemaType, err)
+			}
+			if got != tc.wantDDL {
+				t.Fatalf("SchemaFieldTypeToDDL(%q) = %q, want %q", tc.schemaType, got, tc.wantDDL)
+			}
+		})
+	}
+}
+
+func TestSchemaFieldTypeToDDLError(t *testing.T) {
+	if _, err := SchemaFieldTypeToDDL("object"); err == nil || !errors.Is(err, ErrUnknownSchemaType) {
+		t.Fatalf("expected unknown schema type error, got %v", err)
+	}
+	if _, err := SchemaFieldTypeToDDL("numeric (12,2)"); err == nil || !errors.Is(err, ErrUnknownSchemaType) {
+		t.Fatalf("expected spaced numeric type to fail fast, got %v", err)
+	}
+}
+
+func TestNodeStateFieldTypeToDDL_AllowsNamedTypesAsJSONB(t *testing.T) {
+	cases := map[string]string{
+		"DimensionScore":   "JSONB",
+		"[DimensionScore]": "JSONB",
+		"DimensionScore[]": "JSONB",
+		"text[]":           "TEXT[]",
+	}
+	for schemaType, wantDDL := range cases {
+		t.Run(schemaType, func(t *testing.T) {
+			got, err := NodeStateFieldTypeToDDL(schemaType)
+			if err != nil {
+				t.Fatalf("NodeStateFieldTypeToDDL(%q): %v", schemaType, err)
+			}
+			if got != wantDDL {
+				t.Fatalf("NodeStateFieldTypeToDDL(%q) = %q, want %q", schemaType, got, wantDDL)
+			}
+		})
+	}
+}
+
+func TestGeneratePlatformTableDDLs(t *testing.T) {
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"events": {
+			DDL: "CREATE TABLE events (\n    event_id UUID PRIMARY KEY,\n    entity_id UUID NOT NULL,\n    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_events_entity (entity_id, created_at)\n);",
+		},
+		"flow_instances": {
+			DDL: "CREATE TABLE flow_instances (\n    instance_id TEXT PRIMARY KEY,\n    flow_template TEXT NOT NULL\n);",
+		},
+	}
+
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	if len(plans) != 2 {
+		t.Fatalf("expected 2 platform DDL plans, got %d", len(plans))
+	}
+	if plans[0].TableName != "events" {
+		t.Fatalf("unexpected first platform table %q", plans[0].TableName)
+	}
+	if plans[0].ColumnCount != 3 {
+		t.Fatalf("unexpected platform column count %d", plans[0].ColumnCount)
+	}
+	if got := plans[0].Statements[0]; !strings.Contains(got, "CREATE TABLE IF NOT EXISTS events") {
+		t.Fatalf("expected idempotent create table, got %q", got)
+	}
+	if strings.Contains(plans[0].Statements[0], "INDEX idx_events_entity") {
+		t.Fatalf("expected inline index to be extracted from table ddl, got %q", plans[0].Statements[0])
+	}
+	if got := plans[0].Statements[1]; !strings.Contains(got, `CREATE INDEX IF NOT EXISTS "idx_events_entity" ON "events"(entity_id, created_at)`) {
+		t.Fatalf("expected idempotent create index, got %q", got)
+	}
+	if plans[1].TableName != "flow_instances" {
+		t.Fatalf("unexpected second platform table %q", plans[1].TableName)
+	}
+}
+
+func TestGeneratePlatformTableDDLs_ExtractsInlineUniquePartialIndex(t *testing.T) {
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"agent_sessions": {
+			DDL: "CREATE TABLE agent_sessions (\n    session_id UUID PRIMARY KEY,\n    agent_id TEXT NOT NULL,\n    scope_key TEXT NOT NULL,\n    status TEXT NOT NULL,\n    UNIQUE INDEX agent_sessions_nonterminated_unique (agent_id, scope_key) WHERE status <> 'terminated'\n);",
+		},
+	}
+
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	if len(plans) != 1 || len(plans[0].Statements) != 2 {
+		t.Fatalf("plans = %#v", plans)
+	}
+	if got := plans[0].Statements[1]; !strings.Contains(got, `CREATE UNIQUE INDEX IF NOT EXISTS "agent_sessions_nonterminated_unique" ON "agent_sessions"(agent_id, scope_key) WHERE status <> 'terminated'`) {
+		t.Fatalf("unexpected unique partial index statement: %q", got)
+	}
+}
+
+func TestPlatformSpecEntityStateUsesRunScopedIdentity(t *testing.T) {
+	repoRoot := repoRootForRuntimeWriterGuard(t)
+	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	var entityState SchemaTableDDL
+	for _, plan := range plans {
+		if plan.TableName == "entity_state" {
+			entityState = plan
+			break
+		}
+	}
+	if entityState.TableName == "" {
+		t.Fatal("entity_state ddl plan missing")
+	}
+	joined := strings.Join(entityState.Statements, "\n")
+	for _, want := range []string{
+		"run_id            UUID NOT NULL REFERENCES runs(run_id)",
+		"entity_id         UUID NOT NULL",
+		"PRIMARY KEY (run_id, entity_id)",
+		`CREATE INDEX IF NOT EXISTS "idx_entity_flow" ON "entity_state"(run_id, flow_instance, current_state)`,
+		`CREATE INDEX IF NOT EXISTS "idx_entity_cross_run" ON "entity_state"(entity_id)`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("entity_state ddl missing %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "entity_id         UUID PRIMARY KEY") {
+		t.Fatalf("entity_state ddl kept global entity_id primary key:\n%s", joined)
+	}
+}
+
+func TestPlatformSpecOwnsMultiBundleSchemaFoundation(t *testing.T) {
+	repoRoot := repoRootForRuntimeWriterGuard(t)
+	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	var runs SchemaTableDDL
+	var bundles SchemaTableDDL
+	for _, plan := range plans {
+		if plan.TableName == "runs" {
+			runs = plan
+		}
+		if plan.TableName == "bundles" {
+			bundles = plan
+		}
+	}
+	if bundles.TableName == "" {
+		t.Fatal("bundles ddl plan missing")
+	}
+	bundleDDL := strings.Join(bundles.Statements, "\n")
+	for _, want := range []string{
+		"bundle_hash      TEXT PRIMARY KEY",
+		"content_yaml     TEXT NOT NULL",
+		"parsed_json      JSONB NOT NULL",
+		"data_blob        BYTEA",
+		"metadata         JSONB NOT NULL",
+		"ingested_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+		`CREATE INDEX IF NOT EXISTS "idx_bundles_ingested_at" ON "bundles"(ingested_at)`,
+	} {
+		if !strings.Contains(bundleDDL, want) {
+			t.Fatalf("bundles ddl missing %q:\n%s", want, bundleDDL)
+		}
+	}
+	if runs.TableName == "" {
+		t.Fatal("runs ddl plan missing")
+	}
+	joined := strings.Join(runs.Statements, "\n")
+	for _, want := range []string{
+		"bundle_hash        TEXT NOT NULL CHECK",
+		"bundle_source      TEXT NOT NULL CHECK",
+		`CREATE INDEX IF NOT EXISTS "idx_runs_bundle_hash" ON "runs"(bundle_hash) WHERE bundle_hash IS NOT NULL`,
+		`CREATE INDEX IF NOT EXISTS "idx_runs_bundle_source_status" ON "runs"(bundle_source, status, started_at)`,
+		`CREATE INDEX IF NOT EXISTS "idx_runs_bundle_delete_planning" ON "runs"(bundle_hash, status) WHERE bundle_hash IS NOT NULL`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("runs ddl missing %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "bundle_hash TEXT REFERENCES") || strings.Contains(joined, "FOREIGN KEY (bundle_hash)") {
+		t.Fatalf("runs ddl must not create a bundle_hash foreign key:\n%s", joined)
+	}
+	if strings.Contains(joined, "bundle_"+"fingerprint") || strings.Contains(joined, "DEFAULT '"+"legacy'") {
+		t.Fatalf("runs ddl retained legacy bundle identity:\n%s", joined)
+	}
+}
+
+func TestPlatformSchemaConstrainsStandingExecutableProvenance(t *testing.T) {
+	repoRoot := repoRootForRuntimeWriterGuard(t)
+	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	byName := map[string]string{}
+	for _, plan := range plans {
+		byName[plan.TableName] = strings.Join(plan.Statements, "\n")
+	}
+	standing := byName["standing_services"]
+	if standing == "" {
+		t.Fatal("standing_services ddl plan missing")
+	}
+	for _, want := range []string{
+		"current_bundle_hash    TEXT NOT NULL CHECK",
+		"current_bundle_source  TEXT NOT NULL CHECK (current_bundle_source IN ('persisted', 'ephemeral'))",
+	} {
+		if !strings.Contains(standing, want) {
+			t.Fatalf("standing_services ddl missing %q:\n%s", want, standing)
+		}
+	}
+	if strings.Contains(standing, "'deleted'") {
+		t.Fatalf("standing current provenance admits non-executable deleted source:\n%s", standing)
+	}
+	for _, table := range []string{"standing_service_generations", "standing_service_journal"} {
+		ddl := byName[table]
+		if ddl == "" {
+			t.Fatalf("%s ddl plan missing", table)
+		}
+		if strings.Contains(ddl, "bundle_hash") || strings.Contains(ddl, "bundle_source") {
+			t.Fatalf("%s duplicates bundle identity:\n%s", table, ddl)
+		}
+	}
+}
+
+func TestPlatformSpecEventReceiptsUsesTypedSubscriberIdentity(t *testing.T) {
+	repoRoot := repoRootForRuntimeWriterGuard(t)
+	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	var receipts SchemaTableDDL
+	for _, plan := range plans {
+		if plan.TableName == "event_receipts" {
+			receipts = plan
+			break
+		}
+	}
+	if receipts.TableName == "" {
+		t.Fatal("event_receipts ddl plan missing")
+	}
+	joined := strings.Join(receipts.Statements, "\n")
+	if !strings.Contains(joined, "UNIQUE (event_id, subscriber_type, subscriber_id)") {
+		t.Fatalf("event_receipts ddl missing typed subscriber identity:\n%s", joined)
+	}
+	if strings.Contains(joined, "UNIQUE (event_id, subscriber_id)") {
+		t.Fatalf("event_receipts ddl kept untyped subscriber identity:\n%s", joined)
+	}
+}
+
+func TestGeneratePlatformTableDDLs_OrdersRunsBeforeEvents(t *testing.T) {
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"events": {
+			DDL: "CREATE TABLE events (\n    event_id UUID PRIMARY KEY,\n    run_id UUID REFERENCES runs(run_id)\n);",
+		},
+		"runs": {
+			DDL: "CREATE TABLE runs (\n    run_id UUID PRIMARY KEY\n);",
+		},
+		"entity_mutations": {
+			DDL: "CREATE TABLE entity_mutations (\n    mutation_id UUID PRIMARY KEY,\n    run_id UUID REFERENCES runs(run_id),\n    caused_by_event UUID REFERENCES events(event_id)\n);",
+		},
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	if len(plans) != 3 {
+		t.Fatalf("expected 3 platform DDL plans, got %d", len(plans))
+	}
+	if plans[0].TableName != "runs" {
+		t.Fatalf("first table = %q, want runs", plans[0].TableName)
+	}
+	if plans[1].TableName != "events" {
+		t.Fatalf("second table = %q, want events", plans[1].TableName)
+	}
+	if plans[2].TableName != "entity_mutations" {
+		t.Fatalf("third table = %q, want entity_mutations", plans[2].TableName)
+	}
+}
+
+func TestGeneratePlatformTableDDLs_OrdersAgentsBeforeIdentityDependents(t *testing.T) {
+	var spec runtimecontracts.PlatformSpecDocument
+	spec.PlatformTables.Tables = map[string]struct {
+		Description string `yaml:"description"`
+		DDL         string `yaml:"ddl"`
+	}{
+		"agent_directive_operations": {
+			DDL: "CREATE TABLE agent_directive_operations (\n    operation_id UUID PRIMARY KEY,\n    agent_id TEXT REFERENCES agents(agent_id)\n);",
+		},
+		"agents": {
+			DDL: "CREATE TABLE agents (\n    agent_id TEXT PRIMARY KEY\n);",
+		},
+	}
+	plans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	if len(plans) != 2 {
+		t.Fatalf("expected 2 platform DDL plans, got %d", len(plans))
+	}
+	if plans[0].TableName != "agents" {
+		t.Fatalf("first table = %q, want agents", plans[0].TableName)
+	}
+	if plans[1].TableName != "agent_directive_operations" {
+		t.Fatalf("second table = %q, want agent_directive_operations", plans[1].TableName)
+	}
+}
+
+func TestGenerateNodeStateTableDDLs(t *testing.T) {
+	nodes := map[string]runtimecontracts.SystemNodeContract{
+		"processing-node": {
+			StateTable: "processing_node_state",
+			StateSchema: runtimecontracts.NodeStateSchema{
+				Fields: []runtimecontracts.NodeStateField{
+					{Name: "attempts", Type: "integer"},
+					{Name: "last_error", Type: "text"},
+					{Name: "score", Type: "float"},
+					{Name: "dimensions_received", Type: "[DimensionScore]"},
+				},
+			},
+		},
+	}
+
+	plans, err := GenerateNodeStateTableDDLs(nodes)
+	if err != nil {
+		t.Fatalf("GenerateNodeStateTableDDLs: %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("expected 1 state DDL plan, got %d", len(plans))
+	}
+	createStmt := plans[0].Statements[0]
+	if !strings.Contains(createStmt, `"entity_id" UUID NOT NULL`) {
+		t.Fatalf("expected entity_id column, got %q", createStmt)
+	}
+	if !strings.Contains(createStmt, `"node_id" TEXT NOT NULL`) {
+		t.Fatalf("expected node_id column, got %q", createStmt)
+	}
+	if !strings.Contains(createStmt, `"attempts" BIGINT`) || !strings.Contains(createStmt, `"last_error" TEXT`) || !strings.Contains(createStmt, `"score" DOUBLE PRECISION`) || !strings.Contains(createStmt, `"dimensions_received" JSONB`) {
+		t.Fatalf("expected state_schema fields, got %q", createStmt)
+	}
+	if !strings.Contains(createStmt, `PRIMARY KEY ("entity_id", "node_id")`) {
+		t.Fatalf("expected composite primary key, got %q", createStmt)
+	}
+}
+
+func TestGenerateNodeStateTableDDLs_RejectsPseudoTypes(t *testing.T) {
+	nodes := map[string]runtimecontracts.SystemNodeContract{
+		"processing-node": {
+			StateTable: "processing_node_state",
+			StateSchema: runtimecontracts.NodeStateSchema{
+				Fields: []runtimecontracts.NodeStateField{
+					{Name: "received_items", Type: "dimension score receipts keyed by dimension name"},
+				},
+			},
+		},
+	}
+
+	_, err := GenerateNodeStateTableDDLs(nodes)
+	if err == nil || !strings.Contains(err.Error(), "not canonical") {
+		t.Fatalf("expected pseudo-type error, got %v", err)
+	}
+}

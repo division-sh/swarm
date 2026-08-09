@@ -16,7 +16,9 @@ import (
 
 var errUnexpectedDurableTestRole = errors.New("unexpected durable EventBus test role")
 
-type unexpectedDurableTestRoles struct{}
+type unexpectedDurableTestRoles struct {
+	runtimerunlifecycle.OperationOwner
+}
 
 func (unexpectedDurableTestRoles) CreateReplyContext(context.Context, runtimereplycontext.Record) error {
 	return errUnexpectedDurableTestRole

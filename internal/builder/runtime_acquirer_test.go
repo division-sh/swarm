@@ -93,10 +93,8 @@ func newTestOwnedEventBus(t testing.TB, store runtimebus.EventStore, opts runtim
 }
 
 func recordBuilderTestDeliveryReceipt(request runtimebus.CommitPublishRequest) error {
-	if request.DeliveryReceipt == nil {
-		return errors.New("builder test delivery receipt is required")
-	}
-	return request.DeliveryReceipt.Record(nil)
+	_ = request
+	return nil
 }
 
 type builderTestDeliveryOwner struct{}

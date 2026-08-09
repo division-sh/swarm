@@ -140,13 +140,8 @@ type testAuthorActivityCatalogRegistrar interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 }
 
-type conformanceRuntimeTestMutationOwner interface {
-	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
-}
-
 type conformanceDurableEventBusStore interface {
 	runtimebus.EventStore
-	conformanceRuntimeTestMutationOwner
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store

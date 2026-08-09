@@ -64,12 +64,12 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				t.Cleanup(cleanup)
 				pg := storetest.AdmitPostgresRuntimeStore(t, postgresDB)
 				seedPostgresInboundGatewayRuntime(t, ctx, postgresDB, pg, runID, entityID, flowInstance, "channel-runtime", "telegram", "unused", "channel-runtime-observer")
-				db, eventStore, workflowPersistence, runLifecycle, deliveryStore = postgresDB, pg, runtimepipeline.NewPostgresWorkflowPersistence(postgresDB, pg), pg, pg
+				db, eventStore, workflowPersistence, runLifecycle, deliveryStore = postgresDB, pg, runtimepipeline.NewWorkflowPersistence(pg), pg, pg
 			} else {
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 				seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "channel-runtime", "telegram", "unused", "channel-runtime-observer")
-				db, eventStore = sqliteStore.DB, sqliteStore
-				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore)
+				db, eventStore = storetest.Database(sqliteStore), sqliteStore
+				workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 				runLifecycle, deliveryStore = sqliteStore, sqliteStore
 			}
 			seedConfiguredChannelBundleIdentity(t, ctx, db, selected, runID, bundleHash)
@@ -124,7 +124,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				t.Fatalf("WithRuntimeTools: %v", err)
 			}
 			var coordinator *runtimepipeline.PipelineCoordinator
-			bus, err := newRuntimeTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{
+			bus, err := newScopedTestEventBus(t, eventStore, runtimebus.EventBusOptions{
 				ContractBundle:   source,
 				BundleSourceFact: testBundleSourceFact(t, bundleHash),
 				InterceptorProvider: func() []runtimebus.EventInterceptor {
@@ -160,8 +160,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				PipelineObligations:  pipelineObligations,
 				Credentials:          credentialStore,
 				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{privateToolID: privateTarget},
-				GatePublisher:        bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-				FlowRoutes: bus,
+				FlowRoutes:           bus,
 			})
 
 			stopActivityNode := startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
@@ -277,8 +276,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				DeliveryStore:       deliveryStore,
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
-				GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-				FlowRoutes: bus,
+				FlowRoutes:          bus,
 				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{
 					privateToolID: replacementTarget,
 				},
@@ -303,8 +301,7 @@ func TestConfiguredChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testin
 				DeliveryStore:       deliveryStore,
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
-				GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-				FlowRoutes: bus,
+				FlowRoutes:          bus,
 				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{
 					replacementToolID: replacementTarget,
 				},
@@ -330,7 +327,7 @@ func startConfiguredChannelActivityNode(t *testing.T, ctx context.Context, coord
 	if coordinator == nil || bus == nil || db == nil {
 		t.Fatal("configured channel claimed-dispatch fixture requires coordinator, bus, and store")
 	}
-	if nodes := coordinator.BackgroundNodes(bus, db); len(nodes) != 0 {
+	if nodes := coordinator.BackgroundNodes(); len(nodes) != 0 {
 		t.Fatalf("configured channel background nodes = %d, want claimed event dispatch only", len(nodes))
 	}
 	return func() {}

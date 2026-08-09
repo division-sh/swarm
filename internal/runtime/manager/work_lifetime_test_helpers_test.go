@@ -72,6 +72,9 @@ func projectManagerTestPersistenceRoles(roles *PersistenceRoles, candidate any) 
 	if roles.AgentRoutes == nil {
 		roles.AgentRoutes, _ = candidate.(AgentRouteBus)
 	}
+	if roles.FlowActivation == nil {
+		roles.FlowActivation, _ = candidate.(FlowInstanceActivationCommitter)
+	}
 	if roles.RouteInstaller == nil {
 		roles.RouteInstaller, _ = candidate.(FlowInstanceRouteContextInstaller)
 	}
