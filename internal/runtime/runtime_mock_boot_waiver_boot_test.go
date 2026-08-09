@@ -2,9 +2,8 @@ package runtime_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
@@ -12,7 +11,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -116,26 +114,28 @@ func fullyMockedBootAgentMemorySource(t *testing.T) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := canonicalrouting.CopyRuntimeAgentMemory(t, canonicalrouting.RuntimeAgentMemoryPackageBacked)
+	agentsPath := filepath.Join(root, "flows", "support", "agents.yaml")
+	agents, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatalf("read package-backed agents: %v", err)
+	}
+	agents = append(agents, []byte("  mock:\n    kind: python\n    module: mocks/backend.py\n")...)
+	if err := os.WriteFile(agentsPath, agents, 0o644); err != nil {
+		t.Fatalf("write package-backed mocked agents: %v", err)
+	}
+	mockPath := filepath.Join(root, "mocks", "backend.py")
+	if err := os.MkdirAll(filepath.Dir(mockPath), 0o755); err != nil {
+		t.Fatalf("create mock module directory: %v", err)
+	}
+	if err := os.WriteFile(mockPath, []byte("def handle(input):\n    return {'text': 'mock'}\n"), 0o644); err != nil {
+		t.Fatalf("write mock module: %v", err)
+	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
-	ids := make([]string, 0, len(bundle.Agents))
-	for id := range bundle.Agents {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	if len(ids) == 0 {
+	if len(bundle.Agents) == 0 {
 		t.Fatal("agent memory fixture unexpectedly declares zero agents")
-	}
-	for id, entry := range bundle.Agents {
-		entry.Mock = mockperformance.Performance{
-			Kind:   "python",
-			Module: "mocks/" + id + ".py",
-			Source: []byte("def handle(input):\n    return {}\n"),
-			Digest: "sha256:" + strings.Repeat("a", 64),
-		}
-		bundle.Agents[id] = entry
 	}
 	return semanticview.Wrap(bundle)
 }
