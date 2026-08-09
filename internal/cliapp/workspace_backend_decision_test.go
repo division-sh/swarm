@@ -3,6 +3,7 @@ package cliapp
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -281,6 +282,105 @@ func TestWorkspaceBackendClaudeCLIUsesEffectivePerAgentMockSelection(t *testing.
 	})
 }
 
+func TestWorkspaceBackendCensusesScopedLiveAgentsHiddenByAmbiguousAliases(t *testing.T) {
+	source := scopedWorkspaceBackendAgentFixture(t)
+	if _, exists := source.AgentEntries()["shared-worker"]; exists {
+		t.Fatal("ambiguous shared-worker unexpectedly survived in flattened agent aliases")
+	}
+	decision, err := DecideWorkspaceBackend(WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), source)
+	if err != nil {
+		t.Fatalf("DecideWorkspaceBackend: %v", err)
+	}
+	if decision.Backend != workspace.BackendDocker || decision.CapabilityClass != workspaceCapabilityExec {
+		t.Fatalf("decision = %#v, want scoped live Claude agents to require Docker", decision)
+	}
+	labels := []string{}
+	for _, reason := range decision.Reasons {
+		if reason.Kind == WorkspaceReasonClaudeCLI {
+			labels = append(labels, reason.AgentID)
+		}
+	}
+	joined := strings.Join(labels, "\n")
+	for _, want := range []string{
+		"project packages/project-a agent shared-worker",
+		"project packages/project-b agent shared-worker",
+		"flow flow-a agent shared-worker",
+		"flow flow-b agent shared-worker",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("Claude workspace reasons = %q, want %q", joined, want)
+		}
+	}
+}
+
+func scopedWorkspaceBackendAgentFixture(t *testing.T) semanticview.Source {
+	return scopedWorkspaceBackendAgentFixtureOptions(t, true)
+}
+
+func TestLocalPreflightAgentCensusIncludesOnlyAmbiguousScopedDeclarations(t *testing.T) {
+	source := scopedWorkspaceBackendAgentFixtureOptions(t, false)
+	if len(source.AgentEntries()) != 0 {
+		t.Fatalf("flattened agent aliases = %#v, want none", source.AgentEntries())
+	}
+	if !sourceDeclaresAgents(source) {
+		t.Fatal("local preflight classified scoped agent declarations as agent-free")
+	}
+}
+
+func scopedWorkspaceBackendAgentFixtureOptions(t *testing.T, includeRootAgent bool) semanticview.Source {
+	t.Helper()
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: scoped-workspace-backend
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+packages:
+  - path: packages/project-a
+  - path: packages/project-b
+flows:
+  - id: flow-a
+    flow: flow-a
+    mode: static
+  - id: flow-b
+    flow: flow-b
+    mode: static
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-workspace-backend\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: string\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	rootAgents := "{}\n"
+	if includeRootAgent {
+		rootAgents = "root-mock:\n  id: root-mock\n  model: regular\n  memory: false\n  mock:\n    kind: python\n    module: mocks/root-mock.py\n"
+	}
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), rootAgents)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "mocks", "root-mock.py"), "def handle(input):\n    return {'text': 'mock'}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+
+	for _, project := range []string{"project-a", "project-b"} {
+		dir := filepath.Join(root, "packages", project)
+		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project+"\nversion: \"1.0.0\"\nflows: []\n")
+		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: regular\n  memory: false\n")
+		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "nodes.yaml"), "{}\n")
+	}
+	for _, flowID := range []string{"flow-a", "flow-b"} {
+		dir := filepath.Join(root, "flows", flowID)
+		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+flowID+"\nmode: static\ninitial_state: active\nstates: [active]\n")
+		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "events.yaml"), "{}\n")
+		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "policy.yaml"), "{}\n")
+		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: regular\n  memory: false\n")
+		writeWorkflowValidationFixtureFile(t, filepath.Join(dir, "nodes.yaml"), "{}\n")
+	}
+
+	repoRoot := RepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func TestWorkspaceBackendReasonsPreserveEveryAgentCapabilityAcrossAggregateClass(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -365,8 +465,8 @@ type staticWorkspaceAgentRuntimeResolver struct {
 	runtime runtimellm.Runtime
 }
 
-func (r staticWorkspaceAgentRuntimeResolver) RuntimeForAgent(models.AgentConfig) (runtimellm.Runtime, error) {
-	return r.runtime, nil
+func (r staticWorkspaceAgentRuntimeResolver) ResolveAgentRuntime(actor models.AgentConfig) (runtimellm.AgentRuntimeResolution, error) {
+	return runtimellm.AgentRuntimeResolution{Actor: actor, Runtime: r.runtime}, nil
 }
 
 func (r recordingForkChatExecutor) ExecuteForkChat(context.Context, store.ConversationForkChatPrepared, string) (store.ConversationForkChatExecution, error) {

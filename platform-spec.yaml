@@ -6047,20 +6047,36 @@ engine:
         selection:
           owner: internal/runtime/llm/selection.ResolveAgentExecutionSelection
           configured_default: llm.backend
+          authored_backend_intent: AgentConfig.LLMBackend
           exact_override: generation-owned AgentConfig.Mock.Configured
+          derived_descriptor:
+            backend: AgentConfig.ResolvedLLMBackend
+            provider: AgentConfig.ResolvedLLMProvider
+            transport: AgentConfig.ResolvedLLMTransport
+            mode: AgentConfig.ExecutionMode
+            model: AgentConfig.ResolvedModel
           rule: >
-            llm.backend is the configured default for agents without an exact mock. A generation-owned exact Python mock
-            selects the mock profile and typed mock execution mode for that agent before model resolution, conversation
-            construction, tool/provider admission, completion authorization, or persistence. The mock profile requires and
-            retains the exact captured artifact. Live selections carry no mock artifact. Missing or conflicting backend,
-            provider, transport, mode, or artifact state is invalid; no downstream reader may infer or override selection.
+            llm.backend is the configured default. Authored AgentConfig.LLMBackend is immutable selection intent, not a
+            writable effective field: an authored live backend must equal the configured default, authored mock requires an
+            exact Python performance, and any unsupported or conflicting combination fails closed. With no conflicting live
+            pin, a generation-owned exact Python mock selects the mock profile and typed mock execution mode before model
+            resolution, conversation construction, tool/provider admission, completion authorization, or persistence.
+            Selection writes only the derived descriptor fields. It never overwrites authored backend, model, mock,
+            capability, or authority fields. The mock profile requires and retains the exact captured artifact. Missing or
+            conflicting backend, provider, transport, mode, or artifact state is invalid; no downstream reader may infer or
+            override selection.
+          model_metadata_rule: >
+            Authored model aliases always resolve against the configured live profile and its llm.models metadata, even when
+            an exact mock selects mock execution. The mock execution profile is not a second model-metadata namespace and
+            cannot invalidate a configured live alias.
           runtime_binding:
             owner: internal/runtime/llm.AgentRuntimeSet
             rule: >
               Every agent conversation is constructed with the concrete runtime selected by its resolved descriptor. The
               configured live adapter and mock adapter are typed lazy slots, not a context-switched runtime multiplexer.
-              Fully mocked sources never construct or consult the unreachable live adapter. Mixed sources bind exact mocked
-              agents to MockRuntime and all other agents to the configured live adapter.
+              The mock slot has an independent canonical constructor and does not require an injected live adapter's factory
+              or live-session dependencies. Fully mocked sources never construct or consult the unreachable live adapter.
+              Mixed sources bind exact mocked agents to MockRuntime and all other agents to the configured live adapter.
             turn_mode_admission:
               owner: internal/runtime/agents.LLMAgent.OnEvent
               rule: >
@@ -6076,7 +6092,7 @@ engine:
             descriptor_consumers:
               - internal/runtime/manager.AgentManager.resolveAgentModel
               - internal/runtime/agents.NewLLMAgentFactory
-              - internal/runtime/llm.AgentRuntimeSet.RuntimeForAgent
+              - internal/runtime/llm.AgentRuntimeSet.ResolveAgentRuntime
               - internal/runtime/runforkexecution.validateSelectedContractAgentExecutionSelections
               - internal/runtime/bootverify.checkerContext model alias validation
             provider_tool_consumers:
@@ -6091,6 +6107,16 @@ engine:
               - persistence and recovery
               - selected-contract ephemeral materialization
               - conversation fork-chat source snapshot
+            lifecycle_rule: >
+              Static spawn, agent_hire, reconfigure, clone, persisted recovery/restart, selected-contract reconstruction, and
+              fork-chat reconstruction re-run canonical selection from authored intent plus the current configured default.
+              Persisted derived fields are observations, not cross-boot authority, and stale derived fields are replaced
+              before admission or construction. Native-tool admission runs only after this resolution and construction uses
+              that same resolved actor/runtime pair.
+            native_capability_rule: >
+              Exact mock selection waives provider-native capability admission because no provider-native process can run;
+              authored native_tools declarations remain legal and unchanged. Independent workspace lifecycle, file, native
+              bash, and exec-tool reasons remain authoritative in workspace selection and are never erased by the waiver.
           fully_mocked_provider_startup_waiver:
             promoted_by: '#2172'
             owner: effective source agent registry entry Mock.Configured fact consumed through ResolveAgentExecutionSelection
@@ -6138,15 +6164,20 @@ engine:
                 failures name the exact effective project/flow node and handler site. Secret and managed-token values are
                 never exposed.
             workspace_classifier_rule: >
-              The workspace backend classifier consumes each effective source-registry entry's Mock.Configured fact. An
+              The workspace backend classifier consumes every canonical project-scoped and flow-scoped declaration plus
+              only flat declarations not represented by a scope. It resolves each declaration's Mock.Configured fact. An
               exact mocked agent contributes no claude_cli process-execution reason, but retains ordinary workspace
               lifecycle/write requirements and any independently declared exec-class capability. Any unmocked claude_cli
-              agent remains exec-capable and host execution is refused with the unmocked agent named.
+              agent remains exec-capable and host execution is refused with the scope-qualified unmocked agent named.
             cli_preflight_rule: >
               Local CLI preflight consumes the typed workspace decision and skips provider credential resolution and
               Claude-specific command proof only when no claude_cli reason remains. Listener admission, retired gateway URL
               rejection, contract-secret admission, workspace lifecycle/source validation, and Docker/image requirements
               selected by independent native or exec-class capabilities are never waived.
+            managed_startup_probe_rule: >
+              Every live Claude CLI managed agent must resolve a concrete runtime implementing
+              StartupVisibleToolSurfaceProber. Absence is a hard startup error; it cannot be skipped and an empty target set
+              is not success. Exact mock and non-Claude selections do not carry this provider-specific obligation.
         authoring:
           runtime_config: A live provider profile may remain selected globally; each exact agent mock selects in-process mock execution for that agent.
           agent_performance:

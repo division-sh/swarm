@@ -61,6 +61,7 @@ type AgentConfig struct {
 	FlowID               string                        `json:"flow_id,omitempty"`
 	Model                string                        `json:"model,omitempty"`
 	LLMBackend           string                        `json:"llm_backend,omitempty"`
+	ResolvedLLMBackend   string                        `json:"resolved_llm_backend,omitempty"`
 	ResolvedModel        string                        `json:"resolved_model,omitempty"`
 	ResolvedLLMProvider  string                        `json:"resolved_llm_provider,omitempty"`
 	ResolvedLLMTransport string                        `json:"resolved_llm_transport,omitempty"`
@@ -133,6 +134,7 @@ func (cfg *AgentConfig) NormalizeRuntimeDescriptor() {
 	cfg.FlowID = strings.TrimSpace(cfg.FlowID)
 	cfg.Model = strings.TrimSpace(cfg.Model)
 	cfg.LLMBackend = strings.TrimSpace(cfg.LLMBackend)
+	cfg.ResolvedLLMBackend = strings.TrimSpace(cfg.ResolvedLLMBackend)
 	cfg.ResolvedModel = strings.TrimSpace(cfg.ResolvedModel)
 	cfg.ResolvedLLMProvider = strings.TrimSpace(cfg.ResolvedLLMProvider)
 	cfg.ResolvedLLMTransport = strings.TrimSpace(cfg.ResolvedLLMTransport)

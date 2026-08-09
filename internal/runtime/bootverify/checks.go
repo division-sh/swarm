@@ -303,7 +303,10 @@ func newCheckerContext(ctx context.Context, source semanticview.Source, opts Opt
 
 func (c *checkerContext) appendAgentModelAliasFindings(findings []Finding, agentLabel, model string, mockConfigured bool) []Finding {
 	if c != nil && c.opts.ValidateModelResolution {
-		selection, err := llmselection.ResolveAgentExecutionSelection(c.opts.LLMProfile, mockConfigured)
+		selection, err := llmselection.ResolveAgentExecutionSelection(llmselection.AgentExecutionSelectionInput{
+			ConfiguredDefault: c.opts.LLMProfile,
+			MockConfigured:    mockConfigured,
+		})
 		if err != nil {
 			return append(findings, Finding{
 				CheckID:  "invalid_field_detection",
@@ -312,12 +315,12 @@ func (c *checkerContext) appendAgentModelAliasFindings(findings []Finding, agent
 				Location: agentLabel,
 			})
 		}
-		resolved, err := llmselection.ResolveModel(selection.Profile, llmselection.ModelResolution{
+		resolved, err := llmselection.ResolveModel(selection.ModelProfile, llmselection.ModelResolution{
 			Model:  model,
 			Models: c.opts.ModelAliases,
 		})
 		if err != nil {
-			backend := strings.TrimSpace(selection.Profile.ID)
+			backend := strings.TrimSpace(selection.ModelProfile.ID)
 			if backend == "" {
 				backend = "selected backend"
 			}
@@ -1001,32 +1004,13 @@ func (c *checkerContext) nativeTools() []Finding {
 			})
 		}
 	}
-	for _, scope := range c.source.ProjectScopes() {
-		scopeLabel := projectScopeLabel(scope.Key, scope.Manifest.Name)
-		for agentID, agent := range scope.Agents {
-			agentID = strings.TrimSpace(agentID)
-			if agentID == "" {
-				continue
-			}
-			addNativeFindings(scopedObjectLabel(scopeLabel, agentID), agent)
-		}
+	declarations := semanticview.AgentDeclarations(c.source)
+	localIDCounts := map[string]int{}
+	for _, declaration := range declarations {
+		localIDCounts[declaration.LocalID]++
 	}
-	for _, scope := range c.source.FlowScopes() {
-		scopeLabel := flowScopeLabel(scope.ID, scope.Path)
-		for agentID, agent := range scope.Agents {
-			agentID = strings.TrimSpace(agentID)
-			if agentID == "" {
-				continue
-			}
-			addNativeFindings(scopedObjectLabel(scopeLabel, agentID), agent)
-		}
-	}
-	for agentID, agent := range c.source.AgentEntries() {
-		agentID = strings.TrimSpace(agentID)
-		if agentID == "" {
-			continue
-		}
-		addNativeFindings(agentID, agent)
+	for _, declaration := range declarations {
+		addNativeFindings(declaration.Label(localIDCounts[declaration.LocalID] > 1), declaration.Entry)
 	}
 	return uniqueFindings(c.nativeFindings)
 }
@@ -1410,24 +1394,6 @@ func sortedSetKeys(items map[string]struct{}) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func anyAgentNeedsNativeCapability(source semanticview.Source, capability string) bool {
-	if source == nil {
-		return false
-	}
-	capability = strings.TrimSpace(capability)
-	if capability == "" {
-		return false
-	}
-	for _, agent := range source.AgentEntries() {
-		raw, ok := agent.NativeTools[capability]
-		flag, isBool := raw.(bool)
-		if ok && isBool && flag {
-			return true
-		}
-	}
-	return false
 }
 
 var bootverifyEntityReferencePattern = regexp.MustCompile(`entity\.([a-zA-Z_][a-zA-Z0-9_]*)`)

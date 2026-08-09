@@ -16,7 +16,7 @@ func TestPersistedAgentProjectionRejectsLiveDescriptorWithMockArtifact(t *testin
 	identity := testAgentIdentity(t, "live-agent-with-inactive-artifact", "")
 	_, err := projectPersistedAgentConfig(runtimeactors.AgentConfig{
 		ID: "live-agent-with-inactive-artifact", Identity: identity, Role: "reviewer", Model: "regular", LLMBackend: "anthropic",
-		ExecutionMode: runtimeeffects.ExecutionModeLive, Memory: agentmemory.PlatformDefault(),
+		ResolvedLLMBackend: "anthropic", ExecutionMode: runtimeeffects.ExecutionModeLive, Memory: agentmemory.PlatformDefault(),
 		Mock: mockperformance.Performance{Kind: mockperformance.KindPython, Module: "mocks/reviewer.py", Source: []byte("def handle(input): return {'text': 'mock'}\n"), Digest: "sha256:test"},
 	}, "")
 	if err == nil || !strings.Contains(err.Error(), "live runtime descriptor cannot carry a mock performance artifact") {

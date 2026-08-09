@@ -41,13 +41,14 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared stor
 	}
 	ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	actor := conversationForkChatActor(prepared)
-	modelRuntime, err := e.Runtimes.RuntimeForAgent(actor)
+	resolved, err := e.Runtimes.ResolveAgentRuntime(actor)
 	if err != nil {
 		return store.ConversationForkChatExecution{}, fmt.Errorf("resolve conversation fork chat llm runtime: %w", err)
 	}
+	actor = resolved.Actor
 	tools := conversationForkChatToolDefinitions(prepared)
 	toolExec := newConversationForkChatToolExecutor(prepared)
-	conv := runtimellm.NewConversation(actor.ID, prepared.Fork.ForkID, conversationForkChatSystemPrompt(prepared), tools, agentmemory.PlatformDefault(), 8, modelRuntime)
+	conv := runtimellm.NewConversation(actor.ID, prepared.Fork.ForkID, conversationForkChatSystemPrompt(prepared), tools, agentmemory.PlatformDefault(), 8, resolved.Runtime)
 	conv.SetToolExecutor(toolExec)
 	ctx = runtimeactors.WithActor(ctx, actor)
 	ctx = runtimeeffects.WithExecutionMode(ctx, actor.ExecutionMode)

@@ -487,7 +487,6 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 			Type:          "stub",
 			Role:          "test",
 			Model:         "regular",
-			LLMBackend:    "claude_cli",
 		},
 		Status: "active",
 	}

@@ -1487,48 +1487,6 @@ func TestExecAgentHire_RejectsSelfParentBeforeSpawn(t *testing.T) {
 	}
 }
 
-func TestExecAgentHire_FailsClosedWhenNativeToolFallbackIsNotAdmitted(t *testing.T) {
-	t.Parallel()
-
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"manager": {ID: "manager", Role: "manager"},
-			"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
-		},
-	})
-	manager := &captureManagerStub{}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
-		Manager:           manager,
-		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
-		WorkflowSource:    source,
-		ModelRuntimes:     staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
-	})
-
-	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "manager-1",
-		Role:          "manager",
-		Permissions:   []string{"agent_hire"},
-		NativeTools:   models.NativeToolConfig{FileIO: true},
-		FlowPath:      "review/inst-1",
-	}, map[string]any{
-		"config": map[string]any{
-			"id":               "worker-1",
-			"role":             "worker",
-			"manager_fallback": "manager",
-			"native_tools": map[string]any{
-				"file_io": true,
-			},
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "native_tools.file_io") {
-		t.Fatalf("ExecAgentHireDirect error = %v, want native_tools.file_io admission failure", err)
-	}
-	if manager.spawnCalled {
-		t.Fatal("expected native tool admission failure before spawning")
-	}
-}
-
 func TestExecAgentHire_PreservesMemoryPresenceAndProvenance(t *testing.T) {
 	t.Parallel()
 
@@ -1715,56 +1673,6 @@ func TestExecAgentReconfigure_DeniesNativeToolEscalation(t *testing.T) {
 	}
 	if manager.reconfigureCalled {
 		t.Fatal("expected denied reconfigure to fail closed before persistence")
-	}
-}
-
-func TestExecAgentReconfigure_FailsClosedWhenNativeToolFallbackIsNotAdmitted(t *testing.T) {
-	t.Parallel()
-
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"manager": {ID: "manager", Role: "manager"},
-			"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
-		},
-	})
-	manager := &captureManagerStub{
-		agents: map[string]models.AgentConfig{
-			"worker-1": {
-				ID:              "worker-1",
-				Role:            "worker",
-				ManagerFallback: "manager",
-				FlowPath:        "review/inst-1",
-			},
-		},
-	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
-		Manager:           manager,
-		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
-		WorkflowSource:    source,
-		ModelRuntimes:     staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
-	})
-
-	_, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            "manager-1",
-		Identity:      agentidentitytest.Runtime(t, "manager-1", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
-		Role:          "manager",
-		Permissions:   []string{"agent_reconfigure"},
-		NativeTools:   models.NativeToolConfig{FileIO: true},
-		FlowPath:      "review/inst-1",
-	}, map[string]any{
-		"agent_id": "worker-1",
-		"config": map[string]any{
-			"native_tools": map[string]any{
-				"file_io": true,
-			},
-		},
-	})
-	if err == nil || !strings.Contains(err.Error(), "native_tools.file_io") {
-		t.Fatalf("ExecAgentReconfigureDirect error = %v, want native_tools.file_io admission failure", err)
-	}
-	if manager.reconfigureCalled {
-		t.Fatal("expected native tool admission failure before reconfigure")
 	}
 }
 

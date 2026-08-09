@@ -94,12 +94,22 @@ func validateSelectedBackendModelAliasesForDeclaredAgents(cfg *config.Config, so
 	if err != nil {
 		return err
 	}
-	for agentID, agent := range source.AgentEntries() {
-		selection, err := llmselection.ResolveAgentExecutionSelection(profile, agent.Mock.Configured())
+	declarations := semanticview.AgentDeclarations(source)
+	localIDCounts := map[string]int{}
+	for _, declaration := range declarations {
+		localIDCounts[declaration.LocalID]++
+	}
+	for _, declaration := range declarations {
+		agent := declaration.Entry
+		agentID := declaration.Label(localIDCounts[declaration.LocalID] > 1)
+		selection, err := llmselection.ResolveAgentExecutionSelection(llmselection.AgentExecutionSelectionInput{
+			ConfiguredDefault: profile,
+			MockConfigured:    agent.Mock.Configured(),
+		})
 		if err != nil {
 			return fmt.Errorf("agent %s execution selection failed: %w", strings.TrimSpace(agentID), err)
 		}
-		if _, err := llmselection.ResolveModel(selection.Profile, llmselection.ModelResolution{
+		if _, err := llmselection.ResolveModel(selection.ModelProfile, llmselection.ModelResolution{
 			Model:  agent.Model,
 			Models: cfg.LLM.Models,
 		}); err != nil {
@@ -142,13 +152,18 @@ func declaredAgentMockCensus(source semanticview.Source) (mocked, total int, unm
 	if source == nil {
 		return 0, 0, nil
 	}
-	entries := source.AgentEntries()
+	entries := semanticview.AgentDeclarations(source)
 	total = len(entries)
-	for id, agent := range entries {
+	localIDCounts := map[string]int{}
+	for _, declaration := range entries {
+		localIDCounts[declaration.LocalID]++
+	}
+	for _, declaration := range entries {
+		agent := declaration.Entry
 		if agent.Mock.Configured() {
 			mocked++
 		} else {
-			unmocked = append(unmocked, strings.TrimSpace(id))
+			unmocked = append(unmocked, declaration.Label(localIDCounts[declaration.LocalID] > 1))
 		}
 	}
 	sort.Strings(unmocked)
@@ -225,7 +240,7 @@ func workflowSourceDeclaresAgents(source semanticview.Source) (bool, error) {
 	if source == nil {
 		return false, fmt.Errorf("semantic source is required for claude cli runtime")
 	}
-	return len(source.AgentEntries()) > 0, nil
+	return semanticview.SourceDeclaresAgents(source), nil
 }
 
 func workflowSourceOrManagerDeclaresAgents(source semanticview.Source, manager *runtimemanager.AgentManager) (bool, error) {
@@ -267,7 +282,7 @@ func validateClaudeManagedAgentWorkspaces(ctx context.Context, cfg *config.Confi
 		return fmt.Errorf("agent manager is required for claude cli runtime")
 	}
 	for _, agentCfg := range manager.ListAgentConfigs() {
-		profile, err := llmselection.ResolveActiveBackend(agentCfg.LLMBackend)
+		profile, err := llmselection.ResolveActiveBackend(agentCfg.ResolvedLLMBackend)
 		if err != nil {
 			return fmt.Errorf("agent %s selected invalid llm backend: %w", strings.TrimSpace(agentCfg.ID), err)
 		}
@@ -352,15 +367,21 @@ func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, s
 	}
 	targets := make([]preflightTarget, 0)
 	for _, agentCfg := range manager.ListAgentConfigs() {
-		modelRuntime, resolveErr := runtimes.RuntimeForAgent(agentCfg)
+		resolved, resolveErr := runtimes.ResolveAgentRuntime(agentCfg)
 		if resolveErr != nil {
 			return nil, fmt.Errorf("resolve managed provider runtime for agent %s: %w", strings.TrimSpace(agentCfg.ID), resolveErr)
 		}
-		startupProbe, ok := llm.StartupVisibleToolSurfaceProberForRuntime(modelRuntime)
-		if !ok {
+		if resolved.Selection.Mode == runtimeeffects.ExecutionModeMock {
 			continue
 		}
-		targets = append(targets, preflightTarget{config: agentCfg, runtime: modelRuntime, probe: startupProbe})
+		if resolved.Selection.Profile.ID != llmselection.BackendClaudeCLI {
+			continue
+		}
+		startupProbe, ok := llm.StartupVisibleToolSurfaceProberForRuntime(resolved.Runtime)
+		if !ok {
+			return nil, fmt.Errorf("managed provider startup probe is required for agent %s", strings.TrimSpace(resolved.Actor.ID))
+		}
+		targets = append(targets, preflightTarget{config: resolved.Actor, runtime: resolved.Runtime, probe: startupProbe})
 	}
 	if len(targets) == 0 {
 		return nil, nil

@@ -95,20 +95,13 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	if len(harnessOutputs) > 0 && !opts.AllowHarnessOutputs {
 		return result, fmt.Errorf("production validation rejects test-only output sink: harness at %s; replace it with a real consumer before booting", strings.Join(harnessOutputs, ", "))
 	}
-	var err error
-	source, err = providerconnectors.SourceWithConnectorPackImports(source)
+	bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, opts.LLMProfile)
 	if err != nil {
-		return result, fmt.Errorf("provider connector pack import failed: %w", err)
+		return result, err
 	}
-	mockConnectorResponses, err := providerconnectors.CompileMockResponsePlan(source)
-	if err != nil {
-		return result, fmt.Errorf("provider connector mock response compilation failed: %w", err)
-	}
-	result.mockConnectorResponses = mockConnectorResponses
-	result.bootEffectReachability, err = runtimebootverify.ResolveSourceBootEffectReachability(source, opts.LLMProfile, mockConnectorResponses)
-	if err != nil {
-		return result, fmt.Errorf("resolve source boot effect reachability: %w", err)
-	}
+	source = bootEffects.Source
+	result.mockConnectorResponses = bootEffects.MockConnectorResponses
+	result.bootEffectReachability = bootEffects.Reachability
 	source, err = SourceWithProviderTriggerEvents(source, opts.ProviderTriggerCatalog)
 	if err != nil {
 		return result, fmt.Errorf("provider trigger event import failed: %w", err)

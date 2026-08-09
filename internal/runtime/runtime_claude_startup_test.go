@@ -18,8 +18,10 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -514,6 +516,102 @@ func TestValidateClaudeMCPToolsForManagedAgents_RequiresCLIStartupProbeForMCPOnl
 	if len(exec.executed) != 0 {
 		t.Fatalf("executed = %#v, want no MCP tools/call before CLI startup proof", exec.executed)
 	}
+}
+
+func TestValidateManagedProviderPreflightFailsClosedWhenLiveClaudeRuntimeLacksStartupProbe(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.Backend = llmselection.BackendClaudeCLI
+	manager := newClaudeStartupManager()
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ID: "campaign-coordinator", Role: "campaign_coordinator"}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	profile, err := cfg.LLMBackendProfile()
+	if err != nil {
+		t.Fatalf("LLMBackendProfile: %v", err)
+	}
+	runtimes, err := llm.NewAgentRuntimeSet(profile, llm.RuntimeFactory{}, llm.NoopRuntime{})
+	if err != nil {
+		t.Fatalf("NewAgentRuntimeSet: %v", err)
+	}
+	_, err = ValidateManagedProviderPreflight(
+		testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource(), toolgateway.Binding{},
+		runtimes, nil, nil, manager, ManagedProviderPreflightAuthority{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "managed provider startup probe is required for agent campaign-coordinator") {
+		t.Fatalf("ValidateManagedProviderPreflight error = %v", err)
+	}
+}
+
+func TestClaudeStartupCensusesScopedAgentsHiddenByAmbiguousAlias(t *testing.T) {
+	source := ambiguousScopedClaudeStartupSource(t)
+	if _, exists := source.AgentEntries()["shared-worker"]; exists {
+		t.Fatal("ambiguous shared-worker unexpectedly survived in flattened agent aliases")
+	}
+	mocked, total, unmocked := declaredAgentMockCensus(source)
+	if mocked != 1 || total != 3 {
+		t.Fatalf("mock census = mocked:%d total:%d unmocked:%#v, want 1/3", mocked, total, unmocked)
+	}
+	joined := strings.Join(unmocked, "\n")
+	for _, want := range []string{
+		"project packages/project-a agent shared-worker",
+		"project packages/project-b agent shared-worker",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("unmocked declarations = %q, want %q", joined, want)
+		}
+	}
+
+	cfg := &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendClaudeCLI}}
+	err := validateSelectedBackendModelAliasesForDeclaredAgents(cfg, source)
+	if err == nil || !strings.Contains(err.Error(), "project packages/project-a agent shared-worker") || !strings.Contains(err.Error(), "missing-live-alias") {
+		t.Fatalf("model alias validation error = %v, want hidden scoped declaration", err)
+	}
+}
+
+func ambiguousScopedClaudeStartupSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	root := t.TempDir()
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: scoped-claude-startup
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+packages:
+  - path: packages/project-a
+  - path: packages/project-b
+`)
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-claude-startup\n")
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: string\n")
+	for _, file := range []string{"events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
+		writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, file), "{}\n")
+	}
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "agents.yaml"), `
+root-mock:
+  id: root-mock
+  model: regular
+  memory: false
+  mock:
+    kind: python
+    module: mocks/root-mock.py
+`)
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "mocks", "root-mock.py"), "def handle(input):\n    return {'text': 'mock'}\n")
+	for _, project := range []struct {
+		name  string
+		model string
+	}{
+		{name: "project-a", model: "missing-live-alias"},
+		{name: "project-b", model: "regular"},
+	} {
+		dir := filepath.Join(root, "packages", project.name)
+		writeAgentFreeRuntimeFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project.name+"\nversion: \"1.0.0\"\nflows: []\n")
+		writeAgentFreeRuntimeFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: "+project.model+"\n  memory: false\n")
+		writeAgentFreeRuntimeFixtureFile(t, filepath.Join(dir, "nodes.yaml"), "{}\n")
+	}
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedWhenMCPOnlyCLIStartupProbeFails(t *testing.T) {

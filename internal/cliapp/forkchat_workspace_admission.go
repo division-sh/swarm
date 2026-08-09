@@ -29,11 +29,11 @@ func (e workspaceAdmittedForkChatExecutor) ExecuteForkChat(ctx context.Context, 
 	if e.runtimes == nil {
 		return store.ConversationForkChatExecution{}, fmt.Errorf("conversation.fork_chat llm runtime resolver is required")
 	}
-	modelRuntime, err := e.runtimes.RuntimeForAgent(prepared.Snapshot.SourceAgent)
+	resolved, err := e.runtimes.ResolveAgentRuntime(prepared.Snapshot.SourceAgent)
 	if err != nil {
 		return store.ConversationForkChatExecution{}, fmt.Errorf("conversation.fork_chat resolve llm runtime: %w", err)
 	}
-	providerContract, hasProviderContract := runtimellm.ProviderContractForRuntime(modelRuntime)
+	providerContract, hasProviderContract := runtimellm.ProviderContractForRuntime(resolved.Runtime)
 	if hasProviderContract && providerContract.Transport == runtimellm.ProviderTransportCLI {
 		switch {
 		case e.decision.Backend == workspace.BackendDocker:

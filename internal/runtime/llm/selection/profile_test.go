@@ -106,14 +106,14 @@ func TestResolveAgentExecutionSelectionUsesExactMockBeforeConfiguredDefault(t *t
 			if err != nil {
 				t.Fatalf("ResolveActiveBackend: %v", err)
 			}
-			live, err := ResolveAgentExecutionSelection(profile, false)
+			live, err := ResolveAgentExecutionSelection(AgentExecutionSelectionInput{ConfiguredDefault: profile})
 			if err != nil {
 				t.Fatalf("ResolveAgentExecutionSelection(live): %v", err)
 			}
 			if live.Profile.ID != backend || live.Mode != executionmode.Live || live.ArtifactRequirement != ArtifactForbidden {
 				t.Fatalf("live selection = %#v", live)
 			}
-			mock, err := ResolveAgentExecutionSelection(profile, true)
+			mock, err := ResolveAgentExecutionSelection(AgentExecutionSelectionInput{ConfiguredDefault: profile, MockConfigured: true})
 			if err != nil {
 				t.Fatalf("ResolveAgentExecutionSelection(mock): %v", err)
 			}
@@ -129,15 +129,49 @@ func TestResolveAgentExecutionSelectionRequiresArtifactForMockDefault(t *testing
 	if err != nil {
 		t.Fatalf("ResolveActiveBackend: %v", err)
 	}
-	if _, err := ResolveAgentExecutionSelection(profile, false); err == nil || !strings.Contains(err.Error(), "requires an exact mock performance artifact") {
+	if _, err := ResolveAgentExecutionSelection(AgentExecutionSelectionInput{ConfiguredDefault: profile}); err == nil || !strings.Contains(err.Error(), "requires an exact mock performance artifact") {
 		t.Fatalf("missing artifact error = %v", err)
 	}
-	got, err := ResolveAgentExecutionSelection(profile, true)
+	got, err := ResolveAgentExecutionSelection(AgentExecutionSelectionInput{ConfiguredDefault: profile, MockConfigured: true})
 	if err != nil {
 		t.Fatalf("ResolveAgentExecutionSelection: %v", err)
 	}
 	if got.Profile.ID != BackendMock || got.Mode != executionmode.Mock {
 		t.Fatalf("selection = %#v", got)
+	}
+}
+
+func TestResolveAgentExecutionSelectionHonorsOrRejectsAuthoredBackend(t *testing.T) {
+	profile, err := ResolveActiveBackend(BackendClaudeCLI)
+	if err != nil {
+		t.Fatalf("ResolveActiveBackend: %v", err)
+	}
+	mock, err := ResolveAgentExecutionSelection(AgentExecutionSelectionInput{
+		ConfiguredDefault: profile,
+		AuthoredBackend:   BackendMock,
+		MockConfigured:    true,
+	})
+	if err != nil || mock.Profile.ID != BackendMock {
+		t.Fatalf("authored mock selection = %#v, %v", mock, err)
+	}
+	if _, err := ResolveAgentExecutionSelection(AgentExecutionSelectionInput{
+		ConfiguredDefault: profile,
+		AuthoredBackend:   BackendMock,
+	}); err == nil || !strings.Contains(err.Error(), "requires an exact mock performance artifact") {
+		t.Fatalf("authored mock without artifact error = %v", err)
+	}
+	if _, err := ResolveAgentExecutionSelection(AgentExecutionSelectionInput{
+		ConfiguredDefault: profile,
+		AuthoredBackend:   BackendAnthropic,
+	}); err == nil || !strings.Contains(err.Error(), "conflicts with configured runtime backend") {
+		t.Fatalf("different live pin error = %v", err)
+	}
+	if _, err := ResolveAgentExecutionSelection(AgentExecutionSelectionInput{
+		ConfiguredDefault: profile,
+		AuthoredBackend:   BackendClaudeCLI,
+		MockConfigured:    true,
+	}); err == nil || !strings.Contains(err.Error(), "conflicts with an exact mock performance") {
+		t.Fatalf("live pin plus mock error = %v", err)
 	}
 }
 

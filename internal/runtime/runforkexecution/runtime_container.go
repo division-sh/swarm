@@ -230,15 +230,13 @@ func validateSelectedContractAgentExecutionSelections(profile llmselection.Profi
 		return nil
 	}
 	for _, record := range records {
-		selection, selectionErr := llmselection.ResolveAgentExecutionSelection(profile, record.Config.Mock.Configured())
+		_, selectionErr := llmselection.ResolveAgentExecutionSelection(llmselection.AgentExecutionSelectionInput{
+			ConfiguredDefault: profile,
+			AuthoredBackend:   record.Config.LLMBackend,
+			MockConfigured:    record.Config.Mock.Configured(),
+		})
 		if selectionErr != nil {
 			return fmt.Errorf("selected-contract agent %s execution selection: %w", record.Config.ID, selectionErr)
-		}
-		if record.Config.ExecutionMode.Valid() && record.Config.ExecutionMode != selection.Mode {
-			return fmt.Errorf("selected-contract agent %s execution mode %s conflicts with effective selection mode %s", record.Config.ID, record.Config.ExecutionMode, selection.Mode)
-		}
-		if backend := strings.TrimSpace(record.Config.LLMBackend); backend != "" && backend != selection.Profile.ID {
-			return fmt.Errorf("selected-contract agent %s llm backend %s conflicts with effective selection %s", record.Config.ID, backend, selection.Profile.ID)
 		}
 	}
 	return nil

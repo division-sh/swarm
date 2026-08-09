@@ -19,6 +19,7 @@ type PersistedAgentRuntimeDescriptor struct {
 	Type                 string                         `json:"type,omitempty"`
 	FlowID               string                         `json:"flow_id,omitempty"`
 	Model                string                         `json:"model,omitempty"`
+	AuthoredLLMBackend   string                         `json:"authored_llm_backend,omitempty"`
 	ResolvedModel        string                         `json:"resolved_model,omitempty"`
 	ResolvedLLMProvider  string                         `json:"resolved_llm_provider,omitempty"`
 	ResolvedLLMTransport string                         `json:"resolved_llm_transport,omitempty"`
@@ -55,6 +56,7 @@ var runtimeConfigKeys = map[string]struct{}{
 	"model":                   {},
 	"model_tier":              {},
 	"llm_backend":             {},
+	"resolved_llm_backend":    {},
 	"resolved_model":          {},
 	"resolved_llm_provider":   {},
 	"resolved_llm_transport":  {},
@@ -86,6 +88,7 @@ var persistedAgentRuntimeDescriptorKeys = map[string]struct{}{
 	"type":                   {},
 	"flow_id":                {},
 	"model":                  {},
+	"authored_llm_backend":   {},
 	"resolved_model":         {},
 	"resolved_llm_provider":  {},
 	"resolved_llm_transport": {},
@@ -251,7 +254,8 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 		Role:                 strings.TrimSpace(row.Role),
 		FlowID:               desc.FlowID,
 		Model:                modelAlias,
-		LLMBackend:           llmBackend,
+		LLMBackend:           desc.AuthoredLLMBackend,
+		ResolvedLLMBackend:   llmBackend,
 		ResolvedModel:        strings.TrimSpace(desc.ResolvedModel),
 		ResolvedLLMProvider:  strings.TrimSpace(desc.ResolvedLLMProvider),
 		ResolvedLLMTransport: strings.TrimSpace(desc.ResolvedLLMTransport),
@@ -285,6 +289,7 @@ func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, model
 		Type:                 agentPersistedType(cfg, modelAlias),
 		FlowID:               strings.TrimSpace(cfg.FlowID),
 		Model:                strings.TrimSpace(modelAlias),
+		AuthoredLLMBackend:   strings.TrimSpace(cfg.LLMBackend),
 		ResolvedModel:        strings.TrimSpace(cfg.ResolvedModel),
 		ResolvedLLMProvider:  strings.TrimSpace(cfg.ResolvedLLMProvider),
 		ResolvedLLMTransport: strings.TrimSpace(cfg.ResolvedLLMTransport),
@@ -331,6 +336,7 @@ func decodePersistedAgentRuntimeDescriptor(raw []byte) (PersistedAgentRuntimeDes
 	desc.Type = strings.TrimSpace(desc.Type)
 	desc.FlowID = strings.TrimSpace(desc.FlowID)
 	desc.Model = strings.TrimSpace(desc.Model)
+	desc.AuthoredLLMBackend = strings.TrimSpace(desc.AuthoredLLMBackend)
 	desc.ResolvedModel = strings.TrimSpace(desc.ResolvedModel)
 	desc.ResolvedLLMProvider = strings.TrimSpace(desc.ResolvedLLMProvider)
 	desc.ResolvedLLMTransport = strings.TrimSpace(desc.ResolvedLLMTransport)

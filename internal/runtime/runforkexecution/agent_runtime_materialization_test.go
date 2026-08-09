@@ -257,12 +257,12 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 			Source: []byte("def handle(input):\n    return {'text': 'selected mock'}\n"), Digest: "sha256:selected-contract-mock-agent",
 		},
 	}
-	modelRuntime, err := builder.preflight.runtimes.RuntimeForAgent(actor)
+	resolved, err := builder.preflight.runtimes.ResolveAgentRuntime(actor)
 	if err != nil {
 		t.Fatalf("resolve selected-contract exact mock runtime: %v", err)
 	}
-	if _, ok := modelRuntime.(*runtimellm.MockRuntime); !ok {
-		t.Fatalf("selected-contract exact mock runtime = %T, want *llm.MockRuntime", modelRuntime)
+	if _, ok := resolved.Runtime.(*runtimellm.MockRuntime); !ok {
+		t.Fatalf("selected-contract exact mock runtime = %T, want *llm.MockRuntime", resolved.Runtime)
 	}
 	if builder.cleanup != nil {
 		builder.cleanup()

@@ -6,22 +6,26 @@ import (
 	"strings"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 )
 
 func (e *Executor) ValidateNativeToolAdmission(ctx context.Context, actor models.AgentConfig) error {
 	if e == nil || !actor.NativeTools.Any() {
 		return nil
 	}
-	opts, err := e.nativeToolAdmissionOptions(actor)
+	resolvedActor, opts, err := e.nativeToolAdmissionOptions(actor)
 	if err != nil {
 		return err
 	}
-	return ValidateNativeToolAgentAdmission(ctx, actor, opts)
+	if resolvedActor.ExecutionMode == runtimeeffects.ExecutionModeMock {
+		return nil
+	}
+	return ValidateNativeToolAgentAdmission(ctx, resolvedActor, opts)
 }
 
-func (e *Executor) nativeToolAdmissionOptions(actor models.AgentConfig) (NativeToolAdmissionOptions, error) {
+func (e *Executor) nativeToolAdmissionOptions(actor models.AgentConfig) (models.AgentConfig, NativeToolAdmissionOptions, error) {
 	if e == nil {
-		return NativeToolAdmissionOptions{}, nil
+		return actor, NativeToolAdmissionOptions{}, nil
 	}
 	e.mu.RLock()
 	runtimes := e.modelRuntimes
@@ -30,14 +34,14 @@ func (e *Executor) nativeToolAdmissionOptions(actor models.AgentConfig) (NativeT
 	workspaces := e.workspaces
 	e.mu.RUnlock()
 	if runtimes == nil {
-		return NativeToolAdmissionOptions{}, fmt.Errorf("agent llm runtime resolver is required")
+		return actor, NativeToolAdmissionOptions{}, fmt.Errorf("agent llm runtime resolver is required")
 	}
-	runtime, err := runtimes.RuntimeForAgent(actor)
+	resolved, err := runtimes.ResolveAgentRuntime(actor)
 	if err != nil {
-		return NativeToolAdmissionOptions{}, err
+		return actor, NativeToolAdmissionOptions{}, err
 	}
-	return NativeToolAdmissionOptions{
-		Runtime:     runtime,
+	return resolved.Actor, NativeToolAdmissionOptions{
+		Runtime:     resolved.Runtime,
 		Credentials: credentials,
 		Source:      source,
 		Workspaces:  workspaces,
@@ -54,11 +58,11 @@ func (e *Executor) nativeToolAdmissionForTool(ctx context.Context, actor models.
 	if !isNativeFallbackToolName(toolName) {
 		return true, ""
 	}
-	opts, err := e.nativeToolAdmissionOptions(actor)
+	resolvedActor, opts, err := e.nativeToolAdmissionOptions(actor)
 	if err != nil {
 		return false, err.Error()
 	}
-	for _, decision := range NativeToolAdmissionDecisions(ctx, actor, opts) {
+	for _, decision := range NativeToolAdmissionDecisions(ctx, resolvedActor, opts) {
 		for _, name := range decision.ToolNames {
 			if normalizeNativeToolName(name) != toolName {
 				continue

@@ -35,8 +35,8 @@ type staticAgentRuntimeResolver struct {
 	runtime llm.Runtime
 }
 
-func (r staticAgentRuntimeResolver) RuntimeForAgent(models.AgentConfig) (llm.Runtime, error) {
-	return r.runtime, nil
+func (r staticAgentRuntimeResolver) ResolveAgentRuntime(actor models.AgentConfig) (llm.AgentRuntimeResolution, error) {
+	return llm.AgentRuntimeResolution{Actor: actor, Runtime: r.runtime}, nil
 }
 
 func testBoardDirective(text string) runtimeagentcontrol.BoardDirective {

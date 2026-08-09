@@ -2,6 +2,7 @@ package bootverify
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -190,6 +191,25 @@ func TestCredentialChecksCensusScopedActivitiesHiddenByAmbiguousAlias(t *testing
 	}
 }
 
+func TestNativeToolChecksCensusScopedAgentsHiddenByAmbiguousAlias(t *testing.T) {
+	source, _ := scopedAliasMockConnectorFixtureWithNativeTools(t, true)
+	if _, exists := source.AgentEntries()["shared-worker"]; exists {
+		t.Fatal("ambiguous shared-worker unexpectedly survived in flattened agent aliases")
+	}
+	findings := newCheckerContext(context.Background(), source, Options{}).nativeTools()
+	joined := fmt.Sprint(findings)
+	for _, want := range []string{
+		"project packages/project-live agent shared-worker",
+		"project packages/project-mock agent shared-worker",
+		"flow flow-live agent shared-worker",
+		"flow flow-mock agent shared-worker",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("native findings = %#v, want %q", findings, want)
+		}
+	}
+}
+
 func TestCredentialChecksRetainNonToolRequirementsSharingAKey(t *testing.T) {
 	source, plan := mockConnectorCredentialFixture(t, "static", true, false)
 	findings := newCheckerContext(context.Background(), source, Options{
@@ -281,6 +301,14 @@ func mockConnectorCredentialFixture(t *testing.T, credentialKind string, include
 }
 
 func scopedAliasMockConnectorFixture(t *testing.T, includeLive bool) (semanticview.Source, *providerconnectors.MockResponsePlan) {
+	return scopedAliasMockConnectorFixtureOptions(t, includeLive, false)
+}
+
+func scopedAliasMockConnectorFixtureWithNativeTools(t *testing.T, includeLive bool) (semanticview.Source, *providerconnectors.MockResponsePlan) {
+	return scopedAliasMockConnectorFixtureOptions(t, includeLive, true)
+}
+
+func scopedAliasMockConnectorFixtureOptions(t *testing.T, includeLive, includeInvalidNativeTools bool) (semanticview.Source, *providerconnectors.MockResponsePlan) {
 	t.Helper()
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -322,7 +350,7 @@ root-node:
 		dir := filepath.Join(root, "packages", project.name)
 		writeBootverifyFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project.name+"\nversion: \"1.0.0\"\nflows: []\n")
 		module := filepath.ToSlash(filepath.Join("packages", project.name, "mocks", "shared-worker.py"))
-		writeScopedReachabilityAgentFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker", module, project.live)
+		writeScopedReachabilityAgentFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker", module, project.live, scopedReachabilityNativeTools(includeInvalidNativeTools))
 		if !project.live {
 			writeBootverifyFixtureFile(t, filepath.Join(root, module), "def handle(input):\n    return {'text': 'mock'}\n")
 		}
@@ -341,7 +369,7 @@ root-node:
 		writeBootverifyFixtureFile(t, filepath.Join(dir, "events.yaml"), "{}\n")
 		writeBootverifyFixtureFile(t, filepath.Join(dir, "policy.yaml"), "{}\n")
 		module := filepath.ToSlash(filepath.Join("flows", flow.id, "mocks", "shared-worker.py"))
-		writeScopedReachabilityAgentFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker", module, flow.live)
+		writeScopedReachabilityAgentFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker", module, flow.live, scopedReachabilityNativeTools(includeInvalidNativeTools))
 		if !flow.live {
 			writeBootverifyFixtureFile(t, filepath.Join(root, module), "def handle(input):\n    return {'text': 'mock'}\n")
 		}
@@ -360,13 +388,21 @@ root-node:
 	return source, plan
 }
 
-func writeScopedReachabilityAgentFile(t *testing.T, path, agentID, module string, live bool) {
+func writeScopedReachabilityAgentFile(t *testing.T, path, agentID, module string, live bool, extra ...string) {
 	t.Helper()
 	contents := agentID + ":\n  id: " + agentID + "\n  model: regular\n  memory: false\n"
 	if !live {
 		contents += "  mock:\n    kind: python\n    module: " + module + "\n"
 	}
+	contents += strings.Join(extra, "")
 	writeBootverifyFixtureFile(t, path, contents)
+}
+
+func scopedReachabilityNativeTools(enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return "  native_tools:\n    hidden_capability: true\n"
 }
 
 func scopedReachabilityNodeYAML() string {
