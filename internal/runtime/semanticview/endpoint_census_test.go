@@ -279,6 +279,48 @@ func TestAuthoredEventEndpointCensusResolvesImportedWildcardAsTypedRelation(t *t
 	t.Fatal("task.done producer not found")
 }
 
+func TestAuthoredEventEndpointCensusConsumesScopedLocalWildcardAdmission(t *testing.T) {
+	for _, authored := range []string{"task.*", "*"} {
+		t.Run(authored, func(t *testing.T) {
+			source := localWildcardEndpointCensusSource(authored)
+			census := BuildAuthoredEventEndpointCensus(source)
+			producer := AuthoredEventEndpoint{
+				ID:        "child-producer",
+				Direction: EventEndpointProducer,
+				FlowID:    "child",
+				Event:     ResolveFlowEventProof(source, "child", "task.done"),
+			}
+			matches, issues := census.ResolveTypedPubSubConsumerMatches(producer)
+			if len(issues) != 0 || endpointCountFromMatches(matches, "listener") != 1 {
+				t.Fatalf("typed relation = matches %#v issues %#v, want one local listener", matches, issues)
+			}
+			localConsumers := census.MatchingConsumers("child", "child/task.done")
+			if got := endpointCountForNode(localConsumers, "listener"); got != 1 {
+				t.Fatalf("local matching consumers = %#v, want scoped wildcard listener", localConsumers)
+			}
+			if localConsumers[0].Kind != EventEndpointNodeHandler || localConsumers[0].HandlerEvent != authored {
+				t.Fatalf("local consumer = %#v, want admitted authored handler %q", localConsumers[0], authored)
+			}
+			var listener AuthoredEventEndpoint
+			for _, endpoint := range census.Consumers() {
+				if endpoint.NodeID == "listener" {
+					listener = endpoint
+					break
+				}
+			}
+			siblingProof := ResolveFlowEventProof(source, "sibling", "task.done")
+			if endpointMatchesProof(source, listener, siblingProof) {
+				t.Fatalf("sibling event matched child-local wildcard: endpoint %#v proof %#v", listener, siblingProof)
+			}
+			siblingProducer := AuthoredEventEndpoint{ID: "sibling-producer", Direction: EventEndpointProducer, FlowID: "sibling", Event: siblingProof}
+			siblingMatches, siblingIssues := census.ResolveTypedPubSubConsumerMatches(siblingProducer)
+			if endpointCountFromMatches(siblingMatches, "listener") != 0 || len(siblingIssues) != 0 {
+				t.Fatalf("sibling typed relation = matches %#v issues %#v, want no child listener", siblingMatches, siblingIssues)
+			}
+		})
+	}
+}
+
 func TestAuthoredEventEndpointCensusTypedRelationClassifiesSameFlowExactlyOnce(t *testing.T) {
 	source := endpointCensusFixture(nil)
 	producer := AuthoredEventEndpoint{
@@ -587,6 +629,52 @@ func endpointCensusBundle(inputPins []runtimecontracts.FlowInputEventPin) *runti
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"worker": worker.Schema},
 	}
+}
+
+func localWildcardEndpointCensusSource(authored string) Source {
+	child := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+		Path:  "child",
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.done": {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"listener": {ID: "listener", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{authored: {}}},
+		},
+	}
+	sibling := runtimecontracts.FlowContractView{
+		Paths:  runtimecontracts.FlowContractPaths{ID: "sibling", Flow: "sibling", PackageKey: "flows/sibling"},
+		Path:   "sibling",
+		Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child, sibling}}
+	return Wrap(&runtimecontracts.WorkflowContractBundle{FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+		Root: &root,
+		ByID: map[string]*runtimecontracts.FlowContractView{
+			"child":   &root.Children[0],
+			"sibling": &root.Children[1],
+		},
+	}})
+}
+
+func endpointCountFromMatches(matches []TypedPubSubConsumerMatch, nodeID string) int {
+	count := 0
+	for _, match := range matches {
+		if match.Consumer.NodeID == nodeID {
+			count++
+		}
+	}
+	return count
+}
+
+func endpointCountForNode(endpoints []AuthoredEventEndpoint, nodeID string) int {
+	count := 0
+	for _, endpoint := range endpoints {
+		if endpoint.NodeID == nodeID {
+			count++
+		}
+	}
+	return count
 }
 
 func endpointCount(endpoints []AuthoredEventEndpoint, kind EventEndpointKind, flowID, eventType string) int {
