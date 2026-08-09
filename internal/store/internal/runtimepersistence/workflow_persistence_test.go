@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -22,6 +23,7 @@ import (
 
 type workflowTestSelectedStore interface {
 	runtimepipeline.WorkflowPersistenceOwner
+	runtimebus.TargetFailureDeadLetterRecorder
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
 	decisioncard.Store
@@ -108,6 +110,7 @@ func completeWorkflowTestCoordinatorOptions(
 		Persistence:             persistence,
 		RunLifecycle:            selected,
 		DeliveryStore:           selected,
+		DeadLetters:             selected,
 		DecisionCards:           selected,
 		ProposedEffects:         selected,
 		HumanTasks:              selected,
@@ -130,6 +133,9 @@ func TestWorkflowStoreRolesAreImmutableConstructorInputs(t *testing.T) {
 		}},
 		{name: "delivery_lifecycle", omit: func(opts *runtimepipeline.PipelineCoordinatorOptions, _ runtimepipeline.WorkflowPersistence) {
 			opts.DeliveryStore = nil
+		}},
+		{name: "dead_letter_recorder", omit: func(opts *runtimepipeline.PipelineCoordinatorOptions, _ runtimepipeline.WorkflowPersistence) {
+			opts.DeadLetters = nil
 		}},
 		{name: "pipeline_obligations", omit: func(opts *runtimepipeline.PipelineCoordinatorOptions, _ runtimepipeline.WorkflowPersistence) {
 			opts.PipelineObligations = nil

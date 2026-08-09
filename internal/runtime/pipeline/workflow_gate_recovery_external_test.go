@@ -116,6 +116,7 @@ func newGateRecoveryCoordinator(bus gateRecoveryRuntimeBus, selected gateRecover
 	opts.ReceiverExecution = eventreceiver.NormalExecution()
 	opts.Persistence = selected.persistence
 	opts.DeliveryStore = selected.events
+	opts.DeadLetters = selected.events
 	opts.DecisionCards = selected.cards
 	opts.ProposedEffects = selected.cards
 	opts.HumanTasks = selected.cards

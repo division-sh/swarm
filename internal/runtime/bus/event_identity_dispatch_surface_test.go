@@ -39,6 +39,7 @@ import (
 type completeEventDispatchStore interface {
 	runtimebus.EventStore
 	runtimepipeline.WorkflowPersistenceOwner
+	runtimebus.TargetFailureDeadLetterRecorder
 	runtimedelivery.Store
 	runtimemanager.ManagerPersistence
 	runtimerunlifecycle.OperationOwner
@@ -271,6 +272,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 			Persistence:             workflowPersistence,
 			RunLifecycle:            selected,
 			DeliveryStore:           selected,
+			DeadLetters:             selected,
 			PipelineObligations:     selected.PipelineObligations(),
 			DecisionCards:           selected,
 			ProposedEffects:         selected,

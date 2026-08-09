@@ -57,6 +57,9 @@ type runtimeTestUnavailableHumanTasks struct{ decisioncard.HumanTaskStore }
 type runtimeTestUnavailableDecisionCardDraftExpiry struct{}
 type runtimeTestUnavailableHumanTaskExpiry struct{}
 type runtimeTestUnavailableDeliveryStore struct{ runtimedelivery.Store }
+type runtimeTestUnavailableDeadLetterRecorder struct {
+	runtimebus.TargetFailureDeadLetterRecorder
+}
 type runtimeTestUnavailableRunLifecycle struct {
 	runtimerunlifecycle.OperationOwner
 }
@@ -83,6 +86,9 @@ func completeRuntimeTestPipelineOptions(bus *runtimebus.EventBus, opts runtimepi
 	}
 	if opts.DeliveryStore == nil {
 		opts.DeliveryStore = &runtimeTestUnavailableDeliveryStore{}
+	}
+	if opts.DeadLetters == nil {
+		opts.DeadLetters = &runtimeTestUnavailableDeadLetterRecorder{}
 	}
 	if opts.DecisionCards == nil {
 		opts.DecisionCards = &runtimeTestUnavailableDecisionCards{}

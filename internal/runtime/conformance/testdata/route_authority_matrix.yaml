@@ -634,7 +634,7 @@ rows:
     owner_refs:
       - {kind: artifact, path: internal/runtime/cataloge2e/README.md}
     proof_refs:
-      - {kind: go_test, name: TestTier11FlowCompositionCatalogFixtures_RealRuntime}
+      - {kind: go_test, name: TestCatalogReplayClean_SelectedStores}
       - {kind: go_test, name: TestTier12RuntimeFork_SelectedContractForkExecutionFixture}
       - {kind: proof_projection, projection: catalog-full}
     notes: >

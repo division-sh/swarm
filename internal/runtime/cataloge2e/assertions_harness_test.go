@@ -49,7 +49,7 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 		if !expected.Expected.ChainDepthExceeded {
 			assertPublishedEventDeadLetter(t, h.db, h.publishedIDs, expected.Expected.DeadLetter)
 		}
-		assertChainDepthExceeded(t, h.db, h.startedAt, entityID, expected.Expected.ChainDepthExceeded)
+		assertChainDepthExceeded(t, h.db, entityID, expected.Expected.ChainDepthExceeded)
 	}
 	assertAgentReceived(t, h.db, h.startedAt, expected.Expected.AgentReceived)
 	if len(expected.Expected.FlowInstanceCreated) > 0 {
@@ -65,11 +65,12 @@ func assertPublishedEventDeadLetter(t testing.TB, db *sql.DB, publishedEventIDs 
 	count := 0
 	for eventID := range publishedEventIDs {
 		var eventCount int
-		if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+		query := catalogDialectQuery(db, `
 			SELECT COUNT(*)
 			FROM dead_letters
 			WHERE original_event_id = $1::uuid
-		`, strings.TrimSpace(eventID)).Scan(&eventCount); err != nil {
+		`, `SELECT COUNT(*) FROM dead_letters WHERE original_event_id = ?`)
+		if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), query, strings.TrimSpace(eventID)).Scan(&eventCount); err != nil {
 			t.Fatalf("query published-event dead letters for %s: %v", eventID, err)
 		}
 		count += eventCount
@@ -380,11 +381,11 @@ func workflowStateDebugRows(db *sql.DB) (string, error) {
 	if db == nil {
 		return "", nil
 	}
-	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
+	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), catalogDialectQuery(db, `
 		SELECT entity_id::text, COALESCE(flow_instance, ''), current_state
 		FROM entity_state
 		ORDER BY created_at ASC
-	`)
+	`, `SELECT entity_id, COALESCE(flow_instance, ''), current_state FROM entity_state ORDER BY created_at ASC`))
 	if err != nil {
 		return "", err
 	}
@@ -413,12 +414,17 @@ func assertEmittedEvents(t testing.TB, db *sql.DB, since time.Time, publishedIDs
 	}
 	relevantEventIDs := catalogCausalEventIDs(t, db, since, publishedIDs)
 	relevantEntityIDs := catalogCausalEntityIDs(t, db, since, publishedIDs, entityID)
-	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
+	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), catalogDialectQuery(db, `
 		SELECT event_id::text, event_name, COALESCE(NULLIF(payload->>'entity_id', ''), COALESCE(entity_id::text, ''))
 		FROM events
 		WHERE created_at >= $1
 		ORDER BY created_at ASC, event_id ASC
-	`, since)
+	`, `
+		SELECT event_id, event_name, COALESCE(NULLIF(json_extract(payload, '$.entity_id'), ''), COALESCE(entity_id, ''))
+		FROM events
+		WHERE created_at >= ?
+		ORDER BY created_at ASC, event_id ASC
+	`), since)
 	if err != nil {
 		t.Fatalf("query emitted events: %v", err)
 	}
@@ -484,7 +490,7 @@ func catalogEventsSince(t testing.TB, db *sql.DB, since time.Time) []catalogStor
 	if db == nil {
 		return nil
 	}
-	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
+	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), catalogDialectQuery(db, `
 		SELECT
 			event_id::text,
 			event_name,
@@ -493,7 +499,13 @@ func catalogEventsSince(t testing.TB, db *sql.DB, since time.Time) []catalogStor
 		FROM events
 		WHERE created_at >= $1
 		ORDER BY created_at ASC, event_id ASC
-	`, since)
+	`, `
+		SELECT event_id, event_name, COALESCE(source_event_id, ''),
+		       COALESCE(NULLIF(json_extract(payload, '$.entity_id'), ''), COALESCE(entity_id, ''))
+		FROM events
+		WHERE created_at >= ?
+		ORDER BY created_at ASC, event_id ASC
+	`), since)
 	if err != nil {
 		t.Fatalf("query causal events: %v", err)
 	}
@@ -710,7 +722,7 @@ func shouldIgnoreCatalogE2EEvent(eventName string) bool {
 func assertDeadLetter(t testing.TB, db *sql.DB, since time.Time, entityID string, want bool) {
 	t.Helper()
 	var count int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	query := catalogDialectQuery(db, `
 		SELECT COUNT(*)
 		FROM (
 			SELECT 1
@@ -722,17 +734,36 @@ func assertDeadLetter(t testing.TB, db *sql.DB, since time.Time, entityID string
 			WHERE e.event_name = 'platform.dead_letter'
 			  AND COALESCE(NULLIF(e.payload->>'entity_id', ''), COALESCE(e.entity_id::text, '')) = $1
 		) hits
-	`, strings.TrimSpace(entityID)).Scan(&count); err != nil {
+	`, `
+		SELECT COUNT(*) FROM (
+			SELECT 1 FROM dead_letters dl
+			WHERE COALESCE(NULLIF(json_extract(dl.original_payload, '$.entity_id'), ''), COALESCE(dl.entity_id, '')) = ?
+			UNION ALL
+			SELECT 1 FROM events e
+			WHERE e.event_name = 'platform.dead_letter'
+			  AND COALESCE(NULLIF(json_extract(e.payload, '$.entity_id'), ''), COALESCE(e.entity_id, '')) = ?
+		) hits
+	`)
+	args := []any{strings.TrimSpace(entityID)}
+	if catalogIsSQLiteDB(db) {
+		args = append(args, strings.TrimSpace(entityID))
+	}
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), query, args...).Scan(&count); err != nil {
 		t.Fatalf("query dead_letters: %v", err)
 	}
 	got := count > 0
 	if got != want {
-		rows, _ := db.QueryContext(testAuthorActivityContext(context.Background()), `
+		rows, _ := db.QueryContext(testAuthorActivityContext(context.Background()), catalogDialectQuery(db, `
 			SELECT dl.original_event_id::text, COALESCE(dl.entity_id::text, ''),
 			       COALESCE(dl.original_payload->>'entity_id', ''), COALESCE(dl.handler_node, '')
 			FROM dead_letters dl
 			ORDER BY dl.created_at, dl.dead_letter_id
-		`)
+		`, `
+			SELECT dl.original_event_id, COALESCE(dl.entity_id, ''),
+			       COALESCE(json_extract(dl.original_payload, '$.entity_id'), ''), COALESCE(dl.handler_node, '')
+			FROM dead_letters dl
+			ORDER BY dl.created_at, dl.dead_letter_id
+		`))
 		var evidence []string
 		if rows != nil {
 			for rows.Next() {
@@ -913,7 +944,7 @@ func (h *runtimeHarness) assertTriggerReceipt(step catalogTriggerStep) {
 	for _, eventID := range eventIDs {
 		var subscriberID, outcome, sideEffects string
 		var rawFailure []byte
-		err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+		query := catalogDialectQuery(h.db, `
 			SELECT subscriber_id, outcome, COALESCE(side_effects::text, ''), COALESCE(failure, 'null'::jsonb)
 			FROM event_receipts
 			WHERE event_id = $1::uuid
@@ -924,7 +955,14 @@ func (h *runtimeHarness) assertTriggerReceipt(step catalogTriggerStep) {
 			  )
 			ORDER BY processed_at DESC
 			LIMIT 1
-		`, strings.TrimSpace(eventID)).Scan(&subscriberID, &outcome, &sideEffects, &rawFailure)
+		`, `
+			SELECT subscriber_id, outcome, COALESCE(side_effects, ''), COALESCE(failure, 'null')
+			FROM event_receipts
+			WHERE event_id = ? AND subscriber_type = 'platform'
+			  AND (subscriber_id = 'pipeline' OR subscriber_id LIKE 'pipeline:%')
+			ORDER BY processed_at DESC LIMIT 1
+		`)
+		err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), query, strings.TrimSpace(eventID)).Scan(&subscriberID, &outcome, &sideEffects, &rawFailure)
 		if err == sql.ErrNoRows {
 			continue
 		}
@@ -974,7 +1012,7 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 	for _, eventID := range eventIDs {
 		var outcome string
 		var failure []byte
-		err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+		query := catalogDialectQuery(h.db, `
 			SELECT outcome, COALESCE(failure, '{}'::jsonb)
 			FROM event_receipts
 			WHERE event_id = $1::uuid
@@ -985,7 +1023,13 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 			  )
 			ORDER BY processed_at DESC
 			LIMIT 1
-		`, strings.TrimSpace(eventID)).Scan(&outcome, &failure)
+		`, `
+			SELECT outcome, COALESCE(failure, '{}') FROM event_receipts
+			WHERE event_id = ? AND subscriber_type = 'platform'
+			  AND (subscriber_id = 'pipeline' OR subscriber_id LIKE 'pipeline:%')
+			ORDER BY processed_at DESC LIMIT 1
+		`)
+		err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), query, strings.TrimSpace(eventID)).Scan(&outcome, &failure)
 		if err == sql.ErrNoRows {
 			continue
 		}
@@ -995,14 +1039,19 @@ func assertHandlerOutcomeForEntity(t testing.TB, h *runtimeHarness, want, entity
 		got := strings.TrimSpace(strings.ToLower(outcome))
 		if got != "success" {
 			var diagnostic []byte
-			_ = h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+			_ = h.db.QueryRowContext(testAuthorActivityContext(context.Background()), catalogDialectQuery(h.db, `
 				SELECT payload
 				FROM events
 				WHERE event_name = 'platform.runtime_log'
 				  AND payload->'details'->>'action' = 'handler_error'
 				ORDER BY created_at DESC
 				LIMIT 1
-			`).Scan(&diagnostic)
+			`, `
+				SELECT payload FROM events
+				WHERE event_name = 'platform.runtime_log'
+				  AND json_extract(payload, '$.details.action') = 'handler_error'
+				ORDER BY created_at DESC LIMIT 1
+			`)).Scan(&diagnostic)
 			t.Fatalf("handler_outcome = %q, want %q; failure=%s; diagnostic=%s", got, want, failure, diagnostic)
 		}
 		return
@@ -1033,7 +1082,7 @@ func catalogRecognizesHandlerOutcome(raw string) bool {
 func assertEntityDeadLetterOutcome(t testing.TB, db *sql.DB, since time.Time, entityID string) bool {
 	t.Helper()
 	var count int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	query := catalogDialectQuery(db, `
 		SELECT COUNT(*)
 		FROM (
 			SELECT 1
@@ -1045,13 +1094,26 @@ func assertEntityDeadLetterOutcome(t testing.TB, db *sql.DB, since time.Time, en
 			WHERE e.event_name = 'platform.dead_letter'
 			  AND COALESCE(NULLIF(e.payload->>'entity_id', ''), COALESCE(e.entity_id::text, '')) = $1
 		) hits
-	`, entityID).Scan(&count); err != nil {
+	`, `
+		SELECT COUNT(*) FROM (
+			SELECT 1 FROM dead_letters dl
+			WHERE COALESCE(NULLIF(json_extract(dl.original_payload, '$.entity_id'), ''), COALESCE(dl.entity_id, '')) = ?
+			UNION ALL
+			SELECT 1 FROM events e WHERE e.event_name = 'platform.dead_letter'
+			  AND COALESCE(NULLIF(json_extract(e.payload, '$.entity_id'), ''), COALESCE(e.entity_id, '')) = ?
+		) hits
+	`)
+	args := []any{entityID}
+	if catalogIsSQLiteDB(db) {
+		args = append(args, entityID)
+	}
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), query, args...).Scan(&count); err != nil {
 		t.Fatalf("query dead_letter outcomes: %v", err)
 	}
 	return count > 0
 }
 
-func assertChainDepthExceeded(t testing.TB, db *sql.DB, since time.Time, entityID string, want bool) {
+func assertChainDepthExceeded(t testing.TB, db *sql.DB, entityID string, want bool) {
 	t.Helper()
 	entityID = strings.TrimSpace(entityID)
 	if entityID == "" {
@@ -1060,28 +1122,96 @@ func assertChainDepthExceeded(t testing.TB, db *sql.DB, since time.Time, entityI
 		}
 		return
 	}
-	var count int
-	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	query := catalogDialectQuery(db, `
+		SELECT COUNT(*), COALESCE(MAX(dl.chain_depth), 0), COALESCE(MAX(dl.handler_node), ''),
+		       COALESCE(MAX(dl.failure->>'class'), ''), COALESCE(MAX(dl.original_event), '')
+		FROM dead_letters dl
+		JOIN events source ON source.event_id = dl.original_event_id
+		WHERE source.run_id = $1::uuid
+		  AND COALESCE(NULLIF(dl.original_payload->>'entity_id', ''), COALESCE(dl.entity_id::text, '')) = $2
+		  AND dl.failure->>'class' = 'platform.chain_depth_exceeded'
+	`, `
+		SELECT COUNT(*), COALESCE(MAX(dl.chain_depth), 0), COALESCE(MAX(dl.handler_node), ''),
+		       COALESCE(MAX(json_extract(dl.failure, '$.class')), ''), COALESCE(MAX(dl.original_event), '')
+		FROM dead_letters dl
+		JOIN events source ON source.event_id = dl.original_event_id
+		WHERE source.run_id = ?
+		  AND COALESCE(NULLIF(json_extract(dl.original_payload, '$.entity_id'), ''), COALESCE(dl.entity_id, '')) = ?
+		  AND json_extract(dl.failure, '$.class') = 'platform.chain_depth_exceeded'
+	`)
+	args := []any{catalogRuntimeRunID, entityID}
+	var relationCount, chainDepth int
+	var handlerNode, failureClass, originalEvent string
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), query, args...).Scan(&relationCount, &chainDepth, &handlerNode, &failureClass, &originalEvent); err != nil {
+		t.Fatalf("query chain_depth_exceeded dead-letter relation: %v", err)
+	}
+
+	diagnosticQuery := catalogDialectQuery(db, `
 		SELECT COUNT(*)
-		FROM (
-			SELECT 1
-			FROM dead_letters dl
-			WHERE COALESCE(NULLIF(dl.original_payload->>'entity_id', ''), COALESCE(dl.entity_id::text, '')) = $1
-			  AND dl.failure->>'class' = 'platform.chain_depth_exceeded'
-			UNION ALL
-			SELECT 1
-			FROM events e
-			WHERE e.event_name = 'platform.dead_letter'
-			  AND COALESCE(NULLIF(e.payload->>'entity_id', ''), COALESCE(e.entity_id::text, '')) = $1
-			  AND COALESCE(e.payload->'failure'->>'class', '') = 'platform.chain_depth_exceeded'
-		) hits
-	`, entityID).Scan(&count); err != nil {
-		t.Fatalf("query chain_depth_exceeded dead_letters: %v", err)
+		FROM events e
+		WHERE e.run_id = $1::uuid
+		  AND e.event_name = 'platform.dead_letter'
+		  AND e.payload->>'entity_id' = $2
+		  AND e.payload->'failure'->>'class' = 'platform.chain_depth_exceeded'
+		  AND (e.payload->>'chain_depth')::integer = 6
+		  AND e.payload->>'handler_node' = 'node-6'
+	`, `
+		SELECT COUNT(*)
+		FROM events e
+		WHERE e.run_id = ?
+		  AND e.event_name = 'platform.dead_letter'
+		  AND json_extract(e.payload, '$.entity_id') = ?
+		  AND json_extract(e.payload, '$.failure.class') = 'platform.chain_depth_exceeded'
+		  AND CAST(json_extract(e.payload, '$.chain_depth') AS INTEGER) = 6
+		  AND json_extract(e.payload, '$.handler_node') = 'node-6'
+	`)
+	diagnosticArgs := []any{catalogRuntimeRunID, entityID}
+	var diagnosticCount int
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), diagnosticQuery, diagnosticArgs...).Scan(&diagnosticCount); err != nil {
+		t.Fatalf("query chain_depth_exceeded diagnostic: %v", err)
 	}
-	got := count > 0
+
+	activityQuery := catalogDialectQuery(db, `
+		SELECT COUNT(*)
+		FROM author_activity_occurrences aa
+		JOIN dead_letters dl ON aa.source_identity = dl.dead_letter_id::text
+		WHERE aa.run_id = $1::uuid
+		  AND aa.kind = 'dead_letter.recorded'
+		  AND aa.version = 2
+		  AND aa.transition = 'recorded'
+		  AND aa.source_owner = 'dead_letters'
+		  AND aa.projection->>'subject_id' = dl.original_event_id::text
+	`, `
+		SELECT COUNT(*)
+		FROM author_activity_occurrences aa
+		JOIN dead_letters dl ON aa.source_identity = CAST(dl.dead_letter_id AS TEXT)
+		WHERE aa.run_id = ?
+		  AND aa.kind = 'dead_letter.recorded'
+		  AND aa.version = 2
+		  AND aa.transition = 'recorded'
+		  AND aa.source_owner = 'dead_letters'
+		  AND json_extract(aa.projection, '$.subject_id') = CAST(dl.original_event_id AS TEXT)
+	`)
+	var activityCount int
+	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), activityQuery, catalogRuntimeRunID).Scan(&activityCount); err != nil {
+		t.Fatalf("query chain_depth_exceeded author activity: %v", err)
+	}
+
+	got := relationCount == 1 && diagnosticCount == 1 && activityCount == 1 && chainDepth == 6 && handlerNode == "node-6:chain.e6" && failureClass == "platform.chain_depth_exceeded" && originalEvent == "chain.e6"
 	if got != want {
-		t.Fatalf("chain_depth_exceeded = %v, want %v", got, want)
+		t.Fatalf("chain_depth_exceeded facts = relation:%d diagnostic:%d activity:%d depth:%d handler:%q class:%q original:%q, want exact=%v", relationCount, diagnosticCount, activityCount, chainDepth, handlerNode, failureClass, originalEvent, want)
 	}
+}
+
+func catalogDialectQuery(db *sql.DB, postgres, sqlite string) string {
+	if catalogIsSQLiteDB(db) {
+		return sqlite
+	}
+	return postgres
+}
+
+func catalogIsSQLiteDB(db *sql.DB) bool {
+	return db != nil && strings.Contains(strings.ToLower(fmt.Sprintf("%T", db.Driver())), "sqlite")
 }
 
 func (h *runtimeHarness) publishedEventIDs(entityID string) []string {

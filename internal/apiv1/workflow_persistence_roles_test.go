@@ -3,6 +3,7 @@ package apiv1
 import (
 	"testing"
 
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -12,6 +13,7 @@ import (
 )
 
 type apiTestDurableWorkflowRoles interface {
+	runtimebus.TargetFailureDeadLetterRecorder
 	runtimedelivery.Store
 	decisioncard.Store
 	decisioncard.ProposedEffectStore
@@ -33,6 +35,9 @@ func completeAPITestDurableWorkflowOptions(t testing.TB, selected any, bus any, 
 	}
 	if opts.DeliveryStore == nil {
 		opts.DeliveryStore = roles
+	}
+	if opts.DeadLetters == nil {
+		opts.DeadLetters = roles
 	}
 	if opts.PipelineObligations == nil {
 		opts.PipelineObligations = roles.PipelineObligations()

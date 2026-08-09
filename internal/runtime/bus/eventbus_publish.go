@@ -29,9 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-type TargetFailureDeadLetterRecorder interface {
-	RecordDeadLetter(context.Context, runtimedeadletters.Record) error
-}
+type TargetFailureDeadLetterRecorder = runtimedeadletters.Recorder
 
 func targetDeliveryFailureEnvelope(failure runtimepinrouting.TargetFailure) *runtimefailures.Envelope {
 	if failure.Empty() {

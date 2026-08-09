@@ -197,6 +197,7 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 		Persistence:             workflowPersistence,
 		RunLifecycle:            selected,
 		DeliveryStore:           selected,
+		DeadLetters:             selected,
 		PipelineObligations:     selected.PipelineObligations(),
 		DecisionCards:           selected,
 		ProposedEffects:         selected,
