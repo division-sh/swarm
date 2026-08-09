@@ -316,7 +316,7 @@ func TestCLI_VersionPrintsLocalBinaryIdentity(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("version code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Swarm dev", "Commit: unknown", "Built: unknown", "Go:"} {
+	for _, want := range []string{"Swarm dev", "Commit: unknown", "Built: unknown", "Go:", "Platform spec digest: "} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("version output missing %q:\n%s", want, stdout.String())
 		}

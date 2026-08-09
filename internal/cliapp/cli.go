@@ -447,15 +447,16 @@ type versionCommandOptions struct {
 }
 
 type versionOutputResult struct {
-	BinaryVersion   string                       `json:"binary_version"`
-	ModuleVersion   string                       `json:"module_version"`
-	PlatformVersion string                       `json:"platform_version"`
-	Commit          string                       `json:"commit"`
-	Built           string                       `json:"built"`
-	GoVersion       string                       `json:"go_version"`
-	GOOS            string                       `json:"goos"`
-	GOARCH          string                       `json:"goarch"`
-	Server          *diagnosticHealthCheckResult `json:"server,omitempty"`
+	BinaryVersion      string                       `json:"binary_version"`
+	ModuleVersion      string                       `json:"module_version"`
+	PlatformVersion    string                       `json:"platform_version"`
+	PlatformSpecDigest string                       `json:"platform_spec_digest"`
+	Commit             string                       `json:"commit"`
+	Built              string                       `json:"built"`
+	GoVersion          string                       `json:"go_version"`
+	GOOS               string                       `json:"goos"`
+	GOARCH             string                       `json:"goarch"`
+	Server             *diagnosticHealthCheckResult `json:"server,omitempty"`
 }
 
 func newVersionCommand(opts rootCommandOptions) *cobra.Command {
@@ -490,14 +491,15 @@ func runVersionCommand(ctx context.Context, out, errOut io.Writer, opts versionC
 		return err
 	}
 	result := versionOutputResult{
-		BinaryVersion:   metadata.BinaryVersion,
-		ModuleVersion:   metadata.ModuleVersion,
-		PlatformVersion: metadata.PlatformVersion,
-		Commit:          metadata.Commit,
-		Built:           metadata.Built,
-		GoVersion:       metadata.GoVersion,
-		GOOS:            metadata.GOOS,
-		GOARCH:          metadata.GOARCH,
+		BinaryVersion:      metadata.BinaryVersion,
+		ModuleVersion:      metadata.ModuleVersion,
+		PlatformVersion:    metadata.PlatformVersion,
+		PlatformSpecDigest: metadata.PlatformSpecDigest,
+		Commit:             metadata.Commit,
+		Built:              metadata.Built,
+		GoVersion:          metadata.GoVersion,
+		GOOS:               metadata.GOOS,
+		GOARCH:             metadata.GOARCH,
 	}
 	if !opts.server {
 		return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
@@ -527,6 +529,9 @@ func writeLocalVersion(out io.Writer, metadata versionmetadata.Metadata) {
 	fmt.Fprintf(out, "Commit: %s\n", metadata.Commit)
 	fmt.Fprintf(out, "Built: %s\n", metadata.Built)
 	fmt.Fprintf(out, "Go: %s %s/%s\n", metadata.GoVersion, metadata.GOOS, metadata.GOARCH)
+	if digest := strings.TrimSpace(metadata.PlatformSpecDigest); digest != "" {
+		fmt.Fprintf(out, "Platform spec digest: %s\n", digest)
+	}
 }
 
 func writeVersionServerIdentity(out io.Writer, result diagnosticHealthCheckResult) {

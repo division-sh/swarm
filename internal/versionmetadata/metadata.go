@@ -13,17 +13,19 @@ const unknownVersionValue = "unknown"
 var (
 	readVersionBuildInfo       = debug.ReadBuildInfo
 	readVersionPlatformVersion = platform.PlatformVersion
+	readVersionPlatformDigest  = platform.PlatformSpecDigest
 )
 
 type Metadata struct {
-	BinaryVersion   string
-	ModuleVersion   string
-	PlatformVersion string
-	Commit          string
-	Built           string
-	GoVersion       string
-	GOOS            string
-	GOARCH          string
+	BinaryVersion      string
+	ModuleVersion      string
+	PlatformVersion    string
+	PlatformSpecDigest string
+	Commit             string
+	Built              string
+	GoVersion          string
+	GOOS               string
+	GOARCH             string
 }
 
 type Injected struct {
@@ -48,14 +50,15 @@ func Resolve(injected Injected) (Metadata, error) {
 	}
 	vcsTime := buildInfoSetting(buildInfo, "vcs.time")
 	return Metadata{
-		BinaryVersion:   resolvedBinaryVersion(injected.Version, moduleVersion),
-		ModuleVersion:   resolvedOptionalVersion(moduleVersion),
-		PlatformVersion: strings.TrimSpace(platformVersion),
-		Commit:          resolvedInjectedOrFallback(injected.Commit, unknownVersionValue, vcsRevision),
-		Built:           resolvedInjectedOrFallback(injected.Date, unknownVersionValue, vcsTime),
-		GoVersion:       goruntime.Version(),
-		GOOS:            goruntime.GOOS,
-		GOARCH:          goruntime.GOARCH,
+		BinaryVersion:      resolvedBinaryVersion(injected.Version, moduleVersion),
+		ModuleVersion:      resolvedOptionalVersion(moduleVersion),
+		PlatformVersion:    strings.TrimSpace(platformVersion),
+		PlatformSpecDigest: readVersionPlatformDigest(),
+		Commit:             resolvedInjectedOrFallback(injected.Commit, unknownVersionValue, vcsRevision),
+		Built:              resolvedInjectedOrFallback(injected.Date, unknownVersionValue, vcsTime),
+		GoVersion:          goruntime.Version(),
+		GOOS:               goruntime.GOOS,
+		GOARCH:             goruntime.GOARCH,
 	}, nil
 }
 
