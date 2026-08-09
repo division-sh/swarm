@@ -161,14 +161,14 @@ func mockAgentMemorySource(t *testing.T, unmockedCount int) semanticview.Source 
 	if unmockedCount > len(declarations) {
 		unmockedCount = len(declarations)
 	}
-	unmockedLabels := map[string]struct{}{}
 	unmockedLocalIDs := map[string]struct{}{}
 	for _, declaration := range declarations[:unmockedCount] {
-		unmockedLabels[declaration.label] = struct{}{}
 		unmockedLocalIDs[declaration.localID] = struct{}{}
 	}
 	for _, declaration := range declarations {
-		if _, skip := unmockedLabels[declaration.label]; skip {
+		// Loader project and flow views can project the same logical agent.
+		// Mutate every projection consistently so a later view cannot remock it.
+		if _, skip := unmockedLocalIDs[declaration.localID]; skip {
 			continue
 		}
 		entry := declaration.entries[declaration.localID]
