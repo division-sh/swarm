@@ -53,7 +53,3 @@ func (e *IdentityConflict) Error() string {
 func NewIdentityConflict(deadLetterID string, fields []string) error {
 	return &IdentityConflict{DeadLetterID: strings.TrimSpace(deadLetterID), Fields: append([]string(nil), fields...)}
 }
-
-type Persistence interface {
-	RecordDeadLetter(context.Context, Record) error
-}

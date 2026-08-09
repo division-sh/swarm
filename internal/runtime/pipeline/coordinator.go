@@ -63,7 +63,7 @@ type PipelineCoordinator struct {
 	decisionDraftExpiry    DecisionCardDraftExpiry
 	humanTaskExpiry        HumanTaskExpiry
 	deliveryStore          runtimedelivery.Store
-	deadLetters            runtimedeadletters.Persistence
+	deadLetters            runtimedeadletters.Recorder
 	deliveryRuntime        WorkflowDeliveryRuntime
 	flowRoutes             FlowInstanceRouteOwner
 	credentials            runtimecredentials.Store
@@ -92,7 +92,7 @@ type PipelineCoordinatorOptions struct {
 	Module                           WorkflowModule
 	Persistence                      WorkflowPersistence
 	DeliveryStore                    runtimedelivery.Store
-	DeadLetters                      runtimedeadletters.Persistence
+	DeadLetters                      runtimedeadletters.Recorder
 	PipelineObligations              runtimepipelineobligation.Store
 	InstanceActivator                FlowInstanceActivator
 	InstanceDeactivator              FlowInstanceDeactivator
