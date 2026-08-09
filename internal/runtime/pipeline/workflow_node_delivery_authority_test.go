@@ -224,6 +224,7 @@ func TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery(t *testing.T)
 }
 
 func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
+	const retryBase = 30 * time.Second
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			workflowStore, ctx := tc.open(t)
@@ -235,7 +236,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 					"node-a": {ID: "node-a", ExecutionType: "system_node"},
 				},
 				Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
-					"handler_retry_base_seconds": {Value: 1},
+					"handler_retry_base_seconds": {Value: int(retryBase / time.Second)},
 				}},
 				Events: map[string]runtimecontracts.EventCatalogEntry{
 					"source.evt":     {},
@@ -329,6 +330,9 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 					time.Now().UTC(),
 					outcomes,
 				)
+			}
+			if got := snapshot.NextEligibleAt.Sub(snapshot.UpdatedAt); got != retryBase {
+				t.Fatalf("node delivery retry cadence = %s, want %s", got, retryBase)
 			}
 			if len(outcomes) != 1 || outcomes[0].Outcome != "retry_scheduled" {
 				t.Fatalf("node delivery outcomes = %#v, want retry_scheduled after first attempt", outcomes)

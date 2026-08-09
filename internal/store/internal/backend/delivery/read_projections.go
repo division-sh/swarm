@@ -15,12 +15,12 @@ import (
 const (
 	postgresAgentPendingEligibility = `(
 		d.status = 'pending'
-		OR (d.status = 'failed' AND d.retry_count <= d.max_retries AND d.next_eligible_at <= CURRENT_TIMESTAMP)
+		OR (d.status = 'failed' AND d.retry_count <= d.max_retries AND d.next_eligible_at <= ` + postgresDatabaseNowExpression + `)
 		OR d.status = 'in_progress'
 	)`
 	sqliteAgentPendingEligibility = `(
 		d.status = 'pending'
-		OR (d.status = 'failed' AND d.retry_count <= d.max_retries AND d.next_eligible_at <= CURRENT_TIMESTAMP)
+		OR (d.status = 'failed' AND d.retry_count <= d.max_retries AND julianday(substr(d.next_eligible_at, 1, 23)) <= julianday(` + sqliteDatabaseNowExpression + `))
 		OR d.status = 'in_progress'
 	)`
 )
