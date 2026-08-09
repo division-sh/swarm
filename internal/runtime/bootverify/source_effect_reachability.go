@@ -21,6 +21,13 @@ type SourceBootEffectReachability struct {
 	unreachableOutboundTools  map[string]struct{}
 }
 
+type sourceAgentSelectionEntry struct {
+	scopeKind string
+	scopeID   string
+	localID   string
+	entry     runtimecontracts.AgentRegistryEntry
+}
+
 // ResolveSourceBootEffectReachability derives which outbound tool transports
 // can still execute for one effective source. Any live-selected agent or
 // declarative workflow activity keeps its outbound tools reachable; an
@@ -30,29 +37,28 @@ func ResolveSourceBootEffectReachability(source semanticview.Source, configuredD
 		return SourceBootEffectReachability{}, fmt.Errorf("semantic source is required")
 	}
 
-	agents := source.AgentEntries()
-	rawAgentIDs := make([]string, 0, len(agents))
-	for rawID := range agents {
-		rawAgentIDs = append(rawAgentIDs, rawID)
-	}
-	sort.Strings(rawAgentIDs)
+	agents := sourceAgentSelectionEntries(source)
 
 	fact := SourceBootEffectReachability{
 		resolved:                  true,
 		liveWorkflowActivitySites: sourceLiveWorkflowActivitySites(source),
 	}
-	for _, rawAgentID := range rawAgentIDs {
-		agentID := strings.TrimSpace(rawAgentID)
-		entry := agents[rawAgentID]
-		selection, err := llmselection.ResolveAgentExecutionSelection(configuredDefault, entry.Mock.Configured())
+	localIDCounts := map[string]int{}
+	for _, agent := range agents {
+		localIDCounts[agent.localID]++
+	}
+	liveAgentLabels := map[string]struct{}{}
+	for _, agent := range agents {
+		selection, err := llmselection.ResolveAgentExecutionSelection(configuredDefault, agent.entry.Mock.Configured())
 		if err != nil {
-			return SourceBootEffectReachability{}, fmt.Errorf("resolve effective execution selection for agent %q: %w", agentID, err)
+			return SourceBootEffectReachability{}, fmt.Errorf("resolve effective execution selection for agent %q: %w", sourceAgentSelectionLabel(agent, localIDCounts[agent.localID] > 1), err)
 		}
 		if selection.Mode != executionmode.Mock {
-			fact.liveAgentIDs = append(fact.liveAgentIDs, agentID)
+			liveAgentLabels[sourceAgentSelectionLabel(agent, localIDCounts[agent.localID] > 1)] = struct{}{}
 		}
 	}
-	if len(rawAgentIDs) == 0 || len(fact.liveAgentIDs) > 0 {
+	fact.liveAgentIDs = sortedSetKeysLocal(liveAgentLabels)
+	if len(agents) == 0 || len(fact.liveAgentIDs) > 0 {
 		return fact, nil
 	}
 
@@ -75,7 +81,8 @@ func (r SourceBootEffectReachability) ToolCredentialRequired(toolID string) bool
 	return !unreachable
 }
 
-// LiveAgentIDs returns the sorted actors that keep outbound effects reachable.
+// LiveAgentIDs returns the sorted declarations that keep outbound effects
+// reachable. Ambiguous local IDs are scope-qualified.
 func (r SourceBootEffectReachability) LiveAgentIDs() []string {
 	return append([]string(nil), r.liveAgentIDs...)
 }
@@ -86,15 +93,117 @@ func (r SourceBootEffectReachability) LiveWorkflowActivitySites(toolID string) [
 	return append([]string(nil), r.liveWorkflowActivitySites[strings.TrimSpace(toolID)]...)
 }
 
+func sourceAgentSelectionEntries(source semanticview.Source) []sourceAgentSelectionEntry {
+	entries := []sourceAgentSelectionEntry{}
+	scopedLocalIDs := map[string]struct{}{}
+	appendScoped := func(scopeKind, scopeID string, agents map[string]runtimecontracts.AgentRegistryEntry) {
+		for _, rawID := range sortedSetKeysLocal(agents) {
+			localID := strings.TrimSpace(rawID)
+			if localID == "" {
+				continue
+			}
+			scopedLocalIDs[localID] = struct{}{}
+			entries = append(entries, sourceAgentSelectionEntry{
+				scopeKind: scopeKind,
+				scopeID:   strings.TrimSpace(scopeID),
+				localID:   localID,
+				entry:     agents[rawID],
+			})
+		}
+	}
+	for _, scope := range source.ProjectScopes() {
+		appendScoped("project", scope.Key, scope.Agents)
+	}
+	for _, scope := range source.FlowScopes() {
+		appendScoped("flow", scope.ID, scope.Agents)
+	}
+	aliases := source.AgentEntries()
+	for _, rawID := range sortedSetKeysLocal(aliases) {
+		localID := strings.TrimSpace(rawID)
+		if localID == "" {
+			continue
+		}
+		if _, represented := scopedLocalIDs[localID]; represented {
+			continue
+		}
+		entries = append(entries, sourceAgentSelectionEntry{
+			localID: localID,
+			entry:   aliases[rawID],
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		left := sourceAgentSelectionLabel(entries[i], true)
+		right := sourceAgentSelectionLabel(entries[j], true)
+		return left < right
+	})
+	return entries
+}
+
+func sourceAgentSelectionLabel(agent sourceAgentSelectionEntry, qualify bool) string {
+	if !qualify || strings.TrimSpace(agent.scopeKind) == "" {
+		return agent.localID
+	}
+	scopeID := strings.TrimSpace(agent.scopeID)
+	if scopeID == "" || scopeID == "." {
+		scopeID = "root"
+	}
+	return strings.Join([]string{agent.scopeKind, scopeID, "agent", agent.localID}, " ")
+}
+
 func sourceLiveWorkflowActivitySites(source semanticview.Source) map[string][]string {
 	sitesByTool := map[string][]string{}
 	seen := map[string]map[string]struct{}{}
-	for _, site := range source.ActivitySites() {
+	scopedLocalNodeIDs := map[string]struct{}{}
+	appendNodes := func(scopeLabel, flowID string, nodes map[string]runtimecontracts.SystemNodeContract) {
+		for _, rawNodeID := range sortedSetKeysLocal(nodes) {
+			nodeID := strings.TrimSpace(rawNodeID)
+			if nodeID == "" {
+				continue
+			}
+			scopedLocalNodeIDs[nodeID] = struct{}{}
+			node := nodes[rawNodeID]
+			appendWorkflowActivitySites(sitesByTool, seen, scopeLabel, runtimecontracts.ActivitySitesForNode(flowID, nodeID, node.EventHandlers))
+		}
+	}
+	for _, scope := range source.ProjectScopes() {
+		projectID := strings.TrimSpace(scope.Key)
+		if projectID == "" || projectID == "." {
+			projectID = "root"
+		}
+		appendNodes("project "+projectID, scope.OwningFlowID, scope.Nodes)
+	}
+	for _, scope := range source.FlowScopes() {
+		appendNodes("", scope.ID, scope.Nodes)
+	}
+	aliases := source.NodeEntries()
+	for _, rawNodeID := range sortedSetKeysLocal(aliases) {
+		nodeID := strings.TrimSpace(rawNodeID)
+		if nodeID == "" {
+			continue
+		}
+		if _, represented := scopedLocalNodeIDs[nodeID]; represented {
+			continue
+		}
+		flowID := ""
+		if contractSource, ok := source.NodeContractSource(nodeID); ok {
+			flowID = strings.TrimSpace(contractSource.FlowID)
+		}
+		node := aliases[rawNodeID]
+		appendWorkflowActivitySites(sitesByTool, seen, "", runtimecontracts.ActivitySitesForNode(flowID, nodeID, node.EventHandlers))
+	}
+	for toolID := range sitesByTool {
+		sort.Strings(sitesByTool[toolID])
+	}
+	return sitesByTool
+}
+
+func appendWorkflowActivitySites(sitesByTool map[string][]string, seen map[string]map[string]struct{}, scopeLabel string, sites []runtimecontracts.ActivitySite) {
+	for _, site := range sites {
 		toolID := strings.TrimSpace(site.Spec.Tool)
 		if toolID == "" {
 			continue
 		}
-		label := workflowActivitySiteLabel(site)
+		label := workflowActivitySiteLabel(scopeLabel, site)
 		if seen[toolID] == nil {
 			seen[toolID] = map[string]struct{}{}
 		}
@@ -104,14 +213,13 @@ func sourceLiveWorkflowActivitySites(source semanticview.Source) map[string][]st
 		seen[toolID][label] = struct{}{}
 		sitesByTool[toolID] = append(sitesByTool[toolID], label)
 	}
-	for toolID := range sitesByTool {
-		sort.Strings(sitesByTool[toolID])
-	}
-	return sitesByTool
 }
 
-func workflowActivitySiteLabel(site runtimecontracts.ActivitySite) string {
+func workflowActivitySiteLabel(scopeLabel string, site runtimecontracts.ActivitySite) string {
 	parts := []string{}
+	if scopeLabel = strings.TrimSpace(scopeLabel); scopeLabel != "" {
+		parts = append(parts, scopeLabel)
+	}
 	if flowID := strings.TrimSpace(site.FlowID); flowID != "" {
 		parts = append(parts, "flow "+flowID)
 	}
