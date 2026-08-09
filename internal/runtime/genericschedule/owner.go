@@ -276,7 +276,10 @@ func (l *Lifecycle) ReconcileWakeup(ctx context.Context, activationID string) er
 			if wakeErr != nil {
 				return wakeErr
 			}
-			return l.scheduler.RetireGenericScheduleWakeup(wakeup)
+			if err := l.scheduler.RetireGenericScheduleWakeup(wakeup); err != nil {
+				return err
+			}
+			return l.store.ReleaseGenericScheduleWakeup(context.WithoutCancel(ctx), wakeup)
 		}
 		return nil
 	}

@@ -192,6 +192,7 @@ type lifecycleProofStore struct {
 	prepared    PreparedOccurrence
 	commit      func(CommitCommand) (CommitResult, error)
 	commitCalls int
+	released    []Wakeup
 	order       *[]string
 }
 
@@ -229,14 +230,20 @@ func (s *lifecycleProofStore) ClaimGenericScheduleWakeup(context.Context, Wakeup
 	}
 	return true, nil
 }
-func (*lifecycleProofStore) ReleaseGenericScheduleWakeup(context.Context, Wakeup) error {
+func (s *lifecycleProofStore) ReleaseGenericScheduleWakeup(_ context.Context, wakeup Wakeup) error {
+	s.released = append(s.released, wakeup)
+	if s.order != nil {
+		*s.order = append(*s.order, "release")
+	}
 	return nil
 }
 func (*lifecycleProofStore) ReleaseGenericScheduleClaims(context.Context) error { return nil }
 
 type lifecycleProofScheduler struct {
 	restoreScheduler
-	order *[]string
+	order     *[]string
+	retired   []Wakeup
+	retireErr error
 }
 
 func (s *lifecycleProofScheduler) RegisterGenericScheduleWakeup(ctx context.Context, wakeup Wakeup) error {
@@ -244,6 +251,13 @@ func (s *lifecycleProofScheduler) RegisterGenericScheduleWakeup(ctx context.Cont
 		*s.order = append(*s.order, "register")
 	}
 	return s.restoreScheduler.RegisterGenericScheduleWakeup(ctx, wakeup)
+}
+func (s *lifecycleProofScheduler) RetireGenericScheduleWakeup(wakeup Wakeup) error {
+	s.retired = append(s.retired, wakeup)
+	if s.order != nil {
+		*s.order = append(*s.order, "retire")
+	}
+	return s.retireErr
 }
 
 type lifecycleProofPlanner struct {
@@ -325,6 +339,108 @@ func TestLifecyclePersistsActivationBeforeRegisteringWakeup(t *testing.T) {
 	}
 	if got := strings.Join(order, ","); got != "persist,load,claim,register" {
 		t.Fatalf("generic schedule admission order = %q", got)
+	}
+}
+
+func TestLifecycleTerminalWakeupsRetireBeforeReleasingClaims(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for _, test := range []struct {
+		name   string
+		status Status
+		apply  func(*Activation)
+	}{
+		{
+			name: "fired_one_shot", status: StatusFired,
+			apply: func(activation *Activation) {
+				activation.AcceptedAt = now
+				activation.FiredAt = now
+			},
+		},
+		{
+			name: "cancelled", status: StatusCancelled,
+			apply: func(activation *Activation) {
+				activation.CancelCause = "operator_cancelled"
+				activation.CancelledAt = now
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			activation := testGlobalActivation(t, AbsoluteDue(now.Add(time.Hour)), now, now.Add(time.Hour))
+			activation.Status = test.status
+			test.apply(&activation)
+			if err := activation.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			order := []string{}
+			store := &lifecycleProofStore{activation: activation, order: &order}
+			scheduler := &lifecycleProofScheduler{order: &order}
+			lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stopLifecycleProof(t, lifecycle)
+
+			if err := lifecycle.ReconcileWakeup(context.Background(), activation.ID); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(order, ","); got != "load,retire,release" {
+				t.Fatalf("terminal reconciliation order = %q, want load,retire,release", got)
+			}
+			if len(scheduler.retired) != 1 || len(store.released) != 1 || scheduler.retired[0] != store.released[0] {
+				t.Fatalf("terminal wakeup retirement/release = retired:%#v released:%#v", scheduler.retired, store.released)
+			}
+		})
+	}
+}
+
+func TestLifecycleActiveRecurringWakeupRetainsClaim(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	activation := testGlobalActivation(t, EveryDue(time.Hour), now, now.Add(time.Hour))
+	order := []string{}
+	store := &lifecycleProofStore{activation: activation, order: &order}
+	scheduler := &lifecycleProofScheduler{order: &order}
+	lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopLifecycleProof(t, lifecycle)
+
+	if err := lifecycle.ReconcileWakeup(context.Background(), activation.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(order, ","); got != "load,claim,register" {
+		t.Fatalf("active recurring reconciliation order = %q, want load,claim,register", got)
+	}
+	if len(scheduler.retired) != 0 || len(store.released) != 0 {
+		t.Fatalf("active recurring wakeup lost claim: retired:%#v released:%#v", scheduler.retired, store.released)
+	}
+}
+
+func TestLifecycleRetirementFailureRetainsClaim(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	activation := testGlobalActivation(t, AbsoluteDue(now.Add(time.Hour)), now, now.Add(time.Hour))
+	activation.Status = StatusCancelled
+	activation.CancelCause = "operator_cancelled"
+	activation.CancelledAt = now
+	retireErr := errors.New("scheduler retirement failed")
+	order := []string{}
+	store := &lifecycleProofStore{activation: activation, order: &order}
+	scheduler := &lifecycleProofScheduler{order: &order, retireErr: retireErr}
+	lifecycle, err := NewLifecycle(store, scheduler, &lifecycleProofPlanner{}, &lifecycleProofDispatcher{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stopLifecycleProof(t, lifecycle)
+
+	err = lifecycle.ReconcileWakeup(context.Background(), activation.ID)
+	if !errors.Is(err, retireErr) {
+		t.Fatalf("retirement error = %v, want %v", err, retireErr)
+	}
+	if got := strings.Join(order, ","); got != "load,retire" {
+		t.Fatalf("failed retirement order = %q, want load,retire", got)
+	}
+	if len(store.released) != 0 {
+		t.Fatalf("failed retirement released claim: %#v", store.released)
 	}
 }
 
