@@ -16,9 +16,78 @@ import (
 
 type deliveryReadProjectionStore interface {
 	authorActivityReceiptStore
+	runtimedelivery.Store
 	ListPendingAgentDeliveryFacts(context.Context, []agentidentity.Identity, time.Time) (map[agentidentity.Identity]PendingAgentDeliveryFacts, error)
 	ListPendingAgentDeliveryDetails(context.Context, PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error)
 	ListAgentDeliveryLifecycleFacts(context.Context, []agentidentity.Identity) (map[agentidentity.Identity]AgentDeliveryLifecycleFacts, error)
+}
+
+func TestPendingAgentDeliveryRetryEligibilityPreservesSubsecondStoreParity(t *testing.T) {
+	const retryBase = 30 * time.Second
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			selected := fixture.store.(deliveryReadProjectionStore)
+			ctx := testAuthorActivityContext()
+			runID := uuid.NewString()
+			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+
+			identity := testAgentIdentity(t, "retry-agent", "delivery-projection/retry")
+			event := eventtest.PersistedProjection(
+				uuid.NewString(), "projection.retry", "gateway", "", json.RawMessage(`{}`), 0,
+				runID, "", events.EventEnvelope{}, time.Now().UTC(),
+			)
+			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
+			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
+				t.Fatalf("commit retry delivery event: %v", err)
+			}
+			claimed, err := claimDeliveryFixture(ctx, selected, event, route)
+			if err != nil {
+				t.Fatalf("claim retry delivery: %v", err)
+			}
+			snapshot, err := selected.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
+				Disposition: runtimedelivery.FailureRetry,
+				Failure:     testRetryableFailure(),
+				RetryBase:   retryBase,
+			})
+			if err != nil {
+				t.Fatalf("settle retry delivery: %v", err)
+			}
+			if got := snapshot.NextEligibleAt.Sub(snapshot.UpdatedAt); got != retryBase {
+				t.Fatalf("retry cadence = %s, want %s", got, retryBase)
+			}
+
+			facts, err := selected.ListPendingAgentDeliveryFacts(ctx, []agentidentity.Identity{identity}, event.CreatedAt().Add(-time.Minute))
+			if err != nil {
+				t.Fatalf("list deferred retry facts: %v", err)
+			}
+			if got := facts[identity].PendingCount; got != 0 {
+				t.Fatalf("deferred retry pending count = %d, want 0", got)
+			}
+
+			eligibleAt := time.Now().UTC().Add(-time.Second)
+			query := `UPDATE event_deliveries SET next_eligible_at=? WHERE delivery_id=?`
+			args := []any{eligibleAt, snapshot.DeliveryID}
+			if fixture.dialect == "postgres" {
+				query = `UPDATE event_deliveries SET next_eligible_at=$2::timestamptz WHERE delivery_id=$1::uuid`
+				args = []any{snapshot.DeliveryID, eligibleAt}
+			}
+			if _, err := fixture.db.ExecContext(ctx, query, args...); err != nil {
+				t.Fatalf("make retry eligible: %v", err)
+			}
+			page, err := selected.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{
+				AgentIdentity: identity,
+				Since:         event.CreatedAt().Add(-time.Minute),
+				Limit:         10,
+			})
+			if err != nil {
+				t.Fatalf("list eligible retry details: %v", err)
+			}
+			if len(page.PendingDeliveries) != 1 || page.PendingDeliveries[0].DeliveryID != snapshot.DeliveryID {
+				t.Fatalf("eligible retry page = %#v, want exact delivery %s", page, snapshot.DeliveryID)
+			}
+		})
+	}
 }
 
 func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {

@@ -28,6 +28,9 @@ type Dialect string
 const (
 	DialectPostgres Dialect = "postgres"
 	DialectSQLite   Dialect = "sqlite"
+
+	postgresDatabaseNowExpression = `clock_timestamp()`
+	sqliteDatabaseNowExpression   = `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
 )
 
 // Adapter contains the private SQL mechanics for the executable-delivery
@@ -2412,8 +2415,12 @@ func (a *Adapter) databaseNow(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }) (time.Time, error) {
 	query := `SELECT CURRENT_TIMESTAMP`
-	if a != nil && a.dialect == DialectPostgres {
-		query = `SELECT clock_timestamp()`
+	if a != nil && a.dialect == DialectSQLite {
+		// CURRENT_TIMESTAMP drops fractional seconds in SQLite, which can make a
+		// one-second retry eligible almost immediately at a wall-clock boundary.
+		query = `SELECT ` + sqliteDatabaseNowExpression
+	} else if a != nil && a.dialect == DialectPostgres {
+		query = `SELECT ` + postgresDatabaseNowExpression
 	}
 	var raw any
 	if err := q.QueryRowContext(ctx, query).Scan(&raw); err != nil {
