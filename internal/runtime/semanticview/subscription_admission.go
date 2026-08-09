@@ -290,11 +290,31 @@ func ResolveNodeSubscriptionHandler(source Source, nodeID, eventType string) Nod
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
+	type handlerCandidate struct {
+		key       string
+		admission AuthoredSubscriptionAdmission
+	}
+	exact := make([]handlerCandidate, 0, len(keys))
+	patterns := make([]handlerCandidate, 0, len(keys))
+	for _, key := range keys {
+		admission := ClassifyNodeSubscription(source, nodeID, key)
+		if !admission.Admitted() {
+			continue
+		}
+		candidate := handlerCandidate{key: key, admission: admission}
+		if admission.Pattern() {
+			patterns = append(patterns, candidate)
+			continue
+		}
+		exact = append(exact, candidate)
+	}
+	candidates := append(exact, patterns...)
 	owner, _ := source.NodeContractSource(nodeID)
 	flowPath := source.FlowPath(owner.FlowID)
 	inputEvents := source.FlowInputEvents(owner.FlowID)
-	for _, key := range keys {
-		admission := ClassifyNodeSubscription(source, nodeID, key)
+	for _, candidate := range candidates {
+		key := candidate.key
+		admission := candidate.admission
 		if !admission.Matches(eventType) && !admission.MatchesReceiverInput(eventType, flowPath, inputEvents) {
 			continue
 		}

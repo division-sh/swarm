@@ -108,6 +108,30 @@ func TestEventBusExactSubscriptionAdmissionPreservesLocalNodeAndSameScopeAgentRo
 	}
 }
 
+func TestEventBusTemplateAgentSameScopeExactAdmissionRendersConcreteInstanceRoute(t *testing.T) {
+	bundle := routeMaterializationConfigVarBundle()
+	flow := bundle.FlowTree.ByID["operating"]
+	agent := flow.Agents["ceo"]
+	agent.Subscriptions = []string{"operating/opco.product_initialization_requested"}
+	flow.Agents["ceo"] = agent
+
+	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	identity := runtimeflowidentity.DeriveRoute("operating", "11111111-1111-4111-8111-111111111111")
+	if err := rt.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
+		Identity:            identity,
+		ActivationVariables: map[string]string{"vertical_id": identity.InstanceID},
+	}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	got := rt.Resolve(identity.InstancePath + "/opco.product_initialization_requested")
+	if len(got) != 1 || got[0].Recipient.ID() != "ceo-"+identity.InstanceID || got[0].AgentIdentity.FlowInstance() != identity.InstancePath {
+		t.Fatalf("resolved subscribers = %#v, want concrete same-scope agent route", got)
+	}
+}
+
 func exactSubscriptionRouteSource(nodeSubscription string, agentSubscriptions []string) semanticview.Source {
 	node := runtimecontracts.SystemNodeContract{
 		ID:            "listener",
