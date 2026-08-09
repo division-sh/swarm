@@ -122,6 +122,12 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 		sort.Strings(shards[i].Packages)
 	}
 	units := append([]ProofUnit(nil), shards...)
+	specialPackageUses := map[string]int{}
+	for _, id := range profilePolicy.Units {
+		for _, pkg := range policy.Units[id].Packages {
+			specialPackageUses[pkg]++
+		}
+	}
 	for _, id := range profilePolicy.Units {
 		specialUnit := policy.Units[id]
 		weight := 0.0
@@ -135,7 +141,7 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 			} else if packageWeight <= 0 {
 				packageWeight = 0.1
 			}
-			weight += packageWeight
+			weight += packageWeight / float64(specialPackageUses[pkg])
 		}
 		unitPackages, err := canonicalStrings(specialUnit.Packages)
 		if err != nil {
@@ -187,7 +193,7 @@ func (p RunPlan) Validate() error {
 		return fmt.Errorf("run plan has no units or package inventory")
 	}
 	seenUnits := map[string]bool{}
-	seenPackages := map[string]string{}
+	seenPackages := map[string][]ProofUnit{}
 	for _, unit := range p.Units {
 		if unit.ID == "" || seenUnits[unit.ID] {
 			return fmt.Errorf("run plan has empty or duplicate unit id %q", unit.ID)
@@ -203,10 +209,12 @@ func (p RunPlan) Validate() error {
 			return fmt.Errorf("unit %s has unsupported budget class %q", unit.ID, unit.BudgetClass)
 		}
 		for _, pkg := range unit.Packages {
-			if owner, ok := seenPackages[pkg]; ok {
-				return fmt.Errorf("package %s is duplicated across units %s and %s", pkg, owner, unit.ID)
+			for _, previous := range seenPackages[pkg] {
+				if previous.Run == "" || unit.Run == "" {
+					return fmt.Errorf("package %s is duplicated across unfiltered units %s and %s", pkg, previous.ID, unit.ID)
+				}
 			}
-			seenPackages[pkg] = unit.ID
+			seenPackages[pkg] = append(seenPackages[pkg], unit)
 		}
 	}
 	wantPackages, err := canonicalStrings(p.Packages)

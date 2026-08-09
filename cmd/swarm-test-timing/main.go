@@ -303,7 +303,7 @@ func updateWeightModel(cfg config) error {
 		}
 		seenUnits[item.UnitID] = true
 		for _, timing := range item.Report.Packages {
-			observed[timing.Package] = timing.Elapsed
+			observed[timing.Package] += timing.Elapsed
 		}
 	}
 	for _, unit := range plan.Units {

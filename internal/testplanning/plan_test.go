@@ -105,6 +105,40 @@ func TestRunPlanRejectsWrongExecutionSHA(t *testing.T) {
 	}
 }
 
+func TestBuildPlanAllowsExplicitFilteredPartitionsOfOneSpecialPackage(t *testing.T) {
+	policy := testPolicy()
+	policy.Units["catalog-a"] = UnitPolicy{Packages: []string{"module/catalog"}, Run: "^Test[A-M]", CountMode: "count-1", EnvironmentID: "env", BudgetClass: "broad"}
+	policy.Units["catalog-b"] = UnitPolicy{Packages: []string{"module/catalog"}, Run: "^Test[N-Z]", CountMode: "count-1", EnvironmentID: "env", BudgetClass: "broad"}
+	policy.Profiles[ProfilePRCommon] = ProfilePolicy{CountMode: "cache-default", EnvironmentID: "env", Units: []string{"catalog-a", "catalog-b"}}
+
+	plan, err := BuildPlan(policy, WeightModel{Version: 1, SourceRunID: "run", Packages: map[string]float64{"module/catalog": 100}}, []string{"module/a", "module/catalog"}, ProfilePRCommon, "partitioned", "abc")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	first, err := plan.Unit("catalog-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := plan.Unit("catalog-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.WeightSeconds != 50 || second.WeightSeconds != 50 {
+		t.Fatalf("partition weights = %.1f/%.1f, want 50/50", first.WeightSeconds, second.WeightSeconds)
+	}
+}
+
+func TestBuildPlanRejectsFilteredAndUnfilteredDuplicateSpecialPackage(t *testing.T) {
+	policy := testPolicy()
+	policy.Units["catalog-filtered"] = UnitPolicy{Packages: []string{"module/catalog"}, Run: "^TestFiltered$", CountMode: "count-1", EnvironmentID: "env", BudgetClass: "broad"}
+	policy.Profiles[ProfileFull] = ProfilePolicy{CountMode: "count-1", EnvironmentID: "env", Units: []string{"catalog-full", "catalog-filtered"}}
+
+	_, err := BuildPlan(policy, WeightModel{Version: 1, SourceRunID: "run", Packages: map[string]float64{}}, []string{"module/a", "module/catalog"}, ProfileFull, "invalid partition", "abc")
+	if err == nil || !strings.Contains(err.Error(), "duplicated across unfiltered units") {
+		t.Fatalf("BuildPlan error = %v, want unfiltered duplicate rejection", err)
+	}
+}
+
 func TestNightlyProfileRunsFormerExtrasExactlyOnceAsBroadPackages(t *testing.T) {
 	packages := []string{"module/catalog", "module/python", "module/fork"}
 	plan, err := BuildPlan(testPolicy(), WeightModel{Version: 1, SourceRunID: "run", Packages: map[string]float64{}}, packages, ProfileNightly, "nightly", "abc")

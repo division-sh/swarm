@@ -4,8 +4,8 @@
 version: 1
 hard:
   max_shard_command_seconds:
-    limit_seconds: 270
-    justification: Ratified from pinned broad command observations 161s, 159s, and 158s.
+    limit_seconds: 240
+    justification: Broad and partitioned store proof units must complete within the four-minute CI target.
   full_conformance_command_seconds:
     limit_seconds: 450
     justification: Ratified from isolated selected-store full command observations 415s and 367s.

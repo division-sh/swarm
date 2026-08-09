@@ -76,6 +76,8 @@ const (
 	RunForkContractFrontierAdmissionOwner = "runtime.run_fork.contract_frontier_admission"
 
 	RunForkSelectedContractDiagnosticPlatformOutcomePolicyOwner = "runtime.run_fork.contract_frontier_admission.selected_contract_diagnostic_platform_outcome_policy"
+	RunForkSelectedContractPlatformActivityOwner                = "runtime.run_fork.contract_frontier_admission.platform_activity_runtime"
+	RunForkSelectedContractPlatformActivityEvent                = "platform.activity_requested"
 
 	RunForkContractSelectionModeSelectedContracts = "selected_contracts"
 	RunForkContractSelectionModeBundleHash        = "bundle_hash"
@@ -85,6 +87,13 @@ const (
 	RunForkBlockerContractFrontierExecutionUnsupported = "contract_frontier_execution_unsupported"
 	RunForkBlockerContractFrontierRouteUnresolved      = "contract_frontier_route_unresolved"
 )
+
+func RunForkSelectedContractPlatformRuntimeOwner(eventName string) (string, bool) {
+	if strings.TrimSpace(eventName) != RunForkSelectedContractPlatformActivityEvent {
+		return "", false
+	}
+	return RunForkSelectedContractPlatformActivityOwner, true
+}
 
 type RunForkContractSelection struct {
 	Mode            string `json:"mode"`
