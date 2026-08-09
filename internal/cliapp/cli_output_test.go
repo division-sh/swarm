@@ -28,6 +28,7 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 	if versionJSON["binary_version"] != versionMetadata.BinaryVersion ||
 		versionJSON["module_version"] != versionMetadata.ModuleVersion ||
 		versionJSON["platform_version"] != versionMetadata.PlatformVersion ||
+		versionJSON["platform_spec_digest"] != versionMetadata.PlatformSpecDigest ||
 		versionJSON["commit"] != versionMetadata.Commit {
 		t.Fatalf("version json = %#v, want local metadata", versionJSON)
 	}

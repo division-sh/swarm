@@ -97,6 +97,7 @@ func withVersionMetadataHooks(t *testing.T, version, commit, date, platformVersi
 	t.Helper()
 	oldBuildInfo := readVersionBuildInfo
 	oldPlatformVersion := readVersionPlatformVersion
+	oldPlatformDigest := readVersionPlatformDigest
 	_ = version
 	_ = commit
 	_ = date
@@ -109,8 +110,12 @@ func withVersionMetadataHooks(t *testing.T, version, commit, date, platformVersi
 	readVersionPlatformVersion = func() (string, error) {
 		return platformVersion, platformErr
 	}
+	readVersionPlatformDigest = func() string {
+		return "platform-spec-digest-test"
+	}
 	t.Cleanup(func() {
 		readVersionBuildInfo = oldBuildInfo
 		readVersionPlatformVersion = oldPlatformVersion
+		readVersionPlatformDigest = oldPlatformDigest
 	})
 }

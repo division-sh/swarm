@@ -37,6 +37,14 @@ func WorkspaceDockerfile() []byte {
 	return rootartifacts.EmbeddedWorkspaceDockerfile()
 }
 
+// PlatformSpecDigest returns the full sha256 hex digest of the embedded
+// platform spec bytes. It is the single source of truth for the binary↔spec
+// version stamp; MaterializePlatformSpecFile derives its content-addressed
+// filename prefix from the same digest so the two spellings cannot diverge.
+func PlatformSpecDigest() string {
+	return embeddedAssetDigest(PlatformSpecYAML())
+}
+
 func MaterializePlatformSpecFile() (string, error) {
 	spec := PlatformSpecYAML()
 	return materializeEmbeddedAsset("platform spec", "platform-spec-", ".yaml", spec)
@@ -47,9 +55,13 @@ func MaterializeWorkspaceDockerfile() (string, error) {
 	return materializeEmbeddedAsset("workspace Dockerfile", "Dockerfile.workspace-", "", dockerfile)
 }
 
-func materializeEmbeddedAsset(label, prefix, suffix string, data []byte) (string, error) {
+func embeddedAssetDigest(data []byte) string {
 	digest := sha256.Sum256(data)
-	name := prefix + hex.EncodeToString(digest[:8]) + suffix
+	return hex.EncodeToString(digest[:])
+}
+
+func materializeEmbeddedAsset(label, prefix, suffix string, data []byte) (string, error) {
+	name := prefix + embeddedAssetDigest(data)[:16] + suffix
 	var attempts []string
 	for _, base := range platformSpecCacheBases() {
 		path, err := materializeEmbeddedAssetFile(base, name, data)
