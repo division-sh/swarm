@@ -306,19 +306,8 @@ func (m *DockerManager) ValidateSource(ctx context.Context, source semanticview.
 	if err != nil {
 		return err
 	}
-	for agentID, entry := range source.AgentEntries() {
-		agentID = strings.TrimSpace(agentID)
-		class := strings.TrimSpace(entry.WorkspaceClass)
-		if class == "" {
-			continue
-		}
-		scope, ok := classes[class]
-		if !ok {
-			return fmt.Errorf("workspace validation failed: agent %s references undefined workspace_class %q", agentID, class)
-		}
-		if !isSupportedWorkspaceScope(scope) {
-			return fmt.Errorf("workspace validation failed: workspace_class %q declares unsupported workspace_scope %q", class, scope)
-		}
+	if err := validateAgentWorkspaceClasses(source, classes); err != nil {
+		return err
 	}
 	if strings.TrimSpace(m.cfg.WorkspaceImage) == "" {
 		return fmt.Errorf("workspace validation failed: workspace image is required")
@@ -937,6 +926,29 @@ func workspaceClassesForSource(source semanticview.Source) (map[string]string, e
 		out[className] = scope
 	}
 	return out, nil
+}
+
+func validateAgentWorkspaceClasses(source semanticview.Source, classes map[string]string) error {
+	declarations := semanticview.AgentDeclarations(source)
+	localIDCounts := map[string]int{}
+	for _, declaration := range declarations {
+		localIDCounts[declaration.LocalID]++
+	}
+	for _, declaration := range declarations {
+		agentID := declaration.Label(localIDCounts[declaration.LocalID] > 1)
+		class := strings.TrimSpace(declaration.Entry.WorkspaceClass)
+		if class == "" {
+			continue
+		}
+		scope, ok := classes[class]
+		if !ok {
+			return fmt.Errorf("workspace validation failed: agent %s references undefined workspace_class %q", agentID, class)
+		}
+		if !isSupportedWorkspaceScope(scope) {
+			return fmt.Errorf("workspace validation failed: workspace_class %q declares unsupported workspace_scope %q", class, scope)
+		}
+	}
+	return nil
 }
 
 func isSupportedWorkspaceScope(scope string) bool {

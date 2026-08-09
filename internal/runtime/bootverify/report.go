@@ -448,9 +448,14 @@ func workspaceClassFindings(source semanticview.Source) []Finding {
 		}}
 	}
 	out := make([]Finding, 0)
-	for agentID, entry := range source.AgentEntries() {
-		agentID = strings.TrimSpace(agentID)
-		class := strings.TrimSpace(entry.WorkspaceClass)
+	declarations := semanticview.AgentDeclarations(source)
+	localIDCounts := map[string]int{}
+	for _, declaration := range declarations {
+		localIDCounts[declaration.LocalID]++
+	}
+	for _, declaration := range declarations {
+		agentID := declaration.Label(localIDCounts[declaration.LocalID] > 1)
+		class := strings.TrimSpace(declaration.Entry.WorkspaceClass)
 		if class == "" {
 			continue
 		}

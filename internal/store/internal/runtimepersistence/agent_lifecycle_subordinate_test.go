@@ -357,8 +357,9 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	rec := runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID: agentID, Identity: identity, Role: "worker", Type: "sonnet", Model: "regular", FlowID: "global",
-			ExecutionMode: runtimeeffects.ExecutionModeLive,
-			Memory:        agentmemory.Authored(true), FlowPath: "global",
+			ExecutionMode:      runtimeeffects.ExecutionModeLive,
+			ResolvedLLMBackend: "anthropic",
+			Memory:             agentmemory.Authored(true), FlowPath: "global",
 			Config: []byte(`{"system_prompt":"test"}`),
 		},
 		Status: "active", HiredBy: "test", StartedAt: now,

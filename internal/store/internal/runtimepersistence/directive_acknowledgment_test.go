@@ -480,13 +480,14 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 	}, faults))
 	rec := runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ExecutionMode: "live",
-			ID:            agent.id,
-			Identity:      identity,
-			FlowPath:      identity.FlowInstance(),
-			Type:          "stub",
-			Role:          "test",
-			Model:         "regular",
+			ExecutionMode:      "live",
+			ResolvedLLMBackend: "anthropic",
+			ID:                 agent.id,
+			Identity:           identity,
+			FlowPath:           identity.FlowInstance(),
+			Type:               "stub",
+			Role:               "test",
+			Model:              "regular",
 		},
 		Status: "active",
 	}

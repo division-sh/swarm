@@ -73,7 +73,7 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 	}, pg))
 	identity := agentidentitytest.RootRuntime(t, agent.id, "destructive-reset-integration")
 	rec := runtimemanager.PersistedAgent{
-		Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Identity: identity, Role: "test", Model: "regular"},
+		Config:    runtimeactors.AgentConfig{ExecutionMode: "live", ResolvedLLMBackend: "anthropic", ID: agent.id, Identity: identity, Role: "test", Model: "regular"},
 		Status:    "active",
 		HiredBy:   "destructive-reset-test",
 		StartedAt: time.Now().UTC(),

@@ -236,6 +236,104 @@ func TestValidateNativeToolBootConfigCensusesScopedAgentsHiddenByAmbiguousAlias(
 	}
 }
 
+func TestValidateNativeToolBootConfigRejectsCollapsedProjectOwnersAndResolvesFlowOwners(t *testing.T) {
+	source := scopedNativeToolAgentFixture(t)
+	_, err := ValidateNativeToolBootConfig(
+		unmanagedToolTestContext(),
+		source,
+		nil,
+		nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}),
+		relayWorkspaceResolverStub{target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()}},
+	)
+	if err == nil {
+		t.Fatal("ValidateNativeToolBootConfig unexpectedly admitted declarations with one shared runtime owner")
+	}
+	for _, project := range []string{"project-a", "project-b"} {
+		want := "project packages/" + project + " agent shared-worker has no unique scoped declaration owner"
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ValidateNativeToolBootConfig error = %v, want %q", err, want)
+		}
+	}
+	for _, flowID := range []string{"flow-a", "flow-b"} {
+		if strings.Contains(err.Error(), "flow "+flowID+" agent shared-worker") {
+			t.Fatalf("ValidateNativeToolBootConfig error = %v, flow owner %s should resolve exactly", err, flowID)
+		}
+	}
+}
+
+func TestValidateNativeToolBootConfigRejectsProjectOwnersCollapsedWithinOneFlow(t *testing.T) {
+	source := sameFlowScopedNativeToolAgentFixture(t)
+	declarations := semanticview.AgentDeclarations(source)
+	if len(declarations) != 2 {
+		t.Fatalf("declarations = %#v, want two scoped project agents", declarations)
+	}
+	for _, declaration := range declarations {
+		if owner, ok := semanticview.ScopedAgentDeclarationOwner(source, declaration); ok {
+			t.Fatalf("declaration %#v unexpectedly resolved shared owner %q", declaration, owner)
+		}
+	}
+
+	_, err := ValidateNativeToolBootConfig(
+		unmanagedToolTestContext(),
+		source,
+		nil,
+		nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}),
+		relayWorkspaceResolverStub{target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()}},
+	)
+	if err == nil {
+		t.Fatal("ValidateNativeToolBootConfig unexpectedly admitted collapsed same-flow owners")
+	}
+	for _, project := range []string{"project-a", "project-b"} {
+		want := "project flows/operating/packages/" + project + " agent shared-worker has no unique scoped declaration owner"
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ValidateNativeToolBootConfig error = %v, want %q", err, want)
+		}
+	}
+}
+
+func sameFlowScopedNativeToolAgentFixture(t *testing.T) semanticview.Source {
+	t.Helper()
+	root := t.TempDir()
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: same-flow-scoped-native-tool-census
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: operating
+    flow: operating
+    mode: static
+`)
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: same-flow-scoped-native-tool-census\n")
+	for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
+		writeToolFlowDataFixtureFile(t, filepath.Join(root, file), "{}\n")
+	}
+	flowDir := filepath.Join(root, "flows", "operating")
+	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "package.yaml"), `
+name: operating
+version: "1.0.0"
+packages:
+  - path: packages/project-a
+  - path: packages/project-b
+flows: []
+`)
+	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: operating\nmode: static\ninitial_state: active\nstates: [active]\n")
+	for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
+		writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, file), "{}\n")
+	}
+	for _, project := range []string{"project-a", "project-b"} {
+		dir := filepath.Join(flowDir, "packages", project)
+		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project+"\nversion: \"1.0.0\"\nflows: []\n")
+		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "agents.yaml"), scopedNativeToolAgentYAML())
+		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "nodes.yaml"), "{}\n")
+	}
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func scopedNativeToolAgentFixture(t *testing.T) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()

@@ -37,7 +37,7 @@ func TestOperatorAgentDeliveryPagesBoundHydrationParity(t *testing.T) {
 			identity := testAgentIdentity(t, "agent-a", "")
 			if err := selected.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 				Config: runtimeactors.AgentConfig{
-					ID: "agent-a", Identity: identity, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
+					ID: "agent-a", Identity: identity, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
 					Memory: agentmemory.PlatformDefault(), Config: json.RawMessage(`{"system_prompt":"bounded delivery pages"}`),
 				},
 				Status: "active", StartedAt: now,

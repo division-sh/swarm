@@ -44,7 +44,7 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 			continue
 		}
 		actor = resolved.Actor
-		if owner, ok := semanticview.AgentDeclarationOwner(source, declaration.OwnerFlowID, declaration.LocalID); ok {
+		if owner, ok := semanticview.ScopedAgentDeclarationOwner(source, declaration); ok {
 			name, err := runtimeagentidentity.DeclaredName(actor.ID, owner)
 			if err != nil {
 				failures = append(failures, err.Error())
@@ -55,6 +55,9 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 				failures = append(failures, err.Error())
 				continue
 			}
+		} else if strings.TrimSpace(declaration.ScopeKind) != "" {
+			failures = append(failures, fmt.Sprintf("agent %s has no unique scoped declaration owner", strings.TrimSpace(agentID)))
+			continue
 		}
 		if err := ValidateNativeToolAgentAdmission(ctx, actor, NativeToolAdmissionOptions{
 			Runtime:     resolved.Runtime,
