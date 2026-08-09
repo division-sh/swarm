@@ -66,8 +66,9 @@ func proveSameSlugSiblingExternalEffectAuthority(t *testing.T, store lifecycleEf
 			Config: runtimeactors.AgentConfig{
 				ID: "sibling-worker", Identity: fixture.identity, Type: "sonnet", Role: "worker",
 				FlowID: "review", FlowPath: fixture.identity.FlowInstance(), Model: "regular",
-				ExecutionMode: runtimeeffects.ExecutionModeLive,
-				Config:        []byte(`{"system_prompt":"x"}`),
+				ExecutionMode:      runtimeeffects.ExecutionModeLive,
+				ResolvedLLMBackend: "anthropic",
+				Config:             []byte(`{"system_prompt":"x"}`),
 			},
 			Status: "active", HiredBy: "test", StartedAt: now,
 		}
@@ -157,9 +158,10 @@ func proveLifecycleAndExternalEffectAuthority(t *testing.T, store lifecycleEffec
 	rec := runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID: "lifecycle-agent", Identity: identity, Type: "sonnet", Role: "worker", FlowID: "global", Model: "regular",
-			ExecutionMode: runtimeeffects.ExecutionModeLive,
-			FlowPath:      identity.FlowInstance(),
-			Config:        []byte(`{"system_prompt":"x"}`),
+			ExecutionMode:      runtimeeffects.ExecutionModeLive,
+			ResolvedLLMBackend: "anthropic",
+			FlowPath:           identity.FlowInstance(),
+			Config:             []byte(`{"system_prompt":"x"}`),
 		},
 		Status: "active", HiredBy: "test", StartedAt: now,
 	}

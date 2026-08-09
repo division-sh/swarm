@@ -40,7 +40,7 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 			identity := testAgentIdentity(t, "agent-a", "global")
 			if err := selected.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 				Config: runtimeactors.AgentConfig{
-					Identity: identity, ID: "agent-a", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
+					Identity: identity, ID: "agent-a", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
 					Memory: agentmemory.PlatformDefault(), FlowPath: "global", Config: json.RawMessage(`{"system_prompt":"delivery evidence"}`),
 				},
 				Status: "active", StartedAt: now,
@@ -130,7 +130,7 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 			identity := testAgentIdentity(t, "terminal-agent", "global")
 			if err := selected.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 				Config: runtimeactors.AgentConfig{
-					Identity: identity, ID: "terminal-agent", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
+					Identity: identity, ID: "terminal-agent", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
 					Memory: agentmemory.PlatformDefault(), FlowPath: "global", Config: json.RawMessage(`{"system_prompt":"terminal evidence"}`),
 				},
 				Status: "active", StartedAt: now,

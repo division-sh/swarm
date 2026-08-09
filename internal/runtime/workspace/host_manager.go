@@ -91,19 +91,8 @@ func (m *HostManager) ValidateSource(_ context.Context, source semanticview.Sour
 	if err != nil {
 		return err
 	}
-	for agentID, entry := range source.AgentEntries() {
-		agentID = strings.TrimSpace(agentID)
-		class := strings.TrimSpace(entry.WorkspaceClass)
-		if class == "" {
-			continue
-		}
-		scope, ok := classes[class]
-		if !ok {
-			return fmt.Errorf("workspace validation failed: agent %s references undefined workspace_class %q", agentID, class)
-		}
-		if !isSupportedWorkspaceScope(scope) {
-			return fmt.Errorf("workspace validation failed: workspace_class %q declares unsupported workspace_scope %q", class, scope)
-		}
+	if err := validateAgentWorkspaceClasses(source, classes); err != nil {
+		return err
 	}
 	return nil
 }

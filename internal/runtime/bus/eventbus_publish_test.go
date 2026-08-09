@@ -1020,14 +1020,15 @@ func seedActiveRuntimeBusAgent(t *testing.T, ctx context.Context, pg *store.Post
 	identity := runtimebustest.Identity(t, agentID, "")
 	if err := pg.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			ID:            agentID,
-			Identity:      identity,
-			Role:          "observer",
-			FlowID:        "global",
-			Type:          "stub",
-			Model:         "regular",
-			ExecutionMode: "live",
-			Config:        []byte(`{}`),
+			ID:                 agentID,
+			Identity:           identity,
+			Role:               "observer",
+			FlowID:             "global",
+			Type:               "stub",
+			Model:              "regular",
+			ResolvedLLMBackend: "anthropic",
+			ExecutionMode:      "live",
+			Config:             []byte(`{}`),
 		},
 		Status:    "active",
 		HiredBy:   "test",
@@ -2651,7 +2652,7 @@ func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
 	if err := pg.UpsertAgent(context.Background(), runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID: "agent-a", Identity: agentIdentity, FlowID: "bundle-source-test", FlowPath: "bundle-source-test",
-			Role: "worker", Model: "regular", Type: "stub", ExecutionMode: "live", Config: []byte(`{}`),
+			Role: "worker", Model: "regular", Type: "stub", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`),
 		},
 		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
 	}); err != nil {

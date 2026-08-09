@@ -152,14 +152,15 @@ func seedSQLiteAgentUsageAgent(t *testing.T, ctx context.Context, sqliteStore *s
 	t.Helper()
 	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
-			Identity:      sqliteAgentUsageIdentity(t, agentID),
-			ID:            agentID,
-			Role:          "researcher",
-			Type:          "managed",
-			Model:         "cheap",
-			ExecutionMode: "live",
-			FlowPath:      "flow/a",
-			Config:        json.RawMessage(`{"system_prompt":"usage"}`),
+			Identity:           sqliteAgentUsageIdentity(t, agentID),
+			ID:                 agentID,
+			Role:               "researcher",
+			Type:               "managed",
+			Model:              "cheap",
+			ResolvedLLMBackend: "anthropic",
+			ExecutionMode:      "live",
+			FlowPath:           "flow/a",
+			Config:             json.RawMessage(`{"system_prompt":"usage"}`),
 		},
 		Status:    "active",
 		StartedAt: time.Now().UTC(),

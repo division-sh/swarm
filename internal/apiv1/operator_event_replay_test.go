@@ -241,7 +241,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					Config: runtimeactors.AgentConfig{
 						Identity: agentIdentity, ID: agentID, Role: "observer",
 						FlowID: "target-flow", FlowPath: agentIdentity.FlowInstance(), EntityID: entityID,
-						Type: "stub", Model: "regular", ExecutionMode: "live", Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
+						Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
 					},
 					Status: "active", HiredBy: "test", StartedAt: createdAt,
 				}); err != nil {
@@ -381,7 +381,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			if err := f.store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 				Config: runtimeactors.AgentConfig{
 					Identity: identity, ID: agentID,
-					Role: "observer", Type: "stub", Model: "regular", ExecutionMode: "live",
+					Role: "observer", Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
 					FlowID: "target-flow", FlowPath: identity.FlowInstance(),
 					Config: []byte(`{}`), Subscriptions: []string{"scan.requested"},
 				},

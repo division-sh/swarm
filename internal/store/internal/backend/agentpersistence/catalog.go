@@ -241,30 +241,14 @@ func agentFlowInstance(cfg runtimeactors.AgentConfig) string {
 
 func agentLLMBackend(cfg runtimeactors.AgentConfig) (string, error) {
 	v := strings.TrimSpace(cfg.ResolvedLLMBackend)
-	if v != "" {
-		profile, err := llmselection.ResolvePersistedBackend(v)
-		if err != nil {
-			return "", err
-		}
-		return profile.ID, nil
+	if v == "" {
+		return "", fmt.Errorf("resolved llm backend is required before persistence")
 	}
-	configuredID := strings.TrimSpace(cfg.LLMBackend)
-	if configuredID == "" {
-		configuredID = llmselection.DefaultBackendID()
-	}
-	configured, err := llmselection.ResolveActiveBackend(configuredID)
+	profile, err := llmselection.ResolvePersistedBackend(v)
 	if err != nil {
 		return "", err
 	}
-	selection, err := llmselection.ResolveAgentExecutionSelection(llmselection.AgentExecutionSelectionInput{
-		ConfiguredDefault: configured,
-		AuthoredBackend:   cfg.LLMBackend,
-		MockConfigured:    cfg.Mock.Configured(),
-	})
-	if err != nil {
-		return "", err
-	}
-	return selection.Profile.ID, nil
+	return profile.ID, nil
 }
 
 func agentPersistedStatus(raw string) string {

@@ -177,7 +177,7 @@ func seedStandaloneConvergenceAgent(t *testing.T, selected any, ctx context.Cont
 	if err := store.UpsertAgent(ctx, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID: agentID, Identity: identity, Role: "observer", FlowID: "global", Type: "stub", Model: "regular",
-			ExecutionMode: "live", Config: json.RawMessage(`{}`),
+			ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`),
 		},
 		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
 	}); err != nil {
