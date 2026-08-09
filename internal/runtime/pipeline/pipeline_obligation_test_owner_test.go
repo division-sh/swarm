@@ -160,7 +160,7 @@ func (*unavailablePipelineTestHumanTaskExpiry) CommitHumanTaskExpirations(contex
 type unavailablePipelineTestStandingServices struct{ StandingServicePersistence }
 type unavailablePipelineTestDecisionCardMutations struct{ DecisionCardMutationOwner }
 type unavailablePipelineTestDeliveryRuntime struct{ WorkflowDeliveryRuntime }
-type unavailablePipelineTestDeadLetters struct{ runtimedeadletters.Persistence }
+type unavailablePipelineTestDeadLetters struct{ runtimedeadletters.Recorder }
 type unavailablePipelineTestRunLifecycle struct {
 	runtimerunlifecycle.OperationOwner
 }
