@@ -96,6 +96,19 @@ type ResolvedModel struct {
 	RuntimeMode   string
 }
 
+type ArtifactRequirement uint8
+
+const (
+	ArtifactForbidden ArtifactRequirement = iota
+	ArtifactRequired
+)
+
+type AgentExecutionSelection struct {
+	Profile             Profile
+	Mode                executionmode.Mode
+	ArtifactRequirement ArtifactRequirement
+}
+
 type EnvLookup func(string) (string, bool)
 
 const (
@@ -229,9 +242,8 @@ func ResolveActiveBackend(raw string) (Profile, error) {
 	return profile, nil
 }
 
-// ExecutionModeForProfile projects the selected LLM backend onto the runtime's
-// typed causal execution mode. Backend selection is the only authority for
-// this projection; mock artifacts and downstream responder presence are not.
+// ExecutionModeForProfile projects an already-selected profile onto the
+// runtime's typed causal execution mode.
 func ExecutionModeForProfile(profile Profile) (executionmode.Mode, error) {
 	resolved, err := ResolveActiveBackend(profile.ID)
 	if err != nil {
@@ -241,6 +253,37 @@ func ExecutionModeForProfile(profile Profile) (executionmode.Mode, error) {
 		return executionmode.Mock, nil
 	}
 	return executionmode.Live, nil
+}
+
+// ResolveAgentExecutionSelection is the canonical per-agent selection owner.
+// An exact authored mock overrides the configured live default for that agent.
+func ResolveAgentExecutionSelection(configuredDefault Profile, mockConfigured bool) (AgentExecutionSelection, error) {
+	profile, err := ResolveActiveBackend(configuredDefault.ID)
+	if err != nil {
+		return AgentExecutionSelection{}, err
+	}
+	if mockConfigured {
+		profile, err = ResolveActiveBackend(BackendMock)
+		if err != nil {
+			return AgentExecutionSelection{}, err
+		}
+	}
+	mode, err := ExecutionModeForProfile(profile)
+	if err != nil {
+		return AgentExecutionSelection{}, err
+	}
+	requirement := ArtifactForbidden
+	if mode == executionmode.Mock {
+		requirement = ArtifactRequired
+	}
+	if requirement == ArtifactRequired && !mockConfigured {
+		return AgentExecutionSelection{}, fmt.Errorf("llm backend profile %q requires an exact mock performance artifact", profile.ID)
+	}
+	return AgentExecutionSelection{
+		Profile:             profile,
+		Mode:                mode,
+		ArtifactRequirement: requirement,
+	}, nil
 }
 
 func ResolvePersistedBackend(raw string) (Profile, error) {

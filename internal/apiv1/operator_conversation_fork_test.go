@@ -19,6 +19,14 @@ import (
 	"github.com/google/uuid"
 )
 
+type staticForkChatRuntimeResolver struct {
+	runtime runtimellm.Runtime
+}
+
+func (r staticForkChatRuntimeResolver) RuntimeForAgent(runtimeactors.AgentConfig) (runtimellm.Runtime, error) {
+	return r.runtime, nil
+}
+
 type fakeConversationForkLifecycleStore struct {
 	createResult  store.OperatorConversationForkSession
 	createErr     error
@@ -574,7 +582,7 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 		},
 	}
 	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.RuntimeScope(runtimeInstanceID))
-	execution, err := NewLLMForkChatExecutor(rt).ExecuteForkChat(ctx, prepared, "inspect and try sandbox writes")
+	execution, err := NewLLMForkChatExecutor(staticForkChatRuntimeResolver{runtime: rt}).ExecuteForkChat(ctx, prepared, "inspect and try sandbox writes")
 	if err != nil {
 		t.Fatalf("ExecuteForkChat: %v", err)
 	}

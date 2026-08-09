@@ -196,5 +196,5 @@ type bootFloorNativeFallbackRuntime struct {
 }
 
 func (bootFloorNativeFallbackRuntime) ProviderContract() runtimellm.ProviderContract {
-	return runtimellm.OpenAIResponsesProviderContract()
+	return runtimellm.AnthropicAPIProviderContract()
 }

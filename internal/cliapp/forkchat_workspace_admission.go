@@ -6,34 +6,35 @@ import (
 	"strings"
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
-	"github.com/division-sh/swarm/internal/config"
-	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 )
 
 type workspaceAdmittedForkChatExecutor struct {
-	inner     apiv1.ForkChatExecutor
-	decision  WorkspaceBackendSelection
-	profileID string
+	inner    apiv1.ForkChatExecutor
+	decision WorkspaceBackendSelection
+	runtimes runtimellm.AgentRuntimeResolver
 }
 
-func NewWorkspaceAdmittedForkChatExecutor(inner apiv1.ForkChatExecutor, cfg *config.Config, decision WorkspaceBackendSelection) apiv1.ForkChatExecutor {
-	profileID := ""
-	if cfg != nil {
-		if profile, err := cfg.LLMBackendProfile(); err == nil {
-			profileID = strings.TrimSpace(profile.ID)
-		}
-	}
+func NewWorkspaceAdmittedForkChatExecutor(inner apiv1.ForkChatExecutor, runtimes runtimellm.AgentRuntimeResolver, decision WorkspaceBackendSelection) apiv1.ForkChatExecutor {
 	return workspaceAdmittedForkChatExecutor{
-		inner:     inner,
-		decision:  decision,
-		profileID: profileID,
+		inner:    inner,
+		decision: decision,
+		runtimes: runtimes,
 	}
 }
 
 func (e workspaceAdmittedForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared store.ConversationForkChatPrepared, message string) (store.ConversationForkChatExecution, error) {
-	if e.profileID == llmselection.BackendClaudeCLI {
+	if e.runtimes == nil {
+		return store.ConversationForkChatExecution{}, fmt.Errorf("conversation.fork_chat llm runtime resolver is required")
+	}
+	modelRuntime, err := e.runtimes.RuntimeForAgent(prepared.Snapshot.SourceAgent)
+	if err != nil {
+		return store.ConversationForkChatExecution{}, fmt.Errorf("conversation.fork_chat resolve llm runtime: %w", err)
+	}
+	providerContract, hasProviderContract := runtimellm.ProviderContractForRuntime(modelRuntime)
+	if hasProviderContract && providerContract.Transport == runtimellm.ProviderTransportCLI {
 		switch {
 		case e.decision.Backend == workspace.BackendDocker:
 			return e.inner.ExecuteForkChat(ctx, prepared, message)

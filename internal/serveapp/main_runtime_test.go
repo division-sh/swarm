@@ -120,6 +120,7 @@ type delayedRunStatusAgent struct {
 }
 
 type servedEventPublishBlockingLLMRuntime struct {
+	runtimellm.NoopRuntime
 	started chan<- struct{}
 	release <-chan struct{}
 }
@@ -129,6 +130,7 @@ func (r servedEventPublishBlockingLLMRuntime) ProviderContract() runtimellm.Prov
 }
 
 type servedSessionCleanupProofLLMRuntime struct {
+	runtimellm.NoopRuntime
 	store   *store.PostgresStore
 	started chan<- string
 	release <-chan struct{}
@@ -139,6 +141,7 @@ func (r servedSessionCleanupProofLLMRuntime) ProviderContract() runtimellm.Provi
 }
 
 type servedLiveAgentProofLLMRuntime struct {
+	runtimellm.NoopRuntime
 	calls             *atomic.Int32
 	directiveFailures bool
 }

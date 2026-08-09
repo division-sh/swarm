@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
@@ -303,6 +304,114 @@ func TestDoctorWorkspaceBackendHostRefusalRendersTypedCapabilityRemediation(t *t
 			}
 		})
 	}
+}
+
+func TestDoctorPreflightConsumesEffectiveAgentExecutionSelection(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+	setDoctorEmptyProviderSecrets(t)
+
+	t.Run("fully mocked claude bundle waives only provider-specific checks", func(t *testing.T) {
+		report, code, stderr := runDoctorPreflightJSON(t, writeDoctorClaudeHostConfig(t, "/definitely/missing/docker"), writeDoctorMockExecutionFixture(t, doctorMockExecutionFixtureOptions{}), llmselection.BackendClaudeCLI)
+		if code != 0 {
+			t.Fatalf("code = %d, want success; stderr=%s findings=%#v", code, stderr, report.Findings)
+		}
+		for _, expected := range []struct {
+			code     string
+			status   LocalPreflightFindingStatus
+			severity LocalPreflightSeverity
+		}{
+			{code: "api_listener", status: LocalPreflightStatusOK, severity: LocalPreflightSeverityInfo},
+			{code: "mcp_listener", status: LocalPreflightStatusOK, severity: LocalPreflightSeverityInfo},
+			{code: "swarm_tool_gateway_url_empty", status: LocalPreflightStatusOK, severity: LocalPreflightSeverityInfo},
+			{code: "swarm_tool_gateway_container_url_empty", status: LocalPreflightStatusOK, severity: LocalPreflightSeverityInfo},
+			{code: "contract_secrets_present", status: LocalPreflightStatusOK, severity: LocalPreflightSeverityInfo},
+			{code: "workspace_backend_decision", status: LocalPreflightStatusOK, severity: LocalPreflightSeverityInfo},
+			{code: "backend_credential_skipped_no_claude_execution", status: LocalPreflightStatusSkipped, severity: LocalPreflightSeverityInfo},
+			{code: "workspace_source_valid", status: LocalPreflightStatusOK, severity: LocalPreflightSeverityInfo},
+			{code: "docker_not_required", status: LocalPreflightStatusSkipped, severity: LocalPreflightSeverityInfo},
+			{code: "workspace_image_not_required", status: LocalPreflightStatusSkipped, severity: LocalPreflightSeverityInfo},
+			{code: "workspace_claude_cli_not_required", status: LocalPreflightStatusSkipped, severity: LocalPreflightSeverityInfo},
+		} {
+			assertLocalPreflightFindingState(t, report, expected.code, expected.status, expected.severity)
+		}
+		for _, forbidden := range []string{"missing_backend_credential", "workspace_backend_unsupported", "docker_unavailable", "workspace_claude_cli_unavailable"} {
+			if localPreflightReportHasCode(report, forbidden) {
+				t.Fatalf("fully mocked report contains forbidden finding %q: %#v", forbidden, report.Findings)
+			}
+		}
+	})
+
+	t.Run("mixed claude bundle remains refused and names unmocked agent", func(t *testing.T) {
+		report, code, _ := runDoctorPreflightJSON(t, writeDoctorClaudeHostConfig(t, ""), writeDoctorMockExecutionFixture(t, doctorMockExecutionFixtureOptions{IncludeUnmocked: true}), llmselection.BackendClaudeCLI)
+		if code != CLIExitRuntime {
+			t.Fatalf("code = %d, want %d; findings=%#v", code, CLIExitRuntime, report.Findings)
+		}
+		finding, ok := localPreflightReportFinding(report, "workspace_backend_decision_failed")
+		if !ok || finding.Status != LocalPreflightStatusFailed || finding.Severity != LocalPreflightSeverityBlocker {
+			t.Fatalf("workspace decision finding = %#v, want failed blocker", finding)
+		}
+		if !strings.Contains(finding.Message, "unmocked agent live-agent uses claude_cli backend") || strings.Contains(finding.Message, "unmocked agent stub-agent") {
+			t.Fatalf("workspace decision message = %q, want only named live-agent", finding.Message)
+		}
+		if localPreflightReportHasCode(report, "missing_backend_credential") || localPreflightReportHasCode(report, "backend_credential_skipped_no_claude_execution") {
+			t.Fatalf("mixed decision failure reached provider credential phase: %#v", report.Findings)
+		}
+	})
+
+	for _, test := range []struct {
+		name    string
+		options doctorMockExecutionFixtureOptions
+		want    string
+	}{
+		{name: "mocked native bash remains executable", options: doctorMockExecutionFixtureOptions{NativeBash: true}, want: "native_tools.bash"},
+		{name: "mocked exec tool remains executable", options: doctorMockExecutionFixtureOptions{ExecTool: true}, want: "exec-class tool shell"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			report, code, _ := runDoctorPreflightJSON(t, writeDoctorClaudeHostConfig(t, ""), writeDoctorMockExecutionFixture(t, test.options), llmselection.BackendClaudeCLI)
+			if code != CLIExitRuntime {
+				t.Fatalf("code = %d, want %d; findings=%#v", code, CLIExitRuntime, report.Findings)
+			}
+			finding, ok := localPreflightReportFinding(report, "workspace_backend_decision_failed")
+			if !ok || !strings.Contains(finding.Message, test.want) {
+				t.Fatalf("workspace decision finding = %#v, want %q", finding, test.want)
+			}
+			if strings.Contains(finding.Message, "claude_cli") {
+				t.Fatalf("mocked agent incorrectly contributed claude_cli reason: %q", finding.Message)
+			}
+			if localPreflightReportHasCode(report, "backend_credential_skipped_no_claude_execution") {
+				t.Fatalf("workspace refusal must precede provider waiver: %#v", report.Findings)
+			}
+		})
+	}
+
+	t.Run("agent-free source keeps its distinct waiver", func(t *testing.T) {
+		report, code, _ := runDoctorPreflightJSON(t, writeDoctorClaudeHostConfig(t, ""), writeDoctorAgentFreeContractsFixture(t), llmselection.BackendClaudeCLI)
+		if code != 0 {
+			t.Fatalf("code = %d, want success; findings=%#v", code, report.Findings)
+		}
+		assertLocalPreflightFindingState(t, report, "backend_credential_skipped_agent_free", LocalPreflightStatusSkipped, LocalPreflightSeverityInfo)
+		assertLocalPreflightFindingState(t, report, "agent_free_source", LocalPreflightStatusSkipped, LocalPreflightSeverityInfo)
+		if localPreflightReportHasCode(report, "backend_credential_skipped_no_claude_execution") {
+			t.Fatalf("agent-free source entered declared-agent waiver: %#v", report.Findings)
+		}
+	})
+
+	t.Run("non Claude profile keeps its distinct preflight exit", func(t *testing.T) {
+		report, code, _ := runDoctorPreflightJSON(t, writeDoctorClaudeHostConfig(t, ""), doctorAgentContractsPath, llmselection.BackendAnthropic)
+		if code != 0 {
+			t.Fatalf("code = %d, want success; findings=%#v", code, report.Findings)
+		}
+		assertLocalPreflightFindingState(t, report, "backend_not_claude_cli", LocalPreflightStatusSkipped, LocalPreflightSeverityInfo)
+		for _, forbidden := range []string{"missing_backend_credential", "backend_credential_skipped_no_claude_execution", "workspace_claude_cli_not_required"} {
+			if localPreflightReportHasCode(report, forbidden) {
+				t.Fatalf("non-Claude report contains Claude finding %q: %#v", forbidden, report.Findings)
+			}
+		}
+	})
 }
 
 func TestDoctorClaudeCLIPreflightJSONReportsOKWithoutDB(t *testing.T) {
@@ -1333,6 +1442,79 @@ terminal_states:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	return root
+}
+
+type doctorMockExecutionFixtureOptions struct {
+	IncludeUnmocked bool
+	NativeBash      bool
+	ExecTool        bool
+}
+
+func writeDoctorMockExecutionFixture(t *testing.T, options doctorMockExecutionFixtureOptions) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.CopyFS(root, os.DirFS(filepath.Join(RepoRoot(), doctorAgentContractsPath))); err != nil {
+		t.Fatalf("copy doctor agent contracts: %v", err)
+	}
+	agentLines := []string{
+		"stub-agent:",
+		"  model: regular",
+		"  subscriptions:",
+		"    - task.requested",
+		"  emit_events:",
+		"    - task.completed",
+		"  mock:",
+		"    kind: python",
+		"    module: mocks/stub-agent.py",
+	}
+	if options.NativeBash {
+		agentLines = append(agentLines, "  native_tools:", "    bash: true")
+	}
+	if options.ExecTool {
+		agentLines = append(agentLines, "  tools:", "    - shell")
+		writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `
+shell:
+  description: execute a shell command
+  input_schema:
+    type: object
+  output_schema:
+    type: object
+`)
+	}
+	if options.IncludeUnmocked {
+		agentLines = append(agentLines,
+			"live-agent:",
+			"  model: regular",
+			"  prompt_ref: prompts/stub-agent.md",
+			"  subscriptions:",
+			"    - task.requested",
+			"  emit_events:",
+			"    - task.completed",
+		)
+	}
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), strings.Join(agentLines, "\n")+"\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "mocks", "stub-agent.py"), "def handle(input):\n    return {'text': 'ok'}\n")
+	return root
+}
+
+func runDoctorPreflightJSON(t *testing.T, configPath, contractsPath, backend string) (LocalPreflightReport, int, string) {
+	t.Helper()
+	args := doctorClaudeArgs(t, configPath, true)
+	for index := 0; index+1 < len(args); index++ {
+		switch args[index] {
+		case "--backend":
+			args[index+1] = backend
+		case "--contracts":
+			args[index+1] = contractsPath
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
+	var report LocalPreflightReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("parse doctor preflight JSON: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	return report, code, stderr.String()
 }
 
 func writeDoctorTelegramConnectorContractsFixture(t *testing.T) string {

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -40,8 +41,7 @@ func TestAgentManagerDefaultsLLMBackendFromCanonicalProfile(t *testing.T) {
 	}
 }
 
-func TestResolveAgentModelLiveBackendsDropInactiveMockArtifact(t *testing.T) {
-	artifact := capturedMockAlternative()
+func TestResolveAgentModelUsesConfiguredLiveBackendWithoutMock(t *testing.T) {
 	for _, tc := range []struct {
 		backend   string
 		provider  string
@@ -54,7 +54,7 @@ func TestResolveAgentModelLiveBackendsDropInactiveMockArtifact(t *testing.T) {
 	} {
 		t.Run(tc.backend, func(t *testing.T) {
 			am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{LLMBackend: tc.backend})
-			cfg := models.AgentConfig{ID: "agent-" + tc.backend, Model: "regular", LLMBackend: tc.backend, Mock: artifact}
+			cfg := models.AgentConfig{ID: "agent-" + tc.backend, Model: "regular"}
 			if err := am.resolveAgentModel(&cfg); err != nil {
 				t.Fatalf("resolveAgentModel: %v", err)
 			}
@@ -65,9 +65,53 @@ func TestResolveAgentModelLiveBackendsDropInactiveMockArtifact(t *testing.T) {
 				t.Fatalf("resolved provider/transport = %q/%q, want %q/%q", cfg.ResolvedLLMProvider, cfg.ResolvedLLMTransport, tc.provider, tc.transport)
 			}
 			if cfg.Mock.Configured() {
-				t.Fatalf("live selected descriptor retained inactive mock artifact: %#v", cfg.Mock)
+				t.Fatalf("live selected descriptor carries mock artifact: %#v", cfg.Mock)
 			}
 		})
+	}
+}
+
+func TestResolveAgentModelExactMockOverridesEveryConfiguredLiveBackend(t *testing.T) {
+	artifact := capturedMockAlternative()
+	for _, backend := range []string{
+		llmselection.BackendAnthropic,
+		llmselection.BackendClaudeCLI,
+		llmselection.BackendOpenAICompatible,
+		llmselection.BackendOpenAIResponses,
+	} {
+		t.Run(backend, func(t *testing.T) {
+			am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{LLMBackend: backend})
+			cfg := models.AgentConfig{ID: "agent-" + backend, Model: "regular", Mock: artifact}
+			if err := am.resolveAgentModel(&cfg); err != nil {
+				t.Fatalf("resolveAgentModel: %v", err)
+			}
+			if cfg.LLMBackend != llmselection.BackendMock || cfg.ExecutionMode != runtimeeffects.ExecutionModeMock {
+				t.Fatalf("selected backend/mode = %q/%q, want mock/mock", cfg.LLMBackend, cfg.ExecutionMode)
+			}
+			if cfg.ResolvedLLMProvider != llmselection.ProviderMock || cfg.ResolvedLLMTransport != llmselection.TransportMock {
+				t.Fatalf("resolved provider/transport = %q/%q, want mock/in_process", cfg.ResolvedLLMProvider, cfg.ResolvedLLMTransport)
+			}
+			if !reflect.DeepEqual(cfg.Mock, artifact) {
+				t.Fatalf("captured artifact = %#v, want %#v", cfg.Mock, artifact)
+			}
+		})
+	}
+}
+
+func TestResolveAgentModelMaterializesSelectionWithoutOptionalModel(t *testing.T) {
+	am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{LLMBackend: llmselection.BackendClaudeCLI})
+	cfg := models.AgentConfig{ID: "model-less-mock-agent", Mock: capturedMockAlternative()}
+	if err := am.resolveAgentModel(&cfg); err != nil {
+		t.Fatalf("resolveAgentModel: %v", err)
+	}
+	if cfg.LLMBackend != llmselection.BackendMock || cfg.ExecutionMode != runtimeeffects.ExecutionModeMock {
+		t.Fatalf("selected backend/mode = %q/%q, want mock/mock", cfg.LLMBackend, cfg.ExecutionMode)
+	}
+	if cfg.ResolvedLLMProvider != llmselection.ProviderMock || cfg.ResolvedLLMTransport != llmselection.TransportMock {
+		t.Fatalf("resolved provider/transport = %q/%q, want mock/in_process", cfg.ResolvedLLMProvider, cfg.ResolvedLLMTransport)
+	}
+	if cfg.ResolvedModel != "" {
+		t.Fatalf("resolved model = %q, want empty for optional model", cfg.ResolvedModel)
 	}
 }
 
@@ -83,12 +127,12 @@ func TestResolveAgentModelMockRetainsAndRequiresCapturedArtifact(t *testing.T) {
 	}
 
 	missing := models.AgentConfig{ID: "mock-agent-missing", Model: "regular", LLMBackend: llmselection.BackendMock}
-	if err := am.resolveAgentModel(&missing); err == nil || !strings.Contains(err.Error(), "does not declare a mock performance") {
+	if err := am.resolveAgentModel(&missing); err == nil || !strings.Contains(err.Error(), "requires an exact mock performance artifact") {
 		t.Fatalf("missing mock artifact error = %v", err)
 	}
 }
 
-func TestAuthoredMockAlternativeStaticAndInstantiatedAgentsSpawnPersistRecoverLive(t *testing.T) {
+func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testing.T) {
 	artifact := capturedMockAlternative()
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		URIRegistry: runtimecontracts.ContractURIRegistry{
@@ -133,7 +177,7 @@ func TestAuthoredMockAlternativeStaticAndInstantiatedAgentsSpawnPersistRecoverLi
 			t.Fatalf("spawnAgentInternal(%s): %v", cfg.ID, err)
 		}
 	}
-	assertLiveMockAlternativeProjection(t, "spawned", spawned, staticCfg.ID, instantiatedCfg.ID)
+	assertMockProjection(t, "spawned", artifact, spawned, staticCfg.ID, instantiatedCfg.ID)
 	if len(store.records) != 2 {
 		t.Fatalf("persisted records = %d, want 2", len(store.records))
 	}
@@ -141,7 +185,7 @@ func TestAuthoredMockAlternativeStaticAndInstantiatedAgentsSpawnPersistRecoverLi
 	for _, rec := range store.records {
 		persisted[rec.Config.ID] = rec.Config
 	}
-	assertLiveMockAlternativeProjection(t, "persisted", persisted, staticCfg.ID, instantiatedCfg.ID)
+	assertMockProjection(t, "persisted", artifact, persisted, staticCfg.ID, instantiatedCfg.ID)
 
 	recovered := map[string]models.AgentConfig{}
 	recoveryManager := newTestAgentManagerWithOptions(t, &recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
@@ -151,7 +195,52 @@ func TestAuthoredMockAlternativeStaticAndInstantiatedAgentsSpawnPersistRecoverLi
 	if err := recoveryManager.Recover(managedExecutionTestContext(t, context.Background())); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	assertLiveMockAlternativeProjection(t, "recovered", recovered, staticCfg.ID, instantiatedCfg.ID)
+	assertMockProjection(t, "recovered", artifact, recovered, staticCfg.ID, instantiatedCfg.ID)
+}
+
+func TestAuthoredMockSelectionSurvivesReconfigureRestartAndClone(t *testing.T) {
+	artifact := capturedMockAlternative()
+	built := map[string]models.AgentConfig{}
+	am := newTestAgentManagerWithOptions(t, &recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
+		built[cfg.ID] = cfg
+		return recoveryTestAgent{id: cfg.ID}, nil
+	}, AgentManagerOptions{LLMBackend: llmselection.BackendClaudeCLI})
+	if err := am.SpawnAgent(models.AgentConfig{ID: "mock-lifecycle-agent", Role: "worker", Model: "regular", Mock: artifact}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	base, err := am.ResolveAgentConfig("mock-lifecycle-agent", "")
+	if err != nil {
+		t.Fatalf("ResolveAgentConfig(spawn): %v", err)
+	}
+	assertMockProjection(t, "spawn", artifact, map[string]models.AgentConfig{base.ID: base}, base.ID)
+
+	if err := am.ReconfigureAgentTarget(base.ID, "", models.AgentConfig{Tools: []string{"schedule"}}, nil); err != nil {
+		t.Fatalf("ReconfigureAgentTarget: %v", err)
+	}
+	reconfigured, err := am.ResolveAgentConfig(base.ID, "")
+	if err != nil {
+		t.Fatalf("ResolveAgentConfig(reconfigure): %v", err)
+	}
+	assertMockProjection(t, "reconfigure", artifact, map[string]models.AgentConfig{reconfigured.ID: reconfigured}, reconfigured.ID)
+
+	if _, err := am.Restart(testAuthorActivityContext(context.Background()), runtimeagentcontrol.RestartRequest{AgentID: base.ID}); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	restarted, err := am.ResolveAgentConfig(base.ID, "")
+	if err != nil {
+		t.Fatalf("ResolveAgentConfig(restart): %v", err)
+	}
+	assertMockProjection(t, "restart", artifact, map[string]models.AgentConfig{restarted.ID: restarted}, restarted.ID)
+
+	if err := am.SpawnEphemeralClone(restarted.Identity, "mock-lifecycle-clone"); err != nil {
+		t.Fatalf("SpawnEphemeralClone: %v", err)
+	}
+	clone, err := am.ResolveAgentConfig("mock-lifecycle-clone", "")
+	if err != nil {
+		t.Fatalf("ResolveAgentConfig(clone): %v", err)
+	}
+	assertMockProjection(t, "clone", artifact, map[string]models.AgentConfig{clone.ID: clone}, clone.ID)
+	assertMockProjection(t, "constructed", artifact, built, base.ID, clone.ID)
 }
 
 type liveMockAlternativePersistence struct {
@@ -175,15 +264,15 @@ func capturedMockAlternative() mockperformance.Performance {
 	}
 }
 
-func assertLiveMockAlternativeProjection(t *testing.T, phase string, configs map[string]models.AgentConfig, ids ...string) {
+func assertMockProjection(t *testing.T, phase string, artifact mockperformance.Performance, configs map[string]models.AgentConfig, ids ...string) {
 	t.Helper()
 	for _, id := range ids {
 		cfg, ok := configs[id]
 		if !ok {
 			t.Fatalf("%s config %q missing", phase, id)
 		}
-		if cfg.LLMBackend != llmselection.BackendAnthropic || cfg.ExecutionMode != runtimeeffects.ExecutionModeLive || cfg.Mock.Configured() {
-			t.Fatalf("%s config %q = backend %q mode %q mock %#v, want anthropic/live without inactive artifact", phase, id, cfg.LLMBackend, cfg.ExecutionMode, cfg.Mock)
+		if cfg.LLMBackend != llmselection.BackendMock || cfg.ExecutionMode != runtimeeffects.ExecutionModeMock || !reflect.DeepEqual(cfg.Mock, artifact) {
+			t.Fatalf("%s config %q = backend %q mode %q mock %#v, want mock/mock with exact artifact %#v", phase, id, cfg.LLMBackend, cfg.ExecutionMode, cfg.Mock, artifact)
 		}
 	}
 }

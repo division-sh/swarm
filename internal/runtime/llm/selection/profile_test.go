@@ -94,6 +94,53 @@ func TestExecutionModeForProfileUsesSelectedBackendOnly(t *testing.T) {
 	}
 }
 
+func TestResolveAgentExecutionSelectionUsesExactMockBeforeConfiguredDefault(t *testing.T) {
+	for _, backend := range []string{
+		BackendAnthropic,
+		BackendClaudeCLI,
+		BackendOpenAICompatible,
+		BackendOpenAIResponses,
+	} {
+		t.Run(backend, func(t *testing.T) {
+			profile, err := ResolveActiveBackend(backend)
+			if err != nil {
+				t.Fatalf("ResolveActiveBackend: %v", err)
+			}
+			live, err := ResolveAgentExecutionSelection(profile, false)
+			if err != nil {
+				t.Fatalf("ResolveAgentExecutionSelection(live): %v", err)
+			}
+			if live.Profile.ID != backend || live.Mode != executionmode.Live || live.ArtifactRequirement != ArtifactForbidden {
+				t.Fatalf("live selection = %#v", live)
+			}
+			mock, err := ResolveAgentExecutionSelection(profile, true)
+			if err != nil {
+				t.Fatalf("ResolveAgentExecutionSelection(mock): %v", err)
+			}
+			if mock.Profile.ID != BackendMock || mock.Mode != executionmode.Mock || mock.ArtifactRequirement != ArtifactRequired {
+				t.Fatalf("mock selection = %#v", mock)
+			}
+		})
+	}
+}
+
+func TestResolveAgentExecutionSelectionRequiresArtifactForMockDefault(t *testing.T) {
+	profile, err := ResolveActiveBackend(BackendMock)
+	if err != nil {
+		t.Fatalf("ResolveActiveBackend: %v", err)
+	}
+	if _, err := ResolveAgentExecutionSelection(profile, false); err == nil || !strings.Contains(err.Error(), "requires an exact mock performance artifact") {
+		t.Fatalf("missing artifact error = %v", err)
+	}
+	got, err := ResolveAgentExecutionSelection(profile, true)
+	if err != nil {
+		t.Fatalf("ResolveAgentExecutionSelection: %v", err)
+	}
+	if got.Profile.ID != BackendMock || got.Mode != executionmode.Mock {
+		t.Fatalf("selection = %#v", got)
+	}
+}
+
 func TestResolvePersistedBackendAllowsReservedProfiles(t *testing.T) {
 	for _, raw := range []string{BackendAnthropic, BackendClaudeCLI, BackendOpenAICompatible, BackendOpenAIResponses, BackendMock, BackendLocal} {
 		t.Run(raw, func(t *testing.T) {

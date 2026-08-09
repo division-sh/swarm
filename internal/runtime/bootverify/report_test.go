@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -155,6 +156,30 @@ func TestRun_DoesNotWarnForBuiltinRuntimeToolReference(t *testing.T) {
 	}
 	if reportContains(report.Warnings(), "tool_resolution", "schedule") {
 		t.Fatalf("unexpected tool_resolution warning for builtin runtime tool, got %#v", report.Warnings())
+	}
+}
+
+func TestRunModelAliasValidationUsesEffectivePerAgentSelection(t *testing.T) {
+	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
+	if err != nil {
+		t.Fatalf("ResolveActiveBackend: %v", err)
+	}
+	opts := Options{
+		ValidateModelResolution: true,
+		LLMProfile:              profile,
+		ModelAliases: llmselection.ModelAliases{
+			"mock-only": {llmselection.BackendMock: "mock-only-model"},
+		},
+	}
+	checker := newCheckerContext(context.Background(), nil, opts)
+	findings := checker.appendAgentModelAliasFindings(nil, "mock-agent", "mock-only", true)
+	if len(findings) != 0 {
+		t.Fatalf("exact mock was validated against the global Claude profile: %#v", findings)
+	}
+
+	findings = checker.appendAgentModelAliasFindings(nil, "live-agent", "mock-only", false)
+	if len(findings) != 1 || !strings.Contains(findings[0].Message, "model alias resolution failed for claude_cli") {
+		t.Fatalf("unmocked agent did not retain global Claude model validation: %#v", findings)
 	}
 }
 

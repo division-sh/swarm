@@ -2,10 +2,13 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -18,6 +21,13 @@ import (
 type startupCapabilityStore struct {
 	mu       sync.Mutex
 	surfaces map[string]managedcapabilities.Surface
+}
+
+func newClaudeStartupManager() *runtimemanager.AgentManager {
+	return runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
+		LLMBackend:        "claude_cli",
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
 }
 
 func (s *startupCapabilityStore) SaveManagedCapabilitySurface(_ context.Context, surface managedcapabilities.Surface) error {
@@ -36,6 +46,22 @@ func (s *startupCapabilityStore) SaveManagedCapabilitySurface(_ context.Context,
 }
 
 type startupEffectStore struct{}
+
+type startupProbeRuntime struct {
+	*llm.ClaudeCLIRuntime
+	probe llm.StartupVisibleToolSurfaceProber
+}
+
+func (r startupProbeRuntime) ProviderContract() llm.ProviderContract {
+	return llm.ClaudeCLIProviderContract()
+}
+
+func (r startupProbeRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, actor runtimeactors.AgentConfig, systemPrompt string, tools []llm.ToolDefinition) (*llm.Response, error) {
+	if r.probe == nil {
+		return nil, fmt.Errorf("claude cli startup probe is required")
+	}
+	return r.probe.ProbeStartupVisibleToolSurface(ctx, actor, systemPrompt, tools)
+}
 
 func (*startupEffectStore) IsExternalEffectAuthorityCurrent(context.Context, runtimeeffects.Authority) (bool, error) {
 	return true, nil
@@ -66,7 +92,15 @@ func (*startupEffectStore) SettleExternalAttempt(context.Context, runtimeeffects
 func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Config, source semanticview.Source, binding toolgateway.Binding, probe llm.StartupVisibleToolSurfaceProber, turns llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager) error {
 	startupAuthorityID := uuid.NewString()
 	store := &startupEffectStore{}
-	_, err := ValidateManagedProviderPreflight(ctx, cfg, source, binding, &llm.ClaudeCLIRuntime{}, probe, turns, tools, manager, ManagedProviderPreflightAuthority{
+	profile, err := cfg.LLMBackendProfile()
+	if err != nil {
+		return err
+	}
+	runtimes, err := llm.NewAgentRuntimeSet(profile, llm.RuntimeFactory{}, startupProbeRuntime{ClaudeCLIRuntime: &llm.ClaudeCLIRuntime{}, probe: probe})
+	if err != nil {
+		return err
+	}
+	_, err = ValidateManagedProviderPreflight(ctx, cfg, source, binding, runtimes, turns, tools, manager, ManagedProviderPreflightAuthority{
 		ExecutionKind:        managedcapabilities.ExecutionNormalAgent,
 		ExecutionAuthorityID: startupAuthorityID,
 		StartupOwnerID:       "startup-test-owner",

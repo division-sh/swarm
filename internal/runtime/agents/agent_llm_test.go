@@ -31,6 +31,14 @@ import (
 	"time"
 )
 
+type staticAgentRuntimeResolver struct {
+	runtime llm.Runtime
+}
+
+func (r staticAgentRuntimeResolver) RuntimeForAgent(models.AgentConfig) (llm.Runtime, error) {
+	return r.runtime, nil
+}
+
 func testBoardDirective(text string) runtimeagentcontrol.BoardDirective {
 	return runtimeagentcontrol.BoardDirective{
 		Directive: text,
@@ -526,7 +534,7 @@ func TestNewLLMAgentDefaultsToMemoryDisabled(t *testing.T) {
 }
 
 func TestNewLLMAgentFactory_UsesActorScopedToolDefinitions(t *testing.T) {
-	factory := NewLLMAgentFactory(nil, actorScopedFactoryToolExec{}, LLMAgentOptions{})
+	factory := NewLLMAgentFactory(staticAgentRuntimeResolver{runtime: llm.NoopRuntime{}}, actorScopedFactoryToolExec{}, LLMAgentOptions{})
 	agent, err := factory(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analysis-agent",
@@ -560,7 +568,7 @@ func TestLLMAgentOnEvent_FiltersRoleScopedToolsByTurnEntityEligibility(t *testin
 			{Message: llm.Message{Role: "assistant", Content: "handled"}},
 		},
 	}
-	factory := NewLLMAgentFactory(rt, contextAwareFactoryToolExec{}, LLMAgentOptions{})
+	factory := NewLLMAgentFactory(staticAgentRuntimeResolver{runtime: rt}, contextAwareFactoryToolExec{}, LLMAgentOptions{})
 	agent, err := factory(models.AgentConfig{
 		ID:            "market-research-agent",
 		Role:          "market_research",
@@ -614,7 +622,7 @@ func TestLLMAgentBoardStep_UsesExactContextAwareDefinitionsForDirective(t *testi
 			{Message: llm.Message{Role: "assistant", Content: "done"}},
 		},
 	}
-	factory := NewLLMAgentFactory(rt, contextAwareFactoryToolExec{}, LLMAgentOptions{})
+	factory := NewLLMAgentFactory(staticAgentRuntimeResolver{runtime: rt}, contextAwareFactoryToolExec{}, LLMAgentOptions{})
 	created, err := factory(models.AgentConfig{
 		ID:            "market-research-agent",
 		Role:          "market_research",
@@ -717,7 +725,7 @@ func newFactoryDirectiveAgent(t *testing.T, cfg models.AgentConfig, modelRuntime
 		EmitRegistry:      emitRegistry,
 	})
 
-	factory := NewLLMAgentFactory(modelRuntime, exec, LLMAgentOptions{})
+	factory := NewLLMAgentFactory(staticAgentRuntimeResolver{runtime: modelRuntime}, exec, LLMAgentOptions{})
 	agent, err := factory(cfg)
 	if err != nil {
 		t.Fatalf("factory error: %v", err)

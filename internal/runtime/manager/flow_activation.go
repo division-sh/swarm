@@ -358,9 +358,6 @@ func (am *AgentManager) flowInstanceAgentRecords(req runtimepipeline.FlowInstanc
 			HiredBy:         "flow-instance-activator",
 			TemplateVersion: strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
 		}
-		if strings.TrimSpace(rec.Config.LLMBackend) == "" {
-			rec.Config.LLMBackend = am.llmBackend
-		}
 		if err := am.resolveAgentModel(&rec.Config); err != nil {
 			return nil, err
 		}

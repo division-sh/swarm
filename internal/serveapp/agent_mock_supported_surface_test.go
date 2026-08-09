@@ -39,8 +39,8 @@ func TestMockAgentSupportedSurfaceSQLitePostgres(t *testing.T) {
 
 func TestForkChatSandboxBuildsCanonicalMockAdapter(t *testing.T) {
 	harness := effecttest.New()
-	runtime, err := buildForkChatSandboxLLMRuntime(
-		&config.Config{LLM: config.LLMConfig{Backend: "mock"}},
+	runtimes, err := buildForkChatSandboxLLMRuntimes(
+		&config.Config{LLM: config.LLMConfig{Backend: "claude_cli"}},
 		nil,
 		toolgateway.Binding{},
 		nil,
@@ -51,6 +51,14 @@ func TestForkChatSandboxBuildsCanonicalMockAdapter(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("build fork-chat mock runtime: %v", err)
+	}
+	selection, err := runtimes.SelectionForArtifact(true)
+	if err != nil {
+		t.Fatalf("select fork-chat mock runtime: %v", err)
+	}
+	runtime, err := runtimes.RuntimeForSelection(selection)
+	if err != nil {
+		t.Fatalf("resolve fork-chat mock runtime: %v", err)
 	}
 	contract, err := runtimellm.RequireProviderContract(string(runtimeeffects.ExecutionModeMock), runtime)
 	if err != nil {
@@ -74,6 +82,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	}
 	for key, value := range map[string]string{
 		"webhook_signing.telegram": "telegram-secret",
+		"telegram_bot_token":       "telegram-token",
 	} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("set credential %s: %v", key, err)
@@ -187,7 +196,7 @@ func writeMockAgentRuntimeConfig(t *testing.T, backend, sqlitePath string) strin
 	}
 	lines = append(lines,
 		"llm:",
-		"  backend: mock",
+		"  backend: claude_cli",
 		"  session:",
 		"    lock_ttl: 10s",
 		"    rotate_after_turns: 40",

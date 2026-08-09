@@ -98,7 +98,6 @@ func runForkExecutorForBundleContext(executor RunForkExecutor, contextDef *swrun
 		selected.AgentRuntime.Config = selectedRuntime.Config
 		selected.AgentRuntime.Workspace = selectedRuntime.Workspace
 		selected.AgentRuntime.Credentials = selectedRuntime.Credentials
-		selected.AgentRuntime.LLMRuntime = selectedRuntime.LLM
 		selected.ContractSelection = runtimerunforkadmission.SelectedContractSelection(contextDef.Source, contextDef.ContractsRoot)
 		return selected
 	}

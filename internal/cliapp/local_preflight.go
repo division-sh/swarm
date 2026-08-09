@@ -160,6 +160,12 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		report.add(localPreflightWorkspacePrerequisite, "agent_free_source", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, "selected contract source declares no agents; claude_cli workspace proof is not required", "")
 		return report.finalize()
 	}
+	claudeExecutionRequired := workspaceBackendHasReason(workspaceBackend.Reasons, WorkspaceReasonClaudeCLI)
+	if !claudeExecutionRequired {
+		report.add(localPreflightBackendPrerequisite, "backend_credential_skipped_no_claude_execution", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, "no declared agent can execute claude_cli; provider credential resolution is not required", "")
+		report.checkWorkspace(ctx, req.Config, source, contractsRoot, req.MountSources, workspaceBackend, req.Config.LLM.ClaudeCLI.Command, false)
+		return report.finalize()
+	}
 	providerCredentialStore, err := BuildProviderCredentialStore()
 	if err != nil {
 		report.add(localPreflightBackendPrerequisite, "provider_credential_store_unavailable", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the local credential store used by swarm secrets")
@@ -182,7 +188,7 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		}
 		report.add(localPreflightBackendPrerequisite, "backend_credential_present", LocalPreflightSeverityInfo, LocalPreflightStatusOK, message, "")
 	}
-	report.checkWorkspace(ctx, req.Config, source, contractsRoot, req.MountSources, workspaceBackend, req.Config.LLM.ClaudeCLI.Command)
+	report.checkWorkspace(ctx, req.Config, source, contractsRoot, req.MountSources, workspaceBackend, req.Config.LLM.ClaudeCLI.Command, true)
 	return report.finalize()
 }
 
@@ -422,7 +428,7 @@ func (r *LocalPreflightReport) checkContractSecrets(ctx context.Context, source 
 	}
 }
 
-func (r *LocalPreflightReport) checkWorkspace(ctx context.Context, cfg *config.Config, source semanticview.Source, contractsRoot string, mountSources WorkspaceMountSources, backend WorkspaceBackendSelection, claudeCLICommand string) {
+func (r *LocalPreflightReport) checkWorkspace(ctx context.Context, cfg *config.Config, source semanticview.Source, contractsRoot string, mountSources WorkspaceMountSources, backend WorkspaceBackendSelection, claudeCLICommand string, claudeExecutionRequired bool) {
 	workspaces, err := ConfiguredWorkspaceLifecycleForServe(nil, cfg, contractsRoot, source, mountSources, backend)
 	if err != nil {
 		r.add(localPreflightWorkspacePrerequisite, "workspace_config_invalid", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix workspace backend or mount configuration")
@@ -436,8 +442,15 @@ func (r *LocalPreflightReport) checkWorkspace(ctx context.Context, cfg *config.C
 		r.add(localPreflightWorkspacePrerequisite, "workspace_source_invalid", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix workspace_class declarations in the selected contracts")
 		return
 	}
+	r.add(localPreflightWorkspacePrerequisite, "workspace_source_valid", LocalPreflightSeverityInfo, LocalPreflightStatusOK, "workspace lifecycle accepts the selected contract source", "")
 	dockerManager, ok := workspaces.(*workspace.DockerManager)
 	if !ok {
+		if !claudeExecutionRequired {
+			r.add(localPreflightWorkspacePrerequisite, "docker_not_required", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, fmt.Sprintf("workspace backend %q does not require Docker", strings.TrimSpace(backend.Backend)), "")
+			r.add(localPreflightWorkspacePrerequisite, "workspace_image_not_required", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, "no Docker workspace image is required for the selected host lifecycle", "")
+			r.add(localPreflightWorkspacePrerequisite, "workspace_claude_cli_not_required", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, "no declared agent can execute claude_cli; the configured Claude CLI command was not checked", "")
+			return
+		}
 		r.add(localPreflightWorkspacePrerequisite, "workspace_backend_unsupported", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, fmt.Sprintf("workspace backend %q does not support claude_cli local proof", strings.TrimSpace(backend.Backend)), "use --workspace-backend docker for claude_cli local proof; host claude_cli support is split separately")
 		return
 	}
@@ -445,7 +458,11 @@ func (r *LocalPreflightReport) checkWorkspace(ctx context.Context, cfg *config.C
 		message, remediation := workspacePrerequisiteDiagnostic(err, fmt.Sprintf("Start the Docker daemon, then verify with `%s`", workspace.DockerInfoCommand(dockerManager.DockerBin())))
 		r.add(localPreflightWorkspacePrerequisite, "docker_unavailable", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, message, remediation)
 		r.add(localPreflightWorkspacePrerequisite, "workspace_image_unavailable", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, "workspace image was not checked because Docker is unreachable", remediation)
-		r.add(localPreflightWorkspacePrerequisite, "workspace_claude_cli_unavailable", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, "configured Claude CLI command was not checked because the workspace image was not measured", remediation)
+		if claudeExecutionRequired {
+			r.add(localPreflightWorkspacePrerequisite, "workspace_claude_cli_unavailable", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, "configured Claude CLI command was not checked because the workspace image was not measured", remediation)
+		} else {
+			r.add(localPreflightWorkspacePrerequisite, "workspace_claude_cli_not_required", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, "no declared agent can execute claude_cli; the configured Claude CLI command was not checked", "")
+		}
 		return
 	} else {
 		r.add(localPreflightWorkspacePrerequisite, "docker_available", LocalPreflightSeverityInfo, LocalPreflightStatusOK, "Docker is reachable", "")
@@ -453,10 +470,18 @@ func (r *LocalPreflightReport) checkWorkspace(ctx context.Context, cfg *config.C
 	if err := dockerManager.CheckWorkspaceImageAvailable(ctx); err != nil {
 		message, remediation := workspacePrerequisiteDiagnostic(err, "Run `swarm workspace build --backend claude_cli` before startup")
 		r.add(localPreflightWorkspacePrerequisite, "workspace_image_unavailable", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, message, remediation)
-		r.add(localPreflightWorkspacePrerequisite, "workspace_claude_cli_unavailable", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, "configured Claude CLI command was not checked because the workspace image is unavailable", remediation)
+		if claudeExecutionRequired {
+			r.add(localPreflightWorkspacePrerequisite, "workspace_claude_cli_unavailable", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, "configured Claude CLI command was not checked because the workspace image is unavailable", remediation)
+		} else {
+			r.add(localPreflightWorkspacePrerequisite, "workspace_claude_cli_not_required", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, "no declared agent can execute claude_cli; the configured Claude CLI command was not checked", "")
+		}
 		return
 	} else {
 		r.add(localPreflightWorkspacePrerequisite, "workspace_image_available", LocalPreflightSeverityInfo, LocalPreflightStatusOK, "workspace image is available", "")
+	}
+	if !claudeExecutionRequired {
+		r.add(localPreflightWorkspacePrerequisite, "workspace_claude_cli_not_required", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, "no declared agent can execute claude_cli; the configured Claude CLI command was not checked", "")
+		return
 	}
 	if err := dockerManager.CheckWorkspaceCLICommandAvailable(ctx, claudeCLICommand); err != nil {
 		r.add(localPreflightWorkspacePrerequisite, "workspace_claude_cli_unavailable", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "run `swarm workspace build --backend claude_cli` or pull a workspace image that contains the configured Claude CLI command")

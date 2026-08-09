@@ -95,7 +95,11 @@ func validateSelectedBackendModelAliasesForDeclaredAgents(cfg *config.Config, so
 		return err
 	}
 	for agentID, agent := range source.AgentEntries() {
-		if _, err := llmselection.ResolveModel(profile, llmselection.ModelResolution{
+		selection, err := llmselection.ResolveAgentExecutionSelection(profile, agent.Mock.Configured())
+		if err != nil {
+			return fmt.Errorf("agent %s execution selection failed: %w", strings.TrimSpace(agentID), err)
+		}
+		if _, err := llmselection.ResolveModel(selection.Profile, llmselection.ModelResolution{
 			Model:  agent.Model,
 			Models: cfg.LLM.Models,
 		}); err != nil {
@@ -263,6 +267,13 @@ func validateClaudeManagedAgentWorkspaces(ctx context.Context, cfg *config.Confi
 		return fmt.Errorf("agent manager is required for claude cli runtime")
 	}
 	for _, agentCfg := range manager.ListAgentConfigs() {
+		profile, err := llmselection.ResolveActiveBackend(agentCfg.LLMBackend)
+		if err != nil {
+			return fmt.Errorf("agent %s selected invalid llm backend: %w", strings.TrimSpace(agentCfg.ID), err)
+		}
+		if profile.ID != llmselection.BackendClaudeCLI {
+			continue
+		}
 		target, err := workspaces.ResolveWorkspace(ctx, agentCfg)
 		if err != nil {
 			return fmt.Errorf("resolve workspace for agent %s: %w", strings.TrimSpace(agentCfg.ID), err)
@@ -317,14 +328,7 @@ func (a ManagedProviderPreflightAuthority) validate() error {
 	return nil
 }
 
-func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, source semanticview.Source, gatewayBinding toolgateway.Binding, modelRuntime llm.Runtime, startupProbe llm.StartupVisibleToolSurfaceProber, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager, authority ManagedProviderPreflightAuthority) ([]string, error) {
-	enabled, err := isClaudeCLIBackend(cfg)
-	if err != nil {
-		return nil, err
-	}
-	if !enabled {
-		return nil, nil
-	}
+func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, source semanticview.Source, gatewayBinding toolgateway.Binding, runtimes *llm.AgentRuntimeSet, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager, authority ManagedProviderPreflightAuthority) ([]string, error) {
 	hasAgents, err := workflowSourceOrManagerDeclaresAgents(source, manager)
 	if err != nil {
 		return nil, err
@@ -335,20 +339,40 @@ func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, s
 	if bundleFullyMocked(source) {
 		return nil, activeAgentMockConsistencyError(manager)
 	}
+	if manager == nil {
+		return nil, fmt.Errorf("agent manager is required for managed provider preflight")
+	}
+	if runtimes == nil {
+		return nil, fmt.Errorf("managed provider preflight requires the agent runtime resolver")
+	}
+	type preflightTarget struct {
+		config  runtimeactors.AgentConfig
+		runtime llm.Runtime
+		probe   llm.StartupVisibleToolSurfaceProber
+	}
+	targets := make([]preflightTarget, 0)
+	for _, agentCfg := range manager.ListAgentConfigs() {
+		modelRuntime, resolveErr := runtimes.RuntimeForAgent(agentCfg)
+		if resolveErr != nil {
+			return nil, fmt.Errorf("resolve managed provider runtime for agent %s: %w", strings.TrimSpace(agentCfg.ID), resolveErr)
+		}
+		startupProbe, ok := llm.StartupVisibleToolSurfaceProberForRuntime(modelRuntime)
+		if !ok {
+			continue
+		}
+		targets = append(targets, preflightTarget{config: agentCfg, runtime: modelRuntime, probe: startupProbe})
+	}
+	if len(targets) == 0 {
+		return nil, nil
+	}
 	if err := authority.validate(); err != nil {
 		return nil, err
-	}
-	if modelRuntime == nil {
-		return nil, fmt.Errorf("managed provider preflight requires the selected runtime")
 	}
 	if turnStore == nil {
 		return nil, fmt.Errorf("mcp turn context store is required for claude cli runtime")
 	}
 	if tools == nil {
 		return nil, fmt.Errorf("tool executor is required for claude cli runtime")
-	}
-	if manager == nil {
-		return nil, fmt.Errorf("agent manager is required for claude cli runtime")
 	}
 	if err := gatewayBinding.Validate(); err != nil {
 		return nil, fmt.Errorf("tool gateway binding is invalid for claude cli runtime: %w", err)
@@ -357,14 +381,14 @@ func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, s
 		return nil, fmt.Errorf("tool gateway binding is not runtime-owned for claude cli runtime")
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
-	surfaceIDs := make([]string, 0, len(manager.ListAgentConfigs()))
-	for _, agentCfg := range manager.ListAgentConfigs() {
+	surfaceIDs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		agentCfg := target.config
+		modelRuntime := target.runtime
+		startupProbe := target.probe
 		agentID := strings.TrimSpace(agentCfg.ID)
 		if agentID == "" {
 			continue
-		}
-		if startupProbe == nil {
-			return nil, fmt.Errorf("claude cli startup probe is required for agent %s", agentID)
 		}
 		agentCtx := runtimeactors.WithActor(ctx, agentCfg)
 		sessionTools, capabilities, err := startupToolPlan(agentCtx, agentCfg, modelRuntime, tools)
