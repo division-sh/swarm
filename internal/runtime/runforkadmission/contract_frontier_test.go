@@ -279,7 +279,7 @@ func assertContractFrontierMixedRecipients(t *testing.T, recipients []runfork.Ru
 	for _, recipient := range recipients {
 		key := recipient.Recipient.Code() + "/" + recipient.Recipient.ID()
 		wantConnect, ok := want[key]
-		if !ok || (recipient.RouteSourceCode() == "compiled_connect_evaluation") != wantConnect {
+		if !ok || (recipient.RouteSourceCode() == "connect_route_plan") != wantConnect {
 			t.Fatalf("recipient = %#v, want direct root routes and compiled child recipient", recipient)
 		}
 	}
@@ -599,6 +599,7 @@ func testContractFrontierRootConnectSource() semanticview.Source {
 	consumer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "static",
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
 					Events:    []string{"root.ready"},

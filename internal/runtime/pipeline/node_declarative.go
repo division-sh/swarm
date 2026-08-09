@@ -133,11 +133,15 @@ func (n *DeclarativeNode) Subscriptions() []events.EventType {
 	effectiveSubscriptions := runtimecontracts.EffectiveSystemNodeSubscriptions(n.contract)
 	out := make([]events.EventType, 0, len(effectiveSubscriptions))
 	for _, evt := range effectiveSubscriptions {
-		evt = strings.TrimSpace(evt)
-		if evt == "" {
+		aliases, err := workflowNodeSubscriptionAliases(n.source, n.NodeID(), evt)
+		if err != nil {
 			continue
 		}
-		out = append(out, events.EventType(evt))
+		for _, alias := range aliases {
+			if alias = strings.TrimSpace(alias); alias != "" {
+				out = append(out, events.EventType(alias))
+			}
+		}
 	}
 	return out
 }
@@ -181,34 +185,15 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 		return nil, fmt.Errorf("resolve workflow handler for node %s: %s", n.NodeID(), resolved.Failure)
 	}
 	handler, ok := resolved.Handler, resolved.Matched
-	denyRawHandlerFallback := n.source != nil && semanticview.ImportBoundaryWildcardHandlerFallbackDenied(n.source, n.NodeID(), eventType)
-	if !ok {
-		if !denyRawHandlerFallback {
-			handler, ok = n.contract.EventHandlers[eventType]
-		}
-	}
 	if ok {
 		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, n.source, n.NodeID(), evt)
 	}
-	if !ok && !denyRawHandlerFallback {
-		for pattern, candidate := range n.contract.EventHandlers {
-			if strings.TrimSpace(pattern) == eventType {
-				continue
-			}
-			if runtimecontractsHandlerPatternMatches(pattern, eventType) {
-				handler = candidate
-				handlerEventKey = strings.TrimSpace(pattern)
-				ok = true
-				break
-			}
-		}
-	}
 	if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
 		if ref, _, refOK := timeridentity.ParseJoinRef(parsePayloadMap(evt.Payload())); refOK && ref.NodeID == n.NodeID() {
-			candidate, found := n.contract.EventHandlers[ref.HandlerEvent]
-			if found && candidate.Join != nil && candidate.Join.EffectiveID() == ref.JoinID {
-				handler = candidate
-				handlerEventKey = ref.HandlerEvent
+			candidate := semanticview.ResolveNodeSubscriptionHandler(n.source, n.NodeID(), ref.HandlerEvent)
+			if candidate.Matched && candidate.Handler.Join != nil && candidate.Handler.Join.EffectiveID() == ref.JoinID {
+				handler = candidate.Handler
+				handlerEventKey = candidate.HandlerEventKey
 				ok = true
 			}
 		}

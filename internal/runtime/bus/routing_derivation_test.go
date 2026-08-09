@@ -67,6 +67,79 @@ func TestEventBusFlowInstanceTemplateDerivesSubscriptionsFromHandlerKeys(t *test
 	}
 }
 
+func TestEventBusRejectsInvalidExactNodeSubscriptionsBeforeRouteInstallation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		key  string
+	}{
+		{name: "same scope", key: "child/task.done"},
+		{name: "unresolved", key: "missing/task.done"},
+		{name: "descendant", key: "child/grandchild/task.done"},
+		{name: "full uri", key: "swarm://child/task.done"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := exactSubscriptionRouteSource(tc.key, nil)
+			if _, err := runtimebus.DeriveRouteTable(source); err == nil || !strings.Contains(err.Error(), "must use a local event name") {
+				t.Fatalf("DeriveRouteTable error = %v, want typed exact-node rejection", err)
+			}
+			if _, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{ContractBundle: source}); err == nil || !strings.Contains(err.Error(), "must use a local event name") {
+				t.Fatalf("NewEventBusWithOptions error = %v, want typed exact-node rejection", err)
+			}
+		})
+	}
+}
+
+func TestEventBusExactSubscriptionAdmissionPreservesLocalNodeAndSameScopeAgentRoutes(t *testing.T) {
+	source := exactSubscriptionRouteSource("task.done", []string{"child/task.done"})
+	routes, err := runtimebus.DeriveRouteTable(source)
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	got := routes.Resolve("child/task.done")
+	if len(got) != 2 {
+		t.Fatalf("Resolve(child/task.done) = %#v, want local node and same-scope agent", got)
+	}
+	seen := map[string]bool{}
+	for _, subscriber := range got {
+		seen[subscriber.Recipient.Code()+":"+subscriber.Recipient.ID()] = true
+	}
+	if !seen["node:listener"] || !seen["agent:observer"] {
+		t.Fatalf("resolved subscribers = %#v, want listener and observer", got)
+	}
+}
+
+func exactSubscriptionRouteSource(nodeSubscription string, agentSubscriptions []string) semanticview.Source {
+	node := runtimecontracts.SystemNodeContract{
+		ID:            "listener",
+		SubscribesTo:  []string{nodeSubscription},
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{nodeSubscription: {}},
+	}
+	flow := runtimecontracts.FlowContractView{
+		Path:   "child",
+		Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
+		Nodes:  map[string]runtimecontracts.SystemNodeContract{"listener": node},
+	}
+	if len(agentSubscriptions) > 0 {
+		flow.Agents = map[string]runtimecontracts.AgentRegistryEntry{
+			"observer": {ID: "observer", Subscriptions: append([]string(nil), agentSubscriptions...)},
+		}
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
+		},
+	}
+	if len(agentSubscriptions) > 0 {
+		bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{
+			"child/observer": {FlowID: "child", LocalID: "observer", Full: "test://fixture/child/observer"},
+		}
+	}
+	return semanticview.Wrap(bundle)
+}
+
 type routePersistenceTestStore struct {
 	routes           map[string]runtimebus.FlowInstanceRouteRecord
 	flowInstances    []runtimebus.ActiveFlowInstanceDescriptor

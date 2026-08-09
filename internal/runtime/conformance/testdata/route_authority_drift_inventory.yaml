@@ -692,13 +692,36 @@ seam_families:
       raw matching is not inter-flow authority. #2085 must reject before
       registration, reconfiguration mutation, or recovery and retain no
       old-run migration or compatibility path.
-  - id: flow_owned_agent_subscription_admission
+  - id: authored_subscription_admission
     layer: route_plan_authority
     classification: canonical_owner
     paths:
       - platform-spec.yaml
+      - internal/apispec/platform_spec_composition_routing_test.go
+      - internal/runtime/accprojection/resolver.go
+      - internal/runtime/accprojection/resolver_test.go
       - internal/runtime/semanticview/agent_subscription_admission.go
       - internal/runtime/semanticview/agent_subscription_admission_test.go
+      - internal/runtime/semanticview/bundle_source.go
+      - internal/runtime/semanticview/endpoint_census.go
+      - internal/runtime/semanticview/endpoint_census_test.go
+      - internal/runtime/semanticview/import_boundary_wildcards.go
+      - internal/runtime/semanticview/subscription_admission.go
+      - internal/runtime/semanticview/subscription_admission_test.go
+      - internal/runtime/bootverify/report_test.go
+      - internal/runtime/bootverify/workflow_event_topology_checks.go
+      - internal/runtime/bootverify/workflow_stage_timer_checks_test.go
+      - internal/runtime/bootverify/workflow_timer_checks.go
+      - internal/runtime/bus/eventbus_publish_test.go
+      - internal/runtime/bus/import_boundary_wildcard_routing_test.go
+      - internal/runtime/bus/routing_derivation.go
+      - internal/runtime/bus/routing_derivation_test.go
+      - internal/runtime/engine/declarative_node.go
+      - internal/runtime/engine/declarative_node_test.go
+      - internal/runtime/pipeline/node_declarative.go
+      - internal/runtime/pipeline/workflow_nodes.go
+      - internal/runtime/pipeline/workflow_nodes_test.go
+      - internal/runtime/routingtopology/topology_test.go
       - internal/runtime/manager/agent_subscription_admission.go
       - internal/runtime/manager/agent_subscription_admission_test.go
       - internal/runtime/manager/agent_manager.go
@@ -714,11 +737,13 @@ seam_families:
       - internal/store/sqlite_runtime_test.go
     search_dimensions: [flow_owned_subscription_pattern_authority, live_agent_subscription_route_authority, pending_agent_subscription_recovery_authority]
     notes: >
-      One typed admission derives canonical same-scope exact and pattern
-      identities, consumes imported wildcard/grant evidence, and rejects
-      foreign authority before lifecycle mutation, live route installation, or
-      pending recovery. Private admission state is the only capability accepted
-      by agent route APIs; live channels remain non-authoritative carriers.
+      One typed admission classifies node, agent, and timer exact/pattern
+      subscriptions before they may become verification, relation, route,
+      handler, lifecycle, or recovery authority. Node and timer exact values are
+      local-only; agent exact values retain only the admitted same-scope form;
+      imported wildcard observation consumes the typed subtree/grant owner.
+      Private agent admission state remains the only capability accepted by
+      live agent route APIs; raw strings and channels are non-authoritative.
   - id: import_boundary_wildcard_pattern_authority
     layer: route_plan_consumers
     classification: valid_consumer

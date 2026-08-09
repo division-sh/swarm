@@ -77,11 +77,11 @@ func (c *checkerContext) eventWarnings() []Finding {
 			rejectedProducers[producerID] = struct{}{}
 		}
 	}
-	for _, subscription := range census.LegacyQualifiedSubscriptions() {
-		location := legacyQualifiedSubscriptionLocation(subscription)
-		message := fmt.Sprintf("qualified exact subscription '%s' at %s cannot create an inter-flow route", subscription.Consumer.Event.Authored, location)
-		remediation := "Declare output/input pins and package.yaml connect for the boundary edge, then subscribe to the receiver-local input event. Exact qualified subscriptions cannot replace connect."
-		evidence := []string{fmt.Sprintf("retired qualified subscription %q at %q", subscription.Consumer.Event.Authored, location)}
+	for _, subscription := range census.InvalidAuthoredSubscriptions() {
+		location := invalidAuthoredSubscriptionLocation(subscription)
+		message := subscription.Admission.Message()
+		remediation := "Use a receiver-local exact event name. Declare output/input pins and package.yaml connect for delivery across a flow boundary; imported wildcard observation requires typed bind.observe authorization."
+		evidence := []string{fmt.Sprintf("rejected authored subscription %q at %q (%s)", subscription.Consumer.Event.Authored, location, subscription.Admission.Failure())}
 		c.eventWarningFindings = append(c.eventWarningFindings, NewHardInvalidityFinding("legacy_qualified_subscription", location, message, remediation, evidence...))
 	}
 	emitted := topologyWarningEndpoints(census.Producers(), true)
@@ -116,13 +116,13 @@ func (c *checkerContext) eventWarnings() []Finding {
 		if topologyRoutesProducer(topology, connectGraph, entry) || eventHasExternalConsumerLocal(ref.Entry) {
 			continue
 		}
-		if legacy := legacyQualifiedConsumersForEvent(census, ref.Canonical); len(legacy) > 0 {
-			location := legacyQualifiedSubscriptionLocation(legacy[0])
-			message := fmt.Sprintf("'%s' has no canonical consumer (same-flow subscriber or connected pin); retired qualified subscription '%s' at %s cannot provide delivery authority", ref.Canonical, legacy[0].Consumer.Event.Authored, location)
+		if invalid := invalidAuthoredConsumersForEvent(census, ref.Canonical); len(invalid) > 0 {
+			location := invalidAuthoredSubscriptionLocation(invalid[0])
+			message := fmt.Sprintf("'%s' has no canonical consumer (same-flow subscriber or connected pin); rejected subscription '%s' at %s cannot provide delivery authority", ref.Canonical, invalid[0].Consumer.Event.Authored, location)
 			remediation := fmt.Sprintf("Declare output/input pins and a connect for %s, then replace every legacy qualified subscription with a flow-local subscription.", ref.Canonical)
-			evidence := make([]string, 0, len(legacy))
-			for _, subscription := range legacy {
-				evidence = append(evidence, fmt.Sprintf("retired qualified subscription %q at %q", subscription.Consumer.Event.Authored, legacyQualifiedSubscriptionLocation(subscription)))
+			evidence := make([]string, 0, len(invalid))
+			for _, subscription := range invalid {
+				evidence = append(evidence, fmt.Sprintf("rejected authored subscription %q at %q", subscription.Consumer.Event.Authored, invalidAuthoredSubscriptionLocation(subscription)))
 			}
 			c.eventWarningFindings = append(c.eventWarningFindings, NewHardInvalidityFinding("event_consumer_exists", ref.Canonical, message, remediation, evidence...))
 			continue
@@ -192,18 +192,18 @@ func generatedActivityResultEventNamesLocal(source semanticview.Source) map[stri
 	return out
 }
 
-func legacyQualifiedConsumersForEvent(census semanticview.AuthoredEventEndpointCensus, canonical string) []semanticview.LegacyQualifiedSubscription {
+func invalidAuthoredConsumersForEvent(census semanticview.AuthoredEventEndpointCensus, canonical string) []semanticview.InvalidAuthoredSubscription {
 	canonical = strings.TrimSpace(canonical)
-	out := make([]semanticview.LegacyQualifiedSubscription, 0)
-	for _, subscription := range census.LegacyQualifiedSubscriptions() {
-		if strings.TrimSpace(subscription.Event.Canonical) == canonical {
+	out := make([]semanticview.InvalidAuthoredSubscription, 0)
+	for _, subscription := range census.InvalidAuthoredSubscriptions() {
+		if strings.TrimSpace(subscription.Consumer.Event.Canonical) == canonical {
 			out = append(out, subscription)
 		}
 	}
 	return out
 }
 
-func legacyQualifiedSubscriptionLocation(subscription semanticview.LegacyQualifiedSubscription) string {
+func invalidAuthoredSubscriptionLocation(subscription semanticview.InvalidAuthoredSubscription) string {
 	file := strings.TrimSpace(subscription.Consumer.SourceFile)
 	if file != "" && subscription.Consumer.SourceLine > 0 {
 		return fmt.Sprintf("%s:%d", file, subscription.Consumer.SourceLine)

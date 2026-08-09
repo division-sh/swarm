@@ -44,8 +44,9 @@ func TestRouteResolveSubscriberPatterns_HarnessAddsNoProducerPattern(t *testing.
 	if !ok {
 		t.Fatal("worker flow scope missing")
 	}
-	patterns := routeResolveSubscriberPatterns(
+	patterns, err := routeResolveSubscriberPatterns(
 		source,
+		subscriberNode,
 		scope.PackageKey,
 		scope.ID,
 		scope.InputEvents,
@@ -53,6 +54,9 @@ func TestRouteResolveSubscriberPatterns_HarnessAddsNoProducerPattern(t *testing.
 		routeFlowLocalEventSet(source, scope),
 		"work.requested",
 	)
+	if err != nil {
+		t.Fatalf("resolve subscriber patterns: %v", err)
+	}
 	if len(patterns) == 0 {
 		t.Fatal("ordinary authored subscription did not resolve")
 	}

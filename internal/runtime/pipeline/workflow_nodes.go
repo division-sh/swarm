@@ -196,13 +196,13 @@ func workflowNodeExactEventHandlerResolution(source semanticview.Source, nodeID,
 	if source == nil || eventType == "" {
 		return workflowNodeEventHandlerResolution{}
 	}
-	handler, ok := source.NodeEventHandler(nodeID, eventType)
-	if !ok {
+	resolved := semanticview.ResolveNodeSubscriptionHandler(source, nodeID, eventType)
+	if !resolved.Matched {
 		return workflowNodeEventHandlerResolution{}
 	}
 	return workflowNodeEventHandlerResolution{
-		Handler:         handler,
-		HandlerEventKey: workflowNodeMatchedHandlerEventKey(source, nodeID, eventType),
+		Handler:         resolved.Handler,
+		HandlerEventKey: resolved.HandlerEventKey,
 		Matched:         true,
 	}
 }
@@ -215,57 +215,15 @@ func workflowNodeEventHandlerResolutionForEventType(source semanticview.Source, 
 	if eventType == "" {
 		return workflowNodeEventHandlerResolution{}
 	}
-	if handler, ok := source.NodeEventHandler(nodeID, eventType); ok {
-		handlerEventKey := workflowNodeMatchedHandlerEventKey(source, nodeID, eventType)
-		if bundle, bundleOK := semanticview.Bundle(source); bundleOK {
-			resolved := bundle.ResolveNodeEventHandler(nodeID, eventType)
-			if resolved.Matched && strings.TrimSpace(resolved.AuthoredEventType) != "" {
-				handlerEventKey = strings.TrimSpace(resolved.AuthoredEventType)
-			}
-		}
+	resolved := semanticview.ResolveNodeSubscriptionHandler(source, nodeID, eventType)
+	if resolved.Matched {
 		return workflowNodeEventHandlerResolution{
-			Handler:         handler,
-			HandlerEventKey: handlerEventKey,
+			Handler:         resolved.Handler,
+			HandlerEventKey: resolved.HandlerEventKey,
 			Matched:         true,
 		}
 	}
-	if semanticview.ImportBoundaryWildcardHandlerFallbackDenied(source, nodeID, eventType) {
-		return workflowNodeEventHandlerResolution{}
-	}
-	if bundle, ok := semanticview.Bundle(source); ok {
-		resolved := bundle.ResolveNodeEventHandler(nodeID, eventType)
-		if resolved.Matched {
-			return workflowNodeEventHandlerResolution{
-				Handler:         resolved.Handler,
-				HandlerEventKey: strings.TrimSpace(resolved.AuthoredEventType),
-				Matched:         true,
-			}
-		}
-	}
 	return workflowNodeEventHandlerResolution{}
-}
-
-func workflowNodeMatchedHandlerEventKey(source semanticview.Source, nodeID, eventType string) string {
-	eventType = eventidentity.Normalize(eventType)
-	if source == nil {
-		return eventType
-	}
-	handlers := source.NodeEventHandlers(nodeID)
-	if len(handlers) == 0 {
-		return eventType
-	}
-	for key := range handlers {
-		if eventidentity.Normalize(key) == eventType {
-			return strings.TrimSpace(key)
-		}
-	}
-	for key := range handlers {
-		key = strings.TrimSpace(key)
-		if key != "" && runtimecontractsHandlerPatternMatches(key, eventType) {
-			return key
-		}
-	}
-	return eventType
 }
 
 func workflowNodeHandlerEventKeyForExecution(ctx context.Context, source semanticview.Source, nodeID string, evt events.Event) string {
@@ -298,7 +256,11 @@ func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
 		runtimeSubscriptions := source.NodeRuntimeSubscriptions(nodeID)
 		subscriptions := make([]events.EventType, 0, len(runtimeSubscriptions))
 		for _, evt := range runtimeSubscriptions {
-			for _, resolved := range workflowNodeSubscriptionAliases(source, nodeID, evt) {
+			aliases, err := workflowNodeSubscriptionAliases(source, nodeID, evt)
+			if err != nil {
+				return nil, err
+			}
+			for _, resolved := range aliases {
 				if resolved == "" {
 					continue
 				}
@@ -330,14 +292,18 @@ func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
 	return out, nil
 }
 
-func workflowNodeSubscriptionAliases(source semanticview.Source, nodeID, eventType string) []string {
+func workflowNodeSubscriptionAliases(source semanticview.Source, nodeID, eventType string) ([]string, error) {
 	nodeID = strings.TrimSpace(nodeID)
 	eventType = eventidentity.Normalize(eventType)
 	if nodeID == "" || eventType == "" || source == nil {
 		if eventType == "" {
-			return nil
+			return nil, nil
 		}
-		return []string{eventType}
+		return []string{eventType}, nil
+	}
+	admission := semanticview.ClassifyNodeSubscription(source, nodeID, eventType)
+	if !admission.Admitted() {
+		return nil, fmt.Errorf("workflow node %s: %s", nodeID, admission.Message())
 	}
 	out := make([]string, 0, 2)
 	appendAlias := func(value string) {
@@ -352,31 +318,24 @@ func workflowNodeSubscriptionAliases(source semanticview.Source, nodeID, eventTy
 		}
 		out = append(out, value)
 	}
-	contractSource, ok := source.NodeContractSource(nodeID)
-	if !ok {
-		appendAlias(source.ResolveNodeEventReference(nodeID, eventType))
-		return out
-	}
+	contractSource, _ := source.NodeContractSource(nodeID)
 	flowID := strings.TrimSpace(contractSource.FlowID)
-	if strings.Contains(eventType, "*") {
-		if resolution := semanticview.ResolveImportBoundaryWildcardSubscriptionForNode(source, nodeID, eventType); resolution.Scoped {
-			for _, pattern := range resolution.Patterns {
-				appendAlias(pattern.EventPattern)
-			}
-			return out
-		}
-	}
-	if source.FlowHasInputEvent(flowID, eventType) {
-		for _, pattern := range runtimepinrouting.ResolveFlowInputProducer(source, flowID, eventType).AutoWireResolution().Patterns {
+	if admission.Pattern() {
+		for _, pattern := range admission.RoutePatterns() {
 			appendAlias(pattern)
 		}
-	} else {
-		appendAlias(source.ResolveNodeEventReference(nodeID, eventType))
-		return out
+		return out, nil
 	}
-	appendAlias(source.ResolveNodeEventReference(nodeID, eventType))
-	appendAlias(eventType)
-	return out
+	if source.FlowHasInputEvent(flowID, admission.LocalEvent()) {
+		for _, pattern := range runtimepinrouting.ResolveFlowInputProducer(source, flowID, admission.LocalEvent()).AutoWireResolution().Patterns {
+			appendAlias(pattern)
+		}
+	}
+	for _, pattern := range admission.RoutePatterns() {
+		appendAlias(pattern)
+	}
+	appendAlias(admission.LocalEvent())
+	return out, nil
 }
 
 func workflowFlowInputProducerAliases(source semanticview.Source, targetFlowID, eventType string) []string {

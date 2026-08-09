@@ -4730,6 +4730,56 @@ func TestRun_RejectsAbsoluteSiblingQualifiedSubscription(t *testing.T) {
 	}
 }
 
+func TestRun_ExactSubscriptionAdmissionPreservesOnlySameScopeAgentException(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		kind        string
+		authored    string
+		wantInvalid bool
+	}{
+		{name: "node same scope", kind: "node", authored: "child/task.done", wantInvalid: true},
+		{name: "node unresolved", kind: "node", authored: "missing/task.done", wantInvalid: true},
+		{name: "node generated subscription", kind: "generated", authored: "child/task.done", wantInvalid: true},
+		{name: "agent same scope", kind: "agent", authored: "child/task.done", wantInvalid: false},
+		{name: "agent unresolved", kind: "agent", authored: "missing/task.done", wantInvalid: true},
+		{name: "agent descendant", kind: "agent", authored: "child/grandchild/task.done", wantInvalid: true},
+		{name: "agent full uri", kind: "agent", authored: "swarm://child/task.done", wantInvalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			child := runtimecontracts.FlowContractView{
+				Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+				Path:   "child",
+				Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
+			}
+			switch tc.kind {
+			case "node":
+				child.Nodes = map[string]runtimecontracts.SystemNodeContract{
+					"listener": {ID: "listener", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{tc.authored: {}}},
+				}
+			case "generated":
+				child.Nodes = map[string]runtimecontracts.SystemNodeContract{
+					"listener": {ID: "listener", SubscribesTo: []string{tc.authored}},
+				}
+			case "agent":
+				child.Agents = map[string]runtimecontracts.AgentRegistryEntry{
+					"observer": {ID: "observer", Subscriptions: []string{tc.authored}},
+				}
+			}
+			root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
+			bundle := &runtimecontracts.WorkflowContractBundle{FlowTree: runtimecontracts.FlowTree{
+				Root: &root,
+				ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
+			}}
+
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			gotInvalid := reportContains(report.HardInvalidities(), "legacy_qualified_subscription", tc.authored)
+			if gotInvalid != tc.wantInvalid {
+				t.Fatalf("hard invalidities = %#v, invalid = %t want %t", report.HardInvalidities(), gotInvalid, tc.wantInvalid)
+			}
+		})
+	}
+}
+
 func TestRun_ReportsExpressionFieldReferenceWarning(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
@@ -6354,7 +6404,7 @@ func TestRun_DoesNotRequireRetiredStaticAcquisitionForBackpropInputPinHandlers(t
 	}
 }
 
-func TestRun_UsesCompiledOwnersForEquivalentSingleNodePerEventRoutes(t *testing.T) {
+func TestRun_RejectsQualifiedNodeBeforeItCanBecomeEquivalentRouteOwnership(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	rootNode := bundle.Nodes["dispatcher"]
 	rootNode.EventHandlers["child/task.feedback"] = runtimecontracts.SystemNodeEventHandler{}
@@ -6363,8 +6413,11 @@ func TestRun_UsesCompiledOwnersForEquivalentSingleNodePerEventRoutes(t *testing.
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "single_node_per_event", "child/task.feedback") {
-		t.Fatalf("expected single_node_per_event error, got %#v", report.Errors())
+	if !reportContains(report.HardInvalidities(), "legacy_qualified_subscription", "child/task.feedback") {
+		t.Fatalf("expected qualified subscription hard invalidity, got %#v", report.HardInvalidities())
+	}
+	if reportContains(report.Errors(), "single_node_per_event", "child/task.feedback") {
+		t.Fatalf("invalid subscription became route ownership: %#v", report.Errors())
 	}
 }
 
@@ -6497,6 +6550,28 @@ func TestRun_ReportsErrorForUnknownTimerTriggerEvent(t *testing.T) {
 	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
 	if !reportContains(report.Errors(), "timer_validation", "unknown event") {
 		t.Fatalf("expected timer_validation unknown event error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsQualifiedAndPatternTimerEventReferencesBeforeResolution(t *testing.T) {
+	for _, startOn := range []string{
+		"event:support/ticket.opened",
+		"event:missing/ticket.opened",
+		"event:swarm://support/ticket.opened",
+		"event:ticket.*",
+	} {
+		t.Run(strings.ReplaceAll(startOn, "/", "_"), func(t *testing.T) {
+			root := writeTimerValidationFixture(t, "event:ticket.opened", "")
+			repoRoot := repoRootForBootverifyTest(t)
+			platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+			bundle := loadFixtureBundleAt(t, repoRoot, root, platformSpec)
+			bundle.Semantics.Timers[0].StartOn = startOn
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			if !reportContains(report.Errors(), "timer_validation", "exact local event name") &&
+				!reportContains(report.Errors(), "timer_validation", "must use a local event name") {
+				t.Fatalf("timer errors = %#v, want typed local-only rejection", report.Errors())
+			}
+		})
 	}
 }
 

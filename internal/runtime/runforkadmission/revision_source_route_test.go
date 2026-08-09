@@ -109,6 +109,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 		name              string
 		eventName         string
 		sourceRoute       events.RouteIdentity
+		routingSource     events.RoutingSource
 		explicitSelector  bool
 		deliveryStatus    string
 		source            func() semanticview.Source
@@ -171,6 +172,8 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 		{
 			name:             "root source needs no child route identity",
 			eventName:        "root.ready",
+			sourceRoute:      events.RouteIdentity{EntityID: "33333333-3333-4333-8333-333333333333"},
+			routingSource:    eventtest.RootRoutingSource("33333333-3333-4333-8333-333333333333"),
 			explicitSelector: true,
 			source:           testContractFrontierRootConnectSource,
 			wantHistory:      []string{"consumer-node"}, wantHistoryEvents: 1,
@@ -207,7 +210,15 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 				captureRunForkRevision(t, ctx, db, runID)
 			}
 			eventEnvelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, tc.sourceRoute)
-			event := eventtest.ExistingRunRootIngress(eventID, events.EventType(tc.eventName), "producer-node", "", []byte(`{}`), 0, runID, eventEnvelope, at)
+			if !tc.routingSource.Empty() {
+				eventEnvelope = events.EventEnvelope{}
+			}
+			var event events.Event
+			if !tc.routingSource.Empty() {
+				event = eventtest.ExistingRunRootIngressWithRoutingSource(eventID, events.EventType(tc.eventName), "producer-node", "", []byte(`{}`), 0, runID, eventEnvelope, tc.routingSource, at)
+			} else {
+				event = eventtest.ExistingRunRootIngress(eventID, events.EventType(tc.eventName), "producer-node", "", []byte(`{}`), 0, runID, eventEnvelope, at)
+			}
 			if tc.deliveryStatus != "" {
 				route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("source-node")}
 				storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)

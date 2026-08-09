@@ -368,24 +368,8 @@ func (s bundleSource) NodeEventHandlers(nodeID string) map[string]runtimecontrac
 	return s.bundle.NodeEventHandlers(nodeID)
 }
 func (s bundleSource) NodeEventHandler(nodeID, eventType string) (runtimecontracts.SystemNodeEventHandler, bool) {
-	nodeID = strings.TrimSpace(nodeID)
-	eventType = strings.TrimSpace(eventType)
-	for pattern := range s.bundle.NodeEventHandlers(nodeID) {
-		if !strings.Contains(pattern, "*") {
-			continue
-		}
-		matched, scoped := ImportBoundaryWildcardSubscriptionMatchesNode(s, nodeID, pattern, eventType)
-		if !scoped {
-			continue
-		}
-		if matched {
-			return s.bundle.NodeEventHandler(nodeID, pattern)
-		}
-	}
-	if ImportBoundaryWildcardHandlerFallbackDenied(s, nodeID, eventType) {
-		return runtimecontracts.SystemNodeEventHandler{}, false
-	}
-	return s.bundle.NodeEventHandler(nodeID, eventType)
+	resolved := ResolveNodeSubscriptionHandler(s, nodeID, eventType)
+	return resolved.Handler, resolved.Matched
 }
 func (s bundleSource) NodeEntries() map[string]runtimecontracts.SystemNodeContract {
 	return s.bundle.NodeEntries()
