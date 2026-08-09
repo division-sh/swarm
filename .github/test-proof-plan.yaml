@@ -71,7 +71,6 @@ units:
   catalog-required-verify:
     packages:
       - github.com/division-sh/swarm/internal/cliapp
-    run: ^(TestCatalogRequiredVerifyAll|TestSwarmTestCatalogCompanionsAreProtocolOnly)$
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad
