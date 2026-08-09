@@ -1,6 +1,11 @@
 package semanticview
 
-import "testing"
+import (
+	"testing"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+)
 
 func TestClassifyAuthoredSubscriptionExactAdmissionMatrix(t *testing.T) {
 	tests := []struct {
@@ -79,5 +84,34 @@ func TestAuthoredSubscriptionAdmissionMatchesTypedReceiverInputWithoutOpeningInv
 	})
 	if invalid.MatchesReceiverInput("producer/task.ready", "receiver", []string{"task.ready"}) {
 		t.Fatal("invalid qualified exact bypassed admission through receiver input localization")
+	}
+}
+
+func TestResolveNodeSubscriptionHandlerPrioritizesExactBeforeWildcard(t *testing.T) {
+	flow := runtimecontracts.FlowContractView{
+		Path:   "child",
+		Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"task.completed": {}},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"listener": {
+				ID: "listener",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"*.completed":    {},
+					"task.completed": {},
+				},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	source := Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
+		},
+	})
+
+	resolved := ResolveNodeSubscriptionHandler(source, "listener", "child/task.completed")
+	if !resolved.Matched || resolved.HandlerEventKey != "task.completed" {
+		t.Fatalf("resolved handler = %#v, want exact task.completed before wildcard", resolved)
 	}
 }

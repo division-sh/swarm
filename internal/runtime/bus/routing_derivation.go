@@ -450,7 +450,7 @@ func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 			if err := rt.addConnectRecipientLocked(templateDef.FlowID, templateDef.InputEvents, rawPattern, subscriber, instancePath); err != nil {
 				return err
 			}
-			resolvedPatterns, err := routeResolveSubscriberPatterns(rt.source, subscriberTemplate.Kind, templateDef.PackageKey, templateDef.FlowID, templateDef.InputEvents, instancePath, templateDef.LocalEvents, rawPattern)
+			resolvedPatterns, err := routeResolveSubscriberPatterns(rt.source, subscriberTemplate.Kind, templateDef.PackageKey, templateDef.FlowID, templateDef.InputEvents, templateScope, instancePath, templateDef.LocalEvents, rawPattern)
 			if err != nil {
 				return err
 			}
@@ -985,7 +985,7 @@ func (rt *RouteTable) addAgentPatternsLocked(
 			if err := rt.addConnectRecipientLocked(routingFlowID, inputEvents, rawPattern, subscriber, ""); err != nil {
 				return err
 			}
-			resolvedPatterns, err := routeResolveSubscriberPatterns(source, subscriberAgent, packageKey, agentFlowID, inputEvents, agentPath, localEvents, rawPattern)
+			resolvedPatterns, err := routeResolveSubscriberPatterns(source, subscriberAgent, packageKey, agentFlowID, inputEvents, agentPath, agentPath, localEvents, rawPattern)
 			if err != nil {
 				return err
 			}
@@ -1020,7 +1020,7 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageK
 			if err := rt.addConnectRecipientLocked(flowID, inputEvents, rawPattern, subscriber, ""); err != nil {
 				return err
 			}
-			resolvedPatterns, err := routeResolveSubscriberPatterns(source, subscriberNode, packageKey, flowID, inputEvents, basePath, localEvents, rawPattern)
+			resolvedPatterns, err := routeResolveSubscriberPatterns(source, subscriberNode, packageKey, flowID, inputEvents, basePath, basePath, localEvents, rawPattern)
 			if err != nil {
 				return err
 			}
@@ -1395,13 +1395,13 @@ func routeFlowIDForPath(source semanticview.Source, flowPath string) string {
 	return ""
 }
 
-func routeResolveSubscriberPatterns(source semanticview.Source, kind subscriberKind, packageKey, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, raw string) ([]routeResolvedPattern, error) {
+func routeResolveSubscriberPatterns(source semanticview.Source, kind subscriberKind, packageKey, flowID string, inputEvents []string, authorityPath, routePath string, localEvents map[string]struct{}, raw string) ([]routeResolvedPattern, error) {
 	raw = eventidentity.Normalize(raw)
 	flowID = strings.TrimSpace(flowID)
 	if raw == "" {
 		return nil, nil
 	}
-	admission := routeClassifyAuthoredSubscription(source, kind, packageKey, flowID, inputEvents, basePath, localEvents, raw)
+	admission := routeClassifyAuthoredSubscription(source, kind, packageKey, flowID, inputEvents, authorityPath, localEvents, raw)
 	if !admission.Admitted() {
 		return nil, fmt.Errorf("route subscriber %s", admission.Message())
 	}
@@ -1413,7 +1413,7 @@ func routeResolveSubscriberPatterns(source semanticview.Source, kind subscriberK
 		}
 	}
 	if admission.Class() == semanticview.AuthoredSubscriptionImportedPattern {
-		resolution := semanticview.ResolveImportBoundaryWildcardSubscription(source, packageKey, flowID, basePath, localEvents, raw)
+		resolution := semanticview.ResolveImportBoundaryWildcardSubscription(source, packageKey, flowID, authorityPath, localEvents, raw)
 		out := make([]routeResolvedPattern, 0, len(resolution.Patterns))
 		for _, pattern := range resolution.Patterns {
 			eventPattern := eventidentity.Normalize(pattern.EventPattern)
@@ -1429,7 +1429,7 @@ func routeResolveSubscriberPatterns(source semanticview.Source, kind subscriberK
 				MatchPattern:       eventPattern,
 				routeSource:        routeSource,
 				LocalizedEvent:     pattern.LocalizedEvent,
-				RoutePath:          routeImportBoundarySubscriberPath(source, packageKey, flowID, basePath),
+				RoutePath:          routeImportBoundarySubscriberPath(source, packageKey, flowID, routePath),
 				SourceTemplatePath: pattern.SourceTemplatePath,
 				SourceLocalEvent:   pattern.SourceLocalEvent,
 			})
@@ -1438,9 +1438,28 @@ func routeResolveSubscriberPatterns(source semanticview.Source, kind subscriberK
 	}
 	out := make([]routeResolvedPattern, 0, len(admission.RoutePatterns()))
 	for _, pattern := range admission.RoutePatterns() {
-		out = append(out, routeResolvedPattern{EventPattern: pattern, routeSource: subscriberRouteSourceSubscription})
+		out = append(out, routeResolvedPattern{
+			EventPattern: rebaseAdmittedSubscriptionPattern(pattern, authorityPath, routePath),
+			routeSource:  subscriberRouteSourceSubscription,
+		})
 	}
 	return out, nil
+}
+
+func rebaseAdmittedSubscriptionPattern(pattern, authorityPath, routePath string) string {
+	pattern = eventidentity.Normalize(pattern)
+	authorityPath = eventidentity.Normalize(authorityPath)
+	routePath = eventidentity.Normalize(routePath)
+	if pattern == "" || authorityPath == routePath || authorityPath == "" {
+		return pattern
+	}
+	if pattern == authorityPath {
+		return routePath
+	}
+	if strings.HasPrefix(pattern, authorityPath+"/") {
+		return eventidentity.Normalize(routePath + strings.TrimPrefix(pattern, authorityPath))
+	}
+	return pattern
 }
 
 func routeClassifyAuthoredSubscription(source semanticview.Source, kind subscriberKind, packageKey, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, raw string) semanticview.AuthoredSubscriptionAdmission {

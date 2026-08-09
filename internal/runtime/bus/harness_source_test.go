@@ -51,6 +51,7 @@ func TestRouteResolveSubscriberPatterns_HarnessAddsNoProducerPattern(t *testing.
 		scope.ID,
 		scope.InputEvents,
 		scope.Path,
+		scope.Path,
 		routeFlowLocalEventSet(source, scope),
 		"work.requested",
 	)
