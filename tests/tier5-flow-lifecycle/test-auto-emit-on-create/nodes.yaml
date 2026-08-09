@@ -1,10 +1,13 @@
-test-node:
-  id: test-node
+spawner:
+  id: spawner
   execution_type: system_node
-  subscribes_to: [auto.started]
-  produces: [auto.processed]
+  subscribes_to: [flow.created]
+  produces: []
   event_handlers:
-    auto.started:
-      advances_to: started
-      emit:
-        event: auto.processed
+    flow.created:
+      action: create_flow_instance
+      template: worker
+      instance_id_from: payload.instance_id
+      config_from:
+        instance_id: payload.instance_id
+      advances_to: spawned

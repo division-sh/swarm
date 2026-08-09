@@ -1,0 +1,4 @@
+auto.started:
+  instance_id: string
+auto.processed:
+  instance_id: string

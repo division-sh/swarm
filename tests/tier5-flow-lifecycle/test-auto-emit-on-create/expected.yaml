@@ -1,13 +1,23 @@
 trigger:
   event: flow.created
   payload:
+    instance_id: worker-001
 expected:
 
   handler_outcome: success
-  entity_state: started
+  entity_state: spawned
   emitted_events:
-    - auto.started
-    - auto.processed
+    - worker/worker-001/auto.started
+    - worker/auto.processed
+  causal_events:
+    - worker/worker-001/auto.started
+    - worker/auto.processed
+  flow_instance_created:
+    template: worker
+    instance_id: worker-001
+  flow_entities:
+    worker:
+      entity_state: done
 
 conformance:
   disposition: runtime

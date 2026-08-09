@@ -1,10 +1,11 @@
 name: test-auto-emit-on-create visible smoke
 steps:
   - publish: flow.created
-    payload: {}
+    payload:
+      instance_id: worker-001
 expect:
   events:
-    include: [auto.started, auto.processed]
+    include: [worker/worker-001/auto.started, worker/auto.processed]
   entities:
     - type: default
-      current_state: started
+      current_state: spawned

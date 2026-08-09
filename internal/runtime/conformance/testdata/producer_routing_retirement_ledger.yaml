@@ -516,10 +516,10 @@ rows:
   disposition: harness
   proof: TestCatalogReplayClean_SelectedStores/test-query-group-by
 - id: B103
-  path: tests/tier5-flow-lifecycle/test-auto-emit-on-create/nodes.yaml
+  path: tests/tier5-flow-lifecycle/test-auto-emit-on-create/flows/worker/nodes.yaml
   event: auto.processed
-  disposition: harness
-  proof: TestCatalogReplayClean_SelectedStores/test-auto-emit-on-create
+  disposition: same_flow
+  proof: TestProducerRoutingCanonicalConsumerManifestationsExecute/B103
 - id: B104
   path: tests/tier5-flow-lifecycle/test-create-flow-instance-config/nodes.yaml
   event: flow.spawned

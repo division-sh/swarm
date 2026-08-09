@@ -1,0 +1,19 @@
+worker:
+  id: worker
+  execution_type: system_node
+  subscribes_to: [auto.started]
+  produces: [auto.processed]
+  event_handlers:
+    auto.started:
+      advances_to: started
+      emit:
+        event: auto.processed
+
+observer:
+  id: observer
+  execution_type: system_node
+  subscribes_to: [auto.processed]
+  produces: []
+  event_handlers:
+    auto.processed:
+      advances_to: done

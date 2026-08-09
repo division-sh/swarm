@@ -3,7 +3,8 @@ trigger:
     - event: task.completed
       payload:
     - event: task.reopen_requested
-      barrier_before: run_terminal
+      barrier_before:
+        kind: run_terminal
       error_contains: run is not active
       payload:
 expected:
