@@ -186,7 +186,7 @@ func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *tes
 		t.Fatalf("write contracts package: %v", err)
 	}
 
-	manager := workspace.NewHostManager(nil)
+	manager := workspace.NewHostManager()
 	manager.SetConfig(workspace.HostConfig{
 		WorkspaceRoot:       workspaceRoot,
 		SharedDataSource:    dataDir,
@@ -295,7 +295,7 @@ func TestExecutorHostNativeBashUsesExplicitHostManagerTarget(t *testing.T) {
 		t.Fatalf("write contracts package: %v", err)
 	}
 
-	manager := workspace.NewHostManager(nil)
+	manager := workspace.NewHostManager()
 	manager.SetConfig(workspace.HostConfig{
 		WorkspaceRoot:       workspaceRoot,
 		SharedDataSource:    dataDir,

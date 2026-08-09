@@ -89,13 +89,13 @@ func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runti
 	outcome, err := c.bus.settlePipelineObligationOutcome(ctx, c.claim, disposition)
 	if err != nil {
 		if outcome.Committed() {
-			return err
+			return fmt.Errorf("settle pipeline publication %s: %w", c.eventID, err)
 		}
 		releaseErr := c.bus.pipelineObligations.Release(context.WithoutCancel(ctx), c.claim)
 		if errors.Is(releaseErr, runtimepipelineobligation.ErrStaleClaim) {
 			releaseErr = nil
 		}
-		return errors.Join(err, releaseErr)
+		return errors.Join(fmt.Errorf("settle pipeline publication %s: %w", c.eventID, err), releaseErr)
 	}
 	return nil
 }
@@ -142,7 +142,10 @@ func (c *pipelinePublicationClaim) MarkDecisionProcessed(ctx context.Context) er
 		}
 		return fmt.Errorf("pipeline publication claim owner is required")
 	}
-	return c.bus.pipelineObligations.MarkDecisionProcessed(ctx, c.claim)
+	if err := c.bus.pipelineObligations.MarkDecisionProcessed(ctx, c.claim); err != nil {
+		return fmt.Errorf("mark decision publication %s processed: %w", c.eventID, err)
+	}
+	return nil
 }
 
 func (c *pipelinePublicationClaim) Claim() runtimepipelineobligation.Claim {

@@ -42,72 +42,20 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
 const eventBusTestRunID = "99999999-9999-9999-9999-999999999999"
-
-type testCommitPublishTransaction struct {
-	active   []string
-	begin    func(context.Context, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
-	finalize func(context.Context, runtimebus.CommitPublishRequest) error
-}
-
-func (*testCommitPublishTransaction) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
-	return events.AdmittedEvent{}, false, nil
-}
-
-func (t *testCommitPublishTransaction) BeginPreparedPublish(ctx context.Context, prepared runtimebus.PreparedPublishEvent) (runtimebus.EventAppendOutcome, error) {
-	outcome := runtimebus.EventAppendInserted
-	var err error
-	if t.begin != nil {
-		outcome, err = t.begin(ctx, prepared.AdmittedEvent())
-	}
-	if err == nil && outcome == runtimebus.EventAppendInserted {
-		t.active = append(t.active, prepared.AdmittedEvent().ID())
-	}
-	return outcome, err
-}
-
-func (t *testCommitPublishTransaction) FinalizePreparedPublish(ctx context.Context, finalization runtimebus.PreparedPublishFinalization) error {
-	req := finalization.Request()
-	if len(t.active) == 0 || t.active[len(t.active)-1] != req.Event.ID() {
-		return errors.New("prepared event finalization does not match the active event")
-	}
-	if t.finalize != nil {
-		if err := t.finalize(ctx, req); err != nil {
-			return err
-		}
-	}
-	if err := req.DeliveryReceipt.Record(nil); err != nil {
-		return err
-	}
-	t.active = t.active[:len(t.active)-1]
-	return nil
-}
-
-func prepareTestCommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan, transaction *testCommitPublishTransaction) (runtimebus.PreparedPublish, error) {
-	postCommit := make([]runtimepipeline.OwnerAction, 0, 4)
-	rollback := make([]runtimepipeline.OwnerAction, 0, 4)
-	ctx = runtimepipeline.WithPipelinePostCommitActions(ctx, &postCommit)
-	ctx = runtimepipeline.WithPipelineRollbackActions(ctx, &rollback)
-	prepared, err := plan.PrepareCommitPublish(runtimebus.WithCommitPublishTransaction(ctx, transaction))
-	if err != nil {
-		runtimepipeline.FlushPipelineRollbackActions(rollback)
-		return runtimebus.PreparedPublish{}, err
-	}
-	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
-	return prepared, nil
-}
 
 type retainedConnectionCommitStore struct {
 	runtimebus.InMemoryEventStore
 	conn *sql.Conn
 }
 
-func (s *retainedConnectionCommitStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	ctx = runtimepipeline.WithPipelineSQLConnContext(ctx, s.conn)
-	return prepareTestCommitPublish(ctx, plan, &testCommitPublishTransaction{})
+func (s *retainedConnectionCommitStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	ctx = runtimepipelinefixture.WithSQLConn(ctx, s.conn)
+	return s.InMemoryEventStore.CommitPublication(ctx, command)
 }
 
 type dispatchContextObserver struct {
@@ -120,10 +68,10 @@ func (o *dispatchContextObserver) NotifyLifecycle(ctx context.Context, signal ru
 		return
 	}
 	o.called = true
-	if _, ok := runtimepipeline.PipelineSQLConnFromContext(ctx); ok {
+	if _, ok := runtimepipelinefixture.SQLConn(ctx); ok {
 		o.t.Error("post-commit dispatch retained the transaction-owned SQL connection")
 	}
-	if _, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok {
+	if _, ok := runtimepipelinefixture.SQLTx(ctx); ok {
 		o.t.Error("post-commit dispatch retained the completed SQL transaction")
 	}
 }
@@ -230,13 +178,13 @@ func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite(t *testi
 	assertEventBusTerminalRunRefusal(t, sqliteStore, runID, "cancelled", func(eventID string) (string, int, int, error) {
 		var status string
 		var eventCount, deliveryCount int
-		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`, runID).Scan(&status); err != nil {
+		if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = ?`, runID).Scan(&status); err != nil {
 			return "", 0, 0, err
 		}
-		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&eventCount); err != nil {
+		if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&eventCount); err != nil {
 			return "", 0, 0, err
 		}
-		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, eventID).Scan(&deliveryCount); err != nil {
+		if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, eventID).Scan(&deliveryCount); err != nil {
 			return "", 0, 0, err
 		}
 		return status, eventCount, deliveryCount, nil
@@ -315,16 +263,16 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 	storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeDirect)
 	assertEventBusExactDuplicateIsOperationNoOp(t, sqliteStore, evt, func() (eventBusExactDuplicateState, error) {
 		var state eventBusExactDuplicateState
-		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COALESCE(status, ''), COALESCE(event_count, 0) FROM runs WHERE run_id = ?`, runID).Scan(&state.Status, &state.RunEventCount); err != nil {
+		if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `SELECT COALESCE(status, ''), COALESCE(event_count, 0) FROM runs WHERE run_id = ?`, runID).Scan(&state.Status, &state.RunEventCount); err != nil {
 			return state, err
 		}
-		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, evt.ID()).Scan(&state.EventRows); err != nil {
+		if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_id = ?`, evt.ID()).Scan(&state.EventRows); err != nil {
 			return state, err
 		}
-		if err := sqliteStore.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, evt.ID()).Scan(&state.DeliveryRows); err != nil {
+		if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ?`, evt.ID()).Scan(&state.DeliveryRows); err != nil {
 			return state, err
 		}
-		if err := sqliteStore.DB.QueryRowContext(ctx, `
+		if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 			SELECT COUNT(*)
 			FROM event_delivery_outcomes o
 			JOIN event_deliveries d ON d.delivery_id = o.delivery_id
@@ -421,7 +369,7 @@ func TestEventBusRejectsDiagnosticDirectEventsThroughEveryPublishOwnerSQLite(t *
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	assertEventBusDiagnosticDirectRefusal(t, sqliteStore, func(eventID string) (int, error) {
 		var count int
-		err := sqliteStore.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&count)
+		err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM events WHERE event_id = ?`, eventID).Scan(&count)
 		return count, err
 	})
 }
@@ -599,10 +547,21 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	`, runtimeflowidentity.EntityID(instanceRoute.InstancePath), eventBusTestRunID, instanceRoute.InstancePath); err != nil {
 		t.Fatalf("seed account entity state: %v", err)
 	}
+	readinessPlan, err := json.Marshal(runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+		Identity: runtimeflowidentity.Instance{
+			TemplateID: "account", ScopeKey: "account", InstanceID: "one", InstancePath: instanceRoute.InstancePath,
+			EntityID: runtimeflowidentity.EntityID(instanceRoute.InstancePath), HasStoredPath: true,
+		},
+		RunID: eventBusTestRunID, BundleHash: "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		BundleSource: "ephemeral", WorkflowVersion: source.WorkflowVersion(),
+	})
+	if err != nil {
+		t.Fatalf("marshal account readiness owner: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO flow_instance_runtime_readiness (run_id, instance_id, plan, created_at, updated_at)
-		VALUES ($1::uuid, $2, jsonb_build_object('workflow_version', $3::text), NOW(), NOW())
-	`, eventBusTestRunID, instanceRoute.InstancePath, source.WorkflowVersion()); err != nil {
+		VALUES ($1::uuid, $2, $3::jsonb, NOW(), NOW())
+	`, eventBusTestRunID, instanceRoute.InstancePath, readinessPlan); err != nil {
 		t.Fatalf("seed account readiness owner: %v", err)
 	}
 
@@ -806,7 +765,7 @@ type nonTransactionalPersistedBeforeInterceptor struct {
 
 func (i nonTransactionalPersistedBeforeInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.t.Helper()
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+	if tx, ok := runtimepipelinefixture.SQLTx(ctx); ok && tx != nil {
 		i.t.Fatal("non-transactional interceptor unexpectedly ran with sql tx")
 	}
 	for _, got := range i.store.eventTypes() {
@@ -829,7 +788,7 @@ type postCommitTxAbsentInterceptor struct {
 
 func (i postCommitTxAbsentInterceptor) Intercept(ctx context.Context, _ events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.t.Helper()
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+	if tx, ok := runtimepipelinefixture.SQLTx(ctx); ok && tx != nil {
 		i.t.Fatal("post-commit interceptor ran with sql tx still in context")
 	}
 	ok, err := i.store.EventExists(ctx, i.eventID)
@@ -847,7 +806,7 @@ func (i postCommitTxAbsentInterceptor) Intercept(ctx context.Context, _ events.E
 		assertSortedStringsEqual(i.t, got, i.wantRecipients)
 	}
 	if i.wantScope != "" {
-		got := loadCommittedPipelineScopePostgres(i.t, ctx, i.store.DB, i.eventID)
+		got := loadCommittedPipelineScopePostgres(i.t, ctx, storetest.DatabaseForTest(i.store), i.eventID)
 		if got != i.wantScope {
 			i.t.Fatalf("committed replay scope = %q, want %q", got, i.wantScope)
 		}
@@ -881,7 +840,7 @@ type postCommitErrorInterceptor struct {
 
 func (i postCommitErrorInterceptor) Intercept(ctx context.Context, _ events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.t.Helper()
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+	if tx, ok := runtimepipelinefixture.SQLTx(ctx); ok && tx != nil {
 		i.t.Fatal("post-commit error interceptor ran with sql tx still in context")
 	}
 	ok, err := i.store.EventExists(ctx, i.eventID)
@@ -911,7 +870,7 @@ func (i deferredEventVisibleInterceptor) Intercept(ctx context.Context, evt even
 	if evt.Type() != i.checkFor {
 		return true, nil, runtimepipelineobligation.Continue(), nil
 	}
-	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+	if tx, ok := runtimepipelinefixture.SQLTx(ctx); ok && tx != nil {
 		i.t.Fatal("deferred event interceptor ran with sql tx still in context")
 	}
 	ok, err := i.store.EventExists(ctx, i.eventID)
@@ -957,6 +916,14 @@ type routeSetEventStore struct {
 	routes map[string][]events.DeliveryRoute
 }
 
+func (s *routeSetEventStore) ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) error {
+	return nil
+}
+
+func (s *routeSetEventStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	return nil, nil
+}
+
 type replayCapableAtomicStoreMissingScope struct {
 	mu         sync.Mutex
 	deliveries []string
@@ -968,18 +935,19 @@ func newRouteSetEventStore() *routeSetEventStore {
 	}
 }
 
-func (s *descriptorAwareEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return prepareTestCommitPublish(ctx, plan, &testCommitPublishTransaction{finalize: func(_ context.Context, req runtimebus.CommitPublishRequest) error {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		s.deliveries = s.deliveries[:0]
-		for _, route := range req.DeliveryRoutes {
-			if route.Recipient.IsAgent() {
-				s.deliveries = append(s.deliveries, route.Recipient.ID())
-			}
+func (s *descriptorAwareEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deliveries = s.deliveries[:0]
+	for _, route := range command.Commit.DeliveryRoutes {
+		if route.Recipient.IsAgent() {
+			s.deliveries = append(s.deliveries, route.Recipient.ID())
 		}
-		return nil
-	}})
+	}
+	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
 }
 
 func (s *descriptorAwareEventStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -999,16 +967,17 @@ func (s *descriptorAwareEventStore) persistedDeliveries() []string {
 	return append([]string(nil), s.deliveries...)
 }
 
-func (s *routeSetEventStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return prepareTestCommitPublish(ctx, plan, &testCommitPublishTransaction{finalize: func(_ context.Context, req runtimebus.CommitPublishRequest) error {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if s.routes == nil {
-			s.routes = map[string][]events.DeliveryRoute{}
-		}
-		s.routes[req.Event.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
-		return nil
-	}})
+func (s *routeSetEventStore) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	if err := command.Validate(); err != nil {
+		return runtimebus.CommittedPublication{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.routes == nil {
+		s.routes = map[string][]events.DeliveryRoute{}
+	}
+	s.routes[command.Commit.Event.ID()] = events.NormalizeDeliveryRoutes(command.Commit.DeliveryRoutes)
+	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
 }
 
 func (s *routeSetEventStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {
@@ -1017,21 +986,11 @@ func (s *routeSetEventStore) ListEventDeliveryRoutes(_ context.Context, eventID 
 	return append([]events.DeliveryRoute(nil), s.routes[eventID]...), nil
 }
 
-func (s *replayCapableAtomicStoreMissingScope) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return prepareTestCommitPublish(ctx, plan, &testCommitPublishTransaction{finalize: func(_ context.Context, req runtimebus.CommitPublishRequest) error {
-		if req.ReplayScope != "" {
-			return runtimepipelineobligation.ErrMissingScope
-		}
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		s.deliveries = s.deliveries[:0]
-		for _, route := range req.DeliveryRoutes {
-			if route.Recipient.IsAgent() {
-				s.deliveries = append(s.deliveries, route.Recipient.ID())
-			}
-		}
-		return nil
-	}})
+func (s *replayCapableAtomicStoreMissingScope) CommitPublication(_ context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	if command.Commit.ReplayScope != "" {
+		return runtimebus.CommittedPublication{}, runtimepipelineobligation.ErrMissingScope
+	}
+	return runtimebus.CommittedPublication{AppendOutcome: runtimebus.EventAppendInserted}, nil
 }
 
 func (s *replayCapableAtomicStoreMissingScope) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
@@ -2014,7 +1973,7 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 			name: "sqlite",
 			open: func(t *testing.T) (runtimebus.EventStore, runtimebus.EventStore, *sql.DB, string) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected, selected, selected.DB, "?"
+				return selected, selected, storetest.DatabaseForTest(selected), "?"
 			},
 		},
 		{
@@ -2290,7 +2249,7 @@ func seedReplayPoolEvent(t *testing.T, selected *store.PostgresStore, runID stri
 			t.Fatal(err)
 		}
 		anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-			FlowInstance: "launch/replay-pool", FlowID: "launch", EntityID: entityID,
+			Route: runtimeflowidentity.RouteForInstancePath("launch/replay-pool"), FlowID: "launch", EntityID: entityID,
 			Stage: "awaiting_review", StageActivationID: uuid.NewString(),
 			Source: eventtest.ConcreteTemplateRoutingSource("launch", "launch/replay-pool", entityID),
 		})
@@ -2441,15 +2400,15 @@ func TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability(t *tes
 	}
 	assertSelectedForkDispatchNotReached(t, deliveries, providerReached)
 
-	outcome, err := pg.CommitSelectedForkEvent(ctx, runtimebus.CommitSelectedForkEventRequest{
+	committed, err := pg.CommitSelectedForkEvent(ctx, runtimebus.CommitSelectedForkEventRequest{
 		Commit: prepared.CommitRequest(),
 		Lineage: runfork.RunForkSelectedContractExecutionLineage{
 			ForkRunID: forkRunID, SourceRunID: sourceRunID, SourceEventID: sourceEventID,
 			ForkEventID: event.ID(), EventName: string(event.Type()), SelectionAuthority: lineage.AuthorityStamp(), CreatedAt: event.CreatedAt(),
 		},
 	})
-	if err == nil || outcome != runtimebus.EventAppendOutcomeUnknown {
-		t.Fatalf("commit outcome=%v err=%v, want missing-source rollback", outcome, err)
+	if err == nil || committed.AppendOutcome != runtimebus.EventAppendOutcomeUnknown {
+		t.Fatalf("commit outcome=%v err=%v, want missing-source rollback", committed.AppendOutcome, err)
 	}
 	eb.AbandonPreparedPublish(ctx, prepared)
 	assertSelectedForkDispatchNotReached(t, deliveries, providerReached)
@@ -2516,7 +2475,7 @@ func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	ctx := context.Background()
+	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 	eventID := uuid.NewString()
 	targetEntityID := uuid.NewString()
 	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(
@@ -2552,14 +2511,14 @@ func TestEventBusPublishTransactional_RecordsTargetFailureDeadLetter(t *testing.
 	}
 }
 
-func TestEventBusPublishInMutationSQLiteRecordsTargetFailureDeadLetter(t *testing.T) {
+func TestEventBusPublishSQLiteRecordsTargetFailureDeadLetter(t *testing.T) {
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	eb, err := newScopedTestEventBus(sqliteStore, runtimebus.EventBusOptions{})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	eb.RegisterRuntimeActiveAgentDescriptor(testActiveAgentDescriptor(t, "live-other", uuid.NewString(), "other-flow"))
-	ctx := context.Background()
+	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 	descriptors, err := eb.PinRoutingDescriptors(ctx)
 	if err != nil {
 		t.Fatalf("PinRoutingDescriptors: %v", err)
@@ -2604,7 +2563,7 @@ func TestEventBusPublishInMutationSQLiteRecordsTargetFailureDeadLetter(t *testin
 	}
 
 	var reason, targetContext string
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT COALESCE(json_extract(failure, '$.detail.code'), ''), COALESCE(json_extract(failure, '$.detail.attributes.target'), '')
 		FROM dead_letters
 		WHERE original_event_id = ?
@@ -2620,7 +2579,7 @@ func TestEventBusPublishInMutationSQLiteRecordsTargetFailureDeadLetter(t *testin
 		t.Fatalf("target context = %s, want missing-flow", targetContext)
 	}
 	var pipelineReceipts int
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM event_receipts
 		WHERE event_id = ?
@@ -3193,9 +3152,9 @@ func newEventBusWorkflowCoordinator(
 	selected *store.PostgresStore,
 	module runtimepipeline.WorkflowModule,
 ) *runtimepipeline.PipelineCoordinator {
-	return runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, db, runtimepipeline.PipelineCoordinatorOptions{
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:                  module,
-		Persistence:             runtimepipeline.NewPostgresWorkflowPersistence(db, selected),
+		Persistence:             runtimepipeline.NewWorkflowPersistence(selected),
 		RunLifecycle:            selected,
 		PipelineObligations:     selected.PipelineObligations(),
 		DeliveryStore:           selected,
@@ -3204,8 +3163,6 @@ func newEventBusWorkflowCoordinator(
 		HumanTasks:              selected,
 		DecisionCardDraftExpiry: selected,
 		HumanTaskExpiry:         selected,
-		GatePublisher:           eventBus,
-		DirectDecisionPublisher: eventBus,
 		DeliveryRuntime:         eventBus,
 		FlowRoutes:              eventBus,
 		ReceiverExecution:       eventreceiver.NormalExecution(),
@@ -3251,13 +3208,15 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	ctx := eventBusTestRunContext(t, db)
 	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
-			InstanceID:      rootEntityID,
-			StorageRef:      rootEntityID,
+			InstanceID:      eventBusTestRunID,
+			StorageRef:      eventBusTestRunID,
 			WorkflowName:    bundle.WorkflowName(),
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "idle",
 			Metadata: map[string]any{
-				"entity_id": rootEntityID,
+				"entity_id":   rootEntityID,
+				"flow_path":   eventBusTestRunID,
+				"instance_id": eventBusTestRunID,
 			},
 		},
 		{
@@ -3267,6 +3226,9 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "delegated",
 			Metadata: map[string]any{
+				"entity_id":        childEntityID,
+				"flow_path":        "child",
+				"instance_id":      "child",
 				"parent_entity_id": rootEntityID,
 			},
 		},
@@ -3276,6 +3238,11 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 			WorkflowName:    "grandchild",
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "finished",
+			Metadata: map[string]any{
+				"entity_id":   grandchildEntityID,
+				"flow_path":   "child/grandchild",
+				"instance_id": "grandchild",
+			},
 		},
 	}) {
 		if _, err := workflowStore.MaterializeInitialEntry(ctx, instance, instance.CreatedAt); err != nil {
@@ -3302,7 +3269,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		t.Fatalf("WaitForQuiescence: %v", err)
 	}
 
-	child, found, err := workflowStore.Load(ctx, childEntityID)
+	child, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath("child"))
 	if err != nil {
 		t.Fatalf("load child instance: %v", err)
 	}
@@ -3313,7 +3280,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		t.Fatalf("child current_state = %q, want completed", got)
 	}
 
-	root, found, err := workflowStore.Load(ctx, rootEntityID)
+	root, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(eventBusTestRunID))
 	if err != nil {
 		t.Fatalf("load root instance: %v", err)
 	}
@@ -3396,11 +3363,16 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 	workflowStore := pc
 	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
-			InstanceID:      rootEntityID,
-			StorageRef:      rootEntityID,
+			InstanceID:      eventBusTestRunID,
+			StorageRef:      eventBusTestRunID,
 			WorkflowName:    "mixed-route",
 			WorkflowVersion: "v-test",
 			CurrentState:    "active",
+			Metadata: map[string]any{
+				"entity_id":   rootEntityID,
+				"flow_path":   eventBusTestRunID,
+				"instance_id": eventBusTestRunID,
+			},
 		},
 		{
 			InstanceID:      childEntityID,
@@ -3408,6 +3380,11 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 			WorkflowName:    "child",
 			WorkflowVersion: "v-test",
 			CurrentState:    "active",
+			Metadata: map[string]any{
+				"entity_id":   childEntityID,
+				"flow_path":   "child",
+				"instance_id": "child",
+			},
 		},
 	}) {
 		if _, err := workflowStore.MaterializeInitialEntry(ctx, instance, instance.CreatedAt); err != nil {
@@ -3425,7 +3402,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 		[]byte(`{"entity_id":"`+rootEntityID+`"}`),
 		0,
 		eventBusTestRunID,
-		events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID), eventBusTestRunID),
 		time.Now().UTC(),
 	)
 	plan, err := eb.CheckPublishRecipientPlan(ctx, evt)
@@ -3649,11 +3626,16 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	workflowStore := pc
 	for _, instance := range exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{
 		{
-			InstanceID:      rootEntityID,
-			StorageRef:      rootEntityID,
+			InstanceID:      eventBusTestRunID,
+			StorageRef:      eventBusTestRunID,
 			WorkflowName:    bundle.WorkflowName(),
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "idle",
+			Metadata: map[string]any{
+				"entity_id":   rootEntityID,
+				"flow_path":   eventBusTestRunID,
+				"instance_id": eventBusTestRunID,
+			},
 		},
 		{
 			InstanceID:      runtimeflowidentity.EntityID("child"),
@@ -3662,6 +3644,9 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "waiting",
 			Metadata: map[string]any{
+				"entity_id":        runtimeflowidentity.EntityID("child"),
+				"flow_path":        "child",
+				"instance_id":      "child",
 				"parent_entity_id": rootEntityID,
 			},
 		},
@@ -3671,6 +3656,11 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 			WorkflowName:    "grandchild",
 			WorkflowVersion: bundle.WorkflowVersion(),
 			CurrentState:    "ready",
+			Metadata: map[string]any{
+				"entity_id":   runtimeflowidentity.EntityID("child/grandchild"),
+				"flow_path":   "child/grandchild",
+				"instance_id": "grandchild",
+			},
 		},
 	}) {
 		if _, err := workflowStore.MaterializeInitialEntry(ctx, instance, instance.CreatedAt); err != nil {
@@ -3686,7 +3676,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		[]byte(`{"entity_id":"`+rootEntityID+`"}`),
 		0,
 		eventBusTestRunID,
-		events.EnvelopeForEntityID(events.EnvelopeForFlowInstance(events.EventEnvelope{}, rootEntityID), rootEntityID),
+		events.EnvelopeForEntityID(events.EnvelopeForFlowInstance(events.EventEnvelope{}, eventBusTestRunID), rootEntityID),
 		rootSource,
 		time.Now().UTC(),
 	)
@@ -3733,7 +3723,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("grandchild connect preflight failure=%q routes=%#v", grandchildConnectPlan.TargetFailure, grandchildConnectPlan.DeliveryRoutes)
 	}
 	grandchildTarget := grandchildConnectPlan.DeliveryRoutes[0].Target.Normalized()
-	storedGrandchild, found, err := workflowStore.Load(ctx, grandchildTarget.EntityID)
+	storedGrandchild, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(grandchildTarget.FlowInstance))
 	if err != nil {
 		t.Fatalf("load grandchild connect target: %v", err)
 	}
@@ -3789,7 +3779,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		[]byte(`{"entity_id":"`+rootEntityID+`"}`),
 		0,
 		eventBusTestRunID,
-		events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID), eventBusTestRunID),
 		time.Now().UTC(),
 	)); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -3807,13 +3797,18 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("load child/micro.start event id: %v", err)
 	}
 	assertNodeDeliveryStatus(t, db, microStartEventID, "grandchild-worker", "delivered")
+	var microDoneEventID string
+	if err := db.QueryRowContext(ctx, `SELECT event_id::text FROM events WHERE event_name = 'child/grandchild/micro.done' ORDER BY created_at DESC LIMIT 1`).Scan(&microDoneEventID); err != nil {
+		t.Fatalf("load child/grandchild/micro.done event id: %v", err)
+	}
+	assertNodeDeliveryStatus(t, db, microDoneEventID, "child-relay", "delivered")
 	var microRelayedEventID string
 	if err := db.QueryRowContext(ctx, `SELECT event_id::text FROM events WHERE event_name = 'child/micro.relayed' ORDER BY created_at DESC LIMIT 1`).Scan(&microRelayedEventID); err != nil {
 		t.Fatalf("load child/micro.relayed event id: %v", err)
 	}
 	assertNodeDeliveryStatus(t, db, microRelayedEventID, "root-collector", "delivered")
 
-	root, found, err := workflowStore.Load(ctx, rootEntityID)
+	root, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(eventBusTestRunID))
 	if err != nil {
 		t.Fatalf("load root instance: %v", err)
 	}
@@ -3835,11 +3830,11 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 		t.Fatalf("root current_state = %q, want done through declared ancestor connects; events=%v", got, dump)
 	}
 
-	childInstance, childFound, err := workflowStore.Load(ctx, runtimeflowidentity.EntityID("child"))
+	childInstance, childFound, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath("child"))
 	if err != nil || !childFound {
 		t.Fatalf("load child workflow instance: found=%t err=%v", childFound, err)
 	}
-	grandchildInstance, grandchildFound, err := workflowStore.Load(ctx, runtimeflowidentity.EntityID("child/grandchild"))
+	grandchildInstance, grandchildFound, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath("child/grandchild"))
 	if err != nil || !grandchildFound {
 		t.Fatalf("load grandchild workflow instance: found=%t err=%v", grandchildFound, err)
 	}
@@ -3911,13 +3906,15 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 	ctx := eventBusTestRunContext(t, db)
 	workflowStore := pc
 	rootFixture := exactEventBusWorkflowFixtures([]runtimepipeline.WorkflowInstance{{
-		InstanceID:      rootEntityID,
-		StorageRef:      rootEntityID,
+		InstanceID:      eventBusTestRunID,
+		StorageRef:      eventBusTestRunID,
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "pending",
 		Metadata: map[string]any{
-			"entity_id": rootEntityID,
+			"entity_id":   rootEntityID,
+			"flow_path":   eventBusTestRunID,
+			"instance_id": eventBusTestRunID,
 		},
 	}})[0]
 	if _, err := workflowStore.MaterializeInitialEntry(ctx, rootFixture, rootFixture.CreatedAt); err != nil {
@@ -3932,7 +3929,7 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 		[]byte(`{"entity_id":"`+rootEntityID+`"}`),
 		0,
 		eventBusTestRunID,
-		events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID), eventBusTestRunID),
 		time.Now().UTC(),
 	))
 	if err != nil {
@@ -3957,7 +3954,7 @@ func TestEventBusPublish_GatedChildFlowCompletionWithoutSubjectLinkFailsClosed(t
 		t.Fatalf("dead-lettered exact deliveries = %d, want 1", deadLettered)
 	}
 
-	root, found, err := workflowStore.Load(ctx, rootEntityID)
+	root, found, err := workflowStore.Load(ctx, runtimeflowidentity.RouteForInstancePath(eventBusTestRunID))
 	if err != nil {
 		t.Fatalf("load root instance: %v", err)
 	}

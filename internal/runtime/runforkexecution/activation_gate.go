@@ -258,6 +258,10 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		}
 		result.ContractSwapBootResumeExecution = &contractSwapExecution
 		sourceEventIDs := contractSwapBootResumeSourceEvents(contractSwapExecution)
+		workflowStates, err := selectedContractWorkflowStateProjection(plan, loadedSource.Source, *model.RecipientPlanning)
+		if err != nil {
+			return result, err
+		}
 		container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
 			Owner:                 req.ExecutionOwner,
 			Admission:             admission,
@@ -267,6 +271,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			ForkRunID:             forkRunID,
 			ForkEventID:           plan.ForkPoint.EventID,
 			SourceEvents:          sourceEventIDs,
+			WorkflowStates:        workflowStates,
 			ExecutionOwner:        runfork.RunForkHistoricalReplayContractSwapBootResumeOwner,
 			DeferredWorkAdmission: deferredWorkAdmission,
 		})

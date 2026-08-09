@@ -2,11 +2,12 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -22,6 +23,7 @@ import (
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/google/uuid"
 )
 
 type pipelineEngineEvaluator struct {
@@ -80,28 +82,205 @@ func (e pipelineEngineEvaluator) EvalValue(string, runtimeengine.BaseContext) (a
 	return nil, runtimeengine.ErrNotImplemented
 }
 
-type pipelineEngineTx struct {
-	ctx context.Context
+type pipelineEngineMutationOwner struct {
+	store       *workflowInstanceStore
+	state       pipelineEngineStateRepo
+	publication EnginePublicationPlanner
+	verifier    runtimeengine.EmitPersistenceVerifier
+	lifecycle   runtimeengine.WorkflowLifecycleEffectOwner
+	activities  runtimeengine.ActivityIntentWriter
 }
 
-func (t pipelineEngineTx) Context() context.Context { return t.ctx }
-
-type pipelineEngineTxRunner struct {
-	store workflowMutationStore
-}
-
-type workflowMutationStore interface {
-	enabled() bool
-	runPipelineMutation(context.Context, func(context.Context) error) error
-}
-
-func (r pipelineEngineTxRunner) Run(ctx context.Context, fn func(runtimeengine.Tx) error) error {
-	if r.store == nil || !r.store.enabled() {
-		return fn(pipelineEngineTx{ctx: ctx})
+func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, mutation runtimeengine.EngineMutation) (runtimeengine.CommittedEngineMutation, error) {
+	if o.store != nil && o.store.enabled() {
+		if o.store.engineMutations == nil {
+			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("selected workflow engine mutation owner is required")
+		}
+		preparedState, err := o.state.prepareMutation(ctx, mutation.Address, mutation.State)
+		if err != nil {
+			return runtimeengine.CommittedEngineMutation{}, err
+		}
+		lifecycle, err := o.state.coordinator.prepareWorkflowLifecycleMutation(
+			ctx,
+			&preparedState.instance,
+			mutation.LifecycleEffects,
+			len(mutation.LifecycleEffects) > 0,
+		)
+		if err != nil {
+			return runtimeengine.CommittedEngineMutation{}, err
+		}
+		state, err := preparedState.record()
+		if err != nil {
+			return runtimeengine.CommittedEngineMutation{}, err
+		}
+		var publications []runtimeengine.DurablePublicationPlan
+		emissionIntents := append([]runtimeengine.EmitIntent(nil), mutation.EmitIntents...)
+		emissionIntents = append(emissionIntents, lifecycle.Emissions...)
+		if len(emissionIntents) > 0 && len(mutation.EmitPrerequisites.Fields) > 0 {
+			if err := verifyPreparedWorkflowEmitPersistence(preparedState.instance, mutation.EmitPrerequisites); err != nil {
+				return runtimeengine.CommittedEngineMutation{}, err
+			}
+		}
+		proposedEffects := make([]WorkflowEngineProposedEffect, 0, len(mutation.ActivityIntents))
+		immediateActivities := make([]runtimeengine.ActivityIntent, 0, len(mutation.ActivityIntents))
+		for _, value := range mutation.ActivityIntents {
+			intent := value.Normalized()
+			if intent.ApprovalDecision == "" {
+				immediateActivities = append(immediateActivities, intent)
+				continue
+			}
+			if o.state.coordinator == nil {
+				return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("approved activity requires pipeline coordinator")
+			}
+			card, continuation, err := o.state.coordinator.buildProposedEffectCard(ctx, intent)
+			if err != nil {
+				return runtimeengine.CommittedEngineMutation{}, err
+			}
+			proposedEffects = append(proposedEffects, WorkflowEngineProposedEffect{Card: card, Continuation: continuation})
+		}
+		activityPublications, err := activityRequestEmitIntents(immediateActivities)
+		if err != nil {
+			return runtimeengine.CommittedEngineMutation{}, err
+		}
+		emissionIntents = append(emissionIntents, activityPublications...)
+		if len(emissionIntents) > 0 {
+			if o.publication == nil {
+				return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("engine publication planner is required")
+			}
+			publications, err = o.publication.PrepareEnginePublications(ctx, emissionIntents)
+			if err != nil {
+				return runtimeengine.CommittedEngineMutation{}, err
+			}
+		}
+		postCommit := WorkflowEnginePostCommitPlan{FlowDeactivation: &WorkflowEngineFlowDeactivation{
+			Route: mutation.Address.Route, EntityID: mutation.Address.EntityID.String(), NextState: state.CurrentState,
+		}}
+		committed, err := o.store.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
+			State: state, Lifecycle: lifecycle.Commit,
+			ProposedEffects: proposedEffects, Publications: publications, PostCommit: postCommit,
+		})
+		if err != nil {
+			if o.publication != nil {
+				err = errors.Join(err, o.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
+			}
+			return runtimeengine.CommittedEngineMutation{}, err
+		}
+		if o.publication != nil {
+			if err := o.publication.FinalizeEnginePublications(ctx, committed.Publications); err != nil {
+				return runtimeengine.CommittedEngineMutation{}, err
+			}
+		}
+		if err := o.state.coordinator.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle); err != nil {
+			return runtimeengine.CommittedEngineMutation{}, err
+		}
+		if deactivation := committed.PostCommit.FlowDeactivation; deactivation != nil {
+			if err := o.state.coordinator.maybeDeactivateTerminalFlowInstance(ctx, deactivation.Route, deactivation.EntityID, deactivation.NextState); err != nil {
+				return runtimeengine.CommittedEngineMutation{}, err
+			}
+		}
+		if len(committed.Publications) < len(mutation.EmitIntents) {
+			return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("committed engine publications = %d, want at least %d emitted events", len(committed.Publications), len(mutation.EmitIntents))
+		}
+		committedIntents := make([]runtimeengine.EmitIntent, 0, len(mutation.EmitIntents))
+		for index, publication := range committed.Publications[:len(mutation.EmitIntents)] {
+			if publication == nil {
+				return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("committed engine publication %d is required", index)
+			}
+			intent := publication.CommittedDurablePublicationIntent()
+			if strings.TrimSpace(intent.Event.ID()) != strings.TrimSpace(publication.CommittedDurablePublicationEventID()) {
+				return runtimeengine.CommittedEngineMutation{}, fmt.Errorf("committed engine publication %d intent identity is inconsistent", index)
+			}
+			committedIntents = append(committedIntents, intent)
+		}
+		return runtimeengine.CommittedEngineMutation{
+			ActivityIntents: append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...),
+			EmitIntents:     committedIntents,
+		}, nil
 	}
-	return r.store.runPipelineMutation(ctx, func(txctx context.Context) error {
-		return fn(pipelineEngineTx{ctx: txctx})
-	})
+	commit := func(txctx context.Context) error {
+		if o.state.coordinator == nil {
+			return runtimeengine.ErrMissingStateRepo
+		}
+		if err := o.state.SaveState(txctx, mutation.Address, mutation.State); err != nil {
+			return err
+		}
+		if len(mutation.LifecycleEffects) > 0 {
+			if o.lifecycle == nil {
+				return fmt.Errorf("workflow lifecycle owner is required for engine mutation")
+			}
+			if err := o.lifecycle.ApplyWorkflowLifecycleEffects(txctx, mutation.LifecycleEffects); err != nil {
+				return err
+			}
+		}
+		if len(mutation.ActivityIntents) > 0 {
+			if o.activities == nil {
+				return fmt.Errorf("activity intent owner is required for engine mutation")
+			}
+			if err := o.activities.WriteActivityIntents(txctx, mutation.ActivityIntents); err != nil {
+				return err
+			}
+		}
+		if len(mutation.EmitIntents) > 0 && o.verifier != nil && len(mutation.EmitPrerequisites.Fields) > 0 {
+			if err := o.verifier.VerifyEmitPersistence(txctx, mutation.Address, mutation.EmitPrerequisites); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := commit(ctx); err != nil {
+		return runtimeengine.CommittedEngineMutation{}, err
+	}
+	return runtimeengine.CommittedEngineMutation{
+		ActivityIntents: append([]runtimeengine.ActivityIntent(nil), mutation.ActivityIntents...),
+		EmitIntents:     append([]runtimeengine.EmitIntent(nil), mutation.EmitIntents...),
+	}, nil
+}
+
+func verifyPreparedWorkflowEmitPersistence(instance WorkflowInstance, prerequisites runtimeengine.EmitPersistencePrerequisites) error {
+	missingExpected := make([]string, 0, len(prerequisites.Fields))
+	missingPrepared := make([]string, 0, len(prerequisites.Fields))
+	mismatched := make([]string, 0, len(prerequisites.Fields))
+	metadata := workflowInstancePersistedProjectionMetadata(instance)
+	for _, prerequisite := range prerequisites.Fields {
+		field := strings.TrimSpace(prerequisite.Field)
+		if field == "" {
+			continue
+		}
+		if !prerequisite.HasExpected {
+			missingExpected = append(missingExpected, field)
+			continue
+		}
+		actual, ok := workflowMetadataValue(metadata, field)
+		if !ok {
+			missingPrepared = append(missingPrepared, field)
+			continue
+		}
+		if !workflowJSONValuesEqual(prerequisite.Expected, actual) {
+			mismatched = append(mismatched, field)
+		}
+	}
+	if len(missingExpected)+len(missingPrepared)+len(mismatched) == 0 {
+		return nil
+	}
+	details := make([]string, 0, 3)
+	if len(missingExpected) > 0 {
+		details = append(details, "missing handler writes="+strings.Join(missingExpected, ","))
+	}
+	if len(missingPrepared) > 0 {
+		details = append(details, "missing prepared fields="+strings.Join(missingPrepared, ","))
+	}
+	if len(mismatched) > 0 {
+		details = append(details, "mismatched prepared fields="+strings.Join(mismatched, ","))
+	}
+	return fmt.Errorf("%w: %s", runtimeengine.ErrEmitPersistencePrerequisite, strings.Join(details, "; "))
+}
+
+func workflowInstancePersistedProjectionMetadata(instance WorkflowInstance) map[string]any {
+	projection, err := workflowInstancePersistedProjectionFromInstance(instance, instance.StorageRef)
+	if err != nil {
+		return cloneStringAnyMap(instance.Metadata)
+	}
+	return projection.Metadata()
 }
 
 type pipelineEngineLocker struct {
@@ -121,17 +300,155 @@ type pipelineEngineStateRepo struct {
 	coordinator *PipelineCoordinator
 }
 
-func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identity.EntityID) (runtimeengine.StateSnapshot, bool, error) {
+func cloneWorkflowInstanceForEngineMutation(instance WorkflowInstance) WorkflowInstance {
+	instance.Config = cloneStringAnyMap(instance.Config)
+	instance.Metadata = cloneStringAnyMap(instance.Metadata)
+	instance.StateBuckets = cloneStringAnyMap(instance.StateBuckets)
+	instance.InitialFieldValues = cloneStringAnyMap(instance.InitialFieldValues)
+	instance.TransitionHistory = append([]WorkflowTransitionRecord(nil), instance.TransitionHistory...)
+	if instance.RuntimeReadiness != nil {
+		readiness := *instance.RuntimeReadiness
+		readiness.Agents = append([]DynamicFlowRuntimeAgentExpectation(nil), readiness.Agents...)
+		if readiness.CreationEvent != nil {
+			creation := *readiness.CreationEvent
+			creation.Payload = append([]byte(nil), creation.Payload...)
+			readiness.CreationEvent = &creation
+		}
+		instance.RuntimeReadiness = &readiness
+	}
+	return instance
+}
+
+type preparedWorkflowEngineState struct {
+	runID            string
+	route            runtimeflowidentity.Route
+	instance         WorkflowInstance
+	expectedState    string
+	expectedRevision int64
+	create           bool
+	updatedAt        time.Time
+}
+
+func (p preparedWorkflowEngineState) record() (WorkflowEngineStateRecord, error) {
+	return workflowEngineStateRecord(p.runID, p.route, p.instance, p.expectedState, p.expectedRevision, p.create, p.updatedAt)
+}
+
+func (r pipelineEngineStateRepo) prepareMutation(
+	ctx context.Context,
+	address runtimeengine.StateAddress,
+	mutation runtimeengine.StateMutation,
+) (preparedWorkflowEngineState, error) {
+	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.enabled() {
+		return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation requires selected workflow persistence")
+	}
+	entityID := identity.NormalizeEntityID(address.EntityID.String())
+	if entityID.IsZero() || !address.Route.Valid() {
+		return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation requires exact entity and instance route")
+	}
+	if err := r.ensureFlowOwnsEntity(ctx, address); err != nil {
+		return preparedWorkflowEngineState{}, err
+	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return preparedWorkflowEngineState{}, err
+	}
+	current, found, err := r.coordinator.workflowStore.Load(ctx, address.Route)
+	if err != nil {
+		return preparedWorkflowEngineState{}, err
+	}
+	create := !found
+	expectedState := ""
+	expectedRevision := int64(0)
+	flowID := strings.TrimSpace(address.FlowID.String())
+	if create {
+		if mutation.TriggeredAt.IsZero() {
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow initial materialization requires exact accepted event time")
+		}
+		initialMetadata := cloneStringAnyMap(mutation.StateCarrier.PersistedMetadata())
+		if initialMetadata == nil {
+			initialMetadata = map[string]any{}
+		}
+		for key, exact := range map[string]string{
+			"flow_path": address.Route.InstancePath, "instance_id": address.Route.InstanceID, "entity_id": entityID.String(),
+		} {
+			if existing := strings.TrimSpace(asString(initialMetadata[key])); existing != "" && existing != exact {
+				return preparedWorkflowEngineState{}, fmt.Errorf("engine state %s %q disagrees with exact value %q", key, existing, exact)
+			}
+			initialMetadata[key] = exact
+		}
+		source := r.coordinator.SemanticSource()
+		workflowName := flowID
+		workflowVersion := ""
+		if source != nil {
+			workflowName = firstNonEmptyString(workflowName, source.WorkflowName())
+			workflowVersion = source.WorkflowVersion()
+		}
+		initialState := strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
+		current = WorkflowInstance{
+			InstanceID: address.Route.InstanceID, StorageRef: address.Route.InstancePath,
+			WorkflowName: workflowName, WorkflowVersion: workflowVersion, Status: "active", CurrentState: initialState,
+			Metadata:     workflowMaterializeEntityMetadata(source, flowID, initialMetadata),
+			StateBuckets: mutation.StateCarrier.PersistedStateBuckets(), InitialFieldValues: cloneStringAnyMap(mutation.InitialFieldValues),
+			EnteredStageAt: mutation.TriggeredAt.UTC(), CreatedAt: mutation.TriggeredAt.UTC(), UpdatedAt: mutation.TriggeredAt.UTC(),
+		}
+	} else {
+		current = cloneWorkflowInstanceForEngineMutation(current)
+		expectedState = strings.TrimSpace(current.CurrentState)
+		expectedRevision = current.Revision
+		if expectedRevision <= 0 {
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation requires persisted revision")
+		}
+	}
+
+	fromState := strings.TrimSpace(current.CurrentState)
+	if err := applyEngineStateMutation(&current, mutation, workflowEntitySchemaFields(r.coordinator.SemanticSource(), flowID), r.coordinator.SemanticSource(), flowID); err != nil {
+		return preparedWorkflowEngineState{}, err
+	}
+	nextState := strings.TrimSpace(mutation.NextState)
+	if nextState != "" && nextState != fromState {
+		if strings.TrimSpace(mutation.TriggerEventID) == "" || strings.TrimSpace(mutation.TriggerEventType) == "" || mutation.TriggeredAt.IsZero() {
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow state transition requires exact trigger event identity")
+		}
+		current.CurrentState = nextState
+		current.EnteredStageAt = mutation.TriggeredAt.UTC()
+		current.TransitionHistory = append(current.TransitionHistory, workflowTransitionRecord(
+			r.coordinator.WorkflowDefinition(), fromState, nextState,
+			mutation.TriggerEventID, mutation.TriggerEventType, mutation.TriggeredAt,
+		))
+	}
+	if current.CreatedAt.IsZero() {
+		return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation requires persisted creation time")
+	}
+	updatedAt := mutation.TriggeredAt.UTC()
+	if !create {
+		// The trigger is a causal fact and may legitimately predate materialization
+		// during replay. The row revision time records this commit instead.
+		updatedAt = time.Now().UTC()
+		if updatedAt.Before(current.CreatedAt) {
+			updatedAt = current.CreatedAt
+		}
+	}
+	return preparedWorkflowEngineState{
+		runID: runID, route: address.Route, instance: current,
+		expectedState: expectedState, expectedRevision: expectedRevision,
+		create: create, updatedAt: updatedAt,
+	}, nil
+}
+
+func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimeengine.StateAddress) (runtimeengine.StateSnapshot, bool, error) {
 	if r.coordinator == nil {
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
-	entityID = identity.NormalizeEntityID(entityID.String())
+	entityID := identity.NormalizeEntityID(address.EntityID.String())
 	if entityID.IsZero() {
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
-	flowID := strings.TrimSpace(pipelineFlowScope(ctx))
+	flowID := strings.TrimSpace(address.FlowID.String())
 	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.enabled() {
-		instance, ok, err := r.coordinator.workflowStore.Load(ctx, entityID.String())
+		if !address.Route.Valid() {
+			return runtimeengine.StateSnapshot{}, false, fmt.Errorf("engine state lookup requires an exact workflow instance route")
+		}
+		instance, ok, err := r.coordinator.workflowStore.Load(ctx, address.Route)
 		if err != nil {
 			return runtimeengine.StateSnapshot{}, false, err
 		}
@@ -150,14 +467,17 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 			}
 			out.StateCarrier.Gates = workflowStateGatesForScope(
 				r.coordinator.SemanticSource(),
-				pipelineFlowScope(ctx),
+				flowID,
 				out.StateCarrier.PersistedMetadata(),
 			)
 			return out, true, nil
 		}
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
-	state := r.coordinator.currentWorkflowState(ctx, entityID.String())
+	state, err := r.coordinator.currentWorkflowState(ctx, address.Route, entityID.String())
+	if err != nil {
+		return runtimeengine.StateSnapshot{}, false, err
+	}
 	if strings.TrimSpace(string(state.Stage)) == "" && len(state.Metadata) == 0 {
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
@@ -172,104 +492,22 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 	}, true, nil
 }
 
-func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identity.EntityID, mutation runtimeengine.StateMutation) error {
-	if r.coordinator == nil {
-		return nil
-	}
-	entityID = identity.NormalizeEntityID(entityID.String())
-	if entityID.IsZero() {
-		return nil
-	}
-	currentState := ""
-	nextState := strings.TrimSpace(mutation.NextState)
-	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.enabled() {
-		if err := r.ensureFlowOwnsEntity(ctx, entityID.String()); err != nil {
-			return err
-		}
-		_, hadState, err := r.coordinator.workflowStore.Load(ctx, entityID.String())
-		if err != nil {
-			return err
-		}
-		if !hadState {
-			if mutation.TriggeredAt.IsZero() {
-				return fmt.Errorf("workflow initial materialization requires exact accepted event time")
-			}
-			source := r.coordinator.SemanticSource()
-			flowID := strings.TrimSpace(pipelineFlowScope(ctx))
-			workflowName := flowID
-			workflowVersion := ""
-			if source != nil {
-				workflowName = firstNonEmptyString(workflowName, source.WorkflowName())
-				workflowVersion = source.WorkflowVersion()
-			}
-			initialState := strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
-			materialization, err := r.coordinator.workflowStore.MaterializeInitialEntry(ctx, WorkflowInstance{
-				InstanceID:      entityID.String(),
-				WorkflowName:    workflowName,
-				WorkflowVersion: workflowVersion,
-				CurrentState:    initialState,
-				Metadata:        workflowMaterializeEntityMetadata(source, flowID, mutation.StateCarrier.PersistedMetadata()),
-				StateBuckets:    mutation.StateCarrier.PersistedStateBuckets(),
-			}, mutation.TriggeredAt)
-			if err != nil {
-				return err
-			}
-			if materialization != WorkflowInitialMaterializationCreated && materialization != WorkflowInitialMaterializationAlreadyExists {
-				return fmt.Errorf("workflow initial materialization returned unknown result %d", materialization)
-			}
-			if err := r.coordinator.workflowStore.ArmInitialEntryTimers(ctx, entityID.String()); err != nil {
-				return err
-			}
-		}
-		allowedFields := workflowEntitySchemaFields(r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
-		if err := r.coordinator.workflowStore.mutateE(ctx, entityID.String(), func(instance *WorkflowInstance) error {
-			currentState = strings.TrimSpace(instance.CurrentState)
-			if err := applyEngineStateMutation(instance, mutation, allowedFields, r.coordinator.SemanticSource(), pipelineFlowScope(ctx)); err != nil {
-				return err
-			}
-			if nextState == "" || nextState == currentState {
-				return nil
-			}
-			if strings.TrimSpace(mutation.TriggerEventID) == "" || strings.TrimSpace(mutation.TriggerEventType) == "" || mutation.TriggeredAt.IsZero() {
-				return fmt.Errorf("workflow state transition requires exact trigger event identity")
-			}
-			instance.CurrentState = nextState
-			instance.EnteredStageAt = mutation.TriggeredAt.UTC()
-			instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(
-				r.coordinator.WorkflowDefinition(), currentState, nextState,
-				mutation.TriggerEventID, mutation.TriggerEventType, mutation.TriggeredAt,
-			))
-			return nil
-		}); err != nil {
-			return err
-		}
-		if err := r.coordinator.reconcileSupersededLoopSchedules(ctx, entityID.String()); err != nil {
-			return err
-		}
-		if mutation.StateCarrier.StateBuckets != nil {
-			if err := r.coordinator.reconcileClosedJoinSchedules(ctx, entityID.String(), mutation.StateCarrier); err != nil {
-				return err
-			}
-		}
-	}
-	if nextState != "" {
-		r.coordinator.notifyTestEntityStateUpdated(entityID.String(), nextState)
-		if err := r.coordinator.maybeDeactivateTerminalFlowInstance(ctx, entityID.String(), nextState); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r pipelineEngineStateRepo) VerifyEmitPersistence(ctx context.Context, entityID identity.EntityID, prerequisites runtimeengine.EmitPersistencePrerequisites) error {
+func (r pipelineEngineStateRepo) SaveState(ctx context.Context, address runtimeengine.StateAddress, mutation runtimeengine.StateMutation) error {
 	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.enabled() {
 		return nil
 	}
-	entityID = identity.NormalizeEntityID(entityID.String())
+	return fmt.Errorf("direct workflow state persistence is unsupported; use the workflow engine mutation owner")
+}
+
+func (r pipelineEngineStateRepo) VerifyEmitPersistence(ctx context.Context, address runtimeengine.StateAddress, prerequisites runtimeengine.EmitPersistencePrerequisites) error {
+	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.enabled() {
+		return nil
+	}
+	entityID := identity.NormalizeEntityID(address.EntityID.String())
 	if entityID.IsZero() || len(prerequisites.Fields) == 0 {
 		return nil
 	}
-	persisted, ok, err := r.LoadState(ctx, entityID)
+	persisted, ok, err := r.LoadState(ctx, address)
 	if err != nil {
 		return fmt.Errorf("%w: load persisted entity state: %v", runtimeengine.ErrEmitPersistencePrerequisite, err)
 	}
@@ -313,15 +551,18 @@ func (r pipelineEngineStateRepo) VerifyEmitPersistence(ctx context.Context, enti
 	return fmt.Errorf("%w: %s", runtimeengine.ErrEmitPersistencePrerequisite, strings.Join(details, "; "))
 }
 
-func (r pipelineEngineStateRepo) ensureFlowOwnsEntity(ctx context.Context, entityID string) error {
+func (r pipelineEngineStateRepo) ensureFlowOwnsEntity(ctx context.Context, address runtimeengine.StateAddress) error {
 	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.enabled() {
 		return nil
 	}
-	flowID := strings.TrimSpace(pipelineFlowScope(ctx))
+	flowID := strings.TrimSpace(address.FlowID.String())
 	if flowID == "" {
 		return nil
 	}
-	instance, ok, err := r.coordinator.workflowStore.Load(ctx, entityID)
+	if !address.Route.Valid() {
+		return fmt.Errorf("flow ownership check requires an exact workflow instance route")
+	}
+	instance, ok, err := r.coordinator.workflowStore.Load(ctx, address.Route)
 	if err != nil || !ok {
 		return err
 	}
@@ -331,7 +572,7 @@ func (r pipelineEngineStateRepo) ensureFlowOwnsEntity(ctx context.Context, entit
 	return runtimefailures.New(runtimefailures.ClassAuthorizationDenied, "cross_flow_write_forbidden", "pipeline-engine", "write_entity", map[string]any{
 		"action":         "cross_flow_entity_write",
 		"flow_id":        flowID,
-		"entity_id":      entityID,
+		"entity_id":      address.EntityID.String(),
 		"owner_workflow": strings.TrimSpace(instance.WorkflowName),
 	})
 }
@@ -372,143 +613,6 @@ func (e pipelineEngineEvaluator) queryEntityCount(ctx workflowExpressionContext,
 	return e.coordinator.workflowStore.QueryEntityCount(context.Background(), runID, e.coordinator.SemanticSource(), contract, parsed)
 }
 
-func queryEntityStateCount(runID string, db *sql.DB, source semanticview.Source, contract entityruntime.Contract, predicate workflowEntityQueryPredicate) (int, error) {
-	if db == nil {
-		return 0, nil
-	}
-	runID, err := runtimecurrentstate.ValidateRunID(runID)
-	if err != nil {
-		return 0, err
-	}
-	flowRoot := runtimeflowidentity.ScopeKey(source, contract.FlowID)
-	where := " WHERE run_id = $1::uuid"
-	args := []any{runID}
-	if flowRoot != "" {
-		args = append(args, flowRoot, flowRoot+"/%")
-		where += " AND (flow_instance = $2 OR flow_instance LIKE $3)"
-	}
-	rows, err := db.QueryContext(context.Background(), `
-		SELECT COALESCE(fields, '{}'::jsonb), current_state
-		FROM entity_state`+where, args...)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	count := 0
-	for rows.Next() {
-		var fieldsRaw []byte
-		var currentState string
-		if err := rows.Scan(&fieldsRaw, &currentState); err != nil {
-			return 0, err
-		}
-		fields := map[string]any{}
-		if len(fieldsRaw) > 0 {
-			if err := json.Unmarshal(fieldsRaw, &fields); err != nil {
-				return 0, err
-			}
-		}
-		materialized, err := entityruntime.Materialize(contract, entityruntime.DeclaredValues(contract, fields))
-		if err != nil {
-			return 0, err
-		}
-		if workflowQueryPredicateMatches(map[string]any{
-			"fields":         materialized,
-			"current_state":  strings.TrimSpace(currentState),
-			"entity_type":    contract.EntityType,
-			"flow_instance":  flowRoot,
-			"workflow_name":  contract.FlowID,
-			"workflow_state": strings.TrimSpace(currentState),
-		}, predicate) {
-			count++
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	return count, nil
-}
-
-func workflowQueryPredicateMatches(row map[string]any, predicate workflowEntityQueryPredicate) bool {
-	left := workflowQuerySelectorValue(row, predicate.Field)
-	switch predicate.Op {
-	case "==":
-		return workflowJSONValuesEqual(left, predicate.Value)
-	case "!=":
-		return !workflowJSONValuesEqual(left, predicate.Value)
-	}
-	leftNum, leftNumOK := workflowNumericEntityValue(left)
-	rightNum, rightNumOK := workflowNumericEntityValue(predicate.Value)
-	if leftNumOK && rightNumOK {
-		switch predicate.Op {
-		case ">=":
-			return leftNum >= rightNum
-		case "<=":
-			return leftNum <= rightNum
-		case ">":
-			return leftNum > rightNum
-		case "<":
-			return leftNum < rightNum
-		}
-	}
-	leftText := fmt.Sprintf("%v", left)
-	rightText := fmt.Sprintf("%v", predicate.Value)
-	switch predicate.Op {
-	case ">=":
-		return leftText >= rightText
-	case "<=":
-		return leftText <= rightText
-	case ">":
-		return leftText > rightText
-	case "<":
-		return leftText < rightText
-	default:
-		return false
-	}
-}
-
-func workflowNumericEntityValue(value any) (float64, bool) {
-	switch typed := value.(type) {
-	case int:
-		return float64(typed), true
-	case int32:
-		return float64(typed), true
-	case int64:
-		return float64(typed), true
-	case float32:
-		return float64(typed), true
-	case float64:
-		return typed, true
-	default:
-		return 0, false
-	}
-}
-
-func workflowQuerySelectorValue(row map[string]any, field string) any {
-	field = strings.TrimSpace(field)
-	if field == "" {
-		return nil
-	}
-	if value, ok := row[field]; ok {
-		return value
-	}
-	fields, _ := row["fields"].(map[string]any)
-	if value, ok := workflowMetadataValue(fields, field); ok {
-		return value
-	}
-	return nil
-}
-
-func sqlComparisonOperator(op string) (string, error) {
-	switch strings.TrimSpace(op) {
-	case "==":
-		return "=", nil
-	case "!=", ">=", "<=", ">", "<":
-		return strings.TrimSpace(op), nil
-	default:
-		return "", fmt.Errorf("unsupported query_entities operator %q", op)
-	}
-}
-
 func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.RuntimeDependencies {
 	if pc == nil {
 		return runtimeengine.RuntimeDependencies{}
@@ -517,26 +621,24 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 	if source == nil {
 		source = semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	}
-	var outbox runtimeengine.OutboxWriter
 	var dispatcher runtimeengine.PostCommitDispatcher
 	if pc.bus != nil {
-		outbox = pc.bus.EngineOutbox()
 		dispatcher = pc.bus.EngineDispatcher()
 	}
 	var lifecycleOwner runtimeengine.WorkflowLifecycleEffectOwner
 	if pc.workflowStore != nil && pc.workflowStore.enabled() {
 		lifecycleOwner = pipelineWorkflowLifecycleOwner{coordinator: pc}
 	}
+	stateRepo := pipelineEngineStateRepo{coordinator: pc}
+	activityWriter := pipelineActivityIntentWriter{coordinator: pc}
+	publicationPlanner, _ := pc.bus.(EnginePublicationPlanner)
 	return runtimeengine.RuntimeDependencies{
 		Source:              source,
-		StateRepo:           pipelineEngineStateRepo{coordinator: pc},
-		EmitVerifier:        pipelineEngineStateRepo{coordinator: pc},
-		TxRunner:            pipelineEngineTxRunner{store: pc.workflowStore},
+		StateRepo:           stateRepo,
+		MutationOwner:       pipelineEngineMutationOwner{store: pc.workflowStore, state: stateRepo, publication: publicationPlanner, verifier: stateRepo, lifecycle: lifecycleOwner, activities: activityWriter},
 		Locker:              pipelineEngineLocker{coordinator: pc},
-		Outbox:              outbox,
 		WorkflowLifecycle:   lifecycleOwner,
 		Dispatcher:          dispatcher,
-		ActivityIntents:     pipelineActivityIntentWriter{coordinator: pc},
 		ActivityDispatcher:  pipelineActivityDispatcher{coordinator: pc},
 		GuardRegistry:       pipelineEngineGuardRegistry{registry: pc.GuardRegistry()},
 		GuardRunner:         pipelineEngineGuardRunner{coordinator: pc},
@@ -576,10 +678,18 @@ func workflowMetadataValue(metadata map[string]any, target string) (any, bool) {
 	return current, true
 }
 
+func WorkflowMetadataValue(metadata map[string]any, target string) (any, bool) {
+	return workflowMetadataValue(metadata, target)
+}
+
 func workflowJSONValuesEqual(left, right any) bool {
 	leftJSON, leftErr := json.Marshal(left)
 	rightJSON, rightErr := json.Marshal(right)
 	return leftErr == nil && rightErr == nil && string(leftJSON) == string(rightJSON)
+}
+
+func WorkflowJSONValuesEqual(left, right any) bool {
+	return workflowJSONValuesEqual(left, right)
 }
 
 func workflowMaxChainDepthPolicy(source semanticview.Source) int {
@@ -740,29 +850,30 @@ func hasHumanDecisionProducer(event events.Event) bool {
 
 type pipelineEngineActionRunner struct {
 	coordinator        *PipelineCoordinator
-	artifactRepoCommit func(context.Context, runtimecontracts.ActionSpec, runtimeengine.ExecutionContext) error
+	artifactRepoCommit func(context.Context, runtimecontracts.ActionSpec, runtimeengine.ExecutionContext) (runtimeengine.ActionExecution, error)
 }
 
-func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimeregistry.ActionInstruction, execCtx runtimeengine.ExecutionContext) (bool, error) {
+func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimeregistry.ActionInstruction, execCtx runtimeengine.ExecutionContext) (runtimeengine.ActionExecution, error) {
 	pc := r.coordinator
 	if pc == nil {
-		return false, nil
+		return runtimeengine.ActionExecution{}, nil
 	}
 	actionID := runtimecontracts.NormalizeHandlerActionID(firstNonEmptyString(entry.Builtin, entry.Key.String(), action.ID))
 	if actionID == "" {
-		return false, nil
+		return runtimeengine.ActionExecution{}, nil
 	}
 	switch actionID {
 	case "record_evidence":
 		payload := parsePayloadMap(execCtx.Request.Event.Payload())
 		bucketID := recordEvidenceTarget(execCtx.Request)
 		if bucketID == "" {
-			return true, fmt.Errorf("node %s handler %s record_evidence is missing evidence_target", execCtx.Request.NodeID.String(), recordEvidenceHandlerLabel(execCtx.Request))
+			return runtimeengine.ActionExecution{Handled: true}, fmt.Errorf("node %s handler %s record_evidence is missing evidence_target", execCtx.Request.NodeID.String(), recordEvidenceHandlerLabel(execCtx.Request))
 		}
-		if err := pc.recordWorkflowEvidence(ctx, execCtx.Request.EntityID.String(), execCtx.Request.FlowID.String(), bucketID, payload); err != nil {
-			return true, err
+		mutation, err := pc.projectWorkflowEvidence(execCtx, bucketID, payload)
+		if err != nil {
+			return runtimeengine.ActionExecution{Handled: true}, err
 		}
-		return true, nil
+		return runtimeengine.ActionExecution{Handled: true, State: mutation}, nil
 	case "create_flow_instance":
 		plan := handlerExecutionPlan{
 			NodeID:         execCtx.Request.NodeID.String(),
@@ -774,21 +885,21 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 			ConfigFrom:     action.ConfigFrom,
 		}
 		if err := pc.createFlowInstance(ctx, engineTriggerContext(execCtx.Request), plan, execCtx.Base); err != nil {
-			return true, err
+			return runtimeengine.ActionExecution{Handled: true}, err
 		}
-		return true, nil
+		return runtimeengine.ActionExecution{Handled: true}, nil
 	case "mailbox_write":
 		if err := pc.materializeMailboxItem(ctx, action, execCtx); err != nil {
-			return true, err
+			return runtimeengine.ActionExecution{Handled: true}, err
 		}
-		return true, nil
+		return runtimeengine.ActionExecution{Handled: true}, nil
 	case "artifact_repo_commit":
 		mode, err := pipelineActionExecutionMode(ctx, execCtx)
 		if err != nil {
-			return true, err
+			return runtimeengine.ActionExecution{Handled: true}, err
 		}
 		if mode == runtimeeffects.ExecutionModeMock {
-			return true, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "mock_artifact_repo_commit_forbidden", "pipeline-action-runtime", "admit_artifact_repo_commit", map[string]any{
+			return runtimeengine.ActionExecution{Handled: true}, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "mock_artifact_repo_commit_forbidden", "pipeline-action-runtime", "admit_artifact_repo_commit", map[string]any{
 				"action": "artifact_repo_commit", "execution_mode": string(mode),
 			})
 		}
@@ -796,12 +907,11 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 		if commit == nil {
 			commit = pc.commitArtifactRepo
 		}
-		if err := commit(ctx, action, execCtx); err != nil {
-			return true, err
-		}
-		return true, nil
+		execution, err := commit(ctx, action, execCtx)
+		execution.Handled = true
+		return execution, err
 	default:
-		return false, nil
+		return runtimeengine.ActionExecution{}, nil
 	}
 }
 
@@ -1049,7 +1159,7 @@ func restoreWorkflowRuntimeControlMetadata(metadata map[string]any, control map[
 	}
 }
 
-func (pc *PipelineCoordinator) maybeDeactivateTerminalFlowInstance(ctx context.Context, entityID, nextState string) error {
+func (pc *PipelineCoordinator) maybeDeactivateTerminalFlowInstance(ctx context.Context, route runtimeflowidentity.Route, entityID, nextState string) error {
 	if pc == nil || pc.instanceDeactivator == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
 		return nil
 	}
@@ -1058,7 +1168,10 @@ func (pc *PipelineCoordinator) maybeDeactivateTerminalFlowInstance(ctx context.C
 	if nextState == "" || entityID == "" {
 		return nil
 	}
-	instance, ok, err := pc.workflowStore.Load(ctx, entityID)
+	if !route.Valid() {
+		return fmt.Errorf("flow deactivation requires an exact workflow instance route")
+	}
+	instance, ok, err := pc.workflowStore.Load(ctx, route)
 	if err != nil || !ok {
 		return err
 	}
@@ -1146,6 +1259,11 @@ func workflowInstanceOwnedByFlow(source semanticview.Source, instance WorkflowIn
 	flowID = strings.TrimSpace(flowID)
 	if flowID == "" {
 		return true
+	}
+	if source != nil && flowID == strings.TrimSpace(source.WorkflowName()) && strings.TrimSpace(instance.WorkflowName) == flowID {
+		if _, err := uuid.Parse(strings.TrimSpace(instance.StorageRef)); err == nil {
+			return true
+		}
 	}
 	ownerScope := runtimeflowidentity.ScopeKey(source, flowID)
 	targetScope := workflowInstanceScopeKey(source, instance)

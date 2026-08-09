@@ -14,6 +14,7 @@ import (
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -32,7 +33,7 @@ import (
 
 type workflowTimerStartupStore interface {
 	externalRuntimeTestDurableEventStore
-	externalRuntimeTestMutationOwner
+	runtimepipeline.WorkflowPersistenceOwner
 	swarmruntime.EventPayloadValidationBinder
 	swarmruntime.AuthorActivityCatalogRegistrar
 	runtimerunlifecycle.CandidateOwner
@@ -71,7 +72,7 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 			name: "sqlite",
 			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected.DB, selected, false
+				return storetest.Database(selected), selected, false
 			},
 		},
 		{
@@ -86,9 +87,9 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 	} {
 		t.Run(backend.name, func(t *testing.T) {
 			db, selected, postgres := backend.open(t)
-			workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
 			if !postgres {
-				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
+				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 			}
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
@@ -100,10 +101,6 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 			}
 
 			process := worklifetime.NewProcess()
-			runtimeDB := db
-			if !postgres {
-				runtimeDB = nil
-			}
 			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle())
 			rt, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
 				Config: &config.Config{
@@ -111,7 +108,6 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 					LLM:     config.LLMConfig{Backend: "anthropic"},
 				},
 
-				SQLDB:                        runtimeDB,
 				EventStore:                   selected,
 				EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
 				EventPayloadValidationBinder: selected,
@@ -221,7 +217,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			name: "sqlite",
 			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected.DB, selected, false
+				return storetest.Database(selected), selected, false
 			},
 		},
 		{
@@ -236,9 +232,9 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 	} {
 		t.Run(backend.name, func(t *testing.T) {
 			db, selected, postgres := backend.open(t)
-			workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
 			if !postgres {
-				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
+				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 			}
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
@@ -251,10 +247,6 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 
 			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle())
 			module := newRuntimeTestWorkflowModule(t, source)
-			runtimeDB := db
-			if !postgres {
-				runtimeDB = nil
-			}
 			newRuntime := func(managerStore runtimemanager.ManagerPersistence) (*swarmruntime.Runtime, *worklifetime.Process) {
 				process := worklifetime.NewProcess()
 				rt, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
@@ -263,7 +255,6 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 						LLM:     config.LLMConfig{Backend: "anthropic"},
 					},
 
-					SQLDB:                        runtimeDB,
 					EventStore:                   selected,
 					EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
 					EventPayloadValidationBinder: selected,
@@ -306,12 +297,12 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			seedRuntime, seedProcess := newRuntime(selected)
 			seedCtx := worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence())
 			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
-				InstanceID:      entityID,
-				StorageRef:      entityID,
+				InstanceID:      "workflow-timer-startup",
+				StorageRef:      "workflow-timer-startup",
 				WorkflowName:    "workflow-timer-startup",
 				WorkflowVersion: "1",
 				CurrentState:    "waiting",
-				Metadata:        map[string]any{"run_id": runID},
+				Metadata:        map[string]any{"run_id": runID, "entity_id": entityID},
 			}, time.Now().UTC())
 			if err != nil {
 				t.Fatalf("materialize workflow timer before restart: %v", err)
@@ -333,7 +324,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			}
 			shutdown("failed restart", restarted, restartedProcess)
 
-			instance, found, err := restarted.Pipeline.Load(ctx, entityID)
+			instance, found, err := restarted.Pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath("workflow-timer-startup"))
 			if err != nil {
 				t.Fatalf("load workflow instance after failed restart: %v", err)
 			}
@@ -353,7 +344,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			name: "sqlite",
 			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected.DB, selected, false
+				return storetest.Database(selected), selected, false
 			},
 		},
 		{
@@ -368,9 +359,9 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 	} {
 		t.Run(backend.name, func(t *testing.T) {
 			db, selected, postgres := backend.open(t)
-			workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, selected)
+			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
 			if !postgres {
-				workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, selected)
+				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 			}
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
@@ -384,10 +375,6 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle())
 			module := newRuntimeTestWorkflowModule(t, source)
 			bootProgress := make([]swarmruntime.BootProgressEvent, 0, swarmruntime.BootProgressTotalSteps)
-			runtimeDB := db
-			if !postgres {
-				runtimeDB = nil
-			}
 			newRuntime := func() (*swarmruntime.Runtime, *worklifetime.Process) {
 				process := worklifetime.NewProcess()
 				rt, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
@@ -396,7 +383,6 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 						LLM:     config.LLMConfig{Backend: "anthropic"},
 					},
 
-					SQLDB:                        runtimeDB,
 					EventStore:                   selected,
 					EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
 					EventPayloadValidationBinder: selected,
@@ -443,12 +429,12 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			occurredAt := time.Now().UTC().Add(-time.Second)
 			seedCtx := worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence())
 			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
-				InstanceID:      entityID,
-				StorageRef:      entityID,
+				InstanceID:      "workflow-timer-startup",
+				StorageRef:      "workflow-timer-startup",
 				WorkflowName:    "workflow-timer-startup",
 				WorkflowVersion: "1",
 				CurrentState:    "waiting",
-				Metadata:        map[string]any{"run_id": runID},
+				Metadata:        map[string]any{"run_id": runID, "entity_id": entityID},
 			}, occurredAt)
 			if err != nil {
 				t.Fatalf("materialize workflow timer before restart: %v", err)
@@ -493,7 +479,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 
 			deadline := time.Now().Add(8 * time.Second)
 			for {
-				instance, found, err := restarted.Pipeline.Load(ctx, entityID)
+				instance, found, err := restarted.Pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath("workflow-timer-startup"))
 				if err != nil {
 					t.Fatalf("load restored workflow instance: %v", err)
 				}

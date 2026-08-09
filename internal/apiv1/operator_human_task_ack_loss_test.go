@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -27,7 +26,7 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
-			cardStore, humanStore, idempotency, mailbox, workflowStore, publisher, db := newHumanTaskAckLossOwners(t, ctx, backend)
+			cardStore, humanStore, idempotency, mailbox, workflowStore, db := newHumanTaskAckLossOwners(t, ctx, backend)
 			now := time.Date(2026, 7, 14, 14, 0, 0, 0, time.UTC)
 			runID := uuid.NewString()
 			if backend == "postgres" {
@@ -46,7 +45,7 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 				Handlers: OperatorReadHandlers(OperatorReadOptions{
 					Now: func() time.Time { return now.Add(time.Minute) }, Ready: func() bool { return true }, Database: fakePinger{},
 					Mailbox: mailbox, DecisionCards: cardStore, DecisionAuthority: authority,
-					Idempotency: idempotency, Events: publisher,
+					Idempotency: idempotency,
 				}),
 			})
 			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"decide","method":"mailbox.decide","params":{"card_id":%q,"verdict":"approve","fields":{},"observed_content_hash":%q,"idempotency_key":"ack-loss"}}`, card.CardID, card.CardContentHash)
@@ -71,8 +70,17 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 			if result["idempotency_replayed"] != true || result["decision_event_id"] != committed.DecisionEventID {
 				t.Fatalf("acknowledgment-loss replay = %#v", result)
 			}
-			if authority.successfulMutations != 2 || publisher.calls != 1 {
-				t.Fatalf("mutation/publish counts = %d/%d, want two API transactions and one semantic publish", authority.successfulMutations, publisher.calls)
+			if authority.successfulMutations != 2 {
+				t.Fatalf("successful mutation calls = %d, want two API transactions", authority.successfulMutations)
+			}
+			query := `SELECT COUNT(*) FROM events WHERE event_id = ?`
+			arg := any(committed.DecisionEventID)
+			if backend == "postgres" {
+				query = `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`
+			}
+			var eventCount int
+			if err := db.QueryRowContext(ctx, query, arg).Scan(&eventCount); err != nil || eventCount != 1 {
+				t.Fatalf("durable decision event count = %d, %v; want exactly one", eventCount, err)
 			}
 			reloaded, err := cardStore.GetDecisionCard(ctx, card.CardID)
 			if err != nil || reloaded.DecisionEventID != committed.DecisionEventID || reloaded.Verdict != "approve" {
@@ -86,18 +94,17 @@ func newHumanTaskAckLossOwners(
 	t *testing.T,
 	ctx context.Context,
 	backend string,
-) (decisioncard.Store, decisioncard.HumanTaskStore, APIIdempotencyStore, MailboxAPIStore, DecisionCardAuthority, *humanTaskAckLossPublisher, *sql.DB) {
+) (decisioncard.Store, decisioncard.HumanTaskStore, APIIdempotencyStore, MailboxAPIStore, DecisionCardAuthority, *sql.DB) {
 	t.Helper()
-	publisher := &humanTaskAckLossPublisher{}
 	if backend == "postgres" {
 		_, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		return pg, pg, pg, pg, newHumanTaskAckLossDecisionAuthority(t, db, pg, runtimepipeline.NewPostgresWorkflowPersistence(db, pg), pg, pg, publisher), publisher, db
+		return pg, pg, pg, pg, newHumanTaskAckLossDecisionAuthority(t, db, pg, runtimepipeline.NewWorkflowPersistence(pg), pg, pg), db
 	}
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 	return sqliteStore, sqliteStore, sqliteStore, sqliteStore,
-		newHumanTaskAckLossDecisionAuthority(t, sqliteStore.DB, sqliteStore, runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore), sqliteStore, sqliteStore, publisher), publisher, sqliteStore.DB
+		newHumanTaskAckLossDecisionAuthority(t, storetest.Database(sqliteStore), sqliteStore, runtimepipeline.NewWorkflowPersistence(sqliteStore), sqliteStore, sqliteStore), storetest.Database(sqliteStore)
 }
 
 type humanTaskAckLossPersistence interface {
@@ -114,7 +121,6 @@ func newHumanTaskAckLossDecisionAuthority(
 	persistence runtimepipeline.WorkflowPersistence,
 	cards decisioncard.Store,
 	humanTasks decisioncard.HumanTaskStore,
-	publisher runtimepipeline.WorkflowGateMutationPublisher,
 ) DecisionCardAuthority {
 	t.Helper()
 	source := semanticview.Wrap(runCompletionSystemNodeBundle(t))
@@ -122,12 +128,11 @@ func newHumanTaskAckLossDecisionAuthority(
 	if err != nil {
 		t.Fatalf("construct human-task acknowledgment-loss event bus: %v", err)
 	}
-	return runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, db, completeAPITestDurableWorkflowOptions(t, selected, eventBus, runtimepipeline.PipelineCoordinatorOptions{
+	return runtimepipeline.NewPipelineCoordinatorWithOptions(eventBus, completeAPITestDurableWorkflowOptions(t, selected, eventBus, runtimepipeline.PipelineCoordinatorOptions{
 		Module:              newRunCompletionSystemNodeModule(t, source),
 		Persistence:         persistence,
 		DecisionCards:       cards,
 		HumanTasks:          humanTasks,
-		GatePublisher:       publisher,
 		RunLifecycle:        selected,
 		PipelineObligations: selected.PipelineObligations(),
 	}))
@@ -188,13 +193,4 @@ func (a *humanTaskAckLossAuthority) CommitDecisionCardMutation(
 		return nil, false, errors.New("simulated post-commit acknowledgment loss")
 	}
 	return completion, replayed, nil
-}
-
-type humanTaskAckLossPublisher struct{ calls int }
-
-func (p *humanTaskAckLossPublisher) Publish(context.Context, events.Event) error { return nil }
-
-func (p *humanTaskAckLossPublisher) PublishInMutation(context.Context, events.Event) error {
-	p.calls++
-	return nil
 }

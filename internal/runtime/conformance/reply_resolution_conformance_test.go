@@ -79,7 +79,11 @@ func TestReplyResolutionConformance_DefaultCorrelationUsesStableRequestEventID(t
 	store := newReplyConformanceStore()
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
 		ContractBundle: source,
-		Durable:        bus.DurableDependencies{ReplyContext: store},
+		Durable: bus.DurableDependencies{
+			ReplyContext:      store,
+			ActiveFlows:       store,
+			FlowRouteTopology: store,
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -141,7 +145,11 @@ func TestReplyResolutionConformance_RoutesConcurrentSameOriginAndCrossOriginByPe
 	store := newReplyConformanceStore()
 	eb, err := newScopedTestEventBus(t, store, bus.EventBusOptions{
 		ContractBundle: source,
-		Durable:        bus.DurableDependencies{ReplyContext: store},
+		Durable: bus.DurableDependencies{
+			ReplyContext:      store,
+			ActiveFlows:       store,
+			FlowRouteTopology: store,
+		},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -726,10 +734,9 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 		t.Fatalf("%T lacks typed human-task runtime surface", backend)
 	}
 	eb := newDurableReplyConformanceBus(t, ctx, backend, source)
-	db := replyConformanceDB(t, backend)
-	workflowPersistence := runtimepipeline.NewPostgresWorkflowPersistence(db, backend)
+	workflowPersistence := runtimepipeline.NewWorkflowPersistence(backend)
 	if sqliteStore, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		workflowPersistence = runtimepipeline.NewSQLiteWorkflowPersistence(db, sqliteStore)
+		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 	}
 	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
 	if err != nil {
@@ -743,11 +750,10 @@ func newDurableReplyHumanTaskRuntime(t *testing.T, ctx context.Context, backend 
 		source: source, workflow: workflow, nodes: nodes,
 		guards: runtimepipeline.NewContractGuardRegistry(source), actions: runtimepipeline.NewContractActionRegistry(source),
 	}
-	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
+	coordinator := runtimepipeline.NewPipelineCoordinatorWithOptions(eb, runtimepipeline.PipelineCoordinatorOptions{
 		Module: module, Persistence: workflowPersistence, RunLifecycle: backend,
 		DeliveryStore: backend, DeliveryRuntime: eb, DecisionCards: cards, HumanTasks: cards,
 		ProposedEffects: backend, DecisionCardDraftExpiry: backend, HumanTaskExpiry: backend,
-		GatePublisher: eb, DirectDecisionPublisher: eb,
 		PipelineObligations: backend.PipelineObligations(), ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
@@ -807,6 +813,7 @@ func receiveReplyConformanceHumanTaskOutcome(t *testing.T, outcomes <-chan *bus.
 
 type durableReplyConformanceStore interface {
 	conformanceDurableEventBusStore
+	runtimepipeline.WorkflowPersistenceOwner
 	ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 }
 
@@ -849,9 +856,9 @@ func replyConformanceDB(t *testing.T, backend durableReplyConformanceStore) *sql
 	t.Helper()
 	switch typed := backend.(type) {
 	case *store.PostgresStore:
-		return typed.DB
+		return storetest.DatabaseForTest(typed)
 	case *store.SQLiteRuntimeStore:
-		return typed.DB
+		return storetest.DatabaseForTest(typed)
 	default:
 		t.Fatalf("unsupported reply conformance backend %T", backend)
 		return nil
@@ -998,9 +1005,9 @@ func seedDurableReplyConformanceRun(t *testing.T, ctx context.Context, backend d
 	t.Helper()
 	switch typed := backend.(type) {
 	case *store.PostgresStore:
-		storetest.RequirePostgresRun(t, ctx, typed.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+		storetest.RequirePostgresRun(t, ctx, storetest.DatabaseForTest(typed), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	case *store.SQLiteRuntimeStore:
-		storetest.RequireSQLiteRun(t, ctx, typed.DB, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+		storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(typed), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	default:
 		t.Fatalf("unsupported reply conformance backend %T", backend)
 	}
@@ -1054,15 +1061,68 @@ func newReplyConformanceStore() *replyConformanceStore {
 	}
 }
 
-func (s *replyConformanceStore) CommitPublish(ctx context.Context, plan bus.CommitPublishPlan) (bus.PreparedPublish, error) {
-	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req bus.CommitPublishRequest) error {
+func (s *replyConformanceStore) CommitPublication(ctx context.Context, command bus.PublicationCommand) (bus.CommittedPublication, error) {
+	return runtimebustest.CommitPublish(ctx, command, nil, func(_ context.Context, req bus.CommitPublishRequest) error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		for _, candidate := range req.ReplyCreations {
+			record := candidate.Normalized()
+			if err := record.Validate(); err != nil {
+				return err
+			}
+			if existing, ok := s.contexts[record.ID]; ok {
+				if !existing.SameIdentity(record) {
+					return errors.New("reply context identity collision")
+				}
+				continue
+			}
+			s.contexts[record.ID] = record
+			s.createCalls++
+		}
+		for _, candidate := range req.ReplyClaims {
+			claim := candidate.Normalized()
+			if err := claim.Validate(); err != nil {
+				return err
+			}
+			record, ok := s.contexts[claim.Expected.ID]
+			if !ok {
+				return runtimereplycontext.ErrNotFound
+			}
+			if !record.SameIdentity(claim.Expected) {
+				return errors.New("reply context identity changed before claim")
+			}
+			if record.State == runtimereplycontext.StateTerminal {
+				if record.AcceptedReplyEventID != claim.ReplyEventID {
+					return errors.New("reply context is already terminal")
+				}
+				continue
+			}
+			now := time.Now().UTC()
+			record.State = runtimereplycontext.StateTerminal
+			record.AcceptedReplyEventID = claim.ReplyEventID
+			record.TerminalAt = &now
+			record.UpdatedAt = now
+			s.contexts[record.ID] = record
+			s.claimCalls++
+		}
 		s.events[req.Event.ID()] = req.Event.Event()
 		s.routes[req.Event.ID()] = events.NormalizeDeliveryRoutes(req.DeliveryRoutes)
 		s.scopes[req.Event.ID()] = req.ReplayScope
 		return nil
 	})
+}
+
+func (s *replyConformanceStore) ListActiveFlowInstanceDescriptors(context.Context) ([]bus.ActiveFlowInstanceDescriptor, error) {
+	return nil, nil
+}
+
+func (s *replyConformanceStore) ReplaceFlowInstanceRouteTopology(_ context.Context, sets []bus.FlowInstanceRouteRecordSet) error {
+	for _, set := range sets {
+		if !set.Identity.Valid() {
+			return fmt.Errorf("invalid flow-instance route identity: %#v", set.Identity)
+		}
+	}
+	return nil
 }
 
 func (s *replyConformanceStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {

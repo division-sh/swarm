@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -36,19 +37,20 @@ func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t
 		From: []WorkflowStateID{"waiting"},
 		To:   "done",
 	}})
+	module := handlerTestWorkflowModule("first-event-transition", "acceptor").(*previewWorkflowModule)
+	module.bundle.Semantics = bundle.Semantics
+	module.workflow = workflow
 
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			store, ctx := tc.open(t)
+			runID := correlation.RunIDFromContext(ctx)
 			pc := &PipelineCoordinator{
 				bus:            &recordingPipelineBus{},
 				workflowStore:  store,
 				expressionEval: newWorkflowExpressionEvaluator(),
 				entityLocks:    map[string]*sync.Mutex{},
-				module: &previewWorkflowModule{
-					bundle:   bundle,
-					workflow: workflow,
-				},
+				module:         module,
 			}
 			configureWorkflowLifecycleForTest(t, pc)
 
@@ -62,11 +64,16 @@ func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t
 				"",
 				[]byte(`{}`),
 				0,
-				correlation.RunIDFromContext(ctx),
+				runID,
 				"",
-				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+				testWorkflowSourceEnvelope("first-event-transition", runID, entityID),
 				occurredAt,
 			)
+			dialect := authoractivityfixture.DialectPostgres
+			if store.isSQLite() {
+				dialect = authoractivityfixture.DialectSQLite
+			}
+			seedPipelineEventRecordForDialect(t, ctx, store.testDB(), dialect, evt)
 			engine := newCoordinatorHandlerExecutionEngine(pc, "acceptor")
 			outcome, err := engine.ExecuteHandlerSteps(ctx, runtimecontracts.SystemNodeEventHandler{
 				AdvancesTo: "done",
@@ -78,7 +85,7 @@ func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t
 				t.Fatalf("first event outcome = %#v, want handled", outcome)
 			}
 
-			instance, found, err := store.Load(ctx, entityID)
+			instance, found, err := store.Load(ctx, testWorkflowInstanceRoute(runID))
 			if err != nil {
 				t.Fatalf("load first-event workflow instance: %v", err)
 			}

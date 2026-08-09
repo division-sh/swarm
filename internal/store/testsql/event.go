@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
 const (
@@ -26,7 +26,7 @@ func CorruptEventStore(
 	t testing.TB,
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	claim EventCorruptionClaim,
 	sqliteStatement string,
 	postgresStatement string,
@@ -43,7 +43,7 @@ func RejectEventStoreCorruption(
 	t testing.TB,
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	claim EventCorruptionClaim,
 	sqliteStatement string,
 	postgresStatement string,
@@ -60,7 +60,7 @@ func RejectEventStoreCorruptionCategory(
 	t testing.TB,
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	claim EventCorruptionClaim,
 	category string,
 	sqliteStatement string,
@@ -88,10 +88,10 @@ func RejectEventStoreCorruptionCategory(
 	}
 }
 
-func RequireEventRowCount(t testing.TB, ctx context.Context, db *sql.DB, dialect runtimeauthoractivity.Dialect, eventID string, want int) {
+func RequireEventRowCount(t testing.TB, ctx context.Context, db *sql.DB, dialect authoractivityfixture.Dialect, eventID string, want int) {
 	t.Helper()
 	query := `SELECT COUNT(*) FROM events WHERE event_id = ?`
-	if dialect == runtimeauthoractivity.DialectPostgres {
+	if dialect == authoractivityfixture.DialectPostgres {
 		query = `SELECT COUNT(*) FROM events WHERE event_id = $1::uuid`
 	}
 	var got int
@@ -163,13 +163,13 @@ func InstallPostgresEventDeliveryFailureAfterFlowMaterialization(
 	})
 }
 
-func eventCorruptionStatement(t testing.TB, dialect runtimeauthoractivity.Dialect, claim EventCorruptionClaim, sqliteStatement, postgresStatement string) string {
+func eventCorruptionStatement(t testing.TB, dialect authoractivityfixture.Dialect, claim EventCorruptionClaim, sqliteStatement, postgresStatement string) string {
 	t.Helper()
 	if strings.TrimSpace(claim.Invariant) == "" || strings.TrimSpace(claim.Reason) == "" {
 		t.Fatal("unsafe event corruption requires an invariant and reason")
 	}
 	statement := sqliteStatement
-	if dialect == runtimeauthoractivity.DialectPostgres {
+	if dialect == authoractivityfixture.DialectPostgres {
 		statement = postgresStatement
 	}
 	if strings.TrimSpace(statement) == "" {

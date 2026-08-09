@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -172,17 +173,22 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	_ = budgetFile.Close()
 
 	const (
-		runtimePackage = "github.com/division-sh/swarm/internal/runtime"
-		storePackage   = "github.com/division-sh/swarm/internal/store"
+		runtimePackage            = "github.com/division-sh/swarm/internal/runtime"
+		storePackage              = "github.com/division-sh/swarm/internal/store"
+		runtimePersistencePackage = "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 	)
 	runtimeIsSpecial := false
 	storeIsSpecial := false
+	runtimePersistenceIsSpecial := false
 	for _, pkg := range policy.SpecialPackages {
 		if pkg == runtimePackage {
 			runtimeIsSpecial = true
 		}
 		if pkg == storePackage {
 			storeIsSpecial = true
+		}
+		if pkg == runtimePersistencePackage {
+			runtimePersistenceIsSpecial = true
 		}
 	}
 	if !runtimeIsSpecial {
@@ -191,13 +197,16 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if !storeIsSpecial {
 		t.Fatal("internal/store must remain isolated from broad package co-scheduling")
 	}
+	if !runtimePersistenceIsSpecial {
+		t.Fatal("internal/store/internal/runtimepersistence must remain isolated from broad package co-scheduling")
+	}
 	runtimeUnit, ok := policy.Units["runtime-full"]
 	if !ok || len(runtimeUnit.Packages) != 1 || runtimeUnit.Packages[0] != runtimePackage || runtimeUnit.Run != "" || runtimeUnit.CountMode != "count-1" {
 		t.Fatalf("runtime-full unit = %#v, want one complete uncached internal/runtime proof", runtimeUnit)
 	}
 	storeUnit, ok := policy.Units["store-full"]
-	if !ok || len(storeUnit.Packages) != 1 || storeUnit.Packages[0] != storePackage || storeUnit.Run != "" || storeUnit.CountMode != "count-1" {
-		t.Fatalf("store-full unit = %#v, want one complete uncached internal/store proof", storeUnit)
+	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage, runtimePersistencePackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" {
+		t.Fatalf("store-full unit = %#v, want complete uncached facade and runtime-persistence proof", storeUnit)
 	}
 	for _, profileName := range []string{testplanning.ProfilePRCommon, testplanning.ProfilePREscalated, testplanning.ProfileFull, testplanning.ProfileNightly} {
 		foundRuntime := false

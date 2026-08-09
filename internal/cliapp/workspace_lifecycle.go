@@ -1,7 +1,6 @@
 package cliapp
 
 import (
-	"database/sql"
 	"fmt"
 	"strings"
 
@@ -20,8 +19,8 @@ type ServeWorkspaceLifecycle interface {
 	runtimedestructivereset.ManagedContainerRuntime
 }
 
-func configuredWorkspaceLifecycle(db *sql.DB, cfg *config.Config, contractsRoot string, source semanticview.Source, mountSources WorkspaceMountSources) (*workspace.DockerManager, error) {
-	manager := workspace.NewDockerManager(db)
+func configuredWorkspaceLifecycle(lookup workspace.Lookup, cfg *config.Config, contractsRoot string, source semanticview.Source, mountSources WorkspaceMountSources) (*workspace.DockerManager, error) {
+	manager := workspace.NewDockerManager(lookup)
 	workspaceCfg, err := dockerWorkspaceConfigFromRuntimeConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -44,7 +43,7 @@ func configuredWorkspaceLifecycle(db *sql.DB, cfg *config.Config, contractsRoot 
 	return manager, nil
 }
 
-func ConfiguredWorkspaceLifecycleForBackend(db *sql.DB, cfg *config.Config, contractsRoot string, source semanticview.Source, mountSources WorkspaceMountSources, backend WorkspaceBackendSelection) (ServeWorkspaceLifecycle, error) {
+func ConfiguredWorkspaceLifecycleForBackend(lookup workspace.Lookup, cfg *config.Config, contractsRoot string, source semanticview.Source, mountSources WorkspaceMountSources, backend WorkspaceBackendSelection) (ServeWorkspaceLifecycle, error) {
 	selected := strings.TrimSpace(backend.Backend)
 	if selected == "" {
 		return nil, fmt.Errorf("workspace backend decision is required")
@@ -53,9 +52,9 @@ func ConfiguredWorkspaceLifecycleForBackend(db *sql.DB, cfg *config.Config, cont
 	case WorkspaceBackendNone:
 		return nil, nil
 	case workspace.BackendDocker:
-		return configuredWorkspaceLifecycle(db, cfg, contractsRoot, source, mountSources)
+		return configuredWorkspaceLifecycle(lookup, cfg, contractsRoot, source, mountSources)
 	case workspace.BackendHost:
-		return configuredHostWorkspaceLifecycle(db, cfg, contractsRoot, source, mountSources)
+		return configuredHostWorkspaceLifecycle(cfg, contractsRoot, source, mountSources)
 	default:
 		sourceLabel := strings.TrimSpace(backend.Source)
 		if sourceLabel == "" {
@@ -65,7 +64,7 @@ func ConfiguredWorkspaceLifecycleForBackend(db *sql.DB, cfg *config.Config, cont
 	}
 }
 
-func configuredHostWorkspaceLifecycle(db *sql.DB, cfg *config.Config, contractsRoot string, source semanticview.Source, mountSources WorkspaceMountSources) (*workspace.HostManager, error) {
+func configuredHostWorkspaceLifecycle(cfg *config.Config, contractsRoot string, source semanticview.Source, mountSources WorkspaceMountSources) (*workspace.HostManager, error) {
 	if cfg != nil && cfg.Workspace.VolumesFromConfigured() {
 		volumesFrom := strings.TrimSpace(cfg.Workspace.VolumesFrom)
 		if volumesFrom == "" {
@@ -73,7 +72,7 @@ func configuredHostWorkspaceLifecycle(db *sql.DB, cfg *config.Config, contractsR
 		}
 		return nil, fmt.Errorf("host workspace backend cannot consume workspace.volumes_from=%s", volumesFrom)
 	}
-	manager := workspace.NewHostManager(db)
+	manager := workspace.NewHostManager()
 	workspaceCfg, err := hostWorkspaceConfigFromRuntimeConfig(cfg)
 	if err != nil {
 		return nil, err

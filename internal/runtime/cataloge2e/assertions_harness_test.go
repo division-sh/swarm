@@ -43,7 +43,7 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 		assertFlowState(t, h, entityID, "flow-b", expected.Expected.FlowBState)
 		assertCausalFlowEntities(t, h, entityID, expected.Expected.FlowEntities)
 		assertEntityFields(t, h.workflow, entityID, expected.Expected.EntityFields)
-		assertGates(t, h.workflow, entityID, expected.Expected.Gates)
+		assertGates(t, h, entityID, expected.Expected.Gates)
 		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, expected.Expected.EmittedEvents, flowPrefix, semanticview.Wrap(h.bundle))
 		assertCausalEvents(t, h, expected.Expected.CausalEvents, flowPrefix)
 		if !expected.Expected.ChainDepthExceeded {
@@ -118,6 +118,7 @@ func assertCausalFlowEntities(t testing.TB, h *runtimeHarness, rootEntityID stri
 		if len(expected.Gates) > 0 {
 			gates := catalogBoolGates(got.Metadata)
 			for key, wantValue := range expected.Gates {
+				key = h.catalogGateKey(flowID, key)
 				if gotValue := gates[strings.TrimSpace(key)]; gotValue != wantValue {
 					t.Fatalf("causal flow instance %s gate %s = %v, want %v", flowID, key, gotValue, wantValue)
 				}
@@ -141,7 +142,7 @@ func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[
 			assertEntityState(t, h.db, h.workflow, entityID, want.EntityState)
 		}
 		assertEntityFields(t, h.workflow, entityID, want.EntityFields)
-		assertGates(t, h.workflow, entityID, want.Gates)
+		assertGates(t, h, entityID, want.Gates)
 		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, want.EmittedEvents, flowPrefix, semanticview.Wrap(h.bundle))
 		assertCausalEvents(t, h, want.CausalEvents, flowPrefix)
 		assertDeadLetter(t, h.db, h.startedAt, entityID, want.DeadLetter)
@@ -158,15 +159,15 @@ func (h *runtimeHarness) resolveExpectedEntityID(entityID string) string {
 	}
 }
 
-func assertGates(t testing.TB, workflow catalogWorkflowPersistence, entityID string, want map[string]bool) {
+func assertGates(t testing.TB, h *runtimeHarness, entityID string, want map[string]bool) {
 	t.Helper()
 	if len(want) == 0 {
 		return
 	}
-	if workflow == nil {
+	if h == nil || h.workflow == nil {
 		t.Fatal("workflow instance store is required for gates assertions")
 	}
-	instance, ok, err := workflow.Load(catalogRuntimeContext(), strings.TrimSpace(entityID))
+	instance, ok, err := h.workflow.Load(catalogRuntimeContext(), catalogRootWorkflowRoute())
 	if err != nil {
 		t.Fatalf("load workflow instance %s for gates: %v", entityID, err)
 	}
@@ -175,7 +176,11 @@ func assertGates(t testing.TB, workflow catalogWorkflowPersistence, entityID str
 	}
 	raw, _ := instance.Metadata["gates"].(map[string]any)
 	for key, wantValue := range want {
-		key = strings.TrimSpace(key)
+		flowID := ""
+		if h.bundle != nil {
+			flowID = h.bundle.WorkflowName()
+		}
+		key = h.catalogGateKey(flowID, key)
 		if key == "" {
 			continue
 		}
@@ -200,7 +205,7 @@ func assertEntityFields(t testing.TB, workflow catalogWorkflowPersistence, entit
 	if workflow == nil {
 		t.Fatal("workflow instance store is required for entity_fields assertions")
 	}
-	instance, ok, err := workflow.Load(catalogRuntimeContext(), strings.TrimSpace(entityID))
+	instance, ok, err := workflow.Load(catalogRuntimeContext(), catalogRootWorkflowRoute())
 	if err != nil {
 		t.Fatalf("load workflow instance %s for entity_fields: %v", entityID, err)
 	}
@@ -238,7 +243,7 @@ func assertEntityState(t testing.TB, db *sql.DB, workflow catalogWorkflowPersist
 	if workflow == nil {
 		t.Fatal("workflow instance store is required")
 	}
-	instance, ok, err := workflow.Load(catalogRuntimeContext(), strings.TrimSpace(entityID))
+	instance, ok, err := workflow.Load(catalogRuntimeContext(), catalogRootWorkflowRoute())
 	if err != nil {
 		t.Fatalf("load workflow instance %s: %v", entityID, err)
 	}
@@ -263,7 +268,7 @@ func assertFlowState(t testing.TB, h *runtimeHarness, entityID, flowID, wantStat
 	if h == nil || h.workflow == nil {
 		t.Fatal("workflow instance store is required")
 	}
-	instance, ok, err := h.workflow.Load(catalogRuntimeContext(), strings.TrimSpace(entityID))
+	instance, ok, err := h.workflow.Load(catalogRuntimeContext(), catalogRootWorkflowRoute())
 	if err != nil {
 		t.Fatalf("load workflow instance %s for flow state: %v", entityID, err)
 	}
@@ -343,46 +348,9 @@ func catalogFlowInstanceForCausalFlow(db *sql.DB, workflow catalogWorkflowPersis
 		}
 		return true
 	}
-	keys := map[string]struct{}{}
-	for entityID := range candidateEntityIDs {
-		if entityID = strings.TrimSpace(entityID); entityID != "" {
-			keys[entityID] = struct{}{}
-		}
-	}
-	for candidate := range candidates {
-		if candidate = strings.Trim(candidate, "/"); candidate != "" {
-			keys[candidate] = struct{}{}
-			keys[runtimepipeline.FlowInstanceEntityID(candidate)] = struct{}{}
-		}
-	}
-	if db != nil {
-		rows, err := db.QueryContext(catalogRuntimeContext(), `SELECT entity_id::text FROM entity_state ORDER BY created_at, entity_id`)
-		if err != nil {
-			return runtimepipeline.WorkflowInstance{}, false, err
-		}
-		for rows.Next() {
-			var key string
-			if err := rows.Scan(&key); err != nil {
-				rows.Close()
-				return runtimepipeline.WorkflowInstance{}, false, err
-			}
-			keys[strings.TrimSpace(key)] = struct{}{}
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return runtimepipeline.WorkflowInstance{}, false, err
-		}
-		rows.Close()
-	}
-	instances := make([]runtimepipeline.WorkflowInstance, 0, len(keys))
-	for key := range keys {
-		row, found, err := workflow.Load(catalogRuntimeContext(), key)
-		if err != nil {
-			return runtimepipeline.WorkflowInstance{}, false, err
-		}
-		if found {
-			instances = append(instances, row)
-		}
+	instances, err := workflow.ListWorkflowInstances(catalogRuntimeContext())
+	if err != nil {
+		return runtimepipeline.WorkflowInstance{}, false, err
 	}
 	for _, row := range instances {
 		if matchCausal(row) && matchFlow(row) {

@@ -38,6 +38,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -720,7 +721,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	requireInboundPostCommitSnapshot(t, requireInboundBusEvent(t, ch, "Telegram PostgreSQL post-commit dispatch"), inboundPublicationEvent(t, record, eventID))
 	waitForInboundBusQuiescence(t, bus)
 
-	eventtestsql.CorruptEventStore(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventtestsql.EventCorruptionClaim{
+	eventtestsql.CorruptEventStore(t, ctx, db, authoractivityfixture.DialectPostgres, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.duplicate_integrity",
 		Reason:    "prove inbound duplicate comparison rejects a schema-valid durable payload conflict",
 	}, "", `UPDATE events SET payload = '{"corrupt":true}'::jsonb WHERE event_id = $1::uuid`, eventID)
@@ -730,7 +731,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 		t.Fatalf("corrupt duplicate status = %d, want 503 body=%s", duplicate.Code, duplicate.Body.String())
 	}
 	requireNoInboundBusEvent(t, ch, "corrupt Telegram PostgreSQL duplicate")
-	eventtestsql.RequireEventRowCount(t, ctx, db, runtimeauthoractivity.DialectPostgres, eventID, 1)
+	eventtestsql.RequireEventRowCount(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, 1)
 }
 
 func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
@@ -789,7 +790,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	requireInboundPostCommitSnapshot(t, requireInboundBusEvent(t, ch, "Telegram SQLite post-commit dispatch"), inboundPublicationEvent(t, record, eventID))
 	waitForInboundBusQuiescence(t, bus)
 
-	eventtestsql.CorruptEventStore(t, ctx, sqliteStore.DB, runtimeauthoractivity.DialectSQLite, eventtestsql.EventCorruptionClaim{
+	eventtestsql.CorruptEventStore(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite, eventtestsql.EventCorruptionClaim{
 		Invariant: "store.event_record.duplicate_integrity",
 		Reason:    "prove inbound duplicate comparison rejects a schema-valid durable payload conflict",
 	}, `UPDATE events SET payload = '{"corrupt":true}' WHERE event_id = ?`, "", eventID)
@@ -799,7 +800,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 		t.Fatalf("corrupt duplicate status = %d, want 503 body=%s", duplicate.Code, duplicate.Body.String())
 	}
 	requireNoInboundBusEvent(t, ch, "corrupt Telegram SQLite duplicate")
-	eventtestsql.RequireEventRowCount(t, ctx, sqliteStore.DB, runtimeauthoractivity.DialectSQLite, eventID, 1)
+	eventtestsql.RequireEventRowCount(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite, eventID, 1)
 }
 
 func inboundPublicationEvent(t testing.TB, record runtimeinbound.Record, eventID string) events.Event {
@@ -1094,6 +1095,9 @@ func seedPostgresInboundGatewayRuntime(
 		RunID:  runID,
 	})
 	configBytes, err := json.Marshal(map[string]any{
+		"flow_path":   flowInstance,
+		"instance_id": flowInstance,
+		"storage_ref": flowInstance,
 		"secrets": map[string]any{
 			"webhook_signing": map[string]string{
 				provider: webhookSecret,
@@ -1195,12 +1199,15 @@ func seedSQLiteInboundGatewayRuntime(
 ) {
 	t.Helper()
 	now := time.Now().UTC()
-	storetest.RequireSQLiteRun(t, ctx, sqliteStore.DB, storetest.RunFixture{
+	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{
 		Origin:    boundedInboundStandingOrigin(t, provider),
 		RunID:     runID,
 		StartedAt: now,
 	})
 	configBytes, err := json.Marshal(map[string]any{
+		"flow_path":   flowInstance,
+		"instance_id": flowInstance,
+		"storage_ref": flowInstance,
 		"secrets": map[string]any{
 			"webhook_signing": map[string]string{
 				provider: webhookSecret,
@@ -1210,13 +1217,13 @@ func seedSQLiteInboundGatewayRuntime(
 	if err != nil {
 		t.Fatalf("marshal sqlite flow config: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
+	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
 		VALUES (?, ?, 'static', ?, 'active', ?)
 	`, flowInstance, boundedProviderFlowID, string(configBytes), now); err != nil {
 		t.Fatalf("seed sqlite flow instance: %v", err)
 	}
-	if _, err := sqliteStore.DB.ExecContext(ctx, `
+	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
@@ -1368,7 +1375,7 @@ func countPostgresInboundProviderEvents(t *testing.T, ctx context.Context, db *s
 func loadSQLiteInboundProviderEventID(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, runID string, entityID string, eventName string, providerEventID string) string {
 	t.Helper()
 	var eventID string
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT event_id
 		FROM events
 		WHERE run_id = ?
@@ -1386,7 +1393,7 @@ func loadSQLiteInboundProviderEventID(t *testing.T, ctx context.Context, sqliteS
 func countSQLiteInboundProviderEvents(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, runID string, entityID string, eventName string, providerEventID string) int {
 	t.Helper()
 	var count int
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM events
 		WHERE run_id = ?
@@ -1402,7 +1409,7 @@ func countSQLiteInboundProviderEvents(t *testing.T, ctx context.Context, sqliteS
 func loadSQLiteInboundProviderEventPayloadField(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, eventID string, field string) string {
 	t.Helper()
 	var value string
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT json_extract(payload, ?)
 		FROM events
 		WHERE event_id = ?
@@ -1415,7 +1422,7 @@ func loadSQLiteInboundProviderEventPayloadField(t *testing.T, ctx context.Contex
 func countSQLiteInboundMarkers(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, providerEventID string, entityID string, provider string) int {
 	t.Helper()
 	var count int
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM events
 		WHERE event_name = 'platform.inbound_recorded'
@@ -1431,7 +1438,7 @@ func countSQLiteInboundMarkers(t *testing.T, ctx context.Context, sqliteStore *s
 func countSQLiteAgentDeliveriesForEvent(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, eventID string, agentID string) int {
 	t.Helper()
 	var count int
-	if err := sqliteStore.DB.QueryRowContext(ctx, `
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM event_deliveries
 		WHERE event_id = ?

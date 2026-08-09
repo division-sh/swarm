@@ -135,7 +135,8 @@ func TestExecutableDeliveryContinuationHasClosedProductionConsumers(t *testing.T
 		t.Fatal(err)
 	}
 	want := map[string]int{
-		"internal/runtime/deliverycontinuation/coordinator.go": 1,
+		"internal/runtime/deliverycontinuation/coordinator.go":                      1,
+		"internal/store/internal/runtimepersistence/facade_forwarders_generated.go": 2,
 	}
 	if len(scanConsumers) != len(want) {
 		t.Fatalf("delivery continuation scan consumers = %#v, want %#v", scanConsumers, want)

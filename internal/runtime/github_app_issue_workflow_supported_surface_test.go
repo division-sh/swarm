@@ -51,7 +51,7 @@ func TestGitHubAppIssueWorkflowConnectorPackRoundTripThroughActivityJournal(t *t
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
-			persistence:   runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+			persistence:   runtimepipeline.NewWorkflowPersistence(pg),
 			runLifecycle:  pg,
 			obligations:   pg.PipelineObligations(),
 			runID:         runID,
@@ -70,16 +70,16 @@ func TestGitHubAppIssueWorkflowConnectorPackRoundTripThroughActivityJournal(t *t
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 		seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "github", "github-webhook-secret", "github-app-issue-workflow-observer")
-		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, sqliteStore.DB, flowInstance, true)
+		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, storetest.Database(sqliteStore), flowInstance, true)
 
 		runGitHubAppIssueWorkflowSurface(t, slackManagedConnectorBackend{
 			name:          "sqlite",
 			ctx:           ctx,
-			db:            sqliteStore.DB,
+			db:            storetest.Database(sqliteStore),
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
-			persistence:   runtimepipeline.NewSQLiteWorkflowPersistence(sqliteStore.DB, sqliteStore),
+			persistence:   runtimepipeline.NewWorkflowPersistence(sqliteStore),
 			runLifecycle:  sqliteStore,
 			obligations:   sqliteStore.PipelineObligations(),
 			runID:         runID,

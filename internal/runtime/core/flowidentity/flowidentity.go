@@ -151,21 +151,6 @@ func EntityID(ref string) string {
 	return uuid.NewSHA1(flowInstanceEntityNamespace, []byte(ref)).String()
 }
 
-func LookupKeys(ref string) []string {
-	ref = normalizeRef(ref)
-	if ref == "" {
-		return nil
-	}
-	keys := make([]string, 0, 2)
-	if parsed, err := uuid.Parse(ref); err == nil {
-		keys = append(keys, parsed.String())
-	}
-	if entityID := EntityID(ref); entityID != "" && !contains(keys, entityID) {
-		keys = append(keys, entityID)
-	}
-	return keys
-}
-
 func LogicalInstanceID(instancePath string) string {
 	instancePath = normalizeRef(instancePath)
 	if instancePath == "" {
@@ -176,8 +161,14 @@ func LogicalInstanceID(instancePath string) string {
 
 func Derive(source semanticview.Source, flowID, instanceID string) Instance {
 	scopeKey := normalizeRef(ScopeKey(source, flowID))
-	instancePath := normalizeRef(InstancePath(source, flowID, instanceID))
 	instanceID = strings.TrimSpace(instanceID)
+	instancePath := normalizeRef(InstancePath(source, flowID, instanceID))
+	if source != nil {
+		if schema, ok := source.FlowSchemaByID(strings.TrimSpace(flowID)); ok && !strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+			instancePath = scopeKey
+			instanceID = LogicalInstanceID(scopeKey)
+		}
+	}
 	entityID := strings.TrimSpace(instanceID)
 	if instancePath != "" {
 		entityID = EntityID(instancePath)
@@ -234,6 +225,17 @@ func StoredRoute(scopeKey, instanceID, instancePath string) Route {
 		InstanceID:   instanceID,
 		InstancePath: instancePath,
 	}
+}
+
+// RouteForInstancePath constructs the canonical semantic lookup key from an
+// already-materialized instance path. A singleton path is its own scope;
+// template paths use the final segment as their discriminator.
+func RouteForInstancePath(instancePath string) Route {
+	instancePath = normalizeRef(instancePath)
+	if instancePath == "" {
+		return Route{}
+	}
+	return StoredRoute(SemanticScope(instancePath), "", instancePath)
 }
 
 func (i Instance) Route() Route {
@@ -332,35 +334,25 @@ func StoredPersisted(
 ) (Persisted, error) {
 	instance := Stored(source, workflowName, instancePath, instanceID, entityID, parentEntityID)
 	storageRef = normalizeRef(storageRef)
-	if instance.InstancePath != "" {
-		if logical := LogicalInstanceID(instance.InstancePath); logical != "" && SemanticScopeFromInstancePath(instance.InstancePath) != "" {
-			if strings.TrimSpace(instance.InstanceID) != "" && strings.TrimSpace(instance.InstanceID) != logical {
-				return Persisted{}, fmt.Errorf("flow identity instance_id %q disagrees with flow_instance_path %q", instance.InstanceID, instance.InstancePath)
-			}
+	if instance.InstancePath == "" {
+		return Persisted{}, fmt.Errorf("persisted flow identity requires an exact instance route")
+	}
+	if logical := LogicalInstanceID(instance.InstancePath); logical != "" && SemanticScopeFromInstancePath(instance.InstancePath) != "" {
+		if strings.TrimSpace(instance.InstanceID) != "" && strings.TrimSpace(instance.InstanceID) != logical {
+			return Persisted{}, fmt.Errorf("flow identity instance_id %q disagrees with flow_instance_path %q", instance.InstanceID, instance.InstancePath)
 		}
 	}
-	if storageRef == "" {
-		switch {
-		case instance.HasStoredPath && instance.InstancePath != "":
-			storageRef = instance.InstancePath
-		case strings.TrimSpace(entityID) != "":
-			storageRef = strings.TrimSpace(entityID)
-		default:
-			storageRef = strings.TrimSpace(instance.InstanceID)
-		}
+	if storageRef != "" && storageRef != instance.InstancePath {
+		return Persisted{}, fmt.Errorf("flow identity storage_ref %q disagrees with canonical instance route %q", storageRef, instance.InstancePath)
 	}
 	return Persisted{
 		Instance:   instance,
-		StorageRef: storageRef,
+		StorageRef: instance.InstancePath,
 	}, nil
 }
 
 func (p Persisted) RowID() string {
-	return EntityID(p.StorageRef)
-}
-
-func (p Persisted) LookupKeys() []string {
-	return LookupKeys(p.StorageRef)
+	return strings.TrimSpace(p.EntityID)
 }
 
 func IsDescendant(scopeKey, instancePath string) bool {
@@ -396,6 +388,10 @@ func OwnedByScope(ownerScope, targetInstancePath string) bool {
 func storedScopeKey(source semanticview.Source, workflowName, instancePath string) string {
 	instancePath = normalizeRef(instancePath)
 	if instancePath != "" {
+		expectedScope := normalizeRef(ScopeKey(source, workflowName))
+		if expectedScope != "" && (instancePath == expectedScope || strings.HasPrefix(instancePath, expectedScope+"/")) {
+			return expectedScope
+		}
 		return SemanticScope(instancePath)
 	}
 	return normalizeRef(ScopeKey(source, workflowName))

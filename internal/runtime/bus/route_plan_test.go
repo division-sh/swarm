@@ -1,38 +1,15 @@
 package bus
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
-	"github.com/google/uuid"
 )
-
-type routeValidationPublishTransaction struct {
-	begun     bool
-	finalized bool
-}
-
-func (*routeValidationPublishTransaction) LoadPreparedPublishEvent(context.Context, string) (events.AdmittedEvent, bool, error) {
-	return events.AdmittedEvent{}, false, nil
-}
-
-func (t *routeValidationPublishTransaction) BeginPreparedPublish(context.Context, PreparedPublishEvent) (EventAppendOutcome, error) {
-	t.begun = true
-	return EventAppendInserted, nil
-}
-
-func (t *routeValidationPublishTransaction) FinalizePreparedPublish(_ context.Context, finalization PreparedPublishFinalization) error {
-	t.finalized = true
-	return finalization.Request().DeliveryReceipt.Record(nil)
-}
 
 func TestRoutePlanDeliveryIntentsCarryTypedProducer(t *testing.T) {
 	routes := []events.DeliveryRoute{{Recipient: events.MustNodeDeliveryRecipient("consumer-node"), Target: events.RouteIdentity{
@@ -136,26 +113,19 @@ func TestRoutePlanRejectsMalformedPendingLifecycleAuthority(t *testing.T) {
 	}
 }
 
-func TestEventBusPreparationRejectsMalformedDurableRouteBeforeFinalization(t *testing.T) {
-	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "input.received", "gateway", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
-	admitted, err := events.AdmitForPublish(evt, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	transaction := &routeValidationPublishTransaction{}
+func TestRoutePlanRejectsMalformedDurableRouteBeforePersistence(t *testing.T) {
 	identity := agentidentitytest.RootRuntime(t, "agent-a", "route-plan-test")
-	ctx := WithCommitPublishTransaction(context.Background(), transaction)
-	_, err = (&EventBus{}).prepareAdmittedPublishInMutation(ctx, admitted, nil, "subscribed", func(context.Context, events.Event) (RoutePlan, error) {
-		return RoutePlan{
-			LiveRecipients:  []RoutePlanLiveRecipient{{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity, PersistAsDelivery: true}},
-			DeliveryIntents: []RoutePlanDeliveryIntent{{Persist: true}},
-		}, nil
-	})
-	if err == nil || !strings.Contains(err.Error(), "validate durable route plan") {
-		t.Fatalf("prepare malformed route error = %v", err)
+	plan := RoutePlan{
+		LiveRecipients: []RoutePlanLiveRecipient{{
+			Recipient:         events.MustAgentDeliveryRecipient("agent-a"),
+			AgentIdentity:     identity,
+			PersistAsDelivery: true,
+		}},
+		DeliveryIntents: []RoutePlanDeliveryIntent{{Persist: true}},
 	}
-	if !transaction.begun || transaction.finalized {
-		t.Fatalf("malformed route transaction = begun:%v finalized:%v", transaction.begun, transaction.finalized)
+	err := plan.ValidatePersistentDeliveries()
+	if err == nil || !strings.Contains(err.Error(), "unsupported subscriber type") {
+		t.Fatalf("malformed route error = %v", err)
 	}
 }
 

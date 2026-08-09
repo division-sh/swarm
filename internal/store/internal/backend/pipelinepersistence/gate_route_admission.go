@@ -1,0 +1,28 @@
+package pipelinepersistence
+
+import (
+	"context"
+	"fmt"
+
+	gaterouteadapter "github.com/division-sh/swarm/internal/store/internal/backend/gateroute"
+)
+
+func (s *PipelinePostgresOwner) RequireGateRouteAdmitted(ctx context.Context, runID string) error {
+	if s == nil || s.backend == nil {
+		return fmt.Errorf("postgres store is required")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return gaterouteadapter.RequirePostgres(ctx, s.backend, runID)
+}
+
+func (s *PipelineSQLiteOwner) RequireGateRouteAdmitted(ctx context.Context, runID string) error {
+	if s == nil || s.backend == nil {
+		return fmt.Errorf("sqlite runtime store is required")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return gaterouteadapter.RequireSQLite(ctx, s.backend, runID)
+}

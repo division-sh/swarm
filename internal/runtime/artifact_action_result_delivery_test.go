@@ -71,13 +71,12 @@ func TestArtifactRepoCommitResultEventsFlowThroughDurableCallbackDelivery(t *tes
 			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              module,
-				Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+				Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 				RunLifecycle:        pg,
 				PipelineObligations: pg.PipelineObligations(),
 				DeliveryStore:       pg,
-				GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-				FlowRoutes:   bus,
-				ArtifactRoot: t.TempDir(),
+				FlowRoutes:          bus,
+				ArtifactRoot:        t.TempDir(),
 				TestWorkflowNodeHandlerStartHook: func(_ context.Context, nodeID string, evt events.Event) error {
 					if strings.TrimSpace(nodeID) == "repo-scaffold-node" && strings.TrimSpace(string(evt.Type())) == resultEventType {
 						select {
@@ -223,13 +222,12 @@ func TestArtifactRepoCommitResultEventsFlowThroughStaticServiceCallbackDelivery(
 			pc = newExternalRuntimeTestPipelineCoordinator(t, bus, db, pg, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              module,
-				Persistence:         runtimepipeline.NewPostgresWorkflowPersistence(db, pg),
+				Persistence:         runtimepipeline.NewWorkflowPersistence(pg),
 				RunLifecycle:        pg,
 				PipelineObligations: pg.PipelineObligations(),
 				DeliveryStore:       pg,
-				GatePublisher:       bus, DirectDecisionPublisher: bus, DeliveryRuntime: bus,
-				FlowRoutes:   bus,
-				ArtifactRoot: t.TempDir(),
+				FlowRoutes:          bus,
+				ArtifactRoot:        t.TempDir(),
 				TestWorkflowNodeHandlerStartHook: func(_ context.Context, nodeID string, evt events.Event) error {
 					if strings.TrimSpace(nodeID) == "repo-scaffold-node" && strings.TrimSpace(string(evt.Type())) == resultEventType {
 						select {
@@ -299,16 +297,18 @@ const artifactActionResultEntityID = "22222222-2222-4222-8222-222222222222"
 func artifactActionResultWorkflowInstance() runtimepipeline.WorkflowInstance {
 	enteredAt := time.Now().UTC()
 	fields := map[string]any{
+		"entity_id":        artifactActionResultEntityID,
 		"repo_id":          "11111111-1111-1111-1111-111111111111",
 		"namespace":        "tenant-alpha",
 		"partition_key":    "project-42",
 		"display_slug":     "Demo Artifact",
 		"source_record_id": "record-123",
 		"flow_path":        "repo-scaffold/inst-1",
+		"instance_id":      "inst-1",
 	}
 	return runtimepipeline.WorkflowInstance{
-		InstanceID:      artifactActionResultEntityID,
-		StorageRef:      artifactActionResultEntityID,
+		InstanceID:      "inst-1",
+		StorageRef:      "repo-scaffold/inst-1",
 		WorkflowName:    "repo-scaffold",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "ready",
@@ -320,7 +320,10 @@ func artifactActionResultWorkflowInstance() runtimepipeline.WorkflowInstance {
 
 func artifactActionResultStaticWorkflowInstance() runtimepipeline.WorkflowInstance {
 	instance := artifactActionResultWorkflowInstance()
-	delete(instance.Metadata, "flow_path")
+	instance.InstanceID = "repo-scaffold"
+	instance.StorageRef = "repo-scaffold"
+	instance.Metadata["flow_path"] = "repo-scaffold"
+	instance.Metadata["instance_id"] = "repo-scaffold"
 	return instance
 }
 

@@ -18,6 +18,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -263,10 +264,10 @@ func TestSQLObservabilityReader_EventIdentityDoesNotPromotePayloadEntity(t *test
 	canonicalEventID := uuid.NewString()
 	base := time.Unix(1700001200, 0).UTC()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base})
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 		payloadOnlyEventID, runID, "task.payload_only", eventtest.Producer(events.EventProducerExternal, "agent-a"),
 		[]byte(`{"entity_id":"`+targetEntityID+`","marker":"payload-only"}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, base)
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 		canonicalEventID, runID, "task.canonical_entity", eventtest.Producer(events.EventProducerExternal, "agent-b"),
 		[]byte(`{"entity_id":"payload-business-value","marker":"canonical"}`),
 		events.EventEnvelope{EntityID: targetEntityID, Scope: events.EventScopeEntity}, base.Add(time.Second))
@@ -377,7 +378,7 @@ func TestSQLObservabilityReader_ListRuntimeLogs_ProjectsDeliveryLifecycleFields(
 				"retry_count":` + fmt.Sprintf("%d", retryCount) + `
 			}
 		}`
-		storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+		storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 			uuid.NewString(), "runtime", []byte(payload), createdAt)
 	}
 
@@ -413,7 +414,7 @@ func TestSQLObservabilityReader_ListRuntimeLogs_FailsClosedOnMalformedCanonicalP
 		"message":"malformed runtime log",
 		"details":"not-an-object"
 	}`
-	storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+	storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 		uuid.NewString(), "runtime", []byte(payload), time.Now().UTC())
 
 	_, err := reader.ListRuntimeLogs(ctx, RuntimeLogFilter{}, 10)
@@ -430,7 +431,7 @@ func TestSQLObservabilityReader_ListIncidents_UsesCanonicalRuntimeLogPayloads(t 
 	insertRuntimeLog := func(component, action, agentID string, createdAt time.Time) {
 		t.Helper()
 		payload := canonicalRuntimeLogTestPayload(t, component, action, "retry_exhausted", "runtime incident", agentID)
-		storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+		storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 			uuid.NewString(), "runtime", []byte(payload), createdAt)
 	}
 
@@ -465,7 +466,7 @@ func TestSQLObservabilityReader_ListIncidents_FailsClosedOnMissingCanonicalCompo
 	ctx := context.Background()
 
 	payload := canonicalRuntimeLogTestPayload(t, "", "request_failed", "retry_exhausted", "incomplete runtime incident", "")
-	storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+	storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 		uuid.NewString(), "runtime", []byte(payload), time.Now().UTC())
 
 	_, err := reader.ListIncidents(ctx, IncidentFilter{SinceHours: 24})
@@ -487,7 +488,7 @@ func TestSQLObservabilityReader_ListIncidents_IgnoresErrorLogsWithoutCanonicalFa
 			"action":"fallback_case"
 		}
 	}`
-	storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+	storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 		uuid.NewString(), "runtime", []byte(payload), time.Now().UTC())
 
 	rows, err := reader.ListIncidents(ctx, IncidentFilter{SinceHours: 24})
@@ -508,7 +509,7 @@ func TestSQLObservabilityReader_ListIncidents_SortsByRawLastSeenBeforeLimit(t *t
 	insertRuntimeLog := func(code, message string, createdAt time.Time) {
 		t.Helper()
 		payload := canonicalRuntimeLogTestPayload(t, "diagnostics", "same_second_order", code, message, "")
-		storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, runtimeauthoractivity.DialectPostgres,
+		storetest.InsertDiagnosticDirectEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
 			uuid.NewString(), "runtime", []byte(payload), createdAt)
 	}
 

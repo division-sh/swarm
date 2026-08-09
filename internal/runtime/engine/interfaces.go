@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -39,9 +40,15 @@ type SemanticSourceProvider interface {
 	SemanticSource() semanticview.Source
 }
 
+type StateAddress struct {
+	FlowID   identity.FlowID
+	Route    runtimeflowidentity.Route
+	EntityID identity.EntityID
+}
+
 type StateRepository interface {
-	LoadState(ctx context.Context, entityID identity.EntityID) (StateSnapshot, bool, error)
-	SaveState(ctx context.Context, entityID identity.EntityID, mutation StateMutation) error
+	LoadState(ctx context.Context, address StateAddress) (StateSnapshot, bool, error)
+	SaveState(ctx context.Context, address StateAddress, mutation StateMutation) error
 }
 
 type EmitPersistenceFieldPrerequisite struct {
@@ -55,27 +62,50 @@ type EmitPersistencePrerequisites struct {
 }
 
 type EmitPersistenceVerifier interface {
-	VerifyEmitPersistence(ctx context.Context, entityID identity.EntityID, prerequisites EmitPersistencePrerequisites) error
+	VerifyEmitPersistence(ctx context.Context, address StateAddress, prerequisites EmitPersistencePrerequisites) error
 }
 
-type Tx interface {
-	Context() context.Context
+type EngineMutation struct {
+	Address           StateAddress
+	State             StateMutation
+	LifecycleEffects  []runtimeworkflowlifecycle.Effect
+	ActivityIntents   []ActivityIntent
+	EmitIntents       []EmitIntent
+	EmitPrerequisites EmitPersistencePrerequisites
 }
 
-type TransactionRunner interface {
-	Run(ctx context.Context, fn func(Tx) error) error
+// DurablePublicationPlan is an immutable, already-admitted publication plan.
+// The engine carries it into the selected-store commit without learning the
+// event bus's persistence representation or acquiring transaction authority.
+type DurablePublicationPlan interface {
+	DurablePublicationEventID() string
+	ValidateDurablePublicationPlan() error
+}
+
+// CommittedDurablePublication is exact post-commit evidence for one planned
+// publication. Runtime dispatch consumes it only after the owning mutation has
+// committed successfully.
+type CommittedDurablePublication interface {
+	CommittedDurablePublicationEventID() string
+	CommittedDurablePublicationIntent() EmitIntent
+	ValidateCommittedDurablePublication() error
+}
+
+type CommittedEngineMutation struct {
+	ActivityIntents []ActivityIntent
+	EmitIntents     []EmitIntent
+}
+
+type EngineMutationOwner interface {
+	CommitEngineMutation(ctx context.Context, mutation EngineMutation) (CommittedEngineMutation, error)
 }
 
 type EntityLocker interface {
 	WithEntityLock(ctx context.Context, entityID identity.EntityID, fn func(context.Context) error) error
 }
 
-type OutboxWriter interface {
-	WriteOutbox(ctx context.Context, intents []EmitIntent) error
-}
-
 type WorkflowLifecycleEffectOwner interface {
-	AcceptedEventEffect(entityID identity.EntityID, event events.Event, fromState, toState string) (runtimeworkflowlifecycle.Effect, error)
+	AcceptedEventEffect(route runtimeflowidentity.Route, entityID identity.EntityID, event events.Event, fromState, toState string) (runtimeworkflowlifecycle.Effect, error)
 	ApplyWorkflowLifecycleEffects(ctx context.Context, effects []runtimeworkflowlifecycle.Effect) error
 }
 
@@ -107,8 +137,14 @@ type ActionRegistry interface {
 	Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool)
 }
 
+type ActionExecution struct {
+	Handled     bool
+	EmitIntents []EmitIntent
+	State       *StateMutation
+}
+
 type ActionRunner interface {
-	ExecuteAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimeregistry.ActionInstruction, execCtx ExecutionContext) (bool, error)
+	ExecuteAction(ctx context.Context, action runtimecontracts.ActionSpec, entry runtimeregistry.ActionInstruction, execCtx ExecutionContext) (ActionExecution, error)
 }
 
 type PayloadShaper interface {
@@ -122,13 +158,10 @@ type TransitionValidator interface {
 type RuntimeDependencies struct {
 	Source              semanticview.Source
 	StateRepo           StateRepository
-	EmitVerifier        EmitPersistenceVerifier
-	TxRunner            TransactionRunner
+	MutationOwner       EngineMutationOwner
 	Locker              EntityLocker
-	Outbox              OutboxWriter
 	WorkflowLifecycle   WorkflowLifecycleEffectOwner
 	Dispatcher          PostCommitDispatcher
-	ActivityIntents     ActivityIntentWriter
 	ActivityDispatcher  ActivityDispatcher
 	GuardRegistry       GuardRegistry
 	GuardRunner         GuardRunner

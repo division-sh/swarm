@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -487,151 +486,6 @@ func (r SourceRevisionRequest) Validate() error {
 	return nil
 }
 
-// Mutation is the transaction-bound lifecycle authority. Concrete selected
-// stores bind one private adapter to a named mutation context; runtime
-// consumers never receive SQL, a dialect switch, or a raw status predicate.
-type Mutation interface {
-	RequirePresent(context.Context, string) error
-	RequireActive(context.Context, string) error
-	RequirePresentSource(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
-	RequireActiveSource(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
-	Create(context.Context, CreateRequest) (MutationDisposition, error)
-	TransitionActive(context.Context, ActiveTransitionRequest) (MutationDisposition, error)
-	MarkTerminal(context.Context, TerminalRequest) (Snapshot, MutationDisposition, error)
-	ForkSource(context.Context, ForkSourceRequest) (Snapshot, MutationDisposition, error)
-	ReviseSource(context.Context, SourceRevisionRequest) (MutationDisposition, error)
-	SyncCounters(context.Context, string) error
-}
-
-type mutationContextKey struct{}
-
-func BindMutation(ctx context.Context, mutation Mutation) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if mutation == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, mutationContextKey{}, mutation)
-}
-
-func MutationFromContext(ctx context.Context) (Mutation, bool) {
-	if ctx == nil {
-		return nil, false
-	}
-	mutation, ok := ctx.Value(mutationContextKey{}).(Mutation)
-	return mutation, ok && mutation != nil
-}
-
-func RequireMutation(ctx context.Context) (Mutation, error) {
-	mutation, ok := MutationFromContext(ctx)
-	if !ok {
-		return nil, errors.New("run lifecycle mutation authority is required")
-	}
-	if err := runtimeauthoractivity.Require(ctx); err != nil {
-		return nil, fmt.Errorf("run lifecycle mutation requires author activity ownership: %w", err)
-	}
-	return mutation, nil
-}
-
-func RequirePresent(ctx context.Context, runID string) error {
-	mutation, err := RequireMutation(ctx)
-	if err != nil {
-		return err
-	}
-	return mutation.RequirePresent(ctx, strings.TrimSpace(runID))
-}
-
-func RequireActive(ctx context.Context, runID string) error {
-	mutation, err := RequireMutation(ctx)
-	if err != nil {
-		return err
-	}
-	return mutation.RequireActive(ctx, strings.TrimSpace(runID))
-}
-
-func RequirePresentSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-	mutation, err := RequireMutation(ctx)
-	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
-	}
-	return mutation.RequirePresentSource(ctx, strings.TrimSpace(runID))
-}
-
-func RequireActiveSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-	mutation, err := RequireMutation(ctx)
-	if err != nil {
-		return runtimecorrelation.BundleSourceFact{}, err
-	}
-	return mutation.RequireActiveSource(ctx, strings.TrimSpace(runID))
-}
-
-func Create(ctx context.Context, request CreateRequest) (MutationDisposition, error) {
-	request.StartedAt = CanonicalTimestamp(request.StartedAt)
-	if err := request.Validate(); err != nil {
-		return "", err
-	}
-	mutation, err := RequireMutation(ctx)
-	if err != nil {
-		return "", err
-	}
-	return mutation.Create(ctx, request)
-}
-
-func TransitionActive(ctx context.Context, request ActiveTransitionRequest) (MutationDisposition, error) {
-	if err := request.Validate(); err != nil {
-		return "", err
-	}
-	mutation, err := RequireMutation(ctx)
-	if err != nil {
-		return "", err
-	}
-	return mutation.TransitionActive(ctx, request)
-}
-
-func MarkTerminal(ctx context.Context, request TerminalRequest) (Snapshot, MutationDisposition, error) {
-	request.EndedAt = CanonicalTimestamp(request.EndedAt)
-	if err := request.Validate(); err != nil {
-		return Snapshot{}, "", err
-	}
-	mutation, err := RequireMutation(ctx)
-	if err != nil {
-		return Snapshot{}, "", err
-	}
-	return mutation.MarkTerminal(ctx, request)
-}
-
-func ForkSource(ctx context.Context, request ForkSourceRequest) (Snapshot, MutationDisposition, error) {
-	request.EndedAt = CanonicalTimestamp(request.EndedAt)
-	if err := request.Validate(); err != nil {
-		return Snapshot{}, "", err
-	}
-	mutation, err := RequireMutation(ctx)
-	if err != nil {
-		return Snapshot{}, "", err
-	}
-	return mutation.ForkSource(ctx, request)
-}
-
-func ReviseSource(ctx context.Context, request SourceRevisionRequest) (MutationDisposition, error) {
-	if err := request.Validate(); err != nil {
-		return "", err
-	}
-	mutation, err := RequireMutation(ctx)
-	if err != nil {
-		return "", err
-	}
-	return mutation.ReviseSource(ctx, request)
-}
-
-func SyncCounters(ctx context.Context, runID string) error {
-	mutation, err := RequireMutation(ctx)
-	if err != nil {
-		return err
-	}
-	return mutation.SyncCounters(ctx, strings.TrimSpace(runID))
-}
-
 type Snapshot struct {
 	RunID            string
 	State            State
@@ -984,7 +838,15 @@ type CandidateOwner interface {
 // current named selected-store mutation. SQL, candidate revisions, and
 // post-commit handoff remain private to the selected-store adapter.
 type OperationOwner interface {
+	RequirePresentRun(context.Context, string) error
+	RequireActiveRun(context.Context, string) error
+	RequirePresentRunSource(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
+	RequireActiveRunSource(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
+	CreateRun(context.Context, CreateRequest) (MutationDisposition, error)
 	RequestCompletionCandidate(context.Context, CandidateRequest) (CandidateRequestDisposition, error)
 	TransitionActiveRun(context.Context, ActiveTransitionRequest) (MutationDisposition, error)
 	MarkTerminalRun(context.Context, TerminalRequest) (Snapshot, MutationDisposition, error)
+	ForkRunSource(context.Context, ForkSourceRequest) (Snapshot, MutationDisposition, error)
+	ReviseRunSource(context.Context, SourceRevisionRequest) (MutationDisposition, error)
+	SyncRunCounters(context.Context, string) error
 }

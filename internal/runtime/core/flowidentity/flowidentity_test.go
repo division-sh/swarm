@@ -24,41 +24,16 @@ func TestEntityID_UsesCanonicalRefDerivation(t *testing.T) {
 	}
 }
 
-func TestLookupKeys_UsesCanonicalEntityID(t *testing.T) {
-	cases := []struct {
-		name string
-		ref  string
-		want []string
-	}{
-		{
-			name: "uuid ref",
-			ref:  "11111111-1111-1111-1111-111111111111",
-			want: []string{"11111111-1111-1111-1111-111111111111"},
-		},
-		{
-			name: "bare non-uuid ref",
-			ref:  "child",
-			want: []string{EntityID("child")},
-		},
-		{
-			name: "path ref",
-			ref:  "child/inst-1",
-			want: []string{EntityID("child/inst-1")},
-		},
+func TestPersistedRowIDKeepsEntityFactSeparateFromRouteAddress(t *testing.T) {
+	persisted, err := StoredPersisted(nil, "scout", "scout", "scout", "scout", "11111111-1111-1111-1111-111111111111", "")
+	if err != nil {
+		t.Fatalf("StoredPersisted: %v", err)
 	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := LookupKeys(tc.ref)
-			if len(got) != len(tc.want) {
-				t.Fatalf("LookupKeys(%q) len = %d, want %d (%v)", tc.ref, len(got), len(tc.want), got)
-			}
-			for i := range tc.want {
-				if got[i] != tc.want[i] {
-					t.Fatalf("LookupKeys(%q)[%d] = %q, want %q", tc.ref, i, got[i], tc.want[i])
-				}
-			}
-		})
+	if got := persisted.StorageRef; got != "scout" {
+		t.Fatalf("StorageRef = %q, want scout", got)
+	}
+	if got := persisted.RowID(); got != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("RowID = %q, want exact entity fact", got)
 	}
 }
 
@@ -147,13 +122,13 @@ func TestStoredCoordinates_SeparateScopeFromConcretePath(t *testing.T) {
 	}
 }
 
-func TestStoredPersisted_KeepsStorageRefSeparateFromSemanticIdentity(t *testing.T) {
-	got, err := StoredPersisted(nil, "child", "11111111-1111-1111-1111-111111111111", "", "11111111-1111-1111-1111-111111111111", "", "")
+func TestStoredPersisted_UsesOnlyCanonicalRouteAsStorageRef(t *testing.T) {
+	got, err := StoredPersisted(nil, "child", "child", "", "child", "11111111-1111-1111-1111-111111111111", "")
 	if err != nil {
 		t.Fatalf("StoredPersisted(static): %v", err)
 	}
-	if got.StorageRef != "11111111-1111-1111-1111-111111111111" {
-		t.Fatalf("StorageRef = %q, want preserved uuid storage ref", got.StorageRef)
+	if got.StorageRef != "child" {
+		t.Fatalf("StorageRef = %q, want canonical route", got.StorageRef)
 	}
 	if got.ScopeKey != "child" {
 		t.Fatalf("ScopeKey = %q, want child", got.ScopeKey)
@@ -161,8 +136,16 @@ func TestStoredPersisted_KeepsStorageRefSeparateFromSemanticIdentity(t *testing.
 	if got.InstancePath != "child" {
 		t.Fatalf("InstancePath = %q, want child", got.InstancePath)
 	}
-	if got.InstanceID != "11111111-1111-1111-1111-111111111111" {
-		t.Fatalf("InstanceID = %q, want preserved logical id", got.InstanceID)
+	if got.InstanceID != "child" {
+		t.Fatalf("InstanceID = %q, want canonical singleton discriminator", got.InstanceID)
+	}
+	if got.EntityID != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("EntityID = %q, want independent entity fact", got.EntityID)
+	}
+
+	_, err = StoredPersisted(nil, "child", got.EntityID, "", "child", got.EntityID, "")
+	if err == nil || !strings.Contains(err.Error(), "disagrees with canonical instance route") {
+		t.Fatalf("entity-addressed StoredPersisted error = %v, want canonical route rejection", err)
 	}
 }
 

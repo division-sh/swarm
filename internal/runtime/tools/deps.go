@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -24,17 +25,13 @@ const ScheduleOwnerAgent = runtimepipeline.ScheduleOwnerAgent
 type SchedulePersistence = runtimepipeline.SchedulePersistence
 
 type WorkflowInstanceLoader interface {
-	Load(ctx context.Context, instanceID string) (runtimepipeline.WorkflowInstance, bool, error)
+	Load(ctx context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error)
 }
 
 type EventPublisher interface {
 	Publish(ctx context.Context, evt events.Event) error
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
 	PublishDirectRoutes(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) error
-}
-
-type MutationEventPublisher interface {
-	PublishInMutation(ctx context.Context, evt events.Event) error
 }
 
 type Scheduler interface {
@@ -47,10 +44,9 @@ type Manager interface {
 	SpawnAgentForEntity(entityID string, cfg models.AgentConfig) error
 	TeardownAgentTarget(
 		agentID, flowInstance string,
-		beforeCommit func(models.AgentConfig) error,
-		restoreBeforeCommit func(models.AgentConfig) error,
-	) error
-	ReconfigureAgentTarget(agentID, flowInstance string, cfg models.AgentConfig, onCommitted func(models.AgentConfig) error) error
+		expected *models.AgentConfig,
+	) (models.AgentTargetMutationResult, error)
+	ReconfigureAgentTarget(agentID, flowInstance string, cfg models.AgentConfig, expected *models.AgentConfig) (models.AgentTargetMutationResult, error)
 }
 
 type ManagerProvider func() Manager

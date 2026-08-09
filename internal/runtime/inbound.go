@@ -77,6 +77,29 @@ type InboundGateway struct {
 	credentials             runtimecredentials.Store
 	standingAdmissionMu     sync.Mutex
 	standingAdmissions      map[string]*shutdownAdmission
+	publicationMu           sync.Mutex
+	publicationFlights      map[string]chan struct{}
+}
+
+func (g *InboundGateway) claimPublicationFlight(key string) (<-chan struct{}, bool, func()) {
+	g.publicationMu.Lock()
+	defer g.publicationMu.Unlock()
+	if g.publicationFlights == nil {
+		g.publicationFlights = make(map[string]chan struct{})
+	}
+	if done := g.publicationFlights[key]; done != nil {
+		return done, false, func() {}
+	}
+	done := make(chan struct{})
+	g.publicationFlights[key] = done
+	return done, true, func() {
+		g.publicationMu.Lock()
+		if g.publicationFlights[key] == done {
+			delete(g.publicationFlights, key)
+			close(done)
+		}
+		g.publicationMu.Unlock()
+	}
 }
 
 func (g *InboundGateway) SetAdmissionGuard(begin func(context.Context) (context.Context, func(), bool)) {
@@ -343,12 +366,14 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		InstanceID        string `json:"instance_id"`
 		TargetAlias       string `json:"target_alias"`
 		TargetFlow        string `json:"target_flow_instance"`
+		Generation        int64  `json:"generation"`
 	}{
 		ProjectionVersion: runtimeinbound.RequestSemanticProjectionVersion,
 		Provider:          provider, EntityID: entityID, ProviderEventID: providerEventID,
 		ProviderEventType: admitted.ProviderEventType, SemanticDigest: admitted.SemanticContentDigest,
 		StableServiceID: target.ServiceID, PackageKey: target.PackageKey, FlowID: target.FlowID,
 		InstanceID: target.InstanceID, TargetAlias: target.Alias, TargetFlow: target.FlowInstance,
+		Generation: target.Generation,
 	})
 	if err != nil {
 		http.Error(w, "derive inbound request fingerprint failed", http.StatusInternalServerError)
@@ -364,10 +389,36 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		RequestFingerprint: fingerprint, RequestProjectionVersion: runtimeinbound.RequestSemanticProjectionVersion,
 		StableServiceID: target.ServiceID, PackageKey: target.PackageKey, FlowID: target.FlowID,
 		InstanceID: target.InstanceID, TargetAlias: target.Alias, TargetFlowInstance: target.FlowInstance,
-		ExpectedPublicationSequence: target.PublicationSequence, ResolvedRunID: target.RunID,
+		ExpectedPublicationSequence: target.PublicationSequence, ExpectedGeneration: target.Generation,
+		ResolvedRunID: target.RunID,
 		MarkerEventID: markerEventID, AcknowledgementMode: ackMode,
 		OriginalReceivedAt: now, OriginalUserAgent: r.UserAgent(),
 		OriginalTransportMetadata: mustJSON(map[string]any{"method": r.Method, "content_type": r.Header.Get("Content-Type")}),
+	}
+	publicationFlightKey := strings.Join([]string{provider, entityID, providerEventID}, "\x00")
+	for {
+		done, owner, releaseFlight := g.claimPublicationFlight(publicationFlightKey)
+		if owner {
+			defer releaseFlight()
+			break
+		}
+		select {
+		case <-r.Context().Done():
+			http.Error(w, "publish inbound canceled", http.StatusServiceUnavailable)
+			return
+		case <-done:
+		}
+		if existing, found, loadErr := g.store.LoadInboundPublicationByIdentity(requestCtx, provider, entityID, providerEventID); loadErr != nil {
+			http.Error(w, "read inbound publication failed", http.StatusServiceUnavailable)
+			return
+		} else if found {
+			if existing.RequestProjectionVersion != publicationRequest.RequestProjectionVersion || existing.RequestFingerprint != publicationRequest.RequestFingerprint {
+				http.Error(w, "inbound provider identity conflicts with the committed semantic request", http.StatusConflict)
+				return
+			}
+			writeJSON(w, http.StatusOK, inboundPublicationResponse("duplicate", existing, admitted.ProviderEventType, entityID, entitySlug))
+			return
+		}
 	}
 	pubCtx := runtimebus.WithCurrentRuntimeEpoch(requestCtx)
 	pubCtx, err = g.bus.AdmitBundleSourceFact(pubCtx)
@@ -388,37 +439,43 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	}
 
 	published, evidence, authorProjection, projectionErr := projectInboundPublication(target, admitted, publicationRequest, now)
-	var prepared []runtimebus.PreparedPublish
-	record, err := g.store.RunInboundPublicationMutation(pubCtx, publicationRequest, func(mutation runtimeinbound.Mutation) error {
-		if projectionErr != nil {
-			return projectionErr
-		}
-		mutationCtx := runtimeauthoractivity.WithInboundProjection(mutation.Context(), authorProjection)
-		var prepareErr error
-		prepared, prepareErr = g.bus.PrepareInboundDeliveryBatchInMutation(mutationCtx, runtimebus.InboundDeliveryBatch{
-			Provider:          provider,
-			AuthorSubjectType: authorProjection.SubjectType,
-			AuthorSubjectID:   authorProjection.SubjectID,
-			AuthorSummary:     authorProjection.Summary,
-			Events:            published,
-		})
-		if prepareErr != nil {
-			return prepareErr
-		}
-		finalization := runtimeinbound.Finalization{EvidenceEvent: evidence, Events: make([]runtimeinbound.EventFinalization, len(prepared))}
-		for index := range prepared {
-			manifest, _, _, manifestErr := runtimeinbound.CanonicalRecipientManifest(prepared[index].DeliveryRoutes())
-			if manifestErr != nil {
-				return manifestErr
-			}
-			finalization.Events[index] = runtimeinbound.EventFinalization{
-				Ordinal: index, Event: prepared[index].Event, Kind: published[index].Kind,
-				Authorization: published[index].Authorization, RecipientManifest: manifest,
-			}
-		}
-		return mutation.FinalizeInboundPublication(mutationCtx, finalization)
+	if projectionErr != nil {
+		writeInboundPublicationError(w, projectionErr)
+		return
+	}
+	batchPlan, err := g.bus.PrepareInboundDeliveryBatch(pubCtx, runtimebus.InboundDeliveryBatch{
+		Provider:          provider,
+		AuthorSubjectType: authorProjection.SubjectType,
+		AuthorSubjectID:   authorProjection.SubjectID,
+		AuthorSummary:     authorProjection.Summary,
+		Events:            published,
 	})
 	if err != nil {
+		http.Error(w, "publish inbound failed: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	prepared := batchPlan.PreparedPublications()
+	plannedEvents := batchPlan.Events()
+	finalization := runtimeinbound.Finalization{EvidenceEvent: evidence, Events: make([]runtimeinbound.EventFinalization, len(prepared))}
+	for index := range prepared {
+		manifest, _, _, manifestErr := runtimeinbound.CanonicalRecipientManifest(prepared[index].DeliveryRoutes())
+		if manifestErr != nil {
+			_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+			http.Error(w, "publish inbound failed", http.StatusServiceUnavailable)
+			return
+		}
+		finalization.Events[index] = runtimeinbound.EventFinalization{
+			Ordinal: index, Event: prepared[index].Event, Kind: plannedEvents[index].Kind,
+			Authorization: plannedEvents[index].Authorization, RecipientManifest: manifest,
+		}
+	}
+	commitResult, err := g.store.CommitInboundPublication(pubCtx, runtimeinbound.CommitCommand{
+		Request: publicationRequest, Finalization: finalization,
+		Publications: batchPlan.CommitCommands(), AuthorProjection: authorProjection,
+	})
+	record := commitResult.Record
+	if err != nil {
+		err = errors.Join(err, g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan))
 		if g.logger != nil {
 			handleRuntimeLogPersistenceError("inbound-gateway", "publish_failed", g.logger.Error(requestCtx, "inbound-gateway", "publish_failed", map[string]any{
 				"provider": provider, "entity_id": entityID, "provider_event_id": providerEventID,
@@ -439,7 +496,19 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if !record.Created {
+		_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
 		writeJSON(w, http.StatusOK, inboundPublicationResponse("duplicate", record, admitted.ProviderEventType, entityID, entitySlug))
+		return
+	}
+	prepared, err = g.bus.ApplyInboundDeliveryCommit(pubCtx, batchPlan, commitResult.Publications)
+	if err != nil {
+		_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+		if g.logger != nil {
+			handleRuntimeLogPersistenceError("inbound-gateway", "invalid_commit_evidence", g.logger.Error(requestCtx, "inbound-gateway", "invalid_commit_evidence", map[string]any{
+				"provider": provider, "entity_id": entityID, "provider_event_id": providerEventID,
+			}, err))
+		}
+		http.Error(w, "committed inbound publication evidence is invalid", http.StatusServiceUnavailable)
 		return
 	}
 	if len(prepared) != len(record.Events) {
@@ -453,21 +522,48 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		}
 	}
 	if record.AcknowledgementMode == runtimeinbound.AcknowledgementDurableBeforeDispatch {
-		for _, item := range prepared {
+		for index, item := range prepared {
 			if err := g.bus.DispatchPreparedPublishAsync(pubCtx, item); err != nil {
+				for _, pending := range prepared[index+1:] {
+					_ = g.bus.AbandonPreparedPublish(context.WithoutCancel(pubCtx), pending)
+				}
+				if g.logger != nil {
+					handleRuntimeLogPersistenceError("inbound-gateway", "dispatch_failed", g.logger.Error(requestCtx, "inbound-gateway", "dispatch_failed", map[string]any{
+						"provider": provider, "entity_id": entityID, "provider_event_id": providerEventID,
+					}, err))
+				}
 				http.Error(w, "publish inbound failed", http.StatusServiceUnavailable)
 				return
 			}
 		}
 	} else {
-		for _, item := range prepared {
+		for index, item := range prepared {
 			if err := g.bus.DispatchPreparedPublish(pubCtx, item); err != nil {
+				for _, pending := range prepared[index+1:] {
+					_ = g.bus.AbandonPreparedPublish(context.WithoutCancel(pubCtx), pending)
+				}
+				if g.logger != nil {
+					handleRuntimeLogPersistenceError("inbound-gateway", "dispatch_failed", g.logger.Error(requestCtx, "inbound-gateway", "dispatch_failed", map[string]any{
+						"provider": provider, "entity_id": entityID, "provider_event_id": providerEventID,
+					}, err))
+				}
 				http.Error(w, "publish inbound failed", http.StatusServiceUnavailable)
 				return
 			}
 		}
 	}
 	writeJSON(w, http.StatusAccepted, inboundPublicationResponse("accepted", record, admitted.ProviderEventType, entityID, entitySlug))
+}
+
+func writeInboundPublicationError(w http.ResponseWriter, err error) {
+	status := http.StatusServiceUnavailable
+	message := "publish inbound failed"
+	var providerErr providertriggers.Error
+	if errors.As(err, &providerErr) {
+		status = providerErr.Status
+		message = providerErr.Error()
+	}
+	http.Error(w, message, status)
 }
 
 func projectInboundPublication(target InboundTarget, admitted providertriggers.AdmittedRequest, request runtimeinbound.Request, now time.Time) ([]runtimebus.InboundDeliveryEvent, events.Event, runtimeauthoractivity.InboundProjection, error) {

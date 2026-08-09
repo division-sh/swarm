@@ -460,7 +460,7 @@ func validateReleaseDockerMounts(root string, raw []string, required map[string]
 		switch target {
 		case "/data", "/opt/swarm/contracts":
 			wantSource := requiredProjectMounts[target]
-			if mode != "ro" || !filepath.IsAbs(source) || filepath.Clean(source) != wantSource {
+			if mode != "ro" || !filepath.IsAbs(source) || !releasePathsEqual(source, wantSource) {
 				return fmt.Errorf("project mount %q does not match %s:%s:ro", mount, wantSource, target)
 			}
 		default:
@@ -485,6 +485,15 @@ func validateReleaseDockerMounts(root string, raw []string, required map[string]
 		}
 	}
 	return nil
+}
+
+func releasePathsEqual(left, right string) bool {
+	if filepath.Clean(left) == filepath.Clean(right) {
+		return true
+	}
+	resolvedLeft, leftErr := filepath.EvalSymlinks(left)
+	resolvedRight, rightErr := filepath.EvalSymlinks(right)
+	return leftErr == nil && rightErr == nil && filepath.Clean(resolvedLeft) == filepath.Clean(resolvedRight)
 }
 
 func validateReleaseDockerLabels(create releaseDockerCreate, kind, resetEligible, source, scope string) error {

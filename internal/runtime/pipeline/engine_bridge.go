@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -50,6 +51,7 @@ type contractHandlerExecutionResult struct {
 	GuardsEvaluated           []string
 	PreviewMetadata           map[string]any
 	InitialValuesMaterialized map[string]any
+	Emissions                 []events.Event
 	Handled                   bool
 }
 
@@ -105,7 +107,7 @@ func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Conte
 	if strings.TrimSpace(triggerCtx.HandlerEventKey) == "" {
 		triggerCtx.HandlerEventKey = handlerEventKey
 	}
-	return pc.executeNodeContractHandler(ctx, nodeID, handler, triggerCtx, false)
+	return pc.executeNodeContractHandler(ctx, nodeID, handler, triggerCtx, false, true)
 }
 
 func isJoinLifecycleEvent(eventType events.EventType) bool {
@@ -134,15 +136,17 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	handler runtimecontracts.SystemNodeEventHandler,
 	triggerCtx workflowTriggerContext,
 	preview bool,
+	deferCommittedDispatchOption ...bool,
 ) (contractHandlerExecutionResult, error) {
+	deferCommittedDispatch := len(deferCommittedDispatchOption) > 0 && deferCommittedDispatchOption[0]
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" {
 		return contractHandlerExecutionResult{}, nil
 	}
 	flowID := workflowNodeFlowID(pc.SemanticSource(), nodeID)
 	entityID := strings.TrimSpace(firstNonEmptyString(
-		workflowEventEntityID(triggerCtx.Event),
 		triggerCtx.State.EntityID,
+		workflowEventEntityID(triggerCtx.Event),
 	))
 	source := pc.SemanticSource()
 	if handler.SelectEntity != nil && !handler.SelectEntity.Empty() {
@@ -171,7 +175,20 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	entityID, triggerCtx.Event = resolvedEntityID, resolvedEvent
 	if !handler.CreateEntity && entityID != "" && originalStateEntityID != "" && originalStateEntityID != entityID {
-		triggerCtx.State = pc.currentWorkflowState(ctx, entityID)
+		stateRoute, err := canonicalHandlerRoute(
+			source,
+			flowID,
+			firstNonEmptyString(asString(triggerCtx.State.Metadata["flow_path"]), triggerCtx.Event.FlowInstance()),
+			triggerCtx.Event,
+		)
+		if err != nil {
+			return contractHandlerExecutionResult{}, err
+		}
+		currentState, err := pc.currentWorkflowState(ctx, stateRoute, entityID)
+		if err != nil {
+			return contractHandlerExecutionResult{}, err
+		}
+		triggerCtx.State = currentState
 		if strings.TrimSpace(triggerCtx.State.EntityID) == "" {
 			triggerCtx.State.EntityID = entityID
 		}
@@ -194,26 +211,18 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			Handled:         true,
 		}, nil
 	}
-	var (
-		parentEventCollector *[]events.Event
-		collectLocally       bool
-		collectedIntents     *[]runtimeengine.EmitIntent
-	)
-	ctx, parentEventCollector, collectedIntents, collectLocally = pipelineCollectorExecutionContext(ctx)
 	ctx = withPipelineFlowScope(ctx, flowID)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, triggerCtx.Event)
 	ctx = runtimecorrelation.WithHandlerID(ctx, strings.TrimSpace(nodeID)+":"+strings.TrimSpace(string(triggerCtx.Event.Type())))
+	initialFieldValues := map[string]any(nil)
 	if handler.CreateEntity {
-		ctx = withWorkflowCreateEntityInitialValues(ctx, workflowEntitySchemaInitialValues(source, flowID))
+		initialFieldValues = workflowEntitySchemaInitialValues(source, flowID)
 	}
 	handlerEventKey := strings.TrimSpace(triggerCtx.HandlerEventKey)
 	if handlerEventKey == "" {
 		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, source, nodeID, triggerCtx.Event)
 	}
 	deps := coordinatorEngineDependencies(pc)
-	if collectLocally {
-		deps.Outbox = noOpEngineOutbox{}
-	}
 	exec, err := runtimeengine.NewExecutor(deps, newCoordinatorEngineEvaluator(pc))
 	if err != nil {
 		return contractHandlerExecutionResult{}, fmt.Errorf("build runtime engine: %w", err)
@@ -226,21 +235,33 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
+	stateRoute, err := canonicalHandlerRoute(
+		source,
+		flowID,
+		firstNonEmptyString(asString(triggerCtx.State.Metadata["flow_path"]), triggerCtx.Event.FlowInstance()),
+		triggerCtx.Event,
+	)
+	if err != nil {
+		return contractHandlerExecutionResult{}, err
+	}
 	producerSource, err := workflowNodeProducerSource(ctx, source, nodeID, flowID, entityID, triggerCtx.Event.RoutingSource())
 	if err != nil {
 		return contractHandlerExecutionResult{}, fmt.Errorf("admit workflow node producer source: %w", err)
 	}
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
-		EntityID:        identity.NormalizeEntityID(entityID),
-		NodeID:          identity.NormalizeNodeID(nodeID),
-		FlowID:          identity.NormalizeFlowID(flowID),
-		Event:           triggerCtx.Event,
-		ProducerSource:  producerSource,
-		HandlerEventKey: handlerEventKey,
-		ChainDepth:      triggerCtx.Event.ChainDepth(),
-		Handler:         handler,
-		Preview:         preview,
-		State:           stateSnapshot,
+		EntityID:               identity.NormalizeEntityID(entityID),
+		NodeID:                 identity.NormalizeNodeID(nodeID),
+		FlowID:                 identity.NormalizeFlowID(flowID),
+		Route:                  stateRoute,
+		Event:                  triggerCtx.Event,
+		ProducerSource:         producerSource,
+		HandlerEventKey:        handlerEventKey,
+		ChainDepth:             triggerCtx.Event.ChainDepth(),
+		Handler:                handler,
+		Preview:                preview,
+		State:                  stateSnapshot,
+		InitialFieldValues:     initialFieldValues,
+		DeferCommittedDispatch: deferCommittedDispatch,
 	})
 	if !preview {
 		logComputeModuleReplayEvidence(ctx, pc.bus, nodeID, triggerCtx.Event, result.ComputeModuleTraces)
@@ -257,15 +278,27 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if handler.CreateEntity {
 		initialValuesMaterialized = workflowEntitySchemaInitialValues(source, flowID)
 	}
-	if !preview {
-		pc.recordInterceptedEmitDeadLetters(ctx, triggerCtx.Event, nodeID, handlerOutcomeFromExecutionResult(result))
+	emissions := &pipelineEmissionPlan{}
+	if deferCommittedDispatch {
+		emissions.appendIntents(result.EmitIntents)
+		immediateActivities := make([]runtimeengine.ActivityIntent, 0, len(result.ActivityIntents))
+		for _, intent := range result.ActivityIntents {
+			if intent.Normalized().ApprovalDecision == "" {
+				immediateActivities = append(immediateActivities, intent)
+			}
+		}
+		activityEmissions, err := activityRequestEmitIntents(immediateActivities)
+		if err != nil {
+			return contractHandlerExecutionResult{}, err
+		}
+		emissions.appendIntents(activityEmissions)
 	}
-	if collectLocally {
-		flushCollectedPipelineEmitIntents(parentEventCollector, collectedIntents)
+	if !preview {
+		pc.recordInterceptedEmitDeadLetters(ctx, triggerCtx.Event, nodeID, handlerOutcomeFromExecutionResult(result), emissionPlanWhen(deferCommittedDispatch, emissions))
 	}
 	handled := runtimeengine.IsHandledOutcome(result.Status)
 	if result.Status == runtimeengine.OutcomeUnknown {
-		return contractHandlerExecutionResult{Handled: handled}, nil
+		return contractHandlerExecutionResult{Handled: handled, Emissions: emissions.immutableEvents()}, nil
 	}
 	outcome := handlerOutcomeFromExecutionResult(result)
 	plan := handlerExecutionPlanFromNodeHandler(nodeID, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
@@ -287,8 +320,16 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		GuardsEvaluated:           append([]string{}, outcome.GuardsEvaluated...),
 		PreviewMetadata:           previewMetadata,
 		InitialValuesMaterialized: initialValuesMaterialized,
+		Emissions:                 emissions.immutableEvents(),
 		Handled:                   handled,
 	}, nil
+}
+
+func emissionPlanWhen(enabled bool, plan *pipelineEmissionPlan) *pipelineEmissionPlan {
+	if !enabled {
+		return nil
+	}
+	return plan
 }
 
 func logLoopExecution(ctx context.Context, bus Bus, nodeID string, evt events.Event, trace *runtimeengine.LoopExecutionTrace) {
@@ -315,6 +356,23 @@ func resolveHandlerEntityIDForFlow(
 		sourceEntityID := strings.TrimSpace(firstNonEmptyString(entityID, evt.EntityID()))
 		instanceID := canonicalHandlerInstanceID(flowID, evt)
 		instance := deriveFlowInstanceIdentity(source, flowID, instanceID)
+		if source != nil && strings.TrimSpace(flowID) == strings.TrimSpace(source.WorkflowName()) {
+			route, err := canonicalHandlerRoute(source, flowID, "", evt)
+			if err != nil {
+				return "", evt, err
+			}
+			instance = FlowInstanceIdentity{Instance: runtimeflowidentity.Instance{
+				TemplateID:    strings.TrimSpace(flowID),
+				ScopeKey:      route.ScopeKey,
+				InstanceID:    route.InstanceID,
+				InstancePath:  route.InstancePath,
+				EntityID:      runtimeflowidentity.EntityID(route.InstancePath),
+				HasStoredPath: true,
+			}}
+		}
+		if !instance.Route().Valid() {
+			return "", evt, fmt.Errorf("create_entity requires an exact workflow instance route")
+		}
 		instance.ParentEntityID = sourceEntityID
 		entityID = instance.EntityID
 		if state != nil {
@@ -323,14 +381,31 @@ func resolveHandlerEntityIDForFlow(
 			state.Status = ""
 			state.Metadata = workflowCreateEntityMetadata(source, flowID, instance)
 		}
-		return entityID, evt, nil
+		envelope := events.EnvelopeForFlowInstance(evt.NormalizedEnvelope(), instance.InstancePath)
+		resolved, err := events.ResolveEnvelope(evt, envelope)
+		if err != nil {
+			return "", evt, fmt.Errorf("carry created workflow instance route: %w", err)
+		}
+		return entityID, resolved, nil
 	}
 	var err error
 	entityID, evt, err = ensureHandlerEntityID(source, flowID, handler, entityID, evt)
 	if err != nil {
 		return "", evt, err
 	}
-	prepareHandlerMaterializationState(source, flowID, handler, state)
+	if handlerMaterializesEntity(source, flowID, handler) {
+		statePath := ""
+		if state != nil {
+			statePath = asString(state.Metadata["flow_path"])
+		}
+		route, routeErr := canonicalHandlerRoute(source, flowID, statePath, evt)
+		if routeErr != nil {
+			return "", evt, routeErr
+		}
+		if err := prepareHandlerMaterializationState(source, flowID, handler, route, entityID, state); err != nil {
+			return "", evt, err
+		}
+	}
 	if state != nil && strings.TrimSpace(state.EntityID) == "" {
 		state.EntityID = entityID
 	}

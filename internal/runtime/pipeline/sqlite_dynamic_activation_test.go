@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 	ctx := sqliteExactOnceRunContext(t, db)
 	pc, bus := newSQLiteDynamicActivationCoordinator(t, db, workflowStore)
 	parentEntityID := uuid.NewString()
+	parentPath := runtimecorrelation.RunIDFromContext(ctx)
 
 	parent := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),
@@ -35,23 +37,33 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 		0,
 		runtimecorrelation.RunIDFromContext(ctx),
 		"",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, parentEntityID), "root/parent"),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, parentEntityID), parentPath),
 		time.Now().UTC(),
 	)
 
 	if err := workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:      parentEntityID,
-		StorageRef:      parentEntityID,
+		InstanceID:      parentPath,
+		StorageRef:      parentPath,
 		WorkflowName:    "root",
 		WorkflowVersion: "v-test",
 		CurrentState:    "pending",
-		Metadata:        map[string]any{"entity_type": "parent"},
-		CreatedAt:       time.Now().UTC(),
-		UpdatedAt:       time.Now().UTC(),
+		Metadata: map[string]any{
+			"entity_id": parentEntityID, "entity_type": "parent",
+			"flow_path": parentPath, "instance_id": parentPath,
+		},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
 	})); err != nil {
 		t.Fatalf("seed parent workflow instance: %v", err)
 	}
 	parentRoute := seedExactOnceEventDelivery(t, pc, ctx, parent, "fanout-node")
+	state, err := pc.currentWorkflowState(runtimecorrelation.WithInboundEvent(ctx, parent), testWorkflowInstanceRoute(parentPath), parentEntityID)
+	if err != nil {
+		t.Fatalf("load parent workflow state: %v", err)
+	}
+	if got := strings.TrimSpace(asString(state.Metadata["flow_path"])); got != parentPath {
+		t.Fatalf("parent workflow state flow_path = %q, want %s", got, parentPath)
+	}
 
 	handled, err := pc.dispatchWorkflowNodeEventResult(withWorkflowNodeDeliveryRoute(ctx, parentRoute), parent)
 	if err != nil {
@@ -120,7 +132,7 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 		DeliveryRuntime:     bus,
 		PipelineObligations: unavailablePipelineTestObligationOwner{},
 		InstanceActivator: func(ctx context.Context, req FlowInstanceActivationRequest) error {
-			return workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+			err := workflowStore.create(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID:      strings.TrimSpace(req.Instance.InstanceID),
 				StorageRef:      strings.TrimSpace(req.Instance.InstancePath),
 				WorkflowName:    strings.TrimSpace(req.Instance.TemplateID),
@@ -138,6 +150,10 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 				CreatedAt: time.Now().UTC(),
 				UpdatedAt: time.Now().UTC(),
 			}))
+			if err != nil {
+				return fmt.Errorf("activate %s entity %s: %w", req.Instance.InstancePath, req.Instance.EntityID, err)
+			}
+			return nil
 		},
 		Module: &previewWorkflowModule{
 			bundle: bundle,
@@ -202,7 +218,7 @@ func sqliteDynamicActivationBundle() *runtimecontracts.WorkflowContractBundle {
 			},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
-			Version: "v-test",
+			Name: "root", Version: "v-test",
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"fanout-node": {
 					"component_scaffold.batch_requested": {
@@ -240,7 +256,7 @@ func sqliteDynamicActivationBundle() *runtimecontracts.WorkflowContractBundle {
 
 func assertSQLiteWorkflowInstancePersisted(t *testing.T, store *workflowInstanceStore, ctx context.Context, storageRef string) {
 	t.Helper()
-	instance, ok, err := store.Load(ctx, storageRef)
+	instance, ok, err := store.Load(ctx, testWorkflowInstanceRoute(storageRef))
 	if err != nil {
 		t.Fatalf("load workflow instance %s: %v", storageRef, err)
 	}

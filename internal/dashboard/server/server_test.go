@@ -317,8 +317,8 @@ type stubBuilderRunStore struct {
 	runControls map[string]string
 }
 
-func (s *stubBuilderRunStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
+func (s *stubBuilderRunStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublish(ctx, command, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.events = append(s.events, req.Event.Event())

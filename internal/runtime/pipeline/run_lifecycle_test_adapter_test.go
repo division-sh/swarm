@@ -18,10 +18,6 @@ type testRunLifecycleMutation struct {
 	dialect workflowStoreDialect
 }
 
-func bindTestRunLifecycleMutation(ctx context.Context, tx *sql.Tx, dialect workflowStoreDialect) context.Context {
-	return runtimerunlifecycle.BindMutation(ctx, testRunLifecycleMutation{tx: tx, dialect: dialect})
-}
-
 func (m testRunLifecycleMutation) RequirePresent(ctx context.Context, runID string) error {
 	_, _, err := m.load(ctx, runID, false)
 	return err
@@ -280,6 +276,50 @@ func (testRunLifecycleMutation) SyncCounters(context.Context, string) error {
 	return nil
 }
 
+func (m testRunLifecycleMutation) RequirePresentRun(ctx context.Context, runID string) error {
+	return m.RequirePresent(ctx, runID)
+}
+
+func (m testRunLifecycleMutation) RequireActiveRun(ctx context.Context, runID string) error {
+	return m.RequireActive(ctx, runID)
+}
+
+func (m testRunLifecycleMutation) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+	return m.RequirePresentSource(ctx, runID)
+}
+
+func (m testRunLifecycleMutation) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
+	return m.RequireActiveSource(ctx, runID)
+}
+
+func (m testRunLifecycleMutation) CreateRun(ctx context.Context, request runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	return m.Create(ctx, request)
+}
+
+func (testRunLifecycleMutation) RequestCompletionCandidate(context.Context, runtimerunlifecycle.CandidateRequest) (runtimerunlifecycle.CandidateRequestDisposition, error) {
+	return "", errors.New("pipeline test lifecycle candidate operation is unavailable")
+}
+
+func (m testRunLifecycleMutation) TransitionActiveRun(ctx context.Context, request runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	return m.TransitionActive(ctx, request)
+}
+
+func (m testRunLifecycleMutation) MarkTerminalRun(ctx context.Context, request runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return m.MarkTerminal(ctx, request)
+}
+
+func (m testRunLifecycleMutation) ForkRunSource(ctx context.Context, request runtimerunlifecycle.ForkSourceRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return m.ForkSource(ctx, request)
+}
+
+func (m testRunLifecycleMutation) ReviseRunSource(ctx context.Context, request runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error) {
+	return m.ReviseSource(ctx, request)
+}
+
+func (m testRunLifecycleMutation) SyncRunCounters(ctx context.Context, runID string) error {
+	return m.SyncCounters(ctx, runID)
+}
+
 func (m testRunLifecycleMutation) loadSnapshot(
 	ctx context.Context,
 	runID string,
@@ -450,8 +490,11 @@ func newPostgresWorkflowInstanceStoreForTest(db *sql.DB) *workflowInstanceStore 
 		db:      db,
 		dialect: workflowStoreDialectPostgres,
 	}
-	store.runtimeMutation = runner
-	store.runLifecycle = &unavailablePipelineTestRunLifecycle{}
+	registerWorkflowPersistenceFixture(store, db, workflowStoreDialectPostgres, runner)
+	store.runLifecycle = runner
+	store.instanceReader = runner
+	store.engineMutations = runner
+	store.initialCommits = runner
 	return store
 }
 

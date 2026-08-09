@@ -24,12 +24,11 @@ func TestNewDeclarativeNode_RequiresExecutor(t *testing.T) {
 
 func TestNewDeclarativeNode_StoresNodeID(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -61,12 +60,11 @@ func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 		},
 	})
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     source,
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        source,
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -88,12 +86,11 @@ func TestDeclarativeNode_HandleResolvesHandlerFromSemanticSource(t *testing.T) {
 
 func TestDeclarativeNode_HandleRequiresHandlerWhenNotResolvable(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -110,12 +107,11 @@ func TestDeclarativeNode_HandleRequiresHandlerWhenNotResolvable(t *testing.T) {
 
 func TestDeclarativeNode_HandleUsesExplicitHandlerWithoutLookup(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:     stubSource(),
-		StateRepo:  stubStateRepo{},
-		TxRunner:   stubRunner{},
-		Locker:     stubLocker{},
-		Outbox:     stubOutbox{},
-		Dispatcher: stubDispatcher{},
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)

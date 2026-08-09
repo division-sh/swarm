@@ -2,22 +2,17 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"strings"
-	"sync"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
 
@@ -44,29 +39,12 @@ type Bus interface {
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
 	ResolveSubscribedRecipients(eventType string) []string
 	LogRuntime(ctx context.Context, entry RuntimeLogEntry) error
-	EngineOutbox() runtimeengine.OutboxWriter
 	EngineDispatcher() runtimeengine.PostCommitDispatcher
 }
-
-type noOpEngineOutbox struct{}
-
-func (noOpEngineOutbox) WriteOutbox(context.Context, []runtimeengine.EmitIntent) error { return nil }
 
 type noOpEngineDispatcher struct{}
 
 func (noOpEngineDispatcher) DispatchPostCommit(context.Context, []runtimeengine.EmitIntent) error {
-	return nil
-}
-
-type noOpActivityIntentWriter struct{}
-
-func (noOpActivityIntentWriter) WriteActivityIntents(context.Context, []runtimeengine.ActivityIntent) error {
-	return nil
-}
-
-type noOpActivityDispatcher struct{}
-
-func (noOpActivityDispatcher) DispatchActivities(context.Context, []runtimeengine.ActivityIntent) error {
 	return nil
 }
 
@@ -111,27 +89,39 @@ func pipelineFlowScope(ctx context.Context) string {
 	return strings.TrimSpace(flowID)
 }
 
-func pipelineCollectorExecutionContext(ctx context.Context) (context.Context, *[]events.Event, *[]runtimeengine.EmitIntent, bool) {
-	if ctx == nil {
-		return ctx, nil, nil, false
-	}
-	parentCollector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event)
-	if !ok || parentCollector == nil {
-		return ctx, nil, nil, false
-	}
-	if _, ok := ctx.Value(pipelineEmitIntentCollectorKey{}).(*[]runtimeengine.EmitIntent); ok {
-		return ctx, parentCollector, nil, false
-	}
-	collected := []runtimeengine.EmitIntent{}
-	ctx = WithPipelineEmitCollectors(ctx, nil, &collected)
-	return ctx, parentCollector, &collected, true
+type pipelineEmissionPlan struct {
+	events []events.Event
 }
 
-func flushCollectedPipelineEmitIntents(parentCollector *[]events.Event, collected *[]runtimeengine.EmitIntent) {
-	if parentCollector == nil || collected == nil || len(*collected) == 0 {
+func (p *pipelineEmissionPlan) appendEvent(event events.Event) {
+	if p == nil {
 		return
 	}
-	appendEmitIntentsAsEvents(parentCollector, *collected)
+	p.events = append(p.events, cloneEvent(event))
+}
+
+func (p *pipelineEmissionPlan) appendIntents(intents []runtimeengine.EmitIntent) {
+	if p == nil {
+		return
+	}
+	for _, intent := range intents {
+		emitted := cloneEvent(intent.Event)
+		if !intent.Context.Empty() {
+			emitted = events.NewContextDeliveryEvent(emitted, intent.Context).Event()
+		}
+		p.events = append(p.events, emitted)
+	}
+}
+
+func (p *pipelineEmissionPlan) immutableEvents() []events.Event {
+	if p == nil || len(p.events) == 0 {
+		return nil
+	}
+	out := make([]events.Event, 0, len(p.events))
+	for _, event := range p.events {
+		out = append(out, cloneEvent(event))
+	}
+	return out
 }
 
 const DefaultSystemNodeRetryLimit = 5
@@ -326,343 +316,6 @@ func asObject(v any) (map[string]any, bool) {
 	return m, ok
 }
 
-type sqlTxContextKey struct{}
-type sqlConnContextKey struct{}
-type pipelinePostCommitActionsKey struct{}
-type pipelineRollbackActionsKey struct{}
-type pipelineAfterPublishActionsKey struct{}
-
-func withSQLTxContext(ctx context.Context, tx *sql.Tx) context.Context {
-	if tx == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, sqlTxContextKey{}, tx)
-}
-
-func WithPipelineSQLTxContext(ctx context.Context, tx *sql.Tx) context.Context {
-	return withPipelineRunForkRevisionChanges(withSQLTxContext(ctx, tx))
-}
-
-func WithPipelineSQLConnContext(ctx context.Context, conn *sql.Conn) context.Context {
-	if conn == nil {
-		return ctx
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return context.WithValue(ctx, sqlConnContextKey{}, conn)
-}
-
-func PipelineSQLConnFromContext(ctx context.Context) (*sql.Conn, bool) {
-	if ctx == nil {
-		return nil, false
-	}
-	conn, ok := ctx.Value(sqlConnContextKey{}).(*sql.Conn)
-	return conn, ok && conn != nil
-}
-
-func WithoutPipelineSQLConnContext(ctx context.Context) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	return context.WithValue(ctx, sqlConnContextKey{}, (*sql.Conn)(nil))
-}
-
-func sqlTxFromContext(ctx context.Context) (*sql.Tx, bool) {
-	if ctx == nil {
-		return nil, false
-	}
-	tx, ok := ctx.Value(sqlTxContextKey{}).(*sql.Tx)
-	return tx, ok && tx != nil
-}
-
-func PipelineSQLTxFromContext(ctx context.Context) (*sql.Tx, bool) {
-	return sqlTxFromContext(ctx)
-}
-
-func withoutSQLTxContext(ctx context.Context) context.Context {
-	if ctx == nil {
-		return context.Background()
-	}
-	return context.WithValue(ctx, sqlTxContextKey{}, (*sql.Tx)(nil))
-}
-
-func WithoutPipelineSQLTxContext(ctx context.Context) context.Context {
-	return withoutSQLTxContext(ctx)
-}
-
-type OwnerAction func(context.Context)
-
-func ownerActionAdmissionContext(ctx context.Context) context.Context {
-	ctx = context.WithoutCancel(ctx)
-	ctx = WithoutPipelineSQLTxContext(ctx)
-	return WithoutPipelineSQLConnContext(ctx)
-}
-
-func withPipelinePostCommitActions(ctx context.Context, actions *[]OwnerAction) context.Context {
-	if actions == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, pipelinePostCommitActionsKey{}, actions)
-}
-
-func WithPipelinePostCommitActions(ctx context.Context, actions *[]OwnerAction) context.Context {
-	return withPipelinePostCommitActions(ctx, actions)
-}
-
-func queuePipelinePostCommitAction(ctx context.Context, fn OwnerAction) bool {
-	if ctx == nil || fn == nil {
-		return false
-	}
-	actions, ok := ctx.Value(pipelinePostCommitActionsKey{}).(*[]OwnerAction)
-	rollback, rollbackOK := ctx.Value(pipelineRollbackActionsKey{}).(*[]OwnerAction)
-	owner, ownerOK := worklifetime.OccurrenceFromContext(ctx)
-	if !ok || actions == nil || !rollbackOK || rollback == nil || !ownerOK {
-		return false
-	}
-	lease, err := owner.Begin(ownerActionAdmissionContext(ctx))
-	if err != nil {
-		return false
-	}
-	var once sync.Once
-	settle := func() { once.Do(func() { _ = lease.Done() }) }
-	*actions = append(*actions, func(context.Context) {
-		defer settle()
-		fn(lease.Context())
-	})
-	*rollback = append(*rollback, func(context.Context) { settle() })
-	return true
-}
-
-func QueuePipelinePostCommitAction(ctx context.Context, fn OwnerAction) bool {
-	return queuePipelinePostCommitAction(ctx, fn)
-}
-
-// queuePipelineTransactionPostCommitAction registers synchronous work owned by
-// the transaction outcome itself. It never escapes the mutation call, so it
-// requires commit/rollback authority but no separate process-local lease.
-func queuePipelineTransactionPostCommitAction(ctx context.Context, fn OwnerAction) bool {
-	if ctx == nil || fn == nil {
-		return false
-	}
-	postCommit, commitOK := ctx.Value(pipelinePostCommitActionsKey{}).(*[]OwnerAction)
-	rollback, rollbackOK := ctx.Value(pipelineRollbackActionsKey{}).(*[]OwnerAction)
-	if !commitOK || postCommit == nil || !rollbackOK || rollback == nil {
-		return false
-	}
-	*postCommit = append(*postCommit, fn)
-	return true
-}
-
-// QueuePipelinePostCommitHandoff binds one accepted work lease to exactly one
-// transaction outcome. Commit and rollback are mutually exclusive and settle
-// the lease only after the selected outcome has run.
-func QueuePipelinePostCommitHandoff(ctx context.Context, commit, rollback OwnerAction) bool {
-	if ctx == nil || commit == nil || rollback == nil {
-		return false
-	}
-	postCommit, commitOK := ctx.Value(pipelinePostCommitActionsKey{}).(*[]OwnerAction)
-	rollbackActions, rollbackOK := ctx.Value(pipelineRollbackActionsKey{}).(*[]OwnerAction)
-	owner, ownerOK := worklifetime.OccurrenceFromContext(ctx)
-	if !commitOK || postCommit == nil || !rollbackOK || rollbackActions == nil || !ownerOK {
-		return false
-	}
-	lease, err := owner.Begin(ownerActionAdmissionContext(ctx))
-	if err != nil {
-		return false
-	}
-	var once sync.Once
-	settle := func(action OwnerAction) {
-		once.Do(func() {
-			defer func() { _ = lease.Done() }()
-			action(lease.Context())
-		})
-	}
-	*postCommit = append(*postCommit, func(context.Context) { settle(commit) })
-	*rollbackActions = append(*rollbackActions, func(context.Context) { settle(rollback) })
-	return true
-}
-
-// QueueRunLifecycleCandidateHandoff is the closed post-commit handoff for one
-// already-reserved lifecycle candidate admission. Callers cannot supply
-// lifecycle callbacks or choose a different settlement policy.
-func QueueRunLifecycleCandidateHandoff(
-	ctx context.Context,
-	admission runtimerunlifecycle.CandidateAdmission,
-	candidate runtimerunlifecycle.Candidate,
-) bool {
-	if admission == nil {
-		return false
-	}
-	return QueuePipelinePostCommitHandoff(
-		ctx,
-		func(context.Context) { _ = admission.Submit(candidate) },
-		func(context.Context) { _ = admission.Cancel() },
-	)
-}
-
-// RunLifecycleCandidateRegistrationBarrier settles one selected-store
-// transaction that observed no live completion-candidate sink.
-type RunLifecycleCandidateRegistrationBarrier interface {
-	Settle()
-}
-
-func requireRunLifecycleCandidateTransactionOutcome(ctx context.Context) error {
-	if ctx == nil {
-		return fmt.Errorf("candidate registration barrier requires transaction context")
-	}
-	postCommit, commitOK := ctx.Value(pipelinePostCommitActionsKey{}).(*[]OwnerAction)
-	if !commitOK || postCommit == nil {
-		return fmt.Errorf("candidate registration barrier requires post-commit ownership")
-	}
-	rollbackActions, rollbackOK := ctx.Value(pipelineRollbackActionsKey{}).(*[]OwnerAction)
-	if !rollbackOK || rollbackActions == nil {
-		return fmt.Errorf("candidate registration barrier requires rollback ownership")
-	}
-	return nil
-}
-
-// QueueRunLifecycleCandidateRegistrationBarrier binds a selected-store-owned
-// startup reconciliation barrier to the exact transaction outcome.
-func QueueRunLifecycleCandidateRegistrationBarrier(
-	ctx context.Context,
-	barrier RunLifecycleCandidateRegistrationBarrier,
-) error {
-	if barrier == nil {
-		return fmt.Errorf("candidate registration barrier is required")
-	}
-	if err := requireRunLifecycleCandidateTransactionOutcome(ctx); err != nil {
-		return err
-	}
-	postCommit := ctx.Value(pipelinePostCommitActionsKey{}).(*[]OwnerAction)
-	rollbackActions := ctx.Value(pipelineRollbackActionsKey{}).(*[]OwnerAction)
-	*postCommit = append(*postCommit, func(context.Context) { barrier.Settle() })
-	*rollbackActions = append(*rollbackActions, func(context.Context) { barrier.Settle() })
-	return nil
-}
-
-func flushPipelinePostCommitActions(actions []OwnerAction) {
-	for _, fn := range actions {
-		if fn != nil {
-			fn(context.Background())
-		}
-	}
-}
-
-func FlushPipelinePostCommitActions(actions []OwnerAction) {
-	flushPipelinePostCommitActions(actions)
-}
-
-func withPipelineRollbackActions(ctx context.Context, actions *[]OwnerAction) context.Context {
-	if actions == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, pipelineRollbackActionsKey{}, actions)
-}
-
-func WithPipelineRollbackActions(ctx context.Context, actions *[]OwnerAction) context.Context {
-	return withPipelineRollbackActions(ctx, actions)
-}
-
-func queuePipelineRollbackAction(ctx context.Context, fn OwnerAction) bool {
-	if ctx == nil || fn == nil {
-		return false
-	}
-	actions, ok := ctx.Value(pipelineRollbackActionsKey{}).(*[]OwnerAction)
-	postCommit, postCommitOK := ctx.Value(pipelinePostCommitActionsKey{}).(*[]OwnerAction)
-	owner, ownerOK := worklifetime.OccurrenceFromContext(ctx)
-	if !ok || actions == nil || !postCommitOK || postCommit == nil || !ownerOK {
-		return false
-	}
-	lease, err := owner.Begin(ownerActionAdmissionContext(ctx))
-	if err != nil {
-		return false
-	}
-	var once sync.Once
-	settle := func() { once.Do(func() { _ = lease.Done() }) }
-	*actions = append(*actions, func(context.Context) {
-		defer settle()
-		fn(lease.Context())
-	})
-	*postCommit = append(*postCommit, func(context.Context) { settle() })
-	return true
-}
-
-func QueuePipelineRollbackAction(ctx context.Context, fn OwnerAction) bool {
-	return queuePipelineRollbackAction(ctx, fn)
-}
-
-func flushPipelineRollbackActions(actions []OwnerAction) {
-	for i := len(actions) - 1; i >= 0; i-- {
-		if actions[i] != nil {
-			actions[i](context.Background())
-		}
-	}
-}
-
-func FlushPipelineRollbackActions(actions []OwnerAction) {
-	flushPipelineRollbackActions(actions)
-}
-
-func withPipelineAfterPublishActions(ctx context.Context, actions *[]OwnerAction) context.Context {
-	if actions == nil {
-		return ctx
-	}
-	return context.WithValue(ctx, pipelineAfterPublishActionsKey{}, actions)
-}
-
-func WithPipelineAfterPublishActions(ctx context.Context, actions *[]OwnerAction) context.Context {
-	return withPipelineAfterPublishActions(ctx, actions)
-}
-
-func queuePipelineAfterPublishAction(ctx context.Context, fn OwnerAction) bool {
-	if ctx == nil || fn == nil {
-		return false
-	}
-	actions, ok := ctx.Value(pipelineAfterPublishActionsKey{}).(*[]OwnerAction)
-	owner, ownerOK := worklifetime.OccurrenceFromContext(ctx)
-	if !ok || actions == nil || !ownerOK {
-		return false
-	}
-	lease, err := owner.Begin(ownerActionAdmissionContext(ctx))
-	if err != nil {
-		return false
-	}
-	*actions = append(*actions, func(context.Context) {
-		defer func() { _ = lease.Done() }()
-		fn(lease.Context())
-	})
-	return true
-}
-
-func QueuePipelineAfterPublishAction(ctx context.Context, fn OwnerAction) bool {
-	return queuePipelineAfterPublishAction(ctx, fn)
-}
-
-func flushPipelineAfterPublishActions(actions []OwnerAction) {
-	for _, fn := range actions {
-		if fn != nil {
-			fn(context.Background())
-		}
-	}
-}
-
-func FlushPipelineAfterPublishActions(actions []OwnerAction) {
-	flushPipelineAfterPublishActions(actions)
-}
-
-func CollectPipelineEmitIntents(ctx context.Context, intents []runtimeengine.EmitIntent) bool {
-	if ctx == nil || len(intents) == 0 {
-		return false
-	}
-	collected := false
-	if collector, ok := ctx.Value(pipelineEmitIntentCollectorKey{}).(*[]runtimeengine.EmitIntent); ok && collector != nil {
-		*collector = append(*collector, cloneEmitIntents(intents)...)
-		collected = true
-	}
-	return collected
-}
-
 func cloneEmitIntents(intents []runtimeengine.EmitIntent) []runtimeengine.EmitIntent {
 	if len(intents) == 0 {
 		return nil
@@ -675,75 +328,6 @@ func cloneEmitIntents(intents []runtimeengine.EmitIntent) []runtimeengine.EmitIn
 		cloned = append(cloned, copyIntent)
 	}
 	return cloned
-}
-
-func appendEmitIntentsAsEvents(collector *[]events.Event, intents []runtimeengine.EmitIntent) {
-	if collector == nil || len(intents) == 0 {
-		return
-	}
-	for _, intent := range intents {
-		emitted := cloneEvent(intent.Event)
-		if !intent.Context.Empty() {
-			emitted = events.NewContextDeliveryEvent(emitted, intent.Context).Event()
-		}
-		*collector = append(*collector, emitted)
-	}
-}
-
-func WithPipelineEmitCollectors(ctx context.Context, eventsCollector *[]events.Event, intentCollector *[]runtimeengine.EmitIntent) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if eventsCollector != nil {
-		ctx = context.WithValue(ctx, pipelineEmitCollectorKey{}, eventsCollector)
-	}
-	if intentCollector != nil {
-		ctx = context.WithValue(ctx, pipelineEmitIntentCollectorKey{}, intentCollector)
-	}
-	return ctx
-}
-
-func pipelinePostCommitActionsFromContext(ctx context.Context) (*[]OwnerAction, bool) {
-	if ctx == nil {
-		return nil, false
-	}
-	actions, ok := ctx.Value(pipelinePostCommitActionsKey{}).(*[]OwnerAction)
-	return actions, ok && actions != nil
-}
-
-func dbExecContext(ctx context.Context, db *sql.DB, query string, args ...any) (sql.Result, error) {
-	exec := func() (sql.Result, error) {
-		if tx, ok := sqlTxFromContext(ctx); ok {
-			return tx.ExecContext(ctx, query, args...)
-		}
-		return db.ExecContext(ctx, query, args...)
-	}
-	res, err := exec()
-	if err != nil && shouldSQLDebugLog() {
-		log.Printf("runtime.sql.exec error=%v query=%q args=%d", err, compactSQLSnippet(query), len(args))
-	}
-	return res, err
-}
-
-func dbQueryContext(ctx context.Context, db *sql.DB, query string, args ...any) (*sql.Rows, error) {
-	exec := func() (*sql.Rows, error) {
-		if tx, ok := sqlTxFromContext(ctx); ok {
-			return tx.QueryContext(ctx, query, args...)
-		}
-		return db.QueryContext(ctx, query, args...)
-	}
-	rows, err := exec()
-	if err != nil && shouldSQLDebugLog() {
-		log.Printf("runtime.sql.query error=%v query=%q args=%d", err, compactSQLSnippet(query), len(args))
-	}
-	return rows, err
-}
-
-func dbQueryRowContext(ctx context.Context, db *sql.DB, query string, args ...any) *sql.Row {
-	if tx, ok := sqlTxFromContext(ctx); ok {
-		return tx.QueryRowContext(ctx, query, args...)
-	}
-	return db.QueryRowContext(ctx, query, args...)
 }
 
 func shouldSQLDebugLog() bool {

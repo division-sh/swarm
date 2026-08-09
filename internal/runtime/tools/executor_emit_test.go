@@ -63,11 +63,11 @@ type emitWorkflowInstanceLoader struct {
 
 func (l emitWorkflowInstanceLoader) Enabled() bool { return true }
 
-func (l emitWorkflowInstanceLoader) Load(_ context.Context, ref string) (runtimepipeline.WorkflowInstance, bool, error) {
+func (l emitWorkflowInstanceLoader) Load(_ context.Context, route runtimeflowidentity.Route) (runtimepipeline.WorkflowInstance, bool, error) {
 	if l.err != nil {
 		return runtimepipeline.WorkflowInstance{}, false, l.err
 	}
-	instance, ok := l.rows[strings.TrimSpace(ref)]
+	instance, ok := l.rows[strings.TrimSpace(route.InstancePath)]
 	return instance, ok, nil
 }
 
@@ -122,8 +122,8 @@ func newEmitRoutePlanEventBus(t *testing.T, store *emitRoutePlanStore, source se
 	return bus
 }
 
-func (s *emitRoutePlanStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublish(ctx, plan, s.beginPublish, s.finalizePublish)
+func (s *emitRoutePlanStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublish(ctx, command, s.beginPublish, s.finalizePublish)
 }
 
 func (s *emitRoutePlanStore) beginPublish(_ context.Context, admitted events.AdmittedEvent) (runtimebus.EventAppendOutcome, error) {
@@ -1077,7 +1077,12 @@ func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflig
 	store := newEmitRoutePlanStore()
 	eb := newEmitRoutePlanEventBus(t, store, source)
 	emitRegistry := NewEmitRegistry(source, nil)
-	parentRoute := events.RouteIdentity{EntityID: runtimeflowidentity.EntityID("root-entity")}
+	runID := eventtest.UUID("emit-root-receiver-run")
+	parentRoute := events.RouteIdentity{
+		FlowID:       "root",
+		FlowInstance: runID,
+		EntityID:     runtimeflowidentity.EntityID("root-entity"),
+	}
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "producer-agent",
@@ -1092,7 +1097,9 @@ func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflig
 		WorkflowSource: source,
 		EmitRegistry:   emitRegistry,
 		WorkflowInstances: emitWorkflowInstanceLoader{rows: map[string]runtimepipeline.WorkflowInstance{
-			"producer/inst-1": {Metadata: map[string]any{"parent_entity_id": parentRoute.EntityID}},
+			"producer/inst-1": {Metadata: map[string]any{
+				"parent_flow_id": parentRoute.FlowID, "parent_flow_instance": parentRoute.FlowInstance, "parent_entity_id": parentRoute.EntityID,
+			}},
 		}},
 	})
 	ctx := runtimebus.WithInboundEvent(unmanagedToolTestContext(), eventtest.RunCreatingRootIngress(
@@ -1102,7 +1109,7 @@ func TestHandleEmitTool_RootReceiverConnectMaterializesParentTargetBeforePreflig
 		"",
 		nil,
 		0,
-		eventtest.UUID("emit-root-receiver-run"),
+		runID,
 		"",
 		events.EventEnvelope{},
 		time.Now().UTC()))
@@ -1742,6 +1749,7 @@ func emitRoutePlanTestBundle(flows []emitRoutePlanTestFlow, connects []runtimeco
 		},
 		FlowSchemas: flowSchemas,
 		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:                "root",
 			FlowInputs:          flowInputs,
 			FlowOutputs:         flowOutputs,
 			FlowInputEventPins:  flowInputPins,

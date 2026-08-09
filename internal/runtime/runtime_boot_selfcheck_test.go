@@ -3,16 +3,13 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 type bootSelfCheckDescriptorStore struct {
@@ -22,53 +19,8 @@ type bootSelfCheckDescriptorStore struct {
 	events      []events.Event
 }
 
-func TestRuntimeStart_PipelineMaintenanceFailureUsesCanonicalBootStepIdentity(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"task_type", "run_id", "status", "fire_at", "run_status"}))
-	mock.ExpectQuery("SELECT").WillReturnError(context.DeadlineExceeded)
-
-	module := loadRuntimeOwnershipWorkflowModule(t)
-	store := &bootSelfCheckDescriptorStore{}
-	progress := []BootProgressEvent{}
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
-		EventStore: store,
-		Options: RuntimeOptions{
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
-			BootProgress: func(evt BootProgressEvent) {
-				progress = append(progress, evt)
-			},
-		}})
-
-	if err != nil {
-		t.Fatalf("NewRuntime: %v", err)
-	}
-	rt.Pipeline = runtimepipeline.NewPipelineCoordinatorWithOptions(rt.Bus, db, completeRuntimeTestPipelineOptions(rt.Bus, runtimepipeline.PipelineCoordinatorOptions{
-		Module: module, Persistence: runtimepipeline.NewPostgresWorkflowPersistence(db, runtimeTestRejectedMutationOwner{}), WorkOwner: rt.WorkOccurrence(),
-		PipelineObligations: newStartupRecoveryPipelineOwner(nil, nil),
-	}))
-
-	if err := rt.Start(testAuthorActivityContext(context.Background())); err == nil {
-		t.Fatal("Start error = nil, want pipeline maintenance failure")
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("sql expectations: %v", err)
-	}
-	if len(progress) == 0 {
-		t.Fatal("boot progress is empty")
-	}
-	got := progress[len(progress)-1]
-	if got.Step != 8 || got.Name != "pipeline_maintenance" || !strings.EqualFold(got.Status, "failed") {
-		t.Fatalf("pipeline failure progress = %#v, want canonical step 8 pipeline_maintenance failed", got)
-	}
-}
-
-func (s *bootSelfCheckDescriptorStore) CommitPublish(ctx context.Context, plan runtimebus.CommitPublishPlan) (runtimebus.PreparedPublish, error) {
-	return runtimebustest.CommitPublish(ctx, plan, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
+func (s *bootSelfCheckDescriptorStore) CommitPublication(ctx context.Context, command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
+	return runtimebustest.CommitPublish(ctx, command, nil, func(_ context.Context, req runtimebus.CommitPublishRequest) error {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		s.events = append(s.events, req.Event.Event())

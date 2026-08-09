@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
 )
@@ -475,7 +476,7 @@ func baseTestDecisionCard(outcomes map[string]runtimecontracts.WorkflowGateOutco
 
 func testStageAnchor() Anchor {
 	anchor, err := NewStageGateAnchor(StageGateAnchor{
-		FlowInstance: "root", EntityID: "entity-1", Stage: "awaiting_review",
+		Route: runtimeflowidentity.RouteForInstancePath("root"), EntityID: "entity-1", Stage: "awaiting_review",
 		StageActivationID: uuid.NewString(), Source: testRootRoutingSource("entity-1"),
 	})
 	if err != nil {
@@ -504,7 +505,7 @@ func semanticObject(values map[string]any) semanticvalue.Value {
 func TestRegisteredAnchorKindsAreClosedAndProjectScope(t *testing.T) {
 	source := testRootRoutingSource("entity-1")
 	stage, err := NewStageGateAnchor(StageGateAnchor{
-		FlowInstance: "root", EntityID: "entity-1", Source: source, Stage: "review", StageActivationID: "activation-1",
+		Route: runtimeflowidentity.RouteForInstancePath("root"), EntityID: "entity-1", Source: source, Stage: "review", StageActivationID: "activation-1",
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	"github.com/division-sh/swarm/internal/store/internal/eventrecord"
-	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/eventrecord/postgres"
-	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/eventrecord/sqlite"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
+	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
 func eventFacts(
@@ -52,7 +52,7 @@ type Executor interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func Load(ctx context.Context, q Executor, dialect runtimeauthoractivity.Dialect, eventID string) (event events.Event, err error) {
+func Load(ctx context.Context, q Executor, dialect authoractivityfixture.Dialect, eventID string) (event events.Event, err error) {
 	if q == nil {
 		return event, fmt.Errorf("canonical event fixture requires a database")
 	}
@@ -61,9 +61,9 @@ func Load(ctx context.Context, q Executor, dialect runtimeauthoractivity.Dialect
 		found  bool
 	)
 	switch dialect {
-	case runtimeauthoractivity.DialectPostgres:
+	case authoractivityfixture.DialectPostgres:
 		record, found, err = eventrecordpostgres.Load(ctx, q, eventID)
-	case runtimeauthoractivity.DialectSQLite:
+	case authoractivityfixture.DialectSQLite:
 		record, found, err = eventrecordsqlite.Load(ctx, q, eventID)
 	default:
 		return event, fmt.Errorf("canonical event fixture dialect %q is unsupported", dialect)
@@ -81,7 +81,7 @@ func Load(ctx context.Context, q Executor, dialect runtimeauthoractivity.Dialect
 	return admitted.Event(), nil
 }
 
-func Insert(ctx context.Context, exec Executor, dialect runtimeauthoractivity.Dialect, event events.Event) error {
+func Insert(ctx context.Context, exec Executor, dialect authoractivityfixture.Dialect, event events.Event) error {
 	if exec == nil {
 		return fmt.Errorf("canonical event fixture requires a database")
 	}
@@ -98,9 +98,9 @@ func Insert(ctx context.Context, exec Executor, dialect runtimeauthoractivity.Di
 	}
 	var inserted bool
 	switch dialect {
-	case runtimeauthoractivity.DialectPostgres:
+	case authoractivityfixture.DialectPostgres:
 		inserted, err = eventrecordpostgres.Insert(ctx, exec, record)
-	case runtimeauthoractivity.DialectSQLite:
+	case authoractivityfixture.DialectSQLite:
 		inserted, err = eventrecordsqlite.Insert(ctx, exec, record)
 	default:
 		return fmt.Errorf("canonical event fixture dialect %q is unsupported", dialect)
@@ -116,9 +116,9 @@ func Insert(ctx context.Context, exec Executor, dialect runtimeauthoractivity.Di
 		found    bool
 	)
 	switch dialect {
-	case runtimeauthoractivity.DialectPostgres:
+	case authoractivityfixture.DialectPostgres:
 		existing, found, err = eventrecordpostgres.Load(ctx, exec, record.EventID)
-	case runtimeauthoractivity.DialectSQLite:
+	case authoractivityfixture.DialectSQLite:
 		existing, found, err = eventrecordsqlite.Load(ctx, exec, record.EventID)
 	}
 	if err != nil {
@@ -133,7 +133,7 @@ func Insert(ctx context.Context, exec Executor, dialect runtimeauthoractivity.Di
 func ExistingRunRoot(
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	eventID string,
 	runID string,
 	eventType events.EventType,
@@ -156,7 +156,7 @@ func ExistingRunRoot(
 func Child(
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	eventID string,
 	runID string,
 	parentEventID string,
@@ -183,7 +183,7 @@ func Child(
 func DiagnosticDirect(
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	eventID string,
 	producerID string,
 	payload []byte,
@@ -195,7 +195,7 @@ func DiagnosticDirect(
 func DiagnosticDirectForRun(
 	ctx context.Context,
 	db *sql.DB,
-	dialect runtimeauthoractivity.Dialect,
+	dialect authoractivityfixture.Dialect,
 	eventID string,
 	runID string,
 	parentEventID string,

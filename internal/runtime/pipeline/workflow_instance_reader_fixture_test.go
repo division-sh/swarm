@@ -1,0 +1,266 @@
+package pipeline
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+)
+
+type pipelineTestWorkflowInstanceReader struct {
+	db      *sql.DB
+	dialect workflowStoreDialect
+}
+
+func (r pipelineTestWorkflowInstanceReader) LoadWorkflowInstance(ctx context.Context, route runtimeflowidentity.Route) (WorkflowInstance, bool, error) {
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	if !route.Valid() {
+		return WorkflowInstance{}, false, &WorkflowInstanceLookupMiss{RequestedKey: strings.TrimSpace(route.InstancePath)}
+	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return WorkflowInstance{}, false, err
+	}
+	query := pipelineTestWorkflowInstanceSelectSQLite + ` WHERE es.flow_instance = ? AND es.run_id = ? ORDER BY es.created_at DESC, es.entity_id DESC LIMIT 1`
+	if r.dialect == workflowStoreDialectPostgres {
+		query = pipelineTestWorkflowInstanceSelectPostgres + ` WHERE es.flow_instance = $1 AND es.run_id = $2::uuid ORDER BY es.created_at DESC, es.entity_id DESC LIMIT 1`
+	}
+	rows, err := r.db.QueryContext(ctx, query, route.InstancePath, runID)
+	if err != nil {
+		return WorkflowInstance{}, false, err
+	}
+	defer rows.Close()
+	items, err := scanPipelineTestWorkflowInstances(rows, r.dialect)
+	if err != nil || len(items) == 0 {
+		return WorkflowInstance{}, false, err
+	}
+	return items[0], true, nil
+}
+
+func (r pipelineTestWorkflowInstanceReader) ListWorkflowInstances(ctx context.Context) ([]WorkflowInstance, error) {
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	query := pipelineTestWorkflowInstanceSelectSQLite + ` WHERE es.run_id = ? ORDER BY es.created_at ASC`
+	if r.dialect == workflowStoreDialectPostgres {
+		query = pipelineTestWorkflowInstanceSelectPostgres + ` WHERE es.run_id = $1::uuid ORDER BY es.created_at ASC`
+	}
+	rows, err := r.db.QueryContext(ctx, query, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanPipelineTestWorkflowInstances(rows, r.dialect)
+}
+
+func (r pipelineTestWorkflowInstanceReader) SelectActiveWorkflowInstances(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	activeStates := runtimerunlifecycle.ActiveStates()
+	query := `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = ? AND status IN (?, ?))`
+	args := []any{runID, string(activeStates[0]), string(activeStates[1])}
+	if r.dialect == workflowStoreDialectPostgres {
+		query = `SELECT EXISTS (SELECT 1 FROM runs WHERE run_id = $1::uuid AND status IN ($2, $3))`
+	}
+	var active bool
+	if err := r.db.QueryRowContext(ctx, query, args...).Scan(&active); err != nil {
+		return nil, err
+	}
+	scopeKey = strings.Trim(strings.TrimSpace(scopeKey), "/")
+	selectors = NormalizeWorkflowInstanceFieldSelectors(selectors)
+	if !active || scopeKey == "" || len(selectors) == 0 {
+		return nil, nil
+	}
+	items, err := r.ListWorkflowInstances(ctx)
+	if err != nil {
+		return nil, err
+	}
+	excluded := make(map[string]struct{})
+	for _, state := range NormalizeWorkflowInstanceExcludedStates(excludedStates) {
+		excluded[state] = struct{}{}
+	}
+	out := make([]WorkflowInstance, 0, len(items))
+	for _, item := range items {
+		path := strings.Trim(strings.TrimSpace(item.StorageRef), "/")
+		if path != scopeKey && !strings.HasPrefix(path, scopeKey+"/") {
+			continue
+		}
+		if item.Status == "terminated" || item.Status == "inactive" || !item.TerminatedAt.IsZero() {
+			continue
+		}
+		if _, found := excluded[strings.ToLower(strings.TrimSpace(item.CurrentState))]; found {
+			continue
+		}
+		matched := true
+		for _, selector := range selectors {
+			value, found := workflowMetadataValue(item.Metadata, selector.Field)
+			if !found || !workflowJSONValuesEqual(value, selector.Value) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+const pipelineTestWorkflowInstanceSelectPostgres = `
+	SELECT es.entity_id::text, fi.flow_template, fi.config->>'workflow_version', fi.status,
+	       fi.terminated_at, es.current_state, es.revision, es.entered_state_at,
+	       es.gates, es.fields, es.accumulator, fi.config, es.flow_instance,
+	       es.entity_type, es.slug, es.name, es.created_at, es.updated_at
+	FROM entity_state es JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+`
+
+const pipelineTestWorkflowInstanceSelectSQLite = `
+	SELECT es.entity_id, fi.flow_template, json_extract(fi.config, '$.workflow_version'), fi.status,
+	       fi.terminated_at, es.current_state, es.revision, es.entered_state_at,
+	       es.gates, es.fields, es.accumulator, fi.config, es.flow_instance,
+	       es.entity_type, es.slug, es.name, es.created_at, es.updated_at
+	FROM entity_state es JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+`
+
+func scanPipelineTestWorkflowInstances(rows *sql.Rows, dialect workflowStoreDialect) ([]WorkflowInstance, error) {
+	items := make([]WorkflowInstance, 0, 16)
+	for rows.Next() {
+		var record WorkflowInstancePersistenceRecord
+		var workflowVersion, slug, name sql.NullString
+		var terminatedAt sql.NullTime
+		var terminatedAtRaw, enteredAtRaw, createdAtRaw, updatedAtRaw any
+		var gates, fields, accumulator, config any
+		destinations := []any{
+			&record.EntityID, &record.WorkflowName, &workflowVersion, &record.Status,
+			&terminatedAt, &record.CurrentState, &record.Revision, &record.EnteredStageAt,
+			&record.Gates, &record.Fields, &record.Accumulator, &record.Config,
+			&record.FlowInstance, &record.EntityType, &slug, &name, &record.CreatedAt, &record.UpdatedAt,
+		}
+		if dialect != workflowStoreDialectPostgres {
+			destinations = []any{
+				&record.EntityID, &record.WorkflowName, &workflowVersion, &record.Status,
+				&terminatedAtRaw, &record.CurrentState, &record.Revision, &enteredAtRaw,
+				&gates, &fields, &accumulator, &config,
+				&record.FlowInstance, &record.EntityType, &slug, &name, &createdAtRaw, &updatedAtRaw,
+			}
+		}
+		if err := rows.Scan(destinations...); err != nil {
+			return nil, err
+		}
+		record.WorkflowVersion, record.Slug, record.Name = workflowVersion.String, slug.String, name.String
+		if dialect == workflowStoreDialectPostgres {
+			if terminatedAt.Valid {
+				record.TerminatedAt = terminatedAt.Time.UTC()
+			}
+		} else {
+			record.Gates, record.Fields = pipelineTestJSONBytes(gates), pipelineTestJSONBytes(fields)
+			record.Accumulator, record.Config = pipelineTestJSONBytes(accumulator), pipelineTestJSONBytes(config)
+			for _, value := range []struct {
+				raw    any
+				target *time.Time
+			}{{enteredAtRaw, &record.EnteredStageAt}, {createdAtRaw, &record.CreatedAt}, {updatedAtRaw, &record.UpdatedAt}} {
+				parsed, present, err := sqliteWorkflowTimeValue(value.raw)
+				if err != nil || !present {
+					if err == nil {
+						err = fmt.Errorf("pipeline test workflow timestamp is required")
+					}
+					return nil, err
+				}
+				*value.target = parsed
+			}
+			if parsed, present, err := sqliteWorkflowTimeValue(terminatedAtRaw); err != nil {
+				return nil, err
+			} else if present {
+				record.TerminatedAt = parsed
+			}
+		}
+		item, err := DecodeWorkflowInstancePersistenceRecord(record)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func pipelineTestJSONBytes(value any) json.RawMessage {
+	switch value := value.(type) {
+	case string:
+		return json.RawMessage(value)
+	case []byte:
+		return append(json.RawMessage(nil), value...)
+	default:
+		return nil
+	}
+}
+
+var _ WorkflowInstancePersistenceReader = pipelineTestWorkflowInstanceReader{}
+
+func (r *recordingRuntimeMutationRunner) LoadWorkflowInstance(ctx context.Context, route runtimeflowidentity.Route) (WorkflowInstance, bool, error) {
+	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.LoadWorkflowInstance(ctx, route)
+}
+
+func (r *recordingRuntimeMutationRunner) ListWorkflowInstances(ctx context.Context) ([]WorkflowInstance, error) {
+	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.ListWorkflowInstances(ctx)
+}
+
+func (r *recordingRuntimeMutationRunner) SelectActiveWorkflowInstances(ctx context.Context, scopeKey string, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowInstance, error) {
+	return pipelineTestWorkflowInstanceReader{db: r.db, dialect: r.dialect}.SelectActiveWorkflowInstances(ctx, scopeKey, selectors, excludedStates)
+}
+
+var _ WorkflowInstancePersistenceReader = (*recordingRuntimeMutationRunner)(nil)
+
+func (s *workflowInstanceStore) mutate(ctx context.Context, route runtimeflowidentity.Route, fn func(*WorkflowInstance)) error {
+	if fn == nil {
+		return nil
+	}
+	return s.mutateE(ctx, route, func(instance *WorkflowInstance) error {
+		fn(instance)
+		return nil
+	})
+}
+
+func (s *workflowInstanceStore) mutateE(ctx context.Context, route runtimeflowidentity.Route, fn func(*WorkflowInstance) error) error {
+	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
+	requestedKey := strings.TrimSpace(route.InstancePath)
+	if !route.Valid() {
+		return &WorkflowInstanceLookupMiss{RequestedKey: requestedKey}
+	}
+	if s == nil || !s.enabled() || fn == nil {
+		return nil
+	}
+	if s.engineMutations == nil {
+		return fmt.Errorf("workflow instance mutation requires the selected workflow engine mutation owner")
+	}
+	runID, err := runtimecurrentstate.RequireRunID(ctx)
+	if err != nil {
+		return err
+	}
+	instance, ok, err := s.Load(ctx, route)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return &WorkflowInstanceLookupMiss{RequestedKey: requestedKey}
+	}
+	expectedState := strings.TrimSpace(instance.CurrentState)
+	expectedRevision := instance.Revision
+	if err := fn(&instance); err != nil {
+		return err
+	}
+	record, err := workflowEngineStateRecord(runID, route, instance, expectedState, expectedRevision, false, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	_, err = s.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{State: record})
+	return err
+}
