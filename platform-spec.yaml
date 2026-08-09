@@ -7394,7 +7394,7 @@ engine:
       description: 'What happens when chain_depth exceeds the limit (default: 50).'
       intercepted_event: The event that would exceed the limit is NOT emitted. It is intercepted before entering the event
         loop. It does NOT appear in emitted_events.
-      dead_letter_record: 'A dead_letters row is created with a platform.chain_depth_exceeded failure envelope, containing the intercepted event name, payload, and the chain depth at interception.'
+      dead_letter_record: 'The selected runtime store is the sole writer owner. Exactly one dead_letters row and one dead_letter.recorded/v2 author-activity occurrence are created with a platform.chain_depth_exceeded failure envelope containing the intercepted event name, payload, chain depth, and handler identity. Intercepted-emission materialization has one invocation per execution path; duplicate recorder calls are idempotent and PostgreSQL-only SQL writers or diagnostic-event substitutes are forbidden.'
       triggering_handler_outcome: 'The handler that attempted to emit the chain-exceeding event gets outcome: success. The
         handler itself succeeded — it is the EMITTED event that was intercepted. The handler''s other side effects (state
         changes, gate sets, data writes) still commit.'
@@ -18855,7 +18855,7 @@ test_specification:
   internal_catalog_conformance:
     id: testing.internal_catalog_claim_inventory
     promoted_by: '#2143'
-    implementation_status: implemented_first_slice
+    implementation_status: implemented_current_corpus_replay_clean
     owner: platform-spec.yaml#test_specification.internal_catalog_conformance
     purpose: >
       Define the claim-indexed proof contract for the private tests/tier*
@@ -18872,8 +18872,10 @@ test_specification:
       dispositions:
         runtime: >
           The fixture must pass supported swarm verify and execute its exact
-          expected.yaml assertions through the existing PostgreSQL cataloge2e
-          production loader/runtime/store harness.
+          expected.yaml assertions through the production loader and runtime.
+          Ordinary event-driven rows must additionally satisfy replay_clean on
+          real PostgreSQL and SQLite selected stores. The four explicitly
+          different-concept runtime rows retain their named proof boundaries.
         verify-only: >
           The fixture proves the declared pass, warning, or reject result from
           canonical contract loading and verification. Warning and reject rows
@@ -18892,16 +18894,122 @@ test_specification:
         per-tier fixture allowlists, exclusion maps, and mocked result sources
         must not classify fixtures or satisfy claims.
       backend_boundary: >
-        All runtime fixtures execute on the existing PostgreSQL catalog harness.
-        The two selected-contract run-fork fixtures are explicitly PostgreSQL
-        product proofs. SQLite run.fork remains typed unsupported under
+        The 94 ordinary event-driven runtime fixtures execute from one typed
+        transcript on a PostgreSQL source and fresh PostgreSQL and SQLite
+        destinations, including runtime reconstruction and selected-store
+        reopen proof. The two selected-contract run-fork fixtures are explicitly
+        PostgreSQL product proofs. SQLite run.fork remains typed unsupported under
         storage_backends.runtime_store_selection.optional_product_capability_matrix
-        and its fail-closed capability tests receive no fixture-execution credit.
+        and its fail-closed capability tests receive no fork-execution credit.
+        The direct tool row and boot-only row retain separate supported proofs
+        and receive no empty-journal replay credit.
       parent_tail: >
-        Finite grammar matrices, replay-clean both-store restart proof, and
-        convergence on the public deterministic scenario format remain the
-        separately ruled catalog_convergence tail; this inventory does not
-        implement those dimensions.
+        Finite grammar matrices, adoption by the separately owned compiled-process
+        golden workload, and convergence on the public deterministic scenario
+        format remain the catalog_convergence tail. They do not weaken or duplicate
+        the current-corpus replay-clean owner.
+    replay_clean:
+      promoted_by: '#2143'
+      transcript:
+        version: catalog-replay-transcript/v1
+        owner: internal/testutil/replayconformance
+        identity: >
+          The immutable typed transcript records its exact version, current
+          platform-spec SHA-256 digest, canonical bundle hash and fixture source,
+          fixed run identity, deterministic scripted external responses, runtime
+          startup phase, typed initial entity setup, and ordered input groups.
+          Input groups explicitly distinguish sequential and concurrent steps and
+          carry every authored barrier.
+        input_kind: >
+          The current closed input kind is existing_run_root_ingress. Every root
+          carries caller-owned event ID, UTC timestamp, event type, payload,
+          producer, and fixed run identity. Missing or unknown version, digest,
+          bundle/source identity, input kind, event identity, timestamp, type, or
+          producer fails before destination-store construction. There is no legacy,
+          export, migration, dump, callback, or compatibility admission.
+        choreography: >
+          Harness-authored startup order, concurrent groups, terminal barriers,
+          and automatic-effect barriers live in the transcript. Production-owned
+          automatic behavior remains production-owned. Fixture-name branches and
+          source- or backend-specific callbacks are forbidden.
+      topology:
+        census: '98 runtime rows = 94 replay-clean ordinary rows + 2 selected-contract fork rows + 1 direct tool row + 1 boot-only row.'
+        source: One fresh current-schema PostgreSQL selected store and a newly constructed production runtime.
+        destinations:
+        - One independently fresh current-schema PostgreSQL selected store and newly constructed production runtime.
+        - One independently fresh current-schema SQLite selected store and newly constructed production runtime.
+        exclusions: >
+          The two selected-contract fork rows, direct tool row, and boot-only row
+          must retain named separate execution proofs and structurally cannot call
+          the replay primitive or receive replay-clean credit. Any additional or
+          missing runtime row fails the exact census.
+      frontier:
+        rule: >
+          Comparison is eligible only after every input group returns its exact
+          accepted or rejected operation result, all current expected.yaml
+          assertions pass, the selected-store test-quiescence owner reports no
+          immediate delivery, receipt, session, pipeline, or due-timer work, and
+          the runtime and its process-owned work stop cleanly. Deadline expiry,
+          unresolved work, repeated pagination identity, cursor cycle, missing
+          accepted root, unexpected ingress root, malformed snapshot, unknown
+          lineage, or journal mutation fails closed.
+        automatic_runtime_control: >
+          A rootless generated event is frontier-owned only when its canonical
+          constructor class is runtime_control. Its identity/time remain generated
+          allocations, while its complete semantic facts and cardinality compare.
+          Labels and payload shape never grant this classification.
+      operation_outcomes: >
+        Every authored step compares accepted/rejected status and canonical receipt
+        outcome, side effects, and platform.failure/v1 envelope. The complete
+        existing expected.yaml assertions execute independently after the source,
+        each destination, and each reconstructed runtime. An equal or empty event
+        journal cannot substitute for a rejected-input or semantic-outcome proof.
+      projection:
+        version: catalog-replay-projection/v1
+        owner: internal/testutil/replayconformance
+        event_facts: >
+          Compare constructor class, event type, task, run, entity and flow identity,
+          canonical payload bytes, execution mode, chain depth, producer type and ID,
+          routing source, source route, target route and target set, delivery context,
+          and causal lineage. Caller-owned root event IDs and timestamps compare
+          exactly.
+        delivery_facts: >
+          Compare subscriber type and ID, exact canonical delivery route, terminal
+          status, reason, platform.failure/v1 envelope, retry count,
+          retry-scheduled flag, and terminal flag.
+        dead_letter_facts: >
+          Compare exact causal delivery linkage, platform.failure/v1 envelope,
+          retry count, chain depth, and handler identity. Malformed linkage fails
+          closed. Selected-store RecordDeadLetter is the only write owner and
+          intercepted-emission materialization is exact once per execution path.
+        normalization: >
+          Normalize only admission-allocated generated event ID and created_at plus
+          delivery/dead-letter row IDs, claim versions, session/lease identities,
+          and lifecycle timestamps. Generated causal references use deterministic
+          canonical identity keys. Identical generated siblings compare as a
+          cardinality-preserving multiset; non-isomorphic siblings sharing one
+          canonical identity are ambiguous and fail closed. No run, bundle,
+          business payload, task, entity/flow, route, status, failure, retry, chain,
+          handler, or producer fact is normalized.
+        observability_exclusion: >
+          platform.runtime_log observations are excluded through the canonical
+          operator read option only. Event labels, source strings, and payload shape
+          cannot exclude another event. Delivery and dead-letter terminal truth
+          remains included.
+      reopen:
+        rule: >
+          After each stopped execution, PostgreSQL is admitted through a fresh
+          selected-store handle over the isolated database and SQLite is reopened
+          through an independent handle over the exact isolated database. The
+          contract bundle is reloaded and its hash/spec identities are revalidated;
+          a newly constructed production runtime starts with recovery enabled,
+          reaches test quiescence, re-runs every semantic assertion, stops, and
+          emits byte-identical canonical projection. Restart success without
+          unchanged semantic bytes is failure.
+      non_goals:
+      - Public event.replay remains fresh-event redelivery and is not whole-run conformance reexecution.
+      - Selected-contract historical run-fork replay remains a separate PostgreSQL product capability.
+      - No generic backend matrix, scenario language, database history service, raw snapshot copier, or compatibility layer is introduced.
     claims:
       catalog.runtime.primitives:
         status: active

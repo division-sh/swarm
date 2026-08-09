@@ -1,13 +1,12 @@
 package cataloge2e
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
-func TestTier1PrimitiveCatalogFixtures_RealRuntime(t *testing.T) {
+func TestTier1PrimitiveCanonicalRoutingOwnership(t *testing.T) {
 	canonicalrouting.Prove(t,
 		canonicalrouting.ArtifactID("tests/tier1-primitives/test-advances-to"),
 		canonicalrouting.ArtifactID("tests/tier1-primitives/test-advances-to-terminal"),
@@ -41,18 +40,4 @@ func TestTier1PrimitiveCatalogFixtures_RealRuntime(t *testing.T) {
 		canonicalrouting.ArtifactID("tests/tier1-primitives/test-rules-no-match"),
 		canonicalrouting.ArtifactID("tests/tier1-primitives/test-sets-gate"),
 	)
-	for _, fixture := range catalogRuntimeFixtures(t, "catalog.runtime.primitives") {
-		fixtureName, fixtureRoot := fixture.Name, fixture.Root
-		t.Run(fixtureName, func(t *testing.T) {
-			var expected catalogExpectedDocument
-			loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
-
-			h := newRuntimeHarness(t, fixtureRoot, false)
-			h.seedEntityFields(expected)
-			for _, step := range expected.triggerSequence() {
-				h.publishAndWait(step, catalogRuntimePublishTimeout)
-			}
-			assertCatalogRuntimeOutcome(t, h, expected)
-		})
-	}
 }

@@ -13,12 +13,87 @@ import (
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 type exactDeadLetterStore interface {
 	RecordDeadLetter(context.Context, runtimedeadletters.Record) error
+}
+
+type deadLetterRecorderFixtureStore interface {
+	semanticEventFixtureStore
+	runtimedeadletters.Recorder
+}
+
+func TestRecordDeadLetterExactOnceParity(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			selected := fixture.store.(deadLetterRecorderFixtureStore)
+			ctx := testAuthorActivityContext()
+			runID := uuid.NewString()
+			entityID := uuid.NewString()
+			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			event := eventtest.ExistingRunRootIngress(
+				uuid.NewString(), "chain.e5", "node-5", "", []byte(`{}`), 5, runID,
+				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Date(2026, 8, 9, 4, 0, 0, 0, time.UTC),
+			)
+			if err := commitSemanticEventFixture(ctx, selected, event); err != nil {
+				t.Fatalf("commit chain source event: %v", err)
+			}
+			record := runtimedeadletters.Record{
+				OriginalEventID: event.ID(), OriginalEvent: "chain.e6", OriginalPayload: []byte(`{}`),
+				EntityID: entityID, FlowInstance: "runtime", RetryCount: 0, ChainDepth: 6,
+				HandlerNode: "node-6:chain.e6", Timestamp: "2026-08-09T04:00:01Z",
+				Failure: testFailureEnvelope(runtimefailures.ClassChainDepthExceeded, "chain_depth_exceeded", map[string]any{
+					"chain_depth": 6, "event_type": "chain.e6",
+				}),
+			}
+			for attempt := 1; attempt <= 2; attempt++ {
+				if err := selected.RecordDeadLetter(ctx, record); err != nil {
+					t.Fatalf("RecordDeadLetter attempt %d: %v", attempt, err)
+				}
+			}
+			assertExactOnceDeadLetterRecord(t, ctx, fixture, event.ID())
+		})
+	}
+}
+
+func assertExactOnceDeadLetterRecord(t testing.TB, ctx context.Context, fixture authorActivityReceiptFixture, eventID string) {
+	t.Helper()
+	query := `
+		SELECT
+			(SELECT COUNT(*) FROM dead_letters WHERE original_event_id = ?),
+			(SELECT COUNT(*)
+			 FROM author_activity_occurrences aa
+			 JOIN dead_letters dl ON aa.source_identity = CAST(dl.dead_letter_id AS TEXT)
+			 WHERE dl.original_event_id = ?
+			   AND aa.kind = 'dead_letter.recorded' AND aa.version = 2
+			   AND aa.transition = 'recorded' AND aa.source_owner = 'dead_letters')`
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
+		query = `
+			SELECT
+				(SELECT COUNT(*) FROM dead_letters WHERE original_event_id = $1::uuid),
+				(SELECT COUNT(*)
+				 FROM author_activity_occurrences aa
+				 JOIN dead_letters dl ON aa.source_identity = dl.dead_letter_id::text
+				 WHERE dl.original_event_id = $1::uuid
+				   AND aa.kind = 'dead_letter.recorded' AND aa.version = 2
+				   AND aa.transition = 'recorded' AND aa.source_owner = 'dead_letters')`
+	}
+	args := []any{eventID, eventID}
+	if fixture.dialect == authoractivityfixture.DialectPostgres {
+		args = []any{eventID}
+	}
+	var rows, occurrences int
+	if err := fixture.db.QueryRowContext(ctx, query, args...).Scan(&rows, &occurrences); err != nil {
+		t.Fatalf("query exact-once dead-letter facts: %v", err)
+	}
+	if rows != 1 || occurrences != 1 {
+		t.Fatalf("dead-letter exact-once facts = rows:%d occurrences:%d, want 1/1", rows, occurrences)
+	}
 }
 
 func TestRecordDeadLetterRejectsEveryIncompleteOrNonCanonicalDimensionOnBothStores(t *testing.T) {

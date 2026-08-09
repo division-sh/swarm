@@ -3,7 +3,6 @@ package cataloge2e
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,7 +11,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 )
 
-func TestTier11FlowCompositionCatalogFixtures_RealRuntime(t *testing.T) {
+func TestTier11FlowCompositionCanonicalRoutingOwnership(t *testing.T) {
 	canonicalrouting.Prove(t,
 		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-child-flow-absolute-path"),
 		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-child-flow-loads"),
@@ -33,20 +32,6 @@ func TestTier11FlowCompositionCatalogFixtures_RealRuntime(t *testing.T) {
 		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-tool-override"),
 		canonicalrouting.ArtifactID("tests/tier11-flow-composition/test-wildcard-deep-subscription"),
 	)
-	for _, fixture := range catalogRuntimeFixtures(t, "catalog.runtime.flow_composition") {
-		fixtureName, fixtureRoot := fixture.Name, fixture.Root
-		t.Run(fixtureName, func(t *testing.T) {
-			var expected catalogExpectedDocument
-			loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
-			h := newRuntimeHarness(t, fixtureRoot, true)
-			h.seedEntityFields(expected)
-			for _, step := range expected.triggerSequence() {
-				h.publishAndWait(step, catalogRuntimePublishTimeout)
-			}
-			assertCatalogRuntimeOutcome(t, h, expected)
-			assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t, h, "worker/work.assign", "worker/w-001", "task-handler")
-		})
-	}
 }
 
 func assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t testing.TB, h *runtimeHarness, eventName, flowInstance, nodeID string) {
@@ -58,7 +43,7 @@ func assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t testing.TB, h *runt
 	nodeID = strings.TrimSpace(nodeID)
 	wantEntityID := runtimeflowidentity.EntityID(flowInstance)
 	var eventID, targetFlowInstance, targetEntityID, targetSet string
-	err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	eventQuery := `
 		SELECT event_id::text,
 		       COALESCE(target_route->>'flow_instance', ''),
 		       COALESCE(target_route->>'entity_id', ''),
@@ -66,8 +51,19 @@ func assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t testing.TB, h *runt
 		FROM events
 		WHERE event_name = $1
 		ORDER BY created_at DESC, event_id DESC
-		LIMIT 1
-	`, strings.TrimSpace(eventName)).Scan(&eventID, &targetFlowInstance, &targetEntityID, &targetSet)
+		LIMIT 1`
+	if h.backend == catalogBackendSQLite {
+		eventQuery = `
+			SELECT event_id,
+			       COALESCE(json_extract(target_route, '$.flow_instance'), ''),
+			       COALESCE(json_extract(target_route, '$.entity_id'), ''),
+			       COALESCE(target_set, '')
+			FROM events
+			WHERE event_name = ?
+			ORDER BY created_at DESC, event_id DESC
+			LIMIT 1`
+	}
+	err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), eventQuery, strings.TrimSpace(eventName)).Scan(&eventID, &targetFlowInstance, &targetEntityID, &targetSet)
 	if err == sql.ErrNoRows {
 		t.Fatalf("targeted event %q not persisted", strings.TrimSpace(eventName))
 	}
@@ -79,7 +75,7 @@ func assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t testing.TB, h *runt
 	}
 
 	var deliveryStatus, reasonCode, deliveryFlowInstance, deliveryEntityID string
-	if err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	deliveryQuery := `
 		SELECT COALESCE(status, ''),
 		       COALESCE(reason_code, ''),
 		       COALESCE(delivery_target_route->>'flow_instance', ''),
@@ -91,9 +87,24 @@ func assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t testing.TB, h *runt
 		  AND COALESCE(delivery_target_route->>'flow_instance', '') = $3
 		  AND COALESCE(delivery_target_route->>'entity_id', '') = $4
 		ORDER BY created_at DESC, delivery_id DESC
-		LIMIT 1
-	`, eventID, nodeID, flowInstance, wantEntityID).Scan(&deliveryStatus, &reasonCode, &deliveryFlowInstance, &deliveryEntityID); err == sql.ErrNoRows {
-		t.Fatalf("targeted event %s did not persist node delivery for %s route %s/%s; deliveries=%s", eventID, nodeID, flowInstance, wantEntityID, dumpEventDeliveries(t, h.db, eventID))
+		LIMIT 1`
+	if h.backend == catalogBackendSQLite {
+		deliveryQuery = `
+			SELECT COALESCE(status, ''),
+			       COALESCE(reason_code, ''),
+			       COALESCE(json_extract(delivery_target_route, '$.flow_instance'), ''),
+			       COALESCE(json_extract(delivery_target_route, '$.entity_id'), '')
+			FROM event_deliveries
+			WHERE event_id = ?
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = ?
+			  AND COALESCE(json_extract(delivery_target_route, '$.flow_instance'), '') = ?
+			  AND COALESCE(json_extract(delivery_target_route, '$.entity_id'), '') = ?
+			ORDER BY created_at DESC, delivery_id DESC
+			LIMIT 1`
+	}
+	if err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), deliveryQuery, eventID, nodeID, flowInstance, wantEntityID).Scan(&deliveryStatus, &reasonCode, &deliveryFlowInstance, &deliveryEntityID); err == sql.ErrNoRows {
+		t.Fatalf("targeted event %s did not persist node delivery for %s route %s/%s; deliveries=%s", eventID, nodeID, flowInstance, wantEntityID, dumpEventDeliveries(t, h, eventID))
 	} else if err != nil {
 		t.Fatalf("query targeted event delivery: %v", err)
 	}
@@ -102,15 +113,25 @@ func assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t testing.TB, h *runt
 	}
 
 	var deliveryCount int
-	if err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	deliveryCountQuery := `
 		SELECT COUNT(*)
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
 		  AND subscriber_id = $2
 		  AND COALESCE(delivery_target_route->>'flow_instance', '') = $3
-		  AND COALESCE(delivery_target_route->>'entity_id', '') = $4
-	`, eventID, nodeID, flowInstance, wantEntityID).Scan(&deliveryCount); err != nil {
+		  AND COALESCE(delivery_target_route->>'entity_id', '') = $4`
+	if h.backend == catalogBackendSQLite {
+		deliveryCountQuery = `
+			SELECT COUNT(*)
+			FROM event_deliveries
+			WHERE event_id = ?
+			  AND subscriber_type = 'node'
+			  AND subscriber_id = ?
+			  AND COALESCE(json_extract(delivery_target_route, '$.flow_instance'), '') = ?
+			  AND COALESCE(json_extract(delivery_target_route, '$.entity_id'), '') = ?`
+	}
+	if err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), deliveryCountQuery, eventID, nodeID, flowInstance, wantEntityID).Scan(&deliveryCount); err != nil {
 		t.Fatalf("query targeted event deliveries: %v", err)
 	}
 	if deliveryCount != 1 {
@@ -118,12 +139,19 @@ func assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t testing.TB, h *runt
 	}
 
 	var deadLetterCount int
-	if err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), `
+	deadLetterQuery := `
 		SELECT COUNT(*)
 		FROM dead_letters
 		WHERE original_event_id = $1::uuid
-		  AND failure->>'class' IN ('platform.target_unreachable', 'platform.target_ambiguous')
-	`, eventID).Scan(&deadLetterCount); err != nil {
+		  AND failure->>'class' IN ('platform.target_unreachable', 'platform.target_ambiguous')`
+	if h.backend == catalogBackendSQLite {
+		deadLetterQuery = `
+			SELECT COUNT(*)
+			FROM dead_letters
+			WHERE original_event_id = ?
+			  AND json_extract(failure, '$.class') IN ('platform.target_unreachable', 'platform.target_ambiguous')`
+	}
+	if err := h.db.QueryRowContext(testAuthorActivityContext(context.Background()), deadLetterQuery, eventID).Scan(&deadLetterCount); err != nil {
 		t.Fatalf("query targeted event dead letters: %v", err)
 	}
 	if deadLetterCount != 0 {
@@ -131,9 +159,9 @@ func assertDynamicFlowInstanceReceiverSelectedNodeDelivery(t testing.TB, h *runt
 	}
 }
 
-func dumpEventDeliveries(t testing.TB, db *sql.DB, eventID string) string {
+func dumpEventDeliveries(t testing.TB, h *runtimeHarness, eventID string) string {
 	t.Helper()
-	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
+	query := `
 		SELECT COALESCE(subscriber_type, ''),
 		       COALESCE(subscriber_id, ''),
 		       COALESCE(status, ''),
@@ -142,8 +170,20 @@ func dumpEventDeliveries(t testing.TB, db *sql.DB, eventID string) string {
 		       COALESCE(delivery_target_route->>'entity_id', '')
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
-		ORDER BY created_at ASC, delivery_id ASC
-	`, eventID)
+		ORDER BY created_at ASC, delivery_id ASC`
+	if h.backend == catalogBackendSQLite {
+		query = `
+			SELECT COALESCE(subscriber_type, ''),
+			       COALESCE(subscriber_id, ''),
+			       COALESCE(status, ''),
+			       COALESCE(reason_code, ''),
+			       COALESCE(json_extract(delivery_target_route, '$.flow_instance'), ''),
+			       COALESCE(json_extract(delivery_target_route, '$.entity_id'), '')
+			FROM event_deliveries
+			WHERE event_id = ?
+			ORDER BY created_at ASC, delivery_id ASC`
+	}
+	rows, err := h.db.QueryContext(testAuthorActivityContext(context.Background()), query, eventID)
 	if err != nil {
 		return "query_error:" + err.Error()
 	}

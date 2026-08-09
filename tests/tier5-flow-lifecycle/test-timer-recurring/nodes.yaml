@@ -7,9 +7,10 @@ test-node:
       event: timer.tick
       delay: 1s
       start_on: event:monitor.started
+      cancel_on: event:timer.tick
       recurring: true
   event_handlers:
     monitor.started:
       advances_to: monitoring
     timer.tick:
-      advances_to: monitoring
+      advances_to: done

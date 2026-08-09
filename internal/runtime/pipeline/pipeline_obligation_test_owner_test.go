@@ -13,6 +13,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -159,6 +160,7 @@ func (*unavailablePipelineTestHumanTaskExpiry) CommitHumanTaskExpirations(contex
 type unavailablePipelineTestStandingServices struct{ StandingServicePersistence }
 type unavailablePipelineTestDecisionCardMutations struct{ DecisionCardMutationOwner }
 type unavailablePipelineTestDeliveryRuntime struct{ WorkflowDeliveryRuntime }
+type unavailablePipelineTestDeadLetters struct{ runtimedeadletters.Persistence }
 type unavailablePipelineTestRunLifecycle struct {
 	runtimerunlifecycle.OperationOwner
 }
@@ -184,6 +186,9 @@ func completeDurablePipelineTestOptions(bus Bus, opts PipelineCoordinatorOptions
 	}
 	if opts.DeliveryStore == nil {
 		opts.DeliveryStore = &unavailablePipelineTestDeliveryStore{}
+	}
+	if opts.DeadLetters == nil {
+		opts.DeadLetters = &unavailablePipelineTestDeadLetters{}
 	}
 	if opts.PipelineObligations == nil {
 		opts.PipelineObligations = unavailablePipelineTestObligationOwner{}

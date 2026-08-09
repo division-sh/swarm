@@ -390,6 +390,7 @@ func selectedContractPipelineCoordinatorOptions(
 		Module:                  loaded.Module,
 		Persistence:             ports.workflow,
 		DeliveryStore:           ports.busDurable.DeliveryLifecycle,
+		DeadLetters:             ports.busDurable.TargetFailureRecorder,
 		PipelineObligations:     ports.pipelineObligations,
 		InstanceActivator:       instanceActivator,
 		MailboxMaterializer:     ports.mailbox,

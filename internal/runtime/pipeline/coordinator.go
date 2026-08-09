@@ -202,7 +202,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		if !opts.Persistence.Valid() {
 			return nil
 		}
-		if opts.DeliveryStore == nil || opts.PipelineObligations == nil || opts.DecisionCards == nil ||
+		if opts.DeliveryStore == nil || opts.DeadLetters == nil || opts.PipelineObligations == nil || opts.DecisionCards == nil ||
 			opts.ProposedEffects == nil || opts.HumanTasks == nil ||
 			opts.DecisionCardDraftExpiry == nil || opts.HumanTaskExpiry == nil ||
 			opts.DeliveryRuntime == nil || opts.RunLifecycle == nil {
@@ -855,13 +855,16 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			HandlerNode:     firstNonEmptyString(nodeID+":"+eventType, nodeID),
 			Timestamp:       time.Now().UTC().Format(time.RFC3339Nano),
 		}
-		if pc.deadLetters != nil {
-			if err := pc.deadLetters.RecordDeadLetter(ctx, rec); err != nil {
-				pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_persist_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
-					"intercepted_event_type": eventType,
-					"handler_node":           nodeID,
-				}, err)
-			}
+		if pc.deadLetters == nil {
+			pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_persist_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
+				"intercepted_event_type": eventType,
+				"handler_node":           nodeID,
+			}, errors.New("workflow intercepted-emission dead-letter recorder is required"))
+		} else if err := pc.deadLetters.RecordDeadLetter(ctx, rec); err != nil {
+			pc.logRuntimeWarn(ctx, "workflow-runtime", "intercepted_emit_dead_letter_persist_failed", strings.TrimSpace(trigger.ID()), strings.TrimSpace(string(trigger.Type())), runtimeWorkflowID, entityID, map[string]any{
+				"intercepted_event_type": eventType,
+				"handler_node":           nodeID,
+			}, err)
 		}
 		deadLetterPayload := map[string]any{
 			"original_event":   eventType,

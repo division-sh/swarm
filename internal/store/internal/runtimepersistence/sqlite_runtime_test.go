@@ -592,6 +592,7 @@ func configureSQLiteFlowActivationLifecycle(
 		RunLifecycle:            selected,
 		PipelineObligations:     selected.PipelineObligations(),
 		DeliveryStore:           selected,
+		DeadLetters:             selected,
 		DecisionCards:           selected,
 		ProposedEffects:         selected,
 		HumanTasks:              selected,

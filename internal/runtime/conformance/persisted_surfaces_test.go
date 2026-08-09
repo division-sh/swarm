@@ -1890,6 +1890,7 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 		RunLifecycle:            selected,
 		PipelineObligations:     selected.PipelineObligations(),
 		DeliveryStore:           selected,
+		DeadLetters:             selected,
 		DecisionCards:           selected,
 		ProposedEffects:         selected,
 		HumanTasks:              selected,

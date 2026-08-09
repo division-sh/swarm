@@ -25,6 +25,10 @@ type Record struct {
 	Timestamp       string
 }
 
+type Recorder interface {
+	RecordDeadLetter(context.Context, Record) error
+}
+
 type InsertResult struct {
 	DeadLetterID string
 	Inserted     bool

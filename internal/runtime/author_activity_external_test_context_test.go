@@ -117,6 +117,7 @@ type testAuthorActivityCatalogRegistrar interface {
 }
 
 type externalRuntimeTestWorkflowOwner interface {
+	runtimebus.TargetFailureDeadLetterRecorder
 	decisioncard.Store
 	decisioncard.ProposedEffectStore
 	decisioncard.HumanTaskStore
@@ -138,6 +139,9 @@ func newExternalRuntimeTestPipelineCoordinator(
 	}
 	if opts.DecisionCards == nil {
 		opts.DecisionCards = owner
+	}
+	if opts.DeadLetters == nil {
+		opts.DeadLetters = owner
 	}
 	if opts.ProposedEffects == nil {
 		opts.ProposedEffects = owner

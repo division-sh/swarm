@@ -42,6 +42,9 @@ import (
 )
 
 type unavailableFlowActivationDeliveryStore struct{ runtimedelivery.Store }
+type unavailableFlowActivationDeadLetterRecorder struct {
+	runtimebus.TargetFailureDeadLetterRecorder
+}
 type unavailableFlowActivationDecisionCards struct{ decisioncard.Store }
 type unavailableFlowActivationProposedEffects struct {
 	decisioncard.ProposedEffectStore
@@ -67,6 +70,7 @@ func (*unavailableFlowActivationHumanTaskExpiry) CommitHumanTaskExpirations(cont
 func completeFlowActivationWorkflowOptions(opts runtimepipeline.PipelineCoordinatorOptions) runtimepipeline.PipelineCoordinatorOptions {
 	opts.ReceiverExecution = eventreceiver.NormalExecution()
 	opts.DeliveryStore = &unavailableFlowActivationDeliveryStore{}
+	opts.DeadLetters = &unavailableFlowActivationDeadLetterRecorder{}
 	opts.DecisionCards = &unavailableFlowActivationDecisionCards{}
 	opts.ProposedEffects = &unavailableFlowActivationProposedEffects{}
 	opts.HumanTasks = &unavailableFlowActivationHumanTasks{}

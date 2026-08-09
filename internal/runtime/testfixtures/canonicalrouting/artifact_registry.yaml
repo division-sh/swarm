@@ -11,15 +11,15 @@ artifacts:
   - {root: examples/routing/notify-all-children, disposition: different-concept, owner: examples.routing.notify_all_children, proof: internal/runtime/conformance/template_flow_pilot_conformance_test.go:TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority}
   - {root: internal/releasee2e/testdata/claude_cli_managed_lifecycle, disposition: canonical-overlay, owner: releasee2e.claude_cli_managed_lifecycle, proof: internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestReleaseE2EClaudeLifecycleFixtureLoadsAndVerifies}
   - {root: internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp, disposition: canonical-overlay, owner: runforkexecution.selected_fork_flow_scoped_mcp, proof: internal/runtime/testfixtures/canonicalrouting/fixture_test.go:TestSelectedForkFlowScopedMCPFixtureLoadsAndVerifies}
-  - {root: tests/tier11-flow-composition/test-dynamic-flow-instance, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier11_flow_composition_e2e_test.go:TestTier11FlowCompositionCatalogFixtures_RealRuntime, issue: 1738}
-  - {root: tests/tier5-flow-lifecycle/test-create-flow-instance, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCatalogFixtures_RealRuntime, issue: 1738}
-  - {root: tests/tier5-flow-lifecycle/test-create-flow-instance-config, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCatalogFixtures_RealRuntime, issue: 1738}
-  - {root: tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCatalogFixtures_RealRuntime, issue: 1738}
-  - {root: tests/tier9-composition-patterns/test-compose-create-instance-config, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier9_composition_patterns_e2e_test.go:TestTier9CompositionPatternCatalogFixtures_RealRuntime, issue: 1738}
-  - {root: tests/tier5-flow-lifecycle/test-timer-cancel, disposition: different-concept, owner: engine.timer_lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCatalogFixtures_RealRuntime}
-  - {root: tests/tier5-flow-lifecycle/test-timer-fire, disposition: different-concept, owner: engine.timer_lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCatalogFixtures_RealRuntime}
-  - {root: tests/tier5-flow-lifecycle/test-timer-recurring, disposition: different-concept, owner: engine.timer_lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCatalogFixtures_RealRuntime}
-  - {root: tests/tier5-flow-lifecycle/test-timer-start-on, disposition: different-concept, owner: engine.timer_lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCatalogFixtures_RealRuntime}
+  - {root: tests/tier11-flow-composition/test-dynamic-flow-instance, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier11_flow_composition_e2e_test.go:TestTier11FlowCompositionCanonicalRoutingOwnership, issue: 1738}
+  - {root: tests/tier5-flow-lifecycle/test-create-flow-instance, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCanonicalRoutingOwnership, issue: 1738}
+  - {root: tests/tier5-flow-lifecycle/test-create-flow-instance-config, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCanonicalRoutingOwnership, issue: 1738}
+  - {root: tests/tier5-flow-lifecycle/test-create-flow-instance-duplicate, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCanonicalRoutingOwnership, issue: 1738}
+  - {root: tests/tier9-composition-patterns/test-compose-create-instance-config, disposition: tracked-split, owner: legacy-template-lifecycle, proof: internal/runtime/cataloge2e/tier9_composition_patterns_e2e_test.go:TestTier9CompositionPatternCanonicalRoutingOwnership, issue: 1738}
+  - {root: tests/tier5-flow-lifecycle/test-timer-cancel, disposition: different-concept, owner: engine.timer_lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCanonicalRoutingOwnership}
+  - {root: tests/tier5-flow-lifecycle/test-timer-fire, disposition: different-concept, owner: engine.timer_lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCanonicalRoutingOwnership}
+  - {root: tests/tier5-flow-lifecycle/test-timer-recurring, disposition: different-concept, owner: engine.timer_lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCanonicalRoutingOwnership}
+  - {root: tests/tier5-flow-lifecycle/test-timer-start-on, disposition: different-concept, owner: engine.timer_lifecycle, proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCanonicalRoutingOwnership}
   - {root: tests/tier8-boot-verification/test-boot-event-no-consumer, disposition: negative-mutation, owner: bootverify.event_consumer_exists, proof: internal/runtime/cataloge2e/tier8_boot_e2e_test.go:TestTier8BootCatalogFixtures_RealRuntimeBoot}
   - {root: tests/tier8-boot-verification/test-boot-permission-tool-mismatch, disposition: negative-mutation, owner: bootverify.agent_permission_validation, proof: internal/runtime/cataloge2e/tier8_boot_e2e_test.go:TestTier8BootCatalogFixtures_RealRuntimeBoot}
   - {root: tests/tier8-boot-verification/test-boot-prompt-ref, disposition: different-concept, owner: contracts.prompt_resolution, proof: internal/runtime/cataloge2e/tier8_boot_e2e_test.go:TestTier8BootCatalogFixtures_RealRuntimeBoot}
@@ -36,7 +36,7 @@ groups:
       - internal/runtime/testdata/generic-swarm-bundle
   - disposition: different-concept
     owner: engine.primitive
-    proof: internal/runtime/cataloge2e/tier1_primitives_e2e_test.go:TestTier1PrimitiveCatalogFixtures_RealRuntime
+    proof: internal/runtime/cataloge2e/tier1_primitives_e2e_test.go:TestTier1PrimitiveCanonicalRoutingOwnership
     roots:
       - tests/tier1-primitives/test-advances-to
       - tests/tier1-primitives/test-advances-to-terminal
@@ -71,7 +71,7 @@ groups:
       - tests/tier1-primitives/test-sets-gate
   - disposition: different-concept
     owner: policy.pattern
-    proof: internal/runtime/cataloge2e/tier10_policy_patterns_e2e_test.go:TestTier10PolicyPatternCatalogFixtures_RealRuntime
+    proof: internal/runtime/cataloge2e/tier10_policy_patterns_e2e_test.go:TestTier10PolicyPatternCanonicalRoutingOwnership
     roots:
       - tests/tier10-policy-patterns/test-policy-capacity-query
       - tests/tier10-policy-patterns/test-policy-counter-escalate
@@ -81,7 +81,7 @@ groups:
       - tests/tier10-policy-patterns/test-policy-timeout-elapsed
   - disposition: negative-mutation
     owner: legacy_static_multi_entity_retirement
-    proof: internal/runtime/cataloge2e/tier11_flow_composition_e2e_test.go:TestTier11FlowCompositionCatalogFixtures_RealRuntime
+    proof: internal/runtime/cataloge2e/tier11_flow_composition_e2e_test.go:TestTier11FlowCompositionCanonicalRoutingOwnership
     roots:
       - tests/tier11-flow-composition/test-child-flow-absolute-path
       - tests/tier11-flow-composition/test-child-flow-loads
@@ -108,7 +108,7 @@ groups:
       - tests/tier12-runtime-fork/test-selected-contract-fork-execution
   - disposition: different-concept
     owner: engine.list_processing
-    proof: internal/runtime/cataloge2e/tier3_list_processing_e2e_test.go:TestTier3ListProcessingCatalogFixtures_RealRuntime
+    proof: internal/runtime/cataloge2e/tier3_list_processing_e2e_test.go:TestTier3ListProcessingCanonicalRoutingOwnership
     roots:
       - tests/tier3-list-processing/test-fan-out-basic
       - tests/tier3-list-processing/test-fan-out-count
@@ -126,7 +126,7 @@ groups:
       - tests/tier3-list-processing/test-reduce-weighted-average
   - disposition: different-concept
     owner: engine.cross_entity
-    proof: internal/runtime/cataloge2e/tier4_cross_entity_e2e_test.go:TestTier4CrossEntityCatalogFixtures_RealRuntime
+    proof: internal/runtime/cataloge2e/tier4_cross_entity_e2e_test.go:TestTier4CrossEntityCanonicalRoutingOwnership
     roots:
       - tests/tier4-cross-entity/test-clear-multiple-targets
       - tests/tier4-cross-entity/test-clear-state
@@ -135,7 +135,7 @@ groups:
       - tests/tier4-cross-entity/test-query-group-by
   - disposition: different-concept
     owner: engine.flow_lifecycle
-    proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCatalogFixtures_RealRuntime
+    proof: internal/runtime/cataloge2e/tier5_lifecycle_e2e_test.go:TestTier5LifecycleCanonicalRoutingOwnership
     roots:
       - tests/tier5-flow-lifecycle/test-auto-emit-on-create
       - tests/tier5-flow-lifecycle/test-template-no-boot-instance
@@ -144,7 +144,7 @@ groups:
       - tests/tier5-flow-lifecycle/test-wildcard-subscription
   - disposition: different-concept
     owner: engine.event_loop
-    proof: internal/runtime/cataloge2e/tier6_event_loop_e2e_test.go:TestTier6EventLoopCatalogFixtures_RealRuntime
+    proof: internal/runtime/cataloge2e/tier6_event_loop_e2e_test.go:TestTier6EventLoopCanonicalRoutingOwnership
     roots:
       - tests/tier6-event-loop/test-atomicity-commit
       - tests/tier6-event-loop/test-atomicity-guard-rollback
@@ -159,7 +159,7 @@ groups:
       - tests/tier6-event-loop/test-on-complete-atomicity-chain
   - disposition: different-concept
     owner: engine.composition
-    proof: internal/runtime/cataloge2e/tier7_composition_e2e_test.go:TestTier7CompositionCatalogFixtures_RealRuntime
+    proof: internal/runtime/cataloge2e/tier7_composition_e2e_test.go:TestTier7CompositionCanonicalRoutingOwnership
     roots:
       - tests/tier7-composition/test-agent-emits-to-node
       - tests/tier7-composition/test-dual-delivery
@@ -168,7 +168,7 @@ groups:
       - tests/tier7-composition/test-two-node-chain
   - disposition: negative-mutation
     owner: legacy_static_multi_entity_retirement
-    proof: internal/runtime/cataloge2e/tier7_composition_e2e_test.go:TestTier7CompositionCatalogFixtures_RealRuntime
+    proof: internal/runtime/cataloge2e/tier7_composition_e2e_test.go:TestTier7CompositionCanonicalRoutingOwnership
     roots:
       - tests/tier7-composition/test-wildcard-cross-flow
   - disposition: negative-mutation
@@ -207,7 +207,7 @@ groups:
       - tests/tier8-boot-verification/test-boot-tool-missing
   - disposition: different-concept
     owner: engine.composition_pattern
-    proof: internal/runtime/cataloge2e/tier9_composition_patterns_e2e_test.go:TestTier9CompositionPatternCatalogFixtures_RealRuntime
+    proof: internal/runtime/cataloge2e/tier9_composition_patterns_e2e_test.go:TestTier9CompositionPatternCanonicalRoutingOwnership
     roots:
       - tests/tier9-composition-patterns/test-compose-accumulate-compute-branch
       - tests/tier9-composition-patterns/test-compose-clear-gates-reenter
@@ -221,7 +221,7 @@ groups:
       - tests/tier9-composition-patterns/test-compose-rules-per-rule-data
   - disposition: negative-mutation
     owner: legacy_multi_emit_retirement
-    proof: internal/runtime/cataloge2e/tier9_composition_patterns_e2e_test.go:TestTier9CompositionPatternCatalogFixtures_RealRuntime
+    proof: internal/runtime/cataloge2e/tier9_composition_patterns_e2e_test.go:TestTier9CompositionPatternCanonicalRoutingOwnership
     roots:
       - tests/tier9-composition-patterns/test-compose-multi-emit-cross-flow
 sources:

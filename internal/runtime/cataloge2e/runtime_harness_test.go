@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtime "github.com/division-sh/swarm/internal/runtime"
@@ -37,15 +38,28 @@ const (
 	catalogRuntimePublishTimeout = 20 * time.Second
 )
 
+type catalogRuntimeBackend string
+
+const (
+	catalogBackendPostgres catalogRuntimeBackend = "postgres"
+	catalogBackendSQLite   catalogRuntimeBackend = "sqlite"
+)
+
 type catalogTriggerStep struct {
 	Event                         string         `yaml:"event"`
 	Payload                       map[string]any `yaml:"payload"`
+	BarrierBefore                 string         `yaml:"barrier_before"`
 	AssertPersistedBeforeDelivery bool           `yaml:"assert_persisted_before_delivery"`
 	ErrorContains                 string         `yaml:"error_contains"`
 	ReceiptOutcome                string         `yaml:"receipt_outcome"`
 	ReceiptFailureClass           string         `yaml:"receipt_failure_class"`
 	ReceiptFailureDetail          string         `yaml:"receipt_failure_detail"`
 	ReceiptFailureAttributes      map[string]any `yaml:"receipt_failure_attributes"`
+	inputKind                     string
+	eventID                       string
+	createdAt                     time.Time
+	sourceAgent                   string
+	excludeFromEmitted            bool
 }
 
 type catalogExpectedDocument struct {
@@ -128,11 +142,15 @@ func (d catalogExpectedDocument) triggerFlowPrefix() string {
 
 type runtimeHarness struct {
 	t              *testing.T
+	backend        catalogRuntimeBackend
 	ctx            context.Context
 	cancel         context.CancelFunc
 	db             *sql.DB
 	pg             *store.PostgresStore
+	sqlite         *store.SQLiteRuntimeStore
+	reopenedSQLite *store.SQLiteRuntimeStore
 	rt             *runtime.Runtime
+	processOwner   *worklifetime.Process
 	workflow       catalogWorkflowPersistence
 	llm            *scriptedLLMRuntime
 	bundle         *runtimecontracts.WorkflowContractBundle
@@ -142,6 +160,7 @@ type runtimeHarness struct {
 	publishedOrder []string
 	eventEntityIDs map[string]string
 	previews       map[string]runtimepipeline.HandlerPreview
+	shutdownOnce   sync.Once
 	mu             sync.Mutex
 }
 
@@ -174,9 +193,20 @@ type agentFixtureEmit struct {
 }
 
 func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHarness {
+	return newRuntimeHarnessForBackend(t, fixtureRoot, catalogBackendPostgres, start)
+}
+
+func newRuntimeHarnessForBackend(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool) *runtimeHarness {
+	return newRuntimeHarnessFromTranscript(t, fixtureRoot, backend, start, nil)
+}
+
+func newRuntimeHarnessFromTranscript(t *testing.T, fixtureRoot string, backend catalogRuntimeBackend, start bool, transcript *catalogExecutionTranscript) *runtimeHarness {
 	t.Helper()
 	strictCatalogFixtureStartupPolicy().apply(t)
 	bundle := loadFixtureBundle(t, fixtureRoot)
+	if transcript != nil {
+		requireCatalogTranscriptIdentity(t, fixtureRoot, bundle, transcript)
+	}
 	var rootSchema struct {
 		InitialState string `yaml:"initial_state"`
 	}
@@ -186,24 +216,98 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		t.Fatalf("newFixtureWorkflowModule: %v", err)
 	}
 
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	waitForCatalogHarnessDB(t, db)
-
 	cfg := testRuntimeConfig()
 	cfg.LLM.Backend = "anthropic"
 	llmRuntime := newScriptedLLMRuntime()
-	loadAgentFixtures(t, fixtureRoot, llmRuntime)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	pg.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
-	workflowPersistence := runtimepipeline.NewWorkflowPersistence(pg)
+	if transcript == nil {
+		loadAgentFixtures(t, fixtureRoot, llmRuntime)
+	} else {
+		installAgentFixtures(llmRuntime, transcript.agentFixtures)
+	}
+
+	var (
+		db             *sql.DB
+		pg             *store.PostgresStore
+		sqlite         *store.SQLiteRuntimeStore
+		reopenedSQLite *store.SQLiteRuntimeStore
+	)
+	switch backend {
+	case catalogBackendPostgres:
+		_, postgresDB, cleanup := testutil.StartPostgres(t)
+		t.Cleanup(cleanup)
+		db = postgresDB
+		waitForCatalogHarnessDB(t, db)
+		pg = storetest.AdmitPostgresRuntimeStore(t, db)
+		pg.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
+	case catalogBackendSQLite:
+		sqlite, reopenedSQLite = storetest.StartSQLiteRuntimeStorePair(t)
+		db = storetest.DatabaseForTest(sqlite)
+		sqlite.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
+	default:
+		t.Fatalf("unsupported catalog runtime backend %q", backend)
+	}
 
 	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), catalogRuntimeRunID))
-	t.Cleanup(cancel)
 	processOwner := worklifetime.NewProcess()
-	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID, BundleHash: authorActivityTestBundleSourceFact.BundleHash(), BundleSource: "ephemeral"})
+	fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID, BundleHash: authorActivityTestBundleSourceFact.BundleHash(), BundleSource: "ephemeral"}
+	var workflowPersistence runtimepipeline.WorkflowPersistence
+	var deps runtime.RuntimeDeps
+	if pg != nil {
+		runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
+		workflowPersistence = runtimepipeline.NewWorkflowPersistence(pg)
+		deps = catalogPostgresRuntimeDeps(cfg, pg, workflowPersistence, module, llmRuntime, processOwner)
+	} else {
+		runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
+		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqlite)
+		deps = catalogSQLiteRuntimeDeps(cfg, sqlite, workflowPersistence, module, llmRuntime, processOwner)
+	}
 
-	rt, err := runtime.NewValidationHarnessRuntime(ctx, runtime.RuntimeDeps{Config: cfg,
+	rt, err := runtime.NewValidationHarnessRuntime(ctx, deps)
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	if !start {
+		installCatalogHarnessDeliveryAuthority(t, ctx, rt, pg, sqlite)
+	}
+	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
+		t.Fatalf("PrepareAuthorActivityCatalog: %v", err)
+	}
+	if start {
+		if err := rt.Start(ctx); err != nil {
+			t.Fatalf("runtime.Start: %v", err)
+		}
+	}
+	startedAt := catalogHarnessStartBoundary(t, db, backend)
+	if transcript != nil {
+		startedAt = transcript.observationBoundary()
+	}
+	h := &runtimeHarness{
+		t:              t,
+		backend:        backend,
+		ctx:            ctx,
+		cancel:         cancel,
+		db:             db,
+		pg:             pg,
+		sqlite:         sqlite,
+		reopenedSQLite: reopenedSQLite,
+		rt:             rt,
+		processOwner:   processOwner,
+		workflow:       rt.Pipeline,
+		llm:            llmRuntime,
+		bundle:         bundle,
+		initialState:   strings.TrimSpace(rootSchema.InitialState),
+		startedAt:      startedAt,
+		publishedIDs:   map[string]struct{}{},
+		publishedOrder: []string{},
+		eventEntityIDs: map[string]string{},
+		previews:       map[string]runtimepipeline.HandlerPreview{},
+	}
+	t.Cleanup(h.shutdown)
+	return h
+}
+
+func catalogPostgresRuntimeDeps(cfg *config.Config, pg *store.PostgresStore, workflowPersistence runtimepipeline.WorkflowPersistence, module runtimepipeline.WorkflowModule, llmRuntime *scriptedLLMRuntime, processOwner *worklifetime.Process) runtime.RuntimeDeps {
+	return runtime.RuntimeDeps{Config: cfg,
 		WorkflowPersistence: workflowPersistence,
 		EventStore:          pg,
 		EventBusDurable: runtimebus.DurableDependencies{
@@ -215,6 +319,7 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 		EventPayloadValidationBinder:   pg,
 		InboundPayloadValidationBinder: pg,
 		AuthorActivityRegistrars:       []runtime.AuthorActivityCatalogRegistrar{pg},
+		RunBundleAvailability:          pg,
 		RunControlStore:                pg,
 		RunLifecycleCandidates:         pg,
 		RuntimeLogStore:                pg,
@@ -258,72 +363,224 @@ func newRuntimeHarness(t *testing.T, fixtureRoot string, start bool) *runtimeHar
 			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 			BundleSourceFact:  authorActivityTestBundleSourceFact,
 			ProcessWorkOwner:  processOwner,
-		}})
+		}}
+}
 
+func catalogSQLiteRuntimeDeps(cfg *config.Config, sqlite *store.SQLiteRuntimeStore, workflowPersistence runtimepipeline.WorkflowPersistence, module runtimepipeline.WorkflowModule, llmRuntime *scriptedLLMRuntime, processOwner *worklifetime.Process) runtime.RuntimeDeps {
+	return runtime.RuntimeDeps{Config: cfg,
+		WorkflowPersistence: workflowPersistence,
+		EventStore:          sqlite,
+		EventBusDurable: runtimebus.DurableDependencies{
+			ReplyContext: sqlite, RunLifecycle: sqlite, DeliveryLifecycle: sqlite,
+			FlowRoutes: sqlite, FlowRouteRecords: sqlite, FlowRouteSets: sqlite, FlowRouteTopology: sqlite, FlowRouteRollback: sqlite,
+			ActiveAgents: sqlite, ActiveFlows: sqlite, DeliveryTargets: sqlite, DeliveryRouteSets: sqlite,
+			TargetFailureRecorder: sqlite, RunOrigins: sqlite,
+		},
+		EventPayloadValidationBinder:   sqlite,
+		InboundPayloadValidationBinder: sqlite,
+		AuthorActivityRegistrars:       []runtime.AuthorActivityCatalogRegistrar{sqlite},
+		RunBundleAvailability:          sqlite,
+		RunControlStore:                sqlite,
+		RunLifecycleCandidates:         sqlite,
+		RuntimeLogStore:                sqlite,
+		SessionRegistry:                sqlite,
+		LiveSessionAcquirer:            sqlite,
+		SessionResetter:                sqlite,
+		ManagerStore:                   sqlite,
+		ManagerLifecycleStore:          sqlite,
+		ManagerLifecycleDiagnostics:    sqlite,
+		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
+			LifecycleState: sqlite, LifecycleEffects: sqlite,
+			LifecycleDiagnostics: sqlite, EffectsRecovery: sqlite, DeliveryQuiescence: sqlite,
+			EventExistence: sqlite, DirectiveOperations: sqlite, DirectiveTargets: sqlite, FlowRoutes: sqlite,
+		},
+		EffectsStore:             sqlite,
+		CompletionStore:          sqlite,
+		CompletionHeartbeatStore: sqlite,
+		EffectsRecoveryStore:     sqlite,
+		ManagedCapabilitiesStore: sqlite,
+		DeliveryStore:            sqlite,
+		PipelineObligations:      sqlite.PipelineObligations(),
+		ScheduleStore:            sqlite,
+		TimerObligationReader:    sqlite,
+		MailboxMaterializer:      sqlite,
+		DecisionCards:            sqlite,
+		ProposedEffects:          sqlite,
+		DecisionCardHumanTasks:   sqlite,
+		DecisionCardDraftExpiry:  sqlite,
+		HumanTaskExpiry:          sqlite,
+		StartupOwnership:         sqlite,
+		MailboxStore:             sqlite,
+		ToolEntityStore:          sqlite,
+		HumanTaskStore:           sqlite,
+		BudgetSpendStore:         sqlite,
+		RuntimeIngressStore:      sqlite,
+		ConversationStore:        nil,
+		Options: runtime.RuntimeOptions{
+			SelfCheck:         false,
+			WorkflowModule:    module,
+			LLMRuntime:        llmRuntime,
+			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+			BundleSourceFact:  authorActivityTestBundleSourceFact,
+			ProcessWorkOwner:  processOwner,
+		}}
+}
+
+func installCatalogHarnessDeliveryAuthority(t testing.TB, ctx context.Context, rt *runtime.Runtime, pg *store.PostgresStore, sqlite *store.SQLiteRuntimeStore) {
+	t.Helper()
+	authority, err := runtimedelivery.NewNormalExecutionAuthority(
+		authorActivityTestBundleSourceFact,
+		authorActivityTestRuntimeInstanceID,
+		1,
+	)
 	if err != nil {
-		t.Fatalf("NewRuntime: %v", err)
+		t.Fatalf("construct catalog test delivery authority: %v", err)
 	}
-	if !start {
-		authority, authorityErr := runtimedelivery.NewNormalExecutionAuthority(
-			authorActivityTestBundleSourceFact,
-			authorActivityTestRuntimeInstanceID,
-			1,
-		)
-		if authorityErr != nil {
-			t.Fatalf("construct catalog test delivery authority: %v", authorityErr)
-		}
-		if authorityErr := pg.ActivateDeliveryAuthority(ctx, authority); authorityErr != nil {
-			t.Fatalf("activate catalog test delivery authority: %v", authorityErr)
-		}
-		if authorityErr := rt.Bus.SetDeliveryAuthority(authority); authorityErr != nil {
-			t.Fatalf("install catalog test delivery authority: %v", authorityErr)
-		}
-		if authorityErr := rt.Bus.SetDeliveryContinuationOwner(runtimebustest.NewDeliveryContinuationOwner(false)); authorityErr != nil {
-			t.Fatalf("install catalog test delivery continuation owner: %v", authorityErr)
-		}
+	if pg != nil {
+		err = pg.ActivateDeliveryAuthority(ctx, authority)
+	} else if sqlite != nil {
+		err = sqlite.ActivateDeliveryAuthority(ctx, authority)
+	} else {
+		err = errors.New("catalog selected store is required")
 	}
-	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
-		t.Fatalf("PrepareAuthorActivityCatalog: %v", err)
+	if err != nil {
+		t.Fatalf("activate catalog test delivery authority: %v", err)
 	}
-	if start {
-		if err := rt.Start(ctx); err != nil {
-			t.Fatalf("runtime.Start: %v", err)
-		}
+	if err := rt.Bus.SetDeliveryAuthority(authority); err != nil {
+		t.Fatalf("install catalog test delivery authority: %v", err)
 	}
-	startedAt := catalogHarnessStartBoundary(t, db)
-	t.Cleanup(func() {
-		if err := rt.Shutdown(); err != nil {
-			t.Errorf("shutdown catalog runtime: %v", err)
-		}
-		joinCtx, cancelJoin := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancelJoin()
-		if _, err := processOwner.Join(joinCtx); err != nil {
-			t.Errorf("join catalog runtime process owner: %v", err)
-		}
-	})
-
-	return &runtimeHarness{
-		t:              t,
-		ctx:            ctx,
-		cancel:         cancel,
-		db:             db,
-		pg:             pg,
-		rt:             rt,
-		workflow:       rt.Pipeline,
-		llm:            llmRuntime,
-		bundle:         bundle,
-		initialState:   strings.TrimSpace(rootSchema.InitialState),
-		startedAt:      startedAt,
-		publishedIDs:   map[string]struct{}{},
-		publishedOrder: []string{},
-		eventEntityIDs: map[string]string{},
-		previews:       map[string]runtimepipeline.HandlerPreview{},
+	if err := rt.Bus.SetDeliveryContinuationOwner(runtimebustest.NewDeliveryContinuationOwner(false)); err != nil {
+		t.Fatalf("install catalog test delivery continuation owner: %v", err)
 	}
 }
 
-func catalogHarnessStartBoundary(t testing.TB, db *sql.DB) time.Time {
+func (h *runtimeHarness) shutdown() {
+	if h == nil {
+		return
+	}
+	h.shutdownOnce.Do(func() {
+		if h.cancel != nil {
+			h.cancel()
+		}
+		if h.rt != nil {
+			if err := h.rt.Shutdown(); err != nil {
+				h.t.Errorf("shutdown catalog runtime: %v", err)
+			}
+		}
+		if h.processOwner != nil {
+			joinCtx, cancelJoin := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancelJoin()
+			if _, err := h.processOwner.Join(joinCtx); err != nil {
+				h.t.Errorf("join catalog runtime process owner: %v", err)
+			}
+		}
+	})
+}
+
+func (h *runtimeHarness) reopenFromTranscript(transcript *catalogExecutionTranscript) *runtimeHarness {
+	h.t.Helper()
+	h.shutdown()
+	strictCatalogFixtureStartupPolicy().apply(h.t)
+
+	bundle := loadFixtureBundle(h.t, h.bundle.Paths.ContractsRoot)
+	requireCatalogTranscriptIdentity(h.t, bundle.Paths.ContractsRoot, bundle, transcript)
+	module, err := newFixtureWorkflowModule(bundle)
+	if err != nil {
+		h.t.Fatalf("reopen fixture workflow module: %v", err)
+	}
+	cfg := testRuntimeConfig()
+	cfg.LLM.Backend = "anthropic"
+	cfg.Runtime.RecoveryOnStartup = true
+	llmRuntime := newScriptedLLMRuntime()
+	installAgentFixtures(llmRuntime, transcript.agentFixtures)
+
+	var (
+		db     *sql.DB
+		pg     *store.PostgresStore
+		sqlite *store.SQLiteRuntimeStore
+	)
+	switch h.backend {
+	case catalogBackendPostgres:
+		db = h.db
+		pg = storetest.AdmitPostgresRuntimeStore(h.t, db)
+		pg.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
+	case catalogBackendSQLite:
+		sqlite = h.reopenedSQLite
+		if sqlite == nil {
+			h.t.Fatal("catalog SQLite reconstruction handle is required")
+		}
+		db = storetest.DatabaseForTest(sqlite)
+		sqlite.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
+	default:
+		h.t.Fatalf("unsupported catalog runtime backend %q", h.backend)
+	}
+
+	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), catalogRuntimeRunID))
+	processOwner := worklifetime.NewProcess()
+	var workflowPersistence runtimepipeline.WorkflowPersistence
+	var deps runtime.RuntimeDeps
+	if pg != nil {
+		workflowPersistence = runtimepipeline.NewWorkflowPersistence(pg)
+		deps = catalogPostgresRuntimeDeps(cfg, pg, workflowPersistence, module, llmRuntime, processOwner)
+	} else {
+		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqlite)
+		deps = catalogSQLiteRuntimeDeps(cfg, sqlite, workflowPersistence, module, llmRuntime, processOwner)
+	}
+	rt, err := runtime.NewValidationHarnessRuntime(ctx, deps)
+	if err != nil {
+		cancel()
+		h.t.Fatalf("reopen catalog runtime: %v", err)
+	}
+	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
+		cancel()
+		h.t.Fatalf("prepare reopened author activity catalog: %v", err)
+	}
+	if err := rt.Start(ctx); err != nil {
+		cancel()
+		h.t.Fatalf("start reopened catalog runtime: %v", err)
+	}
+
+	reopened := &runtimeHarness{
+		t: h.t, backend: h.backend, ctx: ctx, cancel: cancel, db: db, pg: pg, sqlite: sqlite,
+		rt: rt, processOwner: processOwner, workflow: rt.Pipeline, llm: llmRuntime, bundle: bundle,
+		initialState: h.initialState, startedAt: h.startedAt,
+		publishedIDs: cloneCatalogStringSet(h.publishedIDs), publishedOrder: append([]string(nil), h.publishedOrder...),
+		eventEntityIDs: cloneCatalogStringMap(h.eventEntityIDs), previews: cloneCatalogPreviews(h.previews),
+	}
+	h.t.Cleanup(reopened.shutdown)
+	return reopened
+}
+
+func cloneCatalogStringSet(in map[string]struct{}) map[string]struct{} {
+	out := make(map[string]struct{}, len(in))
+	for key := range in {
+		out[key] = struct{}{}
+	}
+	return out
+}
+
+func cloneCatalogStringMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneCatalogPreviews(in map[string]runtimepipeline.HandlerPreview) map[string]runtimepipeline.HandlerPreview {
+	out := make(map[string]runtimepipeline.HandlerPreview, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func catalogHarnessStartBoundary(t testing.TB, db *sql.DB, backend catalogRuntimeBackend) time.Time {
 	t.Helper()
 	appTime := time.Now().UTC()
+	if backend == catalogBackendSQLite {
+		return appTime.Add(-1 * time.Second)
+	}
 	var out time.Time
 	if err := db.QueryRowContext(testAuthorActivityContext(context.Background()), `SELECT NOW()`).Scan(&out); err != nil {
 		t.Fatalf("query catalog harness db time: %v", err)
@@ -349,6 +606,10 @@ func loadAgentFixtures(t testing.TB, fixtureRoot string, llmRuntime *scriptedLLM
 	}
 	var doc agentFixtureDoc
 	loadYAML(t, path, &doc)
+	installAgentFixtures(llmRuntime, doc)
+}
+
+func installAgentFixtures(llmRuntime *scriptedLLMRuntime, doc agentFixtureDoc) {
 	for agentID, steps := range doc.AgentFixtures {
 		agentID = strings.TrimSpace(agentID)
 		if agentID == "" {
@@ -365,6 +626,9 @@ func loadAgentFixtures(t testing.TB, fixtureRoot string, llmRuntime *scriptedLLM
 
 func (h *runtimeHarness) publishAndWait(step catalogTriggerStep, timeout time.Duration) {
 	h.t.Helper()
+	if strings.TrimSpace(step.eventID) == "" {
+		step.excludeFromEmitted = true
+	}
 	payload := cloneStringAnyMap(step.Payload)
 	eventType := strings.TrimSpace(step.Event)
 	wantErr := strings.TrimSpace(step.ErrorContains)
@@ -372,7 +636,7 @@ func (h *runtimeHarness) publishAndWait(step catalogTriggerStep, timeout time.Du
 		h.seedInitialState(entityID)
 	}
 	if wantErr != "" {
-		err := h.publishRuntimeEventResult(eventType, "cataloge2e", payload, timeout, true, true)
+		err := h.publishRuntimeEventResultForStep(step, timeout, true)
 		if err == nil {
 			h.t.Fatalf("Publish(%s) unexpectedly succeeded, want error containing %q", eventType, wantErr)
 		}
@@ -382,13 +646,10 @@ func (h *runtimeHarness) publishAndWait(step catalogTriggerStep, timeout time.Du
 		h.assertTriggerReceipt(step)
 		return
 	}
-	h.publishRuntimeEvent(eventType, "cataloge2e", payload, timeout, true, true)
-	h.assertTriggerReceipt(step)
-	if eventType == "flow.created" {
-		if autoEmit := h.rootAutoEmitOnCreateEvent(); autoEmit != "" {
-			h.publishRuntimeEvent(autoEmit, "flow-instance-activator", payload, timeout, true, false)
-		}
+	if err := h.publishRuntimeEventResultForStep(step, timeout, true); err != nil {
+		h.t.Fatalf("Publish(%s): %v", eventType, err)
 	}
+	h.assertTriggerReceipt(step)
 }
 
 func (h *runtimeHarness) waitForRunTerminal(timeout time.Duration) {
@@ -398,7 +659,17 @@ func (h *runtimeHarness) waitForRunTerminal(timeout time.Duration) {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		snapshot, err := h.pg.LoadRunLifecycleSnapshot(ctx, catalogRuntimeRunID)
+		var (
+			snapshot runtimebus.RunLifecycleSnapshot
+			err      error
+		)
+		if h.pg != nil {
+			snapshot, err = h.pg.LoadRunLifecycleSnapshot(ctx, catalogRuntimeRunID)
+		} else if h.sqlite != nil {
+			snapshot, err = h.sqlite.LoadRunLifecycleSnapshot(ctx, catalogRuntimeRunID)
+		} else {
+			err = errors.New("catalog selected store is required")
+		}
 		if err != nil {
 			h.t.Fatalf("load catalog run lifecycle: %v", err)
 		}
@@ -441,9 +712,21 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 		} else {
 			eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 		}
-		evt := eventtest.ExistingRunRootIngress(uuid.NewString(),
+		eventID := strings.TrimSpace(step.eventID)
+		if eventID == "" {
+			eventID = uuid.NewString()
+		}
+		createdAt := step.createdAt
+		if createdAt.IsZero() {
+			createdAt = time.Now().UTC()
+		}
+		sourceAgent := strings.TrimSpace(step.sourceAgent)
+		if sourceAgent == "" {
+			sourceAgent = "cataloge2e"
+		}
+		evt := eventtest.ExistingRunRootIngress(eventID,
 			events.EventType(strings.TrimSpace(step.Event)),
-			"cataloge2e", "", raw, 0, catalogRuntimeRunID, eventEnvelope, time.Now().UTC())
+			sourceAgent, "", raw, 0, catalogRuntimeRunID, eventEnvelope, createdAt)
 		if preview, ok := h.previewHandlerOutcome(evt); ok {
 			h.mu.Lock()
 			h.previews[evt.ID()] = preview
@@ -489,6 +772,35 @@ func (h *runtimeHarness) publishRuntimeEvent(eventType, sourceAgent string, payl
 }
 
 func (h *runtimeHarness) publishRuntimeEventResult(eventType, sourceAgent string, payload map[string]any, timeout time.Duration, recordOutcome bool, excludeFromEmitted bool) error {
+	return h.publishRuntimeEventResultWithIdentity(eventType, sourceAgent, payload, uuid.NewString(), time.Now().UTC(), timeout, recordOutcome, excludeFromEmitted)
+}
+
+func (h *runtimeHarness) publishRuntimeEventResultForStep(step catalogTriggerStep, timeout time.Duration, recordOutcome bool) error {
+	eventID := strings.TrimSpace(step.eventID)
+	if eventID == "" {
+		eventID = uuid.NewString()
+	}
+	createdAt := step.createdAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	sourceAgent := strings.TrimSpace(step.sourceAgent)
+	if sourceAgent == "" {
+		sourceAgent = "cataloge2e"
+	}
+	return h.publishRuntimeEventResultWithIdentity(
+		step.Event,
+		sourceAgent,
+		step.Payload,
+		eventID,
+		createdAt,
+		timeout,
+		recordOutcome,
+		step.excludeFromEmitted,
+	)
+}
+
+func (h *runtimeHarness) publishRuntimeEventResultWithIdentity(eventType, sourceAgent string, payload map[string]any, eventID string, createdAt time.Time, timeout time.Duration, recordOutcome bool, excludeFromEmitted bool) error {
 	h.t.Helper()
 	payload = cloneStringAnyMap(payload)
 	raw, err := json.Marshal(payload)
@@ -501,9 +813,9 @@ func (h *runtimeHarness) publishRuntimeEventResult(eventType, sourceAgent string
 	} else {
 		eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 	}
-	evt := eventtest.ExistingRunRootIngress(uuid.NewString(),
+	evt := eventtest.ExistingRunRootIngress(strings.TrimSpace(eventID),
 		events.EventType(strings.TrimSpace(eventType)),
-		strings.TrimSpace(sourceAgent), "", raw, 0, catalogRuntimeRunID, eventEnvelope, time.Now().UTC())
+		strings.TrimSpace(sourceAgent), "", raw, 0, catalogRuntimeRunID, eventEnvelope, createdAt.UTC())
 	if recordOutcome {
 		if preview, ok := h.previewHandlerOutcome(evt); ok {
 			h.mu.Lock()
@@ -539,11 +851,15 @@ func (h *runtimeHarness) refreshPublishedEventEntityID(eventID string) {
 		return
 	}
 	var entityID string
-	err := h.db.QueryRowContext(h.ctx, `
+	query := `
 		SELECT COALESCE(entity_id::text, '')
 		FROM events
 		WHERE event_id = $1::uuid
-	`, eventID).Scan(&entityID)
+	`
+	if h.backend == catalogBackendSQLite {
+		query = `SELECT COALESCE(entity_id, '') FROM events WHERE event_id = ?`
+	}
+	err := h.db.QueryRowContext(h.ctx, query, eventID).Scan(&entityID)
 	if err == sql.ErrNoRows {
 		return
 	}
@@ -696,12 +1012,17 @@ func (h *runtimeHarness) hasExpectedEmittedEvents(ctx context.Context, entityID 
 	h.t.Helper()
 	relevantEventIDs := catalogCausalEventIDs(h.t, h.db, h.startedAt, h.publishedIDs)
 	relevantEntityIDs := catalogCausalEntityIDs(h.t, h.db, h.startedAt, h.publishedIDs, entityID)
-	rows, err := h.db.QueryContext(ctx, `
+	rows, err := h.db.QueryContext(ctx, catalogDialectQuery(h.db, `
 		SELECT event_id::text, event_name, COALESCE(NULLIF(payload->>'entity_id', ''), COALESCE(entity_id::text, ''))
 		FROM events
 		WHERE created_at >= $1
 		ORDER BY created_at ASC, event_id ASC
-	`, h.startedAt)
+	`, `
+		SELECT event_id, event_name, COALESCE(NULLIF(json_extract(payload, '$.entity_id'), ''), COALESCE(entity_id, ''))
+		FROM events
+		WHERE created_at >= ?
+		ORDER BY created_at ASC, event_id ASC
+	`), h.startedAt)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			return false
@@ -921,7 +1242,8 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 	if ok {
 		h.t.Fatalf("entity field fixture %s was already materialized before exact fixture projection", entityID)
 	}
-	if _, err := h.workflow.MaterializeInitialEntry(h.ctx, instance, h.startedAt); err != nil {
+	materializeCtx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
+	if _, err := h.workflow.MaterializeInitialEntry(materializeCtx, instance, h.startedAt); err != nil {
 		h.t.Fatalf("seed entity_fields_before for %s: %v", entityID, err)
 	}
 }

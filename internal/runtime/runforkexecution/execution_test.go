@@ -796,6 +796,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		RunLifecycle:            pg,
 		PipelineObligations:     pg.PipelineObligations(),
 		DeliveryStore:           pg,
+		DeadLetters:             pg,
 		DecisionCards:           pg,
 		ProposedEffects:         pg,
 		HumanTasks:              pg,

@@ -3,6 +3,7 @@ trigger:
     - event: task.completed
       payload:
     - event: task.updated
+      barrier_before: run_terminal
       error_contains: run is not active
       payload:
         data: late-update

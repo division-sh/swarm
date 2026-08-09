@@ -1537,6 +1537,7 @@ func newNotifyAllChildrenRuntime(
 		RunLifecycle:            backend,
 		PipelineObligations:     backend.PipelineObligations(),
 		DeliveryStore:           backend,
+		DeadLetters:             backend,
 		DecisionCards:           backend,
 		ProposedEffects:         backend,
 		HumanTasks:              backend,
