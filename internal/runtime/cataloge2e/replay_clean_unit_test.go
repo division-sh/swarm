@@ -8,10 +8,11 @@ import (
 	"testing"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil/replayconformance"
 )
 
@@ -78,7 +79,7 @@ func TestCatalogReplayProjectionPreservesExactInputAndSemanticFacts(t *testing.T
 	}
 	for name, candidate := range cases {
 		t.Run(name, func(t *testing.T) {
-			got, err := projectCatalogReplayUnit(map[string]store.OperatorEventFull{rootID: replayOperatorEvent(t, candidate)}, transcript)
+			got, err := projectCatalogReplayUnit(map[string]operatorread.OperatorEventFull{rootID: replayOperatorEvent(t, candidate)}, transcript)
 			if err == nil && bytes.Equal(got, want) {
 				t.Fatal("semantic divergence was normalized")
 			}
@@ -110,8 +111,8 @@ func TestCatalogReplayProjectionNormalizesOnlyGeneratedIdentityAndLifecycleAlloc
 	second := createdAt.Add(20 * time.Second)
 	deliveryA.CreatedAt = &first
 	deliveryB.CreatedAt = &second
-	fullA.Deliveries = []store.OperatorEventDelivery{deliveryA}
-	fullB.Deliveries = []store.OperatorEventDelivery{deliveryB}
+	fullA.Deliveries = []operatorread.OperatorEventDelivery{deliveryA}
+	fullB.Deliveries = []operatorread.OperatorEventDelivery{deliveryB}
 	projectionA = catalogReplayUnitProjection(t, transcript, replayOperatorEvent(t, root), fullA)
 	projectionB = catalogReplayUnitProjection(t, transcript, replayOperatorEvent(t, root), fullB)
 	if !bytes.Equal(projectionA, projectionB) {
@@ -124,35 +125,35 @@ func TestCatalogReplayProjectionRejectsSemanticDeliveryAndDeadLetterDivergence(t
 	root := createdRootEvent(eventtest.UUID("delivery-root"), "input.received", "cataloge2e", "", `{}`, catalogRuntimeRunID, events.EventEnvelope{}, createdAt)
 	transcript := catalogReplayUnitTranscript(t, root)
 	base := replayOperatorEvent(t, root)
-	base.Deliveries = []store.OperatorEventDelivery{replayProjectionDelivery(t, "delivery-1")}
-	base.DeadLetters = []store.OperatorDeadLetterRecord{replayProjectionDeadLetter("dead-letter-1", "delivery-1", createdAt)}
+	base.Deliveries = []operatorread.OperatorEventDelivery{replayProjectionDelivery(t, "delivery-1")}
+	base.DeadLetters = []operatorread.OperatorDeadLetterRecord{replayProjectionDeadLetter("dead-letter-1", "delivery-1", createdAt)}
 	want := catalogReplayUnitProjection(t, transcript, base)
 
-	cases := map[string]func(*store.OperatorEventFull){
-		"subscriber": func(got *store.OperatorEventFull) { got.Deliveries[0].SubscriberID = "other-node" },
-		"route":      func(got *store.OperatorEventFull) { got.Deliveries[0].Route.Target.FlowInstance = "other-flow" },
-		"status":     func(got *store.OperatorEventFull) { got.Deliveries[0].Status = "failed" },
-		"failure": func(got *store.OperatorEventFull) {
+	cases := map[string]func(*operatorread.OperatorEventFull){
+		"subscriber": func(got *operatorread.OperatorEventFull) { got.Deliveries[0].SubscriberID = "other-node" },
+		"route":      func(got *operatorread.OperatorEventFull) { got.Deliveries[0].Route.Target.FlowInstance = "other-flow" },
+		"status":     func(got *operatorread.OperatorEventFull) { got.Deliveries[0].Status = "failed" },
+		"failure": func(got *operatorread.OperatorEventFull) {
 			failure := replayFailure(runtimefailures.ClassInternalFailure, "other_failure")
 			got.Deliveries[0].Failure = &failure
 		},
-		"retry count":     func(got *store.OperatorEventFull) { got.Deliveries[0].RetryCount++ },
-		"retry scheduled": func(got *store.OperatorEventFull) { got.Deliveries[0].RetryScheduled = true },
-		"terminal":        func(got *store.OperatorEventFull) { got.Deliveries[0].Terminal = false },
-		"dead-letter failure": func(got *store.OperatorEventFull) {
+		"retry count":     func(got *operatorread.OperatorEventFull) { got.Deliveries[0].RetryCount++ },
+		"retry scheduled": func(got *operatorread.OperatorEventFull) { got.Deliveries[0].RetryScheduled = true },
+		"terminal":        func(got *operatorread.OperatorEventFull) { got.Deliveries[0].Terminal = false },
+		"dead-letter failure": func(got *operatorread.OperatorEventFull) {
 			got.DeadLetters[0].Failure = replayFailure(runtimefailures.ClassInternalFailure, "other_failure")
 		},
-		"dead-letter retry":   func(got *store.OperatorEventFull) { got.DeadLetters[0].RetryCount++ },
-		"dead-letter chain":   func(got *store.OperatorEventFull) { got.DeadLetters[0].ChainDepth++ },
-		"dead-letter handler": func(got *store.OperatorEventFull) { got.DeadLetters[0].HandlerNode = "other-handler" },
+		"dead-letter retry":   func(got *operatorread.OperatorEventFull) { got.DeadLetters[0].RetryCount++ },
+		"dead-letter chain":   func(got *operatorread.OperatorEventFull) { got.DeadLetters[0].ChainDepth++ },
+		"dead-letter handler": func(got *operatorread.OperatorEventFull) { got.DeadLetters[0].HandlerNode = "other-handler" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			candidate := base
-			candidate.Deliveries = append([]store.OperatorEventDelivery(nil), base.Deliveries...)
-			candidate.DeadLetters = append([]store.OperatorDeadLetterRecord(nil), base.DeadLetters...)
+			candidate.Deliveries = append([]operatorread.OperatorEventDelivery(nil), base.Deliveries...)
+			candidate.DeadLetters = append([]operatorread.OperatorDeadLetterRecord(nil), base.DeadLetters...)
 			mutate(&candidate)
-			got, err := projectCatalogReplayUnit(map[string]store.OperatorEventFull{root.ID(): candidate}, transcript)
+			got, err := projectCatalogReplayUnit(map[string]operatorread.OperatorEventFull{root.ID(): candidate}, transcript)
 			if err == nil && bytes.Equal(got, want) {
 				t.Fatal("delivery/dead-letter semantic divergence was normalized")
 			}
@@ -160,8 +161,8 @@ func TestCatalogReplayProjectionRejectsSemanticDeliveryAndDeadLetterDivergence(t
 	}
 
 	allocated := base
-	allocated.Deliveries = append([]store.OperatorEventDelivery(nil), base.Deliveries...)
-	allocated.DeadLetters = append([]store.OperatorDeadLetterRecord(nil), base.DeadLetters...)
+	allocated.Deliveries = append([]operatorread.OperatorEventDelivery(nil), base.Deliveries...)
+	allocated.DeadLetters = append([]operatorread.OperatorDeadLetterRecord(nil), base.DeadLetters...)
 	allocated.DeadLetters[0].DeadLetterID = "other-dead-letter"
 	allocated.DeadLetters[0].ClaimVersion = 99
 	allocated.DeadLetters[0].CreatedAt = createdAt.Add(time.Hour)
@@ -170,10 +171,10 @@ func TestCatalogReplayProjectionRejectsSemanticDeliveryAndDeadLetterDivergence(t
 	}
 
 	malformed := base
-	malformed.Deliveries = append([]store.OperatorEventDelivery(nil), base.Deliveries...)
-	malformed.DeadLetters = append([]store.OperatorDeadLetterRecord(nil), base.DeadLetters...)
+	malformed.Deliveries = append([]operatorread.OperatorEventDelivery(nil), base.Deliveries...)
+	malformed.DeadLetters = append([]operatorread.OperatorDeadLetterRecord(nil), base.DeadLetters...)
 	malformed.DeadLetters[0].DeliveryID = "missing-delivery"
-	if _, err := projectCatalogReplayUnit(map[string]store.OperatorEventFull{root.ID(): malformed}, transcript); err == nil {
+	if _, err := projectCatalogReplayUnit(map[string]operatorread.OperatorEventFull{root.ID(): malformed}, transcript); err == nil {
 		t.Fatal("malformed dead-letter linkage was admitted")
 	}
 }
@@ -183,19 +184,19 @@ func TestCatalogReplayProjectionRejectsMissingUnknownCyclicAndAmbiguousLineage(t
 	rootID := eventtest.UUID("lineage-root")
 	root := createdRootEvent(rootID, "input.received", "cataloge2e", "", `{}`, catalogRuntimeRunID, events.EventEnvelope{}, createdAt)
 	transcript := catalogReplayUnitTranscript(t, root)
-	if _, err := projectCatalogReplayUnit(map[string]store.OperatorEventFull{}, transcript); err == nil {
+	if _, err := projectCatalogReplayUnit(map[string]operatorread.OperatorEventFull{}, transcript); err == nil {
 		t.Fatal("missing accepted root page was admitted")
 	}
 
 	unknown := eventtest.PersistedProjection(rootID, events.EventType("input.received"), "cataloge2e", "", json.RawMessage(`{}`), 0, catalogRuntimeRunID, eventtest.UUID("unknown-parent"), events.EventEnvelope{}, createdAt)
-	if _, err := projectCatalogReplayUnit(map[string]store.OperatorEventFull{rootID: replayOperatorEvent(t, unknown)}, transcript); err == nil {
+	if _, err := projectCatalogReplayUnit(map[string]operatorread.OperatorEventFull{rootID: replayOperatorEvent(t, unknown)}, transcript); err == nil {
 		t.Fatal("unknown causal parent was admitted")
 	}
 
 	otherID := eventtest.UUID("cycle-other")
 	cycleRoot := eventtest.PersistedProjection(rootID, events.EventType("input.received"), "cataloge2e", "", json.RawMessage(`{}`), 0, catalogRuntimeRunID, otherID, events.EventEnvelope{}, createdAt)
 	cycleOther := eventtest.PersistedProjection(otherID, events.EventType("cycle.other"), "worker", "", json.RawMessage(`{}`), 1, catalogRuntimeRunID, rootID, events.EventEnvelope{}, createdAt.Add(time.Second))
-	if _, err := projectCatalogReplayUnit(map[string]store.OperatorEventFull{rootID: replayOperatorEvent(t, cycleRoot), otherID: replayOperatorEvent(t, cycleOther)}, transcript); err == nil {
+	if _, err := projectCatalogReplayUnit(map[string]operatorread.OperatorEventFull{rootID: replayOperatorEvent(t, cycleRoot), otherID: replayOperatorEvent(t, cycleOther)}, transcript); err == nil {
 		t.Fatal("causal cycle was admitted")
 	}
 
@@ -203,14 +204,14 @@ func TestCatalogReplayProjectionRejectsMissingUnknownCyclicAndAmbiguousLineage(t
 	childB := eventtest.Child(eventtest.UUID("ambiguous-b"), events.EventType("output.ready"), "worker", "", json.RawMessage(`{"same":true}`), 1, root, events.EventEnvelope{}, createdAt.Add(2*time.Second))
 	fullA := replayOperatorEvent(t, childA)
 	fullB := replayOperatorEvent(t, childB)
-	fullA.Deliveries = []store.OperatorEventDelivery{replayProjectionDelivery(t, "delivery-a")}
-	if _, err := projectCatalogReplayUnit(map[string]store.OperatorEventFull{rootID: replayOperatorEvent(t, root), childA.ID(): fullA, childB.ID(): fullB}, transcript); err == nil {
+	fullA.Deliveries = []operatorread.OperatorEventDelivery{replayProjectionDelivery(t, "delivery-a")}
+	if _, err := projectCatalogReplayUnit(map[string]operatorread.OperatorEventFull{rootID: replayOperatorEvent(t, root), childA.ID(): fullA, childB.ID(): fullB}, transcript); err == nil {
 		t.Fatal("ambiguous non-isomorphic generated siblings were admitted")
 	}
 }
 
 func TestCatalogReplayPaginationFailsClosedAndExcludesOnlyRuntimeLogs(t *testing.T) {
-	lister := &catalogReplayPageLister{pages: map[string]store.OperatorEventListResult{"": {}}}
+	lister := &catalogReplayPageLister{pages: map[string]operatorread.OperatorEventListResult{"": {}}}
 	if _, err := loadCatalogOperatorEvents(context.Background(), lister); err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +219,7 @@ func TestCatalogReplayPaginationFailsClosedAndExcludesOnlyRuntimeLogs(t *testing
 		t.Fatalf("operator projection options = %#v, want exact run and runtime-log exclusion", lister.options)
 	}
 
-	cycle := &catalogReplayPageLister{pages: map[string]store.OperatorEventListResult{
+	cycle := &catalogReplayPageLister{pages: map[string]operatorread.OperatorEventListResult{
 		"":      {NextCursor: "again"},
 		"again": {NextCursor: "again"},
 	}}
@@ -229,9 +230,9 @@ func TestCatalogReplayPaginationFailsClosedAndExcludesOnlyRuntimeLogs(t *testing
 	createdAt := time.Date(2026, 8, 9, 16, 0, 0, 0, time.UTC)
 	event := createdRootEvent(eventtest.UUID("page-event"), "input.received", "cataloge2e", "", `{}`, catalogRuntimeRunID, events.EventEnvelope{}, createdAt)
 	full := replayOperatorEvent(t, event)
-	mutating := &catalogReplayPageLister{pages: map[string]store.OperatorEventListResult{
-		"":     {Events: []store.OperatorEventFull{full}, NextCursor: "next"},
-		"next": {Events: []store.OperatorEventFull{full}},
+	mutating := &catalogReplayPageLister{pages: map[string]operatorread.OperatorEventListResult{
+		"":     {Events: []operatorread.OperatorEventFull{full}, NextCursor: "next"},
+		"next": {Events: []operatorread.OperatorEventFull{full}},
 	}}
 	if _, err := loadCatalogOperatorEvents(context.Background(), mutating); err == nil {
 		t.Fatal("repeated/mutating page event was admitted")
@@ -242,11 +243,11 @@ func TestCatalogReplayPaginationFailsClosedAndExcludesOnlyRuntimeLogs(t *testing
 }
 
 type catalogReplayPageLister struct {
-	pages   map[string]store.OperatorEventListResult
-	options []store.OperatorEventListOptions
+	pages   map[string]operatorread.OperatorEventListResult
+	options []operatorread.OperatorEventListOptions
 }
 
-func (l *catalogReplayPageLister) ListOperatorEvents(_ context.Context, opts store.OperatorEventListOptions) (store.OperatorEventListResult, error) {
+func (l *catalogReplayPageLister) ListOperatorEvents(_ context.Context, opts operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error) {
 	l.options = append(l.options, opts)
 	return l.pages[opts.Cursor], nil
 }
@@ -277,9 +278,9 @@ func catalogReplayUnitTranscript(t testing.TB, root events.Event) *catalogExecut
 	}
 }
 
-func catalogReplayUnitProjection(t testing.TB, transcript *catalogExecutionTranscript, events ...store.OperatorEventFull) []byte {
+func catalogReplayUnitProjection(t testing.TB, transcript *catalogExecutionTranscript, events ...operatorread.OperatorEventFull) []byte {
 	t.Helper()
-	byID := make(map[string]store.OperatorEventFull, len(events))
+	byID := make(map[string]operatorread.OperatorEventFull, len(events))
 	for _, event := range events {
 		byID[event.EventID] = event
 	}
@@ -290,7 +291,7 @@ func catalogReplayUnitProjection(t testing.TB, transcript *catalogExecutionTrans
 	return projection
 }
 
-func projectCatalogReplayUnit(eventsByID map[string]store.OperatorEventFull, transcript *catalogExecutionTranscript) ([]byte, error) {
+func projectCatalogReplayUnit(eventsByID map[string]operatorread.OperatorEventFull, transcript *catalogExecutionTranscript) ([]byte, error) {
 	roots, err := catalogReplayRootInputs(transcript)
 	if err != nil {
 		return nil, err
@@ -298,9 +299,9 @@ func projectCatalogReplayUnit(eventsByID map[string]store.OperatorEventFull, tra
 	return replayconformance.Project(eventsByID, transcript.runID, roots)
 }
 
-func replayOperatorEvent(t testing.TB, event events.Event) store.OperatorEventFull {
+func replayOperatorEvent(t testing.TB, event events.Event) operatorread.OperatorEventFull {
 	t.Helper()
-	full, err := store.NewOperatorEventFull(event)
+	full, err := operatorread.NewOperatorEventFull(event)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,13 +312,13 @@ func createdRootEvent(id, eventType, producer, taskID, payload, runID string, en
 	return eventtest.ExistingRunRootIngress(id, events.EventType(eventType), producer, taskID, json.RawMessage(payload), 0, runID, envelope, createdAt)
 }
 
-func replayProjectionDelivery(t testing.TB, id string) store.OperatorEventDelivery {
+func replayProjectionDelivery(t testing.TB, id string) operatorread.OperatorEventDelivery {
 	t.Helper()
 	recipient, err := events.NewNodeDeliveryRecipient("node-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return store.OperatorEventDelivery{
+	return operatorread.OperatorEventDelivery{
 		DeliveryID: id, SubscriberType: "node", SubscriberID: "node-1",
 		Route:  events.DeliveryRoute{Recipient: recipient, Target: events.RouteIdentity{FlowInstance: "root"}},
 		Status: "dead_letter", ReasonCode: "platform.retry_exhausted", Failure: replayFailurePointer(runtimefailures.ClassRetryExhausted, "attempts_exhausted"),
@@ -325,8 +326,8 @@ func replayProjectionDelivery(t testing.TB, id string) store.OperatorEventDelive
 	}
 }
 
-func replayProjectionDeadLetter(id, deliveryID string, createdAt time.Time) store.OperatorDeadLetterRecord {
-	return store.OperatorDeadLetterRecord{
+func replayProjectionDeadLetter(id, deliveryID string, createdAt time.Time) operatorread.OperatorDeadLetterRecord {
+	return operatorread.OperatorDeadLetterRecord{
 		DeadLetterID: id, DeliveryID: deliveryID, ClaimVersion: 1,
 		Failure:    replayFailure(runtimefailures.ClassRetryExhausted, "attempts_exhausted"),
 		RetryCount: 2, ChainDepth: 3, HandlerNode: "node-1", CreatedAt: createdAt,

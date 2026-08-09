@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
@@ -49,7 +50,7 @@ func TestSQLiteRuntimeStoreListEventsMissingPipelineReceiptExcludesDiagnosticDir
 		t.Fatalf("pipeline summary = %#v, want one executable and diagnostic exclusion", summary)
 	}
 
-	logs, err := store.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	logs, err := store.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		Level:     "warn",
 		Component: "diagnostic_replay",
@@ -112,7 +113,7 @@ func TestPostgresStoreListEventsMissingPipelineReceiptExcludesDiagnosticDirectEv
 		t.Fatalf("pipeline summary = %#v, want one executable and diagnostic exclusion", summary)
 	}
 
-	logs, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	logs, err := pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		Level:     "warn",
 		Component: "diagnostic_replay",

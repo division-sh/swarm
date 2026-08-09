@@ -6,32 +6,53 @@ import (
 
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	storeerrors "github.com/division-sh/swarm/internal/store/internal/storeerrors"
 	"github.com/google/uuid"
 )
 
-var ErrBundleNotFound = storeerrors.ErrBundleNotFound
-
-type AdminPostgresOwner struct {
+type BundleDeletePostgresOwner struct {
 	backend     *postgresbackend.Backend
 	schemaGuard func() error
 	deliveries  *deliveryadapter.Adapter
 }
 
-func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error) (*AdminPostgresOwner, error) {
+type DestructiveResetPostgresOwner struct {
+	backend     *postgresbackend.Backend
+	schemaGuard func() error
+	deliveries  *deliveryadapter.Adapter
+}
+
+func NewBundleDeletePostgres(backend *postgresbackend.Backend, schemaGuard func() error) (*BundleDeletePostgresOwner, error) {
 	if backend == nil || !backend.Valid() {
-		return nil, fmt.Errorf("admin postgres backend is required")
+		return nil, fmt.Errorf("bundle delete postgres backend is required")
 	}
 	deliveries, err := deliveryadapter.NewAdapter(deliveryadapter.DialectPostgres)
 	if err != nil {
 		return nil, err
 	}
-	return &AdminPostgresOwner{backend: backend, schemaGuard: schemaGuard, deliveries: deliveries}, nil
+	return &BundleDeletePostgresOwner{backend: backend, schemaGuard: schemaGuard, deliveries: deliveries}, nil
 }
 
-func (s *AdminPostgresOwner) requireCurrentSchema() error {
+func NewDestructiveResetPostgres(backend *postgresbackend.Backend, schemaGuard func() error) (*DestructiveResetPostgresOwner, error) {
+	if backend == nil || !backend.Valid() {
+		return nil, fmt.Errorf("destructive reset postgres backend is required")
+	}
+	deliveries, err := deliveryadapter.NewAdapter(deliveryadapter.DialectPostgres)
+	if err != nil {
+		return nil, err
+	}
+	return &DestructiveResetPostgresOwner{backend: backend, schemaGuard: schemaGuard, deliveries: deliveries}, nil
+}
+
+func (s *BundleDeletePostgresOwner) requireCurrentSchema() error {
 	if s == nil || s.schemaGuard == nil {
-		return fmt.Errorf("admin postgres schema guard is required")
+		return fmt.Errorf("bundle delete postgres schema guard is required")
+	}
+	return s.schemaGuard()
+}
+
+func (s *DestructiveResetPostgresOwner) requireCurrentSchema() error {
+	if s == nil || s.schemaGuard == nil {
+		return fmt.Errorf("destructive reset postgres schema guard is required")
 	}
 	return s.schemaGuard()
 }

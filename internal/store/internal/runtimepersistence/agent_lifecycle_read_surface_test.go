@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -25,11 +26,11 @@ func TestAgentLifecycleBlockingLayerCoversEveryCurrentProducerState(t *testing.T
 		runtimedelivery.StateExhausted: "delivery_terminal",
 	}
 	for state, layer := range want {
-		if got := agentLifecycleBlockingLayer(state); got != layer {
-			t.Errorf("agentLifecycleBlockingLayer(%q) = %q, want %q", state, got, layer)
+		if got := storeoperatorsurface.AgentLifecycleBlockingLayer(state); got != layer {
+			t.Errorf("storeoperatorsurface.AgentLifecycleBlockingLayer(%q) = %q, want %q", state, got, layer)
 		}
 	}
-	if got := agentLifecycleBlockingLayer(runtimedelivery.StateDelivered); got != "" {
+	if got := storeoperatorsurface.AgentLifecycleBlockingLayer(runtimedelivery.StateDelivered); got != "" {
 		t.Fatalf("delivered blocking layer = %q, want empty because delivered is not a current diagnosis state", got)
 	}
 }

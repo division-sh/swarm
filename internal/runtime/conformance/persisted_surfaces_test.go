@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/config"
 	dashboardserver "github.com/division-sh/swarm/internal/dashboard/server"
 	"github.com/division-sh/swarm/internal/events"
@@ -140,11 +142,11 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 		t.Fatalf("AppendAgentTurn: %v", err)
 	}
 
-	reader := dashboardserver.NewSQLConversationReader(db, pg)
+	reader := pg
 	if reader == nil {
-		t.Fatal("NewSQLConversationReader returned nil")
+		t.Fatal("conversation read owner is nil")
 	}
-	page, err := reader.ListOperatorConversationTurns(ctx, store.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 1})
+	page, err := reader.ListOperatorConversationTurns(ctx, operatorread.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 1})
 	if err != nil {
 		t.Fatalf("ListOperatorConversationTurns: %v", err)
 	}
@@ -220,11 +222,11 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 		t.Fatalf("UpdateLiveSessionWatchdog: %v", err)
 	}
 
-	reader := dashboardserver.NewSQLConversationReader(db, pg)
+	reader := pg
 	if reader == nil {
-		t.Fatal("NewSQLConversationReader returned nil")
+		t.Fatal("conversation read owner is nil")
 	}
-	page, err := reader.ListOperatorConversationTurns(ctx, store.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 10})
+	page, err := reader.ListOperatorConversationTurns(ctx, operatorread.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListOperatorConversationTurns: %v", err)
 	}
@@ -234,7 +236,7 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 	if page.Conversation.Metadata.Watchdog.State != "no_output" || page.Conversation.Metadata.Watchdog.Action != "session_no_output" {
 		t.Fatalf("unexpected runtime_state.watchdog: %+v", page.Conversation.Metadata.Watchdog)
 	}
-	list, err := reader.ListOperatorConversations(ctx, store.OperatorConversationListOptions{Limit: 10})
+	list, err := reader.ListOperatorConversations(ctx, operatorread.OperatorConversationListOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("ListOperatorConversations: %v", err)
 	}
@@ -641,11 +643,11 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 		t.Fatalf("AppendAgentTurn(stateless): %v", err)
 	}
 
-	reader := dashboardserver.NewSQLConversationReader(db, pg)
+	reader := pg
 	if reader == nil {
-		t.Fatal("NewSQLConversationReader returned nil")
+		t.Fatal("conversation read owner is nil")
 	}
-	page, err := reader.ListOperatorConversations(ctx, store.OperatorConversationListOptions{Limit: 10})
+	page, err := reader.ListOperatorConversations(ctx, operatorread.OperatorConversationListOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("ListOperatorConversations: %v", err)
 	}
@@ -695,9 +697,9 @@ func TestCanonicalRuntimeLogSurface_RoundTripsThroughObservabilityReader(t *test
 		t.Fatalf("logger.Log() error = %v", err)
 	}
 
-	reader := dashboardserver.NewSQLObservabilityReader(db, pg)
+	reader := dashboardserver.NewObservabilityProjection(pg)
 	if reader == nil {
-		t.Fatal("NewSQLObservabilityReader returned nil")
+		t.Fatal("NewObservabilityProjection returned nil")
 	}
 	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
 		Component: "tool-executor",
@@ -1026,9 +1028,9 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 		t.Fatalf("Start error = %v, want explicit recovery denial", startErr)
 	}
 
-	reader := dashboardserver.NewSQLObservabilityReader(db, pg)
+	reader := dashboardserver.NewObservabilityProjection(pg)
 	if reader == nil {
-		t.Fatal("NewSQLObservabilityReader returned nil")
+		t.Fatal("NewObservabilityProjection returned nil")
 	}
 	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
 		Component: "runtime",
@@ -1218,9 +1220,9 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 		t.Fatalf("ResetRuntimeStateWithSource: %v", err)
 	}
 
-	reader := dashboardserver.NewSQLObservabilityReader(db, pg)
+	reader := dashboardserver.NewObservabilityProjection(pg)
 	if reader == nil {
-		t.Fatal("NewSQLObservabilityReader returned nil")
+		t.Fatal("NewObservabilityProjection returned nil")
 	}
 	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
 		Component: "runtime",
@@ -1404,9 +1406,9 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 		}
 	}()
 
-	reader := dashboardserver.NewSQLObservabilityReader(db, pg)
+	reader := dashboardserver.NewObservabilityProjection(pg)
 	if reader == nil {
-		t.Fatal("NewSQLObservabilityReader returned nil")
+		t.Fatal("NewObservabilityProjection returned nil")
 	}
 	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
 		Component: "agent-manager",
@@ -1549,9 +1551,9 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	default:
 	}
 
-	reader := dashboardserver.NewSQLObservabilityReader(db, pg)
+	reader := dashboardserver.NewObservabilityProjection(pg)
 	if reader == nil {
-		t.Fatal("NewSQLObservabilityReader returned nil")
+		t.Fatal("NewObservabilityProjection returned nil")
 	}
 	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
 		Component: "pipeline-recovery",
@@ -1645,11 +1647,11 @@ func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProj
 		t.Fatalf("AppendAgentTurn(task runtime_log block): %v", err)
 	}
 
-	reader := dashboardserver.NewSQLConversationReader(db, pg)
+	reader := pg
 	if reader == nil {
-		t.Fatal("NewSQLConversationReader returned nil")
+		t.Fatal("conversation read owner is nil")
 	}
-	page, err := reader.ListOperatorConversationTurns(ctx, store.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 10})
+	page, err := reader.ListOperatorConversationTurns(ctx, operatorread.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListOperatorConversationTurns: %v", err)
 	}

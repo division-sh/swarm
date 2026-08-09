@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
@@ -36,8 +37,8 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	seedDeliveryStateFixture(t, ctx, pg, olderEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a")}, runtimedelivery.StateExhausted, &agentFailure)
 	seedDeliveryStateFixture(t, ctx, pg, olderEvent, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-a")}, runtimedelivery.StateRetrying, &nodeFailure)
 	hasDead := true
-	filtered, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{
-		Filter: OperatorEventListFilter{
+	filtered, err := pg.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{
+		Filter: operatorread.OperatorEventListFilter{
 			RunID:          runID,
 			DeliveryStatus: "dead_letter",
 			ReasonCode:     "retry_exhausted",
@@ -67,28 +68,28 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 		t.Fatalf("node delivery evidence = %#v", nodeDelivery)
 	}
 
-	page1, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{Filter: OperatorEventListFilter{RunID: runID}, Limit: 1})
+	page1, err := pg.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{Filter: operatorread.OperatorEventListFilter{RunID: runID}, Limit: 1})
 	if err != nil {
 		t.Fatalf("ListOperatorEvents page1: %v", err)
 	}
 	if len(page1.Events) != 1 || page1.Events[0].EventID != newerEventID || page1.NextCursor == "" {
 		t.Fatalf("page1 = %#v", page1)
 	}
-	page2, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{Filter: OperatorEventListFilter{RunID: runID}, Limit: 1, Cursor: page1.NextCursor})
+	page2, err := pg.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{Filter: operatorread.OperatorEventListFilter{RunID: runID}, Limit: 1, Cursor: page1.NextCursor})
 	if err != nil {
 		t.Fatalf("ListOperatorEvents page2: %v", err)
 	}
 	if len(page2.Events) != 1 || page2.Events[0].EventID != olderEventID {
 		t.Fatalf("page2 = %#v", page2)
 	}
-	ascPage1, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{Filter: OperatorEventListFilter{RunID: runID}, Limit: 1, Order: "asc"})
+	ascPage1, err := pg.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{Filter: operatorread.OperatorEventListFilter{RunID: runID}, Limit: 1, Order: "asc"})
 	if err != nil {
 		t.Fatalf("ListOperatorEvents asc page1: %v", err)
 	}
 	if len(ascPage1.Events) != 1 || ascPage1.Events[0].EventID != olderEventID || ascPage1.NextCursor == "" {
 		t.Fatalf("asc page1 = %#v", ascPage1)
 	}
-	ascPage2, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{Filter: OperatorEventListFilter{RunID: runID}, Limit: 1, Order: "asc", Cursor: ascPage1.NextCursor})
+	ascPage2, err := pg.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{Filter: operatorread.OperatorEventListFilter{RunID: runID}, Limit: 1, Order: "asc", Cursor: ascPage1.NextCursor})
 	if err != nil {
 		t.Fatalf("ListOperatorEvents asc page2: %v", err)
 	}
@@ -96,8 +97,8 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 		t.Fatalf("asc page2 = %#v", ascPage2)
 	}
 	sinceBase := base
-	afterBase, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{
-		Filter: OperatorEventListFilter{RunID: runID},
+	afterBase, err := pg.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{
+		Filter: operatorread.OperatorEventListFilter{RunID: runID},
 		Since:  &sinceBase,
 		Limit:  10,
 	})
@@ -108,8 +109,8 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 		t.Fatalf("since events = %#v, want only newer event", afterBase.Events)
 	}
 
-	if _, err := pg.LoadOperatorEvent(ctx, uuid.NewString()); !errors.Is(err, ErrEventNotFound) {
-		t.Fatalf("LoadOperatorEvent missing error = %v, want ErrEventNotFound", err)
+	if _, err := pg.LoadOperatorEvent(ctx, uuid.NewString()); !errors.Is(err, operatorread.ErrEventNotFound) {
+		t.Fatalf("LoadOperatorEvent missing error = %v, want operatorread.ErrEventNotFound", err)
 	}
 }
 
@@ -127,8 +128,8 @@ func TestOperatorObservabilityEventOwnerDoesNotPromotePayloadEntityIdentity(t *t
 	seedOperatorObservabilityEvent(t, ctx, pg, payloadOnlyEventID, runID, "task.payload_only", events.EventProducerExternal, "agent-a", json.RawMessage(`{"entity_id":"`+targetEntityID+`","marker":"payload-only"}`), "", base)
 	seedOperatorObservabilityEvent(t, ctx, pg, canonicalEventID, runID, "task.canonical_entity", events.EventProducerExternal, "agent-b", json.RawMessage(`{"entity_id":"payload-business-value","marker":"canonical"}`), targetEntityID, base.Add(time.Second))
 
-	filtered, err := pg.ListOperatorEvents(ctx, OperatorEventListOptions{
-		Filter: OperatorEventListFilter{EntityID: targetEntityID},
+	filtered, err := pg.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{
+		Filter: operatorread.OperatorEventListFilter{EntityID: targetEntityID},
 		Limit:  10,
 		Order:  "asc",
 	})
@@ -149,7 +150,7 @@ func TestOperatorObservabilityEventOwnerDoesNotPromotePayloadEntityIdentity(t *t
 	if payloadOnly.EntityID != "" {
 		t.Fatalf("payload-only top-level entity_id = %q, want empty", payloadOnly.EntityID)
 	}
-	if got := readStoreString(payloadOnly.Payload["entity_id"]); got != targetEntityID {
+	if got, _ := payloadOnly.Payload["entity_id"].(string); strings.TrimSpace(got) != targetEntityID {
 		t.Fatalf("payload entity_id = %q, want preserved payload value %s", got, targetEntityID)
 	}
 
@@ -160,7 +161,7 @@ func TestOperatorObservabilityEventOwnerDoesNotPromotePayloadEntityIdentity(t *t
 	if canonical.EntityID != targetEntityID {
 		t.Fatalf("canonical top-level entity_id = %q, want %s", canonical.EntityID, targetEntityID)
 	}
-	if got := readStoreString(canonical.Payload["entity_id"]); got != "payload-business-value" {
+	if got, _ := canonical.Payload["entity_id"].(string); strings.TrimSpace(got) != "payload-business-value" {
 		t.Fatalf("canonical payload entity_id = %q, want payload-business-value", got)
 	}
 }
@@ -194,7 +195,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 	olderLog := insertLog("old_code", base)
 	newerLog := insertLog("new_code", base.Add(time.Minute))
 
-	page1, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	page1, err := pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		Component: "mcp-gateway",
 		Level:     "error",
@@ -207,7 +208,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 	if len(page1.Logs) != 1 || page1.Logs[0].LogID != newerLog || page1.NextCursor == "" {
 		t.Fatalf("runtime log page1 = %#v", page1)
 	}
-	page2, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	page2, err := pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		Component: "mcp-gateway",
 		Level:     "error",
@@ -222,7 +223,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 		t.Fatalf("runtime log page2 = %#v", page2)
 	}
 	sinceBase := base
-	afterBase, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	afterBase, err := pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		Component: "mcp-gateway",
 		Level:     "error",
@@ -237,7 +238,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 		t.Fatalf("since logs = %#v, want only newer log", afterBase.Logs)
 	}
 
-	incidents, err := pg.ListOperatorRuntimeIncidents(ctx, OperatorRuntimeIncidentListOptions{
+	incidents, err := pg.ListOperatorRuntimeIncidents(ctx, operatorread.OperatorRuntimeIncidentListOptions{
 		SinceHours: 2,
 		MCPOnly:    true,
 		Limit:      10,
@@ -278,7 +279,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit bulk runtime-log fixture: %v", err)
 	}
-	bulkIncidents, err := pg.ListOperatorRuntimeIncidents(ctx, OperatorRuntimeIncidentListOptions{
+	bulkIncidents, err := pg.ListOperatorRuntimeIncidents(ctx, operatorread.OperatorRuntimeIncidentListOptions{
 		SinceHours: 2,
 		MCPOnly:    true,
 		Limit:      10,
@@ -286,7 +287,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListOperatorRuntimeIncidents bulk: %v", err)
 	}
-	var bulk *OperatorRuntimeIncident
+	var bulk *operatorread.OperatorRuntimeIncident
 	for idx := range bulkIncidents.Incidents {
 		if bulkIncidents.Incidents[idx].ErrorCode == "bulk_code" {
 			bulk = &bulkIncidents.Incidents[idx]
@@ -321,7 +322,7 @@ func TestPostgresRuntimeLogSourceFilterUsesCanonicalAgentOrRuntime(t *testing.T)
 	agentID := insertLog("agent source", `{"component":"source-parity","action":"agent_source","agent_id":"agent-1"}`, base.Add(2*time.Second))
 	blankAgentID := insertLog("blank agent fallback", `{"component":"source-parity","action":"blank_agent_fallback","agent_id":"   "}`, base.Add(3*time.Second))
 
-	all, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	all, err := pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		Component: "source-parity",
 		Level:     "warn",
@@ -340,7 +341,7 @@ func TestPostgresRuntimeLogSourceFilterUsesCanonicalAgentOrRuntime(t *testing.T)
 		blankAgentID:      "runtime",
 	})
 
-	runtimeRows, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	runtimeRows, err := pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		Component: "source-parity",
 		Level:     "warn",
@@ -355,7 +356,7 @@ func TestPostgresRuntimeLogSourceFilterUsesCanonicalAgentOrRuntime(t *testing.T)
 		blankAgentID:      "runtime",
 	})
 
-	agentRows, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	agentRows, err := pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		Component: "source-parity",
 		Level:     "warn",
@@ -367,7 +368,7 @@ func TestPostgresRuntimeLogSourceFilterUsesCanonicalAgentOrRuntime(t *testing.T)
 	}
 	assertRuntimeLogIDsAndSources(t, agentRows.Logs, map[string]string{agentID: "agent-1"})
 
-	missingRows, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	missingRows, err := pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		Component: "source-parity",
 		Level:     "warn",
@@ -382,7 +383,7 @@ func TestPostgresRuntimeLogSourceFilterUsesCanonicalAgentOrRuntime(t *testing.T)
 	}
 }
 
-func assertRuntimeLogIDsAndSources(t *testing.T, logs []OperatorRuntimeLogEntry, want map[string]string) {
+func assertRuntimeLogIDsAndSources(t *testing.T, logs []operatorread.OperatorRuntimeLogEntry, want map[string]string) {
 	t.Helper()
 	if len(logs) != len(want) {
 		t.Fatalf("runtime logs = %#v, want %d rows", logs, len(want))
@@ -427,7 +428,7 @@ func TestOperatorRuntimeLogsFilterBySessionAndTimeWindow(t *testing.T) {
 
 	since := base
 	until := base.Add(2500 * time.Millisecond)
-	result, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	result, err := pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		SessionID: "sess-1",
 		Since:     &since,
@@ -482,7 +483,7 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 	logA := insertLog(runA, "bundle_a_code", base.Add(time.Second))
 	_ = insertLog(runB, "bundle_b_code", base.Add(2*time.Second))
 
-	logs, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	logs, err := pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		BundleHash: bundleA,
 		Limit:      10,
 		Order:      "asc",
@@ -494,7 +495,7 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 		t.Fatalf("bundle-filtered logs = %#v, want only run A log", logs.Logs)
 	}
 
-	mismatched, err := pg.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	mismatched, err := pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:      runB,
 		BundleHash: bundleA,
 		Limit:      10,
@@ -507,7 +508,7 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 		t.Fatalf("mismatched run_id+bundle_hash logs = %#v, want none", mismatched.Logs)
 	}
 
-	incidents, err := pg.ListOperatorRuntimeIncidents(ctx, OperatorRuntimeIncidentListOptions{
+	incidents, err := pg.ListOperatorRuntimeIncidents(ctx, operatorread.OperatorRuntimeIncidentListOptions{
 		BundleHash: bundleA,
 		SinceHours: 2,
 		Limit:      10,
@@ -533,14 +534,14 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 	seedOperatorObservabilityEvent(t, ctx, pg, firstEvent, runID, "first.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), "", base)
 	seedOperatorObservabilityEvent(t, ctx, pg, secondEvent, runID, "second.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), "", base.Add(time.Second))
 
-	page1, next, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 1})
+	page1, next, err := pg.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 1})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage page1: %v", err)
 	}
 	if len(page1) != 1 || page1[0].EventID != firstEvent || next == "" {
 		t.Fatalf("trace page1 rows=%#v next=%q", page1, next)
 	}
-	page2, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 1, Cursor: next})
+	page2, _, err := pg.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 1, Cursor: next})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage page2: %v", err)
 	}
@@ -548,50 +549,50 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 		t.Fatalf("trace page2 = %#v", page2)
 	}
 	until := base.Add(time.Second)
-	boundedPage1, boundedNext, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 1, Until: &until})
+	boundedPage1, boundedNext, err := pg.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 1, Until: &until})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage bounded page1: %v", err)
 	}
 	if len(boundedPage1) != 1 || boundedPage1[0].EventID != firstEvent || boundedNext == "" {
 		t.Fatalf("bounded trace page1 rows=%#v next=%q", boundedPage1, boundedNext)
 	}
-	boundedPage2, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 1, Cursor: boundedNext, Until: &until})
+	boundedPage2, _, err := pg.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 1, Cursor: boundedNext, Until: &until})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage bounded page2: %v", err)
 	}
 	if len(boundedPage2) != 1 || boundedPage2[0].EventID != secondEvent {
 		t.Fatalf("bounded trace page2 = %#v", boundedPage2)
 	}
-	sinceRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, Since: &base})
+	sinceRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10, Since: &base})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage since: %v", err)
 	}
 	if len(sinceRows) != 1 || sinceRows[0].EventID != secondEvent {
 		t.Fatalf("trace since rows = %#v, want only second event", sinceRows)
 	}
-	untilRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, Until: &base})
+	untilRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10, Until: &base})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage until: %v", err)
 	}
 	if len(untilRows) != 1 || untilRows[0].EventID != firstEvent {
 		t.Fatalf("trace until rows = %#v, want only first event", untilRows)
 	}
-	emptyWindowRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, Since: &base, Until: &base})
+	emptyWindowRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10, Since: &base, Until: &base})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage empty window: %v", err)
 	}
 	if len(emptyWindowRows) != 0 {
 		t.Fatalf("trace equal since/until rows = %#v, want empty exclusive/inclusive window", emptyWindowRows)
 	}
-	windowRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, Since: &base, Until: &until})
+	windowRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10, Since: &base, Until: &until})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage bounded window: %v", err)
 	}
 	if len(windowRows) != 1 || windowRows[0].EventID != secondEvent {
 		t.Fatalf("trace bounded window rows = %#v, want only second event", windowRows)
 	}
-	if _, _, err := pg.LoadRunDebugTracePage(ctx, uuid.NewString(), RunDebugTraceQueryOptions{}); !errors.Is(err, ErrRunNotFound) {
-		t.Fatalf("missing run error = %v, want ErrRunNotFound", err)
+	if _, _, err := pg.LoadRunDebugTracePage(ctx, uuid.NewString(), operatorread.RunDebugTraceQueryOptions{}); !errors.Is(err, operatorread.ErrRunNotFound) {
+		t.Fatalf("missing run error = %v, want operatorread.ErrRunNotFound", err)
 	}
 }
 
@@ -608,14 +609,14 @@ func TestRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 	seedOperatorObservabilityEvent(t, ctx, pg, businessEvent, runID, "item.received", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), "", base)
 	seedOperatorRuntimeLog(t, ctx, pg, runtimeLogEvent, runID, "runtime", json.RawMessage(`{}`), base.Add(time.Millisecond))
 
-	allRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10})
+	allRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage all: %v", err)
 	}
 	if got := traceEventIDs(allRows); !sameStrings(got, []string{businessEvent, runtimeLogEvent}) {
 		t.Fatalf("all trace rows = %#v, want business and runtime_log", got)
 	}
-	filteredRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, ExcludeRuntimeLogs: true})
+	filteredRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10, ExcludeRuntimeLogs: true})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage filtered: %v", err)
 	}
@@ -647,37 +648,37 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		opts RunDebugTraceQueryOptions
+		opts operatorread.RunDebugTraceQueryOptions
 		want string
 	}{
 		{
 			name: "event name multi-value",
-			opts: RunDebugTraceQueryOptions{Limit: 10, Filter: RunDebugTraceFilter{EventNames: []string{"missing.event", "second.event"}}},
+			opts: operatorread.RunDebugTraceQueryOptions{Limit: 10, Filter: operatorread.RunDebugTraceFilter{EventNames: []string{"missing.event", "second.event"}}},
 			want: secondEvent,
 		},
 		{
 			name: "entity id",
-			opts: RunDebugTraceQueryOptions{Limit: 10, Filter: RunDebugTraceFilter{EntityIDs: []string{entityOne}}},
+			opts: operatorread.RunDebugTraceQueryOptions{Limit: 10, Filter: operatorread.RunDebugTraceFilter{EntityIDs: []string{entityOne}}},
 			want: firstEvent,
 		},
 		{
 			name: "delivery status",
-			opts: RunDebugTraceQueryOptions{Limit: 10, Filter: RunDebugTraceFilter{DeliveryStatuses: []string{"dead_letter"}}},
+			opts: operatorread.RunDebugTraceQueryOptions{Limit: 10, Filter: operatorread.RunDebugTraceFilter{DeliveryStatuses: []string{"dead_letter"}}},
 			want: secondEvent,
 		},
 		{
 			name: "subscriber identity",
-			opts: RunDebugTraceQueryOptions{Limit: 10, Filter: RunDebugTraceFilter{SubscriberIDs: []string{"agent-2"}, SubscriberTypes: []string{"agent"}}},
+			opts: operatorread.RunDebugTraceQueryOptions{Limit: 10, Filter: operatorread.RunDebugTraceFilter{SubscriberIDs: []string{"agent-2"}, SubscriberTypes: []string{"agent"}}},
 			want: secondEvent,
 		},
 		{
 			name: "and composition",
-			opts: RunDebugTraceQueryOptions{Limit: 10, Filter: RunDebugTraceFilter{EventNames: []string{"first.event", "second.event"}, EntityIDs: []string{entityTwo}, DeliveryStatuses: []string{"dead_letter"}, SubscriberIDs: []string{"agent-2"}, SubscriberTypes: []string{"agent"}}},
+			opts: operatorread.RunDebugTraceQueryOptions{Limit: 10, Filter: operatorread.RunDebugTraceFilter{EventNames: []string{"first.event", "second.event"}, EntityIDs: []string{entityTwo}, DeliveryStatuses: []string{"dead_letter"}, SubscriberIDs: []string{"agent-2"}, SubscriberTypes: []string{"agent"}}},
 			want: secondEvent,
 		},
 		{
 			name: "filter and until composition",
-			opts: RunDebugTraceQueryOptions{Limit: 10, Until: &until, Filter: RunDebugTraceFilter{EventNames: []string{"first.event", "second.event"}}},
+			opts: operatorread.RunDebugTraceQueryOptions{Limit: 10, Until: &until, Filter: operatorread.RunDebugTraceFilter{EventNames: []string{"first.event", "second.event"}}},
 			want: firstEvent,
 		},
 	} {

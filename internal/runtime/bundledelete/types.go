@@ -154,7 +154,11 @@ type Finalizer interface {
 }
 
 type LockManager interface {
-	TryAcquire(context.Context, string) (destructivereset.LockLease, bool, error)
+	AcquireBundleDelete(context.Context) (LockLease, bool, error)
+}
+
+type LockLease interface {
+	Release(context.Context) error
 }
 
 type ManagedContainerInventoryReader interface {

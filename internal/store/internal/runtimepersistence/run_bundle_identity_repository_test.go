@@ -517,7 +517,6 @@ var bundleIdentityFixtureLedger = []string{
 	"internal/cliapp/entities_test.go",
 	"internal/dashboard/server/observability_sql_test.go",
 	"internal/dashboard/server/server_test.go",
-	"internal/digest/source_test.go",
 	"internal/runtime/budget_recovery_parity_test.go",
 	"internal/runtime/bus/event_identity_dispatch_surface_test.go",
 	"internal/runtime/bus/eventbus_publish_test.go",

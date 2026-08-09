@@ -13,9 +13,9 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 func TestWorkspaceBackendDecisionCapabilityMatrix(t *testing.T) {
@@ -439,16 +439,16 @@ func TestConfiguredWorkspaceLifecycleForBackendNoWorkspace(t *testing.T) {
 
 func TestWorkspaceAdmittedForkChatExecutorRejectsClaudeCLIWithoutDocker(t *testing.T) {
 	executor := NewWorkspaceAdmittedForkChatExecutor(recordingForkChatExecutor{}, staticWorkspaceAgentRuntimeResolver{runtime: &runtimellm.ClaudeCLIRuntime{}}, WorkspaceBackendSelection{Backend: WorkspaceBackendNone, NoWorkspace: true})
-	_, err := executor.ExecuteForkChat(context.Background(), store.ConversationForkChatPrepared{}, "inspect")
+	_, err := executor.ExecuteForkChat(context.Background(), runfork.ConversationForkChatPrepared{}, "inspect")
 	if err == nil || !strings.Contains(err.Error(), "conversation.fork_chat") || !strings.Contains(err.Error(), "claude_cli") {
 		t.Fatalf("ExecuteForkChat error = %v, want forkchat claude_cli admission failure", err)
 	}
 }
 
 func TestWorkspaceAdmittedForkChatExecutorAllowsAPIBackend(t *testing.T) {
-	inner := recordingForkChatExecutor{result: store.ConversationForkChatExecution{AssistantMessage: "ok"}}
+	inner := recordingForkChatExecutor{result: runfork.ConversationForkChatExecution{AssistantMessage: "ok"}}
 	executor := NewWorkspaceAdmittedForkChatExecutor(inner, staticWorkspaceAgentRuntimeResolver{runtime: &runtimellm.OpenAIResponsesRuntime{}}, WorkspaceBackendSelection{Backend: WorkspaceBackendNone, NoWorkspace: true})
-	got, err := executor.ExecuteForkChat(context.Background(), store.ConversationForkChatPrepared{}, "inspect")
+	got, err := executor.ExecuteForkChat(context.Background(), runfork.ConversationForkChatPrepared{}, "inspect")
 	if err != nil {
 		t.Fatalf("ExecuteForkChat: %v", err)
 	}
@@ -458,7 +458,7 @@ func TestWorkspaceAdmittedForkChatExecutorAllowsAPIBackend(t *testing.T) {
 }
 
 type recordingForkChatExecutor struct {
-	result store.ConversationForkChatExecution
+	result runfork.ConversationForkChatExecution
 }
 
 type staticWorkspaceAgentRuntimeResolver struct {
@@ -469,7 +469,7 @@ func (r staticWorkspaceAgentRuntimeResolver) ResolveAgentRuntime(actor models.Ag
 	return runtimellm.AgentRuntimeResolution{Actor: actor, Runtime: r.runtime}, nil
 }
 
-func (r recordingForkChatExecutor) ExecuteForkChat(context.Context, store.ConversationForkChatPrepared, string) (store.ConversationForkChatExecution, error) {
+func (r recordingForkChatExecutor) ExecuteForkChat(context.Context, runfork.ConversationForkChatPrepared, string) (runfork.ConversationForkChatExecution, error) {
 	return r.result, nil
 }
 

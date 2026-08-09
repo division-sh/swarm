@@ -11,14 +11,15 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 type completionBudgetTestStore interface {
 	selectedCompletionAuthorityStore
-	CreateOperatorConversationFork(context.Context, ConversationForkCreateRequest) (OperatorConversationForkSession, error)
-	PrepareOperatorConversationForkChat(context.Context, ConversationForkChatPrepareRequest) (ConversationForkChatPrepared, error)
+	CreateOperatorConversationFork(context.Context, runfork.ConversationForkCreateRequest) (runfork.OperatorConversationForkSession, error)
+	PrepareOperatorConversationForkChat(context.Context, runfork.ConversationForkChatPrepareRequest) (runfork.ConversationForkChatPrepared, error)
 }
 
 type completionBudgetRaceFixture struct {
@@ -227,13 +228,13 @@ func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFix
 		} else {
 			source = seedConversationForkSource(t, fixture.db, now)
 		}
-		fork, err := fixture.primary.CreateOperatorConversationFork(testAuthorActivityContext(), ConversationForkCreateRequest{
-			SourceSessionID: source.sessionID, ForkPoint: ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID}, CreatedBy: "budget-actor", Now: now,
+		fork, err := fixture.primary.CreateOperatorConversationFork(testAuthorActivityContext(), runfork.ConversationForkCreateRequest{
+			SourceSessionID: source.sessionID, ForkPoint: runfork.ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID}, CreatedBy: "budget-actor", Now: now,
 		})
 		if err != nil {
 			t.Fatalf("create budget-race forkchat fork: %v", err)
 		}
-		prepared, err := fixture.primary.PrepareOperatorConversationForkChat(testAuthorActivityContext(), ConversationForkChatPrepareRequest{
+		prepared, err := fixture.primary.PrepareOperatorConversationForkChat(testAuthorActivityContext(), runfork.ConversationForkChatPrepareRequest{
 			ForkID: fork.ForkID, Message: "budget race", Method: "conversation.fork_chat", ActorTokenID: "budget-actor",
 			RequestHash: runtimeeffects.Fingerprint([]byte("budget race")), Now: now.Add(time.Second),
 		})

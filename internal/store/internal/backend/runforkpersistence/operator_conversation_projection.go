@@ -11,8 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimerunfork "github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimeturnactivity "github.com/division-sh/swarm/internal/runtime/turnactivity"
 )
 
@@ -55,49 +57,49 @@ type operatorRowScanner interface {
 	Scan(dest ...any) error
 }
 
-func (s *RunForkPostgresOwner) ListOperatorConversationTurns(ctx context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error) {
+func (s *RunForkPostgresOwner) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
 	owner, err := postgresConversationForkStore(s)
 	if err != nil {
-		return OperatorConversationTurnListResult{}, err
+		return operatorread.OperatorConversationTurnListResult{}, err
 	}
 	return owner.listOperatorConversationTurns(ctx, opts)
 }
 
-func (s *RunForkSQLiteOwner) ListOperatorConversationTurns(ctx context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error) {
+func (s *RunForkSQLiteOwner) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
 	owner, err := sqliteConversationForkStore(s)
 	if err != nil {
-		return OperatorConversationTurnListResult{}, err
+		return operatorread.OperatorConversationTurnListResult{}, err
 	}
 	return owner.listOperatorConversationTurns(ctx, opts)
 }
 
-func (s *RunForkPostgresOwner) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (OperatorPublicConversationTurnDetail, error) {
+func (s *RunForkPostgresOwner) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
 	owner, err := postgresConversationForkStore(s)
 	if err != nil {
-		return OperatorPublicConversationTurnDetail{}, err
+		return operatorread.OperatorPublicConversationTurnDetail{}, err
 	}
 	return owner.loadOperatorConversationTurn(ctx, sessionID, turnID)
 }
 
-func (s *RunForkSQLiteOwner) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (OperatorPublicConversationTurnDetail, error) {
+func (s *RunForkSQLiteOwner) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
 	owner, err := sqliteConversationForkStore(s)
 	if err != nil {
-		return OperatorPublicConversationTurnDetail{}, err
+		return operatorread.OperatorPublicConversationTurnDetail{}, err
 	}
 	return owner.loadOperatorConversationTurn(ctx, sessionID, turnID)
 }
 
-func (s conversationForkStore) loadOperatorConversationSummary(ctx context.Context, sessionID string) (OperatorConversationSummary, error) {
+func (s conversationForkStore) loadOperatorConversationSummary(ctx context.Context, sessionID string) (operatorread.OperatorConversationSummary, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		return OperatorConversationSummary{}, ErrSessionNotFound
+		return operatorread.OperatorConversationSummary{}, operatorread.ErrSessionNotFound
 	}
 	if err := s.requireCurrentSchema(); err != nil {
-		return OperatorConversationSummary{}, err
+		return operatorread.OperatorConversationSummary{}, err
 	}
 	sources := s.conversationQuerySources()
 	if len(sources) == 0 {
-		return OperatorConversationSummary{}, ErrSessionNotFound
+		return operatorread.OperatorConversationSummary{}, operatorread.ErrSessionNotFound
 	}
 	row := s.queryRow(ctx, s.db, fmt.Sprintf(`
 		SELECT CAST(session_id AS TEXT), agent_id, COALESCE(CAST(run_id AS TEXT), ''), kind,
@@ -111,7 +113,7 @@ func (s conversationForkStore) loadOperatorConversationSummary(ctx context.Conte
 		LIMIT 2
 	`, strings.Join(sources, "\nUNION ALL\n")), sessionID)
 	var (
-		item            OperatorConversationSummary
+		item            operatorread.OperatorConversationSummary
 		runtimeStateRaw []byte
 		startedAtRaw    any
 		endedAtRaw      any
@@ -122,29 +124,29 @@ func (s conversationForkStore) loadOperatorConversationSummary(ctx context.Conte
 		&item.Memory, &item.MemorySource, &item.Status, &item.TurnCount, &item.MessageCount,
 		&runtimeStateRaw, &startedAtRaw, &endedAtRaw, &updatedAtRaw,
 	); errors.Is(err, sql.ErrNoRows) {
-		return OperatorConversationSummary{}, ErrSessionNotFound
+		return operatorread.OperatorConversationSummary{}, operatorread.ErrSessionNotFound
 	} else if err != nil {
-		return OperatorConversationSummary{}, operatorConversationReadQueryError("load conversation summary", err)
+		return operatorread.OperatorConversationSummary{}, operatorConversationReadQueryError("load conversation summary", err)
 	}
 	startedAt, err := requiredConversationTime(startedAtRaw, "started_at")
 	if err != nil {
-		return OperatorConversationSummary{}, err
+		return operatorread.OperatorConversationSummary{}, err
 	}
 	item.StartedAt = startedAt
 	if endedAt, valid, scanErr := sqliteTimeValue(endedAtRaw); scanErr != nil {
-		return OperatorConversationSummary{}, fmt.Errorf("decode conversation ended_at: %w", scanErr)
+		return operatorread.OperatorConversationSummary{}, fmt.Errorf("decode conversation ended_at: %w", scanErr)
 	} else if valid {
 		endedAt = endedAt.UTC()
 		item.EndedAt = &endedAt
 	}
 	updatedAt, err := requiredConversationTime(updatedAtRaw, "updated_at")
 	if err != nil {
-		return OperatorConversationSummary{}, err
+		return operatorread.OperatorConversationSummary{}, err
 	}
 	item.UpdatedAt = updatedAt
 	runtimeState, err := DecodeConversationRuntimeStateDescriptor(runtimeStateRaw)
 	if err != nil {
-		return OperatorConversationSummary{}, fmt.Errorf("decode conversation runtime_state: %w", err)
+		return operatorread.OperatorConversationSummary{}, fmt.Errorf("decode conversation runtime_state: %w", err)
 	}
 	item.Summary = runtimeState.Summary
 	item.Metadata = projectOperatorConversationSummaryMetadata(runtimeState)
@@ -155,10 +157,10 @@ func (s conversationForkStore) loadOperatorConversationSummary(ctx context.Conte
 		ORDER BY created_at DESC, turn_id DESC
 		LIMIT 1
 	`, sessionID).Scan(&item.ExecutionMode); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return OperatorConversationSummary{}, fmt.Errorf("load conversation execution mode: %w", err)
+		return operatorread.OperatorConversationSummary{}, fmt.Errorf("load conversation execution mode: %w", err)
 	}
 	if item.ExecutionMode != "" && item.ExecutionMode != "live" && item.ExecutionMode != "mock" {
-		return OperatorConversationSummary{}, fmt.Errorf("invalid persisted conversation execution_mode %q", item.ExecutionMode)
+		return operatorread.OperatorConversationSummary{}, fmt.Errorf("invalid persisted conversation execution_mode %q", item.ExecutionMode)
 	}
 	return item, nil
 }
@@ -174,18 +176,18 @@ func requiredConversationTime(raw any, field string) (time.Time, error) {
 	return value.UTC(), nil
 }
 
-func (s conversationForkStore) listOperatorConversationTurns(ctx context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error) {
+func (s conversationForkStore) listOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
 	if err := s.requirePublicConversationProjectionAccess(); err != nil {
-		return OperatorConversationTurnListResult{}, err
+		return operatorread.OperatorConversationTurnListResult{}, err
 	}
 	runIDProjection := "COALESCE(CAST(run_id AS TEXT), '')"
 	opts, cursor, err := normalizeOperatorConversationTurnListOptions(opts)
 	if err != nil {
-		return OperatorConversationTurnListResult{}, err
+		return operatorread.OperatorConversationTurnListResult{}, err
 	}
 	summary, err := s.loadOperatorConversationSummary(ctx, opts.SessionID)
 	if err != nil {
-		return OperatorConversationTurnListResult{}, err
+		return operatorread.OperatorConversationTurnListResult{}, err
 	}
 
 	where := []string{"1 = 1"}
@@ -193,7 +195,7 @@ func (s conversationForkStore) listOperatorConversationTurns(ctx context.Context
 	if cursor != nil {
 		cursorAt, parseErr := time.Parse(time.RFC3339Nano, cursor.CompletedAt)
 		if parseErr != nil {
-			return OperatorConversationTurnListResult{}, ErrInvalidConversationCursor
+			return operatorread.OperatorConversationTurnListResult{}, operatorread.ErrInvalidConversationCursor
 		}
 		where = append(where, "(created_at < ? OR (created_at = ? AND CAST(turn_id AS TEXT) < ?))")
 		args = append(args, cursorAt.UTC(), cursorAt.UTC(), cursor.TurnID)
@@ -224,24 +226,24 @@ func (s conversationForkStore) listOperatorConversationTurns(ctx context.Context
 		LIMIT ?
 	`, runIDProjection, strings.Join(where, " AND ")), args...)
 	if err != nil {
-		return OperatorConversationTurnListResult{}, fmt.Errorf("list conversation turns: %w", err)
+		return operatorread.OperatorConversationTurnListResult{}, fmt.Errorf("list conversation turns: %w", err)
 	}
 	defer rows.Close()
 
-	turns := make([]OperatorConversationTurnListItem, 0, opts.Limit+1)
+	turns := make([]operatorread.OperatorConversationTurnListItem, 0, opts.Limit+1)
 	for rows.Next() {
 		record, err := scanConversationTurnRecord(rows)
 		if err != nil {
-			return OperatorConversationTurnListResult{}, err
+			return operatorread.OperatorConversationTurnListResult{}, err
 		}
 		turn, err := projectPublicConversationTurnListItem(record)
 		if err != nil {
-			return OperatorConversationTurnListResult{}, err
+			return operatorread.OperatorConversationTurnListResult{}, err
 		}
 		turns = append(turns, turn)
 	}
 	if err := rows.Err(); err != nil {
-		return OperatorConversationTurnListResult{}, err
+		return operatorread.OperatorConversationTurnListResult{}, err
 	}
 
 	nextCursor := ""
@@ -254,25 +256,25 @@ func (s conversationForkStore) listOperatorConversationTurns(ctx context.Context
 			TurnID:      last.TurnID,
 		})
 	}
-	return OperatorConversationTurnListResult{Conversation: summary, Turns: turns, NextCursor: nextCursor}, nil
+	return operatorread.OperatorConversationTurnListResult{Conversation: summary, Turns: turns, NextCursor: nextCursor}, nil
 }
 
-func (s conversationForkStore) loadOperatorConversationTurn(ctx context.Context, sessionID, turnID string) (OperatorPublicConversationTurnDetail, error) {
+func (s conversationForkStore) loadOperatorConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
 	if err := s.requirePublicConversationProjectionAccess(); err != nil {
-		return OperatorPublicConversationTurnDetail{}, err
+		return operatorread.OperatorPublicConversationTurnDetail{}, err
 	}
 	runIDProjection := "COALESCE(CAST(run_id AS TEXT), '')"
 	sessionID = strings.TrimSpace(sessionID)
 	turnID = strings.TrimSpace(turnID)
 	if sessionID == "" {
-		return OperatorPublicConversationTurnDetail{}, ErrSessionNotFound
+		return operatorread.OperatorPublicConversationTurnDetail{}, operatorread.ErrSessionNotFound
 	}
 	if turnID == "" {
-		return OperatorPublicConversationTurnDetail{}, ErrTurnNotFound
+		return operatorread.OperatorPublicConversationTurnDetail{}, operatorread.ErrTurnNotFound
 	}
 	summary, err := s.loadOperatorConversationSummary(ctx, sessionID)
 	if err != nil {
-		return OperatorPublicConversationTurnDetail{}, err
+		return operatorread.OperatorPublicConversationTurnDetail{}, err
 	}
 	row := s.queryRow(ctx, s.db, fmt.Sprintf(`
 		WITH ordered AS (
@@ -298,27 +300,27 @@ func (s conversationForkStore) loadOperatorConversationTurn(ctx context.Context,
 	`, runIDProjection), sessionID, turnID)
 	record, err := scanConversationTurnRecord(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return OperatorPublicConversationTurnDetail{}, ErrTurnNotFound
+		return operatorread.OperatorPublicConversationTurnDetail{}, operatorread.ErrTurnNotFound
 	}
 	if err != nil {
-		return OperatorPublicConversationTurnDetail{}, fmt.Errorf("load conversation turn: %w", err)
+		return operatorread.OperatorPublicConversationTurnDetail{}, fmt.Errorf("load conversation turn: %w", err)
 	}
 	turn, err := projectPublicConversationTurn(record)
 	if err != nil {
-		return OperatorPublicConversationTurnDetail{}, err
+		return operatorread.OperatorPublicConversationTurnDetail{}, err
 	}
-	return OperatorPublicConversationTurnDetail{Session: summary, Turn: turn}, nil
+	return operatorread.OperatorPublicConversationTurnDetail{Session: summary, Turn: turn}, nil
 }
 
 func (s conversationForkStore) requirePublicConversationProjectionAccess() error {
 	return s.requireCurrentSchema()
 }
 
-func (s conversationForkStore) resolveConversationTurnCoordinateByID(ctx context.Context, sessionID, turnID string) (ConversationForkPointDescriptor, error) {
+func (s conversationForkStore) resolveConversationTurnCoordinateByID(ctx context.Context, sessionID, turnID string) (runtimerunfork.ConversationForkPointDescriptor, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	turnID = strings.TrimSpace(turnID)
 	if turnID == "" {
-		return ConversationForkPointDescriptor{}, ErrTurnNotFound
+		return runtimerunfork.ConversationForkPointDescriptor{}, operatorread.ErrTurnNotFound
 	}
 	row := s.queryRow(ctx, s.db, `
 		WITH ordered AS (
@@ -335,15 +337,15 @@ func (s conversationForkStore) resolveConversationTurnCoordinateByID(ctx context
 	`, sessionID, turnID)
 	item, err := scanConversationTurnCoordinate(row, "turn", "", nil)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ConversationForkPointDescriptor{}, ErrTurnNotFound
+		return runtimerunfork.ConversationForkPointDescriptor{}, operatorread.ErrTurnNotFound
 	}
 	if err != nil {
-		return ConversationForkPointDescriptor{}, err
+		return runtimerunfork.ConversationForkPointDescriptor{}, err
 	}
 	return item, nil
 }
 
-func (s conversationForkStore) resolveConversationTurnCoordinateByEvent(ctx context.Context, sessionID, eventID string) (ConversationForkPointDescriptor, error) {
+func (s conversationForkStore) resolveConversationTurnCoordinateByEvent(ctx context.Context, sessionID, eventID string) (runtimerunfork.ConversationForkPointDescriptor, error) {
 	rows, err := s.query(ctx, s.db, `
 		WITH ordered AS (
 			SELECT ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC) AS ordinal,
@@ -360,30 +362,30 @@ func (s conversationForkStore) resolveConversationTurnCoordinateByEvent(ctx cont
 		LIMIT 2
 	`, sessionID, eventID)
 	if err != nil {
-		return ConversationForkPointDescriptor{}, fmt.Errorf("resolve conversation event coordinate: %w", err)
+		return runtimerunfork.ConversationForkPointDescriptor{}, fmt.Errorf("resolve conversation event coordinate: %w", err)
 	}
 	defer rows.Close()
-	matches := make([]ConversationForkPointDescriptor, 0, 2)
+	matches := make([]runtimerunfork.ConversationForkPointDescriptor, 0, 2)
 	for rows.Next() {
 		item, err := scanConversationTurnCoordinate(rows, "event", eventID, nil)
 		if err != nil {
-			return ConversationForkPointDescriptor{}, err
+			return runtimerunfork.ConversationForkPointDescriptor{}, err
 		}
 		matches = append(matches, item)
 	}
 	if err := rows.Err(); err != nil {
-		return ConversationForkPointDescriptor{}, err
+		return runtimerunfork.ConversationForkPointDescriptor{}, err
 	}
 	if len(matches) == 0 {
-		return ConversationForkPointDescriptor{}, ErrEventNotFound
+		return runtimerunfork.ConversationForkPointDescriptor{}, operatorread.ErrEventNotFound
 	}
 	if len(matches) > 1 {
-		return ConversationForkPointDescriptor{}, &EntityReadParamError{Field: "fork_point.event_id", Reason: "event matches multiple source turns"}
+		return runtimerunfork.ConversationForkPointDescriptor{}, &operatorread.EntityReadParamError{Field: "fork_point.event_id", Reason: "event matches multiple source turns"}
 	}
 	return matches[0], nil
 }
 
-func (s conversationForkStore) resolveConversationTurnCoordinateAt(ctx context.Context, sessionID string, at time.Time) (ConversationForkPointDescriptor, error) {
+func (s conversationForkStore) resolveConversationTurnCoordinateAt(ctx context.Context, sessionID string, at time.Time) (runtimerunfork.ConversationForkPointDescriptor, error) {
 	at = at.UTC()
 	row := s.queryRow(ctx, s.db, `
 		WITH ordered AS (
@@ -402,26 +404,26 @@ func (s conversationForkStore) resolveConversationTurnCoordinateAt(ctx context.C
 	`, sessionID, at)
 	item, err := scanConversationTurnCoordinate(row, "time", "", &at)
 	if errors.Is(err, sql.ErrNoRows) {
-		return ConversationForkPointDescriptor{}, &EntityReadParamError{Field: "fork_point.at", Reason: "does not select a source turn"}
+		return runtimerunfork.ConversationForkPointDescriptor{}, &operatorread.EntityReadParamError{Field: "fork_point.at", Reason: "does not select a source turn"}
 	}
 	if err != nil {
-		return ConversationForkPointDescriptor{}, err
+		return runtimerunfork.ConversationForkPointDescriptor{}, err
 	}
 	return item, nil
 }
 
-func scanConversationTurnCoordinate(scanner operatorRowScanner, kind, selectedEventID string, at *time.Time) (ConversationForkPointDescriptor, error) {
+func scanConversationTurnCoordinate(scanner operatorRowScanner, kind, selectedEventID string, at *time.Time) (runtimerunfork.ConversationForkPointDescriptor, error) {
 	var (
-		item          ConversationForkPointDescriptor
+		item          runtimerunfork.ConversationForkPointDescriptor
 		storedEventID string
 		selectedAtRaw any
 	)
 	if err := scanner.Scan(&item.TurnIndex, &item.TurnID, &storedEventID, &selectedAtRaw); err != nil {
-		return ConversationForkPointDescriptor{}, err
+		return runtimerunfork.ConversationForkPointDescriptor{}, err
 	}
 	selectedAt, err := requiredConversationTime(selectedAtRaw, "selected_at")
 	if err != nil {
-		return ConversationForkPointDescriptor{}, err
+		return runtimerunfork.ConversationForkPointDescriptor{}, err
 	}
 	item.Kind = kind
 	item.EventID = strings.TrimSpace(selectedEventID)
@@ -433,27 +435,27 @@ func scanConversationTurnCoordinate(scanner operatorRowScanner, kind, selectedEv
 	return item, nil
 }
 
-func normalizeOperatorConversationTurnListOptions(opts OperatorConversationTurnListOptions) (OperatorConversationTurnListOptions, *conversationTurnCursor, error) {
+func normalizeOperatorConversationTurnListOptions(opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListOptions, *conversationTurnCursor, error) {
 	opts.SessionID = strings.TrimSpace(opts.SessionID)
 	opts.Cursor = strings.TrimSpace(opts.Cursor)
 	if opts.SessionID == "" {
-		return opts, nil, ErrSessionNotFound
+		return opts, nil, operatorread.ErrSessionNotFound
 	}
 	if opts.Limit == 0 {
 		opts.Limit = defaultOperatorConversationTurnPageSize
 	}
 	if opts.Limit < 1 || opts.Limit > maxOperatorConversationTurnPageSize {
-		return opts, nil, &EntityReadParamError{Field: "limit", Reason: "must be between 1 and 500"}
+		return opts, nil, &operatorread.EntityReadParamError{Field: "limit", Reason: "must be between 1 and 500"}
 	}
 	if opts.Cursor == "" {
 		return opts, nil, nil
 	}
 	cursor, err := decodeConversationTurnCursor(opts.Cursor)
 	if err != nil || cursor.Kind != "conversation.list_turns" || strings.TrimSpace(cursor.TurnID) == "" {
-		return opts, nil, ErrInvalidConversationCursor
+		return opts, nil, operatorread.ErrInvalidConversationCursor
 	}
 	if _, err := time.Parse(time.RFC3339Nano, cursor.CompletedAt); err != nil {
-		return opts, nil, ErrInvalidConversationCursor
+		return opts, nil, operatorread.ErrInvalidConversationCursor
 	}
 	return opts, &cursor, nil
 }
@@ -505,26 +507,26 @@ func scanConversationTurnRecord(scanner operatorRowScanner) (conversationTurnRec
 	return record, nil
 }
 
-func projectPublicConversationTurn(record conversationTurnRecord) (OperatorPublicConversationTurn, error) {
+func projectPublicConversationTurn(record conversationTurnRecord) (operatorread.OperatorPublicConversationTurn, error) {
 	var blocks []runtimellm.TurnBlock
 	raw := bytes.TrimSpace(record.TurnBlocksRaw)
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
 		raw = []byte("[]")
 	}
 	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return OperatorPublicConversationTurn{}, fmt.Errorf("decode public conversation turn blocks: %w", err)
+		return operatorread.OperatorPublicConversationTurn{}, fmt.Errorf("decode public conversation turn blocks: %w", err)
 	}
 	activity, assistantOutput, outcome, err := projectAuthorSafeTurnActivity(blocks, record.ParseOK)
 	if err != nil {
-		return OperatorPublicConversationTurn{}, err
+		return operatorread.OperatorPublicConversationTurn{}, err
 	}
 	if record.Failure != nil {
-		activity = append(activity, OperatorConversationActivity{Kind: "failure"})
+		activity = append(activity, operatorread.OperatorConversationActivity{Kind: "failure"})
 	}
 	if activity == nil {
-		activity = []OperatorConversationActivity{}
+		activity = []operatorread.OperatorConversationActivity{}
 	}
-	turn := OperatorPublicConversationTurn{
+	turn := operatorread.OperatorPublicConversationTurn{
 		TurnID:                 strings.TrimSpace(record.TurnID),
 		ExecutionMode:          strings.TrimSpace(record.ExecutionMode),
 		Ordinal:                record.Ordinal,
@@ -545,40 +547,40 @@ func projectPublicConversationTurn(record conversationTurnRecord) (OperatorPubli
 		RunID:                  strings.TrimSpace(record.RunID),
 	}
 	if turn.ExecutionMode != "live" && turn.ExecutionMode != "mock" {
-		return OperatorPublicConversationTurn{}, fmt.Errorf("invalid persisted conversation execution_mode %q", turn.ExecutionMode)
+		return operatorread.OperatorPublicConversationTurn{}, fmt.Errorf("invalid persisted conversation execution_mode %q", turn.ExecutionMode)
 	}
 	if record.UsageExactness != "" {
 		switch record.UsageExactness {
 		case "exact", "estimated":
 			if !record.InputTokens.Valid || !record.OutputTokens.Valid || record.InputTokens.Int64 < 0 || record.OutputTokens.Int64 < 0 {
-				return OperatorPublicConversationTurn{}, fmt.Errorf("invalid persisted conversation token usage")
+				return operatorread.OperatorPublicConversationTurn{}, fmt.Errorf("invalid persisted conversation token usage")
 			}
-			turn.Tokens = &OperatorConversationTokenUsage{Input: record.InputTokens.Int64, Output: record.OutputTokens.Int64, Exactness: record.UsageExactness}
+			turn.Tokens = &operatorread.OperatorConversationTokenUsage{Input: record.InputTokens.Int64, Output: record.OutputTokens.Int64, Exactness: record.UsageExactness}
 		case "unavailable":
 			if record.InputTokens.Valid || record.OutputTokens.Valid {
-				return OperatorPublicConversationTurn{}, fmt.Errorf("unavailable persisted conversation usage includes token totals")
+				return operatorread.OperatorPublicConversationTurn{}, fmt.Errorf("unavailable persisted conversation usage includes token totals")
 			}
 		default:
-			return OperatorPublicConversationTurn{}, fmt.Errorf("invalid persisted conversation usage exactness %q", record.UsageExactness)
+			return operatorread.OperatorPublicConversationTurn{}, fmt.Errorf("invalid persisted conversation usage exactness %q", record.UsageExactness)
 		}
 	}
 	return turn, nil
 }
 
-func ProjectPublicConversationTurn(record ConversationTurnRecord) (OperatorPublicConversationTurn, error) {
+func ProjectPublicConversationTurn(record ConversationTurnRecord) (operatorread.OperatorPublicConversationTurn, error) {
 	return projectPublicConversationTurn(record)
 }
 
-func projectPublicConversationTurnListItem(record conversationTurnRecord) (OperatorConversationTurnListItem, error) {
+func projectPublicConversationTurnListItem(record conversationTurnRecord) (operatorread.OperatorConversationTurnListItem, error) {
 	turn, err := projectPublicConversationTurn(record)
 	if err != nil {
-		return OperatorConversationTurnListItem{}, err
+		return operatorread.OperatorConversationTurnListItem{}, err
 	}
 	return operatorConversationTurnListItemFromPublic(turn), nil
 }
 
-func operatorConversationTurnListItemFromPublic(turn OperatorPublicConversationTurn) OperatorConversationTurnListItem {
-	counts := OperatorConversationActivityCounts{}
+func operatorConversationTurnListItemFromPublic(turn operatorread.OperatorPublicConversationTurn) operatorread.OperatorConversationTurnListItem {
+	counts := operatorread.OperatorConversationActivityCounts{}
 	for _, item := range turn.Activity {
 		switch item.Kind {
 		case "dispatch":
@@ -595,7 +597,7 @@ func operatorConversationTurnListItemFromPublic(turn OperatorPublicConversationT
 			counts.Failure++
 		}
 	}
-	return OperatorConversationTurnListItem{
+	return operatorread.OperatorConversationTurnListItem{
 		TurnID:           turn.TurnID,
 		ExecutionMode:    turn.ExecutionMode,
 		Ordinal:          turn.Ordinal,
@@ -611,18 +613,18 @@ func operatorConversationTurnListItemFromPublic(turn OperatorPublicConversationT
 	}
 }
 
-func OperatorConversationTurnListItemFromPublic(turn OperatorPublicConversationTurn) OperatorConversationTurnListItem {
+func OperatorConversationTurnListItemFromPublic(turn operatorread.OperatorPublicConversationTurn) operatorread.OperatorConversationTurnListItem {
 	return operatorConversationTurnListItemFromPublic(turn)
 }
 
-func projectAuthorSafeTurnActivity(blocks []runtimellm.TurnBlock, parseOK bool) ([]OperatorConversationActivity, string, string, error) {
+func projectAuthorSafeTurnActivity(blocks []runtimellm.TurnBlock, parseOK bool) ([]operatorread.OperatorConversationActivity, string, string, error) {
 	projected, assistantOutput, outcome, err := runtimeturnactivity.Project(blocks, parseOK)
 	if err != nil {
 		return nil, "", "", err
 	}
-	activity := make([]OperatorConversationActivity, 0, len(projected))
+	activity := make([]operatorread.OperatorConversationActivity, 0, len(projected))
 	for _, item := range projected {
-		activity = append(activity, OperatorConversationActivity{
+		activity = append(activity, operatorread.OperatorConversationActivity{
 			Kind: item.Kind, EventID: item.EventID, EventType: item.EventType,
 			ToolName: item.ToolName, ToolUseID: item.ToolUseID, Text: item.Text,
 			OK: item.OK, BlockOrdinal: item.BlockOrdinal,

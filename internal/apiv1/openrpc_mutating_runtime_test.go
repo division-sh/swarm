@@ -13,6 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/bundlecatalog"
+	"github.com/division-sh/swarm/internal/mailbox"
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -37,7 +42,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 const mutatingRuntimeProbeTestName = "TestOpenRPCMutatingHTTPRuntimeProbes"
@@ -212,7 +216,7 @@ func TestMailboxDecideHTTPUsesTheHumanTaskAnchorRegistry(t *testing.T) {
 	if status != http.StatusOK || resp.Error != nil {
 		t.Fatalf("human-task mailbox.decide = status:%d response:%#v body:%s", status, resp, body)
 	}
-	var found store.OperatorEventFull
+	var found operatorread.OperatorEventFull
 	for _, event := range state.observability.events {
 		if event.EventName == decisionCardEventName {
 			found = event
@@ -578,7 +582,7 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 			s.runForkAvailability.rows[runID] = runForkDataIntegrity(runID, runStartTestBundleHash)
 		}}},
 		{Method: "event.publish", Params: mergeProbeParams(validEvent, map[string]any{"run_id": runID}), Code: RunAlreadyTerminalCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.runs.headers[runID] = store.RunHeader{RunID: runID, Status: "completed"}
+			s.runs.headers[runID] = operatorread.RunHeader{RunID: runID, Status: "completed"}
 		}}},
 
 		{Method: "event.replay", Params: map[string]any{"event_id": "missing", "idempotency_key": "idem-error"}, Code: EventNotFoundCode},
@@ -604,19 +608,19 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 		{Method: "agent.replay", Params: map[string]any{"event_id": "evt-1", "agent_id": "agent-a", "idempotency_key": "idem-error"}, Code: PayloadValidationFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.events.checkErr = runtimebus.ErrPayloadValidation }}},
 
 		{Method: "conversation.fork", Params: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_id": sourceTurnID}, "idempotency_key": "idem-error"}, Code: SessionNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.forks.createErr = store.ErrSessionNotFound
+			s.forks.createErr = operatorread.ErrSessionNotFound
 		}}},
 		{Method: "conversation.fork", Params: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "turn", "turn_id": sourceTurnID}, "idempotency_key": "idem-error"}, Code: TurnNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.forks.createErr = store.ErrTurnNotFound
+			s.forks.createErr = operatorread.ErrTurnNotFound
 		}}},
 		{Method: "conversation.fork", Params: map[string]any{"source_session_id": sourceSessionID, "fork_point": map[string]any{"kind": "event", "event_id": "00000000-0000-0000-0000-000000000901"}, "idempotency_key": "idem-error"}, Code: EventNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.forks.createErr = store.ErrEventNotFound
+			s.forks.createErr = operatorread.ErrEventNotFound
 		}}},
 		{Method: "conversation.fork_chat", Params: map[string]any{"fork_id": forkID, "message": "inspect fork", "idempotency_key": "idem-error"}, Code: ForkNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.forks.prepareErr = store.ErrConversationForkNotFound
+			s.forks.prepareErr = runfork.ErrConversationForkNotFound
 		}}},
 		{Method: "conversation.fork_delete", Params: map[string]any{"fork_id": forkID, "idempotency_key": "idem-error"}, Code: ForkNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.forks.deleteErr = store.ErrConversationForkNotFound
+			s.forks.deleteErr = runfork.ErrConversationForkNotFound
 		}}},
 		{Method: "bundle.register", Params: map[string]any{"content_yaml": testBundleRegistrationEnvelope(), "idempotency_key": "idem-error"}, Code: BundleRegisterConflictCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.bundleCatalog.conflict = true
@@ -669,7 +673,7 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 			s.runControl.errs["continue"] = &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrNotPaused, RunID: runID, CurrentStatus: "running"}
 		}}},
 
-		{Method: "mailbox.acknowledge", Params: map[string]any{"mailbox_id": "missing", "idempotency_key": "idem-error"}, Code: MailboxNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.mailbox.notifyErr = store.ErrMailboxV1NotFound }}},
+		{Method: "mailbox.acknowledge", Params: map[string]any{"mailbox_id": "missing", "idempotency_key": "idem-error"}, Code: MailboxNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.mailbox.notifyErr = mailbox.ErrV1NotFound }}},
 		{Method: "mailbox.begin_input", Params: map[string]any{"card_id": "card-1", "verdict": "reject", "observed_content_hash": "content-1", "idempotency_key": "idem-error"}, Code: MailboxNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrNotFound }}},
 		{Method: "mailbox.begin_input", Params: map[string]any{"card_id": "card-1", "verdict": "reject", "observed_content_hash": "stale", "idempotency_key": "idem-error"}, Code: "MAILBOX_STALE_CARD"},
 		{Method: "mailbox.begin_input", Params: map[string]any{"card_id": "card-1", "verdict": "missing", "observed_content_hash": "content-1", "idempotency_key": "idem-error"}, Code: "MAILBOX_INVALID_VERDICT", Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.decisionCards.err = decisioncard.ErrInvalidVerdict }}},
@@ -725,7 +729,7 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 			s.runtimeIngress.errs["runtime.resume"] = runtimeingress.ErrNotPaused
 		}}},
 		{Method: "runtime.nuke", Params: map[string]any{"dry_run": false, "idempotency_key": "idem-error"}, Code: RuntimeNukeInProgressCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.nuke.planErr = destructivereset.ErrOperationInProgress }}},
-		{Method: "bundle.delete", Params: map[string]any{"bundle_hash": runStartTestBundleHash, "force": true, "idempotency_key": "idem-error"}, Code: BundleNotFoundCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.bundleDelete.err = store.ErrBundleNotFound }}},
+		{Method: "bundle.delete", Params: map[string]any{"bundle_hash": runStartTestBundleHash, "force": true, "idempotency_key": "idem-error"}, Code: BundleNotFoundCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.bundleDelete.err = bundlecatalog.ErrNotFound }}},
 		{Method: "bundle.delete", Params: map[string]any{"bundle_hash": runStartTestBundleHash, "force": true, "idempotency_key": "idem-error"}, Code: BundleDeleteInProgressCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.bundleDelete.err = bundledelete.ErrOperationInProgress }}},
 		{Method: "bundle.delete", Params: map[string]any{"bundle_hash": runStartTestBundleHash, "idempotency_key": "idem-error"}, Code: BundleHasActiveRunsCode, WantEffects: 1, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.bundleDelete.err = &bundledelete.ActiveRunsRemainError{
@@ -821,7 +825,7 @@ func newMutatingRuntimeProbeHandler(t *testing.T, methodName string, modifiers .
 	for _, modifier := range modifiers {
 		modifier(state)
 	}
-	allHandlers := OperatorReadHandlers(state.options(t))
+	allHandlers := testOperatorHandlers(state.options(t))
 	calls := map[string]int{}
 	handlers := map[string]MethodHandler{}
 	for _, name := range approvedMutatingHTTPRuntimeMethods() {
@@ -872,14 +876,14 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 		now:         now,
 		idempotency: newMutatingProbeIdempotencyStore(),
 		runs: &fakeRunReadStore{
-			headers: map[string]store.RunHeader{
+			headers: map[string]operatorread.RunHeader{
 				runID: {
 					RunID: runID, Status: "running",
 					Origin: mustEventRunOrigin(t, "evt-1", "scan.requested"), StartedAt: now,
 				},
 			},
 		},
-		observability: &fakeObservabilityReadStore{events: map[string]store.OperatorEventFull{}},
+		observability: &fakeObservabilityReadStore{events: map[string]operatorread.OperatorEventFull{}},
 		runControl:    &mutatingProbeRunControl{errs: map[string]error{}},
 		agentControl:  &mutatingProbeAgentControl{errs: map[string]error{}, results: map[string]mutatingProbeDirectiveResult{}},
 		runtimeIngress: &mutatingProbeRuntimeIngress{
@@ -911,14 +915,14 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 	state.mailbox = newMutatingProbeMailboxStore(state)
 	state.decisionCards = newMutatingProbeDecisionCardStore(state)
 	state.workflowStore = &mutatingProbeDecisionWorkflowStore{state: state, cards: state.decisionCards, events: state.events}
-	state.bundleCatalog = &mutatingProbeBundleCatalog{state: state, details: map[string]store.BundleCatalogDetail{}}
+	state.bundleCatalog = &mutatingProbeBundleCatalog{state: state, details: map[string]bundlecatalog.Detail{}}
 	state.forks = &fakeConversationForkLifecycleStore{
-		createResult: store.OperatorConversationForkSession{
+		createResult: runfork.OperatorConversationForkSession{
 			ForkID:          "00000000-0000-0000-0000-000000000301",
 			SourceSessionID: "00000000-0000-0000-0000-000000000201",
 			SourceRunID:     runID,
 			SourceAgentID:   "agent-a",
-			ForkPoint: store.ConversationForkPointDescriptor{
+			ForkPoint: runfork.ConversationForkPointDescriptor{
 				Kind:       "turn",
 				TurnIndex:  1,
 				TurnID:     "00000000-0000-0000-0000-000000000401",
@@ -926,17 +930,17 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 			},
 			CreatedBy: "token",
 			CreatedAt: now,
-			ExpiresAt: now.Add(store.ConversationForkLifecycleTTL),
+			ExpiresAt: now.Add(runfork.ConversationForkLifecycleTTL),
 			State:     "active",
-			Turns:     []store.OperatorConversationTurn{},
+			Turns:     []operatorread.OperatorConversationTurn{},
 		},
-		prepareResult: store.ConversationForkChatPrepared{
-			Fork: store.OperatorConversationForkSession{
+		prepareResult: runfork.ConversationForkChatPrepared{
+			Fork: runfork.OperatorConversationForkSession{
 				ForkID:          "00000000-0000-0000-0000-000000000301",
 				SourceSessionID: "00000000-0000-0000-0000-000000000201",
 				SourceRunID:     runID,
 				SourceAgentID:   "agent-a",
-				ForkPoint: store.ConversationForkPointDescriptor{
+				ForkPoint: runfork.ConversationForkPointDescriptor{
 					Kind:       "turn",
 					TurnIndex:  1,
 					TurnID:     "00000000-0000-0000-0000-000000000401",
@@ -944,27 +948,27 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 				},
 				CreatedBy: "token",
 				CreatedAt: now,
-				ExpiresAt: now.Add(store.ConversationForkLifecycleTTL),
+				ExpiresAt: now.Add(runfork.ConversationForkLifecycleTTL),
 				State:     "active",
-				Turns:     []store.OperatorConversationTurn{},
+				Turns:     []operatorread.OperatorConversationTurn{},
 			},
-			Snapshot: store.ConversationForkSnapshot{
+			Snapshot: runfork.ConversationForkSnapshot{
 				ForkID:          "00000000-0000-0000-0000-000000000301",
 				SourceSessionID: "00000000-0000-0000-0000-000000000201",
 				SourceRunID:     runID,
 				SourceAgentID:   "agent-a",
-				SourceTurn: store.ConversationForkSourceTurn{
+				SourceTurn: runfork.ConversationForkSourceTurn{
 					TurnID:     "00000000-0000-0000-0000-000000000401",
 					TurnIndex:  1,
 					SelectedAt: now,
 					CreatedAt:  now,
 				},
-				EntitySnapshot: []store.ConversationForkEntitySnapshot{},
-				SnapshotOwner:  store.ConversationForkChatSnapshotOwner,
+				EntitySnapshot: []runfork.ConversationForkEntitySnapshot{},
+				SnapshotOwner:  runfork.ConversationForkChatSnapshotOwner,
 				CreatedAt:      now,
 			},
-			SandboxPolicy: store.ConversationForkSandboxPolicy{
-				Owner:              store.ConversationForkChatSandboxOwner,
+			SandboxPolicy: runfork.ConversationForkSandboxPolicy{
+				Owner:              runfork.ConversationForkChatSandboxOwner,
 				ReadPolicy:         "fork_snapshot_only",
 				WritePolicy:        "stub_record_only_no_live_mutation",
 				SideEffectingTools: []string{"save_entity_field"},
@@ -972,9 +976,9 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 			},
 			AvailableTools: []string{"fork_snapshot_read_entities", "save_entity_field"},
 		},
-		recordResult: store.ConversationForkChatResult{
+		recordResult: runfork.ConversationForkChatResult{
 			ForkID: "00000000-0000-0000-0000-000000000301",
-			Turn: store.OperatorConversationTurn{
+			Turn: operatorread.OperatorConversationTurn{
 				TurnIndex:       1,
 				TurnID:          "00000000-0000-0000-0000-000000000402",
 				ExecutionMode:   "live",
@@ -982,43 +986,43 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 				ResponsePayload: []byte(`{"message":"forkchat sandbox response: inspect fork"}`),
 				ParseOK:         true,
 			},
-			Snapshot: store.ConversationForkSnapshot{
+			Snapshot: runfork.ConversationForkSnapshot{
 				ForkID:          "00000000-0000-0000-0000-000000000301",
 				SourceSessionID: "00000000-0000-0000-0000-000000000201",
 				SourceRunID:     runID,
 				SourceAgentID:   "agent-a",
-				SourceTurn: store.ConversationForkSourceTurn{
+				SourceTurn: runfork.ConversationForkSourceTurn{
 					TurnID:     "00000000-0000-0000-0000-000000000401",
 					TurnIndex:  1,
 					SelectedAt: now,
 					CreatedAt:  now,
 				},
-				EntitySnapshot: []store.ConversationForkEntitySnapshot{},
-				SnapshotOwner:  store.ConversationForkChatSnapshotOwner,
+				EntitySnapshot: []runfork.ConversationForkEntitySnapshot{},
+				SnapshotOwner:  runfork.ConversationForkChatSnapshotOwner,
 				CreatedAt:      now,
 			},
-			SandboxPolicy: store.ConversationForkSandboxPolicy{
-				Owner:              store.ConversationForkChatSandboxOwner,
+			SandboxPolicy: runfork.ConversationForkSandboxPolicy{
+				Owner:              runfork.ConversationForkChatSandboxOwner,
 				ReadPolicy:         "fork_snapshot_only",
 				WritePolicy:        "stub_record_only_no_live_mutation",
 				SideEffectingTools: []string{"save_entity_field"},
 				StubbedTools:       []string{"save_entity_field"},
 			},
 		},
-		deleteResult: store.ConversationForkDeleteResult{ForkID: "00000000-0000-0000-0000-000000000301", Deleted: true},
+		deleteResult: runfork.ConversationForkDeleteResult{ForkID: "00000000-0000-0000-0000-000000000301", Deleted: true},
 		recordEffect: state.recordEffect,
 	}
 	return state
 }
 
-func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
+func (s *mutatingRuntimeProbeState) options(t *testing.T) testOperatorCapabilities {
 	t.Helper()
 	bundle := testSetupValidationBundle(t)
 	if s.method == "run.start" {
 		bundle = runStartTestBundle("scan.requested")
 	}
 	source := semanticview.Wrap(bundle)
-	return OperatorReadOptions{
+	return testOperatorCapabilities{
 		RepoRoot:                  t.TempDir(),
 		PlatformSpecPath:          testBundleRegistrationPlatformSpec(t),
 		Now:                       func() time.Time { return s.now },
@@ -1030,7 +1034,7 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
 		AgentControl:              s.agentControl,
 		ConversationForks:         s.forks,
 		ConversationForkLifecycle: s.forks,
-		ForkChatExecutor: &fakeForkChatExecutor{result: store.ConversationForkChatExecution{
+		ForkChatExecutor: &fakeForkChatExecutor{result: runfork.ConversationForkChatExecution{
 			AssistantMessage: "forkchat sandbox response: inspect fork",
 		}},
 		Mailbox:             s.mailbox,
@@ -1046,9 +1050,6 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
 		StandingServices:    s.standing,
 		RuntimeIngress:      s.runtimeIngress,
 		ResetCoordinator:    s.nuke,
-		ResetQuiescer:       recordingRuntimeNukeQuiescer{s.nuke},
-		ResetCleaner:        recordingRuntimeNukeCleaner{s.nuke},
-		ResetContainers:     recordingRuntimeNukeContainerStopper{s.nuke},
 		BundleDelete:        s.bundleDelete,
 		TestSetup:           s.testSetup,
 		Source:              source,
@@ -1163,22 +1164,22 @@ func (e *recordingBundleDeleteExecutor) Execute(_ context.Context, req bundledel
 
 type mutatingProbeIdempotencyStore struct {
 	calls   int
-	records map[string]store.APIIdempotencyCompletion
+	records map[string]apiidempotency.Completion
 	hashes  map[string]string
 }
 
 func newMutatingProbeIdempotencyStore() *mutatingProbeIdempotencyStore {
 	return &mutatingProbeIdempotencyStore{
-		records: map[string]store.APIIdempotencyCompletion{},
+		records: map[string]apiidempotency.Completion{},
 		hashes:  map[string]string{},
 	}
 }
 
 func (s *mutatingProbeIdempotencyStore) WithAPIIdempotency(
 	ctx context.Context,
-	req store.APIIdempotencyRequest,
-	execute func(context.Context) (store.APIIdempotencyCompletion, error),
-) (store.APIIdempotencyCompletion, bool, error) {
+	req apiidempotency.Request,
+	execute func(context.Context) (apiidempotency.Completion, error),
+) (apiidempotency.Completion, bool, error) {
 	s.calls++
 	if strings.TrimSpace(req.IdempotencyKey) == "" {
 		completion, err := execute(ctx)
@@ -1187,7 +1188,7 @@ func (s *mutatingProbeIdempotencyStore) WithAPIIdempotency(
 	key := strings.Join([]string{req.Method, req.ActorTokenID, strings.TrimSpace(req.IdempotencyKey)}, "|")
 	if completion, ok := s.records[key]; ok {
 		if s.hashes[key] != req.RequestHash {
-			return store.APIIdempotencyCompletion{}, false, &store.APIIdempotencyConflictError{
+			return apiidempotency.Completion{}, false, &apiidempotency.ConflictError{
 				OriginalRequestHash:    s.hashes[key],
 				ConflictingRequestHash: req.RequestHash,
 				Method:                 req.Method,
@@ -1200,7 +1201,7 @@ func (s *mutatingProbeIdempotencyStore) WithAPIIdempotency(
 	}
 	completion, err := execute(ctx)
 	if err != nil {
-		return store.APIIdempotencyCompletion{}, false, err
+		return apiidempotency.Completion{}, false, err
 	}
 	copied := completion
 	copied.Response = append(json.RawMessage(nil), completion.Response...)
@@ -1211,37 +1212,37 @@ func (s *mutatingProbeIdempotencyStore) WithAPIIdempotency(
 
 type mutatingProbeBundleCatalog struct {
 	state    *mutatingRuntimeProbeState
-	details  map[string]store.BundleCatalogDetail
+	details  map[string]bundlecatalog.Detail
 	conflict bool
 }
 
-func (s *mutatingProbeBundleCatalog) ListBundleCatalog(context.Context, store.BundleCatalogListOptions) (store.BundleCatalogListResult, error) {
-	return store.BundleCatalogListResult{Bundles: []store.BundleCatalogSummary{}}, nil
+func (s *mutatingProbeBundleCatalog) ListBundleCatalog(context.Context, bundlecatalog.ListOptions) (bundlecatalog.ListResult, error) {
+	return bundlecatalog.ListResult{Bundles: []bundlecatalog.Summary{}}, nil
 }
 
-func (s *mutatingProbeBundleCatalog) LoadBundleCatalog(_ context.Context, bundleHash string) (store.BundleCatalogDetail, error) {
+func (s *mutatingProbeBundleCatalog) LoadBundleCatalog(_ context.Context, bundleHash string) (bundlecatalog.Detail, error) {
 	detail, ok := s.details[strings.TrimSpace(bundleHash)]
 	if !ok {
-		return store.BundleCatalogDetail{}, store.ErrBundleNotFound
+		return bundlecatalog.Detail{}, bundlecatalog.ErrNotFound
 	}
 	return detail, nil
 }
 
-func (s *mutatingProbeBundleCatalog) ListBundleCatalogAgents(context.Context, string) (store.BundleCatalogAgentsResult, error) {
-	return store.BundleCatalogAgentsResult{Agents: []store.BundleCatalogAgentDefinition{}}, nil
+func (s *mutatingProbeBundleCatalog) ListBundleCatalogAgents(context.Context, string) (bundlecatalog.AgentsResult, error) {
+	return bundlecatalog.AgentsResult{Agents: []bundlecatalog.AgentDefinition{}}, nil
 }
 
-func (s *mutatingProbeBundleCatalog) UpsertBundleCatalog(_ context.Context, req store.BundleCatalogUpsert) (store.BundleCatalogUpsertResult, error) {
+func (s *mutatingProbeBundleCatalog) UpsertBundleCatalog(_ context.Context, req bundlecatalog.Upsert) (bundlecatalog.UpsertResult, error) {
 	if s.conflict {
-		return store.BundleCatalogUpsertResult{}, &store.BundleCatalogConflictError{BundleHash: req.BundleHash}
+		return bundlecatalog.UpsertResult{}, &bundlecatalog.ConflictError{BundleHash: req.BundleHash}
 	}
 	if s.details == nil {
-		s.details = map[string]store.BundleCatalogDetail{}
+		s.details = map[string]bundlecatalog.Detail{}
 	}
 	_, exists := s.details[req.BundleHash]
 	if !exists {
 		s.state.recordEffect()
-		s.details[req.BundleHash] = store.BundleCatalogDetail{
+		s.details[req.BundleHash] = bundlecatalog.Detail{
 			BundleHash:    req.BundleHash,
 			ContentYAML:   req.ContentYAML,
 			ParsedJSON:    req.ParsedJSON,
@@ -1252,7 +1253,7 @@ func (s *mutatingProbeBundleCatalog) UpsertBundleCatalog(_ context.Context, req 
 			IngestedAt:    s.state.now,
 		}
 	}
-	return store.BundleCatalogUpsertResult{Detail: s.details[req.BundleHash], Registered: !exists}, nil
+	return bundlecatalog.UpsertResult{Detail: s.details[req.BundleHash], Registered: !exists}, nil
 }
 
 var _ BundleCatalogReadStore = (*mutatingProbeBundleCatalog)(nil)
@@ -1281,6 +1282,13 @@ func (p *mutatingProbeEventPublisher) PublishAcknowledged(ctx context.Context, e
 	return p.Publish(ctx, evt)
 }
 
+func (p *mutatingProbeEventPublisher) CheckPublishRecipientPlan(context.Context, events.Event) (runtimebus.PublishRecipientPlan, error) {
+	if p.checkErr != nil {
+		return runtimebus.PublishRecipientPlan{}, p.checkErr
+	}
+	return runtimebus.PublishRecipientPlan{PersistedRecipients: []string{"probe-recipient"}}, nil
+}
+
 func (p *mutatingProbeEventPublisher) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
 	if p.missingBundleSourceFact {
 		return ctx, nil
@@ -1297,14 +1305,14 @@ func (p *mutatingProbeEventPublisher) PublishDirectRoutes(_ context.Context, evt
 		return p.directErr
 	}
 	p.state.recordEffect()
-	deliveries := make([]store.OperatorEventDelivery, 0, len(routes))
+	deliveries := make([]operatorread.OperatorEventDelivery, 0, len(routes))
 	for i, route := range routes {
 		recipient := route.Recipient.ID()
 		identity, err := route.Identity()
 		if err != nil {
 			return err
 		}
-		deliveries = append(deliveries, store.OperatorEventDelivery{
+		deliveries = append(deliveries, operatorread.OperatorEventDelivery{
 			DeliveryID:     "delivery-" + recipient + "-" + events.EncodeDeliveryRouteIdentity(identity),
 			SubscriberType: eventReplaySubscriberTypeAgent,
 			SubscriberID:   recipient,
@@ -1347,14 +1355,14 @@ type mutatingProbeTestSetupStore struct {
 	err   error
 }
 
-func (s *mutatingProbeTestSetupStore) SetupScenarioEntities(_ context.Context, req store.ScenarioSetupRequest) (store.ScenarioSetupResult, error) {
+func (s *mutatingProbeTestSetupStore) SetupScenarioEntities(_ context.Context, req runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error) {
 	if s.err != nil {
-		return store.ScenarioSetupResult{}, s.err
+		return runtimepipeline.ScenarioSetupResult{}, s.err
 	}
 	s.state.recordEffect()
-	entities := make([]store.ScenarioSetupEntityResult, 0, len(req.Entities))
+	entities := make([]runtimepipeline.ScenarioSetupEntityResult, 0, len(req.Entities))
 	for _, entity := range req.Entities {
-		entities = append(entities, store.ScenarioSetupEntityResult{
+		entities = append(entities, runtimepipeline.ScenarioSetupEntityResult{
 			Alias:        strings.TrimSpace(entity.Alias),
 			EntityID:     strings.TrimSpace(entity.EntityID),
 			FlowInstance: strings.Trim(strings.TrimSpace(entity.FlowInstance), "/"),
@@ -1362,7 +1370,7 @@ func (s *mutatingProbeTestSetupStore) SetupScenarioEntities(_ context.Context, r
 			CurrentState: strings.TrimSpace(entity.CurrentState),
 		})
 	}
-	return store.ScenarioSetupResult{
+	return runtimepipeline.ScenarioSetupResult{
 		RunID:    strings.TrimSpace(req.RunID),
 		Entities: entities,
 	}, nil
@@ -1391,8 +1399,8 @@ func (e *mutatingProbeRunForkExecutor) ExecuteRunFork(_ context.Context, req Run
 	}, nil
 }
 
-func (s *mutatingRuntimeProbeState) storeEvent(evt events.Event, deliveries []store.OperatorEventDelivery) {
-	view, err := store.NewOperatorEventFull(evt)
+func (s *mutatingRuntimeProbeState) storeEvent(evt events.Event, deliveries []operatorread.OperatorEventDelivery) {
+	view, err := operatorread.NewOperatorEventFull(evt)
 	if err != nil {
 		panic(err)
 	}
@@ -1400,16 +1408,16 @@ func (s *mutatingRuntimeProbeState) storeEvent(evt events.Event, deliveries []st
 	s.observability.events[evt.ID()] = view
 }
 
-func mutatingProbeOriginalEvent(t testing.TB, eventID string, subscribers []string, status runtimedelivery.Status) store.OperatorEventFull {
+func mutatingProbeOriginalEvent(t testing.TB, eventID string, subscribers []string, status runtimedelivery.Status) operatorread.OperatorEventFull {
 	t.Helper()
-	deliveries := make([]store.OperatorEventDelivery, 0, len(subscribers))
+	deliveries := make([]operatorread.OperatorEventDelivery, 0, len(subscribers))
 	for _, subscriber := range subscribers {
 		identity := agentidentitytest.Declared(t, subscriber, "test-bundle", "research", "inst-1", "research/inst-1")
 		route := events.DeliveryRoute{
 			Recipient:     events.MustAgentDeliveryRecipient(subscriber),
 			AgentIdentity: identity,
 		}
-		deliveries = append(deliveries, store.OperatorEventDelivery{
+		deliveries = append(deliveries, operatorread.OperatorEventDelivery{
 			DeliveryID:     "original-" + subscriber,
 			SubscriberType: eventReplaySubscriberTypeAgent,
 			SubscriberID:   subscriber,
@@ -1432,7 +1440,7 @@ func mutatingProbeOriginalEvent(t testing.TB, eventID string, subscribers []stri
 		events.EventEnvelope{EntityID: eventtest.UUID("entity-1")},
 		time.Unix(1700000000, 0).UTC(),
 	)
-	view, err := store.NewOperatorEventFull(event)
+	view, err := operatorread.NewOperatorEventFull(event)
 	if err != nil {
 		panic(err)
 	}
@@ -1569,14 +1577,14 @@ func (c *mutatingProbeRuntimeIngress) Resume(_ context.Context, _ runtimeingress
 
 type mutatingProbeMailboxStore struct {
 	state     *mutatingRuntimeProbeState
-	item      store.MailboxV1Item
+	item      mailbox.V1Item
 	notifyErr error
 }
 
 func newMutatingProbeMailboxStore(state *mutatingRuntimeProbeState) *mutatingProbeMailboxStore {
 	return &mutatingProbeMailboxStore{
 		state: state,
-		item: store.MailboxV1Item{
+		item: mailbox.V1Item{
 			MailboxID:     "mailbox-1",
 			Type:          "review_request",
 			Status:        "pending",
@@ -1589,18 +1597,18 @@ func newMutatingProbeMailboxStore(state *mutatingRuntimeProbeState) *mutatingPro
 	}
 }
 
-func (s *mutatingProbeMailboxStore) ListV1MailboxItems(_ context.Context, opts store.MailboxV1ListOptions) ([]store.MailboxV1Item, string, error) {
+func (s *mutatingProbeMailboxStore) ListV1MailboxItems(_ context.Context, opts mailbox.V1ListOptions) ([]mailbox.V1Item, string, error) {
 	if strings.TrimSpace(opts.Cursor) != "" {
-		return []store.MailboxV1Item{}, "", nil
+		return []mailbox.V1Item{}, "", nil
 	}
-	return []store.MailboxV1Item{s.item}, "", nil
+	return []mailbox.V1Item{s.item}, "", nil
 }
 
-func (s *mutatingProbeMailboxStore) GetV1MailboxItem(_ context.Context, mailboxID string) (store.MailboxV1ItemDetail, error) {
+func (s *mutatingProbeMailboxStore) GetV1MailboxItem(_ context.Context, mailboxID string) (mailbox.V1ItemDetail, error) {
 	if strings.TrimSpace(mailboxID) != s.item.MailboxID {
-		return store.MailboxV1ItemDetail{}, store.ErrMailboxV1NotFound
+		return mailbox.V1ItemDetail{}, mailbox.ErrV1NotFound
 	}
-	return store.MailboxV1ItemDetail{Item: s.item, Payload: s.item.Payload}, nil
+	return mailbox.V1ItemDetail{Item: s.item, Payload: s.item.Payload}, nil
 }
 
 func (s *mutatingProbeMailboxStore) MarkMailboxItemNotified(_ context.Context, mailboxID string) error {
@@ -1608,7 +1616,7 @@ func (s *mutatingProbeMailboxStore) MarkMailboxItemNotified(_ context.Context, m
 		return s.notifyErr
 	}
 	if strings.TrimSpace(mailboxID) != s.item.MailboxID {
-		return store.ErrMailboxV1NotFound
+		return mailbox.ErrV1NotFound
 	}
 	s.state.recordEffect()
 	return nil

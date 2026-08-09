@@ -7,10 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 const testSetupEntitiesMethod = "test.setup_entities"
@@ -28,7 +29,7 @@ type testSetupEntityResult struct {
 	CurrentState string `json:"current_state"`
 }
 
-func OperatorTestSetupHandlers(opts OperatorReadOptions) map[string]MethodHandler {
+func OperatorTestSetupHandlers(opts TestSetupHandlerOptions) map[string]MethodHandler {
 	if !testSetupConfigured(opts) {
 		return nil
 	}
@@ -43,54 +44,60 @@ func OperatorTestSetupHandlers(opts OperatorReadOptions) map[string]MethodHandle
 	}
 }
 
-func testSetupConfigured(opts OperatorReadOptions) bool {
-	return opts.TestSetup != nil && opts.Idempotency != nil && opts.RunBundleContext != nil
+func testSetupConfigured(opts TestSetupHandlerOptions) bool {
+	if opts.Setup == nil || opts.Idempotency == nil || opts.RunBundleContext == nil {
+		return false
+	}
+	return runtimeContextManager(opts.RuntimeContexts) != nil || (opts.Source != nil && opts.BundleSource != nil)
 }
 
-func executeTestSetupEntities(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+func executeTestSetupEntities(ctx context.Context, req Request, opts TestSetupHandlerOptions, now time.Time) (any, error) {
 	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
 	if err != nil {
 		return nil, err
 	}
-	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
+	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
 		TTL:            runStartIDempotencyTTL,
 		Now:            now,
-	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
+	}, func(ctx context.Context) (apiidempotency.Completion, error) {
 		request, identity, err := testSetupEntitiesRequestFromParams(req.Params, now)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
 		if strings.TrimSpace(identity.BundleHash) == "" {
-			return store.APIIdempotencyCompletion{}, NewApplicationError(UnsupportedBundleHashCode, false, map[string]any{
+			return apiidempotency.Completion{}, NewApplicationError(UnsupportedBundleHashCode, false, map[string]any{
 				"reason": "test.setup_entities requires canonical bundle_hash",
 			})
 		}
 		params := eventPublicationParams{RunID: request.RunID, RunIDProvided: true}
-		var selectedOpts OperatorReadOptions
-		ctx, selectedOpts, _, err = resolveEventPublicationBundleScope(ctx, opts, params, identity, eventPublicationConfig{})
+		scope := EventPublicationOptions{
+			RunBundleContext: opts.RunBundleContext,
+			RuntimeContexts:  opts.RuntimeContexts,
+			BundleSource:     opts.BundleSource,
+			Source:           opts.Source,
+		}
+		var selectedScope EventPublicationOptions
+		ctx, selectedScope, _, err = resolveEventPublicationBundleScope(ctx, scope, params, identity, eventPublicationConfig{})
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
-		if selectedOpts.TestSetup == nil {
-			return store.APIIdempotencyCompletion{}, fmt.Errorf("test setup store is required")
+		if err := validateTestSetupEntitiesAgainstBundle(selectedScope.Source, request); err != nil {
+			return apiidempotency.Completion{}, err
 		}
-		if err := validateTestSetupEntitiesAgainstBundle(selectedOpts.Source, request); err != nil {
-			return store.APIIdempotencyCompletion{}, err
-		}
-		result, err := selectedOpts.TestSetup.SetupScenarioEntities(ctx, request)
+		result, err := opts.Setup.SetupScenarioEntities(ctx, request)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
 		apiResult := testSetupEntitiesAPIResult(result.Normalized())
 		response, err := json.Marshal(apiResult)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
-		return store.APIIdempotencyCompletion{
+		return apiidempotency.Completion{
 			ResourceID: strings.TrimSpace(result.RunID),
 			Response:   response,
 		}, nil
@@ -108,79 +115,79 @@ func executeTestSetupEntities(ctx context.Context, req Request, opts OperatorRea
 	return result, nil
 }
 
-func testSetupEntitiesRequestFromParams(params map[string]any, now time.Time) (store.ScenarioSetupRequest, bundleIdentityParam, error) {
+func testSetupEntitiesRequestFromParams(params map[string]any, now time.Time) (runtimepipeline.ScenarioSetupRequest, bundleIdentityParam, error) {
 	identity, err := bundleIdentityInputParam(params)
 	if err != nil {
-		return store.ScenarioSetupRequest{}, bundleIdentityParam{}, err
+		return runtimepipeline.ScenarioSetupRequest{}, bundleIdentityParam{}, err
 	}
 	runID, err := requiredUUIDParam(params, "run_id")
 	if err != nil {
-		return store.ScenarioSetupRequest{}, bundleIdentityParam{}, err
+		return runtimepipeline.ScenarioSetupRequest{}, bundleIdentityParam{}, err
 	}
 	rawEntities, ok := params["entities"]
 	if !ok || isEmptyParam(rawEntities) {
-		return store.ScenarioSetupRequest{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "entities", "reason": "is required"})
+		return runtimepipeline.ScenarioSetupRequest{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "entities", "reason": "is required"})
 	}
 	list, ok := rawEntities.([]any)
 	if !ok || len(list) == 0 {
-		return store.ScenarioSetupRequest{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "entities", "reason": "must be a non-empty array"})
+		return runtimepipeline.ScenarioSetupRequest{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "entities", "reason": "must be a non-empty array"})
 	}
-	out := store.ScenarioSetupRequest{
+	out := runtimepipeline.ScenarioSetupRequest{
 		RunID:     runID,
 		CreatedAt: now.UTC(),
-		Entities:  make([]store.ScenarioSetupEntityRequest, 0, len(list)),
+		Entities:  make([]runtimepipeline.ScenarioSetupEntityRequest, 0, len(list)),
 	}
 	for i, raw := range list {
 		entity, err := testSetupEntityRequestFromParam(raw, i)
 		if err != nil {
-			return store.ScenarioSetupRequest{}, bundleIdentityParam{}, err
+			return runtimepipeline.ScenarioSetupRequest{}, bundleIdentityParam{}, err
 		}
 		out.Entities = append(out.Entities, entity)
 	}
 	return out, identity, nil
 }
 
-func testSetupEntityRequestFromParam(raw any, i int) (store.ScenarioSetupEntityRequest, error) {
+func testSetupEntityRequestFromParam(raw any, i int) (runtimepipeline.ScenarioSetupEntityRequest, error) {
 	entity, ok := raw.(map[string]any)
 	if !ok {
-		return store.ScenarioSetupEntityRequest{}, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("entities[%d]", i), "reason": "must be an object"})
+		return runtimepipeline.ScenarioSetupEntityRequest{}, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("entities[%d]", i), "reason": "must be an object"})
 	}
 	for key := range entity {
 		switch key {
 		case "alias", "entity_id", "flow_instance", "entity_type", "current_state", "fields", "gates":
 		default:
-			return store.ScenarioSetupEntityRequest{}, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("entities[%d].%s", i, key), "reason": "unknown field"})
+			return runtimepipeline.ScenarioSetupEntityRequest{}, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("entities[%d].%s", i, key), "reason": "unknown field"})
 		}
 	}
 	alias, err := requiredStringParam(entity, "alias")
 	if err != nil {
-		return store.ScenarioSetupEntityRequest{}, err
+		return runtimepipeline.ScenarioSetupEntityRequest{}, err
 	}
 	entityID, err := requiredUUIDParam(entity, "entity_id")
 	if err != nil {
-		return store.ScenarioSetupEntityRequest{}, err
+		return runtimepipeline.ScenarioSetupEntityRequest{}, err
 	}
 	flowInstance, _, err := optionalStringParam(entity, "flow_instance")
 	if err != nil {
-		return store.ScenarioSetupEntityRequest{}, err
+		return runtimepipeline.ScenarioSetupEntityRequest{}, err
 	}
 	entityType, err := requiredStringParam(entity, "entity_type")
 	if err != nil {
-		return store.ScenarioSetupEntityRequest{}, err
+		return runtimepipeline.ScenarioSetupEntityRequest{}, err
 	}
 	currentState, err := requiredStringParam(entity, "current_state")
 	if err != nil {
-		return store.ScenarioSetupEntityRequest{}, err
+		return runtimepipeline.ScenarioSetupEntityRequest{}, err
 	}
 	fields, err := testSetupFieldsParam(entity, i)
 	if err != nil {
-		return store.ScenarioSetupEntityRequest{}, err
+		return runtimepipeline.ScenarioSetupEntityRequest{}, err
 	}
 	gates, err := testSetupGatesParam(entity, i)
 	if err != nil {
-		return store.ScenarioSetupEntityRequest{}, err
+		return runtimepipeline.ScenarioSetupEntityRequest{}, err
 	}
-	return store.ScenarioSetupEntityRequest{
+	return runtimepipeline.ScenarioSetupEntityRequest{
 		Alias:        alias,
 		EntityID:     entityID,
 		FlowInstance: strings.Trim(flowInstance, "/"),
@@ -223,7 +230,7 @@ func testSetupGatesParam(entity map[string]any, i int) (map[string]bool, error) 
 	return out, nil
 }
 
-func testSetupEntitiesAPIResult(result store.ScenarioSetupResult) testSetupEntitiesResult {
+func testSetupEntitiesAPIResult(result runtimepipeline.ScenarioSetupResult) testSetupEntitiesResult {
 	out := testSetupEntitiesResult{
 		RunID:    strings.TrimSpace(result.RunID),
 		Entities: make([]testSetupEntityResult, 0, len(result.Entities)),
@@ -240,7 +247,7 @@ func testSetupEntitiesAPIResult(result store.ScenarioSetupResult) testSetupEntit
 	return out
 }
 
-func validateTestSetupEntitiesAgainstBundle(source semanticview.Source, request store.ScenarioSetupRequest) error {
+func validateTestSetupEntitiesAgainstBundle(source semanticview.Source, request runtimepipeline.ScenarioSetupRequest) error {
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
 		return NewInvalidParamsError(map[string]any{
@@ -256,7 +263,7 @@ func validateTestSetupEntitiesAgainstBundle(source semanticview.Source, request 
 	return nil
 }
 
-func validateTestSetupEntityAgainstBundle(bundle *runtimecontracts.WorkflowContractBundle, entity store.ScenarioSetupEntityRequest, i int) error {
+func validateTestSetupEntityAgainstBundle(bundle *runtimecontracts.WorkflowContractBundle, entity runtimepipeline.ScenarioSetupEntityRequest, i int) error {
 	flowID := strings.Trim(strings.TrimSpace(entity.FlowInstance), "/")
 	fieldPrefix := fmt.Sprintf("entities[%d]", i)
 	primary, err := bundle.ResolveTestSetupPrimaryEntity(flowID, entity.EntityType)

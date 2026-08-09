@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
@@ -3161,16 +3163,16 @@ func waitRunStatusEventSettlement(t *testing.T, db *sql.DB, runID string, wantEv
 }
 
 func TestProjectRunOperationalStatus_UsesDeliveryLifecycleWhenRunIsOperationallyStalled(t *testing.T) {
-	report := store.RunDebugReport{
+	report := operatorread.RunDebugReport{
 		RunTableStatus: "running",
 		LastEventAt:    time.Unix(1700000000, 0).UTC(),
-		Deliveries: []store.RunDebugDeliveryCount{
+		Deliveries: []operatorread.RunDebugDeliveryCount{
 			{SubscriberID: "agent-1", Status: "delivered", Count: 2},
 			{SubscriberID: "agent-2", Status: "failed", Count: 1},
 		},
 	}
 
-	got := store.ProjectRunOperationalStatus(report)
+	got := operatorread.ProjectRunOperationalStatus(report)
 	if got.State != "stalled" {
 		t.Fatalf("state = %q, want stalled", got.State)
 	}
@@ -3183,18 +3185,18 @@ func TestProjectRunOperationalStatus_UsesDeliveryLifecycleWhenRunIsOperationally
 }
 
 func TestProjectRunOperationalStatus_UsesScoringOutcomeBlockingLayer(t *testing.T) {
-	report := store.RunDebugReport{
+	report := operatorread.RunDebugReport{
 		RunTableStatus: "running",
 		LastEventAt:    time.Unix(1700000000, 0).UTC(),
-		EventCounts: []store.RunDebugEventCount{
+		EventCounts: []operatorread.RunDebugEventCount{
 			{EventName: "scoring/scoring.requested", Count: 1},
 		},
-		Deliveries: []store.RunDebugDeliveryCount{
+		Deliveries: []operatorread.RunDebugDeliveryCount{
 			{SubscriberID: "agent-1", Status: "delivered", Count: 1},
 		},
 	}
 
-	got := store.ProjectRunOperationalStatus(report)
+	got := operatorread.ProjectRunOperationalStatus(report)
 	if got.State != "stalled" {
 		t.Fatalf("state = %q, want stalled", got.State)
 	}
@@ -3207,19 +3209,19 @@ func TestProjectRunOperationalStatus_UsesScoringOutcomeBlockingLayer(t *testing.
 }
 
 func TestProjectRunOperationalStatus_TreatsScopedShortlistAsTerminalScoringOutcome(t *testing.T) {
-	report := store.RunDebugReport{
+	report := operatorread.RunDebugReport{
 		RunTableStatus: "running",
 		LastEventAt:    time.Unix(1700000000, 0).UTC(),
-		EventCounts: []store.RunDebugEventCount{
+		EventCounts: []operatorread.RunDebugEventCount{
 			{EventName: "scoring/scoring.requested", Count: 1},
 			{EventName: "scoring/vertical.shortlisted", Count: 1},
 		},
-		Deliveries: []store.RunDebugDeliveryCount{
+		Deliveries: []operatorread.RunDebugDeliveryCount{
 			{SubscriberID: "agent-1", Status: "delivered", Count: 1},
 		},
 	}
 
-	got := store.ProjectRunOperationalStatus(report)
+	got := operatorread.ProjectRunOperationalStatus(report)
 	if got.State != "stalled" {
 		t.Fatalf("state = %q, want stalled", got.State)
 	}
@@ -3232,16 +3234,16 @@ func TestProjectRunOperationalStatus_TreatsScopedShortlistAsTerminalScoringOutco
 }
 
 func TestProjectRunOperationalStatus_PreservesHealthyRunningWhenActiveDeliveriesRemain(t *testing.T) {
-	report := store.RunDebugReport{
+	report := operatorread.RunDebugReport{
 		RunTableStatus: "running",
 		LastEventAt:    time.Unix(1700000000, 0).UTC(),
-		Deliveries: []store.RunDebugDeliveryCount{
+		Deliveries: []operatorread.RunDebugDeliveryCount{
 			{SubscriberID: "agent-1", Status: "in_progress", Count: 1},
 			{SubscriberID: "agent-2", Status: "delivered", Count: 1},
 		},
 	}
 
-	got := store.ProjectRunOperationalStatus(report)
+	got := operatorread.ProjectRunOperationalStatus(report)
 	if got.State != "running" {
 		t.Fatalf("state = %q, want running", got.State)
 	}

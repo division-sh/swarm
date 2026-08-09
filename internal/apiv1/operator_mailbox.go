@@ -6,22 +6,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/mailbox"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 type MailboxAPIStore interface {
-	ListV1MailboxItems(context.Context, store.MailboxV1ListOptions) ([]store.MailboxV1Item, string, error)
-	GetV1MailboxItem(context.Context, string) (store.MailboxV1ItemDetail, error)
+	ListV1MailboxItems(context.Context, mailbox.V1ListOptions) ([]mailbox.V1Item, string, error)
+	GetV1MailboxItem(context.Context, string) (mailbox.V1ItemDetail, error)
 }
 
 type APIIdempotencyStore interface {
 	WithAPIIdempotency(
 		context.Context,
-		store.APIIdempotencyRequest,
-		func(context.Context) (store.APIIdempotencyCompletion, error),
-	) (store.APIIdempotencyCompletion, bool, error)
+		apiidempotency.Request,
+		func(context.Context) (apiidempotency.Completion, error),
+	) (apiidempotency.Completion, bool, error)
 }
 
 type EventPublisher interface {
@@ -29,11 +30,11 @@ type EventPublisher interface {
 }
 
 type mailboxListResult struct {
-	Items      []store.MailboxV1Item `json:"items"`
-	NextCursor string                `json:"next_cursor,omitempty"`
+	Items      []mailbox.V1Item `json:"items"`
+	NextCursor string           `json:"next_cursor,omitempty"`
 }
 
-func OperatorMailboxHandlers(opts OperatorReadOptions) map[string]MethodHandler {
+func OperatorMailboxHandlers(opts MailboxHandlerOptions) map[string]MethodHandler {
 	if opts.Mailbox == nil {
 		return nil
 	}
@@ -44,20 +45,20 @@ func OperatorMailboxHandlers(opts OperatorReadOptions) map[string]MethodHandler 
 				return nil, err
 			}
 			items, nextCursor, err := opts.Mailbox.ListV1MailboxItems(ctx, listOpts)
-			if errors.Is(err, store.ErrMailboxV1InvalidCursor) {
+			if errors.Is(err, mailbox.ErrV1InvalidCursor) {
 				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid mailbox cursor"})
 			}
 			if err != nil {
 				return nil, err
 			}
 			if items == nil {
-				items = []store.MailboxV1Item{}
+				items = []mailbox.V1Item{}
 			}
 			return mailboxListResult{Items: items, NextCursor: nextCursor}, nil
 		},
 		"mailbox.get": func(ctx context.Context, req Request) (any, error) {
 			detail, err := opts.Mailbox.GetV1MailboxItem(ctx, stringParam(req.Params, "mailbox_id"))
-			if errors.Is(err, store.ErrMailboxV1NotFound) {
+			if errors.Is(err, mailbox.ErrV1NotFound) {
 				return nil, NewApplicationError(MailboxNotFoundCode, false, map[string]any{"mailbox_id": stringParam(req.Params, "mailbox_id")})
 			}
 			if err != nil {
@@ -66,14 +67,11 @@ func OperatorMailboxHandlers(opts OperatorReadOptions) map[string]MethodHandler 
 			return detail, nil
 		},
 	}
-	for method, handler := range decisionCardHandlers(opts) {
-		handlers[method] = handler
-	}
 	return handlers
 }
 
-func mailboxListOptionsFromParams(params map[string]any) (store.MailboxV1ListOptions, error) {
-	out := store.MailboxV1ListOptions{}
+func mailboxListOptionsFromParams(params map[string]any) (mailbox.V1ListOptions, error) {
+	out := mailbox.V1ListOptions{}
 	var err error
 	if out.Status, _, err = optionalStringParam(params, "status"); err != nil {
 		return out, err

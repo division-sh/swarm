@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	pipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
 
@@ -14,10 +15,10 @@ func TestSQLiteScenarioSetupEntitiesIdempotentExistingRows(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	req := ScenarioSetupRequest{
+	req := pipeline.ScenarioSetupRequest{
 		RunID:     runID,
 		CreatedAt: time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC),
-		Entities: []ScenarioSetupEntityRequest{{
+		Entities: []pipeline.ScenarioSetupEntityRequest{{
 			Alias:        "subject",
 			EntityID:     entityID,
 			FlowInstance: "operating",
@@ -41,7 +42,7 @@ func TestSQLiteScenarioSetupEntitiesIdempotentExistingRows(t *testing.T) {
 	assertSQLiteScenarioSetupCounts(t, ctx, sqliteStore, runID, entityID, 1, 3)
 
 	changed := req
-	changed.Entities = append([]ScenarioSetupEntityRequest(nil), req.Entities...)
+	changed.Entities = append([]pipeline.ScenarioSetupEntityRequest(nil), req.Entities...)
 	changed.Entities[0].Fields = map[string]any{"note": "changed"}
 	if _, err := sqliteStore.SetupScenarioEntities(ctx, changed); err == nil || !strings.Contains(err.Error(), "already exists with different fields") {
 		t.Fatalf("SetupScenarioEntities changed replay error = %v, want different fields", err)

@@ -13,7 +13,7 @@ func (s *SQLiteRuntimeStore) LoadRunBundleAvailability(ctx context.Context, runI
 	}
 	availability, err := s.runBundles.Load(ctx, runID)
 	if errors.Is(err, runbundle.ErrRunNotFound) {
-		return runbundle.Availability{}, ErrRunNotFound
+		return runbundle.Availability{}, runbundle.ErrRunNotFound
 	}
 	return availability, err
 }

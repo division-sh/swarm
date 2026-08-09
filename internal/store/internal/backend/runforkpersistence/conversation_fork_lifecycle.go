@@ -10,67 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimerunfork "github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
-
-const ConversationForkLifecycleTTL = 24 * time.Hour
-
-type ConversationForkPointSelector struct {
-	Kind    string
-	TurnID  string
-	EventID string
-	At      *time.Time
-}
-
-type ConversationForkPointDescriptor struct {
-	Kind       string     `json:"kind"`
-	TurnIndex  int        `json:"turn_index"`
-	TurnID     string     `json:"turn_id"`
-	EventID    string     `json:"event_id,omitempty"`
-	At         *time.Time `json:"at,omitempty"`
-	SelectedAt time.Time  `json:"selected_at"`
-}
-
-type OperatorConversationForkSession struct {
-	ForkID          string                          `json:"fork_id"`
-	SourceSessionID string                          `json:"source_session_id"`
-	SourceRunID     string                          `json:"source_run_id,omitempty"`
-	SourceAgentID   string                          `json:"source_agent_id"`
-	SourceIdentity  runtimeagentidentity.Identity   `json:"-"`
-	ForkPoint       ConversationForkPointDescriptor `json:"fork_point"`
-	CreatedBy       string                          `json:"created_by"`
-	CreatedAt       time.Time                       `json:"created_at"`
-	ExpiresAt       time.Time                       `json:"expires_at"`
-	DeletedAt       *time.Time                      `json:"deleted_at,omitempty"`
-	State           string                          `json:"state"`
-	Turns           []OperatorConversationTurn      `json:"turns"`
-}
-
-type ConversationForkCreateRequest struct {
-	SourceSessionID string
-	ForkPoint       ConversationForkPointSelector
-	CreatedBy       string
-	Now             time.Time
-}
-
-type ConversationForkListOptions struct {
-	SourceSessionID string
-	Limit           int
-	Cursor          string
-	Now             time.Time
-}
-
-type ConversationForkListResult struct {
-	Forks      []OperatorConversationForkSession `json:"forks"`
-	NextCursor string                            `json:"next_cursor,omitempty"`
-}
-
-type ConversationForkDeleteResult struct {
-	ForkID         string `json:"fork_id"`
-	Deleted        bool   `json:"deleted"`
-	AlreadyDeleted bool   `json:"already_deleted"`
-}
 
 type conversationForkSource struct {
 	SessionID string
@@ -85,41 +29,41 @@ type conversationForkCursor struct {
 	ForkID    string `json:"fork_id"`
 }
 
-func (s *RunForkPostgresOwner) CreateOperatorConversationFork(ctx context.Context, req ConversationForkCreateRequest) (OperatorConversationForkSession, error) {
+func (s *RunForkPostgresOwner) CreateOperatorConversationFork(ctx context.Context, req runtimerunfork.ConversationForkCreateRequest) (runtimerunfork.OperatorConversationForkSession, error) {
 	owner, err := postgresConversationForkStore(s)
 	if err != nil {
-		return OperatorConversationForkSession{}, err
+		return runtimerunfork.OperatorConversationForkSession{}, err
 	}
 	return owner.createOperatorConversationFork(ctx, req)
 }
 
-func (s *RunForkSQLiteOwner) CreateOperatorConversationFork(ctx context.Context, req ConversationForkCreateRequest) (OperatorConversationForkSession, error) {
+func (s *RunForkSQLiteOwner) CreateOperatorConversationFork(ctx context.Context, req runtimerunfork.ConversationForkCreateRequest) (runtimerunfork.OperatorConversationForkSession, error) {
 	owner, err := sqliteConversationForkStore(s)
 	if err != nil {
-		return OperatorConversationForkSession{}, err
+		return runtimerunfork.OperatorConversationForkSession{}, err
 	}
 	return owner.createOperatorConversationFork(ctx, req)
 }
 
-func (s *RunForkPostgresOwner) ResolveConversationForkPoint(ctx context.Context, sourceSessionID string, selector ConversationForkPointSelector) (ConversationForkPointDescriptor, error) {
+func (s *RunForkPostgresOwner) ResolveConversationForkPoint(ctx context.Context, sourceSessionID string, selector runtimerunfork.ConversationForkPointSelector) (runtimerunfork.ConversationForkPointDescriptor, error) {
 	owner, err := postgresConversationForkStore(s)
 	if err != nil {
-		return ConversationForkPointDescriptor{}, err
+		return runtimerunfork.ConversationForkPointDescriptor{}, err
 	}
 	return owner.resolveConversationForkPoint(ctx, sourceSessionID, selector)
 }
 
-func (s *RunForkSQLiteOwner) ResolveConversationForkPoint(ctx context.Context, sourceSessionID string, selector ConversationForkPointSelector) (ConversationForkPointDescriptor, error) {
+func (s *RunForkSQLiteOwner) ResolveConversationForkPoint(ctx context.Context, sourceSessionID string, selector runtimerunfork.ConversationForkPointSelector) (runtimerunfork.ConversationForkPointDescriptor, error) {
 	owner, err := sqliteConversationForkStore(s)
 	if err != nil {
-		return ConversationForkPointDescriptor{}, err
+		return runtimerunfork.ConversationForkPointDescriptor{}, err
 	}
 	return owner.resolveConversationForkPoint(ctx, sourceSessionID, selector)
 }
 
-func (s conversationForkStore) createOperatorConversationFork(ctx context.Context, req ConversationForkCreateRequest) (OperatorConversationForkSession, error) {
+func (s conversationForkStore) createOperatorConversationFork(ctx context.Context, req runtimerunfork.ConversationForkCreateRequest) (runtimerunfork.OperatorConversationForkSession, error) {
 	if err := s.requireCurrentSchema(); err != nil {
-		return OperatorConversationForkSession{}, err
+		return runtimerunfork.OperatorConversationForkSession{}, err
 	}
 	now := req.Now.UTC()
 	if now.IsZero() {
@@ -127,22 +71,22 @@ func (s conversationForkStore) createOperatorConversationFork(ctx context.Contex
 	}
 	createdBy := strings.TrimSpace(req.CreatedBy)
 	if createdBy == "" {
-		return OperatorConversationForkSession{}, &EntityReadParamError{Field: "created_by", Reason: "is required"}
+		return runtimerunfork.OperatorConversationForkSession{}, &operatorread.EntityReadParamError{Field: "created_by", Reason: "is required"}
 	}
 	source, err := s.loadConversationForkSource(ctx, req.SourceSessionID)
 	if err != nil {
-		return OperatorConversationForkSession{}, err
+		return runtimerunfork.OperatorConversationForkSession{}, err
 	}
 	descriptor, err := s.resolveConversationForkPoint(ctx, req.SourceSessionID, req.ForkPoint)
 	if err != nil {
-		return OperatorConversationForkSession{}, err
+		return runtimerunfork.OperatorConversationForkSession{}, err
 	}
-	expiresAt := now.Add(ConversationForkLifecycleTTL).UTC()
+	expiresAt := now.Add(runtimerunfork.ConversationForkLifecycleTTL).UTC()
 	sourceIdentity, err := agentIdentityFields(source.Identity)
 	if err != nil {
-		return OperatorConversationForkSession{}, err
+		return runtimerunfork.OperatorConversationForkSession{}, err
 	}
-	var created OperatorConversationForkSession
+	var created runtimerunfork.OperatorConversationForkSession
 	err = s.runMutation(ctx, false, func(txctx context.Context, tx *sql.Tx) error {
 		row := s.queryRow(txctx, tx, `
 		INSERT INTO conversation_forks (
@@ -179,29 +123,29 @@ func (s conversationForkStore) createOperatorConversationFork(ctx context.Contex
 	return created, err
 }
 
-func (s *RunForkPostgresOwner) ListOperatorConversationForks(ctx context.Context, opts ConversationForkListOptions) (ConversationForkListResult, error) {
+func (s *RunForkPostgresOwner) ListOperatorConversationForks(ctx context.Context, opts runtimerunfork.ConversationForkListOptions) (runtimerunfork.ConversationForkListResult, error) {
 	owner, err := postgresConversationForkStore(s)
 	if err != nil {
-		return ConversationForkListResult{}, err
+		return runtimerunfork.ConversationForkListResult{}, err
 	}
 	return owner.listOperatorConversationForks(ctx, opts)
 }
 
-func (s *RunForkSQLiteOwner) ListOperatorConversationForks(ctx context.Context, opts ConversationForkListOptions) (ConversationForkListResult, error) {
+func (s *RunForkSQLiteOwner) ListOperatorConversationForks(ctx context.Context, opts runtimerunfork.ConversationForkListOptions) (runtimerunfork.ConversationForkListResult, error) {
 	owner, err := sqliteConversationForkStore(s)
 	if err != nil {
-		return ConversationForkListResult{}, err
+		return runtimerunfork.ConversationForkListResult{}, err
 	}
 	return owner.listOperatorConversationForks(ctx, opts)
 }
 
-func (s conversationForkStore) listOperatorConversationForks(ctx context.Context, opts ConversationForkListOptions) (ConversationForkListResult, error) {
+func (s conversationForkStore) listOperatorConversationForks(ctx context.Context, opts runtimerunfork.ConversationForkListOptions) (runtimerunfork.ConversationForkListResult, error) {
 	if err := s.requireCurrentSchema(); err != nil {
-		return ConversationForkListResult{}, err
+		return runtimerunfork.ConversationForkListResult{}, err
 	}
 	opts, err := defaultConversationForkListOptions(opts)
 	if err != nil {
-		return ConversationForkListResult{}, err
+		return runtimerunfork.ConversationForkListResult{}, err
 	}
 	args := make([]any, 0, 6)
 	where := []string{"deleted_at IS NULL", "expires_at > ?"}
@@ -209,7 +153,7 @@ func (s conversationForkStore) listOperatorConversationForks(ctx context.Context
 	if opts.SourceSessionID != "" {
 		sessionID, err := normalizeUUIDParam(opts.SourceSessionID, "source_session_id")
 		if err != nil {
-			return ConversationForkListResult{}, err
+			return runtimerunfork.ConversationForkListResult{}, err
 		}
 		args = append(args, sessionID)
 		where = append(where, "source_session_id = ?")
@@ -217,15 +161,15 @@ func (s conversationForkStore) listOperatorConversationForks(ctx context.Context
 	if opts.Cursor != "" {
 		cursor, err := decodeConversationForkCursor(opts.Cursor)
 		if err != nil {
-			return ConversationForkListResult{}, err
+			return runtimerunfork.ConversationForkListResult{}, err
 		}
 		createdAt, err := time.Parse(time.RFC3339Nano, cursor.CreatedAt)
 		if err != nil || strings.TrimSpace(cursor.ForkID) == "" {
-			return ConversationForkListResult{}, ErrInvalidConversationForkCursor
+			return runtimerunfork.ConversationForkListResult{}, runtimerunfork.ErrInvalidConversationForkCursor
 		}
 		forkID, err := normalizeUUIDParam(cursor.ForkID, "cursor.fork_id")
 		if err != nil {
-			return ConversationForkListResult{}, ErrInvalidConversationForkCursor
+			return runtimerunfork.ConversationForkListResult{}, runtimerunfork.ErrInvalidConversationForkCursor
 		}
 		where = append(where, `(
 			created_at < ?
@@ -248,19 +192,19 @@ func (s conversationForkStore) listOperatorConversationForks(ctx context.Context
 		LIMIT ?
 	`, strings.Join(where, " AND ")), args...)
 	if err != nil {
-		return ConversationForkListResult{}, fmt.Errorf("list conversation forks: %w", err)
+		return runtimerunfork.ConversationForkListResult{}, fmt.Errorf("list conversation forks: %w", err)
 	}
 	defer rows.Close()
-	forks := []OperatorConversationForkSession{}
+	forks := []runtimerunfork.OperatorConversationForkSession{}
 	for rows.Next() {
 		item, err := scanConversationForkSession(rows, opts.Now)
 		if err != nil {
-			return ConversationForkListResult{}, err
+			return runtimerunfork.ConversationForkListResult{}, err
 		}
 		forks = append(forks, item)
 	}
 	if err := rows.Err(); err != nil {
-		return ConversationForkListResult{}, fmt.Errorf("read conversation forks: %w", err)
+		return runtimerunfork.ConversationForkListResult{}, fmt.Errorf("read conversation forks: %w", err)
 	}
 	nextCursor := ""
 	if len(forks) > opts.Limit {
@@ -273,34 +217,34 @@ func (s conversationForkStore) listOperatorConversationForks(ctx context.Context
 		})
 	}
 	if forks == nil {
-		forks = []OperatorConversationForkSession{}
+		forks = []runtimerunfork.OperatorConversationForkSession{}
 	}
-	return ConversationForkListResult{Forks: forks, NextCursor: nextCursor}, nil
+	return runtimerunfork.ConversationForkListResult{Forks: forks, NextCursor: nextCursor}, nil
 }
 
-func (s *RunForkPostgresOwner) LoadOperatorConversationFork(ctx context.Context, forkID string) (OperatorConversationForkSession, error) {
+func (s *RunForkPostgresOwner) LoadOperatorConversationFork(ctx context.Context, forkID string) (runtimerunfork.OperatorConversationForkSession, error) {
 	owner, err := postgresConversationForkStore(s)
 	if err != nil {
-		return OperatorConversationForkSession{}, err
+		return runtimerunfork.OperatorConversationForkSession{}, err
 	}
 	return owner.loadOperatorConversationFork(ctx, forkID)
 }
 
-func (s *RunForkSQLiteOwner) LoadOperatorConversationFork(ctx context.Context, forkID string) (OperatorConversationForkSession, error) {
+func (s *RunForkSQLiteOwner) LoadOperatorConversationFork(ctx context.Context, forkID string) (runtimerunfork.OperatorConversationForkSession, error) {
 	owner, err := sqliteConversationForkStore(s)
 	if err != nil {
-		return OperatorConversationForkSession{}, err
+		return runtimerunfork.OperatorConversationForkSession{}, err
 	}
 	return owner.loadOperatorConversationFork(ctx, forkID)
 }
 
-func (s conversationForkStore) loadOperatorConversationFork(ctx context.Context, forkID string) (OperatorConversationForkSession, error) {
+func (s conversationForkStore) loadOperatorConversationFork(ctx context.Context, forkID string) (runtimerunfork.OperatorConversationForkSession, error) {
 	if err := s.requireCurrentSchema(); err != nil {
-		return OperatorConversationForkSession{}, err
+		return runtimerunfork.OperatorConversationForkSession{}, err
 	}
 	id, err := normalizeUUIDParam(forkID, "fork_id")
 	if err != nil {
-		return OperatorConversationForkSession{}, err
+		return runtimerunfork.OperatorConversationForkSession{}, err
 	}
 	row := s.queryRow(ctx, s.db, `
 		SELECT
@@ -315,48 +259,48 @@ func (s conversationForkStore) loadOperatorConversationFork(ctx context.Context,
 	`, id)
 	item, err := scanConversationForkSession(row, time.Now().UTC())
 	if errors.Is(err, sql.ErrNoRows) {
-		return OperatorConversationForkSession{}, ErrConversationForkNotFound
+		return runtimerunfork.OperatorConversationForkSession{}, runtimerunfork.ErrConversationForkNotFound
 	}
 	if err != nil {
-		return OperatorConversationForkSession{}, err
+		return runtimerunfork.OperatorConversationForkSession{}, err
 	}
 	turns, err := loadConversationForkTurns(ctx, s, s.db, item.ForkID)
 	if err != nil {
-		return OperatorConversationForkSession{}, err
+		return runtimerunfork.OperatorConversationForkSession{}, err
 	}
 	item.Turns = turns
 	return item, nil
 }
 
-func (s *RunForkPostgresOwner) DeleteOperatorConversationFork(ctx context.Context, forkID string, now time.Time) (ConversationForkDeleteResult, error) {
+func (s *RunForkPostgresOwner) DeleteOperatorConversationFork(ctx context.Context, forkID string, now time.Time) (runtimerunfork.ConversationForkDeleteResult, error) {
 	owner, err := postgresConversationForkStore(s)
 	if err != nil {
-		return ConversationForkDeleteResult{}, err
+		return runtimerunfork.ConversationForkDeleteResult{}, err
 	}
 	return owner.deleteOperatorConversationFork(ctx, forkID, now)
 }
 
-func (s *RunForkSQLiteOwner) DeleteOperatorConversationFork(ctx context.Context, forkID string, now time.Time) (ConversationForkDeleteResult, error) {
+func (s *RunForkSQLiteOwner) DeleteOperatorConversationFork(ctx context.Context, forkID string, now time.Time) (runtimerunfork.ConversationForkDeleteResult, error) {
 	owner, err := sqliteConversationForkStore(s)
 	if err != nil {
-		return ConversationForkDeleteResult{}, err
+		return runtimerunfork.ConversationForkDeleteResult{}, err
 	}
 	return owner.deleteOperatorConversationFork(ctx, forkID, now)
 }
 
-func (s conversationForkStore) deleteOperatorConversationFork(ctx context.Context, forkID string, now time.Time) (ConversationForkDeleteResult, error) {
+func (s conversationForkStore) deleteOperatorConversationFork(ctx context.Context, forkID string, now time.Time) (runtimerunfork.ConversationForkDeleteResult, error) {
 	if err := s.requireCurrentSchema(); err != nil {
-		return ConversationForkDeleteResult{}, err
+		return runtimerunfork.ConversationForkDeleteResult{}, err
 	}
 	id, err := normalizeUUIDParam(forkID, "fork_id")
 	if err != nil {
-		return ConversationForkDeleteResult{}, err
+		return runtimerunfork.ConversationForkDeleteResult{}, err
 	}
 	now = now.UTC()
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	var result ConversationForkDeleteResult
+	var result runtimerunfork.ConversationForkDeleteResult
 	err = s.runForkMutation(ctx, id, false, func(txctx context.Context, tx *sql.Tx) error {
 		res, err := s.exec(txctx, tx, `UPDATE conversation_forks SET deleted_at = ? WHERE fork_id = ? AND deleted_at IS NULL`, now, id)
 		if err != nil {
@@ -367,18 +311,18 @@ func (s conversationForkStore) deleteOperatorConversationFork(ctx context.Contex
 			return fmt.Errorf("read conversation fork delete affected rows: %w", err)
 		}
 		if affected > 0 {
-			result = ConversationForkDeleteResult{ForkID: id, Deleted: true}
+			result = runtimerunfork.ConversationForkDeleteResult{ForkID: id, Deleted: true}
 			return nil
 		}
 		var existingDeleted conversationForkTimeValue
 		if err := s.queryRow(txctx, tx, `SELECT deleted_at FROM conversation_forks WHERE fork_id = ?`, id).Scan(&existingDeleted); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return ErrConversationForkNotFound
+				return runtimerunfork.ErrConversationForkNotFound
 			}
 			return fmt.Errorf("load conversation fork delete state: %w", err)
 		}
 		if existingDeleted.Valid {
-			result = ConversationForkDeleteResult{ForkID: id, AlreadyDeleted: true}
+			result = runtimerunfork.ConversationForkDeleteResult{ForkID: id, AlreadyDeleted: true}
 			return nil
 		}
 		return fmt.Errorf("conversation fork delete state changed concurrently")
@@ -386,7 +330,7 @@ func (s conversationForkStore) deleteOperatorConversationFork(ctx context.Contex
 	return result, err
 }
 
-func defaultConversationForkListOptions(opts ConversationForkListOptions) (ConversationForkListOptions, error) {
+func defaultConversationForkListOptions(opts runtimerunfork.ConversationForkListOptions) (runtimerunfork.ConversationForkListOptions, error) {
 	if opts.Limit <= 0 {
 		opts.Limit = 50
 	}
@@ -409,7 +353,7 @@ func (s conversationForkStore) loadConversationForkSource(ctx context.Context, s
 	}
 	sources := s.conversationQuerySources()
 	if len(sources) == 0 {
-		return conversationForkSource{}, ErrSessionNotFound
+		return conversationForkSource{}, operatorread.ErrSessionNotFound
 	}
 	rows, err := s.query(ctx, s.db, fmt.Sprintf(`
 		SELECT
@@ -455,50 +399,50 @@ func (s conversationForkStore) loadConversationForkSource(ctx context.Context, s
 		return conversationForkSource{}, err
 	}
 	if len(items) == 0 {
-		return conversationForkSource{}, ErrSessionNotFound
+		return conversationForkSource{}, operatorread.ErrSessionNotFound
 	}
 	if len(items) > 1 {
-		return conversationForkSource{}, &EntityReadParamError{Field: "source_session_id", Reason: "ambiguous source session"}
+		return conversationForkSource{}, &operatorread.EntityReadParamError{Field: "source_session_id", Reason: "ambiguous source session"}
 	}
 	return items[0], nil
 }
 
-func (s conversationForkStore) resolveConversationForkPoint(ctx context.Context, sourceSessionID string, selector ConversationForkPointSelector) (ConversationForkPointDescriptor, error) {
+func (s conversationForkStore) resolveConversationForkPoint(ctx context.Context, sourceSessionID string, selector runtimerunfork.ConversationForkPointSelector) (runtimerunfork.ConversationForkPointDescriptor, error) {
 	sessionID, err := normalizeUUIDParam(sourceSessionID, "source_session_id")
 	if err != nil {
-		return ConversationForkPointDescriptor{}, err
+		return runtimerunfork.ConversationForkPointDescriptor{}, err
 	}
 	kind := strings.ToLower(strings.TrimSpace(selector.Kind))
 	switch kind {
 	case "turn":
 		turnID := strings.TrimSpace(selector.TurnID)
 		if turnID == "" || strings.TrimSpace(selector.EventID) != "" || selector.At != nil {
-			return ConversationForkPointDescriptor{}, &EntityReadParamError{Field: "fork_point", Reason: "turn selector requires only turn_id"}
+			return runtimerunfork.ConversationForkPointDescriptor{}, &operatorread.EntityReadParamError{Field: "fork_point", Reason: "turn selector requires only turn_id"}
 		}
 		return s.resolveConversationTurnCoordinateByID(ctx, sessionID, turnID)
 	case "event":
 		eventID, err := normalizeUUIDParam(selector.EventID, "fork_point.event_id")
 		if err != nil {
-			return ConversationForkPointDescriptor{}, err
+			return runtimerunfork.ConversationForkPointDescriptor{}, err
 		}
 		if strings.TrimSpace(selector.TurnID) != "" || selector.At != nil {
-			return ConversationForkPointDescriptor{}, &EntityReadParamError{Field: "fork_point", Reason: "event selector requires only event_id"}
+			return runtimerunfork.ConversationForkPointDescriptor{}, &operatorread.EntityReadParamError{Field: "fork_point", Reason: "event selector requires only event_id"}
 		}
 		return s.resolveConversationTurnCoordinateByEvent(ctx, sessionID, eventID)
 	case "time":
 		if selector.At == nil || strings.TrimSpace(selector.TurnID) != "" || strings.TrimSpace(selector.EventID) != "" {
-			return ConversationForkPointDescriptor{}, &EntityReadParamError{Field: "fork_point", Reason: "time selector requires only at"}
+			return runtimerunfork.ConversationForkPointDescriptor{}, &operatorread.EntityReadParamError{Field: "fork_point", Reason: "time selector requires only at"}
 		}
 		return s.resolveConversationTurnCoordinateAt(ctx, sessionID, selector.At.UTC())
 	default:
-		return ConversationForkPointDescriptor{}, &EntityReadParamError{Field: "fork_point.kind", Reason: "must be one of turn, event, time"}
+		return runtimerunfork.ConversationForkPointDescriptor{}, &operatorread.EntityReadParamError{Field: "fork_point.kind", Reason: "must be one of turn, event, time"}
 	}
 }
 
 func scanConversationForkSession(scanner interface {
 	Scan(dest ...any) error
-}, now time.Time) (OperatorConversationForkSession, error) {
-	var item OperatorConversationForkSession
+}, now time.Time) (runtimerunfork.OperatorConversationForkSession, error) {
+	var item runtimerunfork.OperatorConversationForkSession
 	var turnIndex sql.NullInt64
 	var turnID string
 	var eventID string
@@ -530,11 +474,11 @@ func scanConversationForkSession(scanner interface {
 		&expiresAt,
 		&deletedAt,
 	); err != nil {
-		return OperatorConversationForkSession{}, err
+		return runtimerunfork.OperatorConversationForkSession{}, err
 	}
 	identity, err := runtimeagentidentity.FromStorageFields(identityFields)
 	if err != nil {
-		return OperatorConversationForkSession{}, fmt.Errorf("decode conversation fork source identity: %w", err)
+		return runtimerunfork.OperatorConversationForkSession{}, fmt.Errorf("decode conversation fork source identity: %w", err)
 	}
 	item.SourceIdentity = identity
 	item.SourceAgentID = item.SourceIdentity.AgentID()
@@ -555,11 +499,11 @@ func scanConversationForkSession(scanner interface {
 	item.ExpiresAt = expiresAt.Time
 	item.ForkPoint.SelectedAt = selectedAt.Time
 	item.State = conversationForkState(item, now)
-	item.Turns = []OperatorConversationTurn{}
+	item.Turns = []operatorread.OperatorConversationTurn{}
 	return item, nil
 }
 
-func conversationForkState(item OperatorConversationForkSession, now time.Time) string {
+func conversationForkState(item runtimerunfork.OperatorConversationForkSession, now time.Time) string {
 	if item.DeletedAt != nil {
 		return "deleted"
 	}
@@ -575,11 +519,11 @@ func conversationForkState(item OperatorConversationForkSession, now time.Time) 
 func normalizeUUIDParam(value, field string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "", &EntityReadParamError{Field: field, Reason: "is required"}
+		return "", &operatorread.EntityReadParamError{Field: field, Reason: "is required"}
 	}
 	parsed, err := uuid.Parse(value)
 	if err != nil {
-		return "", &EntityReadParamError{Field: field, Reason: "must be a UUID"}
+		return "", &operatorread.EntityReadParamError{Field: field, Reason: "must be a UUID"}
 	}
 	return parsed.String(), nil
 }
@@ -592,14 +536,14 @@ func encodeConversationForkCursor(cursor conversationForkCursor) string {
 func decodeConversationForkCursor(raw string) (conversationForkCursor, error) {
 	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(raw))
 	if err != nil {
-		return conversationForkCursor{}, ErrInvalidConversationForkCursor
+		return conversationForkCursor{}, runtimerunfork.ErrInvalidConversationForkCursor
 	}
 	var cursor conversationForkCursor
 	if err := json.Unmarshal(decoded, &cursor); err != nil {
-		return conversationForkCursor{}, ErrInvalidConversationForkCursor
+		return conversationForkCursor{}, runtimerunfork.ErrInvalidConversationForkCursor
 	}
 	if strings.TrimSpace(cursor.Kind) != "conversation.fork_list" {
-		return conversationForkCursor{}, ErrInvalidConversationForkCursor
+		return conversationForkCursor{}, runtimerunfork.ErrInvalidConversationForkCursor
 	}
 	return cursor, nil
 }

@@ -2,14 +2,14 @@ package builder
 
 import (
 	"context"
-	"encoding/json"
 	"sort"
 	"strings"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 const builderRunDebugReplayLimit = 128
@@ -128,7 +128,7 @@ func (h *runHub) loadRunLifecycleSnapshot(ctx context.Context, runID string) (ru
 	return snapshot, true
 }
 
-func (h *runHub) loadOperatorEvents(ctx context.Context, runID string) ([]store.OperatorEventFull, bool) {
+func (h *runHub) loadOperatorEvents(ctx context.Context, runID string) ([]operatorread.OperatorEventFull, bool) {
 	if h == nil || h.runDebug == nil {
 		return nil, false
 	}
@@ -136,8 +136,8 @@ func (h *runHub) loadOperatorEvents(ctx context.Context, runID string) ([]store.
 	if runID == "" {
 		return nil, false
 	}
-	result, err := h.runDebug.ListOperatorEvents(ctx, store.OperatorEventListOptions{
-		Filter:             store.OperatorEventListFilter{RunID: runID},
+	result, err := h.runDebug.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{
+		Filter:             operatorread.OperatorEventListFilter{RunID: runID},
 		Limit:              builderRunDebugReplayLimit,
 		Order:              "desc",
 		ExcludeRuntimeLogs: true,
@@ -148,7 +148,7 @@ func (h *runHub) loadOperatorEvents(ctx context.Context, runID string) ([]store.
 	return result.Events, true
 }
 
-func (h *runHub) loadOperatorRuntimeLogs(ctx context.Context, runID string) ([]store.OperatorRuntimeLogEntry, bool) {
+func (h *runHub) loadOperatorRuntimeLogs(ctx context.Context, runID string) ([]operatorread.OperatorRuntimeLogEntry, bool) {
 	if h == nil || h.runDebug == nil {
 		return nil, false
 	}
@@ -156,7 +156,7 @@ func (h *runHub) loadOperatorRuntimeLogs(ctx context.Context, runID string) ([]s
 	if runID == "" {
 		return nil, false
 	}
-	result, err := h.runDebug.ListOperatorRuntimeLogs(ctx, store.OperatorRuntimeLogListOptions{
+	result, err := h.runDebug.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID: runID,
 		Limit: builderRunDebugReplayLimit,
 		Order: "desc",
@@ -167,7 +167,7 @@ func (h *runHub) loadOperatorRuntimeLogs(ctx context.Context, runID string) ([]s
 	return result.Logs, true
 }
 
-func projectCanonicalRunDebugReplay(snapshot runtimebus.RunLifecycleSnapshot, events []store.OperatorEventFull, runtimeLogs []store.OperatorRuntimeLogEntry) ([]RunEventEnvelope, runDebugStreamState) {
+func projectCanonicalRunDebugReplay(snapshot runtimebus.RunLifecycleSnapshot, events []operatorread.OperatorEventFull, runtimeLogs []operatorread.OperatorRuntimeLogEntry) ([]RunEventEnvelope, runDebugStreamState) {
 	state := runDebugStreamState{
 		eventIDs:      map[string]struct{}{},
 		runtimeLogIDs: map[string]struct{}{},
@@ -175,7 +175,7 @@ func projectCanonicalRunDebugReplay(snapshot runtimebus.RunLifecycleSnapshot, ev
 	return projectCanonicalRunDebugDelta(snapshot, events, runtimeLogs, &state), state
 }
 
-func projectCanonicalRunDebugDelta(snapshot runtimebus.RunLifecycleSnapshot, events []store.OperatorEventFull, runtimeLogs []store.OperatorRuntimeLogEntry, state *runDebugStreamState) []RunEventEnvelope {
+func projectCanonicalRunDebugDelta(snapshot runtimebus.RunLifecycleSnapshot, events []operatorread.OperatorEventFull, runtimeLogs []operatorread.OperatorRuntimeLogEntry, state *runDebugStreamState) []RunEventEnvelope {
 	if state == nil {
 		state = &runDebugStreamState{eventIDs: map[string]struct{}{}, runtimeLogIDs: map[string]struct{}{}}
 	}
@@ -255,7 +255,7 @@ func canonicalRunStartedCandidate(snapshot runtimebus.RunLifecycleSnapshot) runD
 	}
 }
 
-func canonicalEventFiredCandidate(item store.OperatorEventFull, key string) runDebugCandidate {
+func canonicalEventFiredCandidate(item operatorread.OperatorEventFull, key string) runDebugCandidate {
 	payload := map[string]any{
 		"event_name": strings.TrimSpace(item.EventName),
 	}
@@ -282,15 +282,15 @@ func canonicalEventFiredCandidate(item store.OperatorEventFull, key string) runD
 	}
 }
 
-func canonicalRuntimeLogCandidate(item store.OperatorRuntimeLogEntry, key string) runDebugCandidate {
+func canonicalRuntimeLogCandidate(item operatorread.OperatorRuntimeLogEntry, key string) runDebugCandidate {
 	payload := map[string]any{
 		"level":     strings.TrimSpace(item.Level),
 		"component": strings.TrimSpace(item.Component),
 	}
-	if action := stringMapValue(item.Details, "action"); action != "" {
+	if action := strings.TrimSpace(item.Action); action != "" {
 		payload["action"] = action
 	}
-	if eventType := firstNonEmpty(stringMapValue(item.Details, "event_type"), stringMapValue(item.Details, "event_name")); eventType != "" {
+	if eventType := strings.TrimSpace(item.EventType); eventType != "" {
 		payload["event_type"] = eventType
 	}
 	if source := strings.TrimSpace(item.Source); source != "" {
@@ -302,7 +302,7 @@ func canonicalRuntimeLogCandidate(item store.OperatorRuntimeLogEntry, key string
 	if message := strings.TrimSpace(item.Message); message != "" {
 		payload["message"] = message
 	}
-	if detail := builderRuntimeLogDetail(item.Details); len(detail) > 0 {
+	if detail := builderRuntimeLogDetail(item.CanonicalDetail); len(detail) > 0 {
 		payload["detail"] = detail
 	}
 	event := RunEventEnvelope{
@@ -393,30 +393,6 @@ func builderRuntimeLogDetail(details map[string]any) map[string]any {
 		return nil
 	}
 	return out
-}
-
-func stringMapValue(values map[string]any, key string) string {
-	if values == nil {
-		return ""
-	}
-	value, ok := values[key]
-	if !ok {
-		return ""
-	}
-	switch typed := value.(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	default:
-		return strings.Trim(strings.TrimSpace(firstJSONScalar(value)), `"`)
-	}
-}
-
-func firstJSONScalar(value any) string {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return ""
-	}
-	return string(raw)
 }
 
 func cloneStringMap(values map[string]any) map[string]any {

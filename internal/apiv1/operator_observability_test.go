@@ -5,14 +5,15 @@ import (
 	"testing"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	observability := &fakeObservabilityReadStore{
-		traceRows: map[string][]store.RunDebugTraceRow{
+		traceRows: map[string][]operatorread.RunDebugTraceRow{
 			"run-1": {{
 				EventID:        "evt-1",
 				EventName:      "scan.requested",
@@ -23,7 +24,7 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 				DeliveryStatus: "delivered",
 			}},
 		},
-		events: map[string]store.OperatorEventFull{
+		events: map[string]operatorread.OperatorEventFull{
 			"evt-1": {
 				EventID:       "evt-1",
 				EventName:     "scan.requested",
@@ -33,16 +34,16 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 				Source:        "runtime",
 				ProducerType:  events.EventProducerPlatform,
 				Payload:       map[string]any{"ok": true},
-				Deliveries: []store.OperatorEventDelivery{{
+				Deliveries: []operatorread.OperatorEventDelivery{{
 					DeliveryID:     "del-1",
 					SubscriberType: "agent",
 					SubscriberID:   "agent-1",
 					Status:         "delivered",
 				}},
-				DeadLetters: []store.OperatorDeadLetterRecord{},
+				DeadLetters: []operatorread.OperatorDeadLetterRecord{},
 			},
 		},
-		logs: []store.OperatorRuntimeLogEntry{{
+		logs: []operatorread.OperatorRuntimeLogEntry{{
 			LogID:     "log-1",
 			TS:        now,
 			Level:     "warn",
@@ -52,9 +53,12 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 			ErrorCode: "retry_exhausted",
 			SessionID: "sess-1",
 			Message:   "retry exhausted",
-			Details:   map[string]any{"action": "dispatch"},
+			Action:    "dispatch",
+			CanonicalDetail: map[string]any{
+				"action": "dispatch",
+			},
 		}},
-		incidents: []store.OperatorRuntimeIncident{{
+		incidents: []operatorread.OperatorRuntimeIncident{{
 			IncidentID:    "inc-1",
 			FirstSeen:     now,
 			LastSeen:      now,
@@ -68,7 +72,7 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Observability: observability,
 		}),
 	})
@@ -184,7 +188,7 @@ func TestOperatorObservabilityHandlersKeepPayloadEntityOutOfTopLevelEventIdentit
 	now := time.Unix(1700001200, 0).UTC()
 	payloadEntityID := "11111111-1111-4111-8111-111111111111"
 	observability := &fakeObservabilityReadStore{
-		events: map[string]store.OperatorEventFull{
+		events: map[string]operatorread.OperatorEventFull{
 			"evt-payload-only": {
 				EventID:       "evt-payload-only",
 				EventName:     "task.payload_only",
@@ -194,14 +198,14 @@ func TestOperatorObservabilityHandlersKeepPayloadEntityOutOfTopLevelEventIdentit
 				Source:        "runtime",
 				ProducerType:  events.EventProducerPlatform,
 				Payload:       map[string]any{"entity_id": payloadEntityID, "marker": "payload-only"},
-				Deliveries:    []store.OperatorEventDelivery{},
-				DeadLetters:   []store.OperatorDeadLetterRecord{},
+				Deliveries:    []operatorread.OperatorEventDelivery{},
+				DeadLetters:   []operatorread.OperatorDeadLetterRecord{},
 			},
 		},
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Observability: observability,
 		}),
 	})
@@ -245,12 +249,12 @@ func TestOperatorObservabilityHandlersKeepPayloadEntityOutOfTopLevelEventIdentit
 
 func TestOperatorObservabilityHandlersTypedErrors(t *testing.T) {
 	observability := &fakeObservabilityReadStore{
-		traceErr: store.ErrRunNotFound,
-		eventErr: store.ErrEventNotFound,
+		traceErr: operatorread.ErrRunNotFound,
+		eventErr: operatorread.ErrEventNotFound,
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Observability: observability,
 		}),
 	})
@@ -271,7 +275,7 @@ func TestOperatorObservabilityHandlersTypedErrors(t *testing.T) {
 		t.Fatalf("event.get error data = %#v", data)
 	}
 
-	observability.listErr = store.ErrInvalidObservabilityCursor
+	observability.listErr = operatorread.ErrInvalidObservabilityCursor
 	list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"events","method":"event.list","params":{"filter":{"run_id":"run-1"},"cursor":"bad"}}`)
 	if list.Error == nil || list.Error.Code != codeInvalidParams {
 		t.Fatalf("event.list error = %#v, want invalid params", list.Error)
@@ -279,29 +283,29 @@ func TestOperatorObservabilityHandlersTypedErrors(t *testing.T) {
 }
 
 type fakeObservabilityReadStore struct {
-	traceRows map[string][]store.RunDebugTraceRow
+	traceRows map[string][]operatorread.RunDebugTraceRow
 	traceErr  error
 
-	events   map[string]store.OperatorEventFull
+	events   map[string]operatorread.OperatorEventFull
 	eventErr error
 	listErr  error
 
-	logs           []store.OperatorRuntimeLogEntry
+	logs           []operatorread.OperatorRuntimeLogEntry
 	runtimeLogsErr error
-	incidents      []store.OperatorRuntimeIncident
+	incidents      []operatorread.OperatorRuntimeIncident
 
-	lastEventList   store.OperatorEventListOptions
-	lastTrace       store.RunDebugTraceQueryOptions
-	lastRuntimeLogs store.OperatorRuntimeLogListOptions
-	lastIncidents   store.OperatorRuntimeIncidentListOptions
+	lastEventList   operatorread.OperatorEventListOptions
+	lastTrace       operatorread.RunDebugTraceQueryOptions
+	lastRuntimeLogs operatorread.OperatorRuntimeLogListOptions
+	lastIncidents   operatorread.OperatorRuntimeIncidentListOptions
 }
 
-func (s *fakeObservabilityReadStore) LoadRunDebugTracePage(_ context.Context, runID string, opts store.RunDebugTraceQueryOptions) ([]store.RunDebugTraceRow, string, error) {
+func (s *fakeObservabilityReadStore) LoadRunDebugTracePage(_ context.Context, runID string, opts operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, string, error) {
 	s.lastTrace = opts
 	if s.traceErr != nil {
 		return nil, "", s.traceErr
 	}
-	rows := []store.RunDebugTraceRow{}
+	rows := []operatorread.RunDebugTraceRow{}
 	for _, row := range s.traceRows[runID] {
 		if opts.ExcludeRuntimeLogs && row.EventName == "platform.runtime_log" {
 			continue
@@ -317,12 +321,12 @@ func (s *fakeObservabilityReadStore) LoadRunDebugTracePage(_ context.Context, ru
 	return rows, "", nil
 }
 
-func (s *fakeObservabilityReadStore) ListOperatorEvents(_ context.Context, opts store.OperatorEventListOptions) (store.OperatorEventListResult, error) {
+func (s *fakeObservabilityReadStore) ListOperatorEvents(_ context.Context, opts operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error) {
 	s.lastEventList = opts
 	if s.listErr != nil {
-		return store.OperatorEventListResult{}, s.listErr
+		return operatorread.OperatorEventListResult{}, s.listErr
 	}
-	out := make([]store.OperatorEventFull, 0, len(s.events))
+	out := make([]operatorread.OperatorEventFull, 0, len(s.events))
 	for _, event := range s.events {
 		if opts.Since != nil && !event.CreatedAt.After(opts.Since.UTC()) {
 			continue
@@ -338,26 +342,26 @@ func (s *fakeObservabilityReadStore) ListOperatorEvents(_ context.Context, opts 
 		}
 		out = append(out, event)
 	}
-	return store.OperatorEventListResult{Events: out}, nil
+	return operatorread.OperatorEventListResult{Events: out}, nil
 }
 
-func (s *fakeObservabilityReadStore) LoadOperatorEvent(_ context.Context, eventID string) (store.OperatorEventFull, error) {
+func (s *fakeObservabilityReadStore) LoadOperatorEvent(_ context.Context, eventID string) (operatorread.OperatorEventFull, error) {
 	if s.eventErr != nil {
-		return store.OperatorEventFull{}, s.eventErr
+		return operatorread.OperatorEventFull{}, s.eventErr
 	}
 	event, ok := s.events[eventID]
 	if !ok {
-		return store.OperatorEventFull{}, store.ErrEventNotFound
+		return operatorread.OperatorEventFull{}, operatorread.ErrEventNotFound
 	}
 	return event, nil
 }
 
-func (s *fakeObservabilityReadStore) ListOperatorRuntimeLogs(_ context.Context, opts store.OperatorRuntimeLogListOptions) (store.OperatorRuntimeLogListResult, error) {
+func (s *fakeObservabilityReadStore) ListOperatorRuntimeLogs(_ context.Context, opts operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error) {
 	s.lastRuntimeLogs = opts
 	if s.runtimeLogsErr != nil {
-		return store.OperatorRuntimeLogListResult{}, s.runtimeLogsErr
+		return operatorread.OperatorRuntimeLogListResult{}, s.runtimeLogsErr
 	}
-	out := make([]store.OperatorRuntimeLogEntry, 0, len(s.logs))
+	out := make([]operatorread.OperatorRuntimeLogEntry, 0, len(s.logs))
 	for _, log := range s.logs {
 		if opts.Since != nil && !log.TS.After(opts.Since.UTC()) {
 			continue
@@ -388,12 +392,12 @@ func (s *fakeObservabilityReadStore) ListOperatorRuntimeLogs(_ context.Context, 
 		}
 		out = append(out, log)
 	}
-	return store.OperatorRuntimeLogListResult{Logs: out}, nil
+	return operatorread.OperatorRuntimeLogListResult{Logs: out}, nil
 }
 
-func (s *fakeObservabilityReadStore) ListOperatorRuntimeIncidents(_ context.Context, opts store.OperatorRuntimeIncidentListOptions) (store.OperatorRuntimeIncidentListResult, error) {
+func (s *fakeObservabilityReadStore) ListOperatorRuntimeIncidents(_ context.Context, opts operatorread.OperatorRuntimeIncidentListOptions) (operatorread.OperatorRuntimeIncidentListResult, error) {
 	s.lastIncidents = opts
-	return store.OperatorRuntimeIncidentListResult{Incidents: s.incidents}, nil
+	return operatorread.OperatorRuntimeIncidentListResult{Incidents: s.incidents}, nil
 }
 
 var _ ObservabilityReadStore = (*fakeObservabilityReadStore)(nil)

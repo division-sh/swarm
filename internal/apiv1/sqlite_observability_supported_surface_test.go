@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
@@ -17,7 +19,6 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	storepkg "github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -37,14 +38,14 @@ func TestPostgresObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T) {
 
 func assertObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T, fixture observabilitySurfaceFixture) {
 	t.Helper()
-	readOpts := OperatorReadOptions{
+	readOpts := testOperatorCapabilities{
 		Now:           func() time.Time { return fixture.now.Add(time.Minute) },
 		Observability: fixture.store,
 	}
 	handler := testHandler(t, Options{
 		AuthTokens:    []string{testToken},
-		Handlers:      OperatorReadHandlers(readOpts),
-		Subscriptions: OperatorSubscriptions(readOpts, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
+		Handlers:      testOperatorHandlers(readOpts),
+		Subscriptions: testOperatorSubscriptions(readOpts, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
 	})
 
 	trace := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"trace","method":"run.trace","params":{"run_id":%q,"filter":{"event_name":["trace.visible"]},"limit":10}}`, fixture.runID))
@@ -204,7 +205,7 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:           func() time.Time { return base.Add(time.Minute) },
 			Observability: sqliteStore,
 		}),
@@ -344,7 +345,7 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 	}); err != nil {
 		t.Fatalf("RuntimeLogger.Log error runtime log: %v", err)
 	}
-	logs, err := store.ListOperatorRuntimeLogs(ctx, storepkg.OperatorRuntimeLogListOptions{
+	logs, err := store.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		Component: "scheduler",
 		Level:     "warn",
@@ -356,7 +357,7 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 	if len(logs.Logs) != 1 {
 		t.Fatalf("logger-written runtime logs = %#v, want one", logs.Logs)
 	}
-	incidents, err := store.ListOperatorRuntimeIncidents(ctx, storepkg.OperatorRuntimeIncidentListOptions{
+	incidents, err := store.ListOperatorRuntimeIncidents(ctx, operatorread.OperatorRuntimeIncidentListOptions{
 		Component: "scheduler",
 		Level:     "error",
 		Limit:     10,

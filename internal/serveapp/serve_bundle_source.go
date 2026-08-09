@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/bundlecatalog"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 func prepareServeBundleSource(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle, dev bool) (runtimecorrelation.BundleSourceFact, error) {
@@ -25,7 +25,7 @@ func prepareServeBundleSource(ctx context.Context, stores storeBundle, bundle *r
 	if projection.BundleHash != bundleHash {
 		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("bundle catalog projection hash %q does not match source fact %q", projection.BundleHash, bundleHash)
 	}
-	if _, err := catalog.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
+	if _, err := catalog.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
 		BundleHash:  projection.BundleHash,
 		ContentYAML: projection.ContentYAML,
 		ParsedJSON:  projection.ParsedJSON,

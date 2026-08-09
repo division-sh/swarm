@@ -5,14 +5,10 @@ import (
 	"database/sql"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
-
-type AgentDeliveryLifecycleFacts struct {
-	CurrentState  string
-	BlockingLayer string
-}
 
 type agentLifecycleDeliveryRecord struct {
 	AgentIdentity   agentidentity.Identity
@@ -22,7 +18,7 @@ type agentLifecycleDeliveryRecord struct {
 	DeliveredAt     sql.NullTime
 }
 
-func (s *OperatorPostgres) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]AgentDeliveryLifecycleFacts, error) {
+func (s *AgentPostgres) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
@@ -31,15 +27,15 @@ func (s *OperatorPostgres) ListAgentDeliveryLifecycleFacts(ctx context.Context, 
 		return nil, err
 	}
 	if len(normalized) == 0 {
-		return map[agentidentity.Identity]AgentDeliveryLifecycleFacts{}, nil
+		return map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts{}, nil
 	}
 	records, err := s.listAgentLifecycleRecordsSpec(ctx, normalized)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[agentidentity.Identity]AgentDeliveryLifecycleFacts, len(normalized))
+	out := make(map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, len(normalized))
 	for _, identity := range normalized {
-		out[identity] = AgentDeliveryLifecycleFacts{}
+		out[identity] = operatorread.AgentDeliveryLifecycleFacts{}
 	}
 	grouped := make(map[agentidentity.Identity][]agentLifecycleDeliveryRecord, len(normalized))
 	for _, record := range records {
@@ -51,7 +47,7 @@ func (s *OperatorPostgres) ListAgentDeliveryLifecycleFacts(ctx context.Context, 
 	return out, nil
 }
 
-func (s *OperatorPostgres) listAgentLifecycleRecordsSpec(ctx context.Context, identities []agentidentity.Identity) ([]agentLifecycleDeliveryRecord, error) {
+func (s *AgentPostgres) listAgentLifecycleRecordsSpec(ctx context.Context, identities []agentidentity.Identity) ([]agentLifecycleDeliveryRecord, error) {
 	snapshots, err := operatorPostgresDelivery.CurrentAgentSnapshots(ctx, s.backend, identities)
 	if err != nil {
 		return nil, err
@@ -75,12 +71,12 @@ func agentLifecycleRecordsFromSnapshots(snapshots []runtimedelivery.Snapshot) []
 }
 
 type agentLifecycleCandidate struct {
-	facts      AgentDeliveryLifecycleFacts
+	facts      operatorread.AgentDeliveryLifecycleFacts
 	observedAt time.Time
 	priority   int
 }
 
-func canonicalAgentDeliveryLifecycleFactsFromRecords(records []agentLifecycleDeliveryRecord) AgentDeliveryLifecycleFacts {
+func canonicalAgentDeliveryLifecycleFactsFromRecords(records []agentLifecycleDeliveryRecord) operatorread.AgentDeliveryLifecycleFacts {
 	var live *agentLifecycleCandidate
 	var exhausted *agentLifecycleCandidate
 	for _, record := range records {
@@ -89,7 +85,7 @@ func canonicalAgentDeliveryLifecycleFactsFromRecords(records []agentLifecycleDel
 			continue
 		}
 		candidate := agentLifecycleCandidate{
-			facts: AgentDeliveryLifecycleFacts{
+			facts: operatorread.AgentDeliveryLifecycleFacts{
 				CurrentState:  string(state),
 				BlockingLayer: agentLifecycleBlockingLayer(state),
 			},
@@ -113,7 +109,7 @@ func canonicalAgentDeliveryLifecycleFactsFromRecords(records []agentLifecycleDel
 	if exhausted != nil {
 		return exhausted.facts
 	}
-	return AgentDeliveryLifecycleFacts{}
+	return operatorread.AgentDeliveryLifecycleFacts{}
 }
 
 func agentLifecycleObservedAt(record agentLifecycleDeliveryRecord) time.Time {

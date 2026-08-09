@@ -14,8 +14,10 @@ import (
 	"testing"
 	"time"
 
+	apiidempotency "github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -194,15 +196,15 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 		t.Fatalf("stopped run state = %+v, want cancelled/stopped", stoppedRun)
 	}
 
-	req := APIIdempotencyRequest{
+	req := apiidempotency.Request{
 		Method:         "mailbox.decide",
 		ActorTokenID:   "token-1",
 		IdempotencyKey: "idem-1",
 		RequestHash:    "hash-1",
 		Now:            time.Now().UTC(),
 	}
-	first, replayed, err := store.WithAPIIdempotency(ctx, req, func(context.Context) (APIIdempotencyCompletion, error) {
-		return APIIdempotencyCompletion{ResourceID: itemID, Response: json.RawMessage(`{"ok":true}`)}, nil
+	first, replayed, err := store.WithAPIIdempotency(ctx, req, func(context.Context) (apiidempotency.Completion, error) {
+		return apiidempotency.Completion{ResourceID: itemID, Response: json.RawMessage(`{"ok":true}`)}, nil
 	})
 	if err != nil {
 		t.Fatalf("WithAPIIdempotency first: %v", err)
@@ -210,8 +212,8 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	if replayed || first.ResourceID != itemID {
 		t.Fatalf("first idempotency completion=%+v replayed=%v, want new item", first, replayed)
 	}
-	second, replayed, err := store.WithAPIIdempotency(ctx, req, func(context.Context) (APIIdempotencyCompletion, error) {
-		return APIIdempotencyCompletion{ResourceID: "wrong", Response: json.RawMessage(`{"ok":false}`)}, nil
+	second, replayed, err := store.WithAPIIdempotency(ctx, req, func(context.Context) (apiidempotency.Completion, error) {
+		return apiidempotency.Completion{ResourceID: "wrong", Response: json.RawMessage(`{"ok":false}`)}, nil
 	})
 	if err != nil {
 		t.Fatalf("WithAPIIdempotency replay: %v", err)
@@ -220,11 +222,11 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 		t.Fatalf("second idempotency completion=%+v replayed=%v, want replayed item", second, replayed)
 	}
 	req.RequestHash = "hash-2"
-	_, _, err = store.WithAPIIdempotency(ctx, req, func(context.Context) (APIIdempotencyCompletion, error) {
-		return APIIdempotencyCompletion{ResourceID: "wrong", Response: json.RawMessage(`{"ok":false}`)}, nil
+	_, _, err = store.WithAPIIdempotency(ctx, req, func(context.Context) (apiidempotency.Completion, error) {
+		return apiidempotency.Completion{ResourceID: "wrong", Response: json.RawMessage(`{"ok":false}`)}, nil
 	})
-	if !errors.Is(err, ErrAPIIdempotencyConflict) {
-		t.Fatalf("idempotency conflict err = %v, want ErrAPIIdempotencyConflict", err)
+	if !errors.Is(err, apiidempotency.ErrConflict) {
+		t.Fatalf("idempotency conflict err = %v, want apiidempotency.ErrConflict", err)
 	}
 }
 
@@ -875,7 +877,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := "11111111-1111-1111-1111-111111111111"
-	req := APIIdempotencyRequest{
+	req := apiidempotency.Request{
 		Method:         "event.publish",
 		ActorTokenID:   "token-1",
 		IdempotencyKey: "idem-nested-publish",
@@ -883,7 +885,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.
 		Now:            time.Now().UTC(),
 	}
 	publishCalls := 0
-	publish := func(ctx context.Context) (APIIdempotencyCompletion, error) {
+	publish := func(ctx context.Context) (apiidempotency.Completion, error) {
 		publishCalls++
 		if err := bus.Publish(ctx, eventtest.RunCreatingRootIngress(
 			eventID,
@@ -897,13 +899,13 @@ func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.
 			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 			time.Now().UTC(),
 		)); err != nil {
-			return APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
 		response, err := json.Marshal(map[string]string{"event_id": eventID, "run_id": runID})
 		if err != nil {
-			return APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
-		return APIIdempotencyCompletion{ResourceID: eventID, Response: response}, nil
+		return apiidempotency.Completion{ResourceID: eventID, Response: response}, nil
 	}
 
 	first, replayed, err := store.WithAPIIdempotency(ctx, req, publish)
@@ -917,8 +919,8 @@ func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.
 	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM events WHERE event_id = ?`, 1, eventID)
 	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM api_idempotency WHERE method = ? AND idempotency_key = ?`, 1, req.Method, req.IdempotencyKey)
 
-	second, replayed, err := store.WithAPIIdempotency(ctx, req, func(context.Context) (APIIdempotencyCompletion, error) {
-		return APIIdempotencyCompletion{}, errors.New("replay executed callback")
+	second, replayed, err := store.WithAPIIdempotency(ctx, req, func(context.Context) (apiidempotency.Completion, error) {
+		return apiidempotency.Completion{}, errors.New("replay executed callback")
 	})
 	if err != nil {
 		t.Fatalf("WithAPIIdempotency replay: %v", err)
@@ -928,11 +930,11 @@ func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.
 	}
 
 	req.RequestHash = "hash-nested-publish-conflict"
-	_, _, err = store.WithAPIIdempotency(ctx, req, func(context.Context) (APIIdempotencyCompletion, error) {
-		return APIIdempotencyCompletion{}, errors.New("conflict executed callback")
+	_, _, err = store.WithAPIIdempotency(ctx, req, func(context.Context) (apiidempotency.Completion, error) {
+		return apiidempotency.Completion{}, errors.New("conflict executed callback")
 	})
-	if !errors.Is(err, ErrAPIIdempotencyConflict) {
-		t.Fatalf("conflict err = %v, want ErrAPIIdempotencyConflict", err)
+	if !errors.Is(err, apiidempotency.ErrConflict) {
+		t.Fatalf("conflict err = %v, want apiidempotency.ErrConflict", err)
 	}
 	assertSQLiteRuntimeCount(t, store, `SELECT COUNT(*) FROM events WHERE event_id = ?`, 1, eventID)
 }
@@ -953,14 +955,14 @@ func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOr
 
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	req := APIIdempotencyRequest{
+	req := apiidempotency.Request{
 		Method:         "event.publish",
 		ActorTokenID:   "token-1",
 		IdempotencyKey: "idem-failed-publish",
 		RequestHash:    "hash-failed-publish",
 		Now:            time.Now().UTC(),
 	}
-	completion, replayed, err := store.WithAPIIdempotency(ctx, req, func(ctx context.Context) (APIIdempotencyCompletion, error) {
+	completion, replayed, err := store.WithAPIIdempotency(ctx, req, func(ctx context.Context) (apiidempotency.Completion, error) {
 		err := bus.Publish(ctx, eventtest.RunCreatingRootIngress(
 			eventID,
 			events.EventType("item.failed"),
@@ -974,9 +976,9 @@ func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOr
 			time.Now().UTC(),
 		))
 		if err != nil {
-			return APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
-		return APIIdempotencyCompletion{ResourceID: eventID, Response: json.RawMessage(`{"ok":true}`)}, nil
+		return apiidempotency.Completion{ResourceID: eventID, Response: json.RawMessage(`{"ok":true}`)}, nil
 	})
 	if err == nil {
 		t.Fatal("WithAPIIdempotency failed publish err = nil")
@@ -995,7 +997,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyCompletionSerializesWithConcurrentMutat
 	db := selected.backend.ConstructionHandle()
 	configureSQLiteBusyTimeoutForAllConnections(t, db, time.Millisecond)
 
-	req := APIIdempotencyRequest{
+	req := apiidempotency.Request{
 		Method:         "event.publish",
 		ActorTokenID:   "token-1",
 		IdempotencyKey: "idem-concurrent-completion",
@@ -1006,14 +1008,14 @@ func TestSQLiteRuntimeStoreAPIIdempotencyCompletionSerializesWithConcurrentMutat
 	holderRelease := make(chan struct{})
 	holderDone := make(chan error, 1)
 	type callResult struct {
-		completion APIIdempotencyCompletion
+		completion apiidempotency.Completion
 		replayed   bool
 		err        error
 	}
 	callDone := make(chan callResult, 1)
 
 	go func() {
-		completion, replayed, err := selected.WithAPIIdempotency(ctx, req, func(context.Context) (APIIdempotencyCompletion, error) {
+		completion, replayed, err := selected.WithAPIIdempotency(ctx, req, func(context.Context) (apiidempotency.Completion, error) {
 			go func() {
 				holderDone <- selected.backend.RunTransaction(ctx, "sqlite idempotency overlap proof", func(txCtx context.Context, tx *sql.Tx) error {
 					_, err := tx.ExecContext(txCtx, `
@@ -1031,7 +1033,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencyCompletionSerializesWithConcurrentMutat
 				})
 			}()
 			<-holderStarted
-			return APIIdempotencyCompletion{ResourceID: "event-1", Response: json.RawMessage(`{"event_id":"event-1"}`)}, nil
+			return apiidempotency.Completion{ResourceID: "event-1", Response: json.RawMessage(`{"event_id":"event-1"}`)}, nil
 		})
 		callDone <- callResult{completion: completion, replayed: replayed, err: err}
 	}()
@@ -1051,8 +1053,8 @@ func TestSQLiteRuntimeStoreAPIIdempotencyCompletionSerializesWithConcurrentMutat
 		t.Fatalf("idempotency completion = %+v, want committed first result", result)
 	}
 
-	replayed, wasReplay, err := selected.WithAPIIdempotency(ctx, req, func(context.Context) (APIIdempotencyCompletion, error) {
-		return APIIdempotencyCompletion{}, errors.New("replay executed callback")
+	replayed, wasReplay, err := selected.WithAPIIdempotency(ctx, req, func(context.Context) (apiidempotency.Completion, error) {
+		return apiidempotency.Completion{}, errors.New("replay executed callback")
 	})
 	if err != nil || !wasReplay || replayed.ResourceID != "event-1" {
 		t.Fatalf("idempotency replay = %+v replayed=%v err=%v", replayed, wasReplay, err)
@@ -1087,7 +1089,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles(t *test
 	dbPath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 	storeA := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath)
 	storeB := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath)
-	req := APIIdempotencyRequest{
+	req := apiidempotency.Request{
 		Method:         "event.publish",
 		ActorTokenID:   "token-1",
 		IdempotencyKey: "idem-shared-path",
@@ -1096,7 +1098,7 @@ func TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles(t *test
 	}
 
 	type callResult struct {
-		completion APIIdempotencyCompletion
+		completion apiidempotency.Completion
 		replayed   bool
 		err        error
 	}
@@ -1108,13 +1110,13 @@ func TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles(t *test
 	var callbackCalls atomic.Int32
 
 	go func() {
-		completion, replayed, err := storeA.WithAPIIdempotency(ctx, req, func(context.Context) (APIIdempotencyCompletion, error) {
+		completion, replayed, err := storeA.WithAPIIdempotency(ctx, req, func(context.Context) (apiidempotency.Completion, error) {
 			if calls := callbackCalls.Add(1); calls != 1 {
 				secondExecuted <- struct{}{}
 			}
 			close(firstStarted)
 			<-releaseFirst
-			return APIIdempotencyCompletion{ResourceID: "resource-1", Response: json.RawMessage(`{"ok":true}`)}, nil
+			return apiidempotency.Completion{ResourceID: "resource-1", Response: json.RawMessage(`{"ok":true}`)}, nil
 		})
 		firstDone <- callResult{completion: completion, replayed: replayed, err: err}
 	}()
@@ -1126,10 +1128,10 @@ func TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles(t *test
 	}
 
 	go func() {
-		completion, replayed, err := storeB.WithAPIIdempotency(ctx, req, func(context.Context) (APIIdempotencyCompletion, error) {
+		completion, replayed, err := storeB.WithAPIIdempotency(ctx, req, func(context.Context) (apiidempotency.Completion, error) {
 			callbackCalls.Add(1)
 			secondExecuted <- struct{}{}
-			return APIIdempotencyCompletion{ResourceID: "resource-2", Response: json.RawMessage(`{"ok":false}`)}, nil
+			return apiidempotency.Completion{ResourceID: "resource-2", Response: json.RawMessage(`{"ok":false}`)}, nil
 		})
 		secondDone <- callResult{completion: completion, replayed: replayed, err: err}
 	}()
@@ -1402,14 +1404,14 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	})); err != nil {
 		t.Fatalf("AppendAgentTurn: %v", err)
 	}
-	trace, _, err := store.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10})
+	trace, _, err := store.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage: %v", err)
 	}
 	if len(trace) != 1 || trace[0].EventID != eventID || trace[0].SessionID != lease.SessionID || trace[0].TurnTriggerEventID != eventID {
 		t.Fatalf("trace = %#v, want event/session/turn visibility", trace)
 	}
-	eventsPage, err := store.ListOperatorEvents(ctx, OperatorEventListOptions{Filter: OperatorEventListFilter{RunID: runID}, Limit: 10})
+	eventsPage, err := store.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{Filter: operatorread.OperatorEventListFilter{RunID: runID}, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListOperatorEvents: %v", err)
 	}
@@ -1424,7 +1426,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 		"runtime", "", json.RawMessage(`{"log_level":"warn","message":"runtime warning","details":{"component":"scheduler","action":"session_warning","session_id":"`+lease.SessionID+`"}}`), 0, runID, "", events.EventEnvelope{}, now.Add(time.Second))); err != nil {
 		t.Fatalf("AppendEvent runtime log: %v", err)
 	}
-	logs, err := store.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{RunID: runID, Level: "warn", Component: "scheduler", Limit: 10})
+	logs, err := store.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{RunID: runID, Level: "warn", Component: "scheduler", Limit: 10})
 	if err != nil {
 		t.Fatalf("ListOperatorRuntimeLogs: %v", err)
 	}
@@ -1733,7 +1735,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	}
 }
 
-func operatorDeliveriesContain(deliveries []OperatorEventDelivery, subscriberType, subscriberID string) bool {
+func operatorDeliveriesContain(deliveries []operatorread.OperatorEventDelivery, subscriberType, subscriberID string) bool {
 	for _, delivery := range deliveries {
 		if delivery.SubscriberType == subscriberType && delivery.SubscriberID == subscriberID {
 			return true

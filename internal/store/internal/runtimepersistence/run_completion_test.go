@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -122,11 +123,11 @@ func TestPostgresStore_ConvergeNormalRunCompletion_MarksCompletedWhenTerminalAnd
 	if header.Status != "completed" || header.EndedAt == nil {
 		t.Fatalf("run header = status:%q ended:%v, want completed with ended_at", header.Status, header.EndedAt)
 	}
-	report, err := pg.LoadRunDebugReport(ctx, fixture.RunID, RunDebugQueryOptions{})
+	report, err := pg.LoadRunDebugReport(ctx, fixture.RunID, operatorread.RunDebugQueryOptions{})
 	if err != nil {
 		t.Fatalf("LoadRunDebugReport: %v", err)
 	}
-	if got := ProjectRunOperationalStatus(report).State; got != "completed" {
+	if got := operatorread.ProjectRunOperationalStatus(report).State; got != "completed" {
 		t.Fatalf("run operational state = %q, want completed", got)
 	}
 }

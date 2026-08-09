@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	apiidempotency "github.com/division-sh/swarm/internal/apiidempotency"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -20,11 +22,11 @@ type forkChatCompletionAuthorityStore interface {
 	runtimeeffects.CompletionStore
 	runtimeeffects.CompletionHeartbeatStore
 	runtimeeffects.RecoveryStore
-	CreateOperatorConversationFork(context.Context, ConversationForkCreateRequest) (OperatorConversationForkSession, error)
-	PrepareOperatorConversationForkChat(context.Context, ConversationForkChatPrepareRequest) (ConversationForkChatPrepared, error)
-	HeartbeatOperatorConversationForkChat(context.Context, ConversationForkChatPrepared, time.Time) error
-	RecordOperatorConversationForkChat(context.Context, ConversationForkChatRecordRequest) (ConversationForkChatResult, error)
-	FailOperatorConversationForkChat(context.Context, ConversationForkChatFailureRequest) error
+	CreateOperatorConversationFork(context.Context, runfork.ConversationForkCreateRequest) (runfork.OperatorConversationForkSession, error)
+	PrepareOperatorConversationForkChat(context.Context, runfork.ConversationForkChatPrepareRequest) (runfork.ConversationForkChatPrepared, error)
+	HeartbeatOperatorConversationForkChat(context.Context, runfork.ConversationForkChatPrepared, time.Time) error
+	RecordOperatorConversationForkChat(context.Context, runfork.ConversationForkChatRecordRequest) (runfork.ConversationForkChatResult, error)
+	FailOperatorConversationForkChat(context.Context, runfork.ConversationForkChatFailureRequest) error
 }
 
 type forkChatCompletionAuthorityFixture struct {
@@ -33,7 +35,7 @@ type forkChatCompletionAuthorityFixture struct {
 	sqlite bool
 	now    time.Time
 	source conversationForkSourceFixture
-	fork   OperatorConversationForkSession
+	fork   runfork.OperatorConversationForkSession
 }
 
 func TestForkChatCompletionGroupLifecycle(t *testing.T) {
@@ -119,7 +121,7 @@ func proveForkChatCompletionGroupCapRejection(t *testing.T, fixture forkChatComp
 	if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassBudgetExhausted {
 		t.Fatalf("cap rejection=%v, want budget exhausted", err)
 	}
-	if err := fixture.store.FailOperatorConversationForkChat(ctx, ConversationForkChatFailureRequest{Prepared: prepared, Cause: err, Now: fixture.now.Add(2 * time.Second)}); err != nil {
+	if err := fixture.store.FailOperatorConversationForkChat(ctx, runfork.ConversationForkChatFailureRequest{Prepared: prepared, Cause: err, Now: fixture.now.Add(2 * time.Second)}); err != nil {
 		t.Fatalf("terminalize cap-rejected forkchat group: %v", err)
 	}
 	requireForkChatGroupState(t, fixture, prepared.ForkTurnID, "failed", true)
@@ -143,7 +145,7 @@ func proveForkChatCompletionGroupPrelaunchFailure(t *testing.T, fixture forkChat
 	ctx, handle := beginForkChatCompletionAttempt(t, fixture, prepared, 1, "prelaunch")
 	failureErr := runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "provider_prelaunch_rejected", "forkchat-test", "launch", nil)
 	settleForkChatPrelaunchFailure(t, ctx, handle, prepared, failureErr, fixture.now.Add(2*time.Second))
-	if err := fixture.store.FailOperatorConversationForkChat(ctx, ConversationForkChatFailureRequest{Prepared: prepared, Cause: failureErr, Now: fixture.now.Add(3 * time.Second)}); err != nil {
+	if err := fixture.store.FailOperatorConversationForkChat(ctx, runfork.ConversationForkChatFailureRequest{Prepared: prepared, Cause: failureErr, Now: fixture.now.Add(3 * time.Second)}); err != nil {
 		t.Fatalf("terminalize prelaunch forkchat group: %v", err)
 	}
 	requireForkChatGroupState(t, fixture, prepared.ForkTurnID, "failed", true)
@@ -162,7 +164,7 @@ func proveForkChatCompletionGroupPartialRounds(t *testing.T, fixture forkChatCom
 	launchAndObserveForkChatCompletion(t, ctx2, second, "round-2")
 	failureErr := runtimefailures.New(runtimefailures.ClassSchemaInvalid, "provider_round_parse_failed", "forkchat-test", "parse", nil)
 	settleForkChatCompletionAttempt(t, ctx2, second, prepared, runtimeeffects.StateTerminalFailure, failureErr, fixture.now.Add(3*time.Second))
-	if err := fixture.store.FailOperatorConversationForkChat(ctx2, ConversationForkChatFailureRequest{Prepared: prepared, Cause: failureErr, Now: fixture.now.Add(4 * time.Second)}); err != nil {
+	if err := fixture.store.FailOperatorConversationForkChat(ctx2, runfork.ConversationForkChatFailureRequest{Prepared: prepared, Cause: failureErr, Now: fixture.now.Add(4 * time.Second)}); err != nil {
 		t.Fatalf("terminalize partial-round forkchat group: %v", err)
 	}
 	requireForkChatGroupState(t, fixture, prepared.ForkTurnID, "failed", true)
@@ -225,14 +227,14 @@ func proveForkChatCompletionGroupSucceededReplay(t *testing.T, fixture forkChatC
 
 func proveForkChatCompletionGroupConflictingRequestReuse(t *testing.T, fixture forkChatCompletionAuthorityFixture) {
 	prepared := prepareForkChatCompletionGroup(t, fixture, "conflict-key", "original request")
-	_, err := fixture.store.PrepareOperatorConversationForkChat(testAuthorActivityContext(), ConversationForkChatPrepareRequest{
+	_, err := fixture.store.PrepareOperatorConversationForkChat(testAuthorActivityContext(), runfork.ConversationForkChatPrepareRequest{
 		ForkID: fixture.fork.ForkID, Message: "changed request", Method: "conversation.fork_chat",
 		ActorTokenID: prepared.ActorTokenID, RequestHash: runtimeeffects.Fingerprint([]byte("changed request")),
 		IdempotencyKey: prepared.IdempotencyKey, Now: fixture.now.Add(2 * time.Second),
 	})
-	var conflict *APIIdempotencyConflictError
+	var conflict *apiidempotency.ConflictError
 	if !errors.As(err, &conflict) {
-		t.Fatalf("conflicting keyed forkchat request error=%v, want APIIdempotencyConflictError", err)
+		t.Fatalf("conflicting keyed forkchat request error=%v, want apiidempotency.ConflictError", err)
 	}
 	requireForkChatGroupRows(t, fixture, prepared.ForkTurnID, 0, 0)
 }
@@ -261,8 +263,8 @@ func newForkChatCompletionAuthorityFixture(t *testing.T, sqlite bool) forkChatCo
 		store, db = s, pgDB
 		source = seedConversationForkSource(t, db, now)
 	}
-	fork, err := store.CreateOperatorConversationFork(testAuthorActivityContext(), ConversationForkCreateRequest{
-		SourceSessionID: source.sessionID, ForkPoint: ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
+	fork, err := store.CreateOperatorConversationFork(testAuthorActivityContext(), runfork.ConversationForkCreateRequest{
+		SourceSessionID: source.sessionID, ForkPoint: runfork.ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
 		CreatedBy: "actor-token", Now: now,
 	})
 	if err != nil {
@@ -271,9 +273,9 @@ func newForkChatCompletionAuthorityFixture(t *testing.T, sqlite bool) forkChatCo
 	return forkChatCompletionAuthorityFixture{store: store, db: db, sqlite: sqlite, now: now, source: source, fork: fork}
 }
 
-func prepareForkChatCompletionGroup(t *testing.T, fixture forkChatCompletionAuthorityFixture, key, message string) ConversationForkChatPrepared {
+func prepareForkChatCompletionGroup(t *testing.T, fixture forkChatCompletionAuthorityFixture, key, message string) runfork.ConversationForkChatPrepared {
 	t.Helper()
-	prepared, err := fixture.store.PrepareOperatorConversationForkChat(testAuthorActivityContext(), ConversationForkChatPrepareRequest{
+	prepared, err := fixture.store.PrepareOperatorConversationForkChat(testAuthorActivityContext(), runfork.ConversationForkChatPrepareRequest{
 		ForkID: fixture.fork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
 		RequestHash: runtimeeffects.Fingerprint([]byte(message)), IdempotencyKey: key, Now: fixture.now.Add(time.Second),
 	})
@@ -283,7 +285,7 @@ func prepareForkChatCompletionGroup(t *testing.T, fixture forkChatCompletionAuth
 	return prepared
 }
 
-func forkChatCompletionAuthority(prepared ConversationForkChatPrepared, ordinal int) runtimeeffects.Authority {
+func forkChatCompletionAuthority(prepared runfork.ConversationForkChatPrepared, ordinal int) runtimeeffects.Authority {
 	return runtimeeffects.Authority{
 		Kind: runtimeeffects.AuthorityConversationForkChat, ID: prepared.ForkTurnID,
 		ExecutionOwner: prepared.ExecutionOwner, LeaseExpiresAt: prepared.LeaseExpiresAt, FenceGeneration: prepared.FenceGeneration,
@@ -301,7 +303,7 @@ func forkChatCompletionContext(fixture forkChatCompletionAuthorityFixture, autho
 	return runtimeeffects.WithLogicalOperationIdentity(ctx, "forkchat:"+authority.ForkChat.RequestOccurrenceID+":"+suffix)
 }
 
-func beginForkChatCompletionAttempt(t *testing.T, fixture forkChatCompletionAuthorityFixture, prepared ConversationForkChatPrepared, ordinal int, suffix string) (context.Context, *runtimeeffects.Handle) {
+func beginForkChatCompletionAttempt(t *testing.T, fixture forkChatCompletionAuthorityFixture, prepared runfork.ConversationForkChatPrepared, ordinal int, suffix string) (context.Context, *runtimeeffects.Handle) {
 	t.Helper()
 	authority := forkChatCompletionAuthority(prepared, ordinal)
 	ctx := forkChatCompletionContext(fixture, authority, suffix)
@@ -322,7 +324,7 @@ func launchAndObserveForkChatCompletion(t *testing.T, ctx context.Context, handl
 	}
 }
 
-func settleForkChatCompletionAttempt(t *testing.T, ctx context.Context, handle *runtimeeffects.Handle, prepared ConversationForkChatPrepared, state runtimeeffects.State, cause error, now time.Time) {
+func settleForkChatCompletionAttempt(t *testing.T, ctx context.Context, handle *runtimeeffects.Handle, prepared runfork.ConversationForkChatPrepared, state runtimeeffects.State, cause error, now time.Time) {
 	t.Helper()
 	input, output := int64(3), int64(2)
 	settlement := runtimeeffects.CompletionSettlement{
@@ -347,7 +349,7 @@ func settleForkChatCompletionAttempt(t *testing.T, ctx context.Context, handle *
 	}
 }
 
-func settleForkChatPrelaunchFailure(t *testing.T, ctx context.Context, handle *runtimeeffects.Handle, prepared ConversationForkChatPrepared, cause error, now time.Time) {
+func settleForkChatPrelaunchFailure(t *testing.T, ctx context.Context, handle *runtimeeffects.Handle, prepared runfork.ConversationForkChatPrepared, cause error, now time.Time) {
 	t.Helper()
 	failure := runtimefailures.FromError(cause, "forkchat-test", "settle")
 	settlement := runtimeeffects.CompletionSettlement{
@@ -368,10 +370,10 @@ func settleForkChatPrelaunchFailure(t *testing.T, ctx context.Context, handle *r
 	}
 }
 
-func successfulForkChatRecord(prepared ConversationForkChatPrepared, message string, now time.Time) ConversationForkChatRecordRequest {
-	return ConversationForkChatRecordRequest{
+func successfulForkChatRecord(prepared runfork.ConversationForkChatPrepared, message string, now time.Time) runfork.ConversationForkChatRecordRequest {
+	return runfork.ConversationForkChatRecordRequest{
 		ForkID: prepared.Fork.ForkID, Message: message, ActorTokenID: prepared.ActorTokenID, Prepared: prepared,
-		Execution: ConversationForkChatExecution{
+		Execution: runfork.ConversationForkChatExecution{
 			AssistantMessage: "forkchat complete", AvailableTools: prepared.AvailableTools,
 			ExecutionOwner: prepared.ExecutionOwner, FenceGeneration: prepared.FenceGeneration,
 		},
@@ -379,13 +381,13 @@ func successfulForkChatRecord(prepared ConversationForkChatPrepared, message str
 	}
 }
 
-func requireForkChatReplayState(t *testing.T, fixture forkChatCompletionAuthorityFixture, prepared ConversationForkChatPrepared, message, wantState string) {
+func requireForkChatReplayState(t *testing.T, fixture forkChatCompletionAuthorityFixture, prepared runfork.ConversationForkChatPrepared, message, wantState string) {
 	t.Helper()
-	_, err := fixture.store.PrepareOperatorConversationForkChat(testAuthorActivityContext(), ConversationForkChatPrepareRequest{
+	_, err := fixture.store.PrepareOperatorConversationForkChat(testAuthorActivityContext(), runfork.ConversationForkChatPrepareRequest{
 		ForkID: prepared.Fork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: prepared.ActorTokenID,
 		RequestHash: prepared.RequestHash, IdempotencyKey: prepared.IdempotencyKey, Now: fixture.now.Add(20 * time.Second),
 	})
-	var replay *ConversationForkChatReplayStateError
+	var replay *runfork.ConversationForkChatReplayStateError
 	if !errors.As(err, &replay) || replay.ForkTurnID != prepared.ForkTurnID || replay.State != wantState {
 		t.Fatalf("forkchat replay error=%v replay=%#v, want %s/%s", err, replay, prepared.ForkTurnID, wantState)
 	}

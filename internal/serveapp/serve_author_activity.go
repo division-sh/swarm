@@ -162,13 +162,7 @@ func runServeAuthorActivityFollower(
 }
 
 func serveAuthorActivityReaderFromStores(stores storeBundle) serveAuthorActivityReader {
-	if reader, ok := stores.EventStore.(serveAuthorActivityReader); ok && reader != nil {
-		return reader
-	}
-	if reader, ok := stores.InboundStore.(serveAuthorActivityReader); ok && reader != nil {
-		return reader
-	}
-	return nil
+	return stores.AuthorActivityReader
 }
 
 func serveAuthorActivityRenderOptions(out io.Writer, noColor bool) runtimeauthoractivity.RenderOptions {

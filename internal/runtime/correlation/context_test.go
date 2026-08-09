@@ -4,9 +4,10 @@ import (
 	"context"
 	"testing"
 
+	"time"
+
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"time"
 )
 
 func TestWithInboundEvent_RefinesTypedRuntimeLineageSubject(t *testing.T) {

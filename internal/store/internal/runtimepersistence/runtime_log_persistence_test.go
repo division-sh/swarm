@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -43,7 +44,7 @@ func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.
 		t.Fatalf("RuntimeLogger.Log sqlite: %v", err)
 	}
 
-	logs, err := store.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	logs, err := store.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		Component: "eventbus",
 		Level:     "warn",
@@ -62,8 +63,7 @@ func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.
 	if log.Source != "runtime" {
 		t.Fatalf("sqlite runtime log source = %q, want runtime", log.Source)
 	}
-	gotParentEventID, _ := log.Details["parent_event_id"].(string)
-	if got := strings.TrimSpace(gotParentEventID); got != subjectEventID {
+	if got := strings.TrimSpace(log.ParentEventID); got != subjectEventID {
 		t.Fatalf("sqlite runtime log parent_event_id = %q, want %q", got, subjectEventID)
 	}
 	var sourceEventID string
@@ -215,7 +215,7 @@ func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 		t.Fatalf("RuntimeLogger.Log agent source: %v", err)
 	}
 
-	all, err := store.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	all, err := store.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		Component: "source-parity",
 		Level:     "warn",
@@ -228,7 +228,7 @@ func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 		t.Fatalf("all runtime logs = %#v, want three", all.Logs)
 	}
 
-	runtimeRows, err := store.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	runtimeRows, err := store.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		Component: "source-parity",
 		Level:     "warn",
@@ -252,7 +252,7 @@ func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 		t.Fatalf("runtime source messages = %#v, want direct fallback and runtime-owned rows", runtimeMessages)
 	}
 
-	agentRows, err := store.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	agentRows, err := store.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		Component: "source-parity",
 		Level:     "warn",
@@ -266,7 +266,7 @@ func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 		t.Fatalf("agent source logs = %#v, want only agent-owned row", agentRows.Logs)
 	}
 
-	missingRows, err := store.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+	missingRows, err := store.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		Component: "source-parity",
 		Level:     "warn",

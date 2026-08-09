@@ -219,25 +219,29 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 
 func testSetupHandler(t *testing.T, pg *store.PostgresStore, source semanticview.Source) *Handler {
 	t.Helper()
+	handlers := testOperatorHandlers(testOperatorCapabilities{
+		Now:              func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
+		Ready:            func() bool { return true },
+		Database:         fakePinger{},
+		Runs:             pg,
+		Entities:         pg,
+		TestSetup:        pg,
+		Idempotency:      pg,
+		Events:           failingRunStartPublisher{err: errors.New("unexpected test setup event publish")},
+		Source:           source,
+		RunBundleContext: pg,
+		Bundle: runtimecontracts.BundleIdentity{
+			WorkflowName:    "review",
+			WorkflowVersion: "1.0.0",
+			BundleHash:      runStartTestBundleHash,
+		},
+	})
+	if handlers[testSetupEntitiesMethod] == nil {
+		t.Fatal("test.setup_entities handler is not configured")
+	}
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:              func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
-			Ready:            func() bool { return true },
-			Database:         fakePinger{},
-			Runs:             pg,
-			Entities:         pg,
-			TestSetup:        pg,
-			Idempotency:      pg,
-			Events:           failingRunStartPublisher{err: errors.New("unexpected test setup event publish")},
-			Source:           source,
-			RunBundleContext: pg,
-			Bundle: runtimecontracts.BundleIdentity{
-				WorkflowName:    "review",
-				WorkflowVersion: "1.0.0",
-				BundleHash:      runStartTestBundleHash,
-			},
-		}),
+		Handlers:   handlers,
 	})
 }
 

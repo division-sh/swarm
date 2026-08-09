@@ -6,10 +6,11 @@ import (
 	"testing"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 func TestProjectCanonicalRunDebugReplay_UsesCanonicalEventOwnerPayload(t *testing.T) {
@@ -18,7 +19,7 @@ func TestProjectCanonicalRunDebugReplay_UsesCanonicalEventOwnerPayload(t *testin
 		RunID:     "run-123",
 		StartedAt: now,
 	}
-	events := []store.OperatorEventFull{{
+	events := []operatorread.OperatorEventFull{{
 		EventID:       "evt-1",
 		EventName:     "workflow.started",
 		ExecutionMode: "live",
@@ -58,7 +59,7 @@ func TestProjectCanonicalRunDebugReplay_UsesCanonicalEventOwnerPayload(t *testin
 
 func TestProjectCanonicalRunDebugReplay_DoesNotPromotePayloadEntityToInstanceID(t *testing.T) {
 	now := time.Unix(1700001200, 0).UTC()
-	events := []store.OperatorEventFull{{
+	events := []operatorread.OperatorEventFull{{
 		EventID:       "evt-payload-only",
 		EventName:     "workflow.payload_only",
 		ExecutionMode: "live",
@@ -89,7 +90,7 @@ func TestProjectCanonicalRunDebugReplay_DoesNotPromotePayloadEntityToInstanceID(
 func TestProjectCanonicalRunDebugReplay_PreservesCanonicalRuntimeLogDetailAndTimestamp(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassInternalFailure, "runtime_log_failed", "runtime", "retrying", nil), "runtime", "retrying")
-	runtimeLogs := []store.OperatorRuntimeLogEntry{{
+	runtimeLogs := []operatorread.OperatorRuntimeLogEntry{{
 		LogID:     "evt-log-1",
 		Level:     "warn",
 		Component: "runtime",
@@ -99,7 +100,8 @@ func TestProjectCanonicalRunDebugReplay_PreservesCanonicalRuntimeLogDetailAndTim
 		ErrorCode: "boom",
 		Failure:   &failure,
 		Message:   "retrying",
-		Details: map[string]any{
+		Action:    "retrying",
+		CanonicalDetail: map[string]any{
 			"component": "runtime",
 			"action":    "retrying",
 			"error":     "boom",

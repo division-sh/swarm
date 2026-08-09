@@ -2,13 +2,12 @@ package agentpersistence
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	storeerrors "github.com/division-sh/swarm/internal/store/internal/storeerrors"
 )
 
 func IdentityFields(identity runtimeagentidentity.Identity) (runtimeagentidentity.StorageFields, error) {
@@ -51,7 +50,7 @@ func resolveOperatorAgentIdentity(ctx context.Context, source AgentSource, agent
 	agentID = strings.TrimSpace(agentID)
 	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
 	if agentID == "" {
-		return runtimeagentidentity.Identity{}, storeerrors.ErrAgentNotFound
+		return runtimeagentidentity.Identity{}, operatorread.ErrAgentNotFound
 	}
 	rows, err := source.LoadAgents(ctx)
 	if err != nil {
@@ -72,7 +71,7 @@ func resolveOperatorAgentIdentity(ctx context.Context, source AgentSource, agent
 		candidates = append(candidates, identity)
 	}
 	if len(candidates) == 0 {
-		return runtimeagentidentity.Identity{}, storeerrors.ErrAgentNotFound
+		return runtimeagentidentity.Identity{}, operatorread.ErrAgentNotFound
 	}
 	if len(candidates) == 1 {
 		return candidates[0], nil
@@ -86,12 +85,12 @@ func resolveOperatorAgentIdentity(ctx context.Context, source AgentSource, agent
 	}
 	return runtimeagentidentity.Identity{}, fmt.Errorf(
 		"%w: agent_id %q matches %s",
-		storeerrors.ErrAgentTargetAmbiguous,
+		operatorread.ErrAgentTargetAmbiguous,
 		agentID,
 		strings.Join(descriptions, ", "),
 	)
 }
 
 func IsAgentTargetAmbiguous(err error) bool {
-	return errors.Is(err, storeerrors.ErrAgentTargetAmbiguous)
+	return operatorread.IsAgentTargetAmbiguous(err)
 }

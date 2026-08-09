@@ -8,13 +8,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -31,6 +33,10 @@ type eventReplayPublisher interface {
 	CheckDirectRoutes(context.Context, events.Event, []events.DeliveryRoute) (runtimebus.ExactDirectRouteStatus, error)
 }
 
+type EventReplayOwner interface {
+	eventReplayPublisher
+}
+
 type eventReplayResult struct {
 	EventID             string                `json:"event_id"`
 	ReplayEventID       string                `json:"replay_event_id"`
@@ -41,21 +47,21 @@ type eventReplayResult struct {
 }
 
 type eventReplayDelivery struct {
-	DeliveryID       string                           `json:"delivery_id"`
-	SubscriberID     string                           `json:"subscriber_id"`
-	SessionID        string                           `json:"session_id,omitempty"`
-	Status           string                           `json:"status"`
-	ReasonCode       string                           `json:"reason_code,omitempty"`
-	Failure          *runtimefailures.Envelope        `json:"failure,omitempty"`
-	Attempt          int                              `json:"attempt"`
-	RetryCount       int                              `json:"retry_count"`
-	RetryScheduled   bool                             `json:"retry_scheduled"`
-	Terminal         bool                             `json:"terminal"`
-	CreatedAt        *time.Time                       `json:"created_at,omitempty"`
-	StartedAt        *time.Time                       `json:"started_at,omitempty"`
-	FinishedAt       *time.Time                       `json:"finished_at,omitempty"`
-	DeadLetters      []store.OperatorDeadLetterRecord `json:"dead_letters,omitempty"`
-	SourceDeliveryID string                           `json:"source_delivery_id,omitempty"`
+	DeliveryID       string                                  `json:"delivery_id"`
+	SubscriberID     string                                  `json:"subscriber_id"`
+	SessionID        string                                  `json:"session_id,omitempty"`
+	Status           string                                  `json:"status"`
+	ReasonCode       string                                  `json:"reason_code,omitempty"`
+	Failure          *runtimefailures.Envelope               `json:"failure,omitempty"`
+	Attempt          int                                     `json:"attempt"`
+	RetryCount       int                                     `json:"retry_count"`
+	RetryScheduled   bool                                    `json:"retry_scheduled"`
+	Terminal         bool                                    `json:"terminal"`
+	CreatedAt        *time.Time                              `json:"created_at,omitempty"`
+	StartedAt        *time.Time                              `json:"started_at,omitempty"`
+	FinishedAt       *time.Time                              `json:"finished_at,omitempty"`
+	DeadLetters      []operatorread.OperatorDeadLetterRecord `json:"dead_letters,omitempty"`
+	SourceDeliveryID string                                  `json:"source_delivery_id,omitempty"`
 	route            events.DeliveryRoute
 }
 
@@ -87,7 +93,7 @@ type eventReplayPerformed struct {
 	ReplayPublishErr error
 }
 
-func OperatorEventReplayHandlers(opts OperatorReadOptions) map[string]MethodHandler {
+func OperatorEventReplayHandlers(opts EventReplayHandlerOptions) map[string]MethodHandler {
 	if !eventReplayConfigured(opts) {
 		return nil
 	}
@@ -105,21 +111,20 @@ func OperatorEventReplayHandlers(opts OperatorReadOptions) map[string]MethodHand
 	}
 }
 
-func eventReplayConfigured(opts OperatorReadOptions) bool {
+func eventReplayConfigured(opts EventReplayHandlerOptions) bool {
 	if opts.Observability == nil || opts.Idempotency == nil {
 		return false
 	}
-	if runtimeContextManager(opts) != nil {
+	if runtimeContextManager(opts.RuntimeContexts) != nil {
 		return true
 	}
 	if opts.Events == nil {
 		return false
 	}
-	_, ok := opts.Events.(eventReplayPublisher)
-	return ok
+	return opts.Events != nil
 }
 
-func executeEventReplay(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+func executeEventReplay(ctx context.Context, req Request, opts EventReplayHandlerOptions, now time.Time) (any, error) {
 	eventID, err := requiredStringParam(req.Params, "event_id")
 	if err != nil {
 		return nil, err
@@ -134,7 +139,7 @@ func executeEventReplay(ctx context.Context, req Request, opts OperatorReadOptio
 	})
 }
 
-func executeAgentReplay(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+func executeAgentReplay(ctx context.Context, req Request, opts EventReplayHandlerOptions, now time.Time) (any, error) {
 	agentID, err := requiredStringParam(req.Params, "agent_id")
 	if err != nil {
 		return nil, err
@@ -164,12 +169,12 @@ func executeAgentReplay(ctx context.Context, req Request, opts OperatorReadOptio
 func executeOperatorEventReplay(
 	ctx context.Context,
 	req Request,
-	opts OperatorReadOptions,
+	opts EventReplayHandlerOptions,
 	now time.Time,
 	replayReq operatorEventReplayRequest,
 ) (eventReplayResult, error) {
-	publisher, ok := opts.Events.(eventReplayPublisher)
-	if !ok || publisher == nil {
+	publisher := opts.Events
+	if publisher == nil {
 		return eventReplayResult{}, errors.New("event replay publisher is required")
 	}
 	eventID := strings.TrimSpace(replayReq.EventID)
@@ -181,7 +186,7 @@ func executeOperatorEventReplay(
 		return eventReplayResult{}, err
 	}
 	var replayPublishErr error
-	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
+	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: idempotencyKey,
@@ -189,17 +194,17 @@ func executeOperatorEventReplay(
 		ResourceID:     eventID,
 		TTL:            eventReplayIdempotencyTTL,
 		Now:            now,
-	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
+	}, func(ctx context.Context) (apiidempotency.Completion, error) {
 		performed, err := performEventReplay(ctx, req, opts, publisher, eventID, replayReq.RequestedSubscribers, replayReq.AgentIdentity, now)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
 		replayPublishErr = performed.ReplayPublishErr
 		response, err := json.Marshal(performed.Stored)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
-		return store.APIIdempotencyCompletion{
+		return apiidempotency.Completion{
 			ResourceID: performed.Stored.ReplayEventID,
 			Response:   response,
 		}, nil
@@ -230,7 +235,7 @@ func executeOperatorEventReplay(
 func performEventReplay(
 	ctx context.Context,
 	req Request,
-	opts OperatorReadOptions,
+	opts EventReplayHandlerOptions,
 	publisher eventReplayPublisher,
 	eventID string,
 	requestedSubscribers []string,
@@ -238,24 +243,24 @@ func performEventReplay(
 	now time.Time,
 ) (eventReplayPerformed, error) {
 	original, err := opts.Observability.LoadOperatorEvent(ctx, eventID)
-	if errors.Is(err, store.ErrEventNotFound) {
+	if errors.Is(err, operatorread.ErrEventNotFound) {
 		return eventReplayPerformed{}, NewApplicationError(EventNotFoundCode, false, map[string]any{"event_id": eventID})
 	}
 	if err != nil {
 		return eventReplayPerformed{}, err
 	}
-	if runtimeContextManager(opts) != nil {
+	if runtimeContextManager(opts.RuntimeContexts) != nil {
 		var availability runbundle.Availability
-		ctx, opts, availability, err = runtimeBundleContextByRun(ctx, opts, original.RunID)
+		var selected selectedRuntimeContext
+		ctx, selected, availability, err = runtimeBundleContextByRun(ctx, opts.RuntimeContexts, original.RunID)
 		if err != nil {
 			return eventReplayPerformed{}, err
 		}
 		_ = availability
-		selectedPublisher, ok := opts.Events.(eventReplayPublisher)
-		if !ok || selectedPublisher == nil {
+		if selected.Runtime == nil || selected.Runtime.Bus == nil {
 			return eventReplayPerformed{}, errors.New("event replay publisher is required for selected runtime context")
 		}
-		publisher = selectedPublisher
+		publisher = selected.Runtime.Bus
 	}
 	originalDeliveries, selectedSubscribers, err := eventReplayTargetsForRequest(original, requestedSubscribers, requestedIdentity)
 	if err != nil {
@@ -315,10 +320,10 @@ func eventReplayRouteSubscriberIDs(routes []events.DeliveryRoute) []string {
 	return uniqueTrimmedStrings(ids)
 }
 
-func eventReplayEvidencePersisted(ctx context.Context, opts OperatorReadOptions, replayEventID string) (bool, error) {
+func eventReplayEvidencePersisted(ctx context.Context, opts EventReplayHandlerOptions, replayEventID string) (bool, error) {
 	if _, err := opts.Observability.LoadOperatorEvent(ctx, replayEventID); err == nil {
 		return true, nil
-	} else if errors.Is(err, store.ErrEventNotFound) {
+	} else if errors.Is(err, operatorread.ErrEventNotFound) {
 		return false, nil
 	} else {
 		return false, err
@@ -328,7 +333,7 @@ func eventReplayEvidencePersisted(ctx context.Context, opts OperatorReadOptions,
 func ensureEventReplayAudit(
 	ctx context.Context,
 	req Request,
-	opts OperatorReadOptions,
+	opts EventReplayHandlerOptions,
 	publisher eventReplayPublisher,
 	stored eventReplayStoredResult,
 	now time.Time,
@@ -338,28 +343,28 @@ func ensureEventReplayAudit(
 	}
 	if _, err := opts.Observability.LoadOperatorEvent(ctx, stored.AuditEventID); err == nil {
 		return nil
-	} else if !errors.Is(err, store.ErrEventNotFound) {
+	} else if !errors.Is(err, operatorread.ErrEventNotFound) {
 		return err
 	}
 	original, err := opts.Observability.LoadOperatorEvent(ctx, stored.EventID)
-	if errors.Is(err, store.ErrEventNotFound) {
+	if errors.Is(err, operatorread.ErrEventNotFound) {
 		return NewApplicationError(EventNotFoundCode, false, map[string]any{"event_id": stored.EventID})
 	}
 	if err != nil {
 		return err
 	}
-	if runtimeContextManager(opts) != nil {
+	if runtimeContextManager(opts.RuntimeContexts) != nil {
 		var availability runbundle.Availability
-		ctx, opts, availability, err = runtimeBundleContextByRun(ctx, opts, original.RunID)
+		var selected selectedRuntimeContext
+		ctx, selected, availability, err = runtimeBundleContextByRun(ctx, opts.RuntimeContexts, original.RunID)
 		if err != nil {
 			return err
 		}
 		_ = availability
-		selectedPublisher, ok := opts.Events.(eventReplayPublisher)
-		if !ok || selectedPublisher == nil {
+		if selected.Runtime == nil || selected.Runtime.Bus == nil {
 			return errors.New("event replay publisher is required for selected runtime context")
 		}
-		publisher = selectedPublisher
+		publisher = selected.Runtime.Bus
 	}
 	originalDeliveries, _, err := eventReplayTargetsForRequest(original, stored.SubscribersReplayed, stored.AgentIdentity)
 	if err != nil {
@@ -387,8 +392,8 @@ func ensureEventReplayAudit(
 	return nil
 }
 
-func eventReplayTargets(original store.OperatorEventFull, requested []string) ([]eventReplayDelivery, []string, error) {
-	originalBySubscriber := map[string][]store.OperatorEventDelivery{}
+func eventReplayTargets(original operatorread.OperatorEventFull, requested []string) ([]eventReplayDelivery, []string, error) {
+	originalBySubscriber := map[string][]operatorread.OperatorEventDelivery{}
 	orderedSubscribers := []string{}
 	for _, delivery := range original.Deliveries {
 		subscriberType := strings.TrimSpace(delivery.SubscriberType)
@@ -431,7 +436,7 @@ func eventReplayTargets(original store.OperatorEventFull, requested []string) ([
 	return deliveries, selected, nil
 }
 
-func eventReplayTargetsForRequest(original store.OperatorEventFull, requested []string, identity agentidentity.Identity) ([]eventReplayDelivery, []string, error) {
+func eventReplayTargetsForRequest(original operatorread.OperatorEventFull, requested []string, identity agentidentity.Identity) ([]eventReplayDelivery, []string, error) {
 	if identity.IsZero() {
 		return eventReplayTargets(original, requested)
 	}
@@ -470,7 +475,7 @@ func eventReplayTargetsForRequest(original store.OperatorEventFull, requested []
 	return deliveries, []string{identity.AgentID()}, nil
 }
 
-func validateReplayEligibleDelivery(eventID string, delivery store.OperatorEventDelivery) error {
+func validateReplayEligibleDelivery(eventID string, delivery operatorread.OperatorEventDelivery) error {
 	status, err := runtimedelivery.ParseStatus(delivery.Status)
 	if err == nil && (status == runtimedelivery.StatusDelivered || status == runtimedelivery.StatusFailed || status == runtimedelivery.StatusDeadLetter) {
 		return nil
@@ -480,7 +485,7 @@ func validateReplayEligibleDelivery(eventID string, delivery store.OperatorEvent
 	return NewApplicationError(EventReplayNotEligibleCode, false, data)
 }
 
-func deliveriesForSubscribers(eventID string, index map[string][]store.OperatorEventDelivery, subscribers []string) ([]eventReplayDelivery, error) {
+func deliveriesForSubscribers(eventID string, index map[string][]operatorread.OperatorEventDelivery, subscribers []string) ([]eventReplayDelivery, error) {
 	out := []eventReplayDelivery{}
 	for _, subscriber := range subscribers {
 		for _, delivery := range index[subscriber] {
@@ -512,7 +517,7 @@ func eventReplayRoutes(deliveries []eventReplayDelivery) ([]events.DeliveryRoute
 	return routes, nil
 }
 
-func replayEventFromOriginal(original store.OperatorEventFull, replayEventID string, now time.Time) (events.Event, error) {
+func replayEventFromOriginal(original operatorread.OperatorEventFull, replayEventID string, now time.Time) (events.Event, error) {
 	snapshot, err := original.EventSnapshot()
 	if err != nil {
 		var event events.Event
@@ -532,7 +537,7 @@ func replayEventFromOriginal(original store.OperatorEventFull, replayEventID str
 
 func eventReplayAuditPayload(
 	req Request,
-	original store.OperatorEventFull,
+	original operatorread.OperatorEventFull,
 	replayEventID string,
 	auditEventID string,
 	selectedSubscribers []string,
@@ -557,7 +562,7 @@ func eventReplayAuditPayload(
 	return raw, nil
 }
 
-func eventReplayResultFromStore(ctx context.Context, opts OperatorReadOptions, stored eventReplayStoredResult) (eventReplayResult, error) {
+func eventReplayResultFromStore(ctx context.Context, opts EventReplayHandlerOptions, stored eventReplayStoredResult) (eventReplayResult, error) {
 	original, err := opts.Observability.LoadOperatorEvent(ctx, stored.EventID)
 	if err != nil {
 		return eventReplayResult{}, err
@@ -587,7 +592,7 @@ func eventReplayResultFromStore(ctx context.Context, opts OperatorReadOptions, s
 	}, nil
 }
 
-func eventReplayNewDeliveries(deliveries []store.OperatorEventDelivery, originals []eventReplayDelivery) ([]eventReplayDelivery, error) {
+func eventReplayNewDeliveries(deliveries []operatorread.OperatorEventDelivery, originals []eventReplayDelivery) ([]eventReplayDelivery, error) {
 	sourceByRoute := map[string]string{}
 	for _, original := range originals {
 		identity, err := original.route.Identity()
@@ -627,7 +632,7 @@ func eventReplayNewDeliveries(deliveries []store.OperatorEventDelivery, original
 	return out, nil
 }
 
-func eventReplayDeliveryFromStore(delivery store.OperatorEventDelivery, sourceDeliveryID string) eventReplayDelivery {
+func eventReplayDeliveryFromStore(delivery operatorread.OperatorEventDelivery, sourceDeliveryID string) eventReplayDelivery {
 	published := eventPublishDeliveryFromStore(delivery)
 	return eventReplayDelivery{
 		DeliveryID:       published.DeliveryID,
@@ -643,13 +648,13 @@ func eventReplayDeliveryFromStore(delivery store.OperatorEventDelivery, sourceDe
 		CreatedAt:        published.CreatedAt,
 		StartedAt:        published.StartedAt,
 		FinishedAt:       published.FinishedAt,
-		DeadLetters:      append([]store.OperatorDeadLetterRecord(nil), published.DeadLetters...),
+		DeadLetters:      append([]operatorread.OperatorDeadLetterRecord(nil), published.DeadLetters...),
 		SourceDeliveryID: strings.TrimSpace(sourceDeliveryID),
 		route:            delivery.Route.Normalized(),
 	}
 }
 
-func eventReplayDeliveryFailureEvidence(eventID string, delivery store.OperatorEventDelivery) map[string]any {
+func eventReplayDeliveryFailureEvidence(eventID string, delivery operatorread.OperatorEventDelivery) map[string]any {
 	data := map[string]any{
 		"event_id":        strings.TrimSpace(eventID),
 		"delivery_id":     strings.TrimSpace(delivery.DeliveryID),
@@ -658,7 +663,7 @@ func eventReplayDeliveryFailureEvidence(eventID string, delivery store.OperatorE
 		"retry_count":     delivery.RetryCount,
 		"retry_scheduled": delivery.RetryScheduled,
 		"terminal":        delivery.Terminal,
-		"dead_letters":    append([]store.OperatorDeadLetterRecord(nil), delivery.DeadLetters...),
+		"dead_letters":    append([]operatorread.OperatorDeadLetterRecord(nil), delivery.DeadLetters...),
 	}
 	if reason := strings.TrimSpace(delivery.ReasonCode); reason != "" {
 		data["reason_code"] = reason
@@ -750,7 +755,7 @@ func uniqueTrimmedStrings(in []string) []string {
 }
 
 func eventReplayError(err error) error {
-	var conflict *store.APIIdempotencyConflictError
+	var conflict *apiidempotency.ConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
 			"original_request_hash":    conflict.OriginalRequestHash,

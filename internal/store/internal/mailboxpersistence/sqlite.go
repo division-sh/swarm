@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	mailboxcontract "github.com/division-sh/swarm/internal/mailbox"
+
 	"github.com/division-sh/swarm/internal/events"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
@@ -179,7 +181,7 @@ func (s *MailboxSQLiteOwner) MarkMailboxItemNotified(ctx context.Context, id str
 		if rows, err := result.RowsAffected(); err != nil {
 			return err
 		} else if rows == 0 {
-			return ErrMailboxV1NotFound
+			return mailboxcontract.ErrV1NotFound
 		}
 		return nil
 	}); err != nil {

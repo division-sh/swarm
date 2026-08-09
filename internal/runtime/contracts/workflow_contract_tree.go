@@ -2,8 +2,9 @@ package contracts
 
 import (
 	"fmt"
-	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"strings"
+
+	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
 func flowViewChildren(view *FlowContractView) []*FlowContractView {

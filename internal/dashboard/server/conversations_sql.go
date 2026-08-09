@@ -1,55 +1,14 @@
 package server
 
 import (
-	"context"
-	"database/sql"
-	"errors"
 	"strings"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/store"
 )
 
-type SQLConversationReader struct {
-	owner dashboardConversationReadOwner
-}
-
-type dashboardConversationReadOwner interface {
-	ListOperatorConversations(context.Context, store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
-	ListOperatorConversationTurns(context.Context, store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error)
-	LoadOperatorPublicConversationTurn(context.Context, string, string) (store.OperatorPublicConversationTurnDetail, error)
-}
-
-func NewSQLConversationReader(db *sql.DB, source any) *SQLConversationReader {
-	owner, ok := source.(dashboardConversationReadOwner)
-	if db == nil || !ok || owner == nil {
-		return nil
-	}
-	return &SQLConversationReader{owner: owner}
-}
-
-func (r *SQLConversationReader) ListOperatorConversations(ctx context.Context, opts store.OperatorConversationListOptions) (store.OperatorConversationListResult, error) {
-	if r == nil || r.owner == nil {
-		return store.OperatorConversationListResult{}, errors.New("conversation reader is not configured")
-	}
-	return r.owner.ListOperatorConversations(ctx, opts)
-}
-
-func (r *SQLConversationReader) ListOperatorConversationTurns(ctx context.Context, opts store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error) {
-	if r == nil || r.owner == nil {
-		return store.OperatorConversationTurnListResult{}, errors.New("conversation reader is not configured with the canonical turn owner")
-	}
-	return r.owner.ListOperatorConversationTurns(ctx, opts)
-}
-
-func (r *SQLConversationReader) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (store.OperatorPublicConversationTurnDetail, error) {
-	if r == nil || r.owner == nil {
-		return store.OperatorPublicConversationTurnDetail{}, errors.New("conversation reader is not configured with the canonical exact-turn owner")
-	}
-	return r.owner.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
-}
-
-func conversationSummaryFromOperator(item store.OperatorConversationSummary) ConversationSummary {
+func conversationSummaryFromOperator(item operatorread.OperatorConversationSummary) ConversationSummary {
 	return ConversationSummary{
 		SessionID:    strings.TrimSpace(item.SessionID),
 		AgentID:      strings.TrimSpace(item.AgentID),
@@ -65,7 +24,7 @@ func conversationSummaryFromOperator(item store.OperatorConversationSummary) Con
 	}
 }
 
-func conversationDetailFromOperator(item store.OperatorConversationTurnListResult) ConversationDetail {
+func conversationDetailFromOperator(item operatorread.OperatorConversationTurnListResult) ConversationDetail {
 	out := ConversationDetail{
 		Conversation: conversationSummaryFromOperator(item.Conversation),
 		NextCursor:   strings.TrimSpace(item.NextCursor),
@@ -77,7 +36,7 @@ func conversationDetailFromOperator(item store.OperatorConversationTurnListResul
 	return out
 }
 
-func conversationMetadataFromOperator(item store.OperatorConversationSummaryMetadata) ConversationSummaryMetadata {
+func conversationMetadataFromOperator(item operatorread.OperatorConversationSummaryMetadata) ConversationSummaryMetadata {
 	return ConversationSummaryMetadata{
 		ProviderSessionID:    strings.TrimSpace(item.ProviderSessionID),
 		RetryReason:          strings.TrimSpace(item.RetryReason),
@@ -87,7 +46,7 @@ func conversationMetadataFromOperator(item store.OperatorConversationSummaryMeta
 	}
 }
 
-func conversationWatchdogFromOperator(item *store.OperatorConversationWatchdog) *ConversationRuntimeWatchdog {
+func conversationWatchdogFromOperator(item *operatorread.OperatorConversationWatchdog) *ConversationRuntimeWatchdog {
 	if item == nil {
 		return nil
 	}
@@ -101,7 +60,7 @@ func conversationWatchdogFromOperator(item *store.OperatorConversationWatchdog) 
 	}
 }
 
-func conversationTurnListItemFromOperator(item store.OperatorConversationTurnListItem) ConversationTurnListItem {
+func conversationTurnListItemFromOperator(item operatorread.OperatorConversationTurnListItem) ConversationTurnListItem {
 	var tokens *ConversationTokenUsage
 	if item.Tokens != nil {
 		tokens = &ConversationTokenUsage{Input: item.Tokens.Input, Output: item.Tokens.Output, Exactness: item.Tokens.Exactness}
@@ -117,14 +76,5 @@ func conversationTurnListItemFromOperator(item store.OperatorConversationTurnLis
 		},
 		Tokens: tokens, Outcome: item.Outcome, ParseOK: item.ParseOK,
 		Failure: runtimefailures.CloneEnvelope(item.Failure),
-	}
-}
-
-func readString(value any) string {
-	switch typed := value.(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	default:
-		return ""
 	}
 }

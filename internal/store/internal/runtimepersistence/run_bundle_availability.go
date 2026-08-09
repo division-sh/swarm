@@ -38,7 +38,7 @@ func (s *PostgresStore) LoadRunBundleAvailability(ctx context.Context, runID str
 	}
 	availability, err := s.runBundles.Load(ctx, runID)
 	if errors.Is(err, runbundle.ErrRunNotFound) {
-		return runbundle.Availability{}, ErrRunNotFound
+		return runbundle.Availability{}, runbundle.ErrRunNotFound
 	}
 	return availability, err
 }

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -18,211 +18,7 @@ import (
 	"github.com/lib/pq"
 )
 
-type RunDebugQueryOptions struct {
-	LogsAllLevels   bool
-	Component       string
-	EventLimit      int
-	MutationLimit   int
-	RuntimeLogLimit int
-	DeadLetterLimit int
-}
-
-type RunDebugRunSummary struct {
-	RunID          string     `json:"run_id"`
-	RunTableStatus string     `json:"run_table_status,omitempty"`
-	RootEventID    string     `json:"root_event_id,omitempty"`
-	RootEventType  string     `json:"root_event_type,omitempty"`
-	StartedAt      time.Time  `json:"started_at,omitempty"`
-	LastEventAt    time.Time  `json:"last_event_at,omitempty"`
-	EndedAt        *time.Time `json:"ended_at,omitempty"`
-	EventCount     int        `json:"event_count"`
-	EntityCount    int        `json:"entity_count"`
-}
-
-type RunDebugEventCount struct {
-	EventName string `json:"event_name"`
-	Count     int    `json:"count"`
-}
-
-type RunDebugDeliveryCount struct {
-	SubscriberID string `json:"subscriber_id"`
-	Status       string `json:"status"`
-	Count        int    `json:"count"`
-}
-
-type RunDebugEvent struct {
-	EventID    string          `json:"event_id,omitempty"`
-	EventName  string          `json:"event_name"`
-	EntityID   string          `json:"entity_id,omitempty"`
-	CreatedAt  time.Time       `json:"created_at"`
-	Source     string          `json:"source,omitempty"`
-	SourceType string          `json:"source_type,omitempty"`
-	Payload    json.RawMessage `json:"payload,omitempty"`
-}
-
-type RunDebugMutation struct {
-	MutationID    string          `json:"mutation_id,omitempty"`
-	EntityID      string          `json:"entity_id,omitempty"`
-	Field         string          `json:"field"`
-	OldValue      json.RawMessage `json:"old_value,omitempty"`
-	NewValue      json.RawMessage `json:"new_value,omitempty"`
-	WriterType    string          `json:"writer_type,omitempty"`
-	WriterID      string          `json:"writer_id,omitempty"`
-	HandlerStep   string          `json:"handler_step,omitempty"`
-	CausedByEvent string          `json:"caused_by_event,omitempty"`
-	CreatedAt     time.Time       `json:"created_at"`
-}
-
-type RunDebugDeadLetter struct {
-	OriginalEvent string                   `json:"original_event"`
-	EntityID      string                   `json:"entity_id,omitempty"`
-	Failure       runtimefailures.Envelope `json:"failure"`
-	HandlerNode   string                   `json:"handler_node,omitempty"`
-	CreatedAt     time.Time                `json:"created_at"`
-}
-
-type RunDebugFailureDelivery struct {
-	EventID        string                     `json:"event_id"`
-	EventName      string                     `json:"event_name"`
-	EntityID       string                     `json:"entity_id,omitempty"`
-	DeliveryID     string                     `json:"delivery_id"`
-	SubscriberType string                     `json:"subscriber_type"`
-	SubscriberID   string                     `json:"subscriber_id"`
-	SessionID      string                     `json:"session_id,omitempty"`
-	Status         string                     `json:"status"`
-	ReasonCode     string                     `json:"reason_code,omitempty"`
-	Failure        *runtimefailures.Envelope  `json:"failure,omitempty"`
-	RetryCount     int                        `json:"retry_count"`
-	RetryScheduled bool                       `json:"retry_scheduled"`
-	Terminal       bool                       `json:"terminal"`
-	CreatedAt      *time.Time                 `json:"created_at,omitempty"`
-	StartedAt      *time.Time                 `json:"started_at,omitempty"`
-	FinishedAt     *time.Time                 `json:"finished_at,omitempty"`
-	DeadLetters    []OperatorDeadLetterRecord `json:"dead_letters,omitempty"`
-}
-
-type RunDebugAgentTurn struct {
-	AgentID    string    `json:"agent_id"`
-	Turns      int       `json:"turns"`
-	ErrorCount int       `json:"error_count"`
-	LastAt     time.Time `json:"last_at"`
-}
-
-type RunDebugRuntimeLog struct {
-	EventID   string                    `json:"event_id,omitempty"`
-	Level     string                    `json:"level"`
-	Message   string                    `json:"message,omitempty"`
-	Component string                    `json:"component"`
-	Action    string                    `json:"action"`
-	EventType string                    `json:"event_type,omitempty"`
-	AgentID   string                    `json:"agent_id,omitempty"`
-	EntityID  string                    `json:"entity_id,omitempty"`
-	Failure   *runtimefailures.Envelope `json:"failure,omitempty"`
-	Detail    json.RawMessage           `json:"detail,omitempty"`
-	CreatedAt time.Time                 `json:"created_at"`
-}
-
-type RunDebugRuntimeSummary struct {
-	Level     string `json:"level"`
-	Component string `json:"component"`
-	Action    string `json:"action"`
-	Count     int    `json:"count"`
-}
-
-type RunTestQuiescence struct {
-	Ready                   bool `json:"ready"`
-	ActiveDeliveries        int  `json:"active_deliveries"`
-	UnsettledPipelineEvents int  `json:"unsettled_pipeline_events"`
-	DueTimers               int  `json:"due_timers"`
-	ActiveSessionLeases     int  `json:"active_session_leases"`
-}
-
-type RunDebugReport struct {
-	RunID             string                    `json:"run_id"`
-	RunTableStatus    string                    `json:"run_table_status,omitempty"`
-	RootEventID       string                    `json:"root_event_id,omitempty"`
-	RootEventType     string                    `json:"root_event_type,omitempty"`
-	Failure           *runtimefailures.Envelope `json:"failure,omitempty"`
-	ControlReason     string                    `json:"control_reason,omitempty"`
-	StartedAt         time.Time                 `json:"started_at,omitempty"`
-	LastEventAt       time.Time                 `json:"last_event_at,omitempty"`
-	EndedAt           *time.Time                `json:"ended_at,omitempty"`
-	EventCount        int                       `json:"event_count"`
-	EntityCount       int                       `json:"entity_count"`
-	WarnErrorLogCount int                       `json:"warn_error_log_count"`
-	EventCounts       []RunDebugEventCount      `json:"event_counts,omitempty"`
-	Deliveries        []RunDebugDeliveryCount   `json:"deliveries,omitempty"`
-	Events            []RunDebugEvent           `json:"events,omitempty"`
-	FailedDeliveries  []RunDebugFailureDelivery `json:"failed_deliveries,omitempty"`
-	DeadLetters       []RunDebugDeadLetter      `json:"dead_letters,omitempty"`
-	AgentTurns        []RunDebugAgentTurn       `json:"agent_turns,omitempty"`
-	Mutations         []RunDebugMutation        `json:"mutations,omitempty"`
-	RuntimeLogSummary []RunDebugRuntimeSummary  `json:"runtime_log_summary,omitempty"`
-	RuntimeLogs       []RunDebugRuntimeLog      `json:"runtime_logs,omitempty"`
-	TestQuiescence    RunTestQuiescence         `json:"test_quiescence"`
-}
-
-type RunDebugTraceQueryOptions struct {
-	Limit              int
-	Cursor             string
-	Since              *time.Time
-	Until              *time.Time
-	Filter             RunDebugTraceFilter
-	ExcludeRuntimeLogs bool
-}
-
-type RunDebugTraceFilter struct {
-	EventNames       []string
-	EntityIDs        []string
-	DeliveryStatuses []string
-	SubscriberIDs    []string
-	SubscriberTypes  []string
-}
-
-type RunDebugTraceRow struct {
-	EventID                   string                            `json:"event_id,omitempty"`
-	EventName                 string                            `json:"event_name,omitempty"`
-	SourceEventID             string                            `json:"source_event_id,omitempty"`
-	EntityID                  string                            `json:"entity_id,omitempty"`
-	EventSource               string                            `json:"event_source,omitempty"`
-	EventSourceType           string                            `json:"event_source_type,omitempty"`
-	EventCreatedAt            time.Time                         `json:"event_created_at"`
-	DeliveryID                string                            `json:"delivery_id,omitempty"`
-	SubscriberType            string                            `json:"subscriber_type,omitempty"`
-	SubscriberID              string                            `json:"subscriber_id,omitempty"`
-	DeliveryStatus            string                            `json:"delivery_status,omitempty"`
-	DeliveryReasonCode        string                            `json:"delivery_reason_code,omitempty"`
-	ReplyContextID            string                            `json:"reply_context_id,omitempty"`
-	DeliveryPayloadProjection *events.DeliveryPayloadProjection `json:"delivery_payload_projection,omitempty"`
-	DeliveryFailure           *runtimefailures.Envelope         `json:"delivery_failure,omitempty"`
-	DeliveryRetryCount        int                               `json:"delivery_retry_count,omitempty"`
-	DeliveryRetryScheduled    bool                              `json:"delivery_retry_scheduled,omitempty"`
-	DeliveryTerminal          bool                              `json:"delivery_terminal,omitempty"`
-	ActiveSessionID           string                            `json:"active_session_id,omitempty"`
-	DeliveryCreatedAt         *time.Time                        `json:"delivery_created_at,omitempty"`
-	DeliveryStartedAt         *time.Time                        `json:"delivery_started_at,omitempty"`
-	DeliveryDeliveredAt       *time.Time                        `json:"delivery_delivered_at,omitempty"`
-	SessionID                 string                            `json:"session_id,omitempty"`
-	SessionKind               string                            `json:"session_kind,omitempty"`
-	SessionMemory             bool                              `json:"session_memory"`
-	SessionMemorySource       string                            `json:"session_memory_source,omitempty"`
-	SessionStatus             string                            `json:"session_status,omitempty"`
-	SessionUpdatedAt          *time.Time                        `json:"session_updated_at,omitempty"`
-	TurnID                    string                            `json:"turn_id,omitempty"`
-	TurnTriggerEventID        string                            `json:"turn_trigger_event_id,omitempty"`
-	TurnTriggerEventType      string                            `json:"turn_trigger_event_type,omitempty"`
-	TurnFlowInstance          string                            `json:"turn_flow_instance,omitempty"`
-	TurnMemory                bool                              `json:"turn_memory"`
-	TurnMemorySource          string                            `json:"turn_memory_source,omitempty"`
-	TurnEntityID              string                            `json:"turn_entity_id,omitempty"`
-	TurnTaskID                string                            `json:"turn_task_id,omitempty"`
-	TurnParseOK               bool                              `json:"turn_parse_ok,omitempty"`
-	TurnRetryCount            int                               `json:"turn_retry_count,omitempty"`
-	TurnFailure               *runtimefailures.Envelope         `json:"turn_failure,omitempty"`
-	TurnCreatedAt             *time.Time                        `json:"turn_created_at,omitempty"`
-}
-
-func defaultRunDebugQueryOptions(opts RunDebugQueryOptions) RunDebugQueryOptions {
+func defaultRunDebugQueryOptions(opts operatorread.RunDebugQueryOptions) operatorread.RunDebugQueryOptions {
 	if opts.EventLimit <= 0 {
 		opts.EventLimit = 15
 	}
@@ -239,7 +35,7 @@ func defaultRunDebugQueryOptions(opts RunDebugQueryOptions) RunDebugQueryOptions
 	return opts
 }
 
-func defaultRunDebugTraceQueryOptions(opts RunDebugTraceQueryOptions) RunDebugTraceQueryOptions {
+func defaultRunDebugTraceQueryOptions(opts operatorread.RunDebugTraceQueryOptions) operatorread.RunDebugTraceQueryOptions {
 	opts.Cursor = strings.TrimSpace(opts.Cursor)
 	if opts.Limit <= 0 {
 		opts.Limit = 200
@@ -275,11 +71,11 @@ func normalizedUniqueStrings(values []string) []string {
 	return out
 }
 
-func (s *OperatorPostgres) requireRunDebugAccess() error {
+func (s *RunPostgres) requireRunDebugAccess() error {
 	return s.requireCurrentSchema()
 }
 
-func (s *OperatorPostgres) ResolveLatestRunDebugRunID(ctx context.Context) (string, error) {
+func (s *RunPostgres) ResolveLatestRunDebugRunID(ctx context.Context) (string, error) {
 	if s == nil || s.backend == nil {
 		return "", fmt.Errorf("postgres store is required")
 	}
@@ -310,7 +106,7 @@ func (s *OperatorPostgres) ResolveLatestRunDebugRunID(ctx context.Context) (stri
 	return runID, nil
 }
 
-func (s *OperatorPostgres) ListRunDebugRuns(ctx context.Context, limit int) ([]RunDebugRunSummary, error) {
+func (s *RunPostgres) ListRunDebugRuns(ctx context.Context, limit int) ([]operatorread.RunDebugRunSummary, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
@@ -357,10 +153,10 @@ func (s *OperatorPostgres) ListRunDebugRuns(ctx context.Context, limit int) ([]R
 		return nil, fmt.Errorf("list run debug runs: %w", err)
 	}
 	defer rows.Close()
-	out := make([]RunDebugRunSummary, 0, limit)
+	out := make([]operatorread.RunDebugRunSummary, 0, limit)
 	for rows.Next() {
 		var (
-			item      RunDebugRunSummary
+			item      operatorread.RunDebugRunSummary
 			lastEvent sql.NullTime
 			endedAt   sql.NullTime
 		)
@@ -392,23 +188,23 @@ func (s *OperatorPostgres) ListRunDebugRuns(ctx context.Context, limit int) ([]R
 	return out, nil
 }
 
-func (s *OperatorPostgres) LoadRunDebugReport(ctx context.Context, runID string, opts RunDebugQueryOptions) (RunDebugReport, error) {
+func (s *RunPostgres) LoadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
 	if s == nil || s.backend == nil {
-		return RunDebugReport{}, fmt.Errorf("postgres store is required")
+		return operatorread.RunDebugReport{}, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireRunDebugAccess(); err != nil {
-		return RunDebugReport{}, err
+		return operatorread.RunDebugReport{}, err
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
-		return RunDebugReport{}, fmt.Errorf("run_id is required")
+		return operatorread.RunDebugReport{}, fmt.Errorf("run_id is required")
 	}
 	opts = defaultRunDebugQueryOptions(opts)
 	header, err := s.LoadRunHeader(ctx, runID)
 	if err != nil {
-		return RunDebugReport{}, err
+		return operatorread.RunDebugReport{}, err
 	}
-	report := RunDebugReport{
+	report := operatorread.RunDebugReport{
 		RunID:          header.RunID,
 		RunTableStatus: header.Status,
 		Failure:        runtimefailures.CloneEnvelope(header.Failure),
@@ -428,7 +224,7 @@ func (s *OperatorPostgres) LoadRunDebugReport(ctx context.Context, runID string,
 		FROM events
 		WHERE run_id = $1::uuid
 	`, report.RunID).Scan(&report.EventCount, &lastEventAt); err != nil {
-		return RunDebugReport{}, fmt.Errorf("load event summary: %w", err)
+		return operatorread.RunDebugReport{}, fmt.Errorf("load event summary: %w", err)
 	}
 	if lastEventAt.Valid {
 		report.LastEventAt = lastEventAt.Time.UTC()
@@ -442,33 +238,33 @@ func (s *OperatorPostgres) LoadRunDebugReport(ctx context.Context, runID string,
 		ORDER BY event_name
 	`, report.RunID)
 	if err != nil {
-		return RunDebugReport{}, fmt.Errorf("load event counts: %w", err)
+		return operatorread.RunDebugReport{}, fmt.Errorf("load event counts: %w", err)
 	}
 	defer eventCountRows.Close()
 	for eventCountRows.Next() {
-		var item RunDebugEventCount
+		var item operatorread.RunDebugEventCount
 		if err := eventCountRows.Scan(&item.EventName, &item.Count); err != nil {
-			return RunDebugReport{}, fmt.Errorf("scan event counts: %w", err)
+			return operatorread.RunDebugReport{}, fmt.Errorf("scan event counts: %w", err)
 		}
 		report.EventCounts = append(report.EventCounts, item)
 	}
 	if err := eventCountRows.Err(); err != nil {
-		return RunDebugReport{}, fmt.Errorf("read event counts: %w", err)
+		return operatorread.RunDebugReport{}, fmt.Errorf("read event counts: %w", err)
 	}
 
 	deliveryCounts, err := s.deliveryRunDiagnosticCounts(ctx, report.RunID)
 	if err != nil {
-		return RunDebugReport{}, fmt.Errorf("load deliveries: %w", err)
+		return operatorread.RunDebugReport{}, fmt.Errorf("load deliveries: %w", err)
 	}
 	report.Deliveries = runDebugDeliveryCounts(deliveryCounts)
 	failedDeliveries, err := s.loadRunDebugFailureDeliveries(ctx, report.RunID, opts.DeadLetterLimit)
 	if err != nil {
-		return RunDebugReport{}, err
+		return operatorread.RunDebugReport{}, err
 	}
 	report.FailedDeliveries = failedDeliveries
 	testQuiescence, err := s.LoadRunTestQuiescence(ctx, report.RunID, time.Now().UTC())
 	if err != nil {
-		return RunDebugReport{}, err
+		return operatorread.RunDebugReport{}, err
 	}
 	report.TestQuiescence = testQuiescence
 
@@ -487,20 +283,20 @@ func (s *OperatorPostgres) LoadRunDebugReport(ctx context.Context, runID string,
 		LIMIT $2
 	`, report.RunID, opts.EventLimit)
 	if err != nil {
-		return RunDebugReport{}, fmt.Errorf("load run events: %w", err)
+		return operatorread.RunDebugReport{}, fmt.Errorf("load run events: %w", err)
 	}
 	defer eventRows.Close()
 	for eventRows.Next() {
-		var item RunDebugEvent
+		var item operatorread.RunDebugEvent
 		var payload []byte
 		if err := eventRows.Scan(&item.EventID, &item.EventName, &item.EntityID, &item.CreatedAt, &item.Source, &item.SourceType, &payload); err != nil {
-			return RunDebugReport{}, fmt.Errorf("scan run events: %w", err)
+			return operatorread.RunDebugReport{}, fmt.Errorf("scan run events: %w", err)
 		}
 		item.Payload = append(json.RawMessage(nil), payload...)
 		report.Events = append(report.Events, item)
 	}
 	if err := eventRows.Err(); err != nil {
-		return RunDebugReport{}, fmt.Errorf("read run events: %w", err)
+		return operatorread.RunDebugReport{}, fmt.Errorf("read run events: %w", err)
 	}
 
 	deadRows, err := s.backend.QueryContext(ctx, `
@@ -517,24 +313,24 @@ func (s *OperatorPostgres) LoadRunDebugReport(ctx context.Context, runID string,
 		LIMIT $2
 	`, report.RunID, opts.DeadLetterLimit)
 	if err != nil {
-		return RunDebugReport{}, fmt.Errorf("load dead letters: %w", err)
+		return operatorread.RunDebugReport{}, fmt.Errorf("load dead letters: %w", err)
 	}
 	defer deadRows.Close()
 	for deadRows.Next() {
-		var item RunDebugDeadLetter
+		var item operatorread.RunDebugDeadLetter
 		var rawFailure []byte
 		if err := deadRows.Scan(&item.OriginalEvent, &item.EntityID, &rawFailure, &item.HandlerNode, &item.CreatedAt); err != nil {
-			return RunDebugReport{}, fmt.Errorf("scan dead letters: %w", err)
+			return operatorread.RunDebugReport{}, fmt.Errorf("scan dead letters: %w", err)
 		}
 		failure, err := decodeStoredFailure(rawFailure)
 		if err != nil || failure == nil {
-			return RunDebugReport{}, fmt.Errorf("decode run dead letter failure")
+			return operatorread.RunDebugReport{}, fmt.Errorf("decode run dead letter failure")
 		}
 		item.Failure = *failure
 		report.DeadLetters = append(report.DeadLetters, item)
 	}
 	if err := deadRows.Err(); err != nil {
-		return RunDebugReport{}, fmt.Errorf("read dead letters: %w", err)
+		return operatorread.RunDebugReport{}, fmt.Errorf("read dead letters: %w", err)
 	}
 
 	turnRows, err := s.backend.QueryContext(ctx, `
@@ -545,18 +341,18 @@ func (s *OperatorPostgres) LoadRunDebugReport(ctx context.Context, runID string,
 		ORDER BY agent_id
 	`, report.RunID)
 	if err != nil {
-		return RunDebugReport{}, fmt.Errorf("load agent turns: %w", err)
+		return operatorread.RunDebugReport{}, fmt.Errorf("load agent turns: %w", err)
 	}
 	defer turnRows.Close()
 	for turnRows.Next() {
-		var item RunDebugAgentTurn
+		var item operatorread.RunDebugAgentTurn
 		if err := turnRows.Scan(&item.AgentID, &item.Turns, &item.ErrorCount, &item.LastAt); err != nil {
-			return RunDebugReport{}, fmt.Errorf("scan agent turns: %w", err)
+			return operatorread.RunDebugReport{}, fmt.Errorf("scan agent turns: %w", err)
 		}
 		report.AgentTurns = append(report.AgentTurns, item)
 	}
 	if err := turnRows.Err(); err != nil {
-		return RunDebugReport{}, fmt.Errorf("read agent turns: %w", err)
+		return operatorread.RunDebugReport{}, fmt.Errorf("read agent turns: %w", err)
 	}
 
 	mutationRows, err := s.backend.QueryContext(ctx, `
@@ -577,12 +373,12 @@ func (s *OperatorPostgres) LoadRunDebugReport(ctx context.Context, runID string,
 		LIMIT $2
 	`, report.RunID, opts.MutationLimit)
 	if err != nil {
-		return RunDebugReport{}, fmt.Errorf("load run mutations: %w", err)
+		return operatorread.RunDebugReport{}, fmt.Errorf("load run mutations: %w", err)
 	}
 	defer mutationRows.Close()
 	for mutationRows.Next() {
 		var (
-			item     RunDebugMutation
+			item     operatorread.RunDebugMutation
 			oldValue []byte
 			newValue []byte
 		)
@@ -598,49 +394,49 @@ func (s *OperatorPostgres) LoadRunDebugReport(ctx context.Context, runID string,
 			&item.CausedByEvent,
 			&item.CreatedAt,
 		); err != nil {
-			return RunDebugReport{}, fmt.Errorf("scan run mutations: %w", err)
+			return operatorread.RunDebugReport{}, fmt.Errorf("scan run mutations: %w", err)
 		}
 		item.OldValue = append(json.RawMessage(nil), oldValue...)
 		item.NewValue = append(json.RawMessage(nil), newValue...)
 		report.Mutations = append(report.Mutations, item)
 	}
 	if err := mutationRows.Err(); err != nil {
-		return RunDebugReport{}, fmt.Errorf("read run mutations: %w", err)
+		return operatorread.RunDebugReport{}, fmt.Errorf("read run mutations: %w", err)
 	}
 
 	if err := s.loadRunDebugRuntimeLogs(ctx, report.RunID, opts, &report); err != nil {
-		return RunDebugReport{}, err
+		return operatorread.RunDebugReport{}, err
 	}
 
 	return report, nil
 }
 
-func (s *OperatorPostgres) LoadRunTestQuiescence(ctx context.Context, runID string, observedAt time.Time) (RunTestQuiescence, error) {
-	var out RunTestQuiescence
+func (s *RunPostgres) LoadRunTestQuiescence(ctx context.Context, runID string, observedAt time.Time) (operatorread.RunTestQuiescence, error) {
+	var out operatorread.RunTestQuiescence
 	summary, err := s.summarizeDeliveryRun(ctx, runID)
 	if err != nil {
-		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence active deliveries: %w", err)
+		return operatorread.RunTestQuiescence{}, fmt.Errorf("load run test quiescence active deliveries: %w", err)
 	}
 	out.ActiveDeliveries = summary.Pending + summary.InProgress + summary.RetryScheduled
 	if s.runtime == nil {
-		return RunTestQuiescence{}, fmt.Errorf("run debug runtime diagnostics source is required")
+		return operatorread.RunTestQuiescence{}, fmt.Errorf("run debug runtime diagnostics source is required")
 	}
 	pipelineSummary, err := s.runtime.PipelineObligations().SummarizeRun(ctx, runID)
 	if err != nil {
-		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence unsettled pipeline events: %w", err)
+		return operatorread.RunTestQuiescence{}, fmt.Errorf("load run test quiescence unsettled pipeline events: %w", err)
 	}
 	out.UnsettledPipelineEvents = pipelineSummary.Replayable + pipelineSummary.Deferred
 	scope, err := runtimetimerobligation.Run(runID)
 	if err != nil {
-		return RunTestQuiescence{}, err
+		return operatorread.RunTestQuiescence{}, err
 	}
 	timerSnapshot, err := s.runtime.ReadTimerObligations(ctx, scope, observedAt)
 	if err != nil {
-		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence timer obligations: %w", err)
+		return operatorread.RunTestQuiescence{}, fmt.Errorf("load run test quiescence timer obligations: %w", err)
 	}
 	runTimers, ok := timerSnapshot.Run(runID)
 	if !ok {
-		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence timer obligations: snapshot omitted requested run")
+		return operatorread.RunTestQuiescence{}, fmt.Errorf("load run test quiescence timer obligations: snapshot omitted requested run")
 	}
 	out.DueTimers = runTimers.Totals().DueCount
 	if err := s.backend.QueryRowContext(ctx, `
@@ -652,20 +448,20 @@ func (s *OperatorPostgres) LoadRunTestQuiescence(ctx context.Context, runID stri
 		  AND lease_expires_at IS NOT NULL
 		  AND lease_expires_at > now()
 	`, runID).Scan(&out.ActiveSessionLeases); err != nil {
-		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence active session leases: %w", err)
+		return operatorread.RunTestQuiescence{}, fmt.Errorf("load run test quiescence active session leases: %w", err)
 	}
 	out.Ready = runTestQuiescenceReady(out)
 	return out, nil
 }
 
-func runTestQuiescenceReady(value RunTestQuiescence) bool {
+func runTestQuiescenceReady(value operatorread.RunTestQuiescence) bool {
 	return value.ActiveDeliveries == 0 &&
 		value.UnsettledPipelineEvents == 0 &&
 		value.DueTimers == 0 &&
 		value.ActiveSessionLeases == 0
 }
 
-func (s *OperatorPostgres) loadRunDebugFailureDeliveries(ctx context.Context, runID string, limit int) ([]RunDebugFailureDelivery, error) {
+func (s *RunPostgres) loadRunDebugFailureDeliveries(ctx context.Context, runID string, limit int) ([]operatorread.RunDebugFailureDelivery, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -688,12 +484,12 @@ func (s *OperatorPostgres) loadRunDebugFailureDeliveries(ctx context.Context, ru
 			}
 			event := admitted.Event()
 			return deliveryLifecycleEventMetadata{EventName: string(event.Type()), RunID: event.RunID(), EntityID: event.EntityID()}, nil
-		}, func(deliveryID string, claimVersion int64) ([]OperatorDeadLetterRecord, error) {
-			return s.operatorObservabilityReadSurface().loadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
+		}, func(deliveryID string, claimVersion int64) ([]operatorread.OperatorDeadLetterRecord, error) {
+			return s.deadLetters.LoadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
 		})
 }
 
-func normalizeRunDebugFailureDelivery(item *RunDebugFailureDelivery) {
+func normalizeRunDebugFailureDelivery(item *operatorread.RunDebugFailureDelivery) {
 	if item == nil {
 		return
 	}
@@ -701,10 +497,10 @@ func normalizeRunDebugFailureDelivery(item *RunDebugFailureDelivery) {
 	item.ReasonCode = strings.TrimSpace(item.ReasonCode)
 }
 
-func runDebugDeliveryCounts(counts []runtimedelivery.RunDiagnosticCount) []RunDebugDeliveryCount {
-	out := make([]RunDebugDeliveryCount, 0, len(counts))
+func runDebugDeliveryCounts(counts []runtimedelivery.RunDiagnosticCount) []operatorread.RunDebugDeliveryCount {
+	out := make([]operatorread.RunDebugDeliveryCount, 0, len(counts))
 	for _, count := range counts {
-		out = append(out, RunDebugDeliveryCount{
+		out = append(out, operatorread.RunDebugDeliveryCount{
 			SubscriberID: count.SubscriberID,
 			Status:       string(count.Status),
 			Count:        count.Count,
@@ -716,20 +512,20 @@ func runDebugDeliveryCounts(counts []runtimedelivery.RunDiagnosticCount) []RunDe
 func runDebugFailuresFromSnapshots(
 	snapshots []runtimedelivery.Snapshot,
 	loadEvent func(string) (deliveryLifecycleEventMetadata, error),
-	loadDeliveryDeadLetters func(string, int64) ([]OperatorDeadLetterRecord, error),
-) ([]RunDebugFailureDelivery, error) {
+	loadDeliveryDeadLetters func(string, int64) ([]operatorread.OperatorDeadLetterRecord, error),
+) ([]operatorread.RunDebugFailureDelivery, error) {
 	for _, snapshot := range snapshots {
 		if snapshot.Status != runtimedelivery.StatusFailed && snapshot.Status != runtimedelivery.StatusDeadLetter {
 			return nil, fmt.Errorf("canonical run diagnostic failure page returned delivery status %q", snapshot.Status)
 		}
 	}
-	out := make([]RunDebugFailureDelivery, 0, len(snapshots))
+	out := make([]operatorread.RunDebugFailureDelivery, 0, len(snapshots))
 	for _, snapshot := range snapshots {
 		metadata, err := loadEvent(snapshot.EventID)
 		if err != nil {
 			return nil, err
 		}
-		item := RunDebugFailureDelivery{
+		item := operatorread.RunDebugFailureDelivery{
 			EventID: snapshot.EventID, EventName: metadata.EventName, EntityID: metadata.EntityID,
 			DeliveryID: snapshot.DeliveryID, SubscriberType: string(snapshot.SubscriberClass),
 			SubscriberID: snapshot.SubscriberID, SessionID: snapshot.ActiveSessionID,
@@ -760,12 +556,12 @@ func runDebugFailuresFromSnapshots(
 	return out, nil
 }
 
-func (s *OperatorPostgres) LoadRunDebugTrace(ctx context.Context, runID string, opts RunDebugTraceQueryOptions) ([]RunDebugTraceRow, error) {
+func (s *RunPostgres) LoadRunDebugTrace(ctx context.Context, runID string, opts operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, error) {
 	rows, _, err := s.LoadRunDebugTracePage(ctx, runID, opts)
 	return rows, err
 }
 
-func (s *OperatorPostgres) LoadRunDebugTracePage(ctx context.Context, runID string, opts RunDebugTraceQueryOptions) ([]RunDebugTraceRow, string, error) {
+func (s *RunPostgres) LoadRunDebugTracePage(ctx context.Context, runID string, opts operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, string, error) {
 	if s == nil || s.backend == nil {
 		return nil, "", fmt.Errorf("postgres store is required")
 	}
@@ -774,10 +570,10 @@ func (s *OperatorPostgres) LoadRunDebugTracePage(ctx context.Context, runID stri
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
-		return nil, "", ErrRunNotFound
+		return nil, "", operatorread.ErrRunNotFound
 	}
 	if _, err := uuid.Parse(runID); err != nil {
-		return nil, "", ErrRunNotFound
+		return nil, "", operatorread.ErrRunNotFound
 	}
 	opts = defaultRunDebugTraceQueryOptions(opts)
 	var exists bool
@@ -785,7 +581,7 @@ func (s *OperatorPostgres) LoadRunDebugTracePage(ctx context.Context, runID stri
 		return nil, "", fmt.Errorf("check run debug trace run: %w", err)
 	}
 	if !exists {
-		return nil, "", ErrRunNotFound
+		return nil, "", operatorread.ErrRunNotFound
 	}
 
 	return s.loadProjectedRunDebugTrace(ctx, runID, opts)
@@ -800,7 +596,7 @@ type runDebugTraceCursor struct {
 	TurnID            string `json:"turn_id,omitempty"`
 }
 
-func encodeRunDebugTraceCursor(row RunDebugTraceRow) string {
+func encodeRunDebugTraceCursor(row operatorread.RunDebugTraceRow) string {
 	cursor := runDebugTraceCursor{
 		EventCreatedAt: row.EventCreatedAt.UTC().Format(time.RFC3339Nano),
 		EventID:        strings.TrimSpace(row.EventID),
@@ -820,24 +616,24 @@ func encodeRunDebugTraceCursor(row RunDebugTraceRow) string {
 func decodeRunDebugTraceCursor(cursor string) (runDebugTraceCursor, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(cursor))
 	if err != nil {
-		return runDebugTraceCursor{}, ErrInvalidObservabilityCursor
+		return runDebugTraceCursor{}, operatorread.ErrInvalidObservabilityCursor
 	}
 	var decoded runDebugTraceCursor
 	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return runDebugTraceCursor{}, ErrInvalidObservabilityCursor
+		return runDebugTraceCursor{}, operatorread.ErrInvalidObservabilityCursor
 	}
 	if _, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(decoded.EventCreatedAt)); err != nil {
-		return runDebugTraceCursor{}, ErrInvalidObservabilityCursor
+		return runDebugTraceCursor{}, operatorread.ErrInvalidObservabilityCursor
 	}
 	if strings.TrimSpace(decoded.EventID) == "" {
-		return runDebugTraceCursor{}, ErrInvalidObservabilityCursor
+		return runDebugTraceCursor{}, operatorread.ErrInvalidObservabilityCursor
 	}
 	for _, timestamp := range []string{decoded.DeliveryCreatedAt, decoded.TurnCreatedAt} {
 		if strings.TrimSpace(timestamp) == "" {
 			continue
 		}
 		if _, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(timestamp)); err != nil {
-			return runDebugTraceCursor{}, ErrInvalidObservabilityCursor
+			return runDebugTraceCursor{}, operatorread.ErrInvalidObservabilityCursor
 		}
 	}
 	return decoded, nil
@@ -883,7 +679,7 @@ func nullableTimePtr(value sql.NullTime) *time.Time {
 	return &tm
 }
 
-func (s *OperatorPostgres) loadRunDebugRuntimeLogs(ctx context.Context, runID string, opts RunDebugQueryOptions, report *RunDebugReport) error {
+func (s *RunPostgres) loadRunDebugRuntimeLogs(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions, report *operatorread.RunDebugReport) error {
 	if s == nil || s.backend == nil {
 		return fmt.Errorf("postgres store is required")
 	}
@@ -924,7 +720,7 @@ func (s *OperatorPostgres) loadRunDebugRuntimeLogs(ctx context.Context, runID st
 	}
 	defer logSummaryRows.Close()
 	for logSummaryRows.Next() {
-		var item RunDebugRuntimeSummary
+		var item operatorread.RunDebugRuntimeSummary
 		if err := logSummaryRows.Scan(&item.Level, &item.Component, &item.Action, &item.Count); err != nil {
 			return fmt.Errorf("scan runtime log rollup: %w", err)
 		}
@@ -959,7 +755,7 @@ func (s *OperatorPostgres) loadRunDebugRuntimeLogs(ctx context.Context, runID st
 	}
 	defer logRows.Close()
 	for logRows.Next() {
-		var item RunDebugRuntimeLog
+		var item operatorread.RunDebugRuntimeLog
 		var detail []byte
 		var failureRaw []byte
 		if err := logRows.Scan(&item.EventID, &item.Level, &item.Message, &item.Component, &item.Action, &item.EventType, &item.AgentID, &item.EntityID, &failureRaw, &detail, &item.CreatedAt); err != nil {

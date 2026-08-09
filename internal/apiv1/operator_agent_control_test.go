@@ -30,7 +30,7 @@ func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:                func() time.Time { return time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC) },
 			Idempotency:        sqliteStore,
 			AgentConversations: &fakeAgentConversationReadStore{},
@@ -100,7 +100,7 @@ func TestOperatorAgentControlHandlersTypedResourceErrors(t *testing.T) {
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Idempotency:        sqliteStore,
 			AgentConversations: &fakeAgentConversationReadStore{},
 			AgentControl: &fakeAgentControlController{
@@ -153,7 +153,7 @@ func TestOperatorAgentDirectiveFailureUsesCanonicalNestedEnvelope(t *testing.T) 
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Idempotency:        sqliteStore,
 			AgentConversations: &fakeAgentConversationReadStore{},
 			AgentControl: &fakeAgentControlController{errs: map[string]error{
@@ -202,7 +202,7 @@ func TestOperatorAgentSendDirectiveRunTargetErrors(t *testing.T) {
 	terminalRunID := "00000000-0000-0000-0000-000000000405"
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Idempotency:        sqliteStore,
 			AgentConversations: &fakeAgentConversationReadStore{},
 			AgentControl: &fakeAgentControlController{
@@ -284,7 +284,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Idempotency:        pg,
 			AgentConversations: pg,
 			AgentControl:       manager,
@@ -353,7 +353,7 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeBundleSource(t *testing.T
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Idempotency:        pg,
 			AgentConversations: pg,
 			AgentControl:       manager,
@@ -386,7 +386,7 @@ func TestOperatorAgentControlHandlersRestrictAgentNotRunningToSendDirective(t *t
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Idempotency:        sqliteStore,
 			AgentConversations: &fakeAgentConversationReadStore{},
 			AgentControl: &fakeAgentControlController{
@@ -419,7 +419,7 @@ func TestOperatorAgentControlHandlersRestrictAgentNotRunningToSendDirective(t *t
 func TestOperatorAgentControlHandlersRequireOwner(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers:   OperatorReadHandlers(OperatorReadOptions{}),
+		Handlers:   testOperatorHandlers(testOperatorCapabilities{}),
 	})
 	resp := rpcCall(t, handler, agentControlBody("agent.restart", "agent-1", ""))
 	if resp.Error == nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -20,12 +21,13 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 type fakeConversationCapabilitySource struct {
-	turns   map[string][]OperatorPublicConversationTurn
+	turns   map[string][]operatorread.OperatorPublicConversationTurn
 	turnErr error
 	err     error
 }
@@ -34,33 +36,33 @@ func (s fakeConversationCapabilitySource) RequireCurrentSchema() error {
 	return s.err
 }
 
-func (s fakeConversationCapabilitySource) ListOperatorConversationTurns(_ context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error) {
+func (s fakeConversationCapabilitySource) ListOperatorConversationTurns(_ context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
 	if s.turnErr != nil {
-		return OperatorConversationTurnListResult{}, s.turnErr
+		return operatorread.OperatorConversationTurnListResult{}, s.turnErr
 	}
 	publicTurns := s.turns[strings.TrimSpace(opts.SessionID)]
-	page := OperatorConversationTurnListResult{Turns: []OperatorConversationTurnListItem{}}
+	page := operatorread.OperatorConversationTurnListResult{Turns: []operatorread.OperatorConversationTurnListItem{}}
 	for _, turn := range publicTurns {
 		page.Turns = append(page.Turns, operatorConversationTurnListItemFromPublic(turn))
 	}
 	return page, nil
 }
 
-func (s fakeConversationCapabilitySource) LoadOperatorPublicConversationTurn(_ context.Context, sessionID, turnID string) (OperatorPublicConversationTurnDetail, error) {
+func (s fakeConversationCapabilitySource) LoadOperatorPublicConversationTurn(_ context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
 	for _, turn := range s.turns[strings.TrimSpace(sessionID)] {
 		if turn.TurnID == strings.TrimSpace(turnID) {
-			return OperatorPublicConversationTurnDetail{Turn: turn}, nil
+			return operatorread.OperatorPublicConversationTurnDetail{Turn: turn}, nil
 		}
 	}
-	return OperatorPublicConversationTurnDetail{}, ErrTurnNotFound
+	return operatorread.OperatorPublicConversationTurnDetail{}, operatorread.ErrTurnNotFound
 }
 
 type fakeAgentConversationReadSource struct {
 	agents    []runtimemanager.PersistedAgent
-	pending   map[string]PendingAgentDeliveryFacts
-	details   map[string]PendingAgentDeliveryPage
-	lifecycle map[string]AgentDeliveryLifecycleFacts
-	turns     map[string][]OperatorPublicConversationTurn
+	pending   map[string]operatorread.PendingAgentDeliveryFacts
+	details   map[string]operatorread.PendingAgentDeliveryPage
+	lifecycle map[string]operatorread.AgentDeliveryLifecycleFacts
+	turns     map[string][]operatorread.OperatorPublicConversationTurn
 	turnErr   error
 	err       error
 	detailErr error
@@ -74,74 +76,78 @@ func (s fakeAgentConversationReadSource) LoadAgents(context.Context) ([]runtimem
 	return s.agents, s.err
 }
 
-func (s fakeAgentConversationReadSource) ListPendingAgentDeliveryFacts(_ context.Context, identities []agentidentity.Identity, _ time.Time) (map[agentidentity.Identity]PendingAgentDeliveryFacts, error) {
-	out := make(map[agentidentity.Identity]PendingAgentDeliveryFacts, len(identities))
+func (s fakeAgentConversationReadSource) ListPendingAgentDeliveryFacts(_ context.Context, identities []agentidentity.Identity, _ time.Time) (map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts, error) {
+	out := make(map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts, len(identities))
 	for _, identity := range identities {
 		out[identity] = s.pending[identity.AgentID()]
 	}
 	return out, s.err
 }
 
-func (s fakeAgentConversationReadSource) ListPendingAgentDeliveryDetails(_ context.Context, opts PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error) {
+func (s fakeAgentConversationReadSource) ListPendingAgentDeliveryDetails(_ context.Context, opts operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryPage, error) {
 	if s.detailErr != nil {
-		return PendingAgentDeliveryPage{}, s.detailErr
+		return operatorread.PendingAgentDeliveryPage{}, s.detailErr
 	}
 	page, ok := s.details[opts.AgentIdentity.AgentID()]
 	if !ok {
-		return PendingAgentDeliveryPage{PendingDeliveries: []PendingAgentDeliveryDetail{}}, s.err
+		return operatorread.PendingAgentDeliveryPage{PendingDeliveries: []operatorread.PendingAgentDeliveryDetail{}}, s.err
 	}
 	if page.PendingDeliveries == nil {
-		page.PendingDeliveries = []PendingAgentDeliveryDetail{}
+		page.PendingDeliveries = []operatorread.PendingAgentDeliveryDetail{}
 	}
 	return page, s.err
 }
 
-func (s fakeAgentConversationReadSource) ListAgentDeliveryLifecycleFacts(_ context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]AgentDeliveryLifecycleFacts, error) {
-	out := make(map[agentidentity.Identity]AgentDeliveryLifecycleFacts, len(identities))
+func (s fakeAgentConversationReadSource) ListAgentDeliveryLifecycleFacts(_ context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error) {
+	out := make(map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, len(identities))
 	for _, identity := range identities {
 		out[identity] = s.lifecycle[identity.AgentID()]
 	}
 	return out, s.err
 }
 
-func (s fakeAgentConversationReadSource) deliveryLifecycleSnapshotPageForAgent(context.Context, runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error) {
+func (s fakeAgentConversationReadSource) DeliveryLifecycleSnapshotPageForAgent(context.Context, runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error) {
 	return runtimedelivery.SnapshotPage{Snapshots: []runtimedelivery.Snapshot{}}, nil
 }
 
-func (s fakeAgentConversationReadSource) deliveryDiagnosticSnapshotPageForAgent(context.Context, runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error) {
+func (s fakeAgentConversationReadSource) DeliveryDiagnosticSnapshotPageForAgent(context.Context, runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error) {
 	return runtimedelivery.SnapshotPage{Snapshots: []runtimedelivery.Snapshot{}}, nil
 }
 
-func (s fakeAgentConversationReadSource) deliveryDiagnosticCountsForAgentSince(context.Context, agentidentity.Identity, time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
+func (s fakeAgentConversationReadSource) DeliveryDiagnosticCountsForAgentSince(context.Context, agentidentity.Identity, time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
 	return runtimedelivery.AgentDiagnosticCounts{}, nil
 }
 
-func (s fakeAgentConversationReadSource) ListOperatorConversationTurns(_ context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error) {
+func (s fakeAgentConversationReadSource) LoadOperatorDeliveryDeadLetters(context.Context, string, int64) ([]operatorread.OperatorDeadLetterRecord, error) {
+	return []operatorread.OperatorDeadLetterRecord{}, nil
+}
+
+func (s fakeAgentConversationReadSource) ListOperatorConversationTurns(_ context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
 	if s.turnErr != nil {
-		return OperatorConversationTurnListResult{}, s.turnErr
+		return operatorread.OperatorConversationTurnListResult{}, s.turnErr
 	}
 	publicTurns := s.turns[strings.TrimSpace(opts.SessionID)]
-	page := OperatorConversationTurnListResult{Turns: []OperatorConversationTurnListItem{}}
+	page := operatorread.OperatorConversationTurnListResult{Turns: []operatorread.OperatorConversationTurnListItem{}}
 	for _, turn := range publicTurns {
 		page.Turns = append(page.Turns, operatorConversationTurnListItemFromPublic(turn))
 	}
 	return page, nil
 }
 
-func (s fakeAgentConversationReadSource) LoadOperatorPublicConversationTurn(_ context.Context, sessionID, turnID string) (OperatorPublicConversationTurnDetail, error) {
+func (s fakeAgentConversationReadSource) LoadOperatorPublicConversationTurn(_ context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
 	if s.turnErr != nil {
-		return OperatorPublicConversationTurnDetail{}, s.turnErr
+		return operatorread.OperatorPublicConversationTurnDetail{}, s.turnErr
 	}
 	for _, turn := range s.turns[strings.TrimSpace(sessionID)] {
 		if turn.TurnID == strings.TrimSpace(turnID) {
-			return OperatorPublicConversationTurnDetail{Turn: turn}, nil
+			return operatorread.OperatorPublicConversationTurnDetail{Turn: turn}, nil
 		}
 	}
-	return OperatorPublicConversationTurnDetail{}, ErrTurnNotFound
+	return operatorread.OperatorPublicConversationTurnDetail{}, operatorread.ErrTurnNotFound
 }
 
 func TestOperatorAgentSummaryPublishesCanonicalMemoryFacts(t *testing.T) {
-	memorySummary := operatorAgentSummaryFromPersisted(runtimemanager.PersistedAgent{
+	memorySummary := storeoperatorsurface.OperatorAgentSummaryFromPersisted(runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "memory-agent",
 			Identity: testAgentIdentity(t, "memory-agent", "support/chat-1"),
 			Role:     "worker",
@@ -150,7 +156,7 @@ func TestOperatorAgentSummaryPublishesCanonicalMemoryFacts(t *testing.T) {
 			Memory:   agentmemory.Authored(true),
 			FlowPath: "support/chat-1",
 		},
-	}, operatorAgentProjection{LifecycleState: "active"}, 0)
+	}, storeoperatorsurface.OperatorAgentProjection{LifecycleState: "active"}, 0)
 	if !memorySummary.Memory || memorySummary.MemorySource != string(agentmemory.SourceAuthored) {
 		t.Fatalf("memory summary = enabled:%v source:%q, want authored true", memorySummary.Memory, memorySummary.MemorySource)
 	}
@@ -171,7 +177,7 @@ func TestOperatorAgentSummaryPublishesCanonicalMemoryFacts(t *testing.T) {
 		}
 	}
 
-	defaultSummary := operatorAgentSummaryFromPersisted(runtimemanager.PersistedAgent{
+	defaultSummary := storeoperatorsurface.OperatorAgentSummaryFromPersisted(runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "stateless-agent",
 			Identity: testAgentIdentity(t, "stateless-agent", ""),
 			Role:     "worker",
@@ -179,7 +185,7 @@ func TestOperatorAgentSummaryPublishesCanonicalMemoryFacts(t *testing.T) {
 			Model:    "cheap",
 			Memory:   agentmemory.PlatformDefault(),
 		},
-	}, operatorAgentProjection{}, 0)
+	}, storeoperatorsurface.OperatorAgentProjection{}, 0)
 	if defaultSummary.Memory || defaultSummary.MemorySource != string(agentmemory.SourcePlatformDefault) {
 		t.Fatalf("default memory summary = enabled:%v source:%q, want platform-default false", defaultSummary.Memory, defaultSummary.MemorySource)
 	}
@@ -224,14 +230,14 @@ func operatorAgentProjectionRow(agentID string, values ...driver.Value) []driver
 }
 
 func TestCanonicalStatelessConversationVisibilitySourceProjectsRunID(t *testing.T) {
-	source := CanonicalStatelessConversationVisibilitySourceSQL()
+	source := storeoperatorsurface.CanonicalStatelessConversationVisibilitySourceSQL()
 	if !strings.Contains(source, "COALESCE(run_id::text, '') AS run_id") {
 		t.Fatalf("audit run_id projection missing from canonical source:\n%s", source)
 	}
 }
 
 func TestOperatorConversationQuerySourcesAlwaysProjectRunID(t *testing.T) {
-	sources := operatorConversationQuerySources()
+	sources := storeoperatorsurface.OperatorConversationQuerySources()
 	if len(sources) != 2 {
 		t.Fatalf("source count = %d, want 2", len(sources))
 	}
@@ -271,9 +277,9 @@ func TestOperatorConversationReadSurfaceListUsesCanonicalProjection(t *testing.T
 
 	runID := "11111111-1111-1111-1111-111111111111"
 	now := time.Date(2026, 5, 12, 10, 0, 0, 0, time.UTC)
-	reader := NewOperatorConversationReadSurface(db, fakeConversationCapabilitySource{
-		turns: map[string][]OperatorPublicConversationTurn{
-			"sess-1": {{TurnID: "turn-1", TaskID: "task-1", ParseOK: true, Activity: []OperatorConversationActivity{}}},
+	reader := storeoperatorsurface.NewOperatorConversationReadSurface(db, fakeConversationCapabilitySource{
+		turns: map[string][]operatorread.OperatorPublicConversationTurn{
+			"sess-1": {{TurnID: "turn-1", TaskID: "task-1", ParseOK: true, Activity: []operatorread.OperatorConversationActivity{}}},
 		},
 	})
 
@@ -283,7 +289,7 @@ func TestOperatorConversationReadSurfaceListUsesCanonicalProjection(t *testing.T
 			"session_id", "agent_id", "run_id", "kind", "flow_instance", "memory_enabled", "memory_source", "status", "turn_count", "message_count", "runtime_state", "started_at", "ended_at", "updated_at",
 		}).AddRow("sess-1", "agent-1", runID, "live_session", "global", true, "authored", "active", 2, 4, []byte(`{"summary":"brief"}`), now, nil, now))
 
-	result, err := reader.ListOperatorConversations(testAuthorActivityContext(), OperatorConversationListOptions{
+	result, err := reader.ListOperatorConversations(testAuthorActivityContext(), operatorread.OperatorConversationListOptions{
 		AgentID: "agent-1",
 		RunID:   runID,
 		Limit:   2,
@@ -318,9 +324,9 @@ func TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs(t *testing.
 	sessionStartedAt := time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC)
 	turnCompletedAt := time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC)
 	turnFailure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassConnectorFailure, "model_error", "llm-runtime", "turn", nil), "llm-runtime", "turn")
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+	reader := storeoperatorsurface.NewOperatorAgentReadSurface(db, fakeAgentConversationReadSource{
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-		turns: map[string][]OperatorPublicConversationTurn{
+		turns: map[string][]operatorread.OperatorPublicConversationTurn{
 			sessionID: {{
 				TurnID: turnID, CompletedAt: turnCompletedAt, ParseOK: false, Failure: &turnFailure,
 			}},
@@ -364,12 +370,12 @@ func TestOperatorAgentReadSurfaceListAgentsDoesNotDeriveStatusFromActiveLease(t 
 	}
 	defer db.Close()
 
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+	reader := storeoperatorsurface.NewOperatorAgentReadSurface(db, fakeAgentConversationReadSource{
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-		pending: map[string]PendingAgentDeliveryFacts{
+		pending: map[string]operatorread.PendingAgentDeliveryFacts{
 			"agent-1": {},
 		},
-		lifecycle: map[string]AgentDeliveryLifecycleFacts{
+		lifecycle: map[string]operatorread.AgentDeliveryLifecycleFacts{
 			"agent-1": {},
 		},
 	}, 0)
@@ -378,7 +384,7 @@ func TestOperatorAgentReadSurfaceListAgentsDoesNotDeriveStatusFromActiveLease(t 
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow(operatorAgentProjectionRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 2, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0)...))
 
-	result, err := reader.ListOperatorAgents(testAuthorActivityContext(), OperatorAgentListOptions{})
+	result, err := reader.ListOperatorAgents(testAuthorActivityContext(), operatorread.OperatorAgentListOptions{})
 	if err != nil {
 		t.Fatalf("ListOperatorAgents: %v", err)
 	}
@@ -420,16 +426,16 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 	runtimeState := []byte(`{"provider_session_id":"provider-sess-1","watchdog":{"state":"healthy_long_running","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","last_output_at":"2026-05-12T09:04:00Z","recorded_at":"2026-05-12T09:05:00Z"}}`)
 	agent := testOperatorAgent("agent-1")
 	agent.Config.EntityID = configuredEntityID
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+	reader := storeoperatorsurface.NewOperatorAgentReadSurface(db, fakeAgentConversationReadSource{
 		agents: []runtimemanager.PersistedAgent{agent},
-		pending: map[string]PendingAgentDeliveryFacts{
+		pending: map[string]operatorread.PendingAgentDeliveryFacts{
 			"agent-1": {PendingCount: 99, OldestPendingAgeSec: 999},
 		},
-		details: map[string]PendingAgentDeliveryPage{
+		details: map[string]operatorread.PendingAgentDeliveryPage{
 			"agent-1": {
 				PendingCount:        3,
 				OldestPendingAgeSec: 90,
-				PendingDeliveries: []PendingAgentDeliveryDetail{{
+				PendingDeliveries: []operatorread.PendingAgentDeliveryDetail{{
 					DeliveryID: "delivery-1",
 					EventID:    "event-1",
 					EventName:  "task.ready",
@@ -439,13 +445,13 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 				NextCursor: "cursor-2",
 			},
 		},
-		lifecycle: map[string]AgentDeliveryLifecycleFacts{
+		lifecycle: map[string]operatorread.AgentDeliveryLifecycleFacts{
 			"agent-1": {CurrentState: "active", BlockingLayer: "session_execution"},
 		},
-		turns: map[string][]OperatorPublicConversationTurn{
+		turns: map[string][]operatorread.OperatorPublicConversationTurn{
 			sessionID: {{
 				TurnID: turnID, TaskID: "task-1", EntityID: turnEntityID, CompletedAt: turnCompletedAt, ParseOK: true,
-				Activity: []OperatorConversationActivity{
+				Activity: []operatorread.OperatorConversationActivity{
 					{Kind: "tool_result", ToolName: "older_tool", ToolUseID: "toolu-old", OK: boolPointer(true)},
 					{Kind: "tool_result", ToolName: "selected_tool", ToolUseID: "toolu-selected", OK: boolPointer(true)},
 				},
@@ -457,7 +463,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners(t *testing
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow(operatorAgentProjectionRow("agent-1", "active", sessionID, sessionStartedAt, 2, "", nil, runtimeState, 0, 0)...))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), OperatorAgentDiagnosisOptions{QueueLimit: 1, QueueCursor: "cursor-1"})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDiagnosisOptions{QueueLimit: 1, QueueCursor: "cursor-1"})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -576,7 +582,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 		t.Fatalf("load canonical dead letter: %v", err)
 	}
 
-	first, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryDiagnosticsOptions{
+	first, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDeliveryDiagnosticsOptions{
 		FailureLimit:    1,
 		DeadLetterLimit: 10,
 	})
@@ -605,7 +611,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 		t.Fatalf("dead letter records = %#v", first.DeadLetters[0].DeadLetterRecords)
 	}
 
-	second, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryDiagnosticsOptions{
+	second, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDeliveryDiagnosticsOptions{
 		FailureLimit:  1,
 		FailureCursor: first.FailuresNextCursor,
 	})
@@ -680,10 +686,10 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 		usageAccounting string
 		createdAt       time.Time
 	}{
-		{"agent-1", "claude-3-5-sonnet", "regular", "anthropic", "anthropic", "api", "claude-3-5-sonnet", 100, 25, "0.000675", "anthropic", AgentUsageAccountingExact, since},
-		{"agent-1", "sonnet", "regular", "claude_cli", "claude", "cli", "sonnet", 50, 10, "0.000300", "claude_cli", AgentUsageAccountingEstimated, since.Add(time.Minute)},
-		{"agent-1", "claude-3-5-sonnet", "regular", "anthropic", "anthropic", "api", "claude-3-5-sonnet", 7, 3, "0.000010", "anthropic", AgentUsageAccountingExact, until},
-		{"agent-2", "claude-3-5-sonnet", "regular", "anthropic", "anthropic", "api", "claude-3-5-sonnet", 999, 999, "1.000000", "anthropic", AgentUsageAccountingExact, since.Add(time.Minute)},
+		{"agent-1", "claude-3-5-sonnet", "regular", "anthropic", "anthropic", "api", "claude-3-5-sonnet", 100, 25, "0.000675", "anthropic", operatorread.AgentUsageAccountingExact, since},
+		{"agent-1", "sonnet", "regular", "claude_cli", "claude", "cli", "sonnet", 50, 10, "0.000300", "claude_cli", operatorread.AgentUsageAccountingEstimated, since.Add(time.Minute)},
+		{"agent-1", "claude-3-5-sonnet", "regular", "anthropic", "anthropic", "api", "claude-3-5-sonnet", 7, 3, "0.000010", "anthropic", operatorread.AgentUsageAccountingExact, until},
+		{"agent-2", "claude-3-5-sonnet", "regular", "anthropic", "anthropic", "api", "claude-3-5-sonnet", 999, 999, "1.000000", "anthropic", operatorread.AgentUsageAccountingExact, since.Add(time.Minute)},
 	}
 	for _, row := range rows {
 		fields, err := testOperatorAgentIdentity(row.agentID).StorageFields()
@@ -708,7 +714,7 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 		}
 	}
 
-	result, err := pg.LoadOperatorAgentUsage(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentUsageOptions{Since: &since, Until: &until})
+	result, err := pg.LoadOperatorAgentUsage(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentUsageOptions{Since: &since, Until: &until})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentUsage: %v", err)
 	}
@@ -727,10 +733,10 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 	if len(result.Breakdown) != 2 {
 		t.Fatalf("breakdown = %#v, want two rows", result.Breakdown)
 	}
-	if got := result.Breakdown[0]; got.UsageAccounting != AgentUsageAccountingExact || got.InvocationType != "anthropic" || got.Model != "claude-3-5-sonnet" || got.ModelAlias != "regular" || got.BackendProfile != "anthropic" || got.Provider != "anthropic" || got.Transport != "api" || got.ResolvedModel != "claude-3-5-sonnet" {
+	if got := result.Breakdown[0]; got.UsageAccounting != operatorread.AgentUsageAccountingExact || got.InvocationType != "anthropic" || got.Model != "claude-3-5-sonnet" || got.ModelAlias != "regular" || got.BackendProfile != "anthropic" || got.Provider != "anthropic" || got.Transport != "api" || got.ResolvedModel != "claude-3-5-sonnet" {
 		t.Fatalf("first breakdown = %#v", got)
 	}
-	if got := result.Breakdown[1]; got.UsageAccounting != AgentUsageAccountingEstimated || got.InvocationType != "claude_cli" || got.Model != "sonnet" || got.ModelAlias != "regular" || got.BackendProfile != "claude_cli" || got.Provider != "claude" || got.Transport != "cli" || got.ResolvedModel != "sonnet" {
+	if got := result.Breakdown[1]; got.UsageAccounting != operatorread.AgentUsageAccountingEstimated || got.InvocationType != "claude_cli" || got.Model != "sonnet" || got.ModelAlias != "regular" || got.BackendProfile != "claude_cli" || got.Provider != "claude" || got.Transport != "cli" || got.ResolvedModel != "sonnet" {
 		t.Fatalf("second breakdown = %#v", got)
 	}
 }
@@ -746,10 +752,10 @@ func TestSQLiteRuntimeStoreLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
 	agent1 := testOperatorAgentIdentity("agent-1")
 	agent2 := testOperatorAgentIdentity("agent-2")
 	records := []budgetspend.SpendRecord{
-		{ExecutionMode: "live", FlowInstance: "global", AgentID: "agent-1", AgentIdentity: agent1, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 100, OutputTokens: 25, CostUSD: 0.000675, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: since},
-		{ExecutionMode: "live", FlowInstance: "global", AgentID: "agent-1", AgentIdentity: agent1, Model: "sonnet", ModelAlias: "regular", BackendProfile: "claude_cli", Provider: "claude", Transport: "cli", ResolvedModel: "sonnet", InputTokens: 50, OutputTokens: 10, CostUSD: 0.000300, InvocationType: "claude_cli", UsageAccounting: AgentUsageAccountingEstimated, RecordedAt: since.Add(time.Minute)},
-		{ExecutionMode: "live", FlowInstance: "global", AgentID: "agent-1", AgentIdentity: agent1, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 7, OutputTokens: 3, CostUSD: 0.000010, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: until},
-		{ExecutionMode: "live", FlowInstance: "global", AgentID: "agent-2", AgentIdentity: agent2, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 999, OutputTokens: 999, CostUSD: 1.000000, InvocationType: "anthropic", UsageAccounting: AgentUsageAccountingExact, RecordedAt: since.Add(time.Minute)},
+		{ExecutionMode: "live", FlowInstance: "global", AgentID: "agent-1", AgentIdentity: agent1, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 100, OutputTokens: 25, CostUSD: 0.000675, InvocationType: "anthropic", UsageAccounting: operatorread.AgentUsageAccountingExact, RecordedAt: since},
+		{ExecutionMode: "live", FlowInstance: "global", AgentID: "agent-1", AgentIdentity: agent1, Model: "sonnet", ModelAlias: "regular", BackendProfile: "claude_cli", Provider: "claude", Transport: "cli", ResolvedModel: "sonnet", InputTokens: 50, OutputTokens: 10, CostUSD: 0.000300, InvocationType: "claude_cli", UsageAccounting: operatorread.AgentUsageAccountingEstimated, RecordedAt: since.Add(time.Minute)},
+		{ExecutionMode: "live", FlowInstance: "global", AgentID: "agent-1", AgentIdentity: agent1, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 7, OutputTokens: 3, CostUSD: 0.000010, InvocationType: "anthropic", UsageAccounting: operatorread.AgentUsageAccountingExact, RecordedAt: until},
+		{ExecutionMode: "live", FlowInstance: "global", AgentID: "agent-2", AgentIdentity: agent2, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 999, OutputTokens: 999, CostUSD: 1.000000, InvocationType: "anthropic", UsageAccounting: operatorread.AgentUsageAccountingExact, RecordedAt: since.Add(time.Minute)},
 	}
 	for _, rec := range records {
 		if err := sqliteStore.RecordSpend(ctx, rec); err != nil {
@@ -757,7 +763,7 @@ func TestSQLiteRuntimeStoreLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
 		}
 	}
 
-	result, err := sqliteStore.LoadOperatorAgentUsage(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentUsageOptions{Since: &since, Until: &until})
+	result, err := sqliteStore.LoadOperatorAgentUsage(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentUsageOptions{Since: &since, Until: &until})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentUsage: %v", err)
 	}
@@ -776,10 +782,10 @@ func TestSQLiteRuntimeStoreLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
 	if len(result.Breakdown) != 2 {
 		t.Fatalf("breakdown = %#v, want two rows", result.Breakdown)
 	}
-	if got := result.Breakdown[0]; got.UsageAccounting != AgentUsageAccountingExact || got.InvocationType != "anthropic" || got.Model != "claude-3-5-sonnet" || got.ModelAlias != "regular" || got.BackendProfile != "anthropic" || got.Provider != "anthropic" || got.Transport != "api" || got.ResolvedModel != "claude-3-5-sonnet" {
+	if got := result.Breakdown[0]; got.UsageAccounting != operatorread.AgentUsageAccountingExact || got.InvocationType != "anthropic" || got.Model != "claude-3-5-sonnet" || got.ModelAlias != "regular" || got.BackendProfile != "anthropic" || got.Provider != "anthropic" || got.Transport != "api" || got.ResolvedModel != "claude-3-5-sonnet" {
 		t.Fatalf("first breakdown = %#v", got)
 	}
-	if got := result.Breakdown[1]; got.UsageAccounting != AgentUsageAccountingEstimated || got.InvocationType != "claude_cli" || got.Model != "sonnet" || got.ModelAlias != "regular" || got.BackendProfile != "claude_cli" || got.Provider != "claude" || got.Transport != "cli" || got.ResolvedModel != "sonnet" {
+	if got := result.Breakdown[1]; got.UsageAccounting != operatorread.AgentUsageAccountingEstimated || got.InvocationType != "claude_cli" || got.Model != "sonnet" || got.ModelAlias != "regular" || got.BackendProfile != "claude_cli" || got.Provider != "claude" || got.Transport != "cli" || got.ResolvedModel != "sonnet" {
 		t.Fatalf("second breakdown = %#v", got)
 	}
 }
@@ -791,7 +797,7 @@ func TestSQLiteRuntimeStoreLoadAgentUsageEmptyAndAgentExistence(t *testing.T) {
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-terminated", "terminated")
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-ephemeral", "ephemeral")
 
-	result, err := sqliteStore.LoadOperatorAgentUsage(ctx, testOperatorAgentIdentity("agent-empty"), OperatorAgentUsageOptions{})
+	result, err := sqliteStore.LoadOperatorAgentUsage(ctx, testOperatorAgentIdentity("agent-empty"), operatorread.OperatorAgentUsageOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentUsage empty: %v", err)
 	}
@@ -802,9 +808,9 @@ func TestSQLiteRuntimeStoreLoadAgentUsageEmptyAndAgentExistence(t *testing.T) {
 		t.Fatalf("empty usage totals = %#v", result.Usage)
 	}
 	for _, agentID := range []string{"missing", "agent-terminated", "agent-ephemeral"} {
-		_, err := sqliteStore.LoadOperatorAgentUsage(ctx, testOperatorAgentIdentity(agentID), OperatorAgentUsageOptions{})
-		if !errors.Is(err, ErrAgentNotFound) {
-			t.Fatalf("LoadOperatorAgentUsage(%s) error = %v, want ErrAgentNotFound", agentID, err)
+		_, err := sqliteStore.LoadOperatorAgentUsage(ctx, testOperatorAgentIdentity(agentID), operatorread.OperatorAgentUsageOptions{})
+		if !errors.Is(err, operatorread.ErrAgentNotFound) {
+			t.Fatalf("LoadOperatorAgentUsage(%s) error = %v, want operatorread.ErrAgentNotFound", agentID, err)
 		}
 	}
 }
@@ -830,7 +836,7 @@ func TestSQLiteRuntimeStoreLoadAgentUsageFailsClosedOnMalformedRows(t *testing.T
 		time.Date(2026, 5, 21, 9, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("seed malformed spend row: %v", err)
 	}
-	_, err = sqliteStore.LoadOperatorAgentUsage(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentUsageOptions{})
+	_, err = sqliteStore.LoadOperatorAgentUsage(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentUsageOptions{})
 	if err == nil || !strings.Contains(err.Error(), "empty model") {
 		t.Fatalf("LoadOperatorAgentUsage malformed error = %v, want empty model", err)
 	}
@@ -883,7 +889,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsDoesNotRequireConve
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 
-	result, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryDiagnosticsOptions{})
+	result, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDeliveryDiagnosticsOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDeliveryDiagnostics: %v", err)
 	}
@@ -978,7 +984,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 	failedDeliveryID := failedSnapshot.DeliveryID
 	deadLetterDeliveryID := deadLetterSnapshot.DeliveryID
 
-	first, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryLifecycleOptions{
+	first, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
 		Statuses: []string{"pending", "in_progress", "delivered", "failed", "dead_letter"},
 		Limit:    3,
@@ -993,7 +999,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 		t.Fatal("next_cursor empty, want second page")
 	}
 
-	second, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryLifecycleOptions{
+	second, err := pg.LoadOperatorAgentDeliveryLifecycle(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
 		Statuses: []string{"pending", "in_progress", "delivered", "failed", "dead_letter"},
 		Limit:    3,
@@ -1165,7 +1171,7 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	failedDeliveryID := failedSnapshot.DeliveryID
 	deadLetterDeliveryID := deadLetterSnapshot.DeliveryID
 
-	first, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryLifecycleOptions{
+	first, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
 		Statuses: []string{"pending", "in_progress", "delivered", "failed", "dead_letter"},
 		Limit:    3,
@@ -1180,7 +1186,7 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 		t.Fatal("next_cursor empty, want second page")
 	}
 
-	second, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryLifecycleOptions{
+	second, err := sqliteStore.LoadOperatorAgentDeliveryLifecycle(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDeliveryLifecycleOptions{
 		RunID:    runID,
 		Statuses: []string{"pending", "in_progress", "delivered", "failed", "dead_letter"},
 		Limit:    3,
@@ -1273,7 +1279,7 @@ type expectedAgentDeliveryLifecycleRow struct {
 	wantDone    bool
 }
 
-func assertAgentDeliveryLifecycleRows(t *testing.T, got []OperatorAgentDeliveryLifecycleRow, want []expectedAgentDeliveryLifecycleRow) {
+func assertAgentDeliveryLifecycleRows(t *testing.T, got []operatorread.OperatorAgentDeliveryLifecycleRow, want []expectedAgentDeliveryLifecycleRow) {
 	t.Helper()
 	want = append([]expectedAgentDeliveryLifecycleRow(nil), want...)
 	sort.Slice(want, func(i, j int) bool {
@@ -1345,7 +1351,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsUsesCanonicalLifecy
 	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "missing_dead_letter_record", nil)
 	seedAgentDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: testOperatorAgentIdentity("agent-1")}, runtimedelivery.StateExhausted, &failure)
 
-	got, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, testOperatorAgentIdentity("agent-1"), OperatorAgentDeliveryDiagnosticsOptions{})
+	got, err := pg.LoadOperatorAgentDeliveryDiagnostics(ctx, testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDeliveryDiagnosticsOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDeliveryDiagnostics: %v", err)
 	}
@@ -1381,7 +1387,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testi
 	}
 	defer db.Close()
 
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+	reader := storeoperatorsurface.NewOperatorAgentReadSurface(db, fakeAgentConversationReadSource{
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 	}, 0)
 
@@ -1389,7 +1395,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsAbsentLifecycle(t *testi
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow(operatorAgentProjectionRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0)...))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), OperatorAgentDiagnosisOptions{})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDiagnosisOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -1500,20 +1506,20 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisDoesNotInterpretRawToolOutput
 }
 
 func TestOperatorAgentDiagnosisValidationFailsClosedOnLastToolOutcomeWithoutActive(t *testing.T) {
-	err := validateOperatorAgentDiagnosis(OperatorAgentDiagnosis{
+	err := storeoperatorsurface.ValidateOperatorAgentDiagnosis(operatorread.OperatorAgentDiagnosis{
 		AgentID: "agent-1",
 		Status:  "running",
-		Queue: OperatorAgentDiagnosisQueue{
-			PendingDeliveries: []OperatorAgentPendingDelivery{},
+		Queue: operatorread.OperatorAgentDiagnosisQueue{
+			PendingDeliveries: []operatorread.OperatorAgentPendingDelivery{},
 		},
-		LastToolOutcome: &OperatorAgentLastToolOutcome{
+		LastToolOutcome: &operatorread.OperatorAgentLastToolOutcome{
 			TurnID:   "turn-1",
 			ToolName: "read_file",
 			OK:       true,
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "last_tool_outcome requires active") {
-		t.Fatalf("validateOperatorAgentDiagnosis err = %v, want last_tool_outcome active requirement", err)
+		t.Fatalf("storeoperatorsurface.ValidateOperatorAgentDiagnosis err = %v, want last_tool_outcome active requirement", err)
 	}
 }
 
@@ -1524,9 +1530,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisDoesNotDeriveStatusFromActive
 	}
 	defer db.Close()
 
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+	reader := storeoperatorsurface.NewOperatorAgentReadSurface(db, fakeAgentConversationReadSource{
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-		lifecycle: map[string]AgentDeliveryLifecycleFacts{
+		lifecycle: map[string]operatorread.AgentDeliveryLifecycleFacts{
 			"agent-1": {},
 		},
 	}, 0)
@@ -1535,7 +1541,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisDoesNotDeriveStatusFromActive
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow(operatorAgentProjectionRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "lease-owner", time.Now().Add(time.Minute), []byte(`{}`), 0, 0)...))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), OperatorAgentDiagnosisOptions{})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDiagnosisOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -1557,7 +1563,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsActiveWithoutLatestTurn(
 	}
 	defer db.Close()
 
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+	reader := storeoperatorsurface.NewOperatorAgentReadSurface(db, fakeAgentConversationReadSource{
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 	}, 0)
 
@@ -1565,7 +1571,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsActiveWithoutLatestTurn(
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow(operatorAgentProjectionRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0)...))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), OperatorAgentDiagnosisOptions{})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDiagnosisOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -1588,10 +1594,10 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsEmptyActiveOptionalRefs(
 	defer db.Close()
 
 	turnID := "22222222-2222-2222-2222-222222222222"
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+	reader := storeoperatorsurface.NewOperatorAgentReadSurface(db, fakeAgentConversationReadSource{
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-		turns: map[string][]OperatorPublicConversationTurn{
-			"sess-1": {{TurnID: turnID, CompletedAt: time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC), ParseOK: true, Activity: []OperatorConversationActivity{}}},
+		turns: map[string][]operatorread.OperatorPublicConversationTurn{
+			"sess-1": {{TurnID: turnID, CompletedAt: time.Date(2026, 5, 12, 9, 5, 0, 0, time.UTC), ParseOK: true, Activity: []operatorread.OperatorConversationActivity{}}},
 		},
 	}, 0)
 
@@ -1599,7 +1605,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisOmitsEmptyActiveOptionalRefs(
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow(operatorAgentProjectionRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{}`), 0, 0)...))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), OperatorAgentDiagnosisOptions{})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDiagnosisOptions{})
 	if err != nil {
 		t.Fatalf("LoadOperatorAgentDiagnosis: %v", err)
 	}
@@ -1621,7 +1627,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedRuntime
 	}
 	defer db.Close()
 
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+	reader := storeoperatorsurface.NewOperatorAgentReadSurface(db, fakeAgentConversationReadSource{
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
 	}, 0)
 
@@ -1629,7 +1635,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedRuntime
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow(operatorAgentProjectionRow("agent-1", "active", "sess-1", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 0, "", nil, []byte(`{"watchdog":{"state":"stale","blocking_layer":"session_execution","action":"turn_long_running","outcome":"observed","recorded_at":"2026-05-12T09:05:00Z"}}`), 0, 0)...))
 
-	_, err = reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), OperatorAgentDiagnosisOptions{})
+	_, err = reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDiagnosisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "decode latest agent session runtime_state") || !strings.Contains(err.Error(), "watchdog.state") {
 		t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want runtime_state watchdog validation failure", err)
 	}
@@ -1645,9 +1651,9 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLifecyc
 	}
 	defer db.Close()
 
-	reader := NewOperatorAgentConversationReadSurface(db, fakeAgentConversationReadSource{
+	reader := storeoperatorsurface.NewOperatorAgentReadSurface(db, fakeAgentConversationReadSource{
 		agents: []runtimemanager.PersistedAgent{testOperatorAgent("agent-1")},
-		lifecycle: map[string]AgentDeliveryLifecycleFacts{
+		lifecycle: map[string]operatorread.AgentDeliveryLifecycleFacts{
 			"agent-1": {CurrentState: "blocked", BlockingLayer: "session_execution"},
 		},
 	}, 0)
@@ -1656,7 +1662,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLifecyc
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow(operatorAgentProjectionRow("agent-1", "active", "", nil, 0, "", nil, []byte(`{}`), 0, 0)...))
 
-	_, err = reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), OperatorAgentDiagnosisOptions{})
+	_, err = reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDiagnosisOptions{})
 	if err == nil || !strings.Contains(err.Error(), "delivery_lifecycle.state") {
 		t.Fatalf("LoadOperatorAgentDiagnosis err = %v, want delivery_lifecycle.state failure", err)
 	}
@@ -1665,7 +1671,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDiagnosisFailsClosedOnMalformedLifecyc
 	}
 }
 
-func loadAgentDiagnosisWithLatestTurn(t *testing.T, turnID, taskID, entityID string, parseOK bool, turnBlocks []byte) (OperatorAgentDiagnosis, error) {
+func loadAgentDiagnosisWithLatestTurn(t *testing.T, turnID, taskID, entityID string, parseOK bool, turnBlocks []byte) (operatorread.OperatorAgentDiagnosis, error) {
 	t.Helper()
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -1692,17 +1698,17 @@ func loadAgentDiagnosisWithLatestTurn(t *testing.T, turnID, taskID, entityID str
 		if projectionErr != nil {
 			source.turnErr = projectionErr
 		} else {
-			source.turns = map[string][]OperatorPublicConversationTurn{
+			source.turns = map[string][]operatorread.OperatorPublicConversationTurn{
 				"11111111-1111-1111-1111-111111111111": {turn},
 			}
 		}
 	}
-	reader := NewOperatorAgentConversationReadSurface(db, source, 0)
+	reader := storeoperatorsurface.NewOperatorAgentReadSurface(db, source, 0)
 	mock.ExpectQuery("(?s)SELECT\\s+a\\.agent_id,.*FROM agents a.*agent_sessions.*status = 'active'.*ORDER BY updated_at DESC, created_at DESC, session_id ASC").
 		WillReturnRows(sqlmock.NewRows(operatorAgentProjectionColumns()).
 			AddRow(operatorAgentProjectionRow("agent-1", "active", "11111111-1111-1111-1111-111111111111", time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC), 1, "", nil, []byte(`{}`), 0, 0)...))
 
-	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), OperatorAgentDiagnosisOptions{})
+	diagnosis, err := reader.LoadOperatorAgentDiagnosis(testAuthorActivityContext(), testOperatorAgentIdentity("agent-1"), operatorread.OperatorAgentDiagnosisOptions{})
 	if expectationsErr := mock.ExpectationsWereMet(); expectationsErr != nil {
 		t.Fatalf("expectations: %v", expectationsErr)
 	}

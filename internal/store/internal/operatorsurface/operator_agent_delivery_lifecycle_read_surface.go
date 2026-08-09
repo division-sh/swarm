@@ -4,79 +4,15 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
-
-const (
-	DefaultAgentDeliveryLifecycleLimit = 50
-	MaxAgentDeliveryLifecycleLimit     = 200
-)
-
-var (
-	ErrInvalidAgentDeliveryLifecycleCursor = errors.New("invalid agent delivery lifecycle cursor")
-	ErrInvalidAgentDeliveryLifecycleStatus = errors.New("invalid agent delivery lifecycle status")
-)
-
-type AgentDeliveryLifecycleCursorError struct{}
-
-func (AgentDeliveryLifecycleCursorError) Error() string {
-	return "invalid agent delivery lifecycle cursor"
-}
-
-func (AgentDeliveryLifecycleCursorError) Unwrap() error {
-	return ErrInvalidAgentDeliveryLifecycleCursor
-}
-
-type AgentDeliveryLifecycleStatusError struct {
-	Status string
-}
-
-func (e AgentDeliveryLifecycleStatusError) Error() string {
-	status := strings.TrimSpace(e.Status)
-	if status == "" {
-		return "invalid agent delivery lifecycle status"
-	}
-	return fmt.Sprintf("invalid agent delivery lifecycle status %q", status)
-}
-
-func (e AgentDeliveryLifecycleStatusError) Unwrap() error {
-	return ErrInvalidAgentDeliveryLifecycleStatus
-}
-
-type OperatorAgentDeliveryLifecycleOptions struct {
-	RunID    string
-	Statuses []string
-	Limit    int
-	Cursor   string
-}
-
-type OperatorAgentDeliveryLifecycleList struct {
-	AgentID    string                              `json:"agent_id"`
-	Deliveries []OperatorAgentDeliveryLifecycleRow `json:"deliveries"`
-	NextCursor string                              `json:"next_cursor,omitempty"`
-}
-
-type OperatorAgentDeliveryLifecycleRow struct {
-	DeliveryID          string                    `json:"delivery_id"`
-	EventID             string                    `json:"event_id"`
-	EventName           string                    `json:"event_name"`
-	RunID               string                    `json:"run_id,omitempty"`
-	EntityID            string                    `json:"entity_id,omitempty"`
-	Status              string                    `json:"status"`
-	RetryCount          int                       `json:"retry_count"`
-	ReasonCode          string                    `json:"reason_code,omitempty"`
-	Failure             *runtimefailures.Envelope `json:"failure,omitempty"`
-	DeliveryCreatedAt   time.Time                 `json:"delivery_created_at"`
-	DeliveryStartedAt   *time.Time                `json:"delivery_started_at,omitempty"`
-	DeliveryDeliveredAt *time.Time                `json:"delivery_delivered_at,omitempty"`
-}
 
 type agentDeliveryLifecycleCursor struct {
 	Kind              string `json:"kind"`
@@ -92,76 +28,76 @@ var agentDeliveryLifecycleStatuses = map[string]struct{}{
 	"dead_letter": {},
 }
 
-func (s *OperatorPostgres) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryLifecycleOptions) (OperatorAgentDeliveryLifecycleList, error) {
-	return NewOperatorAgentConversationReadSurface(s.backend, s, 0).LoadOperatorAgentDeliveryLifecycle(ctx, identity, opts)
+func (s *AgentPostgres) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryLifecycleOptions) (operatorread.OperatorAgentDeliveryLifecycleList, error) {
+	return NewOperatorAgentReadSurface(s.backend, s, 0).LoadOperatorAgentDeliveryLifecycle(ctx, identity, opts)
 }
 
-func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryLifecycleOptions) (OperatorAgentDeliveryLifecycleList, error) {
+func (r *OperatorAgentReadSurface) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryLifecycleOptions) (operatorread.OperatorAgentDeliveryLifecycleList, error) {
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {
-		return OperatorAgentDeliveryLifecycleList{}, ErrAgentNotFound
+		return operatorread.OperatorAgentDeliveryLifecycleList{}, operatorread.ErrAgentNotFound
 	}
 	opts, err := defaultOperatorAgentDeliveryLifecycleOptions(opts)
 	if err != nil {
-		return OperatorAgentDeliveryLifecycleList{}, err
+		return operatorread.OperatorAgentDeliveryLifecycleList{}, err
 	}
 	if err := r.requireAgentDeliveryLifecycleAccess(); err != nil {
-		return OperatorAgentDeliveryLifecycleList{}, err
+		return operatorread.OperatorAgentDeliveryLifecycleList{}, err
 	}
 	if err := r.ensureAgentDeliveryLifecycleAgentExists(ctx, identity); err != nil {
-		return OperatorAgentDeliveryLifecycleList{}, err
+		return operatorread.OperatorAgentDeliveryLifecycleList{}, err
 	}
 	deliveries, next, err := r.listAgentDeliveryLifecycleRows(ctx, identity, opts)
 	if err != nil {
-		return OperatorAgentDeliveryLifecycleList{}, err
+		return operatorread.OperatorAgentDeliveryLifecycleList{}, err
 	}
 	if deliveries == nil {
-		deliveries = []OperatorAgentDeliveryLifecycleRow{}
+		deliveries = []operatorread.OperatorAgentDeliveryLifecycleRow{}
 	}
-	return OperatorAgentDeliveryLifecycleList{
+	return operatorread.OperatorAgentDeliveryLifecycleList{
 		AgentID:    identity.AgentID(),
 		Deliveries: deliveries,
 		NextCursor: next,
 	}, nil
 }
 
-func (s *OperatorSQLite) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryLifecycleOptions) (OperatorAgentDeliveryLifecycleList, error) {
+func (s *AgentSQLite) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryLifecycleOptions) (operatorread.OperatorAgentDeliveryLifecycleList, error) {
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {
-		return OperatorAgentDeliveryLifecycleList{}, ErrAgentNotFound
+		return operatorread.OperatorAgentDeliveryLifecycleList{}, operatorread.ErrAgentNotFound
 	}
 	opts, err := defaultOperatorAgentDeliveryLifecycleOptions(opts)
 	if err != nil {
-		return OperatorAgentDeliveryLifecycleList{}, err
+		return operatorread.OperatorAgentDeliveryLifecycleList{}, err
 	}
 	if err := s.requireSQLiteAgentDeliveryLifecycleAccess(); err != nil {
-		return OperatorAgentDeliveryLifecycleList{}, err
+		return operatorread.OperatorAgentDeliveryLifecycleList{}, err
 	}
 	if err := s.ensureSQLiteAgentDeliveryLifecycleAgentExists(ctx, identity); err != nil {
-		return OperatorAgentDeliveryLifecycleList{}, err
+		return operatorread.OperatorAgentDeliveryLifecycleList{}, err
 	}
 	deliveries, next, err := s.listSQLiteAgentDeliveryLifecycleRows(ctx, identity, opts)
 	if err != nil {
-		return OperatorAgentDeliveryLifecycleList{}, err
+		return operatorread.OperatorAgentDeliveryLifecycleList{}, err
 	}
 	if deliveries == nil {
-		deliveries = []OperatorAgentDeliveryLifecycleRow{}
+		deliveries = []operatorread.OperatorAgentDeliveryLifecycleRow{}
 	}
-	return OperatorAgentDeliveryLifecycleList{
+	return operatorread.OperatorAgentDeliveryLifecycleList{
 		AgentID:    identity.AgentID(),
 		Deliveries: deliveries,
 		NextCursor: next,
 	}, nil
 }
 
-func defaultOperatorAgentDeliveryLifecycleOptions(opts OperatorAgentDeliveryLifecycleOptions) (OperatorAgentDeliveryLifecycleOptions, error) {
+func defaultOperatorAgentDeliveryLifecycleOptions(opts operatorread.OperatorAgentDeliveryLifecycleOptions) (operatorread.OperatorAgentDeliveryLifecycleOptions, error) {
 	opts.RunID = strings.TrimSpace(opts.RunID)
 	opts.Cursor = strings.TrimSpace(opts.Cursor)
 	if opts.Limit <= 0 {
-		opts.Limit = DefaultAgentDeliveryLifecycleLimit
+		opts.Limit = operatorread.DefaultAgentDeliveryLifecycleLimit
 	}
-	if opts.Limit > MaxAgentDeliveryLifecycleLimit {
-		opts.Limit = MaxAgentDeliveryLifecycleLimit
+	if opts.Limit > operatorread.MaxAgentDeliveryLifecycleLimit {
+		opts.Limit = operatorread.MaxAgentDeliveryLifecycleLimit
 	}
 	statuses := make([]string, 0, len(opts.Statuses))
 	seen := map[string]struct{}{}
@@ -171,7 +107,7 @@ func defaultOperatorAgentDeliveryLifecycleOptions(opts OperatorAgentDeliveryLife
 			continue
 		}
 		if _, ok := agentDeliveryLifecycleStatuses[status]; !ok {
-			return OperatorAgentDeliveryLifecycleOptions{}, AgentDeliveryLifecycleStatusError{Status: status}
+			return operatorread.OperatorAgentDeliveryLifecycleOptions{}, operatorread.AgentDeliveryLifecycleStatusError{Status: status}
 		}
 		if _, ok := seen[status]; ok {
 			continue
@@ -183,24 +119,24 @@ func defaultOperatorAgentDeliveryLifecycleOptions(opts OperatorAgentDeliveryLife
 	return opts, nil
 }
 
-func (r *OperatorAgentConversationReadSurface) requireAgentDeliveryLifecycleAccess() error {
+func (r *OperatorAgentReadSurface) requireAgentDeliveryLifecycleAccess() error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("operator agent delivery lifecycle read owner requires postgres store")
 	}
-	return r.owner.RequireCurrentSchema()
+	return r.source.RequireCurrentSchema()
 }
 
-func (s *OperatorSQLite) requireSQLiteAgentDeliveryLifecycleAccess() error {
+func (s *AgentSQLite) requireSQLiteAgentDeliveryLifecycleAccess() error {
 	if s == nil || s.backend == nil {
 		return fmt.Errorf("sqlite runtime store is required")
 	}
 	return s.requireCurrentSchema()
 }
 
-func (r *OperatorAgentConversationReadSurface) ensureAgentDeliveryLifecycleAgentExists(ctx context.Context, identity agentidentity.Identity) error {
+func (r *OperatorAgentReadSurface) ensureAgentDeliveryLifecycleAgentExists(ctx context.Context, identity agentidentity.Identity) error {
 	fields, err := agentIdentityFields(identity)
 	if err != nil {
-		return ErrAgentNotFound
+		return operatorread.ErrAgentNotFound
 	}
 	var exists bool
 	if err := r.db.QueryRowContext(ctx, `
@@ -221,15 +157,15 @@ func (r *OperatorAgentConversationReadSurface) ensureAgentDeliveryLifecycleAgent
 		return fmt.Errorf("load agent delivery lifecycle agent: %w", err)
 	}
 	if !exists {
-		return ErrAgentNotFound
+		return operatorread.ErrAgentNotFound
 	}
 	return nil
 }
 
-func (s *OperatorSQLite) ensureSQLiteAgentDeliveryLifecycleAgentExists(ctx context.Context, identity agentidentity.Identity) error {
+func (s *AgentSQLite) ensureSQLiteAgentDeliveryLifecycleAgentExists(ctx context.Context, identity agentidentity.Identity) error {
 	fields, err := agentIdentityFields(identity)
 	if err != nil {
-		return ErrAgentNotFound
+		return operatorread.ErrAgentNotFound
 	}
 	var exists bool
 	if err := s.backend.QueryRowContext(ctx, `
@@ -250,23 +186,17 @@ func (s *OperatorSQLite) ensureSQLiteAgentDeliveryLifecycleAgentExists(ctx conte
 		return fmt.Errorf("load sqlite agent delivery lifecycle agent: %w", err)
 	}
 	if !exists {
-		return ErrAgentNotFound
+		return operatorread.ErrAgentNotFound
 	}
 	return nil
 }
 
-func (r *OperatorAgentConversationReadSurface) listAgentDeliveryLifecycleRows(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryLifecycleOptions) ([]OperatorAgentDeliveryLifecycleRow, string, error) {
-	reader, ok := r.owner.(interface {
-		deliveryLifecycleSnapshotPageForAgent(context.Context, runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error)
-	})
-	if !ok {
-		return nil, "", fmt.Errorf("operator agent delivery lifecycle requires canonical bounded delivery snapshots")
-	}
+func (r *OperatorAgentReadSurface) listAgentDeliveryLifecycleRows(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryLifecycleOptions) ([]operatorread.OperatorAgentDeliveryLifecycleRow, string, error) {
 	query, err := agentDeliveryLifecyclePageQuery(identity, opts)
 	if err != nil {
 		return nil, "", err
 	}
-	page, err := reader.deliveryLifecycleSnapshotPageForAgent(ctx, query)
+	page, err := r.source.DeliveryLifecycleSnapshotPageForAgent(ctx, query)
 	if err != nil {
 		return nil, "", fmt.Errorf("list agent delivery lifecycle rows: %w", err)
 	}
@@ -288,7 +218,7 @@ func (r *OperatorAgentConversationReadSurface) listAgentDeliveryLifecycleRows(ct
 	return rows, agentDeliveryLifecyclePageCursor(rows, page.HasMore), err
 }
 
-func (s *OperatorSQLite) listSQLiteAgentDeliveryLifecycleRows(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryLifecycleOptions) ([]OperatorAgentDeliveryLifecycleRow, string, error) {
+func (s *AgentSQLite) listSQLiteAgentDeliveryLifecycleRows(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryLifecycleOptions) ([]operatorread.OperatorAgentDeliveryLifecycleRow, string, error) {
 	query, err := agentDeliveryLifecyclePageQuery(identity, opts)
 	if err != nil {
 		return nil, "", err
@@ -318,8 +248,8 @@ func (s *OperatorSQLite) listSQLiteAgentDeliveryLifecycleRows(ctx context.Contex
 func deliveryLifecycleRowsFromSnapshots(
 	snapshots []runtimedelivery.Snapshot,
 	loadEvent func(string) (deliveryLifecycleEventMetadata, error),
-) ([]OperatorAgentDeliveryLifecycleRow, error) {
-	rows := make([]OperatorAgentDeliveryLifecycleRow, 0, len(snapshots))
+) ([]operatorread.OperatorAgentDeliveryLifecycleRow, error) {
+	rows := make([]operatorread.OperatorAgentDeliveryLifecycleRow, 0, len(snapshots))
 	for _, snapshot := range snapshots {
 		metadata, err := loadEvent(snapshot.EventID)
 		if err != nil {
@@ -329,7 +259,7 @@ func deliveryLifecycleRowsFromSnapshots(
 		if runID == "" {
 			runID = metadata.RunID
 		}
-		row := OperatorAgentDeliveryLifecycleRow{
+		row := operatorread.OperatorAgentDeliveryLifecycleRow{
 			DeliveryID: snapshot.DeliveryID, EventID: snapshot.EventID, EventName: metadata.EventName,
 			RunID: runID, EntityID: metadata.EntityID, Status: string(snapshot.Status),
 			RetryCount: snapshot.RetryCount, ReasonCode: snapshot.ReasonCode,
@@ -348,7 +278,7 @@ func deliveryLifecycleRowsFromSnapshots(
 	return rows, nil
 }
 
-func agentDeliveryLifecyclePageQuery(identity agentidentity.Identity, opts OperatorAgentDeliveryLifecycleOptions) (runtimedelivery.AgentLifecyclePageQuery, error) {
+func agentDeliveryLifecyclePageQuery(identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryLifecycleOptions) (runtimedelivery.AgentLifecyclePageQuery, error) {
 	query := runtimedelivery.AgentLifecyclePageQuery{
 		AgentIdentity: identity,
 		RunID:         opts.RunID,
@@ -357,7 +287,7 @@ func agentDeliveryLifecyclePageQuery(identity agentidentity.Identity, opts Opera
 	for _, raw := range opts.Statuses {
 		status, err := runtimedelivery.ParseStatus(raw)
 		if err != nil {
-			return runtimedelivery.AgentLifecyclePageQuery{}, AgentDeliveryLifecycleStatusError{Status: raw}
+			return runtimedelivery.AgentLifecyclePageQuery{}, operatorread.AgentDeliveryLifecycleStatusError{Status: raw}
 		}
 		query.Statuses = append(query.Statuses, status)
 	}
@@ -372,7 +302,7 @@ func agentDeliveryLifecyclePageQuery(identity agentidentity.Identity, opts Opera
 	return query, nil
 }
 
-func agentDeliveryLifecyclePageCursor(rows []OperatorAgentDeliveryLifecycleRow, hasMore bool) string {
+func agentDeliveryLifecyclePageCursor(rows []operatorread.OperatorAgentDeliveryLifecycleRow, hasMore bool) string {
 	if !hasMore || len(rows) == 0 {
 		return ""
 	}
@@ -387,7 +317,7 @@ func decodeAgentDeliveryLifecycleCursorPosition(raw string) (time.Time, string, 
 	}
 	createdAt, err := time.Parse(time.RFC3339Nano, cursor.DeliveryCreatedAt)
 	if err != nil || strings.TrimSpace(cursor.DeliveryID) == "" {
-		return time.Time{}, "", AgentDeliveryLifecycleCursorError{}
+		return time.Time{}, "", operatorread.AgentDeliveryLifecycleCursorError{}
 	}
 	return createdAt.UTC(), strings.TrimSpace(cursor.DeliveryID), nil
 }
@@ -404,14 +334,14 @@ func encodeAgentDeliveryLifecycleCursor(createdAt time.Time, deliveryID string) 
 func decodeAgentDeliveryLifecycleCursor(raw string) (agentDeliveryLifecycleCursor, error) {
 	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(raw))
 	if err != nil {
-		return agentDeliveryLifecycleCursor{}, AgentDeliveryLifecycleCursorError{}
+		return agentDeliveryLifecycleCursor{}, operatorread.AgentDeliveryLifecycleCursorError{}
 	}
 	var cursor agentDeliveryLifecycleCursor
 	if err := json.Unmarshal(decoded, &cursor); err != nil {
-		return agentDeliveryLifecycleCursor{}, AgentDeliveryLifecycleCursorError{}
+		return agentDeliveryLifecycleCursor{}, operatorread.AgentDeliveryLifecycleCursorError{}
 	}
 	if strings.TrimSpace(cursor.Kind) != "agent.delivery_lifecycle" {
-		return agentDeliveryLifecycleCursor{}, AgentDeliveryLifecycleCursorError{}
+		return agentDeliveryLifecycleCursor{}, operatorread.AgentDeliveryLifecycleCursorError{}
 	}
 	return cursor, nil
 }

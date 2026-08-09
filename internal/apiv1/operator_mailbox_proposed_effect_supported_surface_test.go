@@ -221,7 +221,7 @@ func newProposedEffectMailboxHandler(
 	runBundleContext, _ := persistence.(RunBundleContextStore)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now: func() time.Time { return time.Now().UTC() }, Ready: func() bool { return true }, Database: fakePinger{},
 			Runs: runs, Observability: observability, Idempotency: idempotency, Events: bus, Source: source,
 			RunBundleContext: runBundleContext, Mailbox: mailbox, DecisionCards: cards, DecisionAuthority: coordinator,

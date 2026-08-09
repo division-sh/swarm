@@ -5,31 +5,36 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/google/uuid"
 )
 
-type OperatorAgentConversationReadSource interface {
-	OperatorConversationReadSource
-	ListOperatorConversationTurns(ctx context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error)
-	LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (OperatorPublicConversationTurnDetail, error)
+type OperatorAgentReadSource interface {
+	ConversationRuntimeSource
+	RequireCurrentSchema() error
 	LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error)
-	ListPendingAgentDeliveryFacts(ctx context.Context, identities []agentidentity.Identity, since time.Time) (map[agentidentity.Identity]PendingAgentDeliveryFacts, error)
-	ListPendingAgentDeliveryDetails(ctx context.Context, opts PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error)
-	ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]AgentDeliveryLifecycleFacts, error)
+	ListPendingAgentDeliveryFacts(ctx context.Context, identities []agentidentity.Identity, since time.Time) (map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts, error)
+	ListPendingAgentDeliveryDetails(ctx context.Context, opts operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryPage, error)
+	ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error)
+	DeliveryLifecycleSnapshotPageForAgent(context.Context, runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error)
+	DeliveryDiagnosticSnapshotPageForAgent(context.Context, runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error)
+	DeliveryDiagnosticCountsForAgentSince(context.Context, agentidentity.Identity, time.Time) (runtimedelivery.AgentDiagnosticCounts, error)
+	LoadOperatorDeliveryDeadLetters(context.Context, string, int64) ([]operatorread.OperatorDeadLetterRecord, error)
 }
 
 type OperatorConversationReadSource interface {
 	RequireCurrentSchema() error
+	ListOperatorConversationTurns(context.Context, operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error)
+	LoadOperatorPublicConversationTurn(context.Context, string, string) (operatorread.OperatorPublicConversationTurnDetail, error)
 }
 
 type operatorConversationQueryer interface {
@@ -37,216 +42,29 @@ type operatorConversationQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-type OperatorAgentConversationReadSurface struct {
+type OperatorAgentReadSurface struct {
 	db        operatorConversationQueryer
-	source    OperatorAgentConversationReadSource
-	owner     OperatorConversationReadSource
+	source    OperatorAgentReadSource
 	turnLimit int
 }
 
-func NewOperatorAgentConversationReadSurface(db operatorConversationQueryer, source OperatorAgentConversationReadSource, turnLimit int) *OperatorAgentConversationReadSurface {
+func NewOperatorAgentReadSurface(db operatorConversationQueryer, source OperatorAgentReadSource, turnLimit int) *OperatorAgentReadSurface {
 	if db == nil || source == nil {
 		return nil
 	}
-	return &OperatorAgentConversationReadSurface{db: db, source: source, owner: source, turnLimit: maxStoreInt(turnLimit, 0)}
+	return &OperatorAgentReadSurface{db: db, source: source, turnLimit: maxStoreInt(turnLimit, 0)}
 }
 
-func NewOperatorConversationReadSurface(db operatorConversationQueryer, source OperatorConversationReadSource) *OperatorAgentConversationReadSurface {
+type OperatorConversationReadSurface struct {
+	db     operatorConversationQueryer
+	source OperatorConversationReadSource
+}
+
+func NewOperatorConversationReadSurface(db operatorConversationQueryer, source OperatorConversationReadSource) *OperatorConversationReadSurface {
 	if db == nil || source == nil {
 		return nil
 	}
-	return &OperatorAgentConversationReadSurface{db: db, owner: source}
-}
-
-type OperatorAgentListOptions struct {
-	Flow      string
-	Role      string
-	TurnLimit int
-}
-
-type OperatorAgentListResult struct {
-	Agents []OperatorAgentSummary `json:"agents"`
-}
-
-type OperatorAgentSummary struct {
-	AgentID       string `json:"agent_id"`
-	Role          string `json:"role"`
-	Type          string `json:"type"`
-	Model         string `json:"model"`
-	ExecutionMode string `json:"execution_mode"`
-	Memory        bool   `json:"memory"`
-	MemorySource  string `json:"memory_source"`
-	Status        string `json:"status"`
-
-	Identity              agentidentity.Identity              `json:"-"`
-	RuntimeFlowID         string                              `json:"-"`
-	FlowInstance          string                              `json:"flow_instance,omitempty"`
-	EntityID              string                              `json:"-"`
-	ParentAgentID         string                              `json:"-"`
-	CoordinatorID         string                              `json:"-"`
-	HiredBy               string                              `json:"-"`
-	TemplateVersion       string                              `json:"-"`
-	BudgetEnvelope        float64                             `json:"-"`
-	Subscriptions         []string                            `json:"-"`
-	Permissions           []string                            `json:"-"`
-	PendingEvents         int                                 `json:"-"`
-	OldestPendingAgeSec   int                                 `json:"-"`
-	LockOwner             string                              `json:"-"`
-	LockExpiresAt         time.Time                           `json:"-"`
-	TurnCount             int                                 `json:"-"`
-	TurnLimit             int                                 `json:"-"`
-	NearBreaker           bool                                `json:"-"`
-	SessionID             string                              `json:"-"`
-	ProviderSessionID     string                              `json:"-"`
-	CurrentTaskID         string                              `json:"-"`
-	LastTool              *OperatorAgentTool                  `json:"-"`
-	LiveTurn              *OperatorLiveTurn                   `json:"-"`
-	DiagnosisActive       *OperatorAgentDiagnosisActive       `json:"-"`
-	StartedAt             time.Time                           `json:"-"`
-	DashboardStatus       string                              `json:"-"`
-	DashboardState        string                              `json:"-"`
-	DeliveryLifecycle     string                              `json:"-"`
-	BlockingLayer         string                              `json:"-"`
-	CurrentSessionRef     *OperatorSessionRef                 `json:"-"`
-	LastTurnRef           *OperatorTurnRef                    `json:"-"`
-	DiagnosisRuntimeState *OperatorAgentDiagnosisRuntimeState `json:"-"`
-}
-
-type OperatorSessionRef struct {
-	SessionID string    `json:"session_id"`
-	StartedAt time.Time `json:"started_at"`
-}
-
-type OperatorTurnRef struct {
-	TurnID      string                    `json:"turn_id"`
-	CompletedAt time.Time                 `json:"completed_at"`
-	ParseOK     bool                      `json:"parse_ok"`
-	Failure     *runtimefailures.Envelope `json:"failure,omitempty"`
-}
-
-type OperatorAgentDetail struct {
-	Agent             OperatorAgentSummary `json:"agent"`
-	CurrentSessionRef *OperatorSessionRef  `json:"current_session_ref,omitempty"`
-	LastTurnRef       *OperatorTurnRef     `json:"last_turn_ref,omitempty"`
-}
-
-type OperatorAgentDiagnosis struct {
-	AgentID           string                              `json:"agent_id"`
-	Status            string                              `json:"status"`
-	CurrentSessionRef *OperatorSessionRef                 `json:"current_session_ref,omitempty"`
-	LastTurnRef       *OperatorTurnRef                    `json:"last_turn_ref,omitempty"`
-	Queue             OperatorAgentDiagnosisQueue         `json:"queue"`
-	DeliveryLifecycle *OperatorAgentDeliveryLifecycle     `json:"delivery_lifecycle,omitempty"`
-	RuntimeState      *OperatorAgentDiagnosisRuntimeState `json:"runtime_state,omitempty"`
-	Active            *OperatorAgentDiagnosisActive       `json:"active,omitempty"`
-	LastToolOutcome   *OperatorAgentLastToolOutcome       `json:"last_tool_outcome,omitempty"`
-}
-
-type OperatorAgentDiagnosisActive struct {
-	TurnID   string `json:"turn_id"`
-	TaskID   string `json:"task_id,omitempty"`
-	EntityID string `json:"entity_id,omitempty"`
-}
-
-type OperatorAgentLastToolOutcome struct {
-	TurnID    string `json:"turn_id"`
-	ToolName  string `json:"tool_name"`
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	OK        bool   `json:"ok"`
-}
-
-type OperatorAgentDiagnosisRuntimeState struct {
-	Watchdog *OperatorAgentDiagnosisWatchdog `json:"watchdog"`
-}
-
-type OperatorAgentDiagnosisWatchdog struct {
-	State         string `json:"state"`
-	BlockingLayer string `json:"blocking_layer"`
-	Action        string `json:"action"`
-	Outcome       string `json:"outcome"`
-	LastOutputAt  string `json:"last_output_at,omitempty"`
-	RecordedAt    string `json:"recorded_at"`
-}
-
-type OperatorAgentDiagnosisQueue struct {
-	PendingCount            int                            `json:"pending_count"`
-	OldestPendingAgeSeconds int                            `json:"oldest_pending_age_seconds"`
-	PendingDeliveries       []OperatorAgentPendingDelivery `json:"pending_deliveries"`
-	NextCursor              string                         `json:"next_cursor,omitempty"`
-}
-
-type OperatorAgentPendingDelivery struct {
-	DeliveryID string    `json:"delivery_id"`
-	EventID    string    `json:"event_id"`
-	EventName  string    `json:"event_name"`
-	EnqueuedAt time.Time `json:"enqueued_at"`
-	Attempts   int       `json:"attempts"`
-}
-
-type OperatorAgentDeliveryLifecycle struct {
-	State         string `json:"state"`
-	BlockingLayer string `json:"blocking_layer"`
-}
-
-type OperatorAgentDiagnosisOptions struct {
-	QueueLimit  int
-	QueueCursor string
-}
-
-type OperatorAgentTool struct {
-	Name      string `json:"name"`
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	OK        bool   `json:"ok"`
-}
-
-type OperatorLiveTurn struct {
-	TurnID                 string             `json:"turn_id,omitempty"`
-	TaskID                 string             `json:"task_id,omitempty"`
-	ParseOK                bool               `json:"parse_ok"`
-	AssistantVisibleOutput string             `json:"assistant_visible_output,omitempty"`
-	Outcome                string             `json:"outcome,omitempty"`
-	LastTool               *OperatorAgentTool `json:"last_tool,omitempty"`
-}
-
-type OperatorConversationListOptions struct {
-	AgentID      string
-	FlowInstance string
-	RunID        string
-	Limit        int
-	Cursor       string
-}
-
-type OperatorConversationListResult struct {
-	Conversations []OperatorConversationSummary `json:"conversations"`
-	NextCursor    string                        `json:"next_cursor,omitempty"`
-}
-
-type OperatorConversationSummary struct {
-	SessionID     string     `json:"session_id"`
-	AgentID       string     `json:"agent_id"`
-	ExecutionMode string     `json:"execution_mode,omitempty"`
-	RunID         string     `json:"run_id,omitempty"`
-	StartedAt     time.Time  `json:"started_at"`
-	EndedAt       *time.Time `json:"ended_at,omitempty"`
-	TurnCount     int        `json:"turn_count"`
-	MessageCount  int        `json:"message_count"`
-	Status        string     `json:"status"`
-
-	Kind         string                              `json:"-"`
-	FlowInstance string                              `json:"-"`
-	Memory       bool                                `json:"-"`
-	MemorySource string                              `json:"-"`
-	Summary      string                              `json:"-"`
-	UpdatedAt    time.Time                           `json:"-"`
-	Metadata     OperatorConversationSummaryMetadata `json:"-"`
-}
-
-type OperatorConversationSummaryMetadata struct {
-	ProviderSessionID    string                        `json:"provider_session_id,omitempty"`
-	RetryReason          string                        `json:"retry_reason,omitempty"`
-	RetriesFromSessionID string                        `json:"retries_from_session_id,omitempty"`
-	Watchdog             *OperatorConversationWatchdog `json:"watchdog,omitempty"`
-	LiveTurn             *OperatorLiveTurn             `json:"live_turn,omitempty"`
+	return &OperatorConversationReadSurface{db: db, source: source}
 }
 
 func cloneRawMessage(in json.RawMessage) json.RawMessage {
@@ -258,11 +76,11 @@ func cloneRawMessage(in json.RawMessage) json.RawMessage {
 	return out
 }
 
-func cloneConversationToolCalls(in []OperatorConversationToolCall) []OperatorConversationToolCall {
+func cloneConversationToolCalls(in []operatorread.OperatorConversationToolCall) []operatorread.OperatorConversationToolCall {
 	if in == nil {
 		return nil
 	}
-	out := make([]OperatorConversationToolCall, len(in))
+	out := make([]operatorread.OperatorConversationToolCall, len(in))
 	for i, item := range in {
 		out[i] = item
 		out[i].Arguments = cloneRawMessage(item.Arguments)
@@ -271,79 +89,16 @@ func cloneConversationToolCalls(in []OperatorConversationToolCall) []OperatorCon
 	return out
 }
 
-func cloneConversationToolResults(in []OperatorConversationToolResult) []OperatorConversationToolResult {
+func cloneConversationToolResults(in []operatorread.OperatorConversationToolResult) []operatorread.OperatorConversationToolResult {
 	if in == nil {
 		return nil
 	}
-	out := make([]OperatorConversationToolResult, len(in))
+	out := make([]operatorread.OperatorConversationToolResult, len(in))
 	for i, item := range in {
 		out[i] = item
 		out[i].Output = cloneRawMessage(item.Output)
 	}
 	return out
-}
-
-type OperatorConversationWatchdog struct {
-	State         string `json:"state,omitempty"`
-	BlockingLayer string `json:"blocking_layer,omitempty"`
-	Action        string `json:"action,omitempty"`
-	Outcome       string `json:"outcome,omitempty"`
-	LastOutputAt  string `json:"last_output_at,omitempty"`
-	RecordedAt    string `json:"recorded_at,omitempty"`
-}
-
-type OperatorConversationTurn struct {
-	TurnIndex        int                             `json:"turn_index"`
-	TurnID           string                          `json:"turn_id"`
-	ExecutionMode    string                          `json:"execution_mode"`
-	TriggerEventID   string                          `json:"trigger_event_id"`
-	TriggerEventType string                          `json:"trigger_event_type"`
-	RequestPayload   json.RawMessage                 `json:"request_payload,omitempty"`
-	ResponsePayload  json.RawMessage                 `json:"response_payload,omitempty"`
-	ToolCalls        []OperatorConversationToolCall  `json:"tool_calls,omitempty"`
-	TurnBlocks       []OperatorConversationTurnBlock `json:"turn_blocks,omitempty"`
-	ParseOK          bool                            `json:"parse_ok"`
-	LatencyMS        int                             `json:"latency_ms"`
-	Failure          *runtimefailures.Envelope       `json:"failure,omitempty"`
-
-	AgentID                string                           `json:"-"`
-	SessionID              string                           `json:"-"`
-	FlowInstance           string                           `json:"-"`
-	Memory                 bool                             `json:"-"`
-	MemorySource           string                           `json:"-"`
-	EntityID               string                           `json:"-"`
-	TaskID                 string                           `json:"-"`
-	EmittedEvents          []string                         `json:"-"`
-	AssistantVisibleOutput string                           `json:"-"`
-	ReasoningBlocks        []string                         `json:"-"`
-	ProgressUpdates        []string                         `json:"-"`
-	Outcome                string                           `json:"-"`
-	ToolResults            []OperatorConversationToolResult `json:"-"`
-	RetryCount             int                              `json:"-"`
-	CreatedAt              time.Time                        `json:"-"`
-}
-
-type OperatorConversationToolCall struct {
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments,omitempty"`
-	Result    json.RawMessage `json:"result,omitempty"`
-}
-
-type OperatorConversationToolResult struct {
-	ToolName  string          `json:"tool_name,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Output    json.RawMessage `json:"output,omitempty"`
-}
-
-type OperatorConversationTurnBlock struct {
-	Kind     string          `json:"kind"`
-	Title    string          `json:"title,omitempty"`
-	Text     string          `json:"text,omitempty"`
-	ToolName string          `json:"tool_name,omitempty"`
-	Input    json.RawMessage `json:"input,omitempty"`
-	Output   json.RawMessage `json:"output,omitempty"`
-	Data     json.RawMessage `json:"data,omitempty"`
 }
 
 type operatorAgentProjection struct {
@@ -359,11 +114,11 @@ type operatorAgentProjection struct {
 	SessionStartedAt    time.Time
 	ProviderSessionID   string
 	CurrentTaskID       string
-	LastTool            *OperatorAgentTool
-	LiveTurn            *OperatorLiveTurn
-	DiagnosisActive     *OperatorAgentDiagnosisActive
-	LastTurnRef         *OperatorTurnRef
-	Watchdog            *OperatorConversationWatchdog
+	LastTool            *operatorread.OperatorAgentTool
+	LiveTurn            *operatorread.OperatorLiveTurn
+	DiagnosisActive     *operatorread.OperatorAgentDiagnosisActive
+	LastTurnRef         *operatorread.OperatorTurnRef
+	Watchdog            *operatorread.OperatorConversationWatchdog
 }
 
 type OperatorAgentProjection = operatorAgentProjection
@@ -378,37 +133,37 @@ type operatorRowScanner interface {
 	Scan(dest ...any) error
 }
 
-func (s *OperatorPostgres) ListOperatorAgents(ctx context.Context, opts OperatorAgentListOptions) (OperatorAgentListResult, error) {
-	return NewOperatorAgentConversationReadSurface(s.backend, s, opts.TurnLimit).ListOperatorAgents(ctx, opts)
+func (s *AgentPostgres) ListOperatorAgents(ctx context.Context, opts operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error) {
+	return NewOperatorAgentReadSurface(s.backend, s, opts.TurnLimit).ListOperatorAgents(ctx, opts)
 }
 
-func (s *OperatorPostgres) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (OperatorAgentDetail, error) {
-	return NewOperatorAgentConversationReadSurface(s.backend, s, 0).LoadOperatorAgent(ctx, identity)
+func (s *AgentPostgres) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (operatorread.OperatorAgentDetail, error) {
+	return NewOperatorAgentReadSurface(s.backend, s, 0).LoadOperatorAgent(ctx, identity)
 }
 
-func (s *OperatorPostgres) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDiagnosisOptions) (OperatorAgentDiagnosis, error) {
-	return NewOperatorAgentConversationReadSurface(s.backend, s, 0).LoadOperatorAgentDiagnosis(ctx, identity, opts)
+func (s *AgentPostgres) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDiagnosisOptions) (operatorread.OperatorAgentDiagnosis, error) {
+	return NewOperatorAgentReadSurface(s.backend, s, 0).LoadOperatorAgentDiagnosis(ctx, identity, opts)
 }
 
-func (s *OperatorPostgres) ListOperatorConversations(ctx context.Context, opts OperatorConversationListOptions) (OperatorConversationListResult, error) {
-	return NewOperatorAgentConversationReadSurface(s.backend, s, 0).ListOperatorConversations(ctx, opts)
+func (s *ConversationPostgres) ListOperatorConversations(ctx context.Context, opts operatorread.OperatorConversationListOptions) (operatorread.OperatorConversationListResult, error) {
+	return NewOperatorConversationReadSurface(s.backend, s).ListOperatorConversations(ctx, opts)
 }
 
-func (r *OperatorAgentConversationReadSurface) ListOperatorAgents(ctx context.Context, opts OperatorAgentListOptions) (OperatorAgentListResult, error) {
+func (r *OperatorAgentReadSurface) ListOperatorAgents(ctx context.Context, opts operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error) {
 	if err := r.requireAgentAccess(); err != nil {
-		return OperatorAgentListResult{}, err
+		return operatorread.OperatorAgentListResult{}, err
 	}
 	opts.Flow = strings.Trim(strings.TrimSpace(opts.Flow), "/")
 	opts.Role = strings.TrimSpace(opts.Role)
 	baseRows, err := r.source.LoadAgents(ctx)
 	if err != nil {
-		return OperatorAgentListResult{}, err
+		return operatorread.OperatorAgentListResult{}, err
 	}
 	projections, err := r.loadAgentOperatorProjections(ctx)
 	if err != nil {
-		return OperatorAgentListResult{}, err
+		return operatorread.OperatorAgentListResult{}, err
 	}
-	agents := make([]OperatorAgentSummary, 0, len(baseRows))
+	agents := make([]operatorread.OperatorAgentSummary, 0, len(baseRows))
 	for _, row := range baseRows {
 		if opts.Role != "" && strings.TrimSpace(row.Config.Role) != opts.Role {
 			continue
@@ -418,72 +173,72 @@ func (r *OperatorAgentConversationReadSurface) ListOperatorAgents(ctx context.Co
 		}
 		identity, err := row.Config.ConcreteIdentity()
 		if err != nil {
-			return OperatorAgentListResult{}, err
+			return operatorread.OperatorAgentListResult{}, err
 		}
 		projection, ok := projections[identity]
 		if !ok {
-			return OperatorAgentListResult{}, fmt.Errorf("missing agent operator projection: %s", identity.Description())
+			return operatorread.OperatorAgentListResult{}, fmt.Errorf("missing agent operator projection: %s", identity.Description())
 		}
 		agents = append(agents, operatorAgentSummaryFromPersisted(row, projection, r.turnLimit))
 	}
 	if agents == nil {
-		agents = []OperatorAgentSummary{}
+		agents = []operatorread.OperatorAgentSummary{}
 	}
-	return OperatorAgentListResult{Agents: agents}, nil
+	return operatorread.OperatorAgentListResult{Agents: agents}, nil
 }
 
-func (r *OperatorAgentConversationReadSurface) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (OperatorAgentDetail, error) {
+func (r *OperatorAgentReadSurface) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (operatorread.OperatorAgentDetail, error) {
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {
-		return OperatorAgentDetail{}, ErrAgentNotFound
+		return operatorread.OperatorAgentDetail{}, operatorread.ErrAgentNotFound
 	}
-	result, err := r.ListOperatorAgents(ctx, OperatorAgentListOptions{})
+	result, err := r.ListOperatorAgents(ctx, operatorread.OperatorAgentListOptions{})
 	if err != nil {
-		return OperatorAgentDetail{}, err
+		return operatorread.OperatorAgentDetail{}, err
 	}
 	for _, agent := range result.Agents {
 		if agent.Identity == identity {
-			return OperatorAgentDetail{
+			return operatorread.OperatorAgentDetail{
 				Agent:             agent,
 				CurrentSessionRef: agent.CurrentSessionRef,
 				LastTurnRef:       agent.LastTurnRef,
 			}, nil
 		}
 	}
-	return OperatorAgentDetail{}, ErrAgentNotFound
+	return operatorread.OperatorAgentDetail{}, operatorread.ErrAgentNotFound
 }
 
-func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDiagnosisOptions) (OperatorAgentDiagnosis, error) {
+func (r *OperatorAgentReadSurface) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDiagnosisOptions) (operatorread.OperatorAgentDiagnosis, error) {
 	detail, err := r.LoadOperatorAgent(ctx, identity)
 	if err != nil {
-		return OperatorAgentDiagnosis{}, err
+		return operatorread.OperatorAgentDiagnosis{}, err
 	}
 	diagnosis, err := operatorAgentDiagnosisFromDetail(detail)
 	if err != nil {
-		return OperatorAgentDiagnosis{}, err
+		return operatorread.OperatorAgentDiagnosis{}, err
 	}
-	queue, err := r.source.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{
+	queue, err := r.source.ListPendingAgentDeliveryDetails(ctx, operatorread.PendingAgentDeliveryListOptions{
 		AgentIdentity: identity,
 		Limit:         opts.QueueLimit,
 		Cursor:        opts.QueueCursor,
 	})
 	if err != nil {
-		return OperatorAgentDiagnosis{}, err
+		return operatorread.OperatorAgentDiagnosis{}, err
 	}
 	diagnosis.Queue = operatorAgentDiagnosisQueueFromPendingPage(queue)
 	if err := validateOperatorAgentDiagnosis(diagnosis); err != nil {
-		return OperatorAgentDiagnosis{}, err
+		return operatorread.OperatorAgentDiagnosis{}, err
 	}
 	return diagnosis, nil
 }
 
-func (r *OperatorAgentConversationReadSurface) ListOperatorConversations(ctx context.Context, opts OperatorConversationListOptions) (OperatorConversationListResult, error) {
+func (r *OperatorConversationReadSurface) ListOperatorConversations(ctx context.Context, opts operatorread.OperatorConversationListOptions) (operatorread.OperatorConversationListResult, error) {
 	if err := r.requireConversationAccess(); err != nil {
-		return OperatorConversationListResult{}, err
+		return operatorread.OperatorConversationListResult{}, err
 	}
 	opts, err := defaultOperatorConversationListOptions(opts)
 	if err != nil {
-		return OperatorConversationListResult{}, err
+		return operatorread.OperatorConversationListResult{}, err
 	}
 	sources := operatorConversationQuerySources()
 	args := make([]any, 0, 8)
@@ -507,11 +262,11 @@ func (r *OperatorAgentConversationReadSurface) ListOperatorConversations(ctx con
 	if opts.Cursor != "" {
 		cursor, err := decodeConversationPositionCursor(opts.Cursor, "conversation.list")
 		if err != nil {
-			return OperatorConversationListResult{}, err
+			return operatorread.OperatorConversationListResult{}, err
 		}
 		updatedAt, err := time.Parse(time.RFC3339Nano, cursor.UpdatedAt)
 		if err != nil || strings.TrimSpace(cursor.SessionID) == "" {
-			return OperatorConversationListResult{}, ErrInvalidConversationCursor
+			return operatorread.OperatorConversationListResult{}, operatorread.ErrInvalidConversationCursor
 		}
 		nTime := add(updatedAt.UTC())
 		nSession := add(cursor.SessionID)
@@ -545,18 +300,18 @@ func (r *OperatorAgentConversationReadSurface) ListOperatorConversations(ctx con
 		LIMIT $%d
 		`, strings.Join(sources, "\nUNION ALL\n"), strings.Join(where, " AND "), limitArg), args...)
 	if err != nil {
-		return OperatorConversationListResult{}, operatorConversationReadQueryError("list operator conversations", err)
+		return operatorread.OperatorConversationListResult{}, operatorConversationReadQueryError("list operator conversations", err)
 	}
 	defer rows.Close()
-	conversations := []OperatorConversationSummary{}
+	conversations := []operatorread.OperatorConversationSummary{}
 	for rows.Next() {
 		item, err := scanOperatorConversationSummary(rows)
 		if err != nil {
-			return OperatorConversationListResult{}, err
+			return operatorread.OperatorConversationListResult{}, err
 		}
 		turn, err := r.loadLatestPublicConversationTurn(ctx, item.SessionID)
 		if err != nil {
-			return OperatorConversationListResult{}, err
+			return operatorread.OperatorConversationListResult{}, err
 		}
 		item.Metadata.LiveTurn = operatorLiveTurnFromPublic(turn)
 		if turn != nil {
@@ -565,7 +320,7 @@ func (r *OperatorAgentConversationReadSurface) ListOperatorConversations(ctx con
 		conversations = append(conversations, item)
 	}
 	if err := rows.Err(); err != nil {
-		return OperatorConversationListResult{}, operatorConversationReadQueryError("read operator conversations", err)
+		return operatorread.OperatorConversationListResult{}, operatorConversationReadQueryError("read operator conversations", err)
 	}
 	nextCursor := ""
 	if len(conversations) > opts.Limit {
@@ -578,54 +333,38 @@ func (r *OperatorAgentConversationReadSurface) ListOperatorConversations(ctx con
 		})
 	}
 	if conversations == nil {
-		conversations = []OperatorConversationSummary{}
+		conversations = []operatorread.OperatorConversationSummary{}
 	}
-	return OperatorConversationListResult{Conversations: conversations, NextCursor: nextCursor}, nil
+	return operatorread.OperatorConversationListResult{Conversations: conversations, NextCursor: nextCursor}, nil
 }
 
-func (r *OperatorAgentConversationReadSurface) ListOperatorConversationTurns(ctx context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error) {
-	source, ok := r.owner.(interface {
-		ListOperatorConversationTurns(context.Context, OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error)
-	})
-	if !ok {
-		return OperatorConversationTurnListResult{}, errors.New("operator conversation read surface requires the canonical public turn owner")
-	}
-	return source.ListOperatorConversationTurns(ctx, opts)
+func (r *OperatorConversationReadSurface) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
+	return r.source.ListOperatorConversationTurns(ctx, opts)
 }
 
-func (r *OperatorAgentConversationReadSurface) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (OperatorPublicConversationTurnDetail, error) {
-	source, ok := r.owner.(interface {
-		LoadOperatorPublicConversationTurn(context.Context, string, string) (OperatorPublicConversationTurnDetail, error)
-	})
-	if !ok {
-		return OperatorPublicConversationTurnDetail{}, errors.New("operator conversation read surface requires the canonical public turn owner")
-	}
-	return source.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
+func (r *OperatorConversationReadSurface) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
+	return r.source.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
 }
 
-func (r *OperatorAgentConversationReadSurface) requireAgentAccess() error {
+func (r *OperatorAgentReadSurface) requireAgentAccess() error {
 	if r == nil || r.db == nil || r.source == nil {
 		return fmt.Errorf("operator agent read surface requires postgres store")
 	}
-	return r.owner.RequireCurrentSchema()
+	return r.source.RequireCurrentSchema()
 }
 
-func (r *OperatorAgentConversationReadSurface) requireConversationAccess() error {
-	if r == nil || r.db == nil || r.owner == nil {
+func (r *OperatorConversationReadSurface) requireConversationAccess() error {
+	if r == nil || r.db == nil || r.source == nil {
 		return fmt.Errorf("operator conversation read surface requires postgres store")
 	}
-	return r.owner.RequireCurrentSchema()
+	return r.source.RequireCurrentSchema()
 }
 
-func (r *OperatorAgentConversationReadSurface) loadLatestPublicConversationTurn(ctx context.Context, sessionID string) (*OperatorPublicConversationTurn, error) {
-	source, ok := r.owner.(operatorPublicConversationProjectionSource)
-	if !ok {
-		return nil, errors.New("operator conversation read surface requires the canonical public turn owner")
-	}
-	return loadOperatorLatestConversationTurn(ctx, source, sessionID)
+func (r *OperatorConversationReadSurface) loadLatestPublicConversationTurn(ctx context.Context, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
+	return loadOperatorLatestConversationTurn(ctx, r.source, sessionID)
 }
 
-func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx context.Context) (map[agentidentity.Identity]operatorAgentProjection, error) {
+func (r *OperatorAgentReadSurface) loadAgentOperatorProjections(ctx context.Context) (map[agentidentity.Identity]operatorAgentProjection, error) {
 	rows, err := r.db.QueryContext(ctx, `
 			SELECT
 			a.agent_id,
@@ -753,12 +492,12 @@ func (r *OperatorAgentConversationReadSurface) loadAgentOperatorProjections(ctx 
 	return out, nil
 }
 
-func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projection operatorAgentProjection, turnLimit int) OperatorAgentSummary {
+func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projection operatorAgentProjection, turnLimit int) operatorread.OperatorAgentSummary {
 	memory, err := row.Config.Memory.Normalize()
 	if err != nil {
 		memory = agentmemory.PlatformDefault()
 	}
-	out := OperatorAgentSummary{
+	out := operatorread.OperatorAgentSummary{
 		AgentID:               strings.TrimSpace(row.Config.ID),
 		Identity:              row.Config.Identity.Normalize(),
 		Role:                  strings.TrimSpace(row.Config.Role),
@@ -805,51 +544,51 @@ func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projec
 	return out
 }
 
-func OperatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projection OperatorAgentProjection, turnLimit int) OperatorAgentSummary {
+func OperatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projection OperatorAgentProjection, turnLimit int) operatorread.OperatorAgentSummary {
 	return operatorAgentSummaryFromPersisted(row, projection, turnLimit)
 }
 
-func operatorAgentDiagnosisFromDetail(detail OperatorAgentDetail) (OperatorAgentDiagnosis, error) {
+func operatorAgentDiagnosisFromDetail(detail operatorread.OperatorAgentDetail) (operatorread.OperatorAgentDiagnosis, error) {
 	agent := detail.Agent
-	out := OperatorAgentDiagnosis{
+	out := operatorread.OperatorAgentDiagnosis{
 		AgentID:           strings.TrimSpace(agent.AgentID),
 		Status:            strings.TrimSpace(agent.Status),
 		CurrentSessionRef: detail.CurrentSessionRef,
 		LastTurnRef:       detail.LastTurnRef,
-		Queue: OperatorAgentDiagnosisQueue{
+		Queue: operatorread.OperatorAgentDiagnosisQueue{
 			PendingCount:            agent.PendingEvents,
 			OldestPendingAgeSeconds: agent.OldestPendingAgeSec,
-			PendingDeliveries:       []OperatorAgentPendingDelivery{},
+			PendingDeliveries:       []operatorread.OperatorAgentPendingDelivery{},
 		},
 		RuntimeState: agent.DiagnosisRuntimeState,
 		Active:       cloneOperatorAgentDiagnosisActive(agent.DiagnosisActive),
 	}
 	lastToolOutcome, err := operatorAgentDiagnosisLastToolOutcomeFromAgent(agent)
 	if err != nil {
-		return OperatorAgentDiagnosis{}, err
+		return operatorread.OperatorAgentDiagnosis{}, err
 	}
 	out.LastToolOutcome = lastToolOutcome
 	if state := strings.TrimSpace(agent.DeliveryLifecycle); state != "" {
-		out.DeliveryLifecycle = &OperatorAgentDeliveryLifecycle{
+		out.DeliveryLifecycle = &operatorread.OperatorAgentDeliveryLifecycle{
 			State:         state,
 			BlockingLayer: strings.TrimSpace(agent.BlockingLayer),
 		}
 	}
 	if err := validateOperatorAgentDiagnosis(out); err != nil {
-		return OperatorAgentDiagnosis{}, err
+		return operatorread.OperatorAgentDiagnosis{}, err
 	}
 	return out, nil
 }
 
-func operatorAgentDiagnosisQueueFromPendingPage(page PendingAgentDeliveryPage) OperatorAgentDiagnosisQueue {
-	queue := OperatorAgentDiagnosisQueue{
+func operatorAgentDiagnosisQueueFromPendingPage(page operatorread.PendingAgentDeliveryPage) operatorread.OperatorAgentDiagnosisQueue {
+	queue := operatorread.OperatorAgentDiagnosisQueue{
 		PendingCount:            page.PendingCount,
 		OldestPendingAgeSeconds: page.OldestPendingAgeSec,
-		PendingDeliveries:       make([]OperatorAgentPendingDelivery, 0, len(page.PendingDeliveries)),
+		PendingDeliveries:       make([]operatorread.OperatorAgentPendingDelivery, 0, len(page.PendingDeliveries)),
 		NextCursor:              strings.TrimSpace(page.NextCursor),
 	}
 	for _, detail := range page.PendingDeliveries {
-		queue.PendingDeliveries = append(queue.PendingDeliveries, OperatorAgentPendingDelivery{
+		queue.PendingDeliveries = append(queue.PendingDeliveries, operatorread.OperatorAgentPendingDelivery{
 			DeliveryID: strings.TrimSpace(detail.DeliveryID),
 			EventID:    strings.TrimSpace(detail.EventID),
 			EventName:  strings.TrimSpace(detail.EventName),
@@ -860,7 +599,7 @@ func operatorAgentDiagnosisQueueFromPendingPage(page PendingAgentDeliveryPage) O
 	return queue
 }
 
-func validateOperatorAgentDiagnosis(item OperatorAgentDiagnosis) error {
+func validateOperatorAgentDiagnosis(item operatorread.OperatorAgentDiagnosis) error {
 	if strings.TrimSpace(item.AgentID) == "" {
 		return fmt.Errorf("agent diagnosis agent_id is required")
 	}
@@ -923,11 +662,11 @@ func validateOperatorAgentDiagnosis(item OperatorAgentDiagnosis) error {
 	return nil
 }
 
-func ValidateOperatorAgentDiagnosis(item OperatorAgentDiagnosis) error {
+func ValidateOperatorAgentDiagnosis(item operatorread.OperatorAgentDiagnosis) error {
 	return validateOperatorAgentDiagnosis(item)
 }
 
-func validateOperatorAgentDiagnosisActive(item *OperatorAgentDiagnosisActive) error {
+func validateOperatorAgentDiagnosisActive(item *operatorread.OperatorAgentDiagnosisActive) error {
 	if item == nil {
 		return nil
 	}
@@ -937,7 +676,7 @@ func validateOperatorAgentDiagnosisActive(item *OperatorAgentDiagnosisActive) er
 	return nil
 }
 
-func validateOperatorAgentDiagnosisRuntimeState(item *OperatorAgentDiagnosisRuntimeState) error {
+func validateOperatorAgentDiagnosisRuntimeState(item *operatorread.OperatorAgentDiagnosisRuntimeState) error {
 	if item == nil {
 		return nil
 	}
@@ -950,19 +689,19 @@ func validateOperatorAgentDiagnosisRuntimeState(item *OperatorAgentDiagnosisRunt
 	return nil
 }
 
-func operatorAgentDiagnosisActiveFromLatestTurn(turnID, taskID, entityID string) *OperatorAgentDiagnosisActive {
+func operatorAgentDiagnosisActiveFromLatestTurn(turnID, taskID, entityID string) *operatorread.OperatorAgentDiagnosisActive {
 	turnID = strings.TrimSpace(turnID)
 	if turnID == "" {
 		return nil
 	}
-	return &OperatorAgentDiagnosisActive{
+	return &operatorread.OperatorAgentDiagnosisActive{
 		TurnID:   turnID,
 		TaskID:   strings.TrimSpace(taskID),
 		EntityID: strings.TrimSpace(entityID),
 	}
 }
 
-func cloneOperatorAgentDiagnosisActive(in *OperatorAgentDiagnosisActive) *OperatorAgentDiagnosisActive {
+func cloneOperatorAgentDiagnosisActive(in *operatorread.OperatorAgentDiagnosisActive) *operatorread.OperatorAgentDiagnosisActive {
 	if in == nil {
 		return nil
 	}
@@ -970,7 +709,7 @@ func cloneOperatorAgentDiagnosisActive(in *OperatorAgentDiagnosisActive) *Operat
 	return &out
 }
 
-func operatorAgentDiagnosisLastToolOutcomeFromAgent(agent OperatorAgentSummary) (*OperatorAgentLastToolOutcome, error) {
+func operatorAgentDiagnosisLastToolOutcomeFromAgent(agent operatorread.OperatorAgentSummary) (*operatorread.OperatorAgentLastToolOutcome, error) {
 	if agent.DiagnosisActive == nil {
 		return nil, nil
 	}
@@ -985,7 +724,7 @@ func operatorAgentDiagnosisLastToolOutcomeFromAgent(agent OperatorAgentSummary) 
 		return nil, fmt.Errorf("agent diagnosis last_tool_outcome turn_id %q does not match active turn_id %q", liveTurnID, turnID)
 	}
 	last := agent.LiveTurn.LastTool
-	out := &OperatorAgentLastToolOutcome{
+	out := &operatorread.OperatorAgentLastToolOutcome{
 		TurnID:    turnID,
 		ToolName:  strings.TrimSpace(last.Name),
 		ToolUseID: strings.TrimSpace(last.ToolUseID),
@@ -997,7 +736,7 @@ func operatorAgentDiagnosisLastToolOutcomeFromAgent(agent OperatorAgentSummary) 
 	return out, nil
 }
 
-func validateOperatorAgentDiagnosisLastToolOutcome(item *OperatorAgentLastToolOutcome) error {
+func validateOperatorAgentDiagnosisLastToolOutcome(item *operatorread.OperatorAgentLastToolOutcome) error {
 	if item == nil {
 		return nil
 	}
@@ -1028,11 +767,11 @@ func validOperatorAgentDeliveryLifecycleState(state string) bool {
 	}
 }
 
-func (p operatorAgentProjection) currentSessionRef() *OperatorSessionRef {
+func (p operatorAgentProjection) currentSessionRef() *operatorread.OperatorSessionRef {
 	if strings.TrimSpace(p.SessionID) == "" || p.SessionStartedAt.IsZero() {
 		return nil
 	}
-	return &OperatorSessionRef{SessionID: strings.TrimSpace(p.SessionID), StartedAt: p.SessionStartedAt}
+	return &operatorread.OperatorSessionRef{SessionID: strings.TrimSpace(p.SessionID), StartedAt: p.SessionStartedAt}
 }
 
 func (p operatorAgentProjection) dashboardState() string {
@@ -1088,14 +827,14 @@ func operatorAgentFlowMatches(agentFlow, filter string) bool {
 	return filter == "" || agentFlow == filter || strings.HasPrefix(agentFlow, filter+"/")
 }
 
-func defaultOperatorConversationListOptions(opts OperatorConversationListOptions) (OperatorConversationListOptions, error) {
+func defaultOperatorConversationListOptions(opts operatorread.OperatorConversationListOptions) (operatorread.OperatorConversationListOptions, error) {
 	opts.AgentID = strings.TrimSpace(opts.AgentID)
 	opts.FlowInstance = strings.Trim(strings.TrimSpace(opts.FlowInstance), "/")
 	opts.RunID = strings.TrimSpace(opts.RunID)
 	opts.Cursor = strings.TrimSpace(opts.Cursor)
 	if opts.RunID != "" {
 		if _, err := uuid.Parse(opts.RunID); err != nil {
-			return OperatorConversationListOptions{}, fmt.Errorf("%w: run_id must be a UUID", ErrInvalidEntityReadParam)
+			return operatorread.OperatorConversationListOptions{}, fmt.Errorf("%w: run_id must be a UUID", operatorread.ErrInvalidEntityReadParam)
 		}
 	}
 	if opts.Limit <= 0 {
@@ -1185,17 +924,17 @@ func CloneRawMessage(in json.RawMessage) json.RawMessage {
 	return cloneRawMessage(in)
 }
 
-func CloneConversationToolCalls(in []OperatorConversationToolCall) []OperatorConversationToolCall {
+func CloneConversationToolCalls(in []operatorread.OperatorConversationToolCall) []operatorread.OperatorConversationToolCall {
 	return cloneConversationToolCalls(in)
 }
 
-func CloneConversationToolResults(in []OperatorConversationToolResult) []OperatorConversationToolResult {
+func CloneConversationToolResults(in []operatorread.OperatorConversationToolResult) []operatorread.OperatorConversationToolResult {
 	return cloneConversationToolResults(in)
 }
 
-func scanOperatorConversationSummary(scanner operatorRowScanner) (OperatorConversationSummary, error) {
+func scanOperatorConversationSummary(scanner operatorRowScanner) (operatorread.OperatorConversationSummary, error) {
 	var (
-		item            OperatorConversationSummary
+		item            operatorread.OperatorConversationSummary
 		runtimeStateRaw []byte
 		endedAt         sql.NullTime
 	)
@@ -1215,7 +954,7 @@ func scanOperatorConversationSummary(scanner operatorRowScanner) (OperatorConver
 		&endedAt,
 		&item.UpdatedAt,
 	); err != nil {
-		return OperatorConversationSummary{}, err
+		return operatorread.OperatorConversationSummary{}, err
 	}
 	if endedAt.Valid {
 		ended := endedAt.Time
@@ -1223,15 +962,15 @@ func scanOperatorConversationSummary(scanner operatorRowScanner) (OperatorConver
 	}
 	runtimeState, err := DecodeConversationRuntimeStateDescriptor(runtimeStateRaw)
 	if err != nil {
-		return OperatorConversationSummary{}, fmt.Errorf("decode conversation runtime_state: %w", err)
+		return operatorread.OperatorConversationSummary{}, fmt.Errorf("decode conversation runtime_state: %w", err)
 	}
 	item.Summary = runtimeState.Summary
 	item.Metadata = projectOperatorConversationSummaryMetadata(runtimeState)
 	return item, nil
 }
 
-func projectOperatorConversationSummaryMetadata(p ConversationRuntimeStateDescriptor) OperatorConversationSummaryMetadata {
-	meta := OperatorConversationSummaryMetadata{
+func projectOperatorConversationSummaryMetadata(p ConversationRuntimeStateDescriptor) operatorread.OperatorConversationSummaryMetadata {
+	meta := operatorread.OperatorConversationSummaryMetadata{
 		ProviderSessionID:    p.ProviderSessionID,
 		RetryReason:          p.RetryReason,
 		RetriesFromSessionID: p.RetriesFromSessionID,
@@ -1240,15 +979,15 @@ func projectOperatorConversationSummaryMetadata(p ConversationRuntimeStateDescri
 	return meta
 }
 
-func ProjectOperatorConversationSummaryMetadata(p ConversationRuntimeStateDescriptor) OperatorConversationSummaryMetadata {
+func ProjectOperatorConversationSummaryMetadata(p ConversationRuntimeStateDescriptor) operatorread.OperatorConversationSummaryMetadata {
 	return projectOperatorConversationSummaryMetadata(p)
 }
 
-func operatorConversationWatchdogFromDescriptor(p *ConversationRuntimeWatchdogDescriptor) *OperatorConversationWatchdog {
+func operatorConversationWatchdogFromDescriptor(p *ConversationRuntimeWatchdogDescriptor) *operatorread.OperatorConversationWatchdog {
 	if p == nil {
 		return nil
 	}
-	return &OperatorConversationWatchdog{
+	return &operatorread.OperatorConversationWatchdog{
 		State:         p.State,
 		BlockingLayer: p.BlockingLayer,
 		Action:        p.Action,
@@ -1258,12 +997,12 @@ func operatorConversationWatchdogFromDescriptor(p *ConversationRuntimeWatchdogDe
 	}
 }
 
-func operatorAgentDiagnosisRuntimeStateFromConversationWatchdog(w *OperatorConversationWatchdog) *OperatorAgentDiagnosisRuntimeState {
+func operatorAgentDiagnosisRuntimeStateFromConversationWatchdog(w *operatorread.OperatorConversationWatchdog) *operatorread.OperatorAgentDiagnosisRuntimeState {
 	if w == nil {
 		return nil
 	}
-	return &OperatorAgentDiagnosisRuntimeState{
-		Watchdog: &OperatorAgentDiagnosisWatchdog{
+	return &operatorread.OperatorAgentDiagnosisRuntimeState{
+		Watchdog: &operatorread.OperatorAgentDiagnosisWatchdog{
 			State:         strings.TrimSpace(w.State),
 			BlockingLayer: strings.TrimSpace(w.BlockingLayer),
 			Action:        strings.TrimSpace(w.Action),
@@ -1274,7 +1013,7 @@ func operatorAgentDiagnosisRuntimeStateFromConversationWatchdog(w *OperatorConve
 	}
 }
 
-func conversationWatchdogDescriptorFromAgentDiagnosis(w OperatorAgentDiagnosisWatchdog) ConversationRuntimeWatchdogDescriptor {
+func conversationWatchdogDescriptorFromAgentDiagnosis(w operatorread.OperatorAgentDiagnosisWatchdog) ConversationRuntimeWatchdogDescriptor {
 	return ConversationRuntimeWatchdogDescriptor{
 		State:         strings.TrimSpace(w.State),
 		BlockingLayer: strings.TrimSpace(w.BlockingLayer),
@@ -1293,14 +1032,14 @@ func encodeConversationPositionCursor(cursor conversationPositionCursor) string 
 func decodeConversationPositionCursor(raw string, kind string) (conversationPositionCursor, error) {
 	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(raw))
 	if err != nil {
-		return conversationPositionCursor{}, ErrInvalidConversationCursor
+		return conversationPositionCursor{}, operatorread.ErrInvalidConversationCursor
 	}
 	var cursor conversationPositionCursor
 	if err := json.Unmarshal(decoded, &cursor); err != nil {
-		return conversationPositionCursor{}, ErrInvalidConversationCursor
+		return conversationPositionCursor{}, operatorread.ErrInvalidConversationCursor
 	}
 	if strings.TrimSpace(cursor.Kind) != kind {
-		return conversationPositionCursor{}, ErrInvalidConversationCursor
+		return conversationPositionCursor{}, operatorread.ErrInvalidConversationCursor
 	}
 	return cursor, nil
 }

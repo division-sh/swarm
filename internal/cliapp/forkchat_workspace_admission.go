@@ -7,8 +7,8 @@ import (
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 type workspaceAdmittedForkChatExecutor struct {
@@ -25,13 +25,13 @@ func NewWorkspaceAdmittedForkChatExecutor(inner apiv1.ForkChatExecutor, runtimes
 	}
 }
 
-func (e workspaceAdmittedForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared store.ConversationForkChatPrepared, message string) (store.ConversationForkChatExecution, error) {
+func (e workspaceAdmittedForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared runfork.ConversationForkChatPrepared, message string) (runfork.ConversationForkChatExecution, error) {
 	if e.runtimes == nil {
-		return store.ConversationForkChatExecution{}, fmt.Errorf("conversation.fork_chat llm runtime resolver is required")
+		return runfork.ConversationForkChatExecution{}, fmt.Errorf("conversation.fork_chat llm runtime resolver is required")
 	}
 	resolved, err := e.runtimes.ResolveAgentRuntime(prepared.Snapshot.SourceAgent)
 	if err != nil {
-		return store.ConversationForkChatExecution{}, fmt.Errorf("conversation.fork_chat resolve llm runtime: %w", err)
+		return runfork.ConversationForkChatExecution{}, fmt.Errorf("conversation.fork_chat resolve llm runtime: %w", err)
 	}
 	providerContract, hasProviderContract := runtimellm.ProviderContractForRuntime(resolved.Runtime)
 	if hasProviderContract && providerContract.Transport == runtimellm.ProviderTransportCLI {
@@ -39,11 +39,11 @@ func (e workspaceAdmittedForkChatExecutor) ExecuteForkChat(ctx context.Context, 
 		case e.decision.Backend == workspace.BackendDocker:
 			return e.inner.ExecuteForkChat(ctx, prepared, message)
 		case e.decision.Backend == workspace.BackendHost || e.decision.UnsafeHost:
-			return store.ConversationForkChatExecution{}, fmt.Errorf("conversation.fork_chat cannot use host workspace backend with claude_cli; use docker because claude_cli process execution on host remains split")
+			return runfork.ConversationForkChatExecution{}, fmt.Errorf("conversation.fork_chat cannot use host workspace backend with claude_cli; use docker because claude_cli process execution on host remains split")
 		case e.decision.NoWorkspace || e.decision.Backend == WorkspaceBackendNone:
-			return store.ConversationForkChatExecution{}, fmt.Errorf("conversation.fork_chat requires container isolation because forkchat uses claude_cli; start Docker or configure an API-backed LLM backend")
+			return runfork.ConversationForkChatExecution{}, fmt.Errorf("conversation.fork_chat requires container isolation because forkchat uses claude_cli; start Docker or configure an API-backed LLM backend")
 		default:
-			return store.ConversationForkChatExecution{}, fmt.Errorf("conversation.fork_chat workspace backend decision %q cannot run claude_cli; use docker", strings.TrimSpace(e.decision.Backend))
+			return runfork.ConversationForkChatExecution{}, fmt.Errorf("conversation.fork_chat workspace backend decision %q cannot run claude_cli; use docker", strings.TrimSpace(e.decision.Backend))
 		}
 	}
 	return e.inner.ExecuteForkChat(ctx, prepared, message)

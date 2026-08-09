@@ -7,41 +7,42 @@ import (
 	"path/filepath"
 	"testing"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 const testBuilderAuthToken = "builder-test-token"
 
 type pagedEntityReader struct {
-	pages        []store.OperatorEntityListResult
+	pages        []operatorread.OperatorEntityListResult
 	calls        int
-	getResult    store.OperatorEntityFull
+	getResult    operatorread.OperatorEntityFull
 	getErr       error
 	lastEntityID string
 	lastRunID    string
 }
 
-func (r *pagedEntityReader) ListOperatorEntities(_ context.Context, opts store.OperatorEntityListOptions) (store.OperatorEntityListResult, error) {
+func (r *pagedEntityReader) ListOperatorEntities(_ context.Context, opts operatorread.OperatorEntityListOptions) (operatorread.OperatorEntityListResult, error) {
 	if r.calls >= len(r.pages) {
-		return store.OperatorEntityListResult{Entities: []store.OperatorEntitySummary{}}, nil
+		return operatorread.OperatorEntityListResult{Entities: []operatorread.OperatorEntitySummary{}}, nil
 	}
 	page := r.pages[r.calls]
 	r.calls++
 	return page, nil
 }
 
-func (r *pagedEntityReader) LoadOperatorEntity(_ context.Context, entityID, runID string) (store.OperatorEntityFull, error) {
+func (r *pagedEntityReader) LoadOperatorEntity(_ context.Context, entityID, runID string) (operatorread.OperatorEntityFull, error) {
 	r.lastEntityID = entityID
 	r.lastRunID = runID
 	if r.getErr != nil {
-		return store.OperatorEntityFull{}, r.getErr
+		return operatorread.OperatorEntityFull{}, r.getErr
 	}
 	if r.getResult.Entity.EntityID == "" {
-		return store.OperatorEntityFull{}, store.ErrEntityNotFound
+		return operatorread.OperatorEntityFull{}, operatorread.ErrEntityNotFound
 	}
 	return r.getResult, nil
 }
@@ -132,14 +133,14 @@ func TestHandler_CredentialsListSetDelete(t *testing.T) {
 }
 
 func TestHandler_StateListInstancesDrainsCanonicalEntityPages(t *testing.T) {
-	page1 := make([]store.OperatorEntitySummary, 50)
+	page1 := make([]operatorread.OperatorEntitySummary, 50)
 	for i := range page1 {
-		page1[i] = store.OperatorEntitySummary{EntityID: "entity-page-1"}
+		page1[i] = operatorread.OperatorEntitySummary{EntityID: "entity-page-1"}
 	}
 	reader := &pagedEntityReader{
-		pages: []store.OperatorEntityListResult{
+		pages: []operatorread.OperatorEntityListResult{
 			{Entities: page1, NextCursor: "next"},
-			{Entities: []store.OperatorEntitySummary{{EntityID: "entity-page-2"}}},
+			{Entities: []operatorread.OperatorEntitySummary{{EntityID: "entity-page-2"}}},
 		},
 	}
 	handler := NewHandler(Options{
@@ -149,7 +150,7 @@ func TestHandler_StateListInstancesDrainsCanonicalEntityPages(t *testing.T) {
 
 	resp := callBuilderRPC(t, handler, Request{JSONRPC: "2.0", ID: "1", Method: "state.list_instances"})
 	result, _ := resp.Result.(map[string]any)
-	rows, ok := result["instances"].([]store.OperatorEntitySummary)
+	rows, ok := result["instances"].([]operatorread.OperatorEntitySummary)
 	if !ok || len(rows) != 51 {
 		t.Fatalf("instances = %#v, want 51 rows", result["instances"])
 	}
@@ -160,8 +161,8 @@ func TestHandler_StateListInstancesDrainsCanonicalEntityPages(t *testing.T) {
 
 func TestHandler_StateGetEntityReturnsCanonicalEntityFull(t *testing.T) {
 	reader := &pagedEntityReader{
-		getResult: store.OperatorEntityFull{
-			Entity: store.OperatorEntitySummary{
+		getResult: operatorread.OperatorEntityFull{
+			Entity: operatorread.OperatorEntitySummary{
 				EntityID:     runtimeflowidentity.EntityID("wf-1"),
 				RunID:        "run-1",
 				FlowInstance: "order/wf-1",
@@ -193,7 +194,7 @@ func TestHandler_StateGetEntityReturnsCanonicalEntityFull(t *testing.T) {
 			"run_id":      "run-1",
 		},
 	})
-	full, ok := resp.Result.(store.OperatorEntityFull)
+	full, ok := resp.Result.(operatorread.OperatorEntityFull)
 	if !ok {
 		t.Fatalf("state.get_entity result type = %T, want OperatorEntityFull", resp.Result)
 	}

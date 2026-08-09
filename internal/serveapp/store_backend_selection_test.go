@@ -238,8 +238,6 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 		"RunForkAvailability": apiCaps.RunForkAvailability,
 		"RunFork":             apiCaps.RunFork,
 		"ResetCoordinator":    apiCaps.ResetCoordinator,
-		"ResetQuiescer":       apiCaps.ResetQuiescer,
-		"ResetCleaner":        apiCaps.ResetCleaner,
 	}
 	for name, capability := range classifiedOut {
 		if capability != nil {
@@ -388,15 +386,15 @@ func selectedOperatorReadConstructionCapabilityLedger() []selectedOperatorReadCo
 		{Name: "RunBundleContext", Classification: "wired_both", Reason: "served event.publish follow-up read context is required on both selected stores"},
 		{Name: "TestSetup", Classification: "wired_both", Reason: "test.setup_entities capability is selected through entity owner and remains mutating-ledger classified separately"},
 		{Name: "BundleCatalog", Classification: "wired_both", Reason: "bundle.list/get/agents read owner was promoted by #1782/#1805"},
+		{Name: "BundleRegister", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.bundle_register", RequiresPostgresBaseline: true, Reason: "bundle.register is a spec-classified Postgres-only bundle catalog mutation capability"},
 		{Name: "BundleDelete", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.bundle_delete", RequiresPostgresBaseline: true, Reason: "bundle.delete is a spec-classified Postgres-only mutating/destructive bundle lifecycle capability, not operator-read parity"},
 		{Name: "ConversationForks", Classification: "wired_both", Reason: "conversation.fork_list/view consume the shared fork semantic owner on SQLite and Postgres"},
 		{Name: "ConversationForkLifecycle", Classification: "wired_both", Reason: "conversation.fork/fork_chat/fork_delete consume the shared fork semantic owner with backend-local mutation adapters"},
 		{Name: "RunForkAvailability", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork", RequiresPostgresBaseline: true, Reason: "run.fork availability is a spec-classified Postgres-only product/mutating lifecycle seam"},
 		{Name: "RunFork", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork", RequiresPostgresBaseline: true, Reason: "run.fork execution is a spec-classified Postgres-only product/mutating lifecycle seam"},
+		{Name: "RunForkSelector", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork", RequiresPostgresBaseline: true, Reason: "run.fork selector is part of the same explicit Postgres-only selected-contract lifecycle capability"},
 		{Name: "RuntimeContexts", Classification: "different_semantic_concept_with_proof", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.selected_runtime_store_facade", Reason: "multi-bundle DB-loaded runtime context routing is conditional product/runtime support, not core operator-read parity"},
 		{Name: "ResetCoordinator", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke", RequiresPostgresBaseline: true, Reason: "destructive reset coordinator is a spec-classified Postgres-only product capability"},
-		{Name: "ResetQuiescer", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke", RequiresPostgresBaseline: true, Reason: "destructive reset quiescer is a spec-classified Postgres-only product capability"},
-		{Name: "ResetCleaner", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke", RequiresPostgresBaseline: true, Reason: "destructive reset cleaner is a spec-classified Postgres-only product capability"},
 	}
 }
 

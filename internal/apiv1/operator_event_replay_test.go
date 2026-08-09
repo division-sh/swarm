@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -104,19 +106,19 @@ func TestOperatorEventReplayPublishesDistinctReplayEventAuditAndIdempotency(t *t
 }
 
 func TestEventReplayTargetsPreserveAndValidateEveryExactSubscriberRoute(t *testing.T) {
-	delivered := store.OperatorEventDelivery{
+	delivered := operatorread.OperatorEventDelivery{
 		DeliveryID: "delivery-delivered", SubscriberType: eventReplaySubscriberTypeAgent,
 		SubscriberID: "agent-a", Status: string(runtimedelivery.StatusDelivered), Terminal: true,
 	}
-	pending := store.OperatorEventDelivery{
+	pending := operatorread.OperatorEventDelivery{
 		DeliveryID: "delivery-pending", SubscriberType: eventReplaySubscriberTypeAgent,
 		SubscriberID: "agent-a", Status: string(runtimedelivery.StatusPending), Terminal: false,
 	}
-	for _, deliveries := range [][]store.OperatorEventDelivery{
+	for _, deliveries := range [][]operatorread.OperatorEventDelivery{
 		{delivered, pending},
 		{pending, delivered},
 	} {
-		_, subscribers, err := eventReplayTargets(store.OperatorEventFull{
+		_, subscribers, err := eventReplayTargets(operatorread.OperatorEventFull{
 			EventID: "event-routes", Deliveries: deliveries,
 		}, []string{"agent-a"})
 		var applicationErr *ApplicationError
@@ -136,8 +138,8 @@ func TestEventReplayTargetsPreserveAndValidateEveryExactSubscriberRoute(t *testi
 	failed.DeliveryID = "delivery-failed"
 	failed.Status = string(runtimedelivery.StatusFailed)
 	failed.Terminal = false
-	targets, subscribers, err := eventReplayTargets(store.OperatorEventFull{
-		EventID: "event-routes", Deliveries: []store.OperatorEventDelivery{delivered, failed},
+	targets, subscribers, err := eventReplayTargets(operatorread.OperatorEventFull{
+		EventID: "event-routes", Deliveries: []operatorread.OperatorEventDelivery{delivered, failed},
 	}, []string{"agent-a"})
 	if err != nil {
 		t.Fatalf("eventReplayTargets terminal siblings: %v", err)
@@ -570,7 +572,7 @@ func TestOpaqueMissingEventIDReturnsNotFoundAcrossOperatorConsumersParity(t *tes
 			ctx := testAuthorActivityContext(context.Background())
 			f := tc.open(t, ctx)
 			seedActiveOperatorReplayAgent(t, ctx, f.store, "agent-a")
-			if _, err := f.store.LoadOperatorEvent(ctx, "missing"); !errors.Is(err, store.ErrEventNotFound) {
+			if _, err := f.store.LoadOperatorEvent(ctx, "missing"); !errors.Is(err, operatorread.ErrEventNotFound) {
 				t.Fatalf("operator reader error = %v, want ErrEventNotFound", err)
 			}
 			bus, err := newScopedAPITestEventBus(t, f.store, runtimebus.EventBusOptions{
@@ -615,7 +617,7 @@ func completeOperatorReplayTestHandler(t *testing.T, owner completeOperatorRepla
 	t.Helper()
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now: func() time.Time { return now }, Ready: func() bool { return true }, Database: fakePinger{},
 			Runs: owner, Observability: owner, AgentConversations: owner, Idempotency: owner, Events: bus,
 			Source: semanticview.Wrap(runStartTestBundle("scan.requested")),
@@ -762,7 +764,7 @@ func TestReplayEventFromOriginalUsesCanonicalEventEntityOnly(t *testing.T) {
 		envelope,
 		now.Add(-time.Minute),
 	), "mock")
-	original, err := store.NewOperatorEventFull(snapshot)
+	original, err := operatorread.NewOperatorEventFull(snapshot)
 	if err != nil {
 		t.Fatalf("NewOperatorEventFull: %v", err)
 	}
@@ -1337,7 +1339,7 @@ func eventReplayTestHandler(t *testing.T, pg *store.PostgresStore, bus eventRepl
 	t.Helper()
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:                func() time.Time { return time.Now().UTC() },
 			Ready:              func() bool { return true },
 			Database:           fakePinger{},
@@ -1356,7 +1358,7 @@ func eventReplayTestHandler(t *testing.T, pg *store.PostgresStore, bus eventRepl
 	})
 }
 
-func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventName string, subscribers []string, status runtimedelivery.Status) store.OperatorEventFull {
+func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventName string, subscribers []string, status runtimedelivery.Status) operatorread.OperatorEventFull {
 	t.Helper()
 	eventID := uuid.NewString()
 	runID := uuid.NewString()

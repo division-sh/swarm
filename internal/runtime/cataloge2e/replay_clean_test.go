@@ -16,10 +16,11 @@ import (
 	"testing"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testcatalog"
 	"github.com/division-sh/swarm/internal/testutil/replayconformance"
 	"github.com/google/uuid"
@@ -408,8 +409,8 @@ func (h *runtimeHarness) waitForCatalogAutomaticEventCount(eventName string, min
 		authoredIDs := cloneCatalogStringSet(h.publishedIDs)
 		h.mu.Unlock()
 		count := 0
-		opts := store.OperatorEventListOptions{
-			Filter: store.OperatorEventListFilter{RunID: catalogRuntimeRunID, EventName: eventName},
+		opts := operatorread.OperatorEventListOptions{
+			Filter: operatorread.OperatorEventListFilter{RunID: catalogRuntimeRunID, EventName: eventName},
 			Limit:  minimum,
 		}
 		for {
@@ -481,13 +482,13 @@ func (h *runtimeHarness) waitForCatalogStoreQuiescence(timeout time.Duration) {
 	defer ticker.Stop()
 	for {
 		var (
-			report store.RunDebugReport
+			report operatorread.RunDebugReport
 			err    error
 		)
 		if h.pg != nil {
-			report, err = h.pg.LoadRunDebugReport(ctx, catalogRuntimeRunID, store.RunDebugQueryOptions{})
+			report, err = h.pg.LoadRunDebugReport(ctx, catalogRuntimeRunID, operatorread.RunDebugQueryOptions{})
 		} else if h.sqlite != nil {
-			report, err = h.sqlite.LoadRunDebugReport(ctx, catalogRuntimeRunID, store.RunDebugQueryOptions{})
+			report, err = h.sqlite.LoadRunDebugReport(ctx, catalogRuntimeRunID, operatorread.RunDebugQueryOptions{})
 		} else {
 			h.t.Fatal("catalog selected store is required for quiescence")
 		}
@@ -601,7 +602,7 @@ func catalogReplayRootInputs(transcript *catalogExecutionTranscript) ([]replayco
 	return roots, nil
 }
 
-func (h *runtimeHarness) catalogOperatorEvents() (map[string]store.OperatorEventFull, error) {
+func (h *runtimeHarness) catalogOperatorEvents() (map[string]operatorread.OperatorEventFull, error) {
 	ctx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), catalogRuntimePublishTimeout)
 	defer cancel()
 	lister, err := h.catalogOperatorEventLister()
@@ -623,7 +624,7 @@ func (h *runtimeHarness) catalogOperatorEventLister() (catalogOperatorEventListe
 
 type catalogOperatorEventLister = replayconformance.EventLister
 
-func loadCatalogOperatorEvents(ctx context.Context, lister catalogOperatorEventLister) (map[string]store.OperatorEventFull, error) {
+func loadCatalogOperatorEvents(ctx context.Context, lister catalogOperatorEventLister) (map[string]operatorread.OperatorEventFull, error) {
 	return replayconformance.LoadOperatorEvents(ctx, lister, catalogRuntimeRunID)
 }
 

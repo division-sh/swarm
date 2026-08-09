@@ -6,7 +6,7 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
-func TestPostgresStore_TryAcquireSerializesDestructiveResetLock(t *testing.T) {
+func TestPostgresStore_AcquireDestructiveResetSerializesOperationLease(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
@@ -17,16 +17,16 @@ func TestPostgresStore_TryAcquireSerializesDestructiveResetLock(t *testing.T) {
 	t.Cleanup(func() { _ = pg.backend.Close() })
 
 	ctx := testAuthorActivityContext()
-	first, acquired, err := pg.TryAcquire(ctx, "test:destructive-reset")
+	first, acquired, err := pg.AcquireDestructiveReset(ctx)
 	if err != nil {
-		t.Fatalf("first TryAcquire: %v", err)
+		t.Fatalf("first AcquireDestructiveReset: %v", err)
 	}
 	if !acquired || first == nil {
 		t.Fatalf("first TryAcquire acquired=%v lease=%#v, want acquired lease", acquired, first)
 	}
-	second, acquired, err := pg.TryAcquire(ctx, "test:destructive-reset")
+	second, acquired, err := pg.AcquireDestructiveReset(ctx)
 	if err != nil {
-		t.Fatalf("second TryAcquire: %v", err)
+		t.Fatalf("second AcquireDestructiveReset: %v", err)
 	}
 	if acquired || second != nil {
 		t.Fatalf("second TryAcquire acquired=%v lease=%#v, want contention", acquired, second)
@@ -34,9 +34,9 @@ func TestPostgresStore_TryAcquireSerializesDestructiveResetLock(t *testing.T) {
 	if err := first.Release(ctx); err != nil {
 		t.Fatalf("release first lease: %v", err)
 	}
-	third, acquired, err := pg.TryAcquire(ctx, "test:destructive-reset")
+	third, acquired, err := pg.AcquireDestructiveReset(ctx)
 	if err != nil {
-		t.Fatalf("third TryAcquire: %v", err)
+		t.Fatalf("third AcquireDestructiveReset: %v", err)
 	}
 	if !acquired || third == nil {
 		t.Fatalf("third TryAcquire acquired=%v lease=%#v, want acquired after release", acquired, third)

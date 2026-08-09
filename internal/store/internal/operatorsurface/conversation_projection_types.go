@@ -3,101 +3,21 @@ package operatorsurface
 import (
 	"context"
 	"strings"
-	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
-type OperatorConversationTurnListOptions struct {
-	SessionID string
-	Limit     int
-	Cursor    string
-}
-
-type OperatorConversationTurnListResult struct {
-	Conversation OperatorConversationSummary        `json:"conversation"`
-	Turns        []OperatorConversationTurnListItem `json:"turns"`
-	NextCursor   string                             `json:"next_cursor,omitempty"`
-}
-
-type OperatorConversationTokenUsage struct {
-	Input     int64  `json:"input"`
-	Output    int64  `json:"output"`
-	Exactness string `json:"exactness"`
-}
-
-type OperatorConversationActivity struct {
-	Kind         string `json:"kind"`
-	ToolName     string `json:"tool_name,omitempty"`
-	ToolUseID    string `json:"tool_use_id,omitempty"`
-	EventID      string `json:"event_id,omitempty"`
-	EventType    string `json:"event_type,omitempty"`
-	Text         string `json:"text,omitempty"`
-	OK           *bool  `json:"ok,omitempty"`
-	BlockOrdinal int    `json:"-"`
-}
-
-type OperatorConversationActivityCounts struct {
-	Dispatch   int `json:"dispatch"`
-	Tool       int `json:"tool"`
-	ToolResult int `json:"tool_result"`
-	Publish    int `json:"publish"`
-	Output     int `json:"output"`
-	Failure    int `json:"failure"`
-}
-
-type OperatorConversationTurnListItem struct {
-	TurnID           string                             `json:"turn_id"`
-	ExecutionMode    string                             `json:"execution_mode"`
-	Ordinal          int                                `json:"ordinal"`
-	CompletedAt      time.Time                          `json:"completed_at"`
-	DurationMS       int                                `json:"duration_ms"`
-	TriggerEventID   string                             `json:"trigger_event_id,omitempty"`
-	TriggerEventType string                             `json:"trigger_event_type,omitempty"`
-	ActivityCounts   OperatorConversationActivityCounts `json:"activity_counts"`
-	Tokens           *OperatorConversationTokenUsage    `json:"tokens,omitempty"`
-	Outcome          string                             `json:"outcome,omitempty"`
-	ParseOK          bool                               `json:"parse_ok"`
-	Failure          *runtimefailures.Envelope          `json:"failure,omitempty"`
-}
-
-type OperatorPublicConversationTurn struct {
-	TurnID                 string                          `json:"turn_id"`
-	ExecutionMode          string                          `json:"execution_mode"`
-	Ordinal                int                             `json:"ordinal"`
-	CompletedAt            time.Time                       `json:"completed_at"`
-	DurationMS             int                             `json:"duration_ms"`
-	TriggerEventID         string                          `json:"trigger_event_id,omitempty"`
-	TriggerEventType       string                          `json:"trigger_event_type,omitempty"`
-	EntityID               string                          `json:"entity_id,omitempty"`
-	TaskID                 string                          `json:"task_id,omitempty"`
-	Activity               []OperatorConversationActivity  `json:"activity"`
-	Tokens                 *OperatorConversationTokenUsage `json:"tokens,omitempty"`
-	Outcome                string                          `json:"outcome,omitempty"`
-	ParseOK                bool                            `json:"parse_ok"`
-	Failure                *runtimefailures.Envelope       `json:"failure,omitempty"`
-	AssistantVisibleOutput string                          `json:"assistant_visible_output,omitempty"`
-	RetryCount             int                             `json:"retry_count,omitempty"`
-	AgentID                string                          `json:"-"`
-	SessionID              string                          `json:"-"`
-	RunID                  string                          `json:"-"`
-}
-
-type OperatorPublicConversationTurnDetail struct {
-	Session OperatorConversationSummary    `json:"session"`
-	Turn    OperatorPublicConversationTurn `json:"turn"`
-}
-
 type operatorPublicConversationProjectionSource interface {
-	ListOperatorConversationTurns(context.Context, OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error)
-	LoadOperatorPublicConversationTurn(context.Context, string, string) (OperatorPublicConversationTurnDetail, error)
+	ListOperatorConversationTurns(context.Context, operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error)
+	LoadOperatorPublicConversationTurn(context.Context, string, string) (operatorread.OperatorPublicConversationTurnDetail, error)
 }
 
-func loadOperatorLatestConversationTurn(ctx context.Context, source operatorPublicConversationProjectionSource, sessionID string) (*OperatorPublicConversationTurn, error) {
+func loadOperatorLatestConversationTurn(ctx context.Context, source operatorPublicConversationProjectionSource, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
 	if source == nil || strings.TrimSpace(sessionID) == "" {
 		return nil, nil
 	}
-	page, err := source.ListOperatorConversationTurns(ctx, OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 1})
+	page, err := source.ListOperatorConversationTurns(ctx, operatorread.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 1})
 	if err != nil {
 		return nil, err
 	}
@@ -112,11 +32,11 @@ func loadOperatorLatestConversationTurn(ctx context.Context, source operatorPubl
 	return &turn, nil
 }
 
-func operatorLiveTurnFromPublic(turn *OperatorPublicConversationTurn) *OperatorLiveTurn {
+func operatorLiveTurnFromPublic(turn *operatorread.OperatorPublicConversationTurn) *operatorread.OperatorLiveTurn {
 	if turn == nil {
 		return nil
 	}
-	out := &OperatorLiveTurn{
+	out := &operatorread.OperatorLiveTurn{
 		TurnID: turn.TurnID, TaskID: turn.TaskID, ParseOK: turn.ParseOK,
 		AssistantVisibleOutput: turn.AssistantVisibleOutput, Outcome: turn.Outcome,
 	}
@@ -129,13 +49,13 @@ func operatorLiveTurnFromPublic(turn *OperatorPublicConversationTurn) *OperatorL
 		if activity.OK != nil {
 			ok = *activity.OK
 		}
-		out.LastTool = &OperatorAgentTool{Name: activity.ToolName, ToolUseID: activity.ToolUseID, OK: ok}
+		out.LastTool = &operatorread.OperatorAgentTool{Name: activity.ToolName, ToolUseID: activity.ToolUseID, OK: ok}
 		break
 	}
 	return out
 }
 
-func enrichOperatorProjectionWithPublicTurn(projection *operatorAgentProjection, turn *OperatorPublicConversationTurn) {
+func enrichOperatorProjectionWithPublicTurn(projection *operatorAgentProjection, turn *operatorread.OperatorPublicConversationTurn) {
 	if projection == nil || turn == nil {
 		return
 	}
@@ -143,7 +63,7 @@ func enrichOperatorProjectionWithPublicTurn(projection *operatorAgentProjection,
 	projection.LastTool = projection.LiveTurn.LastTool
 	projection.CurrentTaskID = turn.TaskID
 	projection.DiagnosisActive = operatorAgentDiagnosisActiveFromLatestTurn(turn.TurnID, turn.TaskID, turn.EntityID)
-	projection.LastTurnRef = &OperatorTurnRef{
+	projection.LastTurnRef = &operatorread.OperatorTurnRef{
 		TurnID: turn.TurnID, CompletedAt: turn.CompletedAt, ParseOK: turn.ParseOK,
 		Failure: runtimefailures.CloneEnvelope(turn.Failure),
 	}

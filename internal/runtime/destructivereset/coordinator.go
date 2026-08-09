@@ -3,77 +3,53 @@ package destructivereset
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 )
 
 type Coordinator struct {
-	Planner     Planner
-	Locks       LockManager
-	Idempotency IdempotencyStore
-	Now         func() time.Time
-	Operation   string
-	LockKey     string
+	Planner         Planner
+	Locks           LockManager
+	Quiescer        QuiescenceApplier
+	Cleaner         CleanupApplier
+	Containers      ContainerStopper
+	RuntimeContexts RuntimeContextQuiescer
+	Now             func() time.Time
 }
 
-func (c *Coordinator) BuildPlan(ctx context.Context, req Request) (Result, bool, error) {
-	return c.BuildPlanWithLock(ctx, req, nil)
-}
-
-func (c *Coordinator) BuildPlanWithLock(ctx context.Context, req Request, apply func(context.Context, Result) error) (out Result, replay bool, retErr error) {
+func (c *Coordinator) Execute(ctx context.Context, req Request) (out ExecutionResult, retErr error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if c == nil || c.Planner == nil {
+		return ExecutionResult{}, ErrPlannerNotConfigured
 	}
 	now := c.now()
 	req, err := req.normalize(now)
 	if err != nil {
-		return Result{}, false, err
+		return ExecutionResult{}, err
 	}
-	if c == nil {
-		return Result{}, false, ErrPlannerNotConfigured
-	}
-	if c.Planner == nil {
-		return Result{}, false, ErrPlannerNotConfigured
-	}
-
-	operation := c.operationName()
-	idemKey := IdempotencyKey{
-		OperationName:  operation,
-		ActorTokenID:   req.ActorTokenID,
-		IdempotencyKey: req.IdempotencyKey,
-	}.normalized()
-	if idemKey.IdempotencyKey != "" {
-		if c.Idempotency == nil {
-			return Result{}, false, fmt.Errorf("destructive reset idempotency store is required")
-		}
-		stored, ok, err := c.Idempotency.LoadResetResult(ctx, idemKey)
-		if err != nil {
-			return Result{}, false, err
-		}
-		if ok {
-			if stored.RequestHash != req.RequestHash {
-				return Result{}, false, &IdempotencyConflictError{
-					Key:                    idemKey,
-					OriginalRequestHash:    stored.RequestHash,
-					ConflictingRequestHash: req.RequestHash,
-				}
-			}
-			return copyResult(stored.Result), true, nil
-		}
-	}
-
 	if c.Locks == nil {
-		return Result{}, false, ErrLockNotConfigured
+		return ExecutionResult{}, ErrLockNotConfigured
 	}
-	lease, acquired, err := c.Locks.TryAcquire(ctx, c.lockKey())
+	if c.Quiescer == nil {
+		return ExecutionResult{}, errors.New("destructive reset quiescer is required")
+	}
+	if c.Cleaner == nil {
+		return ExecutionResult{}, errors.New("destructive reset cleaner is required")
+	}
+	if c.Containers == nil {
+		return ExecutionResult{}, errors.New("destructive reset container stopper is required")
+	}
+
+	lease, acquired, err := c.Locks.AcquireDestructiveReset(ctx)
 	if err != nil {
-		return Result{}, false, err
+		return ExecutionResult{}, err
 	}
 	if !acquired {
-		return Result{}, false, ErrOperationInProgress
+		return ExecutionResult{}, ErrOperationInProgress
 	}
 	if lease == nil {
-		return Result{}, false, ErrLockLeaseMissing
+		return ExecutionResult{}, ErrLockLeaseMissing
 	}
 	defer func() {
 		retErr = errors.Join(retErr, lease.Release(context.WithoutCancel(ctx)))
@@ -81,31 +57,52 @@ func (c *Coordinator) BuildPlanWithLock(ctx context.Context, req Request, apply 
 
 	plan, err := c.Planner.BuildPlan(ctx, req)
 	if err != nil {
-		return Result{}, false, err
+		return ExecutionResult{}, err
 	}
 	result := Result{
-		OperationName:  operation,
+		OperationName:  DefaultOperationName,
 		DryRun:         req.DryRun,
 		IncludeBundles: req.IncludeBundles,
 		PlannedAt:      req.RequestedAt,
 		Plan:           plan,
 	}
-	if apply != nil {
-		if err := apply(ctx, copyResult(result)); err != nil {
-			return Result{}, false, err
+	if !req.DryRun && c.RuntimeContexts != nil {
+		if err := c.RuntimeContexts.QuiesceAllRuntimeContexts(ctx); err != nil {
+			return ExecutionResult{}, err
 		}
 	}
-	if idemKey.IdempotencyKey != "" {
-		if err := c.Idempotency.StoreResetResult(ctx, StoredResult{
-			Key:         idemKey,
-			RequestHash: req.RequestHash,
-			Result:      copyResult(result),
-			StoredAt:    now,
-		}); err != nil {
-			return Result{}, false, err
-		}
+	quiescence, err := c.Quiescer.Apply(ctx, QuiescenceRequest{
+		Result:       result,
+		ActorTokenID: req.ActorTokenID,
+		RequestedAt:  req.RequestedAt,
+	})
+	if err != nil {
+		return ExecutionResult{}, err
 	}
-	return result, false, nil
+	cleanup, err := c.Cleaner.Apply(ctx, CleanupRequest{
+		Result:       result,
+		Quiescence:   quiescence,
+		ActorTokenID: req.ActorTokenID,
+		RequestedAt:  req.RequestedAt,
+	})
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	containers, err := c.Containers.Apply(ctx, ContainerResetRequest{
+		Result:       result,
+		Cleanup:      cleanup,
+		ActorTokenID: req.ActorTokenID,
+		RequestedAt:  req.RequestedAt,
+	})
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	return ExecutionResult{
+		Plan:       result,
+		Quiescence: quiescence,
+		Cleanup:    cleanup,
+		Containers: containers,
+	}, nil
 }
 
 func (c *Coordinator) now() time.Time {
@@ -113,18 +110,4 @@ func (c *Coordinator) now() time.Time {
 		return c.Now().UTC()
 	}
 	return time.Now().UTC()
-}
-
-func (c *Coordinator) operationName() string {
-	if c == nil || c.Operation == "" {
-		return DefaultOperationName
-	}
-	return c.Operation
-}
-
-func (c *Coordinator) lockKey() string {
-	if c == nil || c.LockKey == "" {
-		return defaultLockKey
-	}
-	return c.LockKey
 }

@@ -7,10 +7,11 @@ import (
 	"net/http"
 	"strings"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -213,10 +214,10 @@ func (h *handler) dispatchRPC(ctx context.Context, method string, params map[str
 			return nil, &RPCError{Code: -32602, Message: "instance_id is required"}
 		}
 		entity, err := h.entities.LoadOperatorEntity(ctx, runtimeflowidentity.EntityID(instanceID), strings.TrimSpace(asString(params["run_id"])))
-		if errors.Is(err, store.ErrEntityNotFound) {
+		if errors.Is(err, operatorread.ErrEntityNotFound) {
 			return nil, &RPCError{Code: -32004, Message: "instance not found", Data: map[string]any{"instance_id": instanceID}}
 		}
-		if errors.Is(err, store.ErrAmbiguousEntityRunID) || errors.Is(err, store.ErrInvalidEntityReadParam) {
+		if errors.Is(err, operatorread.ErrAmbiguousEntityRunID) || errors.Is(err, operatorread.ErrInvalidEntityReadParam) {
 			return nil, &RPCError{Code: -32602, Message: err.Error()}
 		}
 		if err != nil {

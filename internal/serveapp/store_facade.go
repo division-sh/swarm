@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -19,7 +20,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartuprecovery "github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 type selectedRuntimeStoreFacade struct {
@@ -105,7 +105,7 @@ type selectedBundleRuntimeCatalogStore interface {
 }
 
 type selectedBundleSourceCatalogStore interface {
-	UpsertBundleCatalog(context.Context, store.BundleCatalogUpsert) (store.BundleCatalogUpsertResult, error)
+	UpsertBundleCatalog(context.Context, bundlecatalog.Upsert) (bundlecatalog.UpsertResult, error)
 }
 
 type selectedRunBundleAvailabilityStore interface {
@@ -128,15 +128,15 @@ type selectedAPICapabilities struct {
 	RunBundleContext          apiv1.RunBundleContextStore
 	TestSetup                 apiv1.TestSetupStore
 	BundleCatalog             apiv1.BundleCatalogReadStore
+	BundleRegister            apiv1.BundleCatalogRegisterStore
 	BundleDelete              apiv1.BundleDeleteExecutor
 	ConversationForks         apiv1.ConversationForkReadStore
 	ConversationForkLifecycle apiv1.ConversationForkLifecycleStore
 	RunForkAvailability       apiv1.RunForkAvailabilityStore
 	RunFork                   apiv1.RunForkExecutor
+	RunForkSelector           apiv1.RunForkExecutorSelector
 	RuntimeContexts           *runtime.RuntimeContextManager
 	ResetCoordinator          apiv1.DestructiveResetCoordinator
-	ResetQuiescer             apiv1.DestructiveResetQuiescer
-	ResetCleaner              apiv1.DestructiveResetCleaner
 }
 
 type selectedAPICapabilityRequest struct {
@@ -288,15 +288,15 @@ func (f selectedRuntimeStoreFacade) apiCapabilities(req selectedAPICapabilityReq
 		return selectedAPICapabilities{}, err
 	}
 	caps.BundleCatalog = optional.BundleCatalog
+	caps.BundleRegister = optional.BundleRegister
 	caps.BundleDelete = optional.BundleDelete
 	caps.ConversationForks = optional.ConversationForks
 	caps.ConversationForkLifecycle = optional.ConversationForkLifecycle
 	caps.RunForkAvailability = optional.RunForkAvailability
 	caps.RunFork = optional.RunFork
+	caps.RunForkSelector = optional.RunForkSelector
 	caps.RuntimeContexts = optional.RuntimeContexts
 	caps.ResetCoordinator = optional.ResetCoordinator
-	caps.ResetQuiescer = optional.ResetQuiescer
-	caps.ResetCleaner = optional.ResetCleaner
 	return caps, nil
 }
 

@@ -6,15 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	bundlecatalogcontract "github.com/division-sh/swarm/internal/bundlecatalog"
 )
 
 func (s *SQLite) requireBundleCatalogAccess() error {
 	return s.requireCurrentSchema()
 }
 
-func (s *SQLite) ListBundleCatalog(ctx context.Context, opts BundleCatalogListOptions) (BundleCatalogListResult, error) {
+func (s *SQLite) ListBundleCatalog(ctx context.Context, opts bundlecatalogcontract.ListOptions) (bundlecatalogcontract.ListResult, error) {
 	if err := s.requireBundleCatalogAccess(); err != nil {
-		return BundleCatalogListResult{}, err
+		return bundlecatalogcontract.ListResult{}, err
 	}
 	opts = defaultBundleCatalogListOptions(opts)
 	args := make([]any, 0, 4)
@@ -22,7 +24,7 @@ func (s *SQLite) ListBundleCatalog(ctx context.Context, opts BundleCatalogListOp
 	if opts.Cursor != "" {
 		ingestedAt, bundleHash, err := decodeBundleCatalogCursor(opts.Cursor)
 		if err != nil {
-			return BundleCatalogListResult{}, err
+			return bundlecatalogcontract.ListResult{}, err
 		}
 		where = append(where, "(ingested_at < ? OR (ingested_at = ? AND bundle_hash < ?))")
 		args = append(args, ingestedAt.UTC(), ingestedAt.UTC(), bundleHash)
@@ -43,21 +45,21 @@ func (s *SQLite) ListBundleCatalog(ctx context.Context, opts BundleCatalogListOp
 		LIMIT ?
 	`, strings.Join(where, " AND ")), args...)
 	if err != nil {
-		return BundleCatalogListResult{}, fmt.Errorf("list sqlite bundle catalog: %w", err)
+		return bundlecatalogcontract.ListResult{}, fmt.Errorf("list sqlite bundle catalog: %w", err)
 	}
 	defer rows.Close()
 
-	bundles := make([]BundleCatalogSummary, 0, opts.Limit)
+	bundles := make([]bundlecatalogcontract.Summary, 0, opts.Limit)
 	for rows.Next() {
 		row, err := scanSQLiteBundleCatalogRow(rows)
 		if err != nil {
-			return BundleCatalogListResult{}, err
+			return bundlecatalogcontract.ListResult{}, err
 		}
 		detail, err := row.toDetail()
 		if err != nil {
-			return BundleCatalogListResult{}, err
+			return bundlecatalogcontract.ListResult{}, err
 		}
-		bundles = append(bundles, BundleCatalogSummary{
+		bundles = append(bundles, bundlecatalogcontract.Summary{
 			BundleHash:    detail.BundleHash,
 			AgentCount:    detail.AgentCount,
 			HasData:       detail.HasData,
@@ -67,7 +69,7 @@ func (s *SQLite) ListBundleCatalog(ctx context.Context, opts BundleCatalogListOp
 		})
 	}
 	if err := rows.Err(); err != nil {
-		return BundleCatalogListResult{}, fmt.Errorf("read sqlite bundle catalog: %w", err)
+		return bundlecatalogcontract.ListResult{}, fmt.Errorf("read sqlite bundle catalog: %w", err)
 	}
 
 	nextCursor := ""
@@ -76,18 +78,18 @@ func (s *SQLite) ListBundleCatalog(ctx context.Context, opts BundleCatalogListOp
 		nextCursor = encodeBundleCatalogCursor(bundles[len(bundles)-1])
 	}
 	if bundles == nil {
-		bundles = []BundleCatalogSummary{}
+		bundles = []bundlecatalogcontract.Summary{}
 	}
-	return BundleCatalogListResult{Bundles: bundles, NextCursor: nextCursor}, nil
+	return bundlecatalogcontract.ListResult{Bundles: bundles, NextCursor: nextCursor}, nil
 }
 
-func (s *SQLite) LoadBundleCatalog(ctx context.Context, bundleHash string) (BundleCatalogDetail, error) {
+func (s *SQLite) LoadBundleCatalog(ctx context.Context, bundleHash string) (bundlecatalogcontract.Detail, error) {
 	if err := s.requireBundleCatalogAccess(); err != nil {
-		return BundleCatalogDetail{}, err
+		return bundlecatalogcontract.Detail{}, err
 	}
 	bundleHash = strings.TrimSpace(bundleHash)
 	if bundleHash == "" {
-		return BundleCatalogDetail{}, ErrBundleNotFound
+		return bundlecatalogcontract.Detail{}, bundlecatalogcontract.ErrNotFound
 	}
 	row := s.backend.QueryRowContext(ctx, `
 		SELECT
@@ -103,27 +105,27 @@ func (s *SQLite) LoadBundleCatalog(ctx context.Context, bundleHash string) (Bund
 	`, bundleHash)
 	scanned, err := scanSQLiteBundleCatalogRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return BundleCatalogDetail{}, ErrBundleNotFound
+		return bundlecatalogcontract.Detail{}, bundlecatalogcontract.ErrNotFound
 	}
 	if err != nil {
-		return BundleCatalogDetail{}, err
+		return bundlecatalogcontract.Detail{}, err
 	}
 	return scanned.toDetail()
 }
 
-func (s *SQLite) ListBundleCatalogAgents(ctx context.Context, bundleHash string) (BundleCatalogAgentsResult, error) {
+func (s *SQLite) ListBundleCatalogAgents(ctx context.Context, bundleHash string) (bundlecatalogcontract.AgentsResult, error) {
 	detail, err := s.LoadBundleCatalog(ctx, bundleHash)
 	if err != nil {
-		return BundleCatalogAgentsResult{}, err
+		return bundlecatalogcontract.AgentsResult{}, err
 	}
 	agents, err := projectBundleCatalogAgents(detail.ParsedJSON, detail.ContentYAML)
 	if err != nil {
-		return BundleCatalogAgentsResult{}, err
+		return bundlecatalogcontract.AgentsResult{}, err
 	}
 	if agents == nil {
-		agents = []BundleCatalogAgentDefinition{}
+		agents = []bundlecatalogcontract.AgentDefinition{}
 	}
-	return BundleCatalogAgentsResult{Agents: agents}, nil
+	return bundlecatalogcontract.AgentsResult{Agents: agents}, nil
 }
 
 func scanSQLiteBundleCatalogRow(row bundleCatalogScanner) (bundleCatalogRow, error) {

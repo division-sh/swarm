@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -72,7 +73,7 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			AgentConversations: sqliteStore,
 		}),
 	})
@@ -134,13 +135,13 @@ func TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface(t *testing.T) {
 `, time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("seed sqlite bundle catalog: %v", err)
 	}
-	if _, err := sqliteStore.ListBundleCatalog(ctx, storepkg.BundleCatalogListOptions{}); err != nil {
+	if _, err := sqliteStore.ListBundleCatalog(ctx, bundlecatalog.ListOptions{}); err != nil {
 		t.Fatalf("list sqlite bundle catalog through selected-store owner: %v", err)
 	}
 
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			BundleCatalog: sqliteStore,
 		}),
 	})

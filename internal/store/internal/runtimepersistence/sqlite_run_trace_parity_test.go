@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
@@ -18,29 +19,29 @@ func TestSQLiteRunDebugTracePagePaginationWindowAndFilterParity(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	fixture := seedSQLiteRunTraceParityRows(t, ctx, sqliteStore)
-	mainFilter := RunDebugTraceFilter{
+	mainFilter := operatorread.RunDebugTraceFilter{
 		EventNames: []string{"trace.event_only", "trace.late_delivered", "trace.failed", "trace.second_delivered"},
 	}
 
-	page1, next, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, RunDebugTraceQueryOptions{Limit: 2, Filter: mainFilter})
+	page1, next, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, operatorread.RunDebugTraceQueryOptions{Limit: 2, Filter: mainFilter})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage page1: %v", err)
 	}
 	if len(page1) != 2 || page1[0].EventID != fixture.eventOnlyID || page1[1].EventID != fixture.lateDeliveredID || next == "" {
 		t.Fatalf("page1 rows=%#v next=%q, want event-only then late-delivered with next cursor", page1, next)
 	}
-	page2, next2, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, RunDebugTraceQueryOptions{Limit: 2, Cursor: next, Filter: mainFilter})
+	page2, next2, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, operatorread.RunDebugTraceQueryOptions{Limit: 2, Cursor: next, Filter: mainFilter})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage page2: %v", err)
 	}
 	if len(page2) != 2 || page2[0].EventID != fixture.failedID || page2[1].EventID != fixture.secondDeliveredID || next2 != "" {
 		t.Fatalf("page2 rows=%#v next=%q, want failed then second-delivered and no next cursor", page2, next2)
 	}
-	if _, _, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, RunDebugTraceQueryOptions{Limit: 2, Cursor: "not-a-cursor"}); !errors.Is(err, ErrInvalidObservabilityCursor) {
-		t.Fatalf("invalid cursor error = %v, want ErrInvalidObservabilityCursor", err)
+	if _, _, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, operatorread.RunDebugTraceQueryOptions{Limit: 2, Cursor: "not-a-cursor"}); !errors.Is(err, operatorread.ErrInvalidObservabilityCursor) {
+		t.Fatalf("invalid cursor error = %v, want operatorread.ErrInvalidObservabilityCursor", err)
 	}
 
-	sinceRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, RunDebugTraceQueryOptions{Limit: 10, Since: &fixture.base, Filter: mainFilter})
+	sinceRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, operatorread.RunDebugTraceQueryOptions{Limit: 10, Since: &fixture.base, Filter: mainFilter})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage since: %v", err)
 	}
@@ -48,14 +49,14 @@ func TestSQLiteRunDebugTracePagePaginationWindowAndFilterParity(t *testing.T) {
 		t.Fatalf("since rows = %#v, want late materialized rows only", got)
 	}
 	until := fixture.base.Add(3500 * time.Millisecond)
-	untilRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, RunDebugTraceQueryOptions{Limit: 10, Until: &until, Filter: mainFilter})
+	untilRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, operatorread.RunDebugTraceQueryOptions{Limit: 10, Until: &until, Filter: mainFilter})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage until: %v", err)
 	}
 	if got := traceEventIDs(untilRows); !sameStrings(got, []string{fixture.eventOnlyID, fixture.failedID}) {
 		t.Fatalf("until rows = %#v, want rows whose materialization watermark is <= until", got)
 	}
-	emptyWindowRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, RunDebugTraceQueryOptions{Limit: 10, Since: &fixture.base, Until: &fixture.base, Filter: mainFilter})
+	emptyWindowRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, operatorread.RunDebugTraceQueryOptions{Limit: 10, Since: &fixture.base, Until: &fixture.base, Filter: mainFilter})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage equal since/until: %v", err)
 	}
@@ -63,10 +64,10 @@ func TestSQLiteRunDebugTracePagePaginationWindowAndFilterParity(t *testing.T) {
 		t.Fatalf("equal since/until rows = %#v, want empty strict/inclusive window", emptyWindowRows)
 	}
 
-	deliveredPage1, deliveredNext, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, RunDebugTraceQueryOptions{
+	deliveredPage1, deliveredNext, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, operatorread.RunDebugTraceQueryOptions{
 		Limit: 1,
 		Since: &fixture.base,
-		Filter: RunDebugTraceFilter{
+		Filter: operatorread.RunDebugTraceFilter{
 			EventNames:       []string{"trace.late_delivered", "trace.second_delivered"},
 			DeliveryStatuses: []string{"delivered"},
 			SubscriberTypes:  []string{"agent"},
@@ -78,11 +79,11 @@ func TestSQLiteRunDebugTracePagePaginationWindowAndFilterParity(t *testing.T) {
 	if len(deliveredPage1) != 1 || deliveredPage1[0].EventID != fixture.lateDeliveredID || deliveredNext == "" {
 		t.Fatalf("delivered page1 rows=%#v next=%q, want late-delivered with next cursor", deliveredPage1, deliveredNext)
 	}
-	deliveredPage2, deliveredNext2, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, RunDebugTraceQueryOptions{
+	deliveredPage2, deliveredNext2, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, operatorread.RunDebugTraceQueryOptions{
 		Limit:  1,
 		Cursor: deliveredNext,
 		Since:  &fixture.base,
-		Filter: RunDebugTraceFilter{
+		Filter: operatorread.RunDebugTraceFilter{
 			EventNames:       []string{"trace.late_delivered", "trace.second_delivered"},
 			DeliveryStatuses: []string{"delivered"},
 			SubscriberTypes:  []string{"agent"},
@@ -104,10 +105,10 @@ func TestSQLiteRunDebugTracePageDeterministicDeliveryAndTurnTiePaging(t *testing
 	var got []string
 	cursor := ""
 	for {
-		rows, next, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, RunDebugTraceQueryOptions{
+		rows, next, err := sqliteStore.LoadRunDebugTracePage(ctx, fixture.runID, operatorread.RunDebugTraceQueryOptions{
 			Limit:  1,
 			Cursor: cursor,
-			Filter: RunDebugTraceFilter{
+			Filter: operatorread.RunDebugTraceFilter{
 				EventNames: []string{"trace.tie"},
 			},
 		})
@@ -158,14 +159,14 @@ func TestSQLiteRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
 		t.Fatalf("seed runtime-log trace row: %v", err)
 	}
 
-	allRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10})
+	allRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage all: %v", err)
 	}
 	if got := traceEventIDs(allRows); !sameStrings(got, []string{businessEvent, runtimeLogEvent}) {
 		t.Fatalf("all trace rows = %#v, want business and runtime_log", got)
 	}
-	filteredRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, ExcludeRuntimeLogs: true})
+	filteredRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10, ExcludeRuntimeLogs: true})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage filtered: %v", err)
 	}
@@ -221,7 +222,7 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.backend.ConstructionHandle(), delivered, base.Add(time.Second), base.Add(2*time.Second))
 	insertSQLiteTraceTurnWithMemory(t, ctx, sqliteStore, turnID, runID, agentID, sessionID, eventID, "trace.task_audit", false, base.Add(2*time.Second))
 
-	rows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10})
+	rows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage: %v", err)
 	}
@@ -237,7 +238,7 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 	}
 
 	since := base.Add(4 * time.Second)
-	sinceRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, Since: &since})
+	sinceRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10, Since: &since})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage since: %v", err)
 	}
@@ -245,7 +246,7 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 		t.Fatalf("since rows = %#v, want task row included by audit updated_at watermark", sinceRows)
 	}
 	until := base.Add(4 * time.Second)
-	untilRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, Until: &until})
+	untilRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10, Until: &until})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTracePage until: %v", err)
 	}
@@ -427,7 +428,7 @@ func insertSQLiteTraceTurnWithMemory(t *testing.T, ctx context.Context, sqliteSt
 	}
 }
 
-func traceEventIDs(rows []RunDebugTraceRow) []string {
+func traceEventIDs(rows []operatorread.RunDebugTraceRow) []string {
 	out := make([]string, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, row.EventID)

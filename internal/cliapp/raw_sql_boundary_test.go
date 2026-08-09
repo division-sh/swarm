@@ -12,12 +12,11 @@ import (
 type rawSQLBoundaryClassification string
 
 const (
-	rawSQLConstructionBoundary        rawSQLBoundaryClassification = "construction_boundary"
-	rawSQLDashboardDigestReadBoundary rawSQLBoundaryClassification = "dashboard_digest_read_boundary"
-	rawSQLRuntimeUnitOfWorkBoundary   rawSQLBoundaryClassification = "runtime_unit_of_work_boundary"
-	rawSQLOptionalProductBoundary     rawSQLBoundaryClassification = "optional_product_boundary"
-	rawSQLWorkspaceProcessBoundary    rawSQLBoundaryClassification = "workspace_process_boundary"
-	rawSQLTestSupportBoundary         rawSQLBoundaryClassification = "test_support_boundary"
+	rawSQLConstructionBoundary      rawSQLBoundaryClassification = "construction_boundary"
+	rawSQLRuntimeUnitOfWorkBoundary rawSQLBoundaryClassification = "runtime_unit_of_work_boundary"
+	rawSQLOptionalProductBoundary   rawSQLBoundaryClassification = "optional_product_boundary"
+	rawSQLWorkspaceProcessBoundary  rawSQLBoundaryClassification = "workspace_process_boundary"
+	rawSQLTestSupportBoundary       rawSQLBoundaryClassification = "test_support_boundary"
 )
 
 type rawSQLBoundaryEntry struct {
@@ -100,21 +99,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Classification: rawSQLConstructionBoundary,
 			Issue:          1783,
 			Reason:         "compile-time selected store role assertions are construction/model proof, not producer-side concrete store capability authority",
-		},
-		"internal/dashboard/server/conversations_sql.go": {
-			Classification: rawSQLDashboardDigestReadBoundary,
-			Issue:          1783,
-			Reason:         "dashboard conversation reader is an explicit derived SQL read-model exception pending selected read-owner migration",
-		},
-		"internal/dashboard/server/observability_sql.go": {
-			Classification: rawSQLDashboardDigestReadBoundary,
-			Issue:          1783,
-			Reason:         "dashboard observability reader is an explicit derived SQL read-model exception pending selected read-owner migration",
-		},
-		"internal/digest/source.go": {
-			Classification: rawSQLDashboardDigestReadBoundary,
-			Issue:          1783,
-			Reason:         "digest source is an explicit SQL read-model exception pending selected read-owner migration",
 		},
 		"internal/testutil/runtimepipelinefixture/context.go": {
 			Classification: rawSQLTestSupportBoundary,

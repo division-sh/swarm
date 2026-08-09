@@ -9,20 +9,21 @@ import (
 	"testing"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	eventtypes "github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 type snapshotRunStore struct {
 	runtimebus.InMemoryEventStore
 	snapshot      runtimebus.RunLifecycleSnapshot
-	events        []store.OperatorEventFull
-	runtimeLogs   []store.OperatorRuntimeLogEntry
+	events        []operatorread.OperatorEventFull
+	runtimeLogs   []operatorread.OperatorRuntimeLogEntry
 	appendErr     error
 	terminalCalls int
 }
@@ -48,8 +49,8 @@ func (s *snapshotRunStore) LoadRunLifecycleSnapshot(context.Context, string) (ru
 	return s.snapshot, nil
 }
 
-func (s *snapshotRunStore) ListOperatorEvents(_ context.Context, opts store.OperatorEventListOptions) (store.OperatorEventListResult, error) {
-	out := []store.OperatorEventFull{}
+func (s *snapshotRunStore) ListOperatorEvents(_ context.Context, opts operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error) {
+	out := []operatorread.OperatorEventFull{}
 	for _, event := range s.events {
 		if opts.Filter.RunID != "" && event.RunID != opts.Filter.RunID {
 			continue
@@ -74,18 +75,18 @@ func (s *snapshotRunStore) ListOperatorEvents(_ context.Context, opts store.Oper
 	if opts.Limit > 0 && len(out) > opts.Limit {
 		out = out[:opts.Limit]
 	}
-	return store.OperatorEventListResult{Events: out}, nil
+	return operatorread.OperatorEventListResult{Events: out}, nil
 }
 
-func (s *snapshotRunStore) ListOperatorRuntimeLogs(_ context.Context, opts store.OperatorRuntimeLogListOptions) (store.OperatorRuntimeLogListResult, error) {
-	out := []store.OperatorRuntimeLogEntry{}
+func (s *snapshotRunStore) ListOperatorRuntimeLogs(_ context.Context, opts operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error) {
+	out := []operatorread.OperatorRuntimeLogEntry{}
 	for _, entry := range s.runtimeLogs {
 		if opts.RunID != "" && entry.RunID != opts.RunID {
 			continue
 		}
 		out = append(out, entry)
 	}
-	return store.OperatorRuntimeLogListResult{Logs: out}, nil
+	return operatorread.OperatorRuntimeLogListResult{Logs: out}, nil
 }
 
 type counterPause struct{ calls int }
@@ -245,6 +246,33 @@ func TestBuilderRunCompletionUsesAcquiredGeneration(t *testing.T) {
 	}
 }
 
+func TestBuilderRunCompletionUsesExplicitLifecycleOwnerThroughStartPath(t *testing.T) {
+	runID := eventtest.UUID("builder-run-completion-full-path")
+	entityID := eventtest.UUID("builder-run-completion-full-path-entity")
+	store := &snapshotRunStore{snapshot: runtimebus.RunLifecycleSnapshot{
+		RunID: runID, Status: "completed", StartedAt: time.Now().UTC(),
+	}}
+	_, acquirer := newTestOwnedEventBus(t, store, runtimebus.EventBusOptions{})
+	hub := newRunHub(acquirer, nil, nil, store)
+
+	if err := hub.startRun(context.Background(), runID, map[string]any{
+		"analysis.requested": map[string]any{"entity_id": entityID},
+	}, nil); err != nil {
+		t.Fatalf("startRun: %v", err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for (!hub.isTerminal(runID) || acquirer.owner.ActiveCount() != 0) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !hub.isTerminal(runID) {
+		t.Fatal("start path did not observe terminal lifecycle through the explicit read owner")
+	}
+	if got := acquirer.owner.ActiveCount(); got != 0 {
+		t.Fatalf("active runtime work after full start/completion path = %d, want 0", got)
+	}
+}
+
 func TestRunHubAwaitCompletion_MarksSessionTerminalWhenCanonicalObservationIsUnavailable(t *testing.T) {
 	eb, err := runtimebus.NewEphemeralEventBus(runtimebus.InMemoryEventStore{})
 	if err != nil {
@@ -355,7 +383,7 @@ func TestRunHubAwaitCompletion_WaitingCanonicalRunDoesNotWriteCompleted(t *testi
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	rt := &runtimepkg.Runtime{Bus: eb}
-	hub := &runHub{sessions: map[string]*runSession{"run-123": {
+	hub := &runHub{runDebug: store, sessions: map[string]*runSession{"run-123": {
 		runID:   "run-123",
 		runtime: rt,
 		subs:    map[string]func(RunEventEnvelope){},
@@ -437,7 +465,7 @@ func TestRunHubSubscribe_PrimesCanonicalReplayDedupeState(t *testing.T) {
 			RunID:     "run-123",
 			StartedAt: now,
 		},
-		events: []store.OperatorEventFull{{
+		events: []operatorread.OperatorEventFull{{
 			EventID:       "evt-1",
 			EventName:     "scan.requested",
 			ExecutionMode: "live",
@@ -472,9 +500,9 @@ func TestRunHubSubscribe_PrimesCanonicalReplayDedupeState(t *testing.T) {
 
 func TestRunHubSyncCanonical_UsesLatestCanonicalEventWindow(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
-	events := make([]store.OperatorEventFull, 0, builderRunDebugReplayLimit+2)
+	events := make([]operatorread.OperatorEventFull, 0, builderRunDebugReplayLimit+2)
 	for i := 0; i < builderRunDebugReplayLimit+2; i++ {
-		events = append(events, store.OperatorEventFull{
+		events = append(events, operatorread.OperatorEventFull{
 			EventID:       fmt.Sprintf("evt-%03d", i),
 			EventName:     "scan.requested",
 			ExecutionMode: "live",

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	mailboxcontract "github.com/division-sh/swarm/internal/mailbox"
+
 	"github.com/division-sh/swarm/internal/events"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -349,7 +351,7 @@ func (s *MailboxPostgresOwner) markMailboxItemNotifiedSpec(ctx context.Context, 
 	if rows, err := result.RowsAffected(); err != nil {
 		return err
 	} else if rows == 0 {
-		return ErrMailboxV1NotFound
+		return mailboxcontract.ErrV1NotFound
 	}
 	return nil
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -62,18 +61,6 @@ type RuntimeLogPersistenceRecord struct {
 	Payload       []byte
 	ParentEventID string
 	ExecutionMode executionmode.Mode
-}
-
-type InstanceDigestRow struct {
-	EntityID  string
-	Name      string
-	Stage     string
-	UpdatedAt time.Time
-}
-
-type DigestPersistence interface {
-	CountActiveInstances(ctx context.Context) (int, error)
-	ListInstanceDigestRows(ctx context.Context, limit int) ([]InstanceDigestRow, error)
 }
 
 func NewRuntimeLogger(persistence RuntimeLogPersistence) *RuntimeLogger {

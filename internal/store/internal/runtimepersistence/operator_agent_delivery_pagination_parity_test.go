@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -21,8 +22,8 @@ import (
 type operatorAgentDeliveryPageStore interface {
 	authorActivityReceiptStore
 	UpsertAgent(context.Context, runtimemanager.PersistedAgent) error
-	LoadOperatorAgentDeliveryLifecycle(context.Context, agentidentity.Identity, OperatorAgentDeliveryLifecycleOptions) (OperatorAgentDeliveryLifecycleList, error)
-	LoadOperatorAgentDeliveryDiagnostics(context.Context, agentidentity.Identity, OperatorAgentDeliveryDiagnosticsOptions) (OperatorAgentDeliveryDiagnostics, error)
+	LoadOperatorAgentDeliveryLifecycle(context.Context, agentidentity.Identity, operatorread.OperatorAgentDeliveryLifecycleOptions) (operatorread.OperatorAgentDeliveryLifecycleList, error)
+	LoadOperatorAgentDeliveryDiagnostics(context.Context, agentidentity.Identity, operatorread.OperatorAgentDeliveryDiagnosticsOptions) (operatorread.OperatorAgentDeliveryDiagnostics, error)
 }
 
 func TestOperatorAgentDeliveryPagesBoundHydrationParity(t *testing.T) {
@@ -49,26 +50,26 @@ func TestOperatorAgentDeliveryPagesBoundHydrationParity(t *testing.T) {
 			failed := seedOperatorAgentDeliveryPageHistory(t, ctx, fixture, selected, route, runID, "failed", now)
 			deadLetters := seedOperatorAgentDeliveryPageHistory(t, ctx, fixture, selected, route, runID, "dead_letter", now.Add(-10*time.Minute))
 
-			firstLifecycle, err := selected.LoadOperatorAgentDeliveryLifecycle(ctx, identity, OperatorAgentDeliveryLifecycleOptions{
+			firstLifecycle, err := selected.LoadOperatorAgentDeliveryLifecycle(ctx, identity, operatorread.OperatorAgentDeliveryLifecycleOptions{
 				RunID: runID, Statuses: []string{"failed"}, Limit: 1,
 			})
 			if err != nil || len(firstLifecycle.Deliveries) != 1 || firstLifecycle.Deliveries[0].DeliveryID != failed[0] || firstLifecycle.NextCursor == "" {
 				t.Fatalf("first lifecycle cursor page = %#v err=%v", firstLifecycle, err)
 			}
-			secondLifecycle, err := selected.LoadOperatorAgentDeliveryLifecycle(ctx, identity, OperatorAgentDeliveryLifecycleOptions{
+			secondLifecycle, err := selected.LoadOperatorAgentDeliveryLifecycle(ctx, identity, operatorread.OperatorAgentDeliveryLifecycleOptions{
 				RunID: runID, Statuses: []string{"failed"}, Limit: 1, Cursor: firstLifecycle.NextCursor,
 			})
 			if err != nil || len(secondLifecycle.Deliveries) != 1 || secondLifecycle.Deliveries[0].DeliveryID != failed[1] || secondLifecycle.NextCursor == "" {
 				t.Fatalf("second lifecycle cursor page = %#v err=%v", secondLifecycle, err)
 			}
 
-			firstDiagnostics, err := selected.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, OperatorAgentDeliveryDiagnosticsOptions{
+			firstDiagnostics, err := selected.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, operatorread.OperatorAgentDeliveryDiagnosticsOptions{
 				FailureLimit: 1, DeadLetterLimit: 1,
 			})
 			if err != nil || firstDiagnostics.FailuresNextCursor == "" || firstDiagnostics.DeadLettersNextCursor == "" {
 				t.Fatalf("first diagnostics cursor page = %#v err=%v", firstDiagnostics, err)
 			}
-			secondDiagnostics, err := selected.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, OperatorAgentDeliveryDiagnosticsOptions{
+			secondDiagnostics, err := selected.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, operatorread.OperatorAgentDeliveryDiagnosticsOptions{
 				FailureLimit: 1, FailureCursor: firstDiagnostics.FailuresNextCursor,
 				DeadLetterLimit: 1, DeadLetterCursor: firstDiagnostics.DeadLettersNextCursor,
 			})
@@ -80,7 +81,7 @@ func TestOperatorAgentDeliveryPagesBoundHydrationParity(t *testing.T) {
 			corruptOperatorAgentDeliveryTail(t, ctx, fixture, failed[2])
 			corruptOperatorAgentDeliveryTail(t, ctx, fixture, deadLetters[2])
 
-			lifecycle, err := selected.LoadOperatorAgentDeliveryLifecycle(ctx, identity, OperatorAgentDeliveryLifecycleOptions{
+			lifecycle, err := selected.LoadOperatorAgentDeliveryLifecycle(ctx, identity, operatorread.OperatorAgentDeliveryLifecycleOptions{
 				RunID: runID, Statuses: []string{"failed"}, Limit: 1,
 			})
 			if err != nil {
@@ -90,7 +91,7 @@ func TestOperatorAgentDeliveryPagesBoundHydrationParity(t *testing.T) {
 				t.Fatalf("bounded lifecycle page = %#v, want newest failure plus cursor", lifecycle)
 			}
 
-			diagnostics, err := selected.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, OperatorAgentDeliveryDiagnosticsOptions{
+			diagnostics, err := selected.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, operatorread.OperatorAgentDeliveryDiagnosticsOptions{
 				FailureLimit: 1, DeadLetterLimit: 1,
 			})
 			if err != nil {

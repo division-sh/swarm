@@ -10,6 +10,7 @@ import (
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
@@ -17,42 +18,13 @@ import (
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 )
 
-type ScenarioSetupRequest struct {
-	RunID     string
-	Entities  []ScenarioSetupEntityRequest
-	CreatedAt time.Time
-}
-
-type ScenarioSetupEntityRequest struct {
-	Alias        string
-	EntityID     string
-	FlowInstance string
-	EntityType   string
-	CurrentState string
-	Fields       map[string]any
-	Gates        map[string]bool
-}
-
-type ScenarioSetupResult struct {
-	RunID    string
-	Entities []ScenarioSetupEntityResult
-}
-
-type ScenarioSetupEntityResult struct {
-	Alias        string
-	EntityID     string
-	FlowInstance string
-	EntityType   string
-	CurrentState string
-}
-
-func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req ScenarioSetupRequest) (ScenarioSetupResult, error) {
+func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error) {
 	if s == nil || s.backend == nil {
-		return ScenarioSetupResult{}, fmt.Errorf("postgres scenario setup store is required")
+		return runtimepipeline.ScenarioSetupResult{}, fmt.Errorf("postgres scenario setup store is required")
 	}
 	req, err := normalizeScenarioSetupRequest(req)
 	if err != nil {
-		return ScenarioSetupResult{}, err
+		return runtimepipeline.ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
 	if err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
@@ -109,18 +81,18 @@ func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req S
 		}
 		return nil
 	}); err != nil {
-		return ScenarioSetupResult{}, err
+		return runtimepipeline.ScenarioSetupResult{}, err
 	}
 	return scenarioSetupResult(req), nil
 }
 
-func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req ScenarioSetupRequest) (ScenarioSetupResult, error) {
+func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error) {
 	if s == nil || s.backend == nil {
-		return ScenarioSetupResult{}, fmt.Errorf("sqlite scenario setup store is required")
+		return runtimepipeline.ScenarioSetupResult{}, fmt.Errorf("sqlite scenario setup store is required")
 	}
 	req, err := normalizeScenarioSetupRequest(req)
 	if err != nil {
-		return ScenarioSetupResult{}, err
+		return runtimepipeline.ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
 	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite scenario setup", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
@@ -172,15 +144,15 @@ func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req Sce
 		}
 		return nil
 	}); err != nil {
-		return ScenarioSetupResult{}, err
+		return runtimepipeline.ScenarioSetupResult{}, err
 	}
 	return scenarioSetupResult(req), nil
 }
 
-func normalizeScenarioSetupRequest(req ScenarioSetupRequest) (ScenarioSetupRequest, error) {
+func normalizeScenarioSetupRequest(req runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupRequest, error) {
 	req.RunID = nullUUIDString(req.RunID)
 	if req.RunID == "" {
-		return ScenarioSetupRequest{}, fmt.Errorf("run_id must be uuid")
+		return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("run_id must be uuid")
 	}
 	if req.CreatedAt.IsZero() {
 		req.CreatedAt = time.Now().UTC()
@@ -188,7 +160,7 @@ func normalizeScenarioSetupRequest(req ScenarioSetupRequest) (ScenarioSetupReque
 		req.CreatedAt = req.CreatedAt.UTC()
 	}
 	if len(req.Entities) == 0 {
-		return ScenarioSetupRequest{}, fmt.Errorf("entities is required")
+		return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("entities is required")
 	}
 	aliases := map[string]struct{}{}
 	ids := map[string]struct{}{}
@@ -196,28 +168,28 @@ func normalizeScenarioSetupRequest(req ScenarioSetupRequest) (ScenarioSetupReque
 		entity := &req.Entities[i]
 		entity.Alias = strings.TrimSpace(entity.Alias)
 		if entity.Alias == "" {
-			return ScenarioSetupRequest{}, fmt.Errorf("entities[%d].alias is required", i)
+			return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("entities[%d].alias is required", i)
 		}
 		if _, ok := aliases[entity.Alias]; ok {
-			return ScenarioSetupRequest{}, fmt.Errorf("entities[%d].alias %q is duplicated", i, entity.Alias)
+			return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("entities[%d].alias %q is duplicated", i, entity.Alias)
 		}
 		aliases[entity.Alias] = struct{}{}
 		entity.EntityID = nullUUIDString(entity.EntityID)
 		if entity.EntityID == "" {
-			return ScenarioSetupRequest{}, fmt.Errorf("entities[%d].entity_id must be uuid", i)
+			return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("entities[%d].entity_id must be uuid", i)
 		}
 		if _, ok := ids[entity.EntityID]; ok {
-			return ScenarioSetupRequest{}, fmt.Errorf("entities[%d].entity_id %q is duplicated", i, entity.EntityID)
+			return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("entities[%d].entity_id %q is duplicated", i, entity.EntityID)
 		}
 		ids[entity.EntityID] = struct{}{}
 		entity.FlowInstance = strings.Trim(strings.TrimSpace(entity.FlowInstance), "/")
 		entity.EntityType = strings.TrimSpace(entity.EntityType)
 		entity.CurrentState = strings.TrimSpace(entity.CurrentState)
 		if entity.EntityType == "" {
-			return ScenarioSetupRequest{}, fmt.Errorf("entities[%d].entity_type is required", i)
+			return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("entities[%d].entity_type is required", i)
 		}
 		if entity.CurrentState == "" {
-			return ScenarioSetupRequest{}, fmt.Errorf("entities[%d].current_state is required", i)
+			return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("entities[%d].current_state is required", i)
 		}
 		if entity.Fields == nil {
 			entity.Fields = map[string]any{}
@@ -229,7 +201,7 @@ func normalizeScenarioSetupRequest(req ScenarioSetupRequest) (ScenarioSetupReque
 	return req, nil
 }
 
-func scenarioSetupEntityJSON(entity ScenarioSetupEntityRequest) (json.RawMessage, json.RawMessage, map[string]any, map[string]any, error) {
+func scenarioSetupEntityJSON(entity runtimepipeline.ScenarioSetupEntityRequest) (json.RawMessage, json.RawMessage, map[string]any, map[string]any, error) {
 	fieldsJSON, err := json.Marshal(entity.Fields)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("marshal setup entity fields: %w", err)
@@ -259,7 +231,7 @@ type scenarioSetupEntitySnapshot struct {
 	Revision     int
 }
 
-func validateExistingPostgresScenarioSetupEntity(ctx context.Context, tx *sql.Tx, runID string, entity ScenarioSetupEntityRequest, fieldsJSON, gatesJSON json.RawMessage) error {
+func validateExistingPostgresScenarioSetupEntity(ctx context.Context, tx *sql.Tx, runID string, entity runtimepipeline.ScenarioSetupEntityRequest, fieldsJSON, gatesJSON json.RawMessage) error {
 	var snapshot scenarioSetupEntitySnapshot
 	err := tx.QueryRowContext(ctx, `
 		SELECT flow_instance, entity_type, current_state, fields::text, gates::text, accumulator::text, revision
@@ -275,7 +247,7 @@ func validateExistingPostgresScenarioSetupEntity(ctx context.Context, tx *sql.Tx
 	return validateExistingScenarioSetupEntity(snapshot, entity, fieldsJSON, gatesJSON)
 }
 
-func validateExistingSQLiteScenarioSetupEntity(ctx context.Context, tx *sql.Tx, runID string, entity ScenarioSetupEntityRequest, fieldsJSON, gatesJSON json.RawMessage) error {
+func validateExistingSQLiteScenarioSetupEntity(ctx context.Context, tx *sql.Tx, runID string, entity runtimepipeline.ScenarioSetupEntityRequest, fieldsJSON, gatesJSON json.RawMessage) error {
 	var snapshot scenarioSetupEntitySnapshot
 	err := tx.QueryRowContext(ctx, `
 		SELECT flow_instance, entity_type, current_state, fields, gates, accumulator, revision
@@ -291,7 +263,7 @@ func validateExistingSQLiteScenarioSetupEntity(ctx context.Context, tx *sql.Tx, 
 	return validateExistingScenarioSetupEntity(snapshot, entity, fieldsJSON, gatesJSON)
 }
 
-func validateExistingScenarioSetupEntity(snapshot scenarioSetupEntitySnapshot, entity ScenarioSetupEntityRequest, fieldsJSON, gatesJSON json.RawMessage) error {
+func validateExistingScenarioSetupEntity(snapshot scenarioSetupEntitySnapshot, entity runtimepipeline.ScenarioSetupEntityRequest, fieldsJSON, gatesJSON json.RawMessage) error {
 	var mismatches []string
 	if snapshot.FlowInstance != entity.FlowInstance {
 		mismatches = append(mismatches, "flow_instance")
@@ -348,10 +320,10 @@ func canonicalScenarioSetupJSON(raw string) (string, error) {
 	return string(canonical), nil
 }
 
-func scenarioSetupResult(req ScenarioSetupRequest) ScenarioSetupResult {
-	out := ScenarioSetupResult{RunID: req.RunID, Entities: make([]ScenarioSetupEntityResult, 0, len(req.Entities))}
+func scenarioSetupResult(req runtimepipeline.ScenarioSetupRequest) runtimepipeline.ScenarioSetupResult {
+	out := runtimepipeline.ScenarioSetupResult{RunID: req.RunID, Entities: make([]runtimepipeline.ScenarioSetupEntityResult, 0, len(req.Entities))}
 	for _, entity := range req.Entities {
-		out.Entities = append(out.Entities, ScenarioSetupEntityResult{
+		out.Entities = append(out.Entities, runtimepipeline.ScenarioSetupEntityResult{
 			Alias:        entity.Alias,
 			EntityID:     entity.EntityID,
 			FlowInstance: entity.FlowInstance,
@@ -367,16 +339,4 @@ func scenarioSetupMutationWriter() runtimemutationlog.Writer {
 		Type: "platform",
 		ID:   "test.setup_entities",
 	})
-}
-
-func (r ScenarioSetupResult) Normalized() ScenarioSetupResult {
-	r.RunID = strings.TrimSpace(r.RunID)
-	for i := range r.Entities {
-		r.Entities[i].Alias = strings.TrimSpace(r.Entities[i].Alias)
-		r.Entities[i].EntityID = strings.TrimSpace(r.Entities[i].EntityID)
-		r.Entities[i].FlowInstance = strings.Trim(strings.TrimSpace(r.Entities[i].FlowInstance), "/")
-		r.Entities[i].EntityType = strings.TrimSpace(r.Entities[i].EntityType)
-		r.Entities[i].CurrentState = strings.TrimSpace(r.Entities[i].CurrentState)
-	}
-	return r
 }

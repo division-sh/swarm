@@ -12,12 +12,13 @@ import (
 	"testing"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/gorilla/websocket"
 )
 
@@ -184,7 +185,7 @@ func TestOpenRPCWebSocketRuntimeProbes(t *testing.T) {
 	t.Run("run.subscribe_trace declared RUN_NOT_FOUND", func(t *testing.T) {
 		base := time.Unix(1700001400, 0).UTC()
 		observability := webSocketRuntimeProbeObservability(base)
-		observability.traceErr = store.ErrRunNotFound
+		observability.traceErr = operatorread.ErrRunNotFound
 		handler, _ := newWebSocketRuntimeProbeHandler(t, observability, time.Hour)
 		server := httptest.NewServer(handler)
 		defer server.Close()
@@ -424,7 +425,7 @@ func newWebSocketRuntimeProbeHandler(t *testing.T, observability *fakeObservabil
 	if len(cardStores) > 0 && cardStores[0] != nil {
 		cards = cardStores[0]
 	}
-	readOpts := OperatorReadOptions{
+	readOpts := testOperatorCapabilities{
 		Now:           func() time.Time { return time.Unix(1700001410, 0).UTC() },
 		Ready:         func() bool { return true },
 		Database:      fakePinger{err: nil},
@@ -456,13 +457,13 @@ func newWebSocketRuntimeProbeHandler(t *testing.T, observability *fakeObservabil
 	return testHandler(t, Options{
 		AuthTokens:    []string{testToken},
 		Handlers:      handlers,
-		Subscriptions: OperatorSubscriptions(readOpts, SubscriptionRuntimeOptions{HealthInterval: healthInterval, PollInterval: time.Hour, QueueSize: 16}),
+		Subscriptions: testOperatorSubscriptions(readOpts, SubscriptionRuntimeOptions{HealthInterval: healthInterval, PollInterval: time.Hour, QueueSize: 16}),
 	}), calls
 }
 
 func webSocketRuntimeProbeObservability(base time.Time) *fakeObservabilityReadStore {
 	return &fakeObservabilityReadStore{
-		events: map[string]store.OperatorEventFull{
+		events: map[string]operatorread.OperatorEventFull{
 			"evt-1": {
 				EventID:       "evt-1",
 				EventName:     "scan.requested",
@@ -473,18 +474,18 @@ func webSocketRuntimeProbeObservability(base time.Time) *fakeObservabilityReadSt
 				Source:        "runtime",
 				ProducerType:  events.EventProducerPlatform,
 				Payload:       map[string]any{"ok": true},
-				Deliveries:    []store.OperatorEventDelivery{},
-				DeadLetters:   []store.OperatorDeadLetterRecord{},
+				Deliveries:    []operatorread.OperatorEventDelivery{},
+				DeadLetters:   []operatorread.OperatorDeadLetterRecord{},
 			},
 		},
-		traceRows: map[string][]store.RunDebugTraceRow{
+		traceRows: map[string][]operatorread.RunDebugTraceRow{
 			"run-1": {{
 				EventID:        "evt-1",
 				EventName:      "scan.requested",
 				EventCreatedAt: base.Add(time.Second),
 			}},
 		},
-		logs: []store.OperatorRuntimeLogEntry{{
+		logs: []operatorread.OperatorRuntimeLogEntry{{
 			LogID:     "log-1",
 			TS:        base.Add(time.Second),
 			Level:     "error",

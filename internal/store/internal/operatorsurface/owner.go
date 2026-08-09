@@ -2,10 +2,10 @@ package operatorsurface
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
@@ -14,108 +14,323 @@ import (
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 )
 
-type RuntimeDiagnosticsSource interface {
+type RunDiagnosticsSource interface {
 	PipelineObligations() runtimepipelineobligation.Store
 	ReadTimerObligations(context.Context, runtimetimerobligation.Scope, time.Time) (runtimetimerobligation.Snapshot, error)
-	ListOperatorConversationTurns(context.Context, OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error)
-	LoadOperatorPublicConversationTurn(context.Context, string, string) (OperatorPublicConversationTurnDetail, error)
+}
+
+type AgentRuntimeSource interface {
 	LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error)
 }
 
-func (s *OperatorPostgres) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
-	return s.runtime.LoadAgents(ctx)
+type ConversationRuntimeSource interface {
+	ListOperatorConversationTurns(context.Context, operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error)
+	LoadOperatorPublicConversationTurn(context.Context, string, string) (operatorread.OperatorPublicConversationTurnDetail, error)
 }
 
-func (s *OperatorSQLite) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
-	return s.runtime.LoadAgents(ctx)
+type DeadLetterProjection interface {
+	LoadOperatorDeliveryDeadLetters(context.Context, string, int64) ([]operatorread.OperatorDeadLetterRecord, error)
 }
 
-func (s *OperatorPostgres) ListOperatorConversationTurns(ctx context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error) {
-	return s.runtime.ListOperatorConversationTurns(ctx, opts)
-}
-
-func (s *OperatorPostgres) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (OperatorPublicConversationTurnDetail, error) {
-	return s.runtime.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
-}
-
-func (s *OperatorSQLite) ListOperatorConversationTurns(ctx context.Context, opts OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error) {
-	return s.runtime.ListOperatorConversationTurns(ctx, opts)
-}
-
-func (s *OperatorSQLite) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (OperatorPublicConversationTurnDetail, error) {
-	return s.runtime.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
-}
-
-type OperatorPostgres struct {
+type RunPostgres struct {
 	backend     *postgresbackend.Backend
 	schemaGuard func() error
-	runtime     RuntimeDiagnosticsSource
+	runtime     RunDiagnosticsSource
+	deadLetters DeadLetterProjection
 }
 
-func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, runtime RuntimeDiagnosticsSource) (*OperatorPostgres, error) {
+type EntityPostgres struct {
+	backend     *postgresbackend.Backend
+	schemaGuard func() error
+}
+
+type AgentPostgres struct {
+	backend      *postgresbackend.Backend
+	schemaGuard  func() error
+	runtime      AgentRuntimeSource
+	conversation ConversationRuntimeSource
+	deadLetters  DeadLetterProjection
+}
+
+type ConversationPostgres struct {
+	backend     *postgresbackend.Backend
+	schemaGuard func() error
+	runtime     ConversationRuntimeSource
+}
+
+type ObservabilityPostgres struct {
+	backend     *postgresbackend.Backend
+	schemaGuard func() error
+}
+
+func requirePostgresBackend(backend *postgresbackend.Backend) error {
 	if backend == nil || !backend.Valid() {
-		return nil, fmt.Errorf("operator postgres backend is required")
+		return fmt.Errorf("operator postgres backend is required")
 	}
-	return &OperatorPostgres{backend: backend, schemaGuard: schemaGuard, runtime: runtime}, nil
+	return nil
 }
 
-func (s *OperatorPostgres) requireCurrentSchema() error {
-	if s == nil || s.schemaGuard == nil {
-		return fmt.Errorf("operator postgres schema guard is required")
+func NewRunPostgres(backend *postgresbackend.Backend, schemaGuard func() error, runtime RunDiagnosticsSource, deadLetters DeadLetterProjection) (*RunPostgres, error) {
+	if err := requirePostgresBackend(backend); err != nil {
+		return nil, err
 	}
-	return s.schemaGuard()
+	if runtime == nil || deadLetters == nil {
+		return nil, fmt.Errorf("run diagnostics sources are required")
+	}
+	return &RunPostgres{backend: backend, schemaGuard: schemaGuard, runtime: runtime, deadLetters: deadLetters}, nil
 }
 
-func (s *OperatorPostgres) RequireCurrentSchema() error {
-	return s.requireCurrentSchema()
+func NewEntityPostgres(backend *postgresbackend.Backend, schemaGuard func() error) (*EntityPostgres, error) {
+	if err := requirePostgresBackend(backend); err != nil {
+		return nil, err
+	}
+	return &EntityPostgres{backend: backend, schemaGuard: schemaGuard}, nil
 }
 
-func (s *OperatorPostgres) query(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	return s.backend.QueryContext(ctx, query, args...)
+func NewAgentPostgres(backend *postgresbackend.Backend, schemaGuard func() error, runtime AgentRuntimeSource, conversation ConversationRuntimeSource, deadLetters DeadLetterProjection) (*AgentPostgres, error) {
+	if err := requirePostgresBackend(backend); err != nil {
+		return nil, err
+	}
+	if runtime == nil || conversation == nil || deadLetters == nil {
+		return nil, fmt.Errorf("agent read sources are required")
+	}
+	return &AgentPostgres{backend: backend, schemaGuard: schemaGuard, runtime: runtime, conversation: conversation, deadLetters: deadLetters}, nil
 }
 
-func (s *OperatorPostgres) queryRow(ctx context.Context, query string, args ...any) *sql.Row {
-	return s.backend.QueryRowContext(ctx, query, args...)
+func NewConversationPostgres(backend *postgresbackend.Backend, schemaGuard func() error, runtime ConversationRuntimeSource) (*ConversationPostgres, error) {
+	if err := requirePostgresBackend(backend); err != nil {
+		return nil, err
+	}
+	if runtime == nil {
+		return nil, fmt.Errorf("conversation runtime source is required")
+	}
+	return &ConversationPostgres{backend: backend, schemaGuard: schemaGuard, runtime: runtime}, nil
 }
 
-type OperatorSQLite struct {
+func NewObservabilityPostgres(backend *postgresbackend.Backend, schemaGuard func() error) (*ObservabilityPostgres, error) {
+	if err := requirePostgresBackend(backend); err != nil {
+		return nil, err
+	}
+	return &ObservabilityPostgres{backend: backend, schemaGuard: schemaGuard}, nil
+}
+
+func (s *RunPostgres) requireCurrentSchema() error {
+	if s == nil {
+		return fmt.Errorf("operator run postgres schema guard is required")
+	}
+	return requireSchema("run postgres", s.schemaGuard)
+}
+func (s *EntityPostgres) requireCurrentSchema() error {
+	if s == nil {
+		return fmt.Errorf("operator entity postgres schema guard is required")
+	}
+	return requireSchema("entity postgres", s.schemaGuard)
+}
+func (s *AgentPostgres) requireCurrentSchema() error {
+	if s == nil {
+		return fmt.Errorf("operator agent postgres schema guard is required")
+	}
+	return requireSchema("agent postgres", s.schemaGuard)
+}
+func (s *ConversationPostgres) requireCurrentSchema() error {
+	if s == nil {
+		return fmt.Errorf("operator conversation postgres schema guard is required")
+	}
+	return requireSchema("conversation postgres", s.schemaGuard)
+}
+func (s *ObservabilityPostgres) requireCurrentSchema() error {
+	if s == nil {
+		return fmt.Errorf("operator observability postgres schema guard is required")
+	}
+	return requireSchema("observability postgres", s.schemaGuard)
+}
+
+func (s *RunPostgres) RequireCurrentSchema() error          { return s.requireCurrentSchema() }
+func (s *AgentPostgres) RequireCurrentSchema() error        { return s.requireCurrentSchema() }
+func (s *ConversationPostgres) RequireCurrentSchema() error { return s.requireCurrentSchema() }
+
+func (s *AgentPostgres) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
+	return s.runtime.LoadAgents(ctx)
+}
+
+func (s *AgentPostgres) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
+	return s.conversation.ListOperatorConversationTurns(ctx, opts)
+}
+
+func (s *AgentPostgres) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
+	return s.conversation.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
+}
+
+func (s *AgentPostgres) LoadOperatorDeliveryDeadLetters(ctx context.Context, deliveryID string, claimVersion int64) ([]operatorread.OperatorDeadLetterRecord, error) {
+	return s.deadLetters.LoadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
+}
+
+func (s *ConversationPostgres) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
+	return s.runtime.ListOperatorConversationTurns(ctx, opts)
+}
+
+func (s *ConversationPostgres) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
+	return s.runtime.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
+}
+
+type RunSQLite struct {
 	backend     *sqlitebackend.Backend
 	schemaGuard func() error
 	nowFn       func() time.Time
-	runtime     RuntimeDiagnosticsSource
+	runtime     RunDiagnosticsSource
+	deadLetters DeadLetterProjection
 }
 
-func NewSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, nowFn func() time.Time, runtime RuntimeDiagnosticsSource) (*OperatorSQLite, error) {
+type EntitySQLite struct {
+	backend     *sqlitebackend.Backend
+	schemaGuard func() error
+}
+
+type AgentSQLite struct {
+	backend      *sqlitebackend.Backend
+	schemaGuard  func() error
+	nowFn        func() time.Time
+	runtime      AgentRuntimeSource
+	conversation ConversationRuntimeSource
+	deadLetters  DeadLetterProjection
+}
+
+type ConversationSQLite struct {
+	backend     *sqlitebackend.Backend
+	schemaGuard func() error
+	runtime     ConversationRuntimeSource
+}
+
+type ObservabilitySQLite struct {
+	backend     *sqlitebackend.Backend
+	schemaGuard func() error
+}
+
+func requireSQLiteBackend(backend *sqlitebackend.Backend) error {
 	if backend == nil || !backend.Valid() {
-		return nil, fmt.Errorf("operator sqlite backend is required")
+		return fmt.Errorf("operator sqlite backend is required")
 	}
-	return &OperatorSQLite{backend: backend, schemaGuard: schemaGuard, nowFn: nowFn, runtime: runtime}, nil
+	return nil
 }
 
-func (s *OperatorSQLite) requireCurrentSchema() error {
-	if s == nil || s.schemaGuard == nil {
-		return fmt.Errorf("operator sqlite schema guard is required")
+func NewRunSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, nowFn func() time.Time, runtime RunDiagnosticsSource, deadLetters DeadLetterProjection) (*RunSQLite, error) {
+	if err := requireSQLiteBackend(backend); err != nil {
+		return nil, err
 	}
-	return s.schemaGuard()
+	if runtime == nil || deadLetters == nil {
+		return nil, fmt.Errorf("run diagnostics sources are required")
+	}
+	return &RunSQLite{backend: backend, schemaGuard: schemaGuard, nowFn: nowFn, runtime: runtime, deadLetters: deadLetters}, nil
 }
 
-func (s *OperatorSQLite) RequireCurrentSchema() error {
-	return s.requireCurrentSchema()
+func NewEntitySQLite(backend *sqlitebackend.Backend, schemaGuard func() error) (*EntitySQLite, error) {
+	if err := requireSQLiteBackend(backend); err != nil {
+		return nil, err
+	}
+	return &EntitySQLite{backend: backend, schemaGuard: schemaGuard}, nil
 }
 
-func (s *OperatorSQLite) now() time.Time {
-	if s == nil || s.nowFn == nil {
+func NewAgentSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, nowFn func() time.Time, runtime AgentRuntimeSource, conversation ConversationRuntimeSource, deadLetters DeadLetterProjection) (*AgentSQLite, error) {
+	if err := requireSQLiteBackend(backend); err != nil {
+		return nil, err
+	}
+	if runtime == nil || conversation == nil || deadLetters == nil {
+		return nil, fmt.Errorf("agent read sources are required")
+	}
+	return &AgentSQLite{backend: backend, schemaGuard: schemaGuard, nowFn: nowFn, runtime: runtime, conversation: conversation, deadLetters: deadLetters}, nil
+}
+
+func NewConversationSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, runtime ConversationRuntimeSource) (*ConversationSQLite, error) {
+	if err := requireSQLiteBackend(backend); err != nil {
+		return nil, err
+	}
+	if runtime == nil {
+		return nil, fmt.Errorf("conversation runtime source is required")
+	}
+	return &ConversationSQLite{backend: backend, schemaGuard: schemaGuard, runtime: runtime}, nil
+}
+
+func NewObservabilitySQLite(backend *sqlitebackend.Backend, schemaGuard func() error) (*ObservabilitySQLite, error) {
+	if err := requireSQLiteBackend(backend); err != nil {
+		return nil, err
+	}
+	return &ObservabilitySQLite{backend: backend, schemaGuard: schemaGuard}, nil
+}
+
+func (s *RunSQLite) requireCurrentSchema() error {
+	if s == nil {
+		return fmt.Errorf("operator run sqlite schema guard is required")
+	}
+	return requireSchema("run sqlite", s.schemaGuard)
+}
+func (s *EntitySQLite) requireCurrentSchema() error {
+	if s == nil {
+		return fmt.Errorf("operator entity sqlite schema guard is required")
+	}
+	return requireSchema("entity sqlite", s.schemaGuard)
+}
+func (s *AgentSQLite) requireCurrentSchema() error {
+	if s == nil {
+		return fmt.Errorf("operator agent sqlite schema guard is required")
+	}
+	return requireSchema("agent sqlite", s.schemaGuard)
+}
+func (s *ConversationSQLite) requireCurrentSchema() error {
+	if s == nil {
+		return fmt.Errorf("operator conversation sqlite schema guard is required")
+	}
+	return requireSchema("conversation sqlite", s.schemaGuard)
+}
+func (s *ObservabilitySQLite) requireCurrentSchema() error {
+	if s == nil {
+		return fmt.Errorf("operator observability sqlite schema guard is required")
+	}
+	return requireSchema("observability sqlite", s.schemaGuard)
+}
+
+func (s *RunSQLite) RequireCurrentSchema() error          { return s.requireCurrentSchema() }
+func (s *AgentSQLite) RequireCurrentSchema() error        { return s.requireCurrentSchema() }
+func (s *ConversationSQLite) RequireCurrentSchema() error { return s.requireCurrentSchema() }
+
+func (s *RunSQLite) now() time.Time   { return ownerNow(s.nowFn) }
+func (s *AgentSQLite) now() time.Time { return ownerNow(s.nowFn) }
+
+func (s *AgentSQLite) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
+	return s.runtime.LoadAgents(ctx)
+}
+
+func (s *AgentSQLite) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
+	return s.conversation.ListOperatorConversationTurns(ctx, opts)
+}
+
+func (s *AgentSQLite) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
+	return s.conversation.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
+}
+
+func (s *AgentSQLite) LoadOperatorDeliveryDeadLetters(ctx context.Context, deliveryID string, claimVersion int64) ([]operatorread.OperatorDeadLetterRecord, error) {
+	return s.deadLetters.LoadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
+}
+
+func (s *ConversationSQLite) ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
+	return s.runtime.ListOperatorConversationTurns(ctx, opts)
+}
+
+func (s *ConversationSQLite) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
+	return s.runtime.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
+}
+
+func requireSchema(name string, guard func() error) error {
+	if guard == nil {
+		return fmt.Errorf("operator %s schema guard is required", name)
+	}
+	return guard()
+}
+
+func ownerNow(nowFn func() time.Time) time.Time {
+	if nowFn == nil {
 		return time.Now().UTC()
 	}
-	return s.nowFn().UTC()
-}
-
-func (s *OperatorSQLite) query(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	return s.backend.QueryContext(ctx, query, args...)
-}
-
-func (s *OperatorSQLite) queryRow(ctx context.Context, query string, args ...any) *sql.Row {
-	return s.backend.QueryRowContext(ctx, query, args...)
+	return nowFn().UTC()
 }
 
 var (

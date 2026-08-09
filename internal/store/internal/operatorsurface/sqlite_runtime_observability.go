@@ -7,14 +7,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
-func (s *OperatorSQLite) LoadRunDebugTracePage(ctx context.Context, runID string, opts RunDebugTraceQueryOptions) ([]RunDebugTraceRow, string, error) {
+func (s *RunSQLite) LoadRunDebugTracePage(ctx context.Context, runID string, opts operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, string, error) {
 	runID = nullUUIDString(runID)
 	if runID == "" {
-		return nil, "", ErrRunNotFound
+		return nil, "", operatorread.ErrRunNotFound
 	}
 	opts = defaultRunDebugTraceQueryOptions(opts)
 	var exists bool
@@ -22,12 +23,12 @@ func (s *OperatorSQLite) LoadRunDebugTracePage(ctx context.Context, runID string
 		return nil, "", fmt.Errorf("load sqlite run trace run existence: %w", err)
 	}
 	if !exists {
-		return nil, "", ErrRunNotFound
+		return nil, "", operatorread.ErrRunNotFound
 	}
 	return s.loadProjectedRunDebugTrace(ctx, runID, opts)
 }
 
-func (s *OperatorSQLite) ListOperatorEvents(ctx context.Context, opts OperatorEventListOptions) (OperatorEventListResult, error) {
+func (s *ObservabilitySQLite) ListOperatorEvents(ctx context.Context, opts operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error) {
 	opts = defaultOperatorEventListOptions(opts)
 	where := []string{"1=1"}
 	args := []any{}
@@ -70,11 +71,11 @@ func (s *OperatorSQLite) ListOperatorEvents(ctx context.Context, opts OperatorEv
 	if opts.Cursor != "" {
 		cursor, err := decodeObservabilityPositionCursor(opts.Cursor, "event.list")
 		if err != nil || (cursor.Order != "" && cursor.Order != opts.Order) {
-			return OperatorEventListResult{}, ErrInvalidObservabilityCursor
+			return operatorread.OperatorEventListResult{}, operatorread.ErrInvalidObservabilityCursor
 		}
 		createdAt, err := time.Parse(time.RFC3339Nano, cursor.CreatedAt)
 		if err != nil || strings.TrimSpace(cursor.ID) == "" {
-			return OperatorEventListResult{}, ErrInvalidObservabilityCursor
+			return operatorread.OperatorEventListResult{}, operatorread.ErrInvalidObservabilityCursor
 		}
 		scanCreatedAt, scanEventID = createdAt.UTC(), cursor.ID
 	}
@@ -84,7 +85,7 @@ func (s *OperatorSQLite) ListOperatorEvents(ctx context.Context, opts OperatorEv
 		order = "ASC"
 		comparison = ">"
 	}
-	result := OperatorEventListResult{Events: []OperatorEventFull{}}
+	result := operatorread.OperatorEventListResult{Events: []operatorread.OperatorEventFull{}}
 	for len(result.Events) <= opts.Limit {
 		pageWhere := append([]string(nil), where...)
 		pageArgs := append([]any(nil), args...)
@@ -101,7 +102,7 @@ func (s *OperatorSQLite) ListOperatorEvents(ctx context.Context, opts OperatorEv
 			LIMIT ?
 		`, pageArgs...)
 		if err != nil {
-			return OperatorEventListResult{}, fmt.Errorf("query sqlite operator events: %w", err)
+			return operatorread.OperatorEventListResult{}, fmt.Errorf("query sqlite operator events: %w", err)
 		}
 		candidates := 0
 		for rows.Next() {
@@ -109,7 +110,7 @@ func (s *OperatorSQLite) ListOperatorEvents(ctx context.Context, opts OperatorEv
 			var createdRaw any
 			if err := rows.Scan(&eventID, &createdRaw); err != nil {
 				rows.Close()
-				return OperatorEventListResult{}, fmt.Errorf("scan sqlite operator event id: %w", err)
+				return operatorread.OperatorEventListResult{}, fmt.Errorf("scan sqlite operator event id: %w", err)
 			}
 			createdAt, ok, err := sqliteTimeValue(createdRaw)
 			if err != nil || !ok {
@@ -117,14 +118,14 @@ func (s *OperatorSQLite) ListOperatorEvents(ctx context.Context, opts OperatorEv
 				if err == nil {
 					err = fmt.Errorf("operator event %s is missing created_at", eventID)
 				}
-				return OperatorEventListResult{}, err
+				return operatorread.OperatorEventListResult{}, err
 			}
 			candidates++
 			scanEventID, scanCreatedAt = eventID, createdAt
 			full, err := s.LoadOperatorEvent(ctx, eventID)
 			if err != nil {
 				rows.Close()
-				return OperatorEventListResult{}, err
+				return operatorread.OperatorEventListResult{}, err
 			}
 			if operatorEventMatchesListFilter(full, opts.Filter) {
 				result.Events = append(result.Events, full)
@@ -135,7 +136,7 @@ func (s *OperatorSQLite) ListOperatorEvents(ctx context.Context, opts OperatorEv
 		}
 		if err := rows.Err(); err != nil {
 			rows.Close()
-			return OperatorEventListResult{}, fmt.Errorf("read sqlite operator events: %w", err)
+			return operatorread.OperatorEventListResult{}, fmt.Errorf("read sqlite operator events: %w", err)
 		}
 		rows.Close()
 		if candidates < opts.Limit+1 || len(result.Events) > opts.Limit {
@@ -152,45 +153,45 @@ func (s *OperatorSQLite) ListOperatorEvents(ctx context.Context, opts OperatorEv
 	return result, nil
 }
 
-func (s *OperatorSQLite) LoadOperatorEvent(ctx context.Context, eventID string) (OperatorEventFull, error) {
+func (s *ObservabilitySQLite) LoadOperatorEvent(ctx context.Context, eventID string) (operatorread.OperatorEventFull, error) {
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
-		return OperatorEventFull{}, ErrEventNotFound
+		return operatorread.OperatorEventFull{}, operatorread.ErrEventNotFound
 	}
 	row, found, err := loadSQLiteEventIdentity(ctx, s.backend, eventID)
 	if err != nil {
-		return OperatorEventFull{}, fmt.Errorf("load sqlite operator event: %w", err)
+		return operatorread.OperatorEventFull{}, fmt.Errorf("load sqlite operator event: %w", err)
 	}
 	if !found {
-		return OperatorEventFull{}, ErrEventNotFound
+		return operatorread.OperatorEventFull{}, operatorread.ErrEventNotFound
 	}
 	decoded, err := decodeEventRecord(row)
 	if err != nil {
-		return OperatorEventFull{}, fmt.Errorf("load sqlite operator event: %w", err)
+		return operatorread.OperatorEventFull{}, fmt.Errorf("load sqlite operator event: %w", err)
 	}
-	event, err := NewOperatorEventFull(decoded.Event())
+	event, err := operatorread.NewOperatorEventFull(decoded.Event())
 	if err != nil {
-		return OperatorEventFull{}, err
+		return operatorread.OperatorEventFull{}, err
 	}
 	deadLetters, err := s.sqliteOperatorEventDeadLetters(ctx, eventID)
 	if err != nil {
-		return OperatorEventFull{}, err
+		return operatorread.OperatorEventFull{}, err
 	}
 	deliveries, err := s.sqliteOperatorEventDeliveries(ctx, eventID)
 	if err != nil {
-		return OperatorEventFull{}, err
+		return operatorread.OperatorEventFull{}, err
 	}
-	event.Deliveries = EnrichOperatorDeliveryFailureEvidence(deliveries, deadLetters)
+	event.Deliveries = operatorread.EnrichOperatorDeliveryFailureEvidence(deliveries, deadLetters)
 	event.DeadLetters = deadLetters
 	if event.DeadLetters == nil {
-		event.DeadLetters = []OperatorDeadLetterRecord{}
+		event.DeadLetters = []operatorread.OperatorDeadLetterRecord{}
 	}
 	return event, nil
 }
 
-func (s *OperatorSQLite) ListOperatorRuntimeLogs(ctx context.Context, opts OperatorRuntimeLogListOptions) (OperatorRuntimeLogListResult, error) {
+func (s *ObservabilitySQLite) ListOperatorRuntimeLogs(ctx context.Context, opts operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error) {
 	if opts.Cursor != "" {
-		return OperatorRuntimeLogListResult{}, ErrInvalidObservabilityCursor
+		return operatorread.OperatorRuntimeLogListResult{}, operatorread.ErrInvalidObservabilityCursor
 	}
 	opts = defaultOperatorRuntimeLogListOptions(opts)
 	where := []string{"event_name = 'platform.runtime_log'"}
@@ -240,46 +241,46 @@ func (s *OperatorSQLite) ListOperatorRuntimeLogs(ctx context.Context, opts Opera
 		LIMIT ?
 	`, args...)
 	if err != nil {
-		return OperatorRuntimeLogListResult{}, fmt.Errorf("query sqlite runtime logs: %w", err)
+		return operatorread.OperatorRuntimeLogListResult{}, fmt.Errorf("query sqlite runtime logs: %w", err)
 	}
 	defer rows.Close()
-	result := OperatorRuntimeLogListResult{Logs: []OperatorRuntimeLogEntry{}}
+	result := operatorread.OperatorRuntimeLogListResult{Logs: []operatorread.OperatorRuntimeLogEntry{}}
 	for rows.Next() {
 		var createdRaw, payloadRaw any
 		var logID, runID, entityID, producedBy string
 		if err := rows.Scan(&logID, &createdRaw, &runID, &entityID, &producedBy, &payloadRaw); err != nil {
-			return OperatorRuntimeLogListResult{}, fmt.Errorf("scan sqlite runtime log: %w", err)
+			return operatorread.OperatorRuntimeLogListResult{}, fmt.Errorf("scan sqlite runtime log: %w", err)
 		}
 		var createdAt time.Time
 		if at, ok, err := sqliteTimeValue(createdRaw); err != nil {
-			return OperatorRuntimeLogListResult{}, err
+			return operatorread.OperatorRuntimeLogListResult{}, err
 		} else if ok {
 			createdAt = at
 		}
 		log, err := operatorRuntimeLogEntry(logID, runID, entityID, producedBy, createdAt, sqliteJSONRawMessage(payloadRaw))
 		if err != nil {
-			return OperatorRuntimeLogListResult{}, err
+			return operatorread.OperatorRuntimeLogListResult{}, err
 		}
 		result.Logs = append(result.Logs, log)
 	}
 	if err := rows.Err(); err != nil {
-		return OperatorRuntimeLogListResult{}, fmt.Errorf("read sqlite runtime logs: %w", err)
+		return operatorread.OperatorRuntimeLogListResult{}, fmt.Errorf("read sqlite runtime logs: %w", err)
 	}
 	return result, nil
 }
 
-func (s *OperatorSQLite) ListOperatorRuntimeIncidents(ctx context.Context, opts OperatorRuntimeIncidentListOptions) (OperatorRuntimeIncidentListResult, error) {
-	logs, err := s.ListOperatorRuntimeLogs(ctx, OperatorRuntimeLogListOptions{
+func (s *ObservabilitySQLite) ListOperatorRuntimeIncidents(ctx context.Context, opts operatorread.OperatorRuntimeIncidentListOptions) (operatorread.OperatorRuntimeIncidentListResult, error) {
+	logs, err := s.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		Component: opts.Component,
 		Level:     coalesceRuntimeIncidentLevel(opts.Level),
 		Limit:     opts.Limit,
 	})
 	if err != nil {
-		return OperatorRuntimeIncidentListResult{}, err
+		return operatorread.OperatorRuntimeIncidentListResult{}, err
 	}
-	result := OperatorRuntimeIncidentListResult{Incidents: []OperatorRuntimeIncident{}}
+	result := operatorread.OperatorRuntimeIncidentListResult{Incidents: []operatorread.OperatorRuntimeIncident{}}
 	for _, log := range logs.Logs {
-		result.Incidents = append(result.Incidents, OperatorRuntimeIncident{
+		result.Incidents = append(result.Incidents, operatorread.OperatorRuntimeIncident{
 			IncidentID:    log.LogID,
 			FirstSeen:     log.TS,
 			LastSeen:      log.TS,
@@ -294,19 +295,19 @@ func (s *OperatorSQLite) ListOperatorRuntimeIncidents(ctx context.Context, opts 
 	return result, nil
 }
 
-func (s *OperatorSQLite) sqliteOperatorEventDeliveries(ctx context.Context, eventID string) ([]OperatorEventDelivery, error) {
+func (s *ObservabilitySQLite) sqliteOperatorEventDeliveries(ctx context.Context, eventID string) ([]operatorread.OperatorEventDelivery, error) {
 	snapshots, err := s.deliverySnapshotsForEvent(ctx, eventID)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite operator event deliveries: %w", err)
 	}
-	out := make([]OperatorEventDelivery, 0, len(snapshots))
+	out := make([]operatorread.OperatorEventDelivery, 0, len(snapshots))
 	for _, snapshot := range snapshots {
 		out = append(out, operatorEventDeliveryFromSnapshot(snapshot))
 	}
 	return out, nil
 }
 
-func (s *OperatorSQLite) sqliteOperatorEventDeadLetters(ctx context.Context, eventID string) ([]OperatorDeadLetterRecord, error) {
+func (s *ObservabilitySQLite) sqliteOperatorEventDeadLetters(ctx context.Context, eventID string) ([]operatorread.OperatorDeadLetterRecord, error) {
 	rows, err := s.backend.QueryContext(ctx, `
 		SELECT dead_letter_id, COALESCE(delivery_id, ''), COALESCE(claim_version, 0), failure,
 		       COALESCE(retry_count, 0), COALESCE(chain_depth, 0), COALESCE(handler_node, ''), created_at
@@ -318,9 +319,9 @@ func (s *OperatorSQLite) sqliteOperatorEventDeadLetters(ctx context.Context, eve
 		return nil, fmt.Errorf("query sqlite operator event dead letters: %w", err)
 	}
 	defer rows.Close()
-	out := []OperatorDeadLetterRecord{}
+	out := []operatorread.OperatorDeadLetterRecord{}
 	for rows.Next() {
-		var item OperatorDeadLetterRecord
+		var item operatorread.OperatorDeadLetterRecord
 		var rawFailure any
 		var createdRaw any
 		if err := rows.Scan(&item.DeadLetterID, &item.DeliveryID, &item.ClaimVersion, &rawFailure, &item.RetryCount, &item.ChainDepth, &item.HandlerNode, &createdRaw); err != nil {
@@ -344,7 +345,7 @@ func (s *OperatorSQLite) sqliteOperatorEventDeadLetters(ctx context.Context, eve
 	return out, nil
 }
 
-func (s *OperatorSQLite) LoadOperatorDeliveryDeadLetters(ctx context.Context, deliveryID string, claimVersion int64) ([]OperatorDeadLetterRecord, error) {
+func (s *ObservabilitySQLite) LoadOperatorDeliveryDeadLetters(ctx context.Context, deliveryID string, claimVersion int64) ([]operatorread.OperatorDeadLetterRecord, error) {
 	rows, err := s.backend.QueryContext(ctx, `
 		SELECT dead_letter_id, delivery_id, claim_version, failure,
 		       COALESCE(retry_count, 0), COALESCE(chain_depth, 0), COALESCE(handler_node, ''), created_at
@@ -357,9 +358,9 @@ func (s *OperatorSQLite) LoadOperatorDeliveryDeadLetters(ctx context.Context, de
 		return nil, fmt.Errorf("query sqlite operator delivery dead letters: %w", err)
 	}
 	defer rows.Close()
-	out := []OperatorDeadLetterRecord{}
+	out := []operatorread.OperatorDeadLetterRecord{}
 	for rows.Next() {
-		var item OperatorDeadLetterRecord
+		var item operatorread.OperatorDeadLetterRecord
 		var rawFailure any
 		var createdRaw any
 		if err := rows.Scan(&item.DeadLetterID, &item.DeliveryID, &item.ClaimVersion, &rawFailure, &item.RetryCount, &item.ChainDepth, &item.HandlerNode, &createdRaw); err != nil {
@@ -391,7 +392,7 @@ func sqliteTraceTimePtr(raw any) *time.Time {
 	return &at
 }
 
-func applySQLiteRuntimeLogPayload(log *OperatorRuntimeLogEntry, raw json.RawMessage) error {
+func applySQLiteRuntimeLogPayload(log *operatorread.OperatorRuntimeLogEntry, raw json.RawMessage) error {
 	if log == nil {
 		return fmt.Errorf("runtime log target is required")
 	}
@@ -401,12 +402,26 @@ func applySQLiteRuntimeLogPayload(log *OperatorRuntimeLogEntry, raw json.RawMess
 	}
 	log.Level = strings.TrimSpace(payload.LogLevel)
 	log.Message = strings.TrimSpace(payload.Message)
-	log.Details = payload.Detail
+	log.CanonicalDetail = payload.Detail
 	log.Component = strings.TrimSpace(payload.Component)
 	log.Source = strings.TrimSpace(payload.AgentID)
 	log.SessionID = strings.TrimSpace(payload.SessionID)
 	log.ErrorCode = strings.TrimSpace(payload.ErrorCode)
 	log.Failure = runtimefailures.CloneEnvelope(payload.Failure)
+	log.EventID = strings.TrimSpace(payload.EventID)
+	log.Action = strings.TrimSpace(payload.Action)
+	log.EventType = strings.TrimSpace(payload.EventType)
+	log.ParentEventID = strings.TrimSpace(payload.ParentEventID)
+	log.HandlerID = strings.TrimSpace(payload.HandlerID)
+	log.AgentID = strings.TrimSpace(payload.AgentID)
+	log.DurationUS = payload.DurationUS
+	log.DeliveryState = strings.TrimSpace(payload.DeliveryState)
+	log.PreviousState = strings.TrimSpace(payload.PreviousState)
+	log.Transition = strings.TrimSpace(payload.Transition)
+	log.Reason = strings.TrimSpace(payload.Reason)
+	log.Terminal = strings.TrimSpace(payload.Terminal)
+	log.RetryCount = payload.RetryCount
+	log.Correlation = payload.Correlation
 	return nil
 }
 

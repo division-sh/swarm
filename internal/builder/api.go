@@ -6,20 +6,21 @@ import (
 	"strings"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 type HealthChecker func(ctx context.Context) (map[string]any, error)
 
 type EntityReader interface {
-	ListOperatorEntities(ctx context.Context, opts store.OperatorEntityListOptions) (store.OperatorEntityListResult, error)
-	LoadOperatorEntity(ctx context.Context, entityID, runID string) (store.OperatorEntityFull, error)
+	ListOperatorEntities(ctx context.Context, opts operatorread.OperatorEntityListOptions) (operatorread.OperatorEntityListResult, error)
+	LoadOperatorEntity(ctx context.Context, entityID, runID string) (operatorread.OperatorEntityFull, error)
 }
 
 type RuntimeController interface {
@@ -41,8 +42,8 @@ type RuntimeAcquirer interface {
 }
 
 type RunDebugReader interface {
-	ListOperatorEvents(ctx context.Context, opts store.OperatorEventListOptions) (store.OperatorEventListResult, error)
-	ListOperatorRuntimeLogs(ctx context.Context, opts store.OperatorRuntimeLogListOptions) (store.OperatorRuntimeLogListResult, error)
+	ListOperatorEvents(ctx context.Context, opts operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error)
+	ListOperatorRuntimeLogs(ctx context.Context, opts operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error)
 	LoadRunLifecycleSnapshot(ctx context.Context, runID string) (runtimebus.RunLifecycleSnapshot, error)
 }
 

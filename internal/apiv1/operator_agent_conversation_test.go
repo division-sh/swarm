@@ -8,46 +8,47 @@ import (
 	"testing"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 type fakeAgentConversationReadStore struct {
-	listAgentsResult                     store.OperatorAgentListResult
+	listAgentsResult                     operatorread.OperatorAgentListResult
 	listAgentsErr                        error
-	agentResult                          store.OperatorAgentDetail
+	agentResult                          operatorread.OperatorAgentDetail
 	agentErr                             error
-	agentDiagnosisResult                 store.OperatorAgentDiagnosis
+	agentDiagnosisResult                 operatorread.OperatorAgentDiagnosis
 	agentDiagnosisErr                    error
-	agentUsageResult                     store.OperatorAgentUsage
+	agentUsageResult                     operatorread.OperatorAgentUsage
 	agentUsageErr                        error
-	agentDeliveryLifecycleResult         store.OperatorAgentDeliveryLifecycleList
+	agentDeliveryLifecycleResult         operatorread.OperatorAgentDeliveryLifecycleList
 	agentDeliveryLifecycleErr            error
-	agentDeliveryDiagnosticsResult       store.OperatorAgentDeliveryDiagnostics
+	agentDeliveryDiagnosticsResult       operatorread.OperatorAgentDeliveryDiagnostics
 	agentDeliveryDiagnosticsErr          error
-	listConversationsResult              store.OperatorConversationListResult
+	listConversationsResult              operatorread.OperatorConversationListResult
 	listConversationsErr                 error
-	conversationTurnsResult              store.OperatorConversationTurnListResult
+	conversationTurnsResult              operatorread.OperatorConversationTurnListResult
 	conversationTurnsErr                 error
-	conversationTurnResult               store.OperatorPublicConversationTurnDetail
+	conversationTurnResult               operatorread.OperatorPublicConversationTurnDetail
 	conversationTurnErr                  error
-	lastAgentList                        store.OperatorAgentListOptions
-	lastConversationList                 store.OperatorConversationListOptions
+	lastAgentList                        operatorread.OperatorAgentListOptions
+	lastConversationList                 operatorread.OperatorConversationListOptions
 	lastResolveAgentID                   string
 	lastResolveFlowInstance              string
 	resolveIdentity                      agentidentity.Identity
 	resolveErr                           error
 	lastAgentIdentity                    agentidentity.Identity
 	lastAgentDiagnosisIdentity           agentidentity.Identity
-	lastAgentDiagnosisOptions            store.OperatorAgentDiagnosisOptions
+	lastAgentDiagnosisOptions            operatorread.OperatorAgentDiagnosisOptions
 	lastAgentUsageIdentity               agentidentity.Identity
-	lastAgentUsageOptions                store.OperatorAgentUsageOptions
+	lastAgentUsageOptions                operatorread.OperatorAgentUsageOptions
 	lastAgentDeliveryLifecycleIdentity   agentidentity.Identity
-	lastAgentDeliveryLifecycleOptions    store.OperatorAgentDeliveryLifecycleOptions
+	lastAgentDeliveryLifecycleOptions    operatorread.OperatorAgentDeliveryLifecycleOptions
 	lastAgentDeliveryDiagnosticsIdentity agentidentity.Identity
-	lastAgentDeliveryDiagnosticsOptions  store.OperatorAgentDeliveryDiagnosticsOptions
-	lastConversationTurns                store.OperatorConversationTurnListOptions
+	lastAgentDeliveryDiagnosticsOptions  operatorread.OperatorAgentDeliveryDiagnosticsOptions
+	lastConversationTurns                operatorread.OperatorConversationTurnListOptions
 	lastConversationTurnSessionID        string
 	lastConversationTurnID               string
 }
@@ -72,51 +73,51 @@ func (s *fakeAgentConversationReadStore) ResolveOperatorAgentIdentity(_ context.
 	return agentidentity.New(name, route)
 }
 
-func (s *fakeAgentConversationReadStore) ListOperatorAgents(_ context.Context, opts store.OperatorAgentListOptions) (store.OperatorAgentListResult, error) {
+func (s *fakeAgentConversationReadStore) ListOperatorAgents(_ context.Context, opts operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error) {
 	s.lastAgentList = opts
 	return s.listAgentsResult, s.listAgentsErr
 }
 
-func (s *fakeAgentConversationReadStore) LoadOperatorAgent(_ context.Context, identity agentidentity.Identity) (store.OperatorAgentDetail, error) {
+func (s *fakeAgentConversationReadStore) LoadOperatorAgent(_ context.Context, identity agentidentity.Identity) (operatorread.OperatorAgentDetail, error) {
 	s.lastAgentIdentity = identity
 	return s.agentResult, s.agentErr
 }
 
-func (s *fakeAgentConversationReadStore) LoadOperatorAgentDiagnosis(_ context.Context, identity agentidentity.Identity, opts store.OperatorAgentDiagnosisOptions) (store.OperatorAgentDiagnosis, error) {
+func (s *fakeAgentConversationReadStore) LoadOperatorAgentDiagnosis(_ context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDiagnosisOptions) (operatorread.OperatorAgentDiagnosis, error) {
 	s.lastAgentDiagnosisIdentity = identity
 	s.lastAgentDiagnosisOptions = opts
 	return s.agentDiagnosisResult, s.agentDiagnosisErr
 }
 
-func (s *fakeAgentConversationReadStore) LoadOperatorAgentUsage(_ context.Context, identity agentidentity.Identity, opts store.OperatorAgentUsageOptions) (store.OperatorAgentUsage, error) {
+func (s *fakeAgentConversationReadStore) LoadOperatorAgentUsage(_ context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentUsageOptions) (operatorread.OperatorAgentUsage, error) {
 	s.lastAgentUsageIdentity = identity
 	s.lastAgentUsageOptions = opts
 	return s.agentUsageResult, s.agentUsageErr
 }
 
-func (s *fakeAgentConversationReadStore) LoadOperatorAgentDeliveryLifecycle(_ context.Context, identity agentidentity.Identity, opts store.OperatorAgentDeliveryLifecycleOptions) (store.OperatorAgentDeliveryLifecycleList, error) {
+func (s *fakeAgentConversationReadStore) LoadOperatorAgentDeliveryLifecycle(_ context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryLifecycleOptions) (operatorread.OperatorAgentDeliveryLifecycleList, error) {
 	s.lastAgentDeliveryLifecycleIdentity = identity
 	s.lastAgentDeliveryLifecycleOptions = opts
 	return s.agentDeliveryLifecycleResult, s.agentDeliveryLifecycleErr
 }
 
-func (s *fakeAgentConversationReadStore) LoadOperatorAgentDeliveryDiagnostics(_ context.Context, identity agentidentity.Identity, opts store.OperatorAgentDeliveryDiagnosticsOptions) (store.OperatorAgentDeliveryDiagnostics, error) {
+func (s *fakeAgentConversationReadStore) LoadOperatorAgentDeliveryDiagnostics(_ context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryDiagnosticsOptions) (operatorread.OperatorAgentDeliveryDiagnostics, error) {
 	s.lastAgentDeliveryDiagnosticsIdentity = identity
 	s.lastAgentDeliveryDiagnosticsOptions = opts
 	return s.agentDeliveryDiagnosticsResult, s.agentDeliveryDiagnosticsErr
 }
 
-func (s *fakeAgentConversationReadStore) ListOperatorConversations(_ context.Context, opts store.OperatorConversationListOptions) (store.OperatorConversationListResult, error) {
+func (s *fakeAgentConversationReadStore) ListOperatorConversations(_ context.Context, opts operatorread.OperatorConversationListOptions) (operatorread.OperatorConversationListResult, error) {
 	s.lastConversationList = opts
 	return s.listConversationsResult, s.listConversationsErr
 }
 
-func (s *fakeAgentConversationReadStore) ListOperatorConversationTurns(_ context.Context, opts store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error) {
+func (s *fakeAgentConversationReadStore) ListOperatorConversationTurns(_ context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
 	s.lastConversationTurns = opts
 	return s.conversationTurnsResult, s.conversationTurnsErr
 }
 
-func (s *fakeAgentConversationReadStore) LoadOperatorPublicConversationTurn(_ context.Context, sessionID, turnID string) (store.OperatorPublicConversationTurnDetail, error) {
+func (s *fakeAgentConversationReadStore) LoadOperatorPublicConversationTurn(_ context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
 	s.lastConversationTurnSessionID = sessionID
 	s.lastConversationTurnID = turnID
 	return s.conversationTurnResult, s.conversationTurnErr
@@ -125,7 +126,7 @@ func (s *fakeAgentConversationReadStore) LoadOperatorPublicConversationTurn(_ co
 func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	reads := &fakeAgentConversationReadStore{
-		listAgentsResult: store.OperatorAgentListResult{Agents: []store.OperatorAgentSummary{{
+		listAgentsResult: operatorread.OperatorAgentListResult{Agents: []operatorread.OperatorAgentSummary{{
 			AgentID:      "agent-1",
 			Role:         "researcher",
 			Type:         "managed",
@@ -135,14 +136,14 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 			FlowInstance: "research/inst-1",
 			Status:       "running",
 		}}},
-		agentResult: store.OperatorAgentDetail{Agent: store.OperatorAgentSummary{AgentID: "agent-1", Role: "researcher"}},
-		agentDiagnosisResult: store.OperatorAgentDiagnosis{
+		agentResult: operatorread.OperatorAgentDetail{Agent: operatorread.OperatorAgentSummary{AgentID: "agent-1", Role: "researcher"}},
+		agentDiagnosisResult: operatorread.OperatorAgentDiagnosis{
 			AgentID: "agent-1",
 			Status:  "running",
-			Queue: store.OperatorAgentDiagnosisQueue{
+			Queue: operatorread.OperatorAgentDiagnosisQueue{
 				PendingCount:            2,
 				OldestPendingAgeSeconds: 45,
-				PendingDeliveries: []store.OperatorAgentPendingDelivery{{
+				PendingDeliveries: []operatorread.OperatorAgentPendingDelivery{{
 					DeliveryID: "delivery-1",
 					EventID:    "event-1",
 					EventName:  "task.ready",
@@ -151,23 +152,23 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				}},
 				NextCursor: "cursor-2",
 			},
-			DeliveryLifecycle: &store.OperatorAgentDeliveryLifecycle{
+			DeliveryLifecycle: &operatorread.OperatorAgentDeliveryLifecycle{
 				State:         "active",
 				BlockingLayer: "session_execution",
 			},
-			Active: &store.OperatorAgentDiagnosisActive{
+			Active: &operatorread.OperatorAgentDiagnosisActive{
 				TurnID:   "22222222-2222-2222-2222-222222222222",
 				TaskID:   "task-1",
 				EntityID: "33333333-3333-3333-3333-333333333333",
 			},
-			LastToolOutcome: &store.OperatorAgentLastToolOutcome{
+			LastToolOutcome: &operatorread.OperatorAgentLastToolOutcome{
 				TurnID:    "22222222-2222-2222-2222-222222222222",
 				ToolName:  "selected_tool",
 				ToolUseID: "toolu-selected",
 				OK:        true,
 			},
-			RuntimeState: &store.OperatorAgentDiagnosisRuntimeState{
-				Watchdog: &store.OperatorAgentDiagnosisWatchdog{
+			RuntimeState: &operatorread.OperatorAgentDiagnosisRuntimeState{
+				Watchdog: &operatorread.OperatorAgentDiagnosisWatchdog{
 					State:         "no_output",
 					BlockingLayer: "session_execution",
 					Action:        "session_no_output",
@@ -176,29 +177,29 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				},
 			},
 		},
-		agentUsageResult: store.OperatorAgentUsage{
+		agentUsageResult: operatorread.OperatorAgentUsage{
 			AgentID: "agent-1",
-			Window: store.OperatorAgentUsageWindow{
+			Window: operatorread.OperatorAgentUsageWindow{
 				Since: ptrTime(now.Add(-time.Hour)),
 				Until: ptrTime(now),
 			},
-			Usage: store.OperatorAgentUsageByAccounting{
-				Exact: store.OperatorAgentUsageTotals{
+			Usage: operatorread.OperatorAgentUsageByAccounting{
+				Exact: operatorread.OperatorAgentUsageTotals{
 					LedgerEntries:    1,
 					InputTokens:      100,
 					OutputTokens:     25,
 					EstimatedCostUSD: 0.000675,
 				},
-				Estimated: store.OperatorAgentUsageTotals{
+				Estimated: operatorread.OperatorAgentUsageTotals{
 					LedgerEntries:    1,
 					InputTokens:      50,
 					OutputTokens:     10,
 					EstimatedCostUSD: 0.000300,
 				},
 			},
-			Breakdown: []store.OperatorAgentUsageBreakdown{{
+			Breakdown: []operatorread.OperatorAgentUsageBreakdown{{
 				ExecutionMode:   "live",
-				UsageAccounting: store.AgentUsageAccountingExact,
+				UsageAccounting: operatorread.AgentUsageAccountingExact,
 				InvocationType:  "anthropic",
 				Model:           "claude-3-5-sonnet",
 				ModelAlias:      "regular",
@@ -207,7 +208,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				Transport:       "api",
 				ResolvedModel:   "claude-3-5-sonnet",
 				CostDisplay:     "$0.000675 estimated",
-				Totals: store.OperatorAgentUsageTotals{
+				Totals: operatorread.OperatorAgentUsageTotals{
 					LedgerEntries:    1,
 					InputTokens:      100,
 					OutputTokens:     25,
@@ -215,7 +216,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				},
 			}, {
 				ExecutionMode:   "live",
-				UsageAccounting: store.AgentUsageAccountingEstimated,
+				UsageAccounting: operatorread.AgentUsageAccountingEstimated,
 				InvocationType:  "claude_cli",
 				Model:           "sonnet",
 				ModelAlias:      "regular",
@@ -224,7 +225,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				Transport:       "cli",
 				ResolvedModel:   "sonnet",
 				CostDisplay:     "$0.000300 estimated",
-				Totals: store.OperatorAgentUsageTotals{
+				Totals: operatorread.OperatorAgentUsageTotals{
 					LedgerEntries:    1,
 					InputTokens:      50,
 					OutputTokens:     10,
@@ -232,9 +233,9 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				},
 			}},
 		},
-		agentDeliveryLifecycleResult: store.OperatorAgentDeliveryLifecycleList{
+		agentDeliveryLifecycleResult: operatorread.OperatorAgentDeliveryLifecycleList{
 			AgentID: "agent-1",
-			Deliveries: []store.OperatorAgentDeliveryLifecycleRow{{
+			Deliveries: []operatorread.OperatorAgentDeliveryLifecycleRow{{
 				DeliveryID:        "delivery-lifecycle-1",
 				EventID:           "event-lifecycle-1",
 				EventName:         "task.pending",
@@ -248,13 +249,13 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 			}},
 			NextCursor: "lifecycle-next",
 		},
-		agentDeliveryDiagnosticsResult: store.OperatorAgentDeliveryDiagnostics{
+		agentDeliveryDiagnosticsResult: operatorread.OperatorAgentDeliveryDiagnostics{
 			AgentID: "agent-1",
-			Summary: store.OperatorAgentDeliveryDiagnosticsSummary{
+			Summary: operatorread.OperatorAgentDeliveryDiagnosticsSummary{
 				Failures24h:    1,
 				DeadLetters24h: 1,
 			},
-			Failures: []store.OperatorAgentDeliveryFailure{{
+			Failures: []operatorread.OperatorAgentDeliveryFailure{{
 				DeliveryID: "delivery-failed-1",
 				EventID:    "event-failed-1",
 				EventName:  "task.failed",
@@ -267,7 +268,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				OccurredAt: now.Add(-time.Minute),
 			}},
 			FailuresNextCursor: "failure-next",
-			DeadLetters: []store.OperatorAgentDeadLetterDelivery{{
+			DeadLetters: []operatorread.OperatorAgentDeadLetterDelivery{{
 				DeliveryID: "delivery-dead-1",
 				EventID:    "event-dead-1",
 				EventName:  "task.dead",
@@ -278,7 +279,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 				Failure:    testFailure("retry_exhausted"),
 				RetryCount: 3,
 				OccurredAt: now.Add(-2 * time.Minute),
-				DeadLetterRecords: []store.OperatorDeadLetterRecord{{
+				DeadLetterRecords: []operatorread.OperatorDeadLetterRecord{{
 					DeadLetterID: "dead-letter-1",
 					Failure:      *testFailure("retry_exhausted"),
 					RetryCount:   3,
@@ -289,8 +290,8 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 			}},
 			DeadLettersNextCursor: "dead-letter-next",
 		},
-		listConversationsResult: store.OperatorConversationListResult{
-			Conversations: []store.OperatorConversationSummary{{
+		listConversationsResult: operatorread.OperatorConversationListResult{
+			Conversations: []operatorread.OperatorConversationSummary{{
 				SessionID:    "sess-1",
 				AgentID:      "agent-1",
 				RunID:        "run-1",
@@ -301,26 +302,26 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 			}},
 			NextCursor: "next",
 		},
-		conversationTurnsResult: store.OperatorConversationTurnListResult{
-			Conversation: store.OperatorConversationSummary{SessionID: "sess-1", AgentID: "agent-1", StartedAt: now, Status: "active"},
-			Turns: []store.OperatorConversationTurnListItem{{
+		conversationTurnsResult: operatorread.OperatorConversationTurnListResult{
+			Conversation: operatorread.OperatorConversationSummary{SessionID: "sess-1", AgentID: "agent-1", StartedAt: now, Status: "active"},
+			Turns: []operatorread.OperatorConversationTurnListItem{{
 				TurnID: "turn-1", Ordinal: 1, CompletedAt: now, DurationMS: 25,
 				TriggerEventID: "evt-1", TriggerEventType: "task.started", ParseOK: true,
-				ActivityCounts: store.OperatorConversationActivityCounts{Tool: 1},
+				ActivityCounts: operatorread.OperatorConversationActivityCounts{Tool: 1},
 			}},
 			NextCursor: "turn-cursor-2",
 		},
-		conversationTurnResult: store.OperatorPublicConversationTurnDetail{
-			Session: store.OperatorConversationSummary{SessionID: "sess-1", AgentID: "agent-1", StartedAt: now, Status: "active"},
-			Turn: store.OperatorPublicConversationTurn{
+		conversationTurnResult: operatorread.OperatorPublicConversationTurnDetail{
+			Session: operatorread.OperatorConversationSummary{SessionID: "sess-1", AgentID: "agent-1", StartedAt: now, Status: "active"},
+			Turn: operatorread.OperatorPublicConversationTurn{
 				TurnID: "turn-1", Ordinal: 1, CompletedAt: now.Add(time.Second), ParseOK: true,
-				Activity: []store.OperatorConversationActivity{},
+				Activity: []operatorread.OperatorConversationActivity{},
 			},
 		},
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			AgentConversations:     reads,
 			AgentDeliveryLifecycle: reads,
 			AgentUsage:             reads,
@@ -555,7 +556,7 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 }
 
 func TestOperatorAgentHandlersSerializeLifecycleStatusFromReadOwner(t *testing.T) {
-	summary := store.OperatorAgentSummary{
+	summary := operatorread.OperatorAgentSummary{
 		AgentID:      "agent-1",
 		Role:         "researcher",
 		Type:         "managed",
@@ -566,12 +567,12 @@ func TestOperatorAgentHandlersSerializeLifecycleStatusFromReadOwner(t *testing.T
 		Status:       "idle",
 	}
 	reads := &fakeAgentConversationReadStore{
-		listAgentsResult: store.OperatorAgentListResult{Agents: []store.OperatorAgentSummary{summary}},
-		agentResult:      store.OperatorAgentDetail{Agent: summary},
+		listAgentsResult: operatorread.OperatorAgentListResult{Agents: []operatorread.OperatorAgentSummary{summary}},
+		agentResult:      operatorread.OperatorAgentDetail{Agent: summary},
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			AgentConversations: reads,
 		}),
 	})
@@ -621,7 +622,7 @@ func TestOperatorAgentConversationHandlersSanitizeRunIDProjectionFailures(t *tes
 	reader := &fakeAgentConversationReadStore{listConversationsErr: rawRunIDColumnErr}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			AgentConversations: reader,
 		}),
 	})
@@ -663,56 +664,56 @@ func TestOperatorAgentConversationHandlersTypedErrors(t *testing.T) {
 			name:    "agent missing",
 			method:  "agent.get",
 			body:    `{"jsonrpc":"2.0","id":"agent","method":"agent.get","params":{"agent_id":"missing"}}`,
-			reads:   &fakeAgentConversationReadStore{agentErr: store.ErrAgentNotFound},
+			reads:   &fakeAgentConversationReadStore{agentErr: operatorread.ErrAgentNotFound},
 			wantApp: AgentNotFoundCode,
 		},
 		{
 			name:    "agent diagnosis missing",
 			method:  "agent.diagnose",
 			body:    `{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":"missing"}}`,
-			reads:   &fakeAgentConversationReadStore{agentDiagnosisErr: store.ErrAgentNotFound},
+			reads:   &fakeAgentConversationReadStore{agentDiagnosisErr: operatorread.ErrAgentNotFound},
 			wantApp: AgentNotFoundCode,
 		},
 		{
 			name:    "agent usage missing",
 			method:  "agent.usage",
 			body:    `{"jsonrpc":"2.0","id":"usage","method":"agent.usage","params":{"agent_id":"missing"}}`,
-			reads:   &fakeAgentConversationReadStore{agentUsageErr: store.ErrAgentNotFound},
+			reads:   &fakeAgentConversationReadStore{agentUsageErr: operatorread.ErrAgentNotFound},
 			wantApp: AgentNotFoundCode,
 		},
 		{
 			name:    "agent delivery diagnostics missing",
 			method:  "agent.delivery_diagnostics",
 			body:    `{"jsonrpc":"2.0","id":"agent-delivery-diagnostics","method":"agent.delivery_diagnostics","params":{"agent_id":"missing"}}`,
-			reads:   &fakeAgentConversationReadStore{agentDeliveryDiagnosticsErr: store.ErrAgentNotFound},
+			reads:   &fakeAgentConversationReadStore{agentDeliveryDiagnosticsErr: operatorread.ErrAgentNotFound},
 			wantApp: AgentNotFoundCode,
 		},
 		{
 			name:    "agent delivery lifecycle missing",
 			method:  "agent.delivery_lifecycle",
 			body:    `{"jsonrpc":"2.0","id":"agent-delivery-lifecycle","method":"agent.delivery_lifecycle","params":{"agent_id":"missing"}}`,
-			reads:   &fakeAgentConversationReadStore{agentDeliveryLifecycleErr: store.ErrAgentNotFound},
+			reads:   &fakeAgentConversationReadStore{agentDeliveryLifecycleErr: operatorread.ErrAgentNotFound},
 			wantApp: AgentNotFoundCode,
 		},
 		{
 			name:    "conversation turn list missing session",
 			method:  "conversation.list_turns",
 			body:    `{"jsonrpc":"2.0","id":"turns","method":"conversation.list_turns","params":{"session_id":"missing"}}`,
-			reads:   &fakeAgentConversationReadStore{conversationTurnsErr: store.ErrSessionNotFound},
+			reads:   &fakeAgentConversationReadStore{conversationTurnsErr: operatorread.ErrSessionNotFound},
 			wantApp: SessionNotFoundCode,
 		},
 		{
 			name:    "conversation turn missing session",
 			method:  "conversation.get_turn",
 			body:    `{"jsonrpc":"2.0","id":"turn","method":"conversation.get_turn","params":{"session_id":"missing","turn_id":"turn-1"}}`,
-			reads:   &fakeAgentConversationReadStore{conversationTurnErr: store.ErrSessionNotFound},
+			reads:   &fakeAgentConversationReadStore{conversationTurnErr: operatorread.ErrSessionNotFound},
 			wantApp: SessionNotFoundCode,
 		},
 		{
 			name:    "conversation turn missing turn",
 			method:  "conversation.get_turn",
 			body:    `{"jsonrpc":"2.0","id":"turn","method":"conversation.get_turn","params":{"session_id":"sess-1","turn_id":"missing-turn"}}`,
-			reads:   &fakeAgentConversationReadStore{conversationTurnErr: store.ErrTurnNotFound},
+			reads:   &fakeAgentConversationReadStore{conversationTurnErr: operatorread.ErrTurnNotFound},
 			wantApp: TurnNotFoundCode,
 		},
 	}
@@ -720,7 +721,7 @@ func TestOperatorAgentConversationHandlersTypedErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: OperatorReadHandlers(OperatorReadOptions{
+				Handlers: testOperatorHandlers(testOperatorCapabilities{
 					AgentConversations:     tc.reads,
 					AgentDeliveryLifecycle: tc.reads,
 					AgentUsage:             tc.reads,
@@ -740,20 +741,20 @@ func TestOperatorAgentConversationHandlersTypedErrors(t *testing.T) {
 
 func TestOperatorAgentUsageFailsClosedOnMalformedOwnerData(t *testing.T) {
 	reads := &fakeAgentConversationReadStore{
-		agentUsageResult: store.OperatorAgentUsage{
+		agentUsageResult: operatorread.OperatorAgentUsage{
 			AgentID: "agent-1",
-			Usage: store.OperatorAgentUsageByAccounting{
-				Exact: store.OperatorAgentUsageTotals{},
-				Estimated: store.OperatorAgentUsageTotals{
+			Usage: operatorread.OperatorAgentUsageByAccounting{
+				Exact: operatorread.OperatorAgentUsageTotals{},
+				Estimated: operatorread.OperatorAgentUsageTotals{
 					LedgerEntries: -1,
 				},
 			},
-			Breakdown: []store.OperatorAgentUsageBreakdown{},
+			Breakdown: []operatorread.OperatorAgentUsageBreakdown{},
 		},
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			AgentConversations: reads,
 			AgentUsage:         reads,
 		}),
@@ -771,11 +772,11 @@ func TestOperatorAgentUsageFailsClosedOnMalformedOwnerData(t *testing.T) {
 
 func TestOperatorAgentDiagnoseFailsClosedOnMalformedOwnerData(t *testing.T) {
 	reads := &fakeAgentConversationReadStore{
-		agentDiagnosisResult: store.OperatorAgentDiagnosis{
+		agentDiagnosisResult: operatorread.OperatorAgentDiagnosis{
 			AgentID: "agent-1",
 			Status:  "running",
-			Queue: store.OperatorAgentDiagnosisQueue{
-				PendingDeliveries: []store.OperatorAgentPendingDelivery{{
+			Queue: operatorread.OperatorAgentDiagnosisQueue{
+				PendingDeliveries: []operatorread.OperatorAgentPendingDelivery{{
 					DeliveryID: "delivery-1",
 					EventName:  "task.ready",
 					EnqueuedAt: time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC),
@@ -785,7 +786,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedOwnerData(t *testing.T) {
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			AgentConversations: reads,
 		}),
 	})
@@ -802,13 +803,13 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedOwnerData(t *testing.T) {
 
 func TestOperatorAgentDeliveryDiagnosticsFailsClosedOnMalformedOwnerData(t *testing.T) {
 	reads := &fakeAgentConversationReadStore{
-		agentDeliveryDiagnosticsResult: store.OperatorAgentDeliveryDiagnostics{
+		agentDeliveryDiagnosticsResult: operatorread.OperatorAgentDeliveryDiagnostics{
 			AgentID: "agent-1",
-			Summary: store.OperatorAgentDeliveryDiagnosticsSummary{
+			Summary: operatorread.OperatorAgentDeliveryDiagnosticsSummary{
 				Failures24h:    1,
 				DeadLetters24h: 1,
 			},
-			Failures: []store.OperatorAgentDeliveryFailure{{
+			Failures: []operatorread.OperatorAgentDeliveryFailure{{
 				DeliveryID: "delivery-failed-1",
 				EventID:    "event-failed-1",
 				EventName:  "task.failed",
@@ -816,20 +817,20 @@ func TestOperatorAgentDeliveryDiagnosticsFailsClosedOnMalformedOwnerData(t *test
 				RetryCount: 1,
 				OccurredAt: time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC),
 			}},
-			DeadLetters: []store.OperatorAgentDeadLetterDelivery{{
+			DeadLetters: []operatorread.OperatorAgentDeadLetterDelivery{{
 				DeliveryID:        "delivery-dead-1",
 				EventID:           "event-dead-1",
 				EventName:         "task.dead",
 				Status:            "dead_letter",
 				RetryCount:        2,
 				OccurredAt:        time.Date(2026, 5, 21, 10, 1, 0, 0, time.UTC),
-				DeadLetterRecords: []store.OperatorDeadLetterRecord{},
+				DeadLetterRecords: []operatorread.OperatorDeadLetterRecord{},
 			}},
 		},
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			AgentConversations: reads,
 		}),
 	})
@@ -846,9 +847,9 @@ func TestOperatorAgentDeliveryDiagnosticsFailsClosedOnMalformedOwnerData(t *test
 
 func TestOperatorAgentDeliveryLifecycleFailsClosedOnMalformedOwnerData(t *testing.T) {
 	reads := &fakeAgentConversationReadStore{
-		agentDeliveryLifecycleResult: store.OperatorAgentDeliveryLifecycleList{
+		agentDeliveryLifecycleResult: operatorread.OperatorAgentDeliveryLifecycleList{
 			AgentID: "agent-1",
-			Deliveries: []store.OperatorAgentDeliveryLifecycleRow{{
+			Deliveries: []operatorread.OperatorAgentDeliveryLifecycleRow{{
 				DeliveryID:        "delivery-1",
 				EventID:           "event-1",
 				EventName:         "task.ready",
@@ -860,7 +861,7 @@ func TestOperatorAgentDeliveryLifecycleFailsClosedOnMalformedOwnerData(t *testin
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			AgentDeliveryLifecycle: reads,
 		}),
 	})
@@ -877,14 +878,14 @@ func TestOperatorAgentDeliveryLifecycleFailsClosedOnMalformedOwnerData(t *testin
 
 func TestOperatorAgentDiagnoseFailsClosedOnMalformedWatchdogOwnerData(t *testing.T) {
 	reads := &fakeAgentConversationReadStore{
-		agentDiagnosisResult: store.OperatorAgentDiagnosis{
+		agentDiagnosisResult: operatorread.OperatorAgentDiagnosis{
 			AgentID: "agent-1",
 			Status:  "running",
-			Queue: store.OperatorAgentDiagnosisQueue{
-				PendingDeliveries: []store.OperatorAgentPendingDelivery{},
+			Queue: operatorread.OperatorAgentDiagnosisQueue{
+				PendingDeliveries: []operatorread.OperatorAgentPendingDelivery{},
 			},
-			RuntimeState: &store.OperatorAgentDiagnosisRuntimeState{
-				Watchdog: &store.OperatorAgentDiagnosisWatchdog{
+			RuntimeState: &operatorread.OperatorAgentDiagnosisRuntimeState{
+				Watchdog: &operatorread.OperatorAgentDiagnosisWatchdog{
 					State:         "healthy_long_running",
 					BlockingLayer: "session_execution",
 					Action:        "turn_long_running",
@@ -896,7 +897,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedWatchdogOwnerData(t *testing
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			AgentConversations: reads,
 		}),
 	})
@@ -913,20 +914,20 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedWatchdogOwnerData(t *testing
 
 func TestOperatorAgentDiagnoseFailsClosedOnMalformedActiveOwnerData(t *testing.T) {
 	reads := &fakeAgentConversationReadStore{
-		agentDiagnosisResult: store.OperatorAgentDiagnosis{
+		agentDiagnosisResult: operatorread.OperatorAgentDiagnosis{
 			AgentID: "agent-1",
 			Status:  "running",
-			Queue: store.OperatorAgentDiagnosisQueue{
-				PendingDeliveries: []store.OperatorAgentPendingDelivery{},
+			Queue: operatorread.OperatorAgentDiagnosisQueue{
+				PendingDeliveries: []operatorread.OperatorAgentPendingDelivery{},
 			},
-			Active: &store.OperatorAgentDiagnosisActive{
+			Active: &operatorread.OperatorAgentDiagnosisActive{
 				TaskID: "task-1",
 			},
 		},
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			AgentConversations: reads,
 		}),
 	})
@@ -944,39 +945,39 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedActiveOwnerData(t *testing.T
 func TestOperatorAgentDiagnoseFailsClosedOnMalformedLastToolOutcomeOwnerData(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		active *store.OperatorAgentDiagnosisActive
-		item   *store.OperatorAgentLastToolOutcome
+		active *operatorread.OperatorAgentDiagnosisActive
+		item   *operatorread.OperatorAgentLastToolOutcome
 		want   string
 	}{
 		{
 			name: "missing turn id",
-			item: &store.OperatorAgentLastToolOutcome{ToolName: "read_file", OK: true},
+			item: &operatorread.OperatorAgentLastToolOutcome{ToolName: "read_file", OK: true},
 			want: "last_tool_outcome.turn_id",
 		},
 		{
 			name: "missing tool name",
-			item: &store.OperatorAgentLastToolOutcome{TurnID: "turn-1", OK: true},
+			item: &operatorread.OperatorAgentLastToolOutcome{TurnID: "turn-1", OK: true},
 			want: "last_tool_outcome.tool_name",
 		},
 		{
 			name: "without active selected turn",
-			item: &store.OperatorAgentLastToolOutcome{TurnID: "turn-1", ToolName: "read_file", OK: true},
+			item: &operatorread.OperatorAgentLastToolOutcome{TurnID: "turn-1", ToolName: "read_file", OK: true},
 			want: "last_tool_outcome requires active",
 		},
 		{
 			name:   "turn id does not match active turn id",
-			active: &store.OperatorAgentDiagnosisActive{TurnID: "turn-2"},
-			item:   &store.OperatorAgentLastToolOutcome{TurnID: "turn-1", ToolName: "read_file", OK: true},
+			active: &operatorread.OperatorAgentDiagnosisActive{TurnID: "turn-2"},
+			item:   &operatorread.OperatorAgentLastToolOutcome{TurnID: "turn-1", ToolName: "read_file", OK: true},
 			want:   "last_tool_outcome.turn_id",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reads := &fakeAgentConversationReadStore{
-				agentDiagnosisResult: store.OperatorAgentDiagnosis{
+				agentDiagnosisResult: operatorread.OperatorAgentDiagnosis{
 					AgentID: "agent-1",
 					Status:  "running",
-					Queue: store.OperatorAgentDiagnosisQueue{
-						PendingDeliveries: []store.OperatorAgentPendingDelivery{},
+					Queue: operatorread.OperatorAgentDiagnosisQueue{
+						PendingDeliveries: []operatorread.OperatorAgentPendingDelivery{},
 					},
 					Active:          tc.active,
 					LastToolOutcome: tc.item,
@@ -984,7 +985,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedLastToolOutcomeOwnerData(t *
 			}
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: OperatorReadHandlers(OperatorReadOptions{
+				Handlers: testOperatorHandlers(testOperatorCapabilities{
 					AgentConversations: reads,
 				}),
 			})
@@ -1004,7 +1005,7 @@ func TestOperatorAgentDiagnoseFailsClosedOnMalformedLastToolOutcomeOwnerData(t *
 func TestOperatorAgentDiagnoseRejectsQueueLimit(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			AgentConversations: &fakeAgentConversationReadStore{},
 		}),
 	})
@@ -1019,8 +1020,8 @@ func TestOperatorAgentDiagnoseRejectsQueueLimit(t *testing.T) {
 func TestOperatorAgentDiagnoseRejectsBadQueueCursor(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			AgentConversations: &fakeAgentConversationReadStore{agentDiagnosisErr: store.ErrInvalidPendingAgentDeliveryCursor},
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
+			AgentConversations: &fakeAgentConversationReadStore{agentDiagnosisErr: operatorread.ErrInvalidPendingAgentDeliveryCursor},
 		}),
 	})
 
@@ -1034,7 +1035,7 @@ func TestOperatorAgentDiagnoseRejectsBadQueueCursor(t *testing.T) {
 func TestOperatorAgentUsageRejectsInvalidWindow(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			AgentUsage: &fakeAgentConversationReadStore{},
 		}),
 	})
@@ -1049,7 +1050,7 @@ func TestOperatorAgentUsageRejectsInvalidWindow(t *testing.T) {
 func TestOperatorAgentDeliveryDiagnosticsRejectsLimits(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			AgentConversations: &fakeAgentConversationReadStore{},
 		}),
 	})
@@ -1070,8 +1071,8 @@ func TestOperatorAgentDeliveryDiagnosticsRejectsLimits(t *testing.T) {
 func TestOperatorAgentDeliveryLifecycleRejectsBadCursorAndStatuses(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			AgentDeliveryLifecycle: &fakeAgentConversationReadStore{agentDeliveryLifecycleErr: store.AgentDeliveryLifecycleCursorError{}},
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
+			AgentDeliveryLifecycle: &fakeAgentConversationReadStore{agentDeliveryLifecycleErr: operatorread.AgentDeliveryLifecycleCursorError{}},
 		}),
 	})
 
@@ -1097,8 +1098,8 @@ func TestOperatorAgentDeliveryLifecycleRejectsBadCursorAndStatuses(t *testing.T)
 func TestOperatorAgentDeliveryDiagnosticsRejectsBadCursor(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			AgentConversations: &fakeAgentConversationReadStore{agentDeliveryDiagnosticsErr: store.AgentDeliveryDiagnosticsCursorError{Field: "dead_letter_cursor"}},
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
+			AgentConversations: &fakeAgentConversationReadStore{agentDeliveryDiagnosticsErr: operatorread.AgentDeliveryDiagnosticsCursorError{Field: "dead_letter_cursor"}},
 		}),
 	})
 

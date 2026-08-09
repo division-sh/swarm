@@ -9,12 +9,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/google/uuid"
 )
 
 type boundedRunDebugTraceStore interface {
 	authorActivityReceiptStore
-	LoadRunDebugTracePage(context.Context, string, RunDebugTraceQueryOptions) ([]RunDebugTraceRow, string, error)
+	LoadRunDebugTracePage(context.Context, string, operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, string, error)
 }
 
 func TestRunDebugTracePageBoundsCanonicalHydrationParity(t *testing.T) {
@@ -49,9 +50,9 @@ func TestRunDebugTracePageBoundsCanonicalHydrationParity(t *testing.T) {
 			corruptOperatorAgentDeliveryTail(t, ctx, fixture, filteredDelivery)
 			corruptOperatorAgentDeliveryTail(t, ctx, fixture, targetDeliveries[2])
 
-			opts := RunDebugTraceQueryOptions{
+			opts := operatorread.RunDebugTraceQueryOptions{
 				Limit: 1,
-				Filter: RunDebugTraceFilter{
+				Filter: operatorread.RunDebugTraceFilter{
 					EventNames:       []string{"trace.target"},
 					DeliveryStatuses: []string{"pending"},
 					SubscriberIDs:    []string{"target-agent"},
@@ -99,7 +100,7 @@ func seedRunDebugTraceBoundedDelivery(
 	return event, proof.DeliveryID()
 }
 
-func assertBoundedRunDebugTracePage(t *testing.T, rows []RunDebugTraceRow, next, eventID, deliveryID string) {
+func assertBoundedRunDebugTracePage(t *testing.T, rows []operatorread.RunDebugTraceRow, next, eventID, deliveryID string) {
 	t.Helper()
 	if len(rows) != 1 || rows[0].EventID != eventID || rows[0].DeliveryID != deliveryID || next == "" {
 		t.Fatalf("bounded trace page = %#v next=%q, want %s/%s and cursor", rows, next, eventID, deliveryID)

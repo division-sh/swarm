@@ -562,15 +562,15 @@ func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHa
 			}
 
 			conflicting := terminalEventAdmissionEvent(original.ID(), runID, `{"value":"changed"}`, createdAt)
-			if err := harness.append(ctx, conflicting); !errors.Is(err, ErrEventIdentityConflict) {
+			if err := harness.append(ctx, conflicting); !errors.Is(err, events.ErrEventIdentityConflict) {
 				t.Fatalf("conflicting direct duplicate error = %v, want event identity conflict", err)
 			}
 			taskConflict := terminalEventAdmissionEventWithFacts(original.ID(), runID, "different-task", executionmode.Live, `{"value":"original"}`, createdAt)
-			if err := harness.append(ctx, taskConflict); !errors.Is(err, ErrEventIdentityConflict) {
+			if err := harness.append(ctx, taskConflict); !errors.Is(err, events.ErrEventIdentityConflict) {
 				t.Fatalf("different-task duplicate error = %v, want event identity conflict", err)
 			}
 			modeConflict := terminalEventAdmissionEventWithFacts(original.ID(), runID, "", executionmode.Mock, `{"value":"original"}`, createdAt)
-			if err := harness.append(ctx, modeConflict); !errors.Is(err, ErrEventIdentityConflict) {
+			if err := harness.append(ctx, modeConflict); !errors.Is(err, events.ErrEventIdentityConflict) {
 				t.Fatalf("different-mode duplicate error = %v, want event identity conflict", err)
 			}
 
@@ -899,7 +899,7 @@ func assertGlobalRuntimeLogIdentity(t *testing.T, harness globalRuntimeLogIdenti
 		eventID, events.EventTypePlatformRuntimeLog, "runtime", "", json.RawMessage(`{"message":"conflicting global identity"}`),
 		0, "", "", events.EventEnvelope{}, createdAt,
 	)
-	if err := harness.append(ctx, conflict); !errors.Is(err, ErrEventIdentityConflict) {
+	if err := harness.append(ctx, conflict); !errors.Is(err, events.ErrEventIdentityConflict) {
 		t.Fatalf("conflicting global runtime log error = %v, want event identity conflict", err)
 	}
 	state, err := harness.loadState(ctx, eventID)

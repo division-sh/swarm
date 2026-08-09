@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	mailboxcontract "github.com/division-sh/swarm/internal/mailbox"
 )
 
-func (s *MailboxSQLiteOwner) ListV1MailboxItems(ctx context.Context, opts MailboxV1ListOptions) ([]MailboxV1Item, string, error) {
+func (s *MailboxSQLiteOwner) ListV1MailboxItems(ctx context.Context, opts mailboxcontract.V1ListOptions) ([]mailboxcontract.V1Item, string, error) {
 	if s == nil || s.backend == nil {
 		return nil, "", fmt.Errorf("sqlite runtime store is required")
 	}
@@ -24,7 +26,7 @@ func (s *MailboxSQLiteOwner) ListV1MailboxItems(ctx context.Context, opts Mailbo
 	if opts.Limit > 200 {
 		opts.Limit = 200
 	}
-	cursor, err := decodeMailboxV1Cursor(opts.Cursor)
+	cursor, err := mailboxcontract.DecodeV1Cursor(opts.Cursor)
 	if err != nil {
 		return nil, "", err
 	}
@@ -68,37 +70,37 @@ func (s *MailboxSQLiteOwner) ListV1MailboxItems(ctx context.Context, opts Mailbo
 	nextCursor := ""
 	if len(rowItems) > opts.Limit {
 		next := rowItems[opts.Limit-1]
-		nextCursor = encodeMailboxV1Cursor(next.CreatedAtTime, next.ID)
+		nextCursor = mailboxcontract.EncodeV1Cursor(next.CreatedAtTime, next.ID)
 		rowItems = rowItems[:opts.Limit]
 	}
-	items := make([]MailboxV1Item, 0, len(rowItems))
+	items := make([]mailboxcontract.V1Item, 0, len(rowItems))
 	for _, row := range rowItems {
 		items = append(items, row.projectItem())
 	}
 	return items, nextCursor, nil
 }
 
-func (s *MailboxSQLiteOwner) GetV1MailboxItem(ctx context.Context, id string) (MailboxV1ItemDetail, error) {
+func (s *MailboxSQLiteOwner) GetV1MailboxItem(ctx context.Context, id string) (mailboxcontract.V1ItemDetail, error) {
 	if s == nil || s.backend == nil {
-		return MailboxV1ItemDetail{}, fmt.Errorf("sqlite runtime store is required")
+		return mailboxcontract.V1ItemDetail{}, fmt.Errorf("sqlite runtime store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
-		return MailboxV1ItemDetail{}, err
+		return mailboxcontract.V1ItemDetail{}, err
 	}
 	if strings.TrimSpace(id) == "" {
-		return MailboxV1ItemDetail{}, ErrMailboxV1NotFound
+		return mailboxcontract.V1ItemDetail{}, mailboxcontract.ErrV1NotFound
 	}
 	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
-		return MailboxV1ItemDetail{}, err
+		return mailboxcontract.V1ItemDetail{}, err
 	}
 	row, err := s.loadSQLiteMailboxV1Row(ctx, id)
 	if err != nil {
-		return MailboxV1ItemDetail{}, err
+		return mailboxcontract.V1ItemDetail{}, err
 	}
 	return row.projectDetail(), nil
 }
 
-func sqliteMailboxV1ListWhere(opts MailboxV1ListOptions, cursor Cursor) (string, []any) {
+func sqliteMailboxV1ListWhere(opts mailboxcontract.V1ListOptions, cursor mailboxcontract.V1Cursor) (string, []any) {
 	clauses := []string{"1=1"}
 	args := []any{}
 	add := func(clause string, value any) {
@@ -180,7 +182,7 @@ func (s *MailboxSQLiteOwner) loadSQLiteMailboxV1RowTx(ctx context.Context, tx *s
 		return mailboxV1Row{}, err
 	}
 	if len(items) == 0 {
-		return mailboxV1Row{}, ErrMailboxV1NotFound
+		return mailboxV1Row{}, mailboxcontract.ErrV1NotFound
 	}
 	return items[0], nil
 }

@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type runDebugTraceInputs struct {
-	events   map[string]RunDebugTraceRow
+	events   map[string]operatorread.RunDebugTraceRow
 	turns    map[string]runDebugTraceTurn
 	sessions map[string]runDebugTraceSession
 }
@@ -18,7 +19,7 @@ type runDebugTraceInputs struct {
 type runDebugTraceTurn struct {
 	agentID   string
 	sessionID string
-	row       RunDebugTraceRow
+	row       operatorread.RunDebugTraceRow
 }
 
 type runDebugTraceSession struct {
@@ -30,7 +31,7 @@ type runDebugTraceSession struct {
 	updatedAt    time.Time
 }
 
-func (s *OperatorPostgres) loadProjectedRunDebugTrace(ctx context.Context, runID string, opts RunDebugTraceQueryOptions) ([]RunDebugTraceRow, string, error) {
+func (s *RunPostgres) loadProjectedRunDebugTrace(ctx context.Context, runID string, opts operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, string, error) {
 	query, err := runDebugTracePageQuery(runID, opts)
 	if err != nil {
 		return nil, "", err
@@ -46,7 +47,7 @@ func (s *OperatorPostgres) loadProjectedRunDebugTrace(ctx context.Context, runID
 	return projectRunDebugTrace(inputs, page, opts)
 }
 
-func (s *OperatorSQLite) loadProjectedRunDebugTrace(ctx context.Context, runID string, opts RunDebugTraceQueryOptions) ([]RunDebugTraceRow, string, error) {
+func (s *RunSQLite) loadProjectedRunDebugTrace(ctx context.Context, runID string, opts operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, string, error) {
 	query, err := runDebugTracePageQuery(runID, opts)
 	if err != nil {
 		return nil, "", err
@@ -62,7 +63,7 @@ func (s *OperatorSQLite) loadProjectedRunDebugTrace(ctx context.Context, runID s
 	return projectRunDebugTrace(inputs, page, opts)
 }
 
-func runDebugTracePageQuery(runID string, opts RunDebugTraceQueryOptions) (runtimedelivery.RunTracePageQuery, error) {
+func runDebugTracePageQuery(runID string, opts operatorread.RunDebugTraceQueryOptions) (runtimedelivery.RunTracePageQuery, error) {
 	query := runtimedelivery.RunTracePageQuery{
 		RunID:              runID,
 		Limit:              opts.Limit,
@@ -106,12 +107,12 @@ func runDebugTracePageQuery(runID string, opts RunDebugTraceQueryOptions) (runti
 }
 
 func loadPostgresRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, runID string, references []runtimedelivery.RunTraceReference) (runDebugTraceInputs, error) {
-	inputs := runDebugTraceInputs{events: map[string]RunDebugTraceRow{}, turns: map[string]runDebugTraceTurn{}, sessions: map[string]runDebugTraceSession{}}
+	inputs := runDebugTraceInputs{events: map[string]operatorread.RunDebugTraceRow{}, turns: map[string]runDebugTraceTurn{}, sessions: map[string]runDebugTraceSession{}}
 	for _, reference := range references {
 		if _, loaded := inputs.events[reference.EventID]; loaded {
 			continue
 		}
-		var row RunDebugTraceRow
+		var row operatorread.RunDebugTraceRow
 		if err := db.QueryRowContext(ctx, `
 		SELECT event_id::text, COALESCE(event_name, ''), COALESCE(source_event_id::text, ''),
 		       COALESCE(entity_id::text, ''), COALESCE(produced_by, ''), COALESCE(produced_by_type, ''), created_at
@@ -193,12 +194,12 @@ func loadPostgresRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, r
 }
 
 func loadSQLiteRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, runID string, references []runtimedelivery.RunTraceReference) (runDebugTraceInputs, error) {
-	inputs := runDebugTraceInputs{events: map[string]RunDebugTraceRow{}, turns: map[string]runDebugTraceTurn{}, sessions: map[string]runDebugTraceSession{}}
+	inputs := runDebugTraceInputs{events: map[string]operatorread.RunDebugTraceRow{}, turns: map[string]runDebugTraceTurn{}, sessions: map[string]runDebugTraceSession{}}
 	for _, reference := range references {
 		if _, loaded := inputs.events[reference.EventID]; loaded {
 			continue
 		}
-		var row RunDebugTraceRow
+		var row operatorread.RunDebugTraceRow
 		var createdRaw any
 		if err := db.QueryRowContext(ctx, `
 		SELECT event_id, COALESCE(event_name, ''), COALESCE(source_event_id, ''),
@@ -320,8 +321,8 @@ func referencedRunDebugTraceSessions(references []runtimedelivery.RunTraceRefere
 	return sessions
 }
 
-func projectRunDebugTrace(inputs runDebugTraceInputs, page runtimedelivery.RunTraceReferencePage, opts RunDebugTraceQueryOptions) ([]RunDebugTraceRow, string, error) {
-	out := make([]RunDebugTraceRow, 0, len(page.References))
+func projectRunDebugTrace(inputs runDebugTraceInputs, page runtimedelivery.RunTraceReferencePage, opts operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, string, error) {
+	out := make([]operatorread.RunDebugTraceRow, 0, len(page.References))
 	for _, reference := range page.References {
 		event, ok := inputs.events[reference.EventID]
 		if !ok {
@@ -351,7 +352,7 @@ func projectRunDebugTrace(inputs runDebugTraceInputs, page runtimedelivery.RunTr
 	return out, nextCursor, nil
 }
 
-func projectedRunDebugTraceRowStillMatches(row RunDebugTraceRow, opts RunDebugTraceQueryOptions) bool {
+func projectedRunDebugTraceRowStillMatches(row operatorread.RunDebugTraceRow, opts operatorread.RunDebugTraceQueryOptions) bool {
 	if opts.ExcludeRuntimeLogs && row.EventName == "platform.runtime_log" {
 		return false
 	}
@@ -385,7 +386,7 @@ func traceStringAllowed(value string, allowed []string) bool {
 	return false
 }
 
-func appendProjectedTraceRow(out []RunDebugTraceRow, event RunDebugTraceRow, snapshot runtimedelivery.Snapshot, turn runDebugTraceTurn, sessions map[string]runDebugTraceSession) []RunDebugTraceRow {
+func appendProjectedTraceRow(out []operatorread.RunDebugTraceRow, event operatorread.RunDebugTraceRow, snapshot runtimedelivery.Snapshot, turn runDebugTraceTurn, sessions map[string]runDebugTraceSession) []operatorread.RunDebugTraceRow {
 	row := event
 	if snapshot.DeliveryID != "" {
 		row.DeliveryID = snapshot.DeliveryID

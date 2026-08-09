@@ -11,57 +11,11 @@ import (
 	"strings"
 	"time"
 
+	bundlecatalogcontract "github.com/division-sh/swarm/internal/bundlecatalog"
+
 	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
 	"gopkg.in/yaml.v3"
 )
-
-type BundleCatalogListOptions struct {
-	Limit  int
-	Cursor string
-}
-
-type BundleCatalogListResult struct {
-	Bundles    []BundleCatalogSummary `json:"bundles"`
-	NextCursor string                 `json:"next_cursor,omitempty"`
-}
-
-type BundleCatalogSummary struct {
-	BundleHash    string         `json:"bundle_hash"`
-	AgentCount    int            `json:"agent_count"`
-	HasData       bool           `json:"has_data"`
-	DataSizeBytes int64          `json:"data_size_bytes"`
-	Metadata      map[string]any `json:"metadata"`
-	IngestedAt    time.Time      `json:"ingested_at"`
-}
-
-type BundleCatalogDetail struct {
-	BundleHash    string         `json:"bundle_hash"`
-	ContentYAML   string         `json:"content_yaml"`
-	ParsedJSON    map[string]any `json:"parsed_json"`
-	Metadata      map[string]any `json:"metadata"`
-	AgentCount    int            `json:"agent_count"`
-	HasData       bool           `json:"has_data"`
-	DataSizeBytes int64          `json:"data_size_bytes"`
-	IngestedAt    time.Time      `json:"ingested_at"`
-}
-
-type BundleCatalogAgentsResult struct {
-	Agents []BundleCatalogAgentDefinition `json:"agents"`
-}
-
-type BundleCatalogAgentDefinition struct {
-	AgentID       string   `json:"agent_id"`
-	FlowInstance  string   `json:"flow_instance,omitempty"`
-	Role          string   `json:"role,omitempty"`
-	Type          string   `json:"type,omitempty"`
-	Model         string   `json:"model,omitempty"`
-	LLMBackend    string   `json:"llm_backend,omitempty"`
-	Memory        bool     `json:"memory"`
-	MemorySource  string   `json:"memory_source"`
-	PromptPath    string   `json:"prompt_path,omitempty"`
-	Subscriptions []string `json:"subscriptions,omitempty"`
-	Tools         []string `json:"tools,omitempty"`
-}
 
 type bundleCatalogCursor struct {
 	IngestedAt string `json:"ingested_at"`
@@ -78,7 +32,7 @@ type bundleCatalogRow struct {
 	IngestedAt    time.Time
 }
 
-func defaultBundleCatalogListOptions(opts BundleCatalogListOptions) BundleCatalogListOptions {
+func defaultBundleCatalogListOptions(opts bundlecatalogcontract.ListOptions) bundlecatalogcontract.ListOptions {
 	opts.Cursor = strings.TrimSpace(opts.Cursor)
 	if opts.Limit <= 0 {
 		opts.Limit = 50
@@ -93,9 +47,9 @@ func (s *Postgres) requireBundleCatalogAccess() error {
 	return s.requireCurrentSchema()
 }
 
-func (s *Postgres) ListBundleCatalog(ctx context.Context, opts BundleCatalogListOptions) (BundleCatalogListResult, error) {
+func (s *Postgres) ListBundleCatalog(ctx context.Context, opts bundlecatalogcontract.ListOptions) (bundlecatalogcontract.ListResult, error) {
 	if err := s.requireBundleCatalogAccess(); err != nil {
-		return BundleCatalogListResult{}, err
+		return bundlecatalogcontract.ListResult{}, err
 	}
 	opts = defaultBundleCatalogListOptions(opts)
 	args := make([]any, 0, 3)
@@ -103,7 +57,7 @@ func (s *Postgres) ListBundleCatalog(ctx context.Context, opts BundleCatalogList
 	if opts.Cursor != "" {
 		ingestedAt, bundleHash, err := decodeBundleCatalogCursor(opts.Cursor)
 		if err != nil {
-			return BundleCatalogListResult{}, err
+			return bundlecatalogcontract.ListResult{}, err
 		}
 		args = append(args, ingestedAt.UTC(), bundleHash)
 		where = append(where, fmt.Sprintf("(ingested_at < $%d OR (ingested_at = $%d AND bundle_hash < $%d))", len(args)-1, len(args)-1, len(args)))
@@ -124,21 +78,21 @@ func (s *Postgres) ListBundleCatalog(ctx context.Context, opts BundleCatalogList
 		LIMIT $%d
 	`, strings.Join(where, " AND "), len(args)), args...)
 	if err != nil {
-		return BundleCatalogListResult{}, fmt.Errorf("list bundle catalog: %w", err)
+		return bundlecatalogcontract.ListResult{}, fmt.Errorf("list bundle catalog: %w", err)
 	}
 	defer rows.Close()
 
-	bundles := make([]BundleCatalogSummary, 0, opts.Limit)
+	bundles := make([]bundlecatalogcontract.Summary, 0, opts.Limit)
 	for rows.Next() {
 		row, err := scanBundleCatalogRow(rows)
 		if err != nil {
-			return BundleCatalogListResult{}, err
+			return bundlecatalogcontract.ListResult{}, err
 		}
 		detail, err := row.toDetail()
 		if err != nil {
-			return BundleCatalogListResult{}, err
+			return bundlecatalogcontract.ListResult{}, err
 		}
-		bundles = append(bundles, BundleCatalogSummary{
+		bundles = append(bundles, bundlecatalogcontract.Summary{
 			BundleHash:    detail.BundleHash,
 			AgentCount:    detail.AgentCount,
 			HasData:       detail.HasData,
@@ -148,7 +102,7 @@ func (s *Postgres) ListBundleCatalog(ctx context.Context, opts BundleCatalogList
 		})
 	}
 	if err := rows.Err(); err != nil {
-		return BundleCatalogListResult{}, fmt.Errorf("read bundle catalog: %w", err)
+		return bundlecatalogcontract.ListResult{}, fmt.Errorf("read bundle catalog: %w", err)
 	}
 
 	nextCursor := ""
@@ -157,18 +111,18 @@ func (s *Postgres) ListBundleCatalog(ctx context.Context, opts BundleCatalogList
 		nextCursor = encodeBundleCatalogCursor(bundles[len(bundles)-1])
 	}
 	if bundles == nil {
-		bundles = []BundleCatalogSummary{}
+		bundles = []bundlecatalogcontract.Summary{}
 	}
-	return BundleCatalogListResult{Bundles: bundles, NextCursor: nextCursor}, nil
+	return bundlecatalogcontract.ListResult{Bundles: bundles, NextCursor: nextCursor}, nil
 }
 
-func (s *Postgres) LoadBundleCatalog(ctx context.Context, bundleHash string) (BundleCatalogDetail, error) {
+func (s *Postgres) LoadBundleCatalog(ctx context.Context, bundleHash string) (bundlecatalogcontract.Detail, error) {
 	if err := s.requireBundleCatalogAccess(); err != nil {
-		return BundleCatalogDetail{}, err
+		return bundlecatalogcontract.Detail{}, err
 	}
 	bundleHash = strings.TrimSpace(bundleHash)
 	if bundleHash == "" {
-		return BundleCatalogDetail{}, ErrBundleNotFound
+		return bundlecatalogcontract.Detail{}, bundlecatalogcontract.ErrNotFound
 	}
 	row := s.backend.QueryRowContext(ctx, `
 		SELECT
@@ -184,10 +138,10 @@ func (s *Postgres) LoadBundleCatalog(ctx context.Context, bundleHash string) (Bu
 	`, bundleHash)
 	scanned, err := scanBundleCatalogRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return BundleCatalogDetail{}, ErrBundleNotFound
+		return bundlecatalogcontract.Detail{}, bundlecatalogcontract.ErrNotFound
 	}
 	if err != nil {
-		return BundleCatalogDetail{}, err
+		return bundlecatalogcontract.Detail{}, err
 	}
 	return scanned.toDetail()
 }
@@ -225,19 +179,19 @@ func (s *Postgres) LoadBundleCatalogRuntimeRecord(ctx context.Context, bundleHas
 	return out, nil
 }
 
-func (s *Postgres) ListBundleCatalogAgents(ctx context.Context, bundleHash string) (BundleCatalogAgentsResult, error) {
+func (s *Postgres) ListBundleCatalogAgents(ctx context.Context, bundleHash string) (bundlecatalogcontract.AgentsResult, error) {
 	detail, err := s.LoadBundleCatalog(ctx, bundleHash)
 	if err != nil {
-		return BundleCatalogAgentsResult{}, err
+		return bundlecatalogcontract.AgentsResult{}, err
 	}
 	agents, err := projectBundleCatalogAgents(detail.ParsedJSON, detail.ContentYAML)
 	if err != nil {
-		return BundleCatalogAgentsResult{}, err
+		return bundlecatalogcontract.AgentsResult{}, err
 	}
 	if agents == nil {
-		agents = []BundleCatalogAgentDefinition{}
+		agents = []bundlecatalogcontract.AgentDefinition{}
 	}
-	return BundleCatalogAgentsResult{Agents: agents}, nil
+	return bundlecatalogcontract.AgentsResult{Agents: agents}, nil
 }
 
 type bundleCatalogScanner interface {
@@ -262,20 +216,20 @@ func scanBundleCatalogRow(row bundleCatalogScanner) (bundleCatalogRow, error) {
 	return out, nil
 }
 
-func (r bundleCatalogRow) toDetail() (BundleCatalogDetail, error) {
+func (r bundleCatalogRow) toDetail() (bundlecatalogcontract.Detail, error) {
 	parsed, err := decodeBundleCatalogJSONMap(r.ParsedJSONRaw, "parsed_json")
 	if err != nil {
-		return BundleCatalogDetail{}, err
+		return bundlecatalogcontract.Detail{}, err
 	}
 	metadata, err := decodeBundleCatalogJSONMap(r.MetadataRaw, "metadata")
 	if err != nil {
-		return BundleCatalogDetail{}, err
+		return bundlecatalogcontract.Detail{}, err
 	}
 	agents, err := projectBundleCatalogAgents(parsed, r.ContentYAML)
 	if err != nil {
-		return BundleCatalogDetail{}, err
+		return bundlecatalogcontract.Detail{}, err
 	}
-	return BundleCatalogDetail{
+	return bundlecatalogcontract.Detail{
 		BundleHash:    r.BundleHash,
 		ContentYAML:   r.ContentYAML,
 		ParsedJSON:    parsed,
@@ -302,7 +256,7 @@ func decodeBundleCatalogJSONMap(raw []byte, field string) (map[string]any, error
 	return out, nil
 }
 
-func encodeBundleCatalogCursor(summary BundleCatalogSummary) string {
+func encodeBundleCatalogCursor(summary bundlecatalogcontract.Summary) string {
 	raw, _ := json.Marshal(bundleCatalogCursor{
 		IngestedAt: summary.IngestedAt.UTC().Format(time.RFC3339Nano),
 		BundleHash: strings.TrimSpace(summary.BundleHash),
@@ -313,24 +267,24 @@ func encodeBundleCatalogCursor(summary BundleCatalogSummary) string {
 func decodeBundleCatalogCursor(cursor string) (time.Time, string, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(cursor))
 	if err != nil {
-		return time.Time{}, "", ErrInvalidBundleCatalogCursor
+		return time.Time{}, "", bundlecatalogcontract.ErrInvalidCursor
 	}
 	var decoded bundleCatalogCursor
 	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return time.Time{}, "", ErrInvalidBundleCatalogCursor
+		return time.Time{}, "", bundlecatalogcontract.ErrInvalidCursor
 	}
 	ingestedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(decoded.IngestedAt))
 	if err != nil {
-		return time.Time{}, "", ErrInvalidBundleCatalogCursor
+		return time.Time{}, "", bundlecatalogcontract.ErrInvalidCursor
 	}
 	bundleHash := strings.TrimSpace(decoded.BundleHash)
 	if bundleHash == "" {
-		return time.Time{}, "", ErrInvalidBundleCatalogCursor
+		return time.Time{}, "", bundlecatalogcontract.ErrInvalidCursor
 	}
 	return ingestedAt.UTC(), bundleHash, nil
 }
 
-func projectBundleCatalogAgents(parsed map[string]any, contentYAML string) ([]BundleCatalogAgentDefinition, error) {
+func projectBundleCatalogAgents(parsed map[string]any, contentYAML string) ([]bundlecatalogcontract.AgentDefinition, error) {
 	if len(parsed) > 0 {
 		agents, found, err := extractBundleCatalogAgents(parsed)
 		if err != nil {
@@ -342,7 +296,7 @@ func projectBundleCatalogAgents(parsed map[string]any, contentYAML string) ([]Bu
 	}
 	contentYAML = strings.TrimSpace(contentYAML)
 	if contentYAML == "" {
-		return []BundleCatalogAgentDefinition{}, nil
+		return []bundlecatalogcontract.AgentDefinition{}, nil
 	}
 	var decoded any
 	if err := yaml.Unmarshal([]byte(contentYAML), &decoded); err != nil {
@@ -359,8 +313,8 @@ func projectBundleCatalogAgents(parsed map[string]any, contentYAML string) ([]Bu
 	return agents, nil
 }
 
-func extractBundleCatalogAgents(root map[string]any) ([]BundleCatalogAgentDefinition, bool, error) {
-	var out []BundleCatalogAgentDefinition
+func extractBundleCatalogAgents(root map[string]any) ([]bundlecatalogcontract.AgentDefinition, bool, error) {
+	var out []bundlecatalogcontract.AgentDefinition
 	found := false
 	if raw, ok := root["agents"]; ok {
 		found = true
@@ -385,12 +339,12 @@ func extractBundleCatalogAgents(root map[string]any) ([]BundleCatalogAgentDefini
 		return out[i].AgentID < out[j].AgentID
 	})
 	if out == nil {
-		out = []BundleCatalogAgentDefinition{}
+		out = []bundlecatalogcontract.AgentDefinition{}
 	}
 	return out, found, nil
 }
 
-func extractBundleCatalogFlowAgents(raw any) ([]BundleCatalogAgentDefinition, error) {
+func extractBundleCatalogFlowAgents(raw any) ([]bundlecatalogcontract.AgentDefinition, error) {
 	switch flows := raw.(type) {
 	case map[string]any:
 		names := make([]string, 0, len(flows))
@@ -398,7 +352,7 @@ func extractBundleCatalogFlowAgents(raw any) ([]BundleCatalogAgentDefinition, er
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		var out []BundleCatalogAgentDefinition
+		var out []bundlecatalogcontract.AgentDefinition
 		for _, name := range names {
 			flow, ok := flows[name].(map[string]any)
 			if !ok {
@@ -416,7 +370,7 @@ func extractBundleCatalogFlowAgents(raw any) ([]BundleCatalogAgentDefinition, er
 		}
 		return out, nil
 	case []any:
-		var out []BundleCatalogAgentDefinition
+		var out []bundlecatalogcontract.AgentDefinition
 		for i, item := range flows {
 			flow, ok := item.(map[string]any)
 			if !ok {
@@ -439,7 +393,7 @@ func extractBundleCatalogFlowAgents(raw any) ([]BundleCatalogAgentDefinition, er
 	}
 }
 
-func extractBundleCatalogAgentCollection(raw any, flowInstance string) ([]BundleCatalogAgentDefinition, error) {
+func extractBundleCatalogAgentCollection(raw any, flowInstance string) ([]bundlecatalogcontract.AgentDefinition, error) {
 	switch agents := raw.(type) {
 	case map[string]any:
 		names := make([]string, 0, len(agents))
@@ -447,7 +401,7 @@ func extractBundleCatalogAgentCollection(raw any, flowInstance string) ([]Bundle
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		out := make([]BundleCatalogAgentDefinition, 0, len(names))
+		out := make([]bundlecatalogcontract.AgentDefinition, 0, len(names))
 		for _, name := range names {
 			def, ok := agents[name].(map[string]any)
 			if !ok {
@@ -461,7 +415,7 @@ func extractBundleCatalogAgentCollection(raw any, flowInstance string) ([]Bundle
 		}
 		return out, nil
 	case []any:
-		out := make([]BundleCatalogAgentDefinition, 0, len(agents))
+		out := make([]bundlecatalogcontract.AgentDefinition, 0, len(agents))
 		for i, item := range agents {
 			def, ok := item.(map[string]any)
 			if !ok {
@@ -479,10 +433,10 @@ func extractBundleCatalogAgentCollection(raw any, flowInstance string) ([]Bundle
 	}
 }
 
-func projectBundleCatalogAgentDefinition(agentID, flowInstance string, def map[string]any) (BundleCatalogAgentDefinition, error) {
+func projectBundleCatalogAgentDefinition(agentID, flowInstance string, def map[string]any) (bundlecatalogcontract.AgentDefinition, error) {
 	for key := range def {
 		if bundleCatalogRuntimeAgentFields[key] {
-			return BundleCatalogAgentDefinition{}, fmt.Errorf("bundle catalog agents projection failed: runtime field %q is not allowed", key)
+			return bundlecatalogcontract.AgentDefinition{}, fmt.Errorf("bundle catalog agents projection failed: runtime field %q is not allowed", key)
 		}
 	}
 	if agentID == "" {
@@ -490,20 +444,20 @@ func projectBundleCatalogAgentDefinition(agentID, flowInstance string, def map[s
 	}
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
-		return BundleCatalogAgentDefinition{}, fmt.Errorf("bundle catalog agents projection failed: agent_id is required")
+		return bundlecatalogcontract.AgentDefinition{}, fmt.Errorf("bundle catalog agents projection failed: agent_id is required")
 	}
 	if flowInstance == "" {
 		flowInstance = stringFromMap(def, "flow_instance")
 	}
 	subscriptions, err := optionalStringListFromMap(def, "subscriptions")
 	if err != nil {
-		return BundleCatalogAgentDefinition{}, err
+		return bundlecatalogcontract.AgentDefinition{}, err
 	}
 	tools, err := optionalStringListFromMap(def, "tools")
 	if err != nil {
-		return BundleCatalogAgentDefinition{}, err
+		return bundlecatalogcontract.AgentDefinition{}, err
 	}
-	return BundleCatalogAgentDefinition{
+	return bundlecatalogcontract.AgentDefinition{
 		AgentID:       agentID,
 		FlowInstance:  strings.TrimSpace(flowInstance),
 		Role:          stringFromMap(def, "role"),

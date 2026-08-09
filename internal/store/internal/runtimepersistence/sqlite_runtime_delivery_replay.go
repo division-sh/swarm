@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 )
 
@@ -47,12 +48,12 @@ func (s *SQLiteRuntimeStore) ListEventDeliveryRoutes(ctx context.Context, eventI
 	return events.NormalizeDeliveryRoutes(out), nil
 }
 
-func (s *SQLiteRuntimeStore) ListPendingAgentDeliveryFacts(ctx context.Context, identities []agentidentity.Identity, since time.Time) (map[agentidentity.Identity]PendingAgentDeliveryFacts, error) {
-	return s.operatorSQLite.ListPendingAgentDeliveryFacts(ctx, identities, since)
+func (s *SQLiteRuntimeStore) ListPendingAgentDeliveryFacts(ctx context.Context, identities []agentidentity.Identity, since time.Time) (map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts, error) {
+	return s.operatorAgentSQLite.ListPendingAgentDeliveryFacts(ctx, identities, since)
 }
 
-func (s *SQLiteRuntimeStore) ListPendingAgentDeliveryDetails(ctx context.Context, opts PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error) {
-	return s.operatorSQLite.ListPendingAgentDeliveryDetails(ctx, opts)
+func (s *SQLiteRuntimeStore) ListPendingAgentDeliveryDetails(ctx context.Context, opts operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryPage, error) {
+	return s.operatorAgentSQLite.ListPendingAgentDeliveryDetails(ctx, opts)
 }
 
 func sqliteJSONRawMessage(raw any) json.RawMessage {

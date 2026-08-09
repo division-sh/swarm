@@ -9,10 +9,11 @@ import (
 	"sync"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -31,16 +32,17 @@ type SubscriptionRuntimeOptions struct {
 }
 
 type SubscriptionRuntime struct {
-	now            func() time.Time
-	ready          func() bool
-	database       Pinger
-	observability  ObservabilityReadStore
-	decisionCards  decisioncard.Store
-	bundle         runtimecontracts.BundleIdentity
-	pollInterval   time.Duration
-	healthInterval time.Duration
-	queueSize      int
-	workOwner      *worklifetime.Process
+	now             func() time.Time
+	ready           func() bool
+	database        Pinger
+	observability   ObservabilityReadStore
+	decisionCards   decisioncard.Store
+	proposedEffects decisioncard.ProposedEffectStore
+	bundle          runtimecontracts.BundleIdentity
+	pollInterval    time.Duration
+	healthInterval  time.Duration
+	queueSize       int
+	workOwner       *worklifetime.Process
 }
 
 type subscriptionIDResult struct {
@@ -126,7 +128,7 @@ type runtimeLogSubscriptionState struct {
 	seen  map[string]string
 }
 
-func OperatorSubscriptions(opts OperatorReadOptions, overrides ...SubscriptionRuntimeOptions) *SubscriptionRuntime {
+func OperatorSubscriptions(opts SubscriptionOptions, overrides ...SubscriptionRuntimeOptions) *SubscriptionRuntime {
 	now := opts.Now
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
@@ -136,12 +138,13 @@ func OperatorSubscriptions(opts OperatorReadOptions, overrides ...SubscriptionRu
 		ready = func() bool { return false }
 	}
 	out := &SubscriptionRuntime{
-		now:           now,
-		ready:         ready,
-		database:      opts.Database,
-		observability: opts.Observability,
-		decisionCards: opts.DecisionCards,
-		bundle:        opts.Bundle,
+		now:             now,
+		ready:           ready,
+		database:        opts.Database,
+		observability:   opts.Observability,
+		decisionCards:   opts.DecisionCards,
+		proposedEffects: opts.ProposedEffects,
+		bundle:          opts.Bundle,
 	}
 	if len(overrides) > 0 {
 		out.pollInterval = overrides[0].PollInterval
@@ -283,9 +286,9 @@ func (r *SubscriptionRuntime) prepareRunTraceSubscription(session *webSocketSess
 		return subscriptionPlan{}, err
 	}
 	baseSince := subscriptionBaseSince(replaySince, r.now())
-	if _, _, err := reads.LoadRunDebugTracePage(session.ctx, runID, store.RunDebugTraceQueryOptions{Limit: 1, Since: baseSince, Filter: filter, ExcludeRuntimeLogs: !includeInternal}); errors.Is(err, store.ErrRunNotFound) {
+	if _, _, err := reads.LoadRunDebugTracePage(session.ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 1, Since: baseSince, Filter: filter, ExcludeRuntimeLogs: !includeInternal}); errors.Is(err, operatorread.ErrRunNotFound) {
 		return subscriptionPlan{}, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": runID})
-	} else if errors.Is(err, store.ErrInvalidObservabilityCursor) {
+	} else if errors.Is(err, operatorread.ErrInvalidObservabilityCursor) {
 		return subscriptionPlan{}, NewInvalidParamsError(map[string]any{"field": "replay_since", "reason": "invalid run trace replay watermark"})
 	} else if err != nil {
 		return subscriptionPlan{}, err
@@ -330,7 +333,7 @@ func (r *SubscriptionRuntime) prepareRuntimeLogSubscription(session *webSocketSe
 	}, nil
 }
 
-func runtimeLogSubscriptionOptionsFromParams(params map[string]any) (store.OperatorRuntimeLogListOptions, *time.Time, error) {
+func runtimeLogSubscriptionOptionsFromParams(params map[string]any) (operatorread.OperatorRuntimeLogListOptions, *time.Time, error) {
 	allowed := map[string]struct{}{
 		"run_id":       {},
 		"bundle_hash":  {},
@@ -344,38 +347,38 @@ func runtimeLogSubscriptionOptionsFromParams(params map[string]any) (store.Opera
 	}
 	for name := range params {
 		if _, ok := allowed[name]; !ok {
-			return store.OperatorRuntimeLogListOptions{}, nil, NewInvalidParamsError(map[string]any{"field": name, "reason": "unknown parameter"})
+			return operatorread.OperatorRuntimeLogListOptions{}, nil, NewInvalidParamsError(map[string]any{"field": name, "reason": "unknown parameter"})
 		}
 	}
-	out := store.OperatorRuntimeLogListOptions{}
+	out := operatorread.OperatorRuntimeLogListOptions{}
 	var err error
 	if out.RunID, _, err = optionalStringParam(params, "run_id"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, nil, err
+		return operatorread.OperatorRuntimeLogListOptions{}, nil, err
 	}
 	if out.BundleHash, err = optionalBundleHashParam(params, "bundle_hash"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, nil, err
+		return operatorread.OperatorRuntimeLogListOptions{}, nil, err
 	}
 	if out.EntityID, _, err = optionalStringParam(params, "entity_id"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, nil, err
+		return operatorread.OperatorRuntimeLogListOptions{}, nil, err
 	}
 	if out.SessionID, _, err = optionalStringParam(params, "session_id"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, nil, err
+		return operatorread.OperatorRuntimeLogListOptions{}, nil, err
 	}
 	if out.Component, _, err = optionalStringParam(params, "component"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, nil, err
+		return operatorread.OperatorRuntimeLogListOptions{}, nil, err
 	}
 	if out.Level, _, err = optionalStringParam(params, "level"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, nil, err
+		return operatorread.OperatorRuntimeLogListOptions{}, nil, err
 	}
 	if out.ErrorCode, _, err = optionalStringParam(params, "error_code"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, nil, err
+		return operatorread.OperatorRuntimeLogListOptions{}, nil, err
 	}
 	if out.Source, _, err = optionalStringParam(params, "source"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, nil, err
+		return operatorread.OperatorRuntimeLogListOptions{}, nil, err
 	}
 	replaySince, err := timestampParam(params, "replay_since")
 	if err != nil {
-		return store.OperatorRuntimeLogListOptions{}, nil, err
+		return operatorread.OperatorRuntimeLogListOptions{}, nil, err
 	}
 	return out, replaySince, nil
 }
@@ -414,7 +417,7 @@ func (r *SubscriptionRuntime) runHealthSubscription(ctx context.Context, session
 	}
 }
 
-func (r *SubscriptionRuntime) runEventSubscription(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, filter store.OperatorEventListFilter, since *time.Time) {
+func (r *SubscriptionRuntime) runEventSubscription(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, filter operatorread.OperatorEventListFilter, since *time.Time) {
 	seen := map[string]string{}
 	if !r.emitEventNotifications(ctx, session, subscriptionID, reads, filter, since, seen) {
 		return
@@ -478,11 +481,10 @@ func (r *SubscriptionRuntime) decisionCardChangeProjection(ctx context.Context, 
 	if card.Anchor.Kind() != decisioncard.AnchorKindProposedEffect {
 		return change, nil
 	}
-	store, ok := r.decisionCards.(decisioncard.ProposedEffectStore)
-	if !ok || store == nil {
+	if r.proposedEffects == nil {
 		return nil, fmt.Errorf("proposed-effect subscription readback store is not configured")
 	}
-	effect, err := store.ProposedEffectReadback(ctx, change.CardID)
+	effect, err := r.proposedEffects.ProposedEffectReadback(ctx, change.CardID)
 	if err != nil {
 		return nil, err
 	}
@@ -493,10 +495,10 @@ func (r *SubscriptionRuntime) decisionCardChangeProjection(ctx context.Context, 
 	}, nil
 }
 
-func (r *SubscriptionRuntime) emitEventNotifications(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, filter store.OperatorEventListFilter, since *time.Time, seen map[string]string) bool {
+func (r *SubscriptionRuntime) emitEventNotifications(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, filter operatorread.OperatorEventListFilter, since *time.Time, seen map[string]string) bool {
 	cursor := ""
 	for page := 0; page < subscriptionMaxPages; page++ {
-		result, err := reads.ListOperatorEvents(ctx, store.OperatorEventListOptions{
+		result, err := reads.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{
 			Filter: filter,
 			Since:  since,
 			Limit:  subscriptionBatchLimit,
@@ -530,7 +532,7 @@ func (r *SubscriptionRuntime) emitEventNotifications(ctx context.Context, sessio
 	return false
 }
 
-func (r *SubscriptionRuntime) runTraceSubscription(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, runID string, since *time.Time, filter store.RunDebugTraceFilter, includeInternal bool) {
+func (r *SubscriptionRuntime) runTraceSubscription(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, runID string, since *time.Time, filter operatorread.RunDebugTraceFilter, includeInternal bool) {
 	seen := map[string]string{}
 	if !r.emitTraceNotifications(ctx, session, subscriptionID, reads, runID, since, filter, includeInternal, seen) {
 		return
@@ -549,10 +551,10 @@ func (r *SubscriptionRuntime) runTraceSubscription(ctx context.Context, session 
 	}
 }
 
-func (r *SubscriptionRuntime) emitTraceNotifications(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, runID string, since *time.Time, filter store.RunDebugTraceFilter, includeInternal bool, seen map[string]string) bool {
+func (r *SubscriptionRuntime) emitTraceNotifications(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, runID string, since *time.Time, filter operatorread.RunDebugTraceFilter, includeInternal bool, seen map[string]string) bool {
 	cursor := ""
 	for page := 0; page < subscriptionMaxPages; page++ {
-		rows, nextCursor, err := reads.LoadRunDebugTracePage(ctx, runID, store.RunDebugTraceQueryOptions{
+		rows, nextCursor, err := reads.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{
 			Limit:              subscriptionBatchLimit,
 			Cursor:             cursor,
 			Since:              since,
@@ -583,7 +585,7 @@ func (r *SubscriptionRuntime) emitTraceNotifications(ctx context.Context, sessio
 	return false
 }
 
-func (r *SubscriptionRuntime) runRuntimeLogSubscription(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, opts store.OperatorRuntimeLogListOptions) {
+func (r *SubscriptionRuntime) runRuntimeLogSubscription(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, opts operatorread.OperatorRuntimeLogListOptions) {
 	state := &runtimeLogSubscriptionState{
 		since: opts.Since,
 		seen:  map[string]string{},
@@ -605,7 +607,7 @@ func (r *SubscriptionRuntime) runRuntimeLogSubscription(ctx context.Context, ses
 	}
 }
 
-func (r *SubscriptionRuntime) emitRuntimeLogNotifications(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, opts store.OperatorRuntimeLogListOptions, state *runtimeLogSubscriptionState) bool {
+func (r *SubscriptionRuntime) emitRuntimeLogNotifications(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, opts operatorread.OperatorRuntimeLogListOptions, state *runtimeLogSubscriptionState) bool {
 	if state == nil {
 		state = &runtimeLogSubscriptionState{}
 	}
@@ -699,7 +701,7 @@ func subscriptionBaseSince(replaySince *time.Time, now time.Time) *time.Time {
 	return &value
 }
 
-func runTraceSubscriptionKey(row store.RunDebugTraceRow) string {
+func runTraceSubscriptionKey(row operatorread.RunDebugTraceRow) string {
 	parts := []string{
 		strings.TrimSpace(row.EventID),
 		strings.TrimSpace(row.DeliveryID),

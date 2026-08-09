@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -16,7 +15,7 @@ import (
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 )
 
-var ErrEventIdentityConflict = errors.New("event identity conflict")
+var ErrEventIdentityConflict = events.ErrEventIdentityConflict
 
 type eventIdentityConflictError struct{ EventID string }
 

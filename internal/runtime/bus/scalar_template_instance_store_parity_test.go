@@ -184,7 +184,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producerEntityID}),
 				eventTime,
 			)
-			if err := eventBus.Publish(ctx, conflicting); !errors.Is(err, store.ErrEventIdentityConflict) {
+			if err := eventBus.Publish(ctx, conflicting); !errors.Is(err, events.ErrEventIdentityConflict) {
 				t.Fatalf("Publish conflicting duplicate error = %v, want event identity conflict", err)
 			}
 			if calls := selected.scalarTemplateInstanceDescriptorCalls(); calls != 0 {

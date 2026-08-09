@@ -2,22 +2,18 @@ package apiv1
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"strings"
 	"time"
 
-	swruntime "github.com/division-sh/swarm/internal/runtime"
-	"github.com/division-sh/swarm/internal/runtime/bundledelete"
+	"github.com/division-sh/swarm/internal/bundlecatalog"
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 type Pinger interface {
@@ -25,23 +21,23 @@ type Pinger interface {
 }
 
 type RunReadStore interface {
-	LoadRunHeader(context.Context, string) (store.RunHeader, error)
-	ListRunHeaders(context.Context, store.RunHeaderListOptions) ([]store.RunHeader, string, error)
-	LoadRunDebugReport(context.Context, string, store.RunDebugQueryOptions) (store.RunDebugReport, error)
+	LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
+	ListRunHeaders(context.Context, operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error)
+	LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
 }
 
 type ObservabilityReadStore interface {
-	LoadRunDebugTracePage(context.Context, string, store.RunDebugTraceQueryOptions) ([]store.RunDebugTraceRow, string, error)
-	ListOperatorEvents(context.Context, store.OperatorEventListOptions) (store.OperatorEventListResult, error)
-	LoadOperatorEvent(context.Context, string) (store.OperatorEventFull, error)
-	ListOperatorRuntimeLogs(context.Context, store.OperatorRuntimeLogListOptions) (store.OperatorRuntimeLogListResult, error)
-	ListOperatorRuntimeIncidents(context.Context, store.OperatorRuntimeIncidentListOptions) (store.OperatorRuntimeIncidentListResult, error)
+	LoadRunDebugTracePage(context.Context, string, operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, string, error)
+	ListOperatorEvents(context.Context, operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error)
+	LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
+	ListOperatorRuntimeLogs(context.Context, operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error)
+	ListOperatorRuntimeIncidents(context.Context, operatorread.OperatorRuntimeIncidentListOptions) (operatorread.OperatorRuntimeIncidentListResult, error)
 }
 
 type EntityReadStore interface {
-	ListOperatorEntities(context.Context, store.OperatorEntityListOptions) (store.OperatorEntityListResult, error)
-	LoadOperatorEntity(context.Context, string, string) (store.OperatorEntityFull, error)
-	AggregateOperatorEntities(context.Context, store.OperatorEntityAggregateOptions) (store.OperatorEntityAggregateResult, error)
+	ListOperatorEntities(context.Context, operatorread.OperatorEntityListOptions) (operatorread.OperatorEntityListResult, error)
+	LoadOperatorEntity(context.Context, string, string) (operatorread.OperatorEntityFull, error)
+	AggregateOperatorEntities(context.Context, operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateResult, error)
 }
 
 type AgentIdentityResolver interface {
@@ -50,92 +46,29 @@ type AgentIdentityResolver interface {
 
 type AgentConversationReadStore interface {
 	AgentIdentityResolver
-	ListOperatorAgents(context.Context, store.OperatorAgentListOptions) (store.OperatorAgentListResult, error)
-	LoadOperatorAgent(context.Context, agentidentity.Identity) (store.OperatorAgentDetail, error)
-	LoadOperatorAgentDiagnosis(context.Context, agentidentity.Identity, store.OperatorAgentDiagnosisOptions) (store.OperatorAgentDiagnosis, error)
-	LoadOperatorAgentDeliveryDiagnostics(context.Context, agentidentity.Identity, store.OperatorAgentDeliveryDiagnosticsOptions) (store.OperatorAgentDeliveryDiagnostics, error)
-	ListOperatorConversations(context.Context, store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
-	ListOperatorConversationTurns(context.Context, store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error)
-	LoadOperatorPublicConversationTurn(context.Context, string, string) (store.OperatorPublicConversationTurnDetail, error)
+	ListOperatorAgents(context.Context, operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error)
+	LoadOperatorAgent(context.Context, agentidentity.Identity) (operatorread.OperatorAgentDetail, error)
+	LoadOperatorAgentDiagnosis(context.Context, agentidentity.Identity, operatorread.OperatorAgentDiagnosisOptions) (operatorread.OperatorAgentDiagnosis, error)
+	LoadOperatorAgentDeliveryDiagnostics(context.Context, agentidentity.Identity, operatorread.OperatorAgentDeliveryDiagnosticsOptions) (operatorread.OperatorAgentDeliveryDiagnostics, error)
+	ListOperatorConversations(context.Context, operatorread.OperatorConversationListOptions) (operatorread.OperatorConversationListResult, error)
+	ListOperatorConversationTurns(context.Context, operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error)
+	LoadOperatorPublicConversationTurn(context.Context, string, string) (operatorread.OperatorPublicConversationTurnDetail, error)
 }
 
 type AgentDeliveryLifecycleReadStore interface {
 	AgentIdentityResolver
-	LoadOperatorAgentDeliveryLifecycle(context.Context, agentidentity.Identity, store.OperatorAgentDeliveryLifecycleOptions) (store.OperatorAgentDeliveryLifecycleList, error)
+	LoadOperatorAgentDeliveryLifecycle(context.Context, agentidentity.Identity, operatorread.OperatorAgentDeliveryLifecycleOptions) (operatorread.OperatorAgentDeliveryLifecycleList, error)
 }
 
 type AgentUsageReadStore interface {
 	AgentIdentityResolver
-	LoadOperatorAgentUsage(context.Context, agentidentity.Identity, store.OperatorAgentUsageOptions) (store.OperatorAgentUsage, error)
+	LoadOperatorAgentUsage(context.Context, agentidentity.Identity, operatorread.OperatorAgentUsageOptions) (operatorread.OperatorAgentUsage, error)
 }
 
 type BundleCatalogReadStore interface {
-	ListBundleCatalog(context.Context, store.BundleCatalogListOptions) (store.BundleCatalogListResult, error)
-	LoadBundleCatalog(context.Context, string) (store.BundleCatalogDetail, error)
-	ListBundleCatalogAgents(context.Context, string) (store.BundleCatalogAgentsResult, error)
-}
-
-type BundleDeleteExecutor interface {
-	Execute(context.Context, bundledelete.Request) (bundledelete.Result, error)
-}
-
-type TestSetupStore interface {
-	SetupScenarioEntities(context.Context, store.ScenarioSetupRequest) (store.ScenarioSetupResult, error)
-}
-
-type DecisionCardAuthority interface {
-	CommitDecisionCardMutation(
-		context.Context,
-		runtimepipeline.DecisionCardMutationIdempotency,
-		runtimepipeline.DecisionCardMutationIdempotencyRequest,
-		runtimepipeline.DecisionCardMutation,
-	) (json.RawMessage, bool, error)
-}
-
-type StandingServiceController interface {
-	SuspendStandingService(context.Context, runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error)
-	ResumeStandingService(context.Context, runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error)
-	ResetStandingService(context.Context, runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error)
-}
-
-type OperatorReadOptions struct {
-	Now                       func() time.Time
-	Ready                     func() bool
-	RepoRoot                  string
-	PlatformSpecPath          string
-	Database                  Pinger
-	Runs                      RunReadStore
-	Observability             ObservabilityReadStore
-	Entities                  EntityReadStore
-	AgentConversations        AgentConversationReadStore
-	AgentDeliveryLifecycle    AgentDeliveryLifecycleReadStore
-	AgentUsage                AgentUsageReadStore
-	BundleCatalog             BundleCatalogReadStore
-	BundleDelete              BundleDeleteExecutor
-	ConversationForks         ConversationForkReadStore
-	ConversationForkLifecycle ConversationForkLifecycleStore
-	ForkChatExecutor          ForkChatExecutor
-	RunBundleContext          RunBundleContextStore
-	RunForkAvailability       RunForkAvailabilityStore
-	RunFork                   RunForkExecutor
-	AgentControl              AgentControlController
-	Mailbox                   MailboxAPIStore
-	DecisionCards             decisioncard.Store
-	DecisionAuthority         DecisionCardAuthority
-	TestSetup                 TestSetupStore
-	Idempotency               APIIdempotencyStore
-	Events                    EventPublisher
-	RunControl                RunControlController
-	StandingServices          StandingServiceController
-	RuntimeIngress            RuntimeIngressController
-	RuntimeContexts           *swruntime.RuntimeContextManager
-	ResetCoordinator          DestructiveResetCoordinator
-	ResetQuiescer             DestructiveResetQuiescer
-	ResetCleaner              DestructiveResetCleaner
-	ResetContainers           DestructiveResetContainerStopper
-	Source                    semanticview.Source
-	Bundle                    runtimecontracts.BundleIdentity
-	RuntimeIdentity           RuntimeIdentityResult
+	ListBundleCatalog(context.Context, bundlecatalog.ListOptions) (bundlecatalog.ListResult, error)
+	LoadBundleCatalog(context.Context, string) (bundlecatalog.Detail, error)
+	ListBundleCatalogAgents(context.Context, string) (bundlecatalog.AgentsResult, error)
 }
 
 type healthPingResult struct {
@@ -159,27 +92,27 @@ type RuntimeIdentityResult struct {
 }
 
 type runGetResult struct {
-	Run store.RunHeader `json:"run"`
+	Run operatorread.RunHeader `json:"run"`
 }
 
 type runListResult struct {
-	Runs       []store.RunHeader `json:"runs"`
-	NextCursor string            `json:"next_cursor,omitempty"`
-}
-
-type runTraceListResult struct {
-	Trace      []store.RunDebugTraceRow `json:"trace"`
+	Runs       []operatorread.RunHeader `json:"runs"`
 	NextCursor string                   `json:"next_cursor,omitempty"`
 }
 
+type runTraceListResult struct {
+	Trace      []operatorread.RunDebugTraceRow `json:"trace"`
+	NextCursor string                          `json:"next_cursor,omitempty"`
+}
+
 type runDiagnosis struct {
-	Run              store.RunHeader                 `json:"run"`
-	OperationalState string                          `json:"operational_state"`
-	BlockingLayer    string                          `json:"blocking_layer"`
-	BlockingReason   string                          `json:"blocking_reason"`
-	Heuristics       []string                        `json:"heuristics"`
-	FailedDeliveries []store.RunDebugFailureDelivery `json:"failed_deliveries"`
-	TestQuiescence   store.RunTestQuiescence         `json:"test_quiescence"`
+	Run              operatorread.RunHeader                 `json:"run"`
+	OperationalState string                                 `json:"operational_state"`
+	BlockingLayer    string                                 `json:"blocking_layer"`
+	BlockingReason   string                                 `json:"blocking_reason"`
+	Heuristics       []string                               `json:"heuristics"`
+	FailedDeliveries []operatorread.RunDebugFailureDelivery `json:"failed_deliveries"`
+	TestQuiescence   operatorread.RunTestQuiescence         `json:"test_quiescence"`
 }
 
 var runListStatuses = map[string]struct{}{
@@ -191,7 +124,7 @@ var runListStatuses = map[string]struct{}{
 	"forked":    {},
 }
 
-func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
+func OperatorHealthHandlers(opts HealthHandlerOptions) map[string]MethodHandler {
 	now := opts.Now
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
@@ -200,15 +133,20 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 	if ready == nil {
 		ready = func() bool { return false }
 	}
-	handlers := map[string]MethodHandler{
+	return map[string]MethodHandler{
 		"health.ping": func(context.Context, Request) (any, error) {
 			return healthPingResult{OK: true, TS: now().UTC().Format(time.RFC3339Nano)}, nil
 		},
 		"health.check": func(ctx context.Context, _ Request) (any, error) {
 			return operatorHealthSnapshot(ctx, ready, opts.Database, opts.Bundle), nil
 		},
+	}
+}
+
+func OperatorRuntimeIdentityHandlers(opts RuntimeIdentityHandlerOptions) map[string]MethodHandler {
+	return map[string]MethodHandler{
 		"runtime.identity": func(context.Context, Request) (any, error) {
-			identity := opts.RuntimeIdentity
+			identity := opts.Identity
 			if strings.TrimSpace(identity.RuntimeInstanceID) == "" {
 				return nil, fmt.Errorf("runtime identity is not configured")
 			}
@@ -217,6 +155,11 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 			}
 			return identity, nil
 		},
+	}
+}
+
+func OperatorRunReadHandlers(opts RunReadHandlerOptions) map[string]MethodHandler {
+	return map[string]MethodHandler{
 		"run.get": func(ctx context.Context, req Request) (any, error) {
 			runs, err := requireRunReadStore(opts.Runs)
 			if err != nil {
@@ -224,7 +167,7 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 			}
 			runID := stringParam(req.Params, "run_id")
 			header, err := runs.LoadRunHeader(ctx, runID)
-			if errors.Is(err, store.ErrRunNotFound) {
+			if errors.Is(err, operatorread.ErrRunNotFound) {
 				return nil, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": runID})
 			}
 			if err != nil {
@@ -242,14 +185,14 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 				return nil, err
 			}
 			headers, nextCursor, err := runs.ListRunHeaders(ctx, listOpts)
-			if errors.Is(err, store.ErrInvalidRunListCursor) {
+			if errors.Is(err, operatorread.ErrInvalidRunListCursor) {
 				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid run list cursor"})
 			}
 			if err != nil {
 				return nil, err
 			}
 			if headers == nil {
-				headers = []store.RunHeader{}
+				headers = []operatorread.RunHeader{}
 			}
 			return runListResult{Runs: headers, NextCursor: nextCursor}, nil
 		},
@@ -260,23 +203,23 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 			}
 			runID := stringParam(req.Params, "run_id")
 			header, err := runs.LoadRunHeader(ctx, runID)
-			if errors.Is(err, store.ErrRunNotFound) {
+			if errors.Is(err, operatorread.ErrRunNotFound) {
 				return nil, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": runID})
 			}
 			if err != nil {
 				return nil, err
 			}
-			report, err := runs.LoadRunDebugReport(ctx, runID, store.RunDebugQueryOptions{})
-			if errors.Is(err, store.ErrRunNotFound) {
+			report, err := runs.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{})
+			if errors.Is(err, operatorread.ErrRunNotFound) {
 				return nil, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": runID})
 			}
 			if err != nil {
 				return nil, err
 			}
-			status := store.ProjectRunOperationalStatus(report)
+			status := operatorread.ProjectRunOperationalStatus(report)
 			failedDeliveries := report.FailedDeliveries
 			if failedDeliveries == nil {
-				failedDeliveries = []store.RunDebugFailureDelivery{}
+				failedDeliveries = []operatorread.RunDebugFailureDelivery{}
 			}
 			return runDiagnosis{
 				Run:              header,
@@ -289,64 +232,9 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 			}, nil
 		},
 	}
-	for name, handler := range OperatorMailboxHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorRunStartHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorEventPublishHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorTestSetupHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorEventReplayHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorRunForkHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorRunControlHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorStandingServiceHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorRuntimeControlHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorRuntimeNukeHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorObservabilityHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorEntityHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorAgentConversationHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorBundleCatalogHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorBundleRegisterHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorBundleDeleteHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorConversationForkHandlers(opts) {
-		handlers[name] = handler
-	}
-	for name, handler := range OperatorAgentControlHandlers(opts) {
-		handlers[name] = handler
-	}
-	return handlers
 }
 
-func normalizeRunTestQuiescence(value store.RunTestQuiescence) store.RunTestQuiescence {
+func normalizeRunTestQuiescence(value operatorread.RunTestQuiescence) operatorread.RunTestQuiescence {
 	value.Ready = value.ActiveDeliveries == 0 &&
 		value.UnsettledPipelineEvents == 0 &&
 		value.DueTimers == 0 &&
@@ -403,13 +291,13 @@ func requireBundleCatalogReadStore(reads BundleCatalogReadStore) (BundleCatalogR
 	return reads, nil
 }
 
-func OperatorBundleCatalogHandlers(opts OperatorReadOptions) map[string]MethodHandler {
-	if opts.BundleCatalog == nil {
+func OperatorBundleCatalogHandlers(opts BundleCatalogHandlerOptions) map[string]MethodHandler {
+	if opts.Catalog == nil {
 		return nil
 	}
 	return map[string]MethodHandler{
 		"bundle.list": func(ctx context.Context, req Request) (any, error) {
-			reads, err := requireBundleCatalogReadStore(opts.BundleCatalog)
+			reads, err := requireBundleCatalogReadStore(opts.Catalog)
 			if err != nil {
 				return nil, err
 			}
@@ -418,7 +306,7 @@ func OperatorBundleCatalogHandlers(opts OperatorReadOptions) map[string]MethodHa
 				return nil, err
 			}
 			result, err := reads.ListBundleCatalog(ctx, listOpts)
-			if errors.Is(err, store.ErrInvalidBundleCatalogCursor) {
+			if errors.Is(err, bundlecatalog.ErrInvalidCursor) {
 				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid bundle catalog cursor"})
 			}
 			if err != nil {
@@ -427,7 +315,7 @@ func OperatorBundleCatalogHandlers(opts OperatorReadOptions) map[string]MethodHa
 			return result, nil
 		},
 		"bundle.get": func(ctx context.Context, req Request) (any, error) {
-			reads, err := requireBundleCatalogReadStore(opts.BundleCatalog)
+			reads, err := requireBundleCatalogReadStore(opts.Catalog)
 			if err != nil {
 				return nil, err
 			}
@@ -436,7 +324,7 @@ func OperatorBundleCatalogHandlers(opts OperatorReadOptions) map[string]MethodHa
 				return nil, err
 			}
 			result, err := reads.LoadBundleCatalog(ctx, bundleHash)
-			if errors.Is(err, store.ErrBundleNotFound) {
+			if errors.Is(err, bundlecatalog.ErrNotFound) {
 				return nil, NewApplicationError(BundleNotFoundCode, false, map[string]any{"bundle_hash": bundleHash})
 			}
 			if err != nil {
@@ -445,7 +333,7 @@ func OperatorBundleCatalogHandlers(opts OperatorReadOptions) map[string]MethodHa
 			return result, nil
 		},
 		"bundle.agents": func(ctx context.Context, req Request) (any, error) {
-			reads, err := requireBundleCatalogReadStore(opts.BundleCatalog)
+			reads, err := requireBundleCatalogReadStore(opts.Catalog)
 			if err != nil {
 				return nil, err
 			}
@@ -454,7 +342,7 @@ func OperatorBundleCatalogHandlers(opts OperatorReadOptions) map[string]MethodHa
 				return nil, err
 			}
 			result, err := reads.ListBundleCatalogAgents(ctx, bundleHash)
-			if errors.Is(err, store.ErrBundleNotFound) {
+			if errors.Is(err, bundlecatalog.ErrNotFound) {
 				return nil, NewApplicationError(BundleNotFoundCode, false, map[string]any{"bundle_hash": bundleHash})
 			}
 			if err != nil {
@@ -465,10 +353,10 @@ func OperatorBundleCatalogHandlers(opts OperatorReadOptions) map[string]MethodHa
 	}
 }
 
-func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]MethodHandler {
+func OperatorAgentConversationHandlers(opts AgentConversationHandlerOptions) map[string]MethodHandler {
 	handlers := map[string]MethodHandler{}
 	usageHandler := func(ctx context.Context, req Request) (any, error) {
-		reads, err := requireAgentUsageReadStore(opts.AgentUsage)
+		reads, err := requireAgentUsageReadStore(opts.Usage)
 		if err != nil {
 			return nil, err
 		}
@@ -485,7 +373,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 			return nil, err
 		}
 		result, err := reads.LoadOperatorAgentUsage(ctx, identity, usageOpts)
-		if errors.Is(err, store.ErrAgentNotFound) {
+		if errors.Is(err, operatorread.ErrAgentNotFound) {
 			return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
 		}
 		if err != nil {
@@ -497,7 +385,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 		return result, nil
 	}
 	lifecycleHandler := func(ctx context.Context, req Request) (any, error) {
-		reads, err := requireAgentDeliveryLifecycleReadStore(opts.AgentDeliveryLifecycle)
+		reads, err := requireAgentDeliveryLifecycleReadStore(opts.DeliveryLifecycle)
 		if err != nil {
 			return nil, err
 		}
@@ -525,7 +413,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				return nil, NewInvalidParamsError(map[string]any{"field": "delivery_status", "reason": "must contain only valid DeliveryStatus values"})
 			}
 		}
-		limit, err := boundedIntegerParam(req.Params, "limit", 1, store.MaxAgentDeliveryLifecycleLimit)
+		limit, err := boundedIntegerParam(req.Params, "limit", 1, operatorread.MaxAgentDeliveryLifecycleLimit)
 		if err != nil {
 			return nil, err
 		}
@@ -533,19 +421,19 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 		if err != nil {
 			return nil, err
 		}
-		result, err := reads.LoadOperatorAgentDeliveryLifecycle(ctx, identity, store.OperatorAgentDeliveryLifecycleOptions{
+		result, err := reads.LoadOperatorAgentDeliveryLifecycle(ctx, identity, operatorread.OperatorAgentDeliveryLifecycleOptions{
 			RunID:    runID,
 			Statuses: statuses,
 			Limit:    limit,
 			Cursor:   cursor,
 		})
-		if errors.Is(err, store.ErrAgentNotFound) {
+		if errors.Is(err, operatorread.ErrAgentNotFound) {
 			return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
 		}
-		if errors.Is(err, store.ErrInvalidAgentDeliveryLifecycleCursor) {
+		if errors.Is(err, operatorread.ErrInvalidAgentDeliveryLifecycleCursor) {
 			return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid agent.delivery_lifecycle cursor"})
 		}
-		if errors.Is(err, store.ErrInvalidAgentDeliveryLifecycleStatus) {
+		if errors.Is(err, operatorread.ErrInvalidAgentDeliveryLifecycleStatus) {
 			return nil, NewInvalidParamsError(map[string]any{"field": "delivery_status", "reason": "must contain only valid DeliveryStatus values"})
 		}
 		if err != nil {
@@ -556,13 +444,13 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 		}
 		return result, nil
 	}
-	if opts.AgentDeliveryLifecycle != nil {
+	if opts.DeliveryLifecycle != nil {
 		handlers["agent.delivery_lifecycle"] = lifecycleHandler
 	}
-	if opts.AgentConversations != nil {
+	if opts.Conversations != nil {
 		for name, handler := range map[string]MethodHandler{
 			"agent.list": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+				reads, err := requireAgentConversationReadStore(opts.Conversations)
 				if err != nil {
 					return nil, err
 				}
@@ -577,7 +465,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				return result, nil
 			},
 			"agent.get": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+				reads, err := requireAgentConversationReadStore(opts.Conversations)
 				if err != nil {
 					return nil, err
 				}
@@ -590,7 +478,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 					return nil, err
 				}
 				result, err := reads.LoadOperatorAgent(ctx, identity)
-				if errors.Is(err, store.ErrAgentNotFound) {
+				if errors.Is(err, operatorread.ErrAgentNotFound) {
 					return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
 				}
 				if err != nil {
@@ -599,7 +487,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				return result, nil
 			},
 			"agent.diagnose": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+				reads, err := requireAgentConversationReadStore(opts.Conversations)
 				if err != nil {
 					return nil, err
 				}
@@ -611,7 +499,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				if err != nil {
 					return nil, err
 				}
-				queueLimit, err := boundedIntegerParam(req.Params, "queue_limit", 1, store.MaxAgentDiagnosisQueueLimit)
+				queueLimit, err := boundedIntegerParam(req.Params, "queue_limit", 1, operatorread.MaxAgentDiagnosisQueueLimit)
 				if err != nil {
 					return nil, err
 				}
@@ -619,14 +507,14 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				if err != nil {
 					return nil, err
 				}
-				result, err := reads.LoadOperatorAgentDiagnosis(ctx, identity, store.OperatorAgentDiagnosisOptions{
+				result, err := reads.LoadOperatorAgentDiagnosis(ctx, identity, operatorread.OperatorAgentDiagnosisOptions{
 					QueueLimit:  queueLimit,
 					QueueCursor: queueCursor,
 				})
-				if errors.Is(err, store.ErrAgentNotFound) {
+				if errors.Is(err, operatorread.ErrAgentNotFound) {
 					return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
 				}
-				if errors.Is(err, store.ErrInvalidPendingAgentDeliveryCursor) {
+				if errors.Is(err, operatorread.ErrInvalidPendingAgentDeliveryCursor) {
 					return nil, NewInvalidParamsError(map[string]any{"field": "queue_cursor", "reason": "invalid agent.diagnose queue cursor"})
 				}
 				if err != nil {
@@ -638,7 +526,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				return result, nil
 			},
 			"agent.delivery_diagnostics": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+				reads, err := requireAgentConversationReadStore(opts.Conversations)
 				if err != nil {
 					return nil, err
 				}
@@ -650,11 +538,11 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				if err != nil {
 					return nil, err
 				}
-				failureLimit, err := boundedIntegerParam(req.Params, "failure_limit", 1, store.MaxAgentDeliveryDiagnosticsLimit)
+				failureLimit, err := boundedIntegerParam(req.Params, "failure_limit", 1, operatorread.MaxAgentDeliveryDiagnosticsLimit)
 				if err != nil {
 					return nil, err
 				}
-				deadLetterLimit, err := boundedIntegerParam(req.Params, "dead_letter_limit", 1, store.MaxAgentDeliveryDiagnosticsLimit)
+				deadLetterLimit, err := boundedIntegerParam(req.Params, "dead_letter_limit", 1, operatorread.MaxAgentDeliveryDiagnosticsLimit)
 				if err != nil {
 					return nil, err
 				}
@@ -666,16 +554,16 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				if err != nil {
 					return nil, err
 				}
-				result, err := reads.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, store.OperatorAgentDeliveryDiagnosticsOptions{
+				result, err := reads.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, operatorread.OperatorAgentDeliveryDiagnosticsOptions{
 					FailureLimit:     failureLimit,
 					FailureCursor:    failureCursor,
 					DeadLetterLimit:  deadLetterLimit,
 					DeadLetterCursor: deadLetterCursor,
 				})
-				if errors.Is(err, store.ErrAgentNotFound) {
+				if errors.Is(err, operatorread.ErrAgentNotFound) {
 					return nil, NewApplicationError(AgentNotFoundCode, false, map[string]any{"agent_id": agentID})
 				}
-				var cursorErr store.AgentDeliveryDiagnosticsCursorError
+				var cursorErr operatorread.AgentDeliveryDiagnosticsCursorError
 				if errors.As(err, &cursorErr) {
 					field := strings.TrimSpace(cursorErr.Field)
 					if field == "" {
@@ -692,7 +580,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				return result, nil
 			},
 			"conversation.list": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+				reads, err := requireAgentConversationReadStore(opts.Conversations)
 				if err != nil {
 					return nil, err
 				}
@@ -709,7 +597,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 					listOpts.FlowInstance = identity.FlowInstance()
 				}
 				result, err := reads.ListOperatorConversations(ctx, listOpts)
-				if errors.Is(err, store.ErrInvalidConversationCursor) {
+				if errors.Is(err, operatorread.ErrInvalidConversationCursor) {
 					return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid conversation list cursor"})
 				}
 				if paramErr := entityReadParamError(err); paramErr != nil {
@@ -721,7 +609,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				return result, nil
 			},
 			"conversation.list_turns": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+				reads, err := requireAgentConversationReadStore(opts.Conversations)
 				if err != nil {
 					return nil, err
 				}
@@ -737,11 +625,11 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				if err != nil {
 					return nil, err
 				}
-				result, err := reads.ListOperatorConversationTurns(ctx, store.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: limit, Cursor: cursor})
-				if errors.Is(err, store.ErrSessionNotFound) {
+				result, err := reads.ListOperatorConversationTurns(ctx, operatorread.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: limit, Cursor: cursor})
+				if errors.Is(err, operatorread.ErrSessionNotFound) {
 					return nil, NewApplicationError(SessionNotFoundCode, false, map[string]any{"session_id": sessionID})
 				}
-				if errors.Is(err, store.ErrInvalidConversationCursor) {
+				if errors.Is(err, operatorread.ErrInvalidConversationCursor) {
 					return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid conversation turn cursor"})
 				}
 				if paramErr := entityReadParamError(err); paramErr != nil {
@@ -753,7 +641,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 				return result, nil
 			},
 			"conversation.get_turn": func(ctx context.Context, req Request) (any, error) {
-				reads, err := requireAgentConversationReadStore(opts.AgentConversations)
+				reads, err := requireAgentConversationReadStore(opts.Conversations)
 				if err != nil {
 					return nil, err
 				}
@@ -766,10 +654,10 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 					return nil, err
 				}
 				result, err := reads.LoadOperatorPublicConversationTurn(ctx, sessionID, turnID)
-				if errors.Is(err, store.ErrSessionNotFound) {
+				if errors.Is(err, operatorread.ErrSessionNotFound) {
 					return nil, NewApplicationError(SessionNotFoundCode, false, map[string]any{"session_id": sessionID})
 				}
-				if errors.Is(err, store.ErrTurnNotFound) {
+				if errors.Is(err, operatorread.ErrTurnNotFound) {
 					return nil, NewApplicationError(TurnNotFoundCode, false, map[string]any{"session_id": sessionID, "turn_id": turnID})
 				}
 				if err != nil {
@@ -781,7 +669,7 @@ func OperatorAgentConversationHandlers(opts OperatorReadOptions) map[string]Meth
 			handlers[name] = handler
 		}
 	}
-	if opts.AgentUsage != nil {
+	if opts.Usage != nil {
 		handlers["agent.usage"] = usageHandler
 	}
 	if len(handlers) == 0 {
@@ -796,12 +684,12 @@ func resolveOperatorAgentIdentityParam(ctx context.Context, resolver AgentIdenti
 		return agentidentity.Identity{}, err
 	}
 	identity, err := resolver.ResolveOperatorAgentIdentity(ctx, agentID, flowInstance)
-	if errors.Is(err, store.ErrAgentNotFound) {
+	if errors.Is(err, operatorread.ErrAgentNotFound) {
 		return agentidentity.Identity{}, NewApplicationError(AgentNotFoundCode, false, map[string]any{
 			"agent_id": agentID, "flow_instance": flowInstance,
 		})
 	}
-	if store.IsAgentTargetAmbiguous(err) {
+	if operatorread.IsAgentTargetAmbiguous(err) {
 		return agentidentity.Identity{}, NewInvalidParamsError(map[string]any{
 			"field":  "flow_instance",
 			"reason": err.Error(),
@@ -810,7 +698,7 @@ func resolveOperatorAgentIdentityParam(ctx context.Context, resolver AgentIdenti
 	return identity, err
 }
 
-func validateAgentDiagnosisResult(item store.OperatorAgentDiagnosis) error {
+func validateAgentDiagnosisResult(item operatorread.OperatorAgentDiagnosis) error {
 	if strings.TrimSpace(item.AgentID) == "" {
 		return fmt.Errorf("agent.diagnose owner returned malformed result: agent_id is required")
 	}
@@ -873,7 +761,7 @@ func validateAgentDiagnosisResult(item store.OperatorAgentDiagnosis) error {
 	return nil
 }
 
-func validateAgentDeliveryDiagnosticsResult(item store.OperatorAgentDeliveryDiagnostics) error {
+func validateAgentDeliveryDiagnosticsResult(item operatorread.OperatorAgentDeliveryDiagnostics) error {
 	if strings.TrimSpace(item.AgentID) == "" {
 		return fmt.Errorf("agent.delivery_diagnostics owner returned malformed result: agent_id is required")
 	}
@@ -902,7 +790,7 @@ func validateAgentDeliveryDiagnosticsResult(item store.OperatorAgentDeliveryDiag
 	return nil
 }
 
-func validateAgentDeliveryLifecycleListResult(item store.OperatorAgentDeliveryLifecycleList) error {
+func validateAgentDeliveryLifecycleListResult(item operatorread.OperatorAgentDeliveryLifecycleList) error {
 	if strings.TrimSpace(item.AgentID) == "" {
 		return fmt.Errorf("agent.delivery_lifecycle owner returned malformed result: agent_id is required")
 	}
@@ -917,7 +805,7 @@ func validateAgentDeliveryLifecycleListResult(item store.OperatorAgentDeliveryLi
 	return nil
 }
 
-func validateAgentDeliveryLifecycleRowResult(item store.OperatorAgentDeliveryLifecycleRow, index int) error {
+func validateAgentDeliveryLifecycleRowResult(item operatorread.OperatorAgentDeliveryLifecycleRow, index int) error {
 	prefix := fmt.Sprintf("agent.delivery_lifecycle owner returned malformed result: deliveries[%d]", index)
 	if strings.TrimSpace(item.DeliveryID) == "" {
 		return fmt.Errorf("%s.delivery_id is required", prefix)
@@ -940,7 +828,7 @@ func validateAgentDeliveryLifecycleRowResult(item store.OperatorAgentDeliveryLif
 	return nil
 }
 
-func validateAgentUsageResult(item store.OperatorAgentUsage) error {
+func validateAgentUsageResult(item operatorread.OperatorAgentUsage) error {
 	if strings.TrimSpace(item.AgentID) == "" {
 		return fmt.Errorf("agent.usage owner returned malformed result: agent_id is required")
 	}
@@ -965,7 +853,7 @@ func validateAgentUsageResult(item store.OperatorAgentUsage) error {
 			return fmt.Errorf("agent.usage owner returned malformed result: %s.cost_display is required", prefix)
 		}
 		switch row.UsageAccounting {
-		case store.AgentUsageAccountingExact, store.AgentUsageAccountingEstimated:
+		case operatorread.AgentUsageAccountingExact, operatorread.AgentUsageAccountingEstimated:
 		default:
 			return fmt.Errorf("agent.usage owner returned malformed result: %s.usage_accounting=%q is invalid", prefix, row.UsageAccounting)
 		}
@@ -997,7 +885,7 @@ func validateAgentUsageResult(item store.OperatorAgentUsage) error {
 	return nil
 }
 
-func validateAgentUsageTotals(path string, totals store.OperatorAgentUsageTotals) error {
+func validateAgentUsageTotals(path string, totals operatorread.OperatorAgentUsageTotals) error {
 	if totals.LedgerEntries < 0 {
 		return fmt.Errorf("agent.usage owner returned malformed result: %s.ledger_entries must be non-negative", path)
 	}
@@ -1013,7 +901,7 @@ func validateAgentUsageTotals(path string, totals store.OperatorAgentUsageTotals
 	return nil
 }
 
-func validateAgentDeliveryFailureResult(item store.OperatorAgentDeliveryFailure, index int) error {
+func validateAgentDeliveryFailureResult(item operatorread.OperatorAgentDeliveryFailure, index int) error {
 	prefix := fmt.Sprintf("agent.delivery_diagnostics owner returned malformed result: failures[%d]", index)
 	if strings.TrimSpace(item.DeliveryID) == "" {
 		return fmt.Errorf("%s.delivery_id is required", prefix)
@@ -1036,7 +924,7 @@ func validateAgentDeliveryFailureResult(item store.OperatorAgentDeliveryFailure,
 	return nil
 }
 
-func validateAgentDeadLetterDeliveryResult(item store.OperatorAgentDeadLetterDelivery, index int) error {
+func validateAgentDeadLetterDeliveryResult(item operatorread.OperatorAgentDeadLetterDelivery, index int) error {
 	prefix := fmt.Sprintf("agent.delivery_diagnostics owner returned malformed result: dead_letters[%d]", index)
 	if strings.TrimSpace(item.DeliveryID) == "" {
 		return fmt.Errorf("%s.delivery_id is required", prefix)
@@ -1080,7 +968,7 @@ func validateAgentDeadLetterDeliveryResult(item store.OperatorAgentDeadLetterDel
 	return nil
 }
 
-func validateAgentDiagnosisActiveResult(item *store.OperatorAgentDiagnosisActive) error {
+func validateAgentDiagnosisActiveResult(item *operatorread.OperatorAgentDiagnosisActive) error {
 	if item == nil {
 		return nil
 	}
@@ -1090,14 +978,14 @@ func validateAgentDiagnosisActiveResult(item *store.OperatorAgentDiagnosisActive
 	return nil
 }
 
-func validateAgentDiagnosisRuntimeStateResult(item *store.OperatorAgentDiagnosisRuntimeState) error {
+func validateAgentDiagnosisRuntimeStateResult(item *operatorread.OperatorAgentDiagnosisRuntimeState) error {
 	if item == nil {
 		return nil
 	}
 	if item.Watchdog == nil {
 		return fmt.Errorf("agent.diagnose owner returned malformed result: runtime_state.watchdog is required")
 	}
-	watchdog := store.ConversationRuntimeWatchdogDescriptor{
+	watchdog := operatorread.ConversationRuntimeWatchdogDescriptor{
 		State:         strings.TrimSpace(item.Watchdog.State),
 		BlockingLayer: strings.TrimSpace(item.Watchdog.BlockingLayer),
 		Action:        strings.TrimSpace(item.Watchdog.Action),
@@ -1105,13 +993,13 @@ func validateAgentDiagnosisRuntimeStateResult(item *store.OperatorAgentDiagnosis
 		LastOutputAt:  strings.TrimSpace(item.Watchdog.LastOutputAt),
 		RecordedAt:    strings.TrimSpace(item.Watchdog.RecordedAt),
 	}
-	if err := store.ValidateConversationRuntimeWatchdogDescriptor(watchdog); err != nil {
+	if err := operatorread.ValidateConversationRuntimeWatchdogDescriptor(watchdog); err != nil {
 		return fmt.Errorf("agent.diagnose owner returned malformed result: runtime_state.watchdog is invalid: %w", err)
 	}
 	return nil
 }
 
-func validateAgentDiagnosisLastToolOutcomeResult(item *store.OperatorAgentLastToolOutcome) error {
+func validateAgentDiagnosisLastToolOutcomeResult(item *operatorread.OperatorAgentLastToolOutcome) error {
 	if item == nil {
 		return nil
 	}
@@ -1142,7 +1030,7 @@ func validAgentDeliveryLifecycleState(state string) bool {
 	}
 }
 
-func OperatorEntityHandlers(opts OperatorReadOptions) map[string]MethodHandler {
+func OperatorEntityHandlers(opts EntityHandlerOptions) map[string]MethodHandler {
 	if opts.Entities == nil {
 		return nil
 	}
@@ -1157,7 +1045,7 @@ func OperatorEntityHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 				return nil, err
 			}
 			result, err := reads.ListOperatorEntities(ctx, listOpts)
-			if errors.Is(err, store.ErrInvalidEntityCursor) {
+			if errors.Is(err, operatorread.ErrInvalidEntityCursor) {
 				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid entity list cursor"})
 			}
 			if paramErr := entityReadParamError(err); paramErr != nil {
@@ -1179,10 +1067,10 @@ func OperatorEntityHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 				return nil, err
 			}
 			entity, err := reads.LoadOperatorEntity(ctx, entityID, runID)
-			if errors.Is(err, store.ErrEntityNotFound) {
+			if errors.Is(err, operatorread.ErrEntityNotFound) {
 				return nil, NewApplicationError(EntityNotFoundCode, false, map[string]any{"entity_id": entityID})
 			}
-			if errors.Is(err, store.ErrAmbiguousEntityRunID) {
+			if errors.Is(err, operatorread.ErrAmbiguousEntityRunID) {
 				return nil, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "required when entity_id exists in multiple runs"})
 			}
 			if paramErr := entityReadParamError(err); paramErr != nil {
@@ -1214,7 +1102,7 @@ func OperatorEntityHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 	}
 }
 
-func OperatorObservabilityHandlers(opts OperatorReadOptions) map[string]MethodHandler {
+func OperatorObservabilityHandlers(opts ObservabilityHandlerOptions) map[string]MethodHandler {
 	if opts.Observability == nil {
 		return nil
 	}
@@ -1252,7 +1140,7 @@ func OperatorObservabilityHandlers(opts OperatorReadOptions) map[string]MethodHa
 			if err != nil {
 				return nil, err
 			}
-			rows, nextCursor, err := reads.LoadRunDebugTracePage(ctx, runID, store.RunDebugTraceQueryOptions{
+			rows, nextCursor, err := reads.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{
 				Limit:              limit,
 				Cursor:             cursor,
 				Since:              since,
@@ -1260,17 +1148,17 @@ func OperatorObservabilityHandlers(opts OperatorReadOptions) map[string]MethodHa
 				Filter:             filter,
 				ExcludeRuntimeLogs: !includeInternal,
 			})
-			if errors.Is(err, store.ErrRunNotFound) {
+			if errors.Is(err, operatorread.ErrRunNotFound) {
 				return nil, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": runID})
 			}
-			if errors.Is(err, store.ErrInvalidObservabilityCursor) {
+			if errors.Is(err, operatorread.ErrInvalidObservabilityCursor) {
 				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid run trace cursor"})
 			}
 			if err != nil {
 				return nil, err
 			}
 			if rows == nil {
-				rows = []store.RunDebugTraceRow{}
+				rows = []operatorread.RunDebugTraceRow{}
 			}
 			return runTraceListResult{Trace: rows, NextCursor: nextCursor}, nil
 		},
@@ -1284,7 +1172,7 @@ func OperatorObservabilityHandlers(opts OperatorReadOptions) map[string]MethodHa
 				return nil, err
 			}
 			result, err := reads.ListOperatorEvents(ctx, listOpts)
-			if errors.Is(err, store.ErrInvalidObservabilityCursor) {
+			if errors.Is(err, operatorread.ErrInvalidObservabilityCursor) {
 				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid event list cursor"})
 			}
 			if err != nil {
@@ -1299,7 +1187,7 @@ func OperatorObservabilityHandlers(opts OperatorReadOptions) map[string]MethodHa
 			}
 			eventID := stringParam(req.Params, "event_id")
 			event, err := reads.LoadOperatorEvent(ctx, eventID)
-			if errors.Is(err, store.ErrEventNotFound) {
+			if errors.Is(err, operatorread.ErrEventNotFound) {
 				return nil, NewApplicationError(EventNotFoundCode, false, map[string]any{"event_id": eventID})
 			}
 			if err != nil {
@@ -1317,7 +1205,7 @@ func OperatorObservabilityHandlers(opts OperatorReadOptions) map[string]MethodHa
 				return nil, err
 			}
 			result, err := reads.ListOperatorRuntimeLogs(ctx, listOpts)
-			if errors.Is(err, store.ErrInvalidObservabilityCursor) {
+			if errors.Is(err, operatorread.ErrInvalidObservabilityCursor) {
 				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid runtime log cursor"})
 			}
 			if err != nil {
@@ -1335,7 +1223,7 @@ func OperatorObservabilityHandlers(opts OperatorReadOptions) map[string]MethodHa
 				return nil, err
 			}
 			result, err := reads.ListOperatorRuntimeIncidents(ctx, listOpts)
-			if errors.Is(err, store.ErrInvalidObservabilityCursor) {
+			if errors.Is(err, operatorread.ErrInvalidObservabilityCursor) {
 				return nil, NewInvalidParamsError(map[string]any{"field": "cursor", "reason": "invalid runtime incident cursor"})
 			}
 			if err != nil {
@@ -1346,208 +1234,208 @@ func OperatorObservabilityHandlers(opts OperatorReadOptions) map[string]MethodHa
 	}
 }
 
-func operatorEntityListOptionsFromParams(params map[string]any) (store.OperatorEntityListOptions, error) {
-	out := store.OperatorEntityListOptions{}
+func operatorEntityListOptionsFromParams(params map[string]any) (operatorread.OperatorEntityListOptions, error) {
+	out := operatorread.OperatorEntityListOptions{}
 	var err error
 	if out.RunID, _, err = optionalStringParam(params, "run_id"); err != nil {
-		return store.OperatorEntityListOptions{}, err
+		return operatorread.OperatorEntityListOptions{}, err
 	}
 	if out.Flow, _, err = optionalStringParam(params, "flow"); err != nil {
-		return store.OperatorEntityListOptions{}, err
+		return operatorread.OperatorEntityListOptions{}, err
 	}
 	if out.Type, _, err = optionalStringParam(params, "type"); err != nil {
-		return store.OperatorEntityListOptions{}, err
+		return operatorread.OperatorEntityListOptions{}, err
 	}
 	if out.CurrentState, _, err = optionalStringParam(params, "current_state"); err != nil {
-		return store.OperatorEntityListOptions{}, err
+		return operatorread.OperatorEntityListOptions{}, err
 	}
 	if out.Cursor, _, err = optionalStringParam(params, "cursor"); err != nil {
-		return store.OperatorEntityListOptions{}, err
+		return operatorread.OperatorEntityListOptions{}, err
 	}
 	if raw, ok := params["limit"]; ok && !isEmptyParam(raw) {
 		limit, ok := integerParam(raw)
 		if !ok || limit < 1 || limit > 500 {
-			return store.OperatorEntityListOptions{}, NewInvalidParamsError(map[string]any{"field": "limit", "reason": "must be an integer from 1 to 500"})
+			return operatorread.OperatorEntityListOptions{}, NewInvalidParamsError(map[string]any{"field": "limit", "reason": "must be an integer from 1 to 500"})
 		}
 		out.Limit = limit
 	}
 	return out, nil
 }
 
-func operatorEntityAggregateOptionsFromParams(params map[string]any) (store.OperatorEntityAggregateOptions, error) {
-	out := store.OperatorEntityAggregateOptions{}
+func operatorEntityAggregateOptionsFromParams(params map[string]any) (operatorread.OperatorEntityAggregateOptions, error) {
+	out := operatorread.OperatorEntityAggregateOptions{}
 	var err error
 	if out.RunID, _, err = optionalStringParam(params, "run_id"); err != nil {
-		return store.OperatorEntityAggregateOptions{}, err
+		return operatorread.OperatorEntityAggregateOptions{}, err
 	}
 	if out.GroupBy, _, err = optionalStringParam(params, "group_by"); err != nil {
-		return store.OperatorEntityAggregateOptions{}, err
+		return operatorread.OperatorEntityAggregateOptions{}, err
 	}
 	if out.Type, _, err = optionalStringParam(params, "type"); err != nil {
-		return store.OperatorEntityAggregateOptions{}, err
+		return operatorread.OperatorEntityAggregateOptions{}, err
 	}
 	return out, nil
 }
 
-func operatorAgentListOptionsFromParams(params map[string]any) (store.OperatorAgentListOptions, error) {
-	out := store.OperatorAgentListOptions{}
+func operatorAgentListOptionsFromParams(params map[string]any) (operatorread.OperatorAgentListOptions, error) {
+	out := operatorread.OperatorAgentListOptions{}
 	var err error
 	if out.Flow, _, err = optionalStringParam(params, "flow"); err != nil {
-		return store.OperatorAgentListOptions{}, err
+		return operatorread.OperatorAgentListOptions{}, err
 	}
 	if out.Role, _, err = optionalStringParam(params, "role"); err != nil {
-		return store.OperatorAgentListOptions{}, err
+		return operatorread.OperatorAgentListOptions{}, err
 	}
 	return out, nil
 }
 
-func operatorAgentUsageOptionsFromParams(params map[string]any) (store.OperatorAgentUsageOptions, error) {
-	out := store.OperatorAgentUsageOptions{}
+func operatorAgentUsageOptionsFromParams(params map[string]any) (operatorread.OperatorAgentUsageOptions, error) {
+	out := operatorread.OperatorAgentUsageOptions{}
 	var err error
 	if out.Since, err = timestampParam(params, "since"); err != nil {
-		return store.OperatorAgentUsageOptions{}, err
+		return operatorread.OperatorAgentUsageOptions{}, err
 	}
 	if out.Until, err = timestampParam(params, "until"); err != nil {
-		return store.OperatorAgentUsageOptions{}, err
+		return operatorread.OperatorAgentUsageOptions{}, err
 	}
 	if out.Since != nil && out.Until != nil && !out.Since.Before(*out.Until) {
-		return store.OperatorAgentUsageOptions{}, NewInvalidParamsError(map[string]any{"field": "until", "reason": "must be after since"})
+		return operatorread.OperatorAgentUsageOptions{}, NewInvalidParamsError(map[string]any{"field": "until", "reason": "must be after since"})
 	}
 	return out, nil
 }
 
-func operatorConversationListOptionsFromParams(params map[string]any) (store.OperatorConversationListOptions, error) {
-	out := store.OperatorConversationListOptions{}
+func operatorConversationListOptionsFromParams(params map[string]any) (operatorread.OperatorConversationListOptions, error) {
+	out := operatorread.OperatorConversationListOptions{}
 	var err error
 	if out.AgentID, _, err = optionalStringParam(params, "agent_id"); err != nil {
-		return store.OperatorConversationListOptions{}, err
+		return operatorread.OperatorConversationListOptions{}, err
 	}
 	if out.FlowInstance, _, err = optionalStringParam(params, "flow_instance"); err != nil {
-		return store.OperatorConversationListOptions{}, err
+		return operatorread.OperatorConversationListOptions{}, err
 	}
 	if out.FlowInstance != "" && out.AgentID == "" {
-		return store.OperatorConversationListOptions{}, NewInvalidParamsError(map[string]any{"field": "flow_instance", "reason": "requires agent_id"})
+		return operatorread.OperatorConversationListOptions{}, NewInvalidParamsError(map[string]any{"field": "flow_instance", "reason": "requires agent_id"})
 	}
 	if out.RunID, _, err = optionalStringParam(params, "run_id"); err != nil {
-		return store.OperatorConversationListOptions{}, err
+		return operatorread.OperatorConversationListOptions{}, err
 	}
 	if out.Cursor, _, err = optionalStringParam(params, "cursor"); err != nil {
-		return store.OperatorConversationListOptions{}, err
+		return operatorread.OperatorConversationListOptions{}, err
 	}
 	if raw, ok := params["limit"]; ok && !isEmptyParam(raw) {
 		limit, ok := integerParam(raw)
 		if !ok || limit < 1 || limit > 500 {
-			return store.OperatorConversationListOptions{}, NewInvalidParamsError(map[string]any{"field": "limit", "reason": "must be an integer from 1 to 500"})
+			return operatorread.OperatorConversationListOptions{}, NewInvalidParamsError(map[string]any{"field": "limit", "reason": "must be an integer from 1 to 500"})
 		}
 		out.Limit = limit
 	}
 	return out, nil
 }
 
-func entityReadParamError(err error) *store.EntityReadParamError {
+func entityReadParamError(err error) *operatorread.EntityReadParamError {
 	if err == nil {
 		return nil
 	}
-	var paramErr *store.EntityReadParamError
+	var paramErr *operatorread.EntityReadParamError
 	if errors.As(err, &paramErr) {
 		return paramErr
 	}
 	return nil
 }
 
-func operatorEventListOptionsFromParams(params map[string]any) (store.OperatorEventListOptions, error) {
-	out := store.OperatorEventListOptions{}
+func operatorEventListOptionsFromParams(params map[string]any) (operatorread.OperatorEventListOptions, error) {
+	out := operatorread.OperatorEventListOptions{}
 	filter, err := eventListFilterParam(params)
 	if err != nil {
-		return store.OperatorEventListOptions{}, err
+		return operatorread.OperatorEventListOptions{}, err
 	}
 	if err := requireEventListRunScope(filter); err != nil {
-		return store.OperatorEventListOptions{}, err
+		return operatorread.OperatorEventListOptions{}, err
 	}
 	out.Filter = filter
 	limit, err := boundedIntegerParam(params, "limit", 1, 1000)
 	if err != nil {
-		return store.OperatorEventListOptions{}, err
+		return operatorread.OperatorEventListOptions{}, err
 	}
 	out.Limit = limit
 	cursor, _, err := optionalStringParam(params, "cursor")
 	if err != nil {
-		return store.OperatorEventListOptions{}, err
+		return operatorread.OperatorEventListOptions{}, err
 	}
 	out.Cursor = cursor
 	if out.Since, err = timestampParam(params, "since"); err != nil {
-		return store.OperatorEventListOptions{}, err
+		return operatorread.OperatorEventListOptions{}, err
 	}
 	if out.Until, err = timestampParam(params, "until"); err != nil {
-		return store.OperatorEventListOptions{}, err
+		return operatorread.OperatorEventListOptions{}, err
 	}
 	return out, nil
 }
 
-func eventListFilterParam(params map[string]any) (store.OperatorEventListFilter, error) {
+func eventListFilterParam(params map[string]any) (operatorread.OperatorEventListFilter, error) {
 	raw, ok := params["filter"]
 	if !ok || isEmptyParam(raw) {
-		return store.OperatorEventListFilter{}, nil
+		return operatorread.OperatorEventListFilter{}, nil
 	}
 	filter, ok := raw.(map[string]any)
 	if !ok {
-		return store.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter", "reason": "must be an object"})
+		return operatorread.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter", "reason": "must be an object"})
 	}
 	for name := range filter {
 		if _, ok := eventListFilterFields[name]; !ok {
-			return store.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter." + name, "reason": "unknown parameter"})
+			return operatorread.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter." + name, "reason": "unknown parameter"})
 		}
 	}
-	out := store.OperatorEventListFilter{}
+	out := operatorread.OperatorEventListFilter{}
 	var err error
 	if out.RunID, _, err = optionalStringParam(filter, "run_id"); err != nil {
-		return store.OperatorEventListFilter{}, err
+		return operatorread.OperatorEventListFilter{}, err
 	}
 	if out.RunID != "" && !opaqueIDPattern.MatchString(out.RunID) {
-		return store.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.run_id", "reason": "must match OpaqueId pattern"})
+		return operatorread.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.run_id", "reason": "must match OpaqueId pattern"})
 	}
 	if out.EntityID, _, err = optionalStringParam(filter, "entity_id"); err != nil {
-		return store.OperatorEventListFilter{}, err
+		return operatorread.OperatorEventListFilter{}, err
 	}
 	if out.EntityID != "" && !opaqueIDPattern.MatchString(out.EntityID) {
-		return store.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.entity_id", "reason": "must match OpaqueId pattern"})
+		return operatorread.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.entity_id", "reason": "must match OpaqueId pattern"})
 	}
 	if out.EventName, _, err = optionalStringParam(filter, "event_name"); err != nil {
-		return store.OperatorEventListFilter{}, err
+		return operatorread.OperatorEventListFilter{}, err
 	}
 	if out.DeliveryStatus, _, err = optionalStringParam(filter, "delivery_status"); err != nil {
-		return store.OperatorEventListFilter{}, err
+		return operatorread.OperatorEventListFilter{}, err
 	}
 	if out.DeliveryStatus != "" {
 		if _, ok := eventListDeliveryStatuses[out.DeliveryStatus]; !ok {
-			return store.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.delivery_status", "reason": "must be a valid DeliveryStatus"})
+			return operatorread.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.delivery_status", "reason": "must be a valid DeliveryStatus"})
 		}
 	}
 	if out.SubscriberID, _, err = optionalStringParam(filter, "subscriber_id"); err != nil {
-		return store.OperatorEventListFilter{}, err
+		return operatorread.OperatorEventListFilter{}, err
 	}
 	if out.SubscriberType, _, err = optionalStringParam(filter, "subscriber_type"); err != nil {
-		return store.OperatorEventListFilter{}, err
+		return operatorread.OperatorEventListFilter{}, err
 	}
 	if out.SubscriberType != "" {
 		if _, ok := eventListSubscriberTypes[out.SubscriberType]; !ok {
-			return store.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.subscriber_type", "reason": "must be a valid SubscriberType"})
+			return operatorread.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.subscriber_type", "reason": "must be a valid SubscriberType"})
 		}
 	}
 	if out.ReasonCode, _, err = optionalStringParam(filter, "reason_code"); err != nil {
-		return store.OperatorEventListFilter{}, err
+		return operatorread.OperatorEventListFilter{}, err
 	}
 	if rawBool, ok := filter["has_dead_letter"]; ok && !isEmptyParam(rawBool) {
 		value, ok := rawBool.(bool)
 		if !ok {
-			return store.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.has_dead_letter", "reason": "must be a boolean"})
+			return operatorread.OperatorEventListFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.has_dead_letter", "reason": "must be a boolean"})
 		}
 		out.HasDeadLetter = &value
 	}
 	return out, nil
 }
 
-func requireEventListRunScope(filter store.OperatorEventListFilter) error {
+func requireEventListRunScope(filter operatorread.OperatorEventListFilter) error {
 	if strings.TrimSpace(filter.RunID) == "" {
 		return NewApplicationError(EventObservationRunScopeRequiredCode, false, map[string]any{
 			"field":  "filter.run_id",
@@ -1557,50 +1445,50 @@ func requireEventListRunScope(filter store.OperatorEventListFilter) error {
 	return nil
 }
 
-func runTraceFilterParam(params map[string]any) (store.RunDebugTraceFilter, error) {
+func runTraceFilterParam(params map[string]any) (operatorread.RunDebugTraceFilter, error) {
 	raw, ok := params["filter"]
 	if !ok || isEmptyParam(raw) {
-		return store.RunDebugTraceFilter{}, nil
+		return operatorread.RunDebugTraceFilter{}, nil
 	}
 	filter, ok := raw.(map[string]any)
 	if !ok {
-		return store.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter", "reason": "must be an object"})
+		return operatorread.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter", "reason": "must be an object"})
 	}
 	for name := range filter {
 		if _, ok := runTraceFilterFields[name]; !ok {
-			return store.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter." + name, "reason": "unknown parameter"})
+			return operatorread.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter." + name, "reason": "unknown parameter"})
 		}
 	}
-	out := store.RunDebugTraceFilter{}
+	out := operatorread.RunDebugTraceFilter{}
 	var err error
 	if out.EventNames, err = requiredRunTraceStringListFilter(filter, "event_name"); err != nil {
-		return store.RunDebugTraceFilter{}, err
+		return operatorread.RunDebugTraceFilter{}, err
 	}
 	if out.EntityIDs, err = requiredRunTraceStringListFilter(filter, "entity_id"); err != nil {
-		return store.RunDebugTraceFilter{}, err
+		return operatorread.RunDebugTraceFilter{}, err
 	}
 	for _, entityID := range out.EntityIDs {
 		if !opaqueIDPattern.MatchString(entityID) {
-			return store.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.entity_id", "reason": "must contain only OpaqueId values"})
+			return operatorread.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.entity_id", "reason": "must contain only OpaqueId values"})
 		}
 	}
 	if out.DeliveryStatuses, err = requiredRunTraceStringListFilter(filter, "delivery_status"); err != nil {
-		return store.RunDebugTraceFilter{}, err
+		return operatorread.RunDebugTraceFilter{}, err
 	}
 	for _, status := range out.DeliveryStatuses {
 		if _, ok := eventListDeliveryStatuses[status]; !ok {
-			return store.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.delivery_status", "reason": "must contain only valid DeliveryStatus values"})
+			return operatorread.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.delivery_status", "reason": "must contain only valid DeliveryStatus values"})
 		}
 	}
 	if out.SubscriberIDs, err = requiredRunTraceStringListFilter(filter, "subscriber_id"); err != nil {
-		return store.RunDebugTraceFilter{}, err
+		return operatorread.RunDebugTraceFilter{}, err
 	}
 	if out.SubscriberTypes, err = requiredRunTraceStringListFilter(filter, "subscriber_type"); err != nil {
-		return store.RunDebugTraceFilter{}, err
+		return operatorread.RunDebugTraceFilter{}, err
 	}
 	for _, subscriberType := range out.SubscriberTypes {
 		if _, ok := eventListSubscriberTypes[subscriberType]; !ok {
-			return store.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.subscriber_type", "reason": "must contain only valid SubscriberType values"})
+			return operatorread.RunDebugTraceFilter{}, NewInvalidParamsError(map[string]any{"field": "filter.subscriber_type", "reason": "must contain only valid SubscriberType values"})
 		}
 	}
 	return out, nil
@@ -1649,130 +1537,130 @@ var eventListSubscriberTypes = map[string]struct{}{
 	"agent": {},
 }
 
-func operatorRuntimeLogListOptionsFromParams(params map[string]any) (store.OperatorRuntimeLogListOptions, error) {
-	out := store.OperatorRuntimeLogListOptions{}
+func operatorRuntimeLogListOptionsFromParams(params map[string]any) (operatorread.OperatorRuntimeLogListOptions, error) {
+	out := operatorread.OperatorRuntimeLogListOptions{}
 	var err error
 	if out.RunID, _, err = optionalStringParam(params, "run_id"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, err
+		return operatorread.OperatorRuntimeLogListOptions{}, err
 	}
 	if out.BundleHash, err = optionalBundleHashParam(params, "bundle_hash"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, err
+		return operatorread.OperatorRuntimeLogListOptions{}, err
 	}
 	if out.EntityID, _, err = optionalStringParam(params, "entity_id"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, err
+		return operatorread.OperatorRuntimeLogListOptions{}, err
 	}
 	if out.SessionID, _, err = optionalStringParam(params, "session_id"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, err
+		return operatorread.OperatorRuntimeLogListOptions{}, err
 	}
 	if out.Component, _, err = optionalStringParam(params, "component"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, err
+		return operatorread.OperatorRuntimeLogListOptions{}, err
 	}
 	if out.Level, _, err = optionalStringParam(params, "level"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, err
+		return operatorread.OperatorRuntimeLogListOptions{}, err
 	}
 	if out.ErrorCode, _, err = optionalStringParam(params, "error_code"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, err
+		return operatorread.OperatorRuntimeLogListOptions{}, err
 	}
 	if out.Source, _, err = optionalStringParam(params, "source"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, err
+		return operatorread.OperatorRuntimeLogListOptions{}, err
 	}
 	if out.Order, _, err = optionalStringParam(params, "order"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, err
+		return operatorread.OperatorRuntimeLogListOptions{}, err
 	}
 	if out.Cursor, _, err = optionalStringParam(params, "cursor"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, err
+		return operatorread.OperatorRuntimeLogListOptions{}, err
 	}
 	if out.Since, err = timestampParam(params, "since"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, err
+		return operatorread.OperatorRuntimeLogListOptions{}, err
 	}
 	if out.Until, err = timestampParam(params, "until"); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, err
+		return operatorread.OperatorRuntimeLogListOptions{}, err
 	}
 	if out.Since != nil && out.Until != nil && out.Since.After(*out.Until) {
-		return store.OperatorRuntimeLogListOptions{}, NewInvalidParamsError(map[string]any{"field": "until", "reason": "must be at or after since"})
+		return operatorread.OperatorRuntimeLogListOptions{}, NewInvalidParamsError(map[string]any{"field": "until", "reason": "must be at or after since"})
 	}
 	if out.Limit, err = boundedIntegerParam(params, "limit", 1, 1000); err != nil {
-		return store.OperatorRuntimeLogListOptions{}, err
+		return operatorread.OperatorRuntimeLogListOptions{}, err
 	}
 	return out, nil
 }
 
-func operatorRuntimeIncidentListOptionsFromParams(params map[string]any) (store.OperatorRuntimeIncidentListOptions, error) {
-	out := store.OperatorRuntimeIncidentListOptions{}
+func operatorRuntimeIncidentListOptionsFromParams(params map[string]any) (operatorread.OperatorRuntimeIncidentListOptions, error) {
+	out := operatorread.OperatorRuntimeIncidentListOptions{}
 	var err error
 	if out.BundleHash, err = optionalBundleHashParam(params, "bundle_hash"); err != nil {
-		return store.OperatorRuntimeIncidentListOptions{}, err
+		return operatorread.OperatorRuntimeIncidentListOptions{}, err
 	}
 	if out.Component, _, err = optionalStringParam(params, "component"); err != nil {
-		return store.OperatorRuntimeIncidentListOptions{}, err
+		return operatorread.OperatorRuntimeIncidentListOptions{}, err
 	}
 	if out.Level, _, err = optionalStringParam(params, "level"); err != nil {
-		return store.OperatorRuntimeIncidentListOptions{}, err
+		return operatorread.OperatorRuntimeIncidentListOptions{}, err
 	}
 	if out.Cursor, _, err = optionalStringParam(params, "cursor"); err != nil {
-		return store.OperatorRuntimeIncidentListOptions{}, err
+		return operatorread.OperatorRuntimeIncidentListOptions{}, err
 	}
 	if rawBool, ok := params["mcp_only"]; ok && !isEmptyParam(rawBool) {
 		value, ok := rawBool.(bool)
 		if !ok {
-			return store.OperatorRuntimeIncidentListOptions{}, NewInvalidParamsError(map[string]any{"field": "mcp_only", "reason": "must be a boolean"})
+			return operatorread.OperatorRuntimeIncidentListOptions{}, NewInvalidParamsError(map[string]any{"field": "mcp_only", "reason": "must be a boolean"})
 		}
 		out.MCPOnly = value
 	}
 	if out.SinceHours, err = boundedIntegerParam(params, "since_hours", 1, 720); err != nil {
-		return store.OperatorRuntimeIncidentListOptions{}, err
+		return operatorread.OperatorRuntimeIncidentListOptions{}, err
 	}
 	if out.Limit, err = boundedIntegerParam(params, "limit", 1, 500); err != nil {
-		return store.OperatorRuntimeIncidentListOptions{}, err
+		return operatorread.OperatorRuntimeIncidentListOptions{}, err
 	}
 	return out, nil
 }
 
-func runHeaderListOptionsFromParams(params map[string]any) (store.RunHeaderListOptions, error) {
-	out := store.RunHeaderListOptions{}
+func runHeaderListOptionsFromParams(params map[string]any) (operatorread.RunHeaderListOptions, error) {
+	out := operatorread.RunHeaderListOptions{}
 	status, _, err := optionalStringParam(params, "status")
 	if err != nil {
-		return store.RunHeaderListOptions{}, err
+		return operatorread.RunHeaderListOptions{}, err
 	}
 	status = strings.ToLower(status)
 	if status != "" {
 		if _, ok := runListStatuses[status]; !ok {
-			return store.RunHeaderListOptions{}, NewInvalidParamsError(map[string]any{"field": "status", "reason": "must be a valid RunStatus"})
+			return operatorread.RunHeaderListOptions{}, NewInvalidParamsError(map[string]any{"field": "status", "reason": "must be a valid RunStatus"})
 		}
 		out.Status = status
 	}
 	cursor, _, err := optionalStringParam(params, "cursor")
 	if err != nil {
-		return store.RunHeaderListOptions{}, err
+		return operatorread.RunHeaderListOptions{}, err
 	}
 	out.Cursor = cursor
 	if out.BundleHash, err = optionalBundleHashParam(params, "bundle_hash"); err != nil {
-		return store.RunHeaderListOptions{}, err
+		return operatorread.RunHeaderListOptions{}, err
 	}
 	if raw, ok := params["limit"]; ok && !isEmptyParam(raw) {
 		limit, ok := integerParam(raw)
 		if !ok || limit < 1 || limit > 500 {
-			return store.RunHeaderListOptions{}, NewInvalidParamsError(map[string]any{"field": "limit", "reason": "must be an integer from 1 to 500"})
+			return operatorread.RunHeaderListOptions{}, NewInvalidParamsError(map[string]any{"field": "limit", "reason": "must be an integer from 1 to 500"})
 		}
 		out.Limit = limit
 	}
 	if out.Since, err = timestampParam(params, "since"); err != nil {
-		return store.RunHeaderListOptions{}, err
+		return operatorread.RunHeaderListOptions{}, err
 	}
 	if out.Until, err = timestampParam(params, "until"); err != nil {
-		return store.RunHeaderListOptions{}, err
+		return operatorread.RunHeaderListOptions{}, err
 	}
 	return out, nil
 }
 
-func bundleCatalogListOptionsFromParams(params map[string]any) (store.BundleCatalogListOptions, error) {
-	out := store.BundleCatalogListOptions{}
+func bundleCatalogListOptionsFromParams(params map[string]any) (bundlecatalog.ListOptions, error) {
+	out := bundlecatalog.ListOptions{}
 	var err error
 	if out.Cursor, _, err = optionalStringParam(params, "cursor"); err != nil {
-		return store.BundleCatalogListOptions{}, err
+		return bundlecatalog.ListOptions{}, err
 	}
 	if out.Limit, err = boundedIntegerParam(params, "limit", 1, 500); err != nil {
-		return store.BundleCatalogListOptions{}, err
+		return bundlecatalog.ListOptions{}, err
 	}
 	return out, nil
 }

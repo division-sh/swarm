@@ -42,10 +42,11 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 			authority := &humanTaskAckLossAuthority{delegate: workflowStore}
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: OperatorReadHandlers(OperatorReadOptions{
+				Handlers: testOperatorHandlers(testOperatorCapabilities{
 					Now: func() time.Time { return now.Add(time.Minute) }, Ready: func() bool { return true }, Database: fakePinger{},
 					Mailbox: mailbox, DecisionCards: cardStore, DecisionAuthority: authority,
 					Idempotency: idempotency,
+					Events:      failingRunStartPublisher{err: errors.New("unexpected human-task API event publication")},
 				}),
 			})
 			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"decide","method":"mailbox.decide","params":{"card_id":%q,"verdict":"approve","fields":{},"observed_content_hash":%q,"idempotency_key":"ack-loss"}}`, card.CardID, card.CardContentHash)

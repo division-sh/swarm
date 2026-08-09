@@ -5,36 +5,37 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/store"
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
 type fakeEntityReadStore struct {
-	listResult    store.OperatorEntityListResult
+	listResult    operatorread.OperatorEntityListResult
 	listErr       error
-	getResult     store.OperatorEntityFull
+	getResult     operatorread.OperatorEntityFull
 	getErr        error
-	aggregate     store.OperatorEntityAggregateResult
+	aggregate     operatorread.OperatorEntityAggregateResult
 	aggregateErr  error
-	lastList      store.OperatorEntityListOptions
+	lastList      operatorread.OperatorEntityListOptions
 	lastEntityID  string
 	lastRunID     string
-	lastAggregate store.OperatorEntityAggregateOptions
+	lastAggregate operatorread.OperatorEntityAggregateOptions
 }
 
-func (s *fakeEntityReadStore) ListOperatorEntities(_ context.Context, opts store.OperatorEntityListOptions) (store.OperatorEntityListResult, error) {
+func (s *fakeEntityReadStore) ListOperatorEntities(_ context.Context, opts operatorread.OperatorEntityListOptions) (operatorread.OperatorEntityListResult, error) {
 	s.lastList = opts
 	return s.listResult, s.listErr
 }
 
-func (s *fakeEntityReadStore) LoadOperatorEntity(_ context.Context, entityID, runID string) (store.OperatorEntityFull, error) {
+func (s *fakeEntityReadStore) LoadOperatorEntity(_ context.Context, entityID, runID string) (operatorread.OperatorEntityFull, error) {
 	s.lastEntityID = entityID
 	s.lastRunID = runID
 	return s.getResult, s.getErr
 }
 
-func (s *fakeEntityReadStore) AggregateOperatorEntities(_ context.Context, opts store.OperatorEntityAggregateOptions) (store.OperatorEntityAggregateResult, error) {
+func (s *fakeEntityReadStore) AggregateOperatorEntities(_ context.Context, opts operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateResult, error) {
 	s.lastAggregate = opts
 	return s.aggregate, s.aggregateErr
 }
@@ -42,8 +43,8 @@ func (s *fakeEntityReadStore) AggregateOperatorEntities(_ context.Context, opts 
 func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	entities := &fakeEntityReadStore{
-		listResult: store.OperatorEntityListResult{
-			Entities: []store.OperatorEntitySummary{{
+		listResult: operatorread.OperatorEntityListResult{
+			Entities: []operatorread.OperatorEntitySummary{{
 				EntityID:     "entity-1",
 				RunID:        "run-1",
 				FlowInstance: "review/primary",
@@ -55,8 +56,8 @@ func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 			}},
 			NextCursor: "next",
 		},
-		getResult: store.OperatorEntityFull{
-			Entity: store.OperatorEntitySummary{EntityID: "entity-1", RunID: "run-1", EntityType: "mvp_spec", CurrentState: "collecting"},
+		getResult: operatorread.OperatorEntityFull{
+			Entity: operatorread.OperatorEntitySummary{EntityID: "entity-1", RunID: "run-1", EntityType: "mvp_spec", CurrentState: "collecting"},
 			Fields: map[string]any{"priority": "high"},
 			Gates:  map[string]bool{"approved": true},
 			Accumulated: map[string]any{
@@ -65,11 +66,11 @@ func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 				"notes":       []any{"a", map[string]any{"text": "probe"}},
 			},
 		},
-		aggregate: store.OperatorEntityAggregateResult{Counts: map[string]int{"collecting": 1}},
+		aggregate: operatorread.OperatorEntityAggregateResult{Counts: map[string]int{"collecting": 1}},
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Entities: entities,
 		}),
 	})
@@ -145,7 +146,7 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Entities: pg,
 		}),
 	})
@@ -217,7 +218,7 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Entities: sqliteStore,
 		}),
 	})
@@ -272,28 +273,28 @@ func TestOperatorEntityHandlersTypedErrors(t *testing.T) {
 			name:    "entity get missing",
 			method:  "entity.get",
 			body:    `{"jsonrpc":"2.0","id":"get","method":"entity.get","params":{"entity_id":"missing"}}`,
-			store:   &fakeEntityReadStore{getErr: store.ErrEntityNotFound},
+			store:   &fakeEntityReadStore{getErr: operatorread.ErrEntityNotFound},
 			wantApp: EntityNotFoundCode,
 		},
 		{
 			name:     "entity get ambiguous",
 			method:   "entity.get",
 			body:     `{"jsonrpc":"2.0","id":"get","method":"entity.get","params":{"entity_id":"reused"}}`,
-			store:    &fakeEntityReadStore{getErr: store.ErrAmbiguousEntityRunID},
+			store:    &fakeEntityReadStore{getErr: operatorread.ErrAmbiguousEntityRunID},
 			wantCode: codeInvalidParams,
 		},
 		{
 			name:     "entity list bad cursor",
 			method:   "entity.list",
 			body:     `{"jsonrpc":"2.0","id":"list","method":"entity.list","params":{"cursor":"bad"}}`,
-			store:    &fakeEntityReadStore{listErr: store.ErrInvalidEntityCursor},
+			store:    &fakeEntityReadStore{listErr: operatorread.ErrInvalidEntityCursor},
 			wantCode: codeInvalidParams,
 		},
 		{
 			name:     "entity aggregate bad group",
 			method:   "entity.aggregate",
 			body:     `{"jsonrpc":"2.0","id":"agg","method":"entity.aggregate","params":{"group_by":"bad"}}`,
-			store:    &fakeEntityReadStore{aggregateErr: &store.EntityReadParamError{Field: "group_by", Reason: "unsupported entity aggregate group_by"}},
+			store:    &fakeEntityReadStore{aggregateErr: &operatorread.EntityReadParamError{Field: "group_by", Reason: "unsupported entity aggregate group_by"}},
 			wantCode: codeInvalidParams,
 		},
 	}
@@ -301,7 +302,7 @@ func TestOperatorEntityHandlersTypedErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: OperatorReadHandlers(OperatorReadOptions{
+				Handlers: testOperatorHandlers(testOperatorCapabilities{
 					Entities: tc.store,
 				}),
 			})
