@@ -5,11 +5,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/config"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -181,6 +185,60 @@ func TestValidateNativeToolBootConfig_NonCLIRuntimeRequiresWebSearchFallbackCred
 	warnings, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, store, nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}), nil)
 	if err != nil {
 		t.Fatalf("ValidateNativeToolBootConfig with credential: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+}
+
+func TestValidateNativeToolBootConfig_ExactlyMockedAgentSkipsLiveNativeAdmission(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"agent-1": {
+				ID: "agent-1",
+				Mock: mockperformance.Performance{
+					Kind:   mockperformance.KindPython,
+					Module: "mocks/agent.py",
+					Source: []byte("def handle(input):\n    return {'text': 'mock'}\n"),
+					Digest: "sha256:native-tool-boot-mock",
+				},
+				NativeTools: map[string]any{
+					"web_search": true,
+				},
+			},
+		},
+		Policy: runtimecontracts.PolicyDocument{
+			Values: map[string]runtimecontracts.PolicyValue{
+				"web_search_provider": {
+					Value: map[string]any{
+						"provider":        "brave",
+						"credentials_key": "brave_search_api_key",
+					},
+				},
+			},
+		},
+	})
+	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
+	if err != nil {
+		t.Fatalf("ResolveActiveBackend: %v", err)
+	}
+	harness := effecttest.New()
+	runtimes, err := llm.NewAgentRuntimeSet(profile, llm.RuntimeFactory{
+		Cfg: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}},
+		CompletionController: runtimeeffects.NewCompletionController(
+			harness,
+			harness,
+			harness,
+			harness,
+		),
+	}, nativeCapabilityRuntimeStub{})
+	if err != nil {
+		t.Fatalf("NewAgentRuntimeSet: %v", err)
+	}
+
+	warnings, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, nil, runtimes, nil)
+	if err != nil {
+		t.Fatalf("ValidateNativeToolBootConfig: %v", err)
 	}
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v, want none", warnings)
