@@ -368,6 +368,7 @@ func insertCatalogAssertionDeadLetterRelation(t *testing.T, h *runtimeHarness, e
 		OriginalEvent:   string(event.Type()),
 		OriginalPayload: event.Payload(),
 		EntityID:        entityID,
+		FlowInstance:    "runtime",
 		Failure:         failure,
 		Timestamp:       time.Now().UTC().Format(time.RFC3339Nano),
 	}); err != nil {
