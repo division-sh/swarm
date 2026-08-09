@@ -214,7 +214,7 @@ func TestAuthoredMockSelectionSurvivesReconfigureRestartAndClone(t *testing.T) {
 	}
 	assertMockProjection(t, "spawn", artifact, map[string]models.AgentConfig{base.ID: base}, base.ID)
 
-	if err := am.ReconfigureAgentTarget(base.ID, "", models.AgentConfig{Tools: []string{"schedule"}}, nil); err != nil {
+	if _, err := am.ReconfigureAgentTarget(base.ID, "", models.AgentConfig{Tools: []string{"schedule"}}, nil); err != nil {
 		t.Fatalf("ReconfigureAgentTarget: %v", err)
 	}
 	reconfigured, err := am.ResolveAgentConfig(base.ID, "")
