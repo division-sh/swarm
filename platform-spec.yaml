@@ -6115,6 +6115,7 @@ engine:
                 Process-global execution mode is not credential-admission authority.
               consumers:
                 - internal/runtime/workflow_validation.go for swarm verify and serve validation
+                - internal/cliapp/local_preflight.go for doctor contract-secret admission
                 - internal/serveapp/builder_project_supervisor.go for Builder project validation
                 - internal/builder/handler_state.go for Builder validation RPC
                 - internal/runtime/runtime.go for final runtime boot credential admission

@@ -312,6 +312,8 @@ func TestDoctorPreflightConsumesEffectiveAgentExecutionSelection(t *testing.T) {
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+	unsetSecretEnvForTest(t, "provider_credential")
+	unsetSecretEnvForTest(t, "PROVIDER_CREDENTIAL")
 	setDoctorEmptyProviderSecrets(t)
 
 	t.Run("fully mocked claude bundle waives only provider-specific checks", func(t *testing.T) {
@@ -341,6 +343,33 @@ func TestDoctorPreflightConsumesEffectiveAgentExecutionSelection(t *testing.T) {
 		for _, forbidden := range []string{"missing_backend_credential", "workspace_backend_unsupported", "docker_unavailable", "workspace_claude_cli_unavailable"} {
 			if localPreflightReportHasCode(report, forbidden) {
 				t.Fatalf("fully mocked report contains forbidden finding %q: %#v", forbidden, report.Findings)
+			}
+		}
+	})
+
+	t.Run("fully mocked connector waives only its exact outbound secret", func(t *testing.T) {
+		report, code, stderr := runDoctorPreflightJSON(t, writeDoctorClaudeHostConfig(t, ""), writeVerifyMockConnectorFixture(t, false), llmselection.BackendClaudeCLI)
+		if code != 0 {
+			t.Fatalf("code = %d, want success; stderr=%s findings=%#v", code, stderr, report.Findings)
+		}
+		assertLocalPreflightFindingState(t, report, "contract_secrets_present", LocalPreflightStatusOK, LocalPreflightSeverityInfo)
+		if localPreflightReportHasCode(report, "missing_contract_secret") || localPreflightReportFindingContains(report, "contract_secrets_present", "provider_credential") {
+			t.Fatalf("fully mocked doctor retained unreachable provider credential: %#v", report.Findings)
+		}
+	})
+
+	t.Run("mixed connector retains its exact outbound secret", func(t *testing.T) {
+		report, code, _ := runDoctorPreflightJSON(t, writeDoctorClaudeHostConfig(t, ""), writeVerifyMockConnectorFixture(t, true), llmselection.BackendAnthropic)
+		if code != CLIExitRuntime {
+			t.Fatalf("code = %d, want %d; findings=%#v", code, CLIExitRuntime, report.Findings)
+		}
+		finding, ok := localPreflightReportFinding(report, "missing_contract_secret")
+		if !ok || finding.Status != LocalPreflightStatusFailed || finding.Severity != LocalPreflightSeverityBlocker {
+			t.Fatalf("mixed contract secret finding = %#v, want failed blocker", finding)
+		}
+		for _, want := range []string{"provider_credential", "tool:provider.send"} {
+			if !strings.Contains(finding.Message, want) {
+				t.Fatalf("mixed contract secret message = %q, want %q", finding.Message, want)
 			}
 		}
 	})
