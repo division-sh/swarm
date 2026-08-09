@@ -46,20 +46,15 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			scheduleStore, ok := selected.events.(runtimepipeline.SchedulePersistence)
-			if !ok {
-				t.Fatalf("selected %s store does not implement SchedulePersistence", selected.name)
-			}
 
 			fireErrors := make(chan error, 4)
-			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(context.Context, runtimepipeline.Schedule) {})
+			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t))
 			t.Cleanup(scheduler.Stop)
 			coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
-				Module:             gateRecoveryModule{source: source},
-				Persistence:        selected.persistence,
-				TimerScheduler:     scheduler,
-				TimerScheduleStore: scheduleStore,
-				WorkOwner:          pipelineExternalTestWorkOwner(t),
+				Module:         gateRecoveryModule{source: source},
+				Persistence:    selected.persistence,
+				TimerScheduler: scheduler,
+				WorkOwner:      pipelineExternalTestWorkOwner(t),
 			})
 			bus.SetInterceptors(coordinator)
 
@@ -133,21 +128,13 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 				t.Fatalf("new authored timer EventBus: %v", err)
 			}
 			deliveries := internalSubscriptionDeliveriesForTest(t, eventBus, "consumer-node")
-			scheduleStore, ok := selected.events.(runtimepipeline.SchedulePersistence)
-			if !ok {
-				t.Fatalf("selected %s store does not implement SchedulePersistence", selected.name)
-			}
-			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(
-				pipelineExternalTestWorkOwner(t),
-				func(context.Context, runtimepipeline.Schedule) {},
-			)
+			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t))
 			t.Cleanup(scheduler.Stop)
 			coordinator := newGateRecoveryCoordinator(eventBus, selected, runtimepipeline.PipelineCoordinatorOptions{
-				Module:             gateRecoveryModule{source: source},
-				Persistence:        selected.persistence,
-				TimerScheduler:     scheduler,
-				TimerScheduleStore: scheduleStore,
-				WorkOwner:          pipelineExternalTestWorkOwner(t),
+				Module:         gateRecoveryModule{source: source},
+				Persistence:    selected.persistence,
+				TimerScheduler: scheduler,
+				WorkOwner:      pipelineExternalTestWorkOwner(t),
 			})
 			eventBus.SetInterceptors(coordinator)
 
@@ -210,19 +197,12 @@ func TestRecurringWorkflowTimerDoesNotReregisterAfterSynchronousTransitionCancel
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			scheduleStore, ok := selected.events.(runtimepipeline.SchedulePersistence)
-			if !ok {
-				t.Fatalf("selected %s store does not implement SchedulePersistence", selected.name)
-			}
 
-			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(
-				pipelineExternalTestWorkOwner(t),
-				func(context.Context, runtimepipeline.Schedule) {},
-			)
+			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t))
 			t.Cleanup(scheduler.Stop)
 			coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 				Module: gateRecoveryModule{source: source}, Persistence: selected.persistence,
-				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore, WorkOwner: pipelineExternalTestWorkOwner(t),
+				TimerScheduler: scheduler, WorkOwner: pipelineExternalTestWorkOwner(t),
 			})
 			bus.SetInterceptors(coordinator)
 
@@ -297,13 +277,9 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			scheduleStore, ok := selected.events.(runtimepipeline.SchedulePersistence)
-			if !ok {
-				t.Fatalf("selected %s store does not implement SchedulePersistence", selected.name)
-			}
 			module := gateRecoveryModule{source: source}
 			coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
-				Module: module, Persistence: selected.persistence, TimerScheduleStore: scheduleStore,
+				Module: module, Persistence: selected.persistence,
 			})
 			bus.SetInterceptors(coordinator)
 
@@ -318,10 +294,10 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			assertWorkflowTimerServedRows(t, selected, runID, entityID, "active", 1)
 
 			fireErrors := make(chan error, 4)
-			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(context.Context, runtimepipeline.Schedule) {})
+			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t))
 			restored := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 				Module: module, Persistence: selected.persistence,
-				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore, WorkOwner: pipelineExternalTestWorkOwner(t),
+				TimerScheduler: scheduler, WorkOwner: pipelineExternalTestWorkOwner(t),
 			})
 			bus.SetInterceptors(restored)
 			if err := restored.RestoreWorkflowTimers(ctx); err != nil {
@@ -362,17 +338,12 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			if got := workflowTimerEventCount(t, selected, runID, runtimecontracts.WorkflowStageTimerInternalEvent); got != 1 {
 				t.Fatalf("one-shot events after pre-fire restart = %d, want 1", got)
 			}
-			if err := scheduleStore.ReleaseScheduleClaims(ctx); err != nil {
-				t.Fatalf("release one-shot claims for second restart: %v", err)
-			}
 
-			terminalScheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(_ context.Context, schedule runtimepipeline.Schedule) {
-				fireErrors <- fmt.Errorf("terminal timer was restored: %s", schedule.TaskID)
-			})
+			terminalScheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t))
 			t.Cleanup(terminalScheduler.Stop)
 			terminal := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 				Module: module, Persistence: selected.persistence,
-				TimerScheduler: terminalScheduler, TimerScheduleStore: scheduleStore,
+				TimerScheduler: terminalScheduler,
 			})
 			if err := terminal.RestoreWorkflowTimers(ctx); err != nil {
 				t.Fatalf("restore after one-shot completion: %v", err)
@@ -464,20 +435,16 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			scheduleStore, ok := selected.events.(runtimepipeline.SchedulePersistence)
-			if !ok {
-				t.Fatalf("selected %s store does not implement SchedulePersistence", selected.name)
-			}
 
 			var coordinator *runtimepipeline.PipelineCoordinator
 			fireErrors := make(chan error, 8)
 			newScheduler := func() *runtimepipeline.Scheduler {
-				return runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(context.Context, runtimepipeline.Schedule) {})
+				return runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t))
 			}
 			scheduler := newScheduler()
 			coordinator = newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 				Module: module, Persistence: selected.persistence,
-				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore, WorkOwner: pipelineExternalTestWorkOwner(t),
+				TimerScheduler: scheduler, WorkOwner: pipelineExternalTestWorkOwner(t),
 				TestLifecycleProbe: lifecycleProbe,
 			})
 			bus.SetInterceptors(coordinator)
@@ -511,7 +478,7 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			t.Cleanup(scheduler.Stop)
 			coordinator = newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 				Module: module, Persistence: selected.persistence,
-				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore, WorkOwner: pipelineExternalTestWorkOwner(t),
+				TimerScheduler: scheduler, WorkOwner: pipelineExternalTestWorkOwner(t),
 				TestLifecycleProbe: lifecycleProbe,
 			})
 			bus.SetInterceptors(coordinator)
@@ -625,16 +592,12 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			scheduleStore, ok := selected.events.(runtimepipeline.SchedulePersistence)
-			if !ok {
-				t.Fatalf("selected %s store does not implement SchedulePersistence", selected.name)
-			}
 
-			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(context.Context, runtimepipeline.Schedule) {})
+			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t))
 			t.Cleanup(scheduler.Stop)
 			coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 				Module: gateRecoveryModule{source: source}, Persistence: selected.persistence,
-				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore, WorkOwner: pipelineExternalTestWorkOwner(t),
+				TimerScheduler: scheduler, WorkOwner: pipelineExternalTestWorkOwner(t),
 			})
 			bus.SetInterceptors(coordinator)
 			t.Cleanup(func() {
@@ -716,17 +679,13 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			scheduleStore, ok := selected.events.(runtimepipeline.SchedulePersistence)
-			if !ok {
-				t.Fatalf("selected %s store does not implement SchedulePersistence", selected.name)
-			}
 
 			fireErrors := make(chan error, 4)
-			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t), func(context.Context, runtimepipeline.Schedule) {})
+			scheduler := runtimepipeline.NewSchedulerWithWorkOwner(pipelineExternalTestWorkOwner(t))
 			t.Cleanup(scheduler.Stop)
 			coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 				Module: gateRecoveryModule{source: source}, Persistence: selected.persistence,
-				TimerScheduler: scheduler, TimerScheduleStore: scheduleStore, WorkOwner: pipelineExternalTestWorkOwner(t),
+				TimerScheduler: scheduler, WorkOwner: pipelineExternalTestWorkOwner(t),
 			})
 			bus.SetInterceptors(coordinator)
 

@@ -27,6 +27,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -126,34 +127,24 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 		t.Fatalf("mailbox item status=%q type=%q, want pending review notice", item.Status, item.Type)
 	}
 
-	schedule := runtimepipeline.Schedule{
-		RunID:        runID,
-		AgentID:      "agent-1",
-		EventType:    "timer.fired",
-		Mode:         "once",
-		At:           time.Now().UTC().Add(time.Hour),
-		EntityID:     entityID,
-		FlowInstance: "test-flow",
-		TaskID:       "task-1",
-		Payload:      json.RawMessage(`{"__schedule_task_id":"task-1"}`),
-	}
-	schedule = testAgentOwnedSchedule(t, schedule)
-	if err := store.UpsertSchedule(ctx, schedule); err != nil {
-		t.Fatalf("UpsertSchedule: %v", err)
-	}
-	schedules, err := store.LoadActiveSchedules(ctx)
+	command := testAgentGenericScheduleCommand(t, runID, "agent-1", "test-flow/instance", entityID, "task-1", runtimegenericschedule.AbsoluteDue(time.Now().UTC().Add(time.Hour)))
+	admitted, err := store.AdmitGenericSchedule(ctx, command)
 	if err != nil {
-		t.Fatalf("LoadActiveSchedules: %v", err)
+		t.Fatalf("AdmitGenericSchedule: %v", err)
 	}
-	if len(schedules) != 1 || schedules[0].TaskID != "task-1" {
+	schedules, err := store.ListActiveGenericScheduleActivations(ctx)
+	if err != nil {
+		t.Fatalf("ListActiveGenericScheduleActivations: %v", err)
+	}
+	if len(schedules) != 1 || schedules[0].Command.TaskID != "task-1" {
 		t.Fatalf("active schedules = %#v, want task-1", schedules)
 	}
-	if err := store.MarkScheduleFiredExact(ctx, schedule); err != nil {
-		t.Fatalf("MarkScheduleFiredExact: %v", err)
+	if _, err := store.CancelGenericSchedule(ctx, runtimegenericschedule.CancelCommand{ActivationID: admitted.Activation.ID, Cause: "smoke_test", CancelledAt: time.Now()}); err != nil {
+		t.Fatalf("CancelGenericSchedule: %v", err)
 	}
-	schedules, err = store.LoadActiveSchedules(ctx)
+	schedules, err = store.ListActiveGenericScheduleActivations(ctx)
 	if err != nil {
-		t.Fatalf("LoadActiveSchedules after fire: %v", err)
+		t.Fatalf("ListActiveGenericScheduleActivations after cancel: %v", err)
 	}
 	if len(schedules) != 0 {
 		t.Fatalf("active schedules after fire = %#v, want empty", schedules)
@@ -1751,146 +1742,9 @@ func operatorDeliveriesContain(deliveries []OperatorEventDelivery, subscriberTyp
 	return false
 }
 
-func TestSQLiteRuntimeStoreClaimScheduleRequiresActiveRow(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
-	seedSQLiteScheduleRun(t, store, ctx, runID)
-	schedule := runtimepipeline.Schedule{
-		RunID:     runID,
-		AgentID:   "agent-1",
-		EventType: "timer.fired",
-		Mode:      "once",
-		At:        time.Now().UTC().Add(time.Hour),
-		TaskID:    "task-claim",
-		Payload:   json.RawMessage(`{"__schedule_task_id":"task-claim"}`),
-	}
-	schedule = testAgentOwnedSchedule(t, schedule)
-
-	if err := store.UpsertSchedule(ctx, schedule); err != nil {
-		t.Fatalf("UpsertSchedule: %v", err)
-	}
-	claimed, err := store.ClaimSchedule(ctx, schedule)
-	if err != nil {
-		t.Fatalf("ClaimSchedule active: %v", err)
-	}
-	if !claimed {
-		t.Fatal("ClaimSchedule active = false, want true")
-	}
-	if err := store.CancelScheduleExact(ctx, schedule); err != nil {
-		t.Fatalf("CancelScheduleExact: %v", err)
-	}
-	claimed, err = store.ClaimSchedule(ctx, schedule)
-	if err != nil {
-		t.Fatalf("ClaimSchedule cancelled: %v", err)
-	}
-	if claimed {
-		t.Fatal("ClaimSchedule cancelled = true, want false")
-	}
-	if err := store.UpsertSchedule(ctx, schedule); err != nil {
-		t.Fatalf("UpsertSchedule after cancel: %v", err)
-	}
-	if err := store.MarkScheduleFiredExact(ctx, schedule); err != nil {
-		t.Fatalf("MarkScheduleFiredExact: %v", err)
-	}
-	claimed, err = store.ClaimSchedule(ctx, schedule)
-	if err != nil {
-		t.Fatalf("ClaimSchedule fired: %v", err)
-	}
-	if claimed {
-		t.Fatal("ClaimSchedule fired = true, want false")
-	}
-}
-
-func TestSQLiteRuntimeStoreScheduleNamedOperationsIgnoreAmbientPipelineTransaction(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
-	seedSQLiteScheduleRun(t, store, ctx, runID)
-	schedule := sqliteScheduleTransactionTestSchedule(t, runID, "task-commit")
-
-	tx, err := store.backend.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("BeginTx(upsert): %v", err)
-	}
-	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
-	if err := store.UpsertSchedule(txctx, schedule); err != nil {
-		t.Fatalf("UpsertSchedule(tx): %v", err)
-	}
-	if err := tx.Rollback(); err != nil {
-		t.Fatalf("Rollback ambient upsert tx: %v", err)
-	}
-	assertSQLiteActiveScheduleCount(t, store, ctx, 1)
-	assertSQLiteScheduleClaimed(t, store, ctx, schedule, true)
-
-	tx, err = store.backend.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("BeginTx(cancel): %v", err)
-	}
-	txctx = runtimepipelinefixture.WithSQLTx(ctx, tx)
-	if err := store.CancelScheduleExact(txctx, schedule); err != nil {
-		t.Fatalf("CancelScheduleExact(tx): %v", err)
-	}
-	if err := tx.Rollback(); err != nil {
-		t.Fatalf("Rollback ambient cancel tx: %v", err)
-	}
-	assertSQLiteScheduleClaimed(t, store, ctx, schedule, false)
-
-	if err := store.UpsertSchedule(ctx, schedule); err != nil {
-		t.Fatalf("UpsertSchedule(before complete): %v", err)
-	}
-	tx, err = store.backend.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("BeginTx(complete): %v", err)
-	}
-	txctx = runtimepipelinefixture.WithSQLTx(ctx, tx)
-	if err := store.CompleteScheduleFireExact(txctx, schedule); err != nil {
-		t.Fatalf("CompleteScheduleFireExact(tx): %v", err)
-	}
-	if err := tx.Rollback(); err != nil {
-		t.Fatalf("Rollback ambient complete tx: %v", err)
-	}
-	assertSQLiteScheduleClaimed(t, store, ctx, schedule, false)
-}
-
 func seedSQLiteScheduleRun(t *testing.T, store *SQLiteRuntimeStore, ctx context.Context, runID string) {
 	t.Helper()
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
-}
-
-func sqliteScheduleTransactionTestSchedule(t *testing.T, runID, taskID string) runtimepipeline.Schedule {
-	t.Helper()
-	return testAgentOwnedSchedule(t, runtimepipeline.Schedule{
-		RunID:     runID,
-		AgentID:   "agent-1",
-		EventType: "timer.fired",
-		Mode:      "once",
-		At:        time.Now().UTC().Add(time.Hour),
-		TaskID:    taskID,
-		Payload:   json.RawMessage(`{"__schedule_task_id":"` + taskID + `"}`),
-	})
-}
-
-func assertSQLiteScheduleClaimed(t *testing.T, store *SQLiteRuntimeStore, ctx context.Context, schedule runtimepipeline.Schedule, want bool) {
-	t.Helper()
-	claimed, err := store.ClaimSchedule(ctx, schedule)
-	if err != nil {
-		t.Fatalf("ClaimSchedule: %v", err)
-	}
-	if claimed != want {
-		t.Fatalf("ClaimSchedule = %v, want %v", claimed, want)
-	}
-}
-
-func assertSQLiteActiveScheduleCount(t *testing.T, store *SQLiteRuntimeStore, ctx context.Context, want int) {
-	t.Helper()
-	active, err := store.LoadActiveSchedules(ctx)
-	if err != nil {
-		t.Fatalf("LoadActiveSchedules: %v", err)
-	}
-	if len(active) != want {
-		t.Fatalf("active schedule count = %d, want %d: %#v", len(active), want, active)
-	}
 }
 
 func newBootstrappedSQLiteRuntimeStoreForTest(t *testing.T) *SQLiteRuntimeStore {

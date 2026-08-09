@@ -18,10 +18,13 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 type recoveryGuardManagerStore struct {
@@ -98,13 +101,66 @@ func (*minimalRuntimeEventStore) ListEventDeliveryRecipients(context.Context, st
 func (*minimalRuntimeEventStore) SupportsPersistedReplay() bool { return false }
 
 type recoveryDisabledScheduleStore struct {
-	recordingRuntimeScheduleStore
-	loadCalls atomic.Int32
+	active      []runtimegenericschedule.Activation
+	obligations *runtimetimerobligation.Snapshot
+	loadCalls   atomic.Int32
 }
 
-func (s *recoveryDisabledScheduleStore) LoadActiveSchedules(ctx context.Context) ([]runtimepipeline.Schedule, error) {
+func (*recoveryDisabledScheduleStore) AdmitGenericSchedule(context.Context, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error) {
+	return runtimegenericschedule.AdmissionResult{}, errors.New("unexpected generic schedule admission")
+}
+func (s *recoveryDisabledScheduleStore) LoadGenericScheduleActivation(_ context.Context, activationID string) (runtimegenericschedule.Activation, bool, error) {
+	for _, activation := range s.active {
+		if activation.ID == activationID {
+			return activation, true, nil
+		}
+	}
+	return runtimegenericschedule.Activation{}, false, nil
+}
+func (s *recoveryDisabledScheduleStore) ListActiveGenericScheduleActivations(context.Context) ([]runtimegenericschedule.Activation, error) {
 	s.loadCalls.Add(1)
-	return s.recordingRuntimeScheduleStore.LoadActiveSchedules(ctx)
+	return append([]runtimegenericschedule.Activation(nil), s.active...), nil
+}
+func (*recoveryDisabledScheduleStore) PrepareGenericScheduleOccurrence(context.Context, runtimegenericschedule.Wakeup) (runtimegenericschedule.PreparedOccurrence, error) {
+	return runtimegenericschedule.PreparedOccurrence{}, errors.New("unexpected generic schedule occurrence")
+}
+func (*recoveryDisabledScheduleStore) CommitGenericScheduleOccurrence(context.Context, runtimegenericschedule.CommitCommand) (runtimegenericschedule.CommitResult, error) {
+	return runtimegenericschedule.CommitResult{}, errors.New("unexpected generic schedule commit")
+}
+func (*recoveryDisabledScheduleStore) CancelGenericSchedule(context.Context, runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error) {
+	return runtimegenericschedule.CancelResult{}, errors.New("unexpected generic schedule cancellation")
+}
+func (*recoveryDisabledScheduleStore) ClaimGenericScheduleWakeup(context.Context, runtimegenericschedule.Wakeup) (bool, error) {
+	return true, nil
+}
+func (*recoveryDisabledScheduleStore) ReleaseGenericScheduleWakeup(context.Context, runtimegenericschedule.Wakeup) error {
+	return nil
+}
+func (*recoveryDisabledScheduleStore) ReleaseGenericScheduleClaims(context.Context) error { return nil }
+func (s *recoveryDisabledScheduleStore) ReadTimerObligations(_ context.Context, _ runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
+	if s.obligations != nil {
+		snapshot := *s.obligations
+		snapshot.ObservedAt = observedAt
+		return snapshot, nil
+	}
+	snapshot := runtimetimerobligation.Snapshot{ObservedAt: observedAt, GlobalFamilies: runtimetimerobligation.ZeroFamilies()}
+	for _, activation := range s.active {
+		family := runtimetimerobligation.FamilyTimer
+		if activation.Command.Due.Recurring() {
+			family = runtimetimerobligation.FamilyGlobalRecurring
+		}
+		for index := range snapshot.GlobalFamilies {
+			if snapshot.GlobalFamilies[index].Family == family {
+				snapshot.GlobalFamilies[index].ActiveCount++
+				snapshot.GlobalFamilies[index].RecoverableCount++
+			}
+		}
+		snapshot.Activations = append(snapshot.Activations, runtimetimerobligation.Activation{
+			ActivationID: activation.ID, Family: family, Status: string(activation.Status),
+			DueAt: activation.CurrentDueAt, InitialDueAt: activation.InitialDueAt,
+		})
+	}
+	return snapshot, nil
 }
 
 type recoveryDisabledManagerStore struct {
@@ -126,6 +182,34 @@ func testOperationalRuntimeConfig() *config.Config {
 			Backend: "anthropic",
 		},
 	}
+}
+
+func recoveryGuardActivation(t *testing.T, key string) runtimegenericschedule.Activation {
+	t.Helper()
+	command := runtimegenericschedule.AdmissionCommand{
+		ScheduleKey: key, OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: "runtime",
+		EventType: "timer.check", Payload: semanticvalue.EmptyObject(),
+		RoutingSource: events.NewPlatformControlRoutingSource(),
+		Due:           runtimegenericschedule.AbsoluteDue(time.Now().UTC().Add(time.Minute)),
+		TaskID:        key,
+	}
+	hash, err := command.ImmutableHash()
+	if err != nil {
+		t.Fatalf("hash recovery guard activation: %v", err)
+	}
+	admittedAt := time.Now().UTC()
+	dueAt, err := command.Due.FirstDue(admittedAt)
+	if err != nil {
+		t.Fatalf("derive recovery guard due time: %v", err)
+	}
+	activation := runtimegenericschedule.Activation{
+		ID: uuid.NewString(), Command: command, ImmutableHash: hash, AdmittedAt: admittedAt,
+		InitialDueAt: dueAt, CurrentDueAt: dueAt, Status: runtimegenericschedule.StatusActive,
+	}
+	if err := activation.Validate(); err != nil {
+		t.Fatalf("validate recovery guard activation: %v", err)
+	}
+	return activation
 }
 
 func TestNewRuntimeValidatesInboundPublicationIntegrityBeforeWiringGateway(t *testing.T) {
@@ -210,17 +294,8 @@ func TestNewRuntimeRejectsInvalidArtifactRootEnv(t *testing.T) {
 
 func TestRuntimeStart_FailsWhenRecoveryDisabledAndActiveSchedulesExist(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
-	store := &recordingRuntimeScheduleStore{
-		active: []runtimepipeline.Schedule{{
-			AgentID:   "runtime",
-			OwnerKind: runtimepipeline.ScheduleOwnerSystem,
-			EventType: "timer.check",
-			Mode:      "once",
-			At:        time.Now().Add(time.Minute),
-			TaskID:    "recover-me",
-		}},
-	}
-	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), ScheduleStore: store, TimerObligationReader: store, Options: RuntimeOptions{
+	store := &recoveryDisabledScheduleStore{active: []runtimegenericschedule.Activation{recoveryGuardActivation(t, "recover-me")}}
+	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(), GenericScheduleStore: store, TimerObligationReader: store, Options: RuntimeOptions{
 		SelfCheck:      false,
 		WorkflowModule: module,
 		LLMRuntime:     noopLLMRuntime{},
@@ -277,10 +352,10 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 
 func TestRuntimeStart_AllowsRecoveryDisabledWhenNoRecoverableWorkExists(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
-	scheduleStore := &recordingRuntimeScheduleStore{}
+	scheduleStore := &recoveryDisabledScheduleStore{}
 	eventStore := &recoveryGuardEventStore{}
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
-		ScheduleStore:           scheduleStore,
+		GenericScheduleStore:    scheduleStore,
 		TimerObligationReader:   scheduleStore,
 		EventStore:              eventStore,
 		ManagerStore:            &recoveryGuardManagerStore{},
@@ -304,10 +379,10 @@ func TestRuntimeStart_AllowsRecoveryDisabledWhenNoRecoverableWorkExists(t *testi
 
 func TestRuntimeStart_AllowsRecoveryDisabledWithNonReplayEventStore(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
-	scheduleStore := &recordingRuntimeScheduleStore{}
+	scheduleStore := &recoveryDisabledScheduleStore{}
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
 		EventStore:            &minimalRuntimeEventStore{},
-		ScheduleStore:         scheduleStore,
+		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
 		ManagerStore:          &recoveryGuardManagerStore{},
 		Options: RuntimeOptions{
@@ -331,18 +406,7 @@ func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t 
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	cfg := testOperationalRuntimeConfig()
 	cfg.Runtime.RecoveryOnStartup = true
-	scheduleStore := &recoveryDisabledScheduleStore{
-		recordingRuntimeScheduleStore: recordingRuntimeScheduleStore{
-			active: []runtimepipeline.Schedule{{
-				AgentID:   "runtime",
-				OwnerKind: runtimepipeline.ScheduleOwnerSystem,
-				EventType: "timer.check",
-				Mode:      "once",
-				At:        time.Now().Add(time.Minute),
-				TaskID:    "other-bundle",
-			}},
-		},
-	}
+	scheduleStore := &recoveryDisabledScheduleStore{active: []runtimegenericschedule.Activation{recoveryGuardActivation(t, "other-bundle")}}
 	managerStore := &recoveryDisabledManagerStore{
 		recoveryGuardManagerStore: recoveryGuardManagerStore{
 			agents: []runtimemanager.PersistedAgent{{
@@ -355,7 +419,7 @@ func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t 
 		EventStore:              eventStore,
 		ManagerStore:            managerStore,
 		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{DirectiveOperations: eventStore},
-		ScheduleStore:           scheduleStore,
+		GenericScheduleStore:    scheduleStore,
 		TimerObligationReader:   scheduleStore,
 		Options: RuntimeOptions{
 			SelfCheck:                        false,
@@ -371,7 +435,7 @@ func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t 
 		t.Fatalf("Start: %v", err)
 	}
 	if got := scheduleStore.loadCalls.Load(); got != 0 {
-		t.Fatalf("LoadActiveSchedules calls = %d, want 0", got)
+		t.Fatalf("ListActiveGenericScheduleActivations calls = %d, want 0", got)
 	}
 	if got := managerStore.loadCalls.Load(); got != 0 {
 		t.Fatalf("LoadAgents calls = %d, want 0", got)

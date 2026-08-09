@@ -118,7 +118,7 @@ func TestExecutor_HTTPToolRateLimitAdmitsDirectCallsAndLogsWait(t *testing.T) {
 	defer server.Close()
 
 	bus := &telemetryBusStub{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{
 		WorkflowSource: rateLimitedHTTPToolSource(server.URL, "1/1s", "2s"),
 	})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1", Tools: []string{"check_domain"}})
@@ -152,7 +152,7 @@ func TestExecutor_HTTPTimeoutStartsAfterAdmissionWait(t *testing.T) {
 	}))
 	defer server.Close()
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{})
 	tool := admittedExecutionToolForTest(t, "check_domain",
 		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
 		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.ToolInputSchema{}),
@@ -177,7 +177,7 @@ func TestExecutor_HTTPRateLimitTimeoutDoesNotRetry(t *testing.T) {
 	}))
 	defer server.Close()
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		WorkflowSource: rateLimitedHTTPToolSource(server.URL, "1/s", "0s"),
 	})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1", Tools: []string{"check_domain"}})
@@ -199,7 +199,7 @@ func TestExecutor_MCPServerRateLimitIsSharedAcrossTools(t *testing.T) {
 	server := newRateLimitedMCPTestServer(t, &recorder, []string{"ping", "pong"})
 	defer server.Close()
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		WorkflowSource: rateLimitedMCPSource(server.URL, "1/40ms", "500ms"),
 	})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1", Tools: []string{"infra.ping", "infra.pong"}})
@@ -229,7 +229,7 @@ func TestExecutor_MCPStdioRuntimeCallUsesRateLimit(t *testing.T) {
 		}},
 	})
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1", Tools: []string{"infra.ping"}})
 	if _, err := exec.Execute(ctx, "infra.ping", map[string]any{}); err != nil {
 		t.Fatalf("initial Execute(infra.ping): %v", err)
@@ -306,7 +306,7 @@ func TestGatewayToolPathProjectsHTTPRateLimitTimeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		WorkflowSource: rateLimitedHTTPToolSource(server.URL, "1/s", "0s"),
 	})
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "agent-1", Tools: []string{"check_domain"}}
@@ -341,7 +341,7 @@ func TestGatewayMCPToolsCallProjectsRateLimitedRuntimeError(t *testing.T) {
 	server := newRateLimitedMCPTestServer(t, &recorder, []string{"ping"})
 	defer server.Close()
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		WorkflowSource: rateLimitedMCPSource(server.URL, "1/s", "0s"),
 	})
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "agent-1", Tools: []string{"infra.ping"}}
@@ -395,7 +395,7 @@ func TestGatewayMCPToolsCallProjectsRateLimitedRuntimeError(t *testing.T) {
 
 func TestExecutor_NativeWebSearchHardcodedProviderUsesRateLimit(t *testing.T) {
 	var recorder dispatchTimeRecorder
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		WorkflowSource: rateLimitedNativeWebSearchSource("brave", "1/40ms", "500ms", nil),
 		Credentials:    nativeWebSearchCredentialStore{"brave_search_api_key": "secret"},
 		ModelRuntimes:  staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
@@ -435,7 +435,7 @@ func TestExecutor_NativeWebSearchCustomProviderUsesRateLimit(t *testing.T) {
 		Method: "GET",
 		URL:    server.URL + "?q={{input.query}}&count={{input.max_results}}",
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		WorkflowSource: rateLimitedNativeWebSearchSource("custom", "1/40ms", "500ms", customHTTP),
 		ModelRuntimes:  staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 	})
@@ -463,7 +463,7 @@ func TestExecutor_NativeWebSearchInheritedProviderPolicySharesBucketAcrossFlows(
 	}))
 	defer server.Close()
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		WorkflowSource: rateLimitedNativeWebSearchSiblingFlowSource(server.URL),
 		ModelRuntimes:  staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 	})

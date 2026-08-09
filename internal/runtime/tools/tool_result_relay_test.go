@@ -230,8 +230,8 @@ func newHostRelayExecutor(t *testing.T) (*Executor, models.AgentConfig, *workspa
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
-		ModelRuntimes:     staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
+		ModelRuntime:      nativeCapabilityRuntimeStub{},
 		WorkspaceResolver: manager,
 	})
 	return exec, actor, target

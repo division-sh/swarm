@@ -36,6 +36,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -147,7 +148,7 @@ type storeBundle struct {
 	ManagedCapabilitiesStore       managedcapabilities.Persistence
 	DeliveryStore                  runtimedelivery.Store
 	PipelineObligations            runtimepipelineobligation.Store
-	ScheduleStore                  runtimepipeline.SchedulePersistence
+	GenericScheduleStore           runtimegenericschedule.Store
 	TimerObligationReader          runtimetimerobligation.Reader
 	MailboxMaterializer            runtimepipeline.MailboxWriteMaterializationStore
 	MailboxStore                   runtimetools.MailboxPersistence
@@ -238,7 +239,6 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 					HumanTaskStore:      stores.HumanTaskStore,
 					SessionRegistry:     stores.SessionRegistry,
 					ConversationStore:   stores.ConversationStore,
-					ScheduleStore:       stores.ScheduleStore,
 					MailboxStore:        stores.MailboxStore,
 					Workspace:           req.Workspaces,
 					Credentials:         req.Credentials,
@@ -377,7 +377,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, constructionDB *sql.DB
 		ManagedCapabilitiesStore:    pg,
 		DeliveryStore:               pg,
 		PipelineObligations:         pg.PipelineObligations(),
-		ScheduleStore:               pg,
+		GenericScheduleStore:        pg,
 		TimerObligationReader:       pg,
 		MailboxMaterializer:         pg,
 		MailboxStore:                pg,
@@ -2259,7 +2259,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			ManagedCapabilitiesStore:    sqliteStore,
 			DeliveryStore:               sqliteStore,
 			PipelineObligations:         sqliteStore.PipelineObligations(),
-			ScheduleStore:               sqliteStore,
+			GenericScheduleStore:        sqliteStore,
 			TimerObligationReader:       sqliteStore,
 			MailboxMaterializer:         sqliteStore,
 			MailboxStore:                sqliteStore,

@@ -75,7 +75,7 @@ accounts:
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
 	ensureSQLiteEntityToolTestRun(t, sqliteStore)
 	ctx := runtimetools.WithActor(runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID), actor)
-	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:                    sqliteStore,
 		WorkflowSource:                 semanticview.Wrap(bundle),
 		AllowInternalLegacyEntityTools: true,
@@ -205,7 +205,7 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed sqlite role-scoped entity: %v", err)
 	}
-	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:       sqliteStore,
 		WorkflowSource:    semanticview.Wrap(bundle),
 		AuthorityProvider: allowHumanTaskAuthority{},
@@ -263,7 +263,7 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationOnBothStores(t *testing.
 				Tools: []string{"human_task_request"}, Permissions: []string{"human_task_request"},
 			}
 			bundle := loadWave1EntityToolBundle(t, requester, "provider", "provider_record", "types: {}\n", "provider_record:\n  status: text\n")
-			exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+			exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 				Config: cfg, HumanTaskStore: tc.store, AuthorityProvider: allowHumanTaskAuthority{}, WorkflowSource: semanticview.Wrap(bundle),
 			})
 			ctx, replyContextID, sourceEventID := seedReplyToolContext(t, tc.store)

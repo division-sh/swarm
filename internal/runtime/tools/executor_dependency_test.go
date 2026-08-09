@@ -77,7 +77,7 @@ func (*humanTaskPersistenceStub) CompleteHumanTaskOutcome(context.Context, strin
 }
 
 func TestExecutorMailboxSendFailsWithoutMailboxStore(t *testing.T) {
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{AuthorityProvider: allowMailboxAuthority{}})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{AuthorityProvider: allowMailboxAuthority{}})
 
 	_, err := exec.execMailboxSend(unmanagedToolTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1", EntityID: "entity-1"}, map[string]any{
 		"type": "approval",
@@ -89,7 +89,7 @@ func TestExecutorMailboxSendFailsWithoutMailboxStore(t *testing.T) {
 
 func TestExecutorMailboxSendUsesConstructorOwnedMailboxStore(t *testing.T) {
 	store := &mailboxStoreStub{id: "mailbox-42"}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		MailboxStore:      store,
 		AuthorityProvider: allowMailboxAuthority{},
 	})
@@ -114,7 +114,7 @@ func TestExecutorMailboxSendUsesConstructorOwnedMailboxStore(t *testing.T) {
 }
 
 func TestExecutorEntityStoreDependencyFailsWithoutConstructorOwnedStore(t *testing.T) {
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{})
 
 	store, err := exec.entityStoreDependency()
 	if store != nil || err == nil || !strings.Contains(err.Error(), "entity persistence store is not configured") {
@@ -124,7 +124,7 @@ func TestExecutorEntityStoreDependencyFailsWithoutConstructorOwnedStore(t *testi
 
 func TestExecutorEntityStoreDependencyUsesConstructorOwnedStore(t *testing.T) {
 	store := &entityPersistenceStub{}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{EntityStore: store})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{EntityStore: store})
 
 	got, err := exec.entityStoreDependency()
 	if err != nil {
@@ -136,7 +136,7 @@ func TestExecutorEntityStoreDependencyUsesConstructorOwnedStore(t *testing.T) {
 }
 
 func TestExecutorHumanTaskStoreDependencyFailsWithoutConstructorOwnedStore(t *testing.T) {
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{})
 
 	store, err := exec.humanTaskStoreDependency()
 	if store != nil || err == nil || !strings.Contains(err.Error(), "human-task card store is not configured") {
@@ -146,7 +146,7 @@ func TestExecutorHumanTaskStoreDependencyFailsWithoutConstructorOwnedStore(t *te
 
 func TestExecutorHumanTaskStoreDependencyUsesConstructorOwnedStore(t *testing.T) {
 	store := &humanTaskPersistenceStub{}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{HumanTaskStore: store})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{HumanTaskStore: store})
 
 	got, err := exec.humanTaskStoreDependency()
 	if err != nil {

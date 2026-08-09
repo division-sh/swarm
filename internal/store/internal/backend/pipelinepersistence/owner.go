@@ -15,6 +15,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -27,7 +28,6 @@ import (
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
-	storetimerobligation "github.com/division-sh/swarm/internal/store/internal/backend/timerobligation"
 	runhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	storeworkflowentityquery "github.com/division-sh/swarm/internal/store/internal/workflowentityquery"
 	storeworkflowroute "github.com/division-sh/swarm/internal/store/internal/workflowroute"
@@ -53,7 +53,13 @@ type eventCommitTxStore interface {
 	createReplyContextTx(context.Context, *sql.Tx, runtimereplycontext.Record) error
 	claimReplyContextTx(context.Context, *sql.Tx, runtimereplycontext.ClaimCommand) error
 	workflowDecisionLifecycleOwner() workflowDecisionLifecycleTxOwner
+	genericScheduleTxOwner() GenericScheduleTxOwner
 	commitPublicationTx(context.Context, *sql.Tx, *privateauthoractivity.Mutation, runtimebus.PublicationCommand, *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error)
+}
+
+type GenericScheduleTxOwner interface {
+	AdmitTx(context.Context, *sql.Tx, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error)
+	CancelAdmissionTx(context.Context, *sql.Tx, runtimegenericschedule.AdmissionCommand, string, time.Time) (runtimegenericschedule.CancelResult, error)
 }
 
 type runLifecycleCandidateHandoffReservation = runhandoff.CandidateHandoff
@@ -62,12 +68,6 @@ type activeRunSourceOwnerFunc func(context.Context, string) (runtimecorrelation.
 func (fn activeRunSourceOwnerFunc) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
 	return fn(ctx, runID)
 }
-
-var scheduleAgentIdentityFields = storetimerobligation.ScheduleAgentIdentityFields
-var exactScheduleTaskIDSQL = storetimerobligation.ExactScheduleTaskIDSQL
-var genericScheduleTimerName = storetimerobligation.GenericScheduleTimerName
-var persistedScheduleRoutingSource = storetimerobligation.PersistedScheduleRoutingSource
-var persistedSchedulePayload = storetimerobligation.PersistedSchedulePayload
 
 func runtimeAuthorActivityMutation(story *privateauthoractivity.Mutation) authoractivity.Mutation {
 	if story == nil {
@@ -154,6 +154,7 @@ type PipelinePostgresOwner struct {
 	workflowRoutes         *storeworkflowroute.Postgres
 	events                 EventCommitOwner
 	selectedFork           SelectedForkCommitTxOwner
+	genericSchedules       GenericScheduleTxOwner
 }
 
 type PipelineSQLiteOwner struct {
@@ -170,6 +171,7 @@ type PipelineSQLiteOwner struct {
 	workflowRoutes         *storeworkflowroute.SQLite
 	events                 EventCommitOwner
 	selectedFork           SelectedForkCommitTxOwner
+	genericSchedules       GenericScheduleTxOwner
 	nowFn                  func() time.Time
 	mutationMu             sync.Mutex
 	pipelineClaimMu        sync.Mutex
@@ -178,6 +180,42 @@ type PipelineSQLiteOwner struct {
 	pipelineScanIssuer     *runtimepipelineobligation.ScanIssuer
 	pipelineScans          map[string]*pipelineScanState
 	testPipelineReleaseErr func() error
+}
+
+func (s *PipelinePostgresOwner) BindGenericScheduleTxOwner(owner GenericScheduleTxOwner) error {
+	if s == nil || owner == nil {
+		return errors.New("pipeline PostgreSQL generic schedule transaction owner is required")
+	}
+	if s.genericSchedules != nil {
+		return errors.New("pipeline PostgreSQL generic schedule transaction owner is already bound")
+	}
+	s.genericSchedules = owner
+	return nil
+}
+
+func (s *PipelineSQLiteOwner) BindGenericScheduleTxOwner(owner GenericScheduleTxOwner) error {
+	if s == nil || owner == nil {
+		return errors.New("pipeline SQLite generic schedule transaction owner is required")
+	}
+	if s.genericSchedules != nil {
+		return errors.New("pipeline SQLite generic schedule transaction owner is already bound")
+	}
+	s.genericSchedules = owner
+	return nil
+}
+
+func (s *PipelinePostgresOwner) genericScheduleTxOwner() GenericScheduleTxOwner {
+	if s == nil {
+		return nil
+	}
+	return s.genericSchedules
+}
+
+func (s *PipelineSQLiteOwner) genericScheduleTxOwner() GenericScheduleTxOwner {
+	if s == nil {
+		return nil
+	}
+	return s.genericSchedules
 }
 
 type SelectedForkCommitTxOwner interface {

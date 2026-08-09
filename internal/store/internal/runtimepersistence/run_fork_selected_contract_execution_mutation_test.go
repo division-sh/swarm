@@ -14,6 +14,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
@@ -776,85 +777,13 @@ func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutatio
 
 func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerHistory(t *testing.T) {
 	cases := []struct {
-		name        string
-		insertTimer func(t *testing.T, db *sql.DB, sourceRunID, entityID string, at time.Time)
+		name      string
+		due       runtimegenericschedule.DueBasis
+		cancelled bool
 	}{
-		{
-			name: "fired timer",
-			insertTimer: func(t *testing.T, db *sql.DB, sourceRunID, entityID string, at time.Time) {
-				t.Helper()
-				if _, err := db.ExecContext(testAuthorActivityContext(), `
-					INSERT INTO timers (
-						run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-						routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, fired_at, created_at
-					)
-					VALUES (
-						$1::uuid, 'selected-fired-timer', $2::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
-						jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $2::text)),
-						'live', $3, 'agent-a', 'system', 'timer', 'fired', $4, $5
-					)
-				`, sourceRunID, entityID, at.Add(time.Hour), at.Add(30*time.Minute), at.Add(-time.Minute)); err != nil {
-					t.Fatalf("seed fired timer: %v", err)
-				}
-			},
-		},
-		{
-			name: "non-active timer",
-			insertTimer: func(t *testing.T, db *sql.DB, sourceRunID, entityID string, at time.Time) {
-				t.Helper()
-				if _, err := db.ExecContext(testAuthorActivityContext(), `
-					INSERT INTO timers (
-						run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-						routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, created_at
-					)
-					VALUES (
-						$1::uuid, 'selected-cancelled-timer', $2::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
-						jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $2::text)),
-						'live', $3, 'agent-a', 'system', 'timer', 'cancelled', $4
-					)
-				`, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
-					t.Fatalf("seed cancelled timer: %v", err)
-				}
-			},
-		},
-		{
-			name: "missing executable owner",
-			insertTimer: func(t *testing.T, db *sql.DB, sourceRunID, entityID string, at time.Time) {
-				t.Helper()
-				if _, err := db.ExecContext(testAuthorActivityContext(), `
-					INSERT INTO timers (
-						run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-						routing_source, execution_mode, fire_at, owner_node, owner_kind, task_type, status, created_at
-					)
-					VALUES (
-						$1::uuid, 'selected-ownerless-timer', $2::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
-						jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $2::text)),
-						'live', $3, 'timer-node', 'system', 'timer', 'active', $4
-					)
-				`, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
-					t.Fatalf("seed ownerless timer: %v", err)
-				}
-			},
-		},
-		{
-			name: "missing fire event",
-			insertTimer: func(t *testing.T, db *sql.DB, sourceRunID, entityID string, at time.Time) {
-				t.Helper()
-				if _, err := db.ExecContext(testAuthorActivityContext(), `
-					INSERT INTO timers (
-						run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-						routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, created_at
-					)
-					VALUES (
-						$1::uuid, 'selected-eventless-timer', $2::uuid, 'flow-a/1', '', '{"source":true}'::jsonb,
-						jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $2::text)),
-						'live', $3, 'agent-a', 'system', 'timer', 'active', $4
-					)
-				`, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
-					t.Fatalf("seed eventless timer: %v", err)
-				}
-			},
-		},
+		{name: "active one-shot", due: runtimegenericschedule.AbsoluteDue(time.Unix(1700007125, 0).UTC())},
+		{name: "cancelled one-shot", due: runtimegenericschedule.AbsoluteDue(time.Unix(1700007125, 0).UTC()), cancelled: true},
+		{name: "active recurring", due: runtimegenericschedule.EveryDue(time.Hour)},
 	}
 
 	for _, tc := range cases {
@@ -867,7 +796,12 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 			eventID := uuid.NewString()
 			at := time.Unix(1700003525, 0).UTC()
 			seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
-			tc.insertTimer(t, db, sourceRunID, entityID, at)
+			activation := admitGenericScheduleFixture(t, ctx, pg, testAgentGenericScheduleCommand(
+				t, sourceRunID, "agent-a", "flow-a/1", entityID, "selected-"+strings.ReplaceAll(tc.name, " ", "-"), tc.due,
+			))
+			if tc.cancelled {
+				cancelGenericScheduleFixture(t, ctx, pg, activation, "test_cancelled", at.Add(time.Minute))
+			}
 			captureRunForkTestRevision(t, db, sourceRunID)
 
 			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionMaterializeRequest{
@@ -901,20 +835,10 @@ func TestSelectedContractTimerBlockerRemainsFixedWhenSourceTimerIsDeletedLater(t
 	eventID := uuid.NewString()
 	at := time.Unix(1700003550, 0).UTC()
 	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
-	timerID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO timers (
-			timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-			routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, created_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'selected-vanishing-timer', $3::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
-			jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $3::text)),
-			'live', $4, 'agent-a', 'system', 'timer', 'active', $5
-		)
-	`, timerID, sourceRunID, entityID, at.Add(time.Hour), at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed timer: %v", err)
-	}
+	timer := admitGenericScheduleFixture(t, ctx, pg, testAgentGenericScheduleCommand(
+		t, sourceRunID, "agent-a", "flow-a/1", entityID, "selected-vanishing-timer", runtimegenericschedule.AbsoluteDue(at.Add(time.Hour)),
+	))
+	timerID := timer.ID
 	captureRunForkTestRevision(t, db, sourceRunID)
 	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
@@ -978,20 +902,9 @@ func TestPostTSourceTimerActivatesAsSelectedBranchDivergence(t *testing.T) {
 	}
 	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
 
-	timerID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO timers (
-			timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-			routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, created_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'post-t-source-timer', $3::uuid, 'flow-a/1', 'timer.selected', '{"source":true}'::jsonb,
-			jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow-a', 'flow_instance', 'flow-a/1', 'entity_id', $3::text)),
-			'live', $4, 'agent-a', 'system', 'timer', 'active', $5
-		)
-	`, timerID, sourceRunID, entityID, at.Add(time.Hour), at.Add(time.Minute)); err != nil {
-		t.Fatalf("seed post-T timer: %v", err)
-	}
+	admitGenericScheduleFixture(t, ctx, pg, testAgentGenericScheduleCommand(
+		t, sourceRunID, "agent-a", "flow-a/1", entityID, "post-t-source-timer", runtimegenericschedule.AbsoluteDue(at.Add(time.Hour)),
+	))
 	captureRunForkTestRevision(t, db, sourceRunID)
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{

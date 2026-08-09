@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,86 +17,13 @@ import (
 	"github.com/google/uuid"
 )
 
-type recordingSchedulePersistence struct {
-	schedules     []Schedule
-	cancels       []Schedule
-	releases      []Schedule
-	upsertTx      []bool
-	cancelTx      []bool
-	claimTx       []bool
-	claimCalls    int
-	claimFailures int
-	claimErr      error
-	cancelExacts  int
-	cancelOwned   int
-	cancelErr     error
+type recordingGenericScheduleWakeupOwner struct {
+	activationIDs []string
 }
 
-func (s *recordingSchedulePersistence) UpsertSchedule(ctx context.Context, sc Schedule) error {
-	s.schedules = append(s.schedules, sc)
-	_, txActive := PipelineSQLTxFromContext(ctx)
-	s.upsertTx = append(s.upsertTx, txActive)
+func (s *recordingGenericScheduleWakeupOwner) ReconcileWakeup(_ context.Context, activationID string) error {
+	s.activationIDs = append(s.activationIDs, activationID)
 	return nil
-}
-
-func (s *recordingSchedulePersistence) LoadActiveSchedules(context.Context) ([]Schedule, error) {
-	return nil, nil
-}
-
-func (s *recordingSchedulePersistence) ClaimSchedule(ctx context.Context, _ Schedule) (bool, error) {
-	_, txActive := PipelineSQLTxFromContext(ctx)
-	s.claimTx = append(s.claimTx, txActive)
-	s.claimCalls++
-	if s.claimFailures > 0 {
-		s.claimFailures--
-		return false, s.claimErr
-	}
-	return true, nil
-}
-
-func (s *recordingSchedulePersistence) ReleaseSchedule(_ context.Context, sc Schedule) error {
-	s.releases = append(s.releases, sc)
-	return nil
-}
-
-func (*recordingSchedulePersistence) ReleaseScheduleClaims(context.Context) error {
-	return nil
-}
-
-func (s *recordingSchedulePersistence) CancelScheduleExact(ctx context.Context, sc Schedule) error {
-	s.cancelExacts++
-	s.cancels = append(s.cancels, sc)
-	_, txActive := PipelineSQLTxFromContext(ctx)
-	s.cancelTx = append(s.cancelTx, txActive)
-	return nil
-}
-
-func (s *recordingSchedulePersistence) CancelScheduleExactTerminal(ctx context.Context, sc Schedule) error {
-	s.cancelOwned++
-	s.cancels = append(s.cancels, sc)
-	_, txActive := PipelineSQLTxFromContext(ctx)
-	s.cancelTx = append(s.cancelTx, txActive)
-	return s.cancelErr
-}
-
-func (s *recordingSchedulePersistence) MarkScheduleFiredExact(context.Context, Schedule) error {
-	return nil
-}
-
-func (*recordingSchedulePersistence) CompleteScheduleFireExact(context.Context, Schedule) error {
-	return nil
-}
-
-func newTimerLifecycleCoordinator(t *testing.T, bus Bus, db *sql.DB, module WorkflowModule, store SchedulePersistence) *PipelineCoordinator {
-	t.Helper()
-	opts := PipelineCoordinatorOptions{
-		Module: module,
-	}
-	if store != nil {
-		opts.TimerScheduler = NewSchedulerWithWorkOwner(pipelineTestWorkOwner(t))
-		opts.TimerScheduleStore = store
-	}
-	return newPostgresPipelineCoordinatorForTest(bus, db, opts)
 }
 
 func stageTimerLifecycleBundle() *runtimecontracts.WorkflowContractBundle {

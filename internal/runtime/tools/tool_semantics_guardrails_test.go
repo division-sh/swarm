@@ -134,8 +134,8 @@ func TestRuntimeAndValidatorNormalizationStayAligned(t *testing.T) {
 func TestToolDefinitionsForActor_IncludesEnabledNativeTools(t *testing.T) {
 	t.Parallel()
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
-		ModelRuntimes: staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
+		ModelRuntime: nativeCapabilityRuntimeStub{},
 		WorkspaceResolver: relayWorkspaceResolverStub{
 			target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()},
 		},

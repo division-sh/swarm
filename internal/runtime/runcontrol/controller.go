@@ -8,6 +8,7 @@ import (
 	"time"
 
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 )
 
 const (
@@ -57,6 +58,7 @@ type State struct {
 	ControlledBy        string
 	UpdatedAt           time.Time
 	AbandonedDeliveries int
+	TimerCancellations  []runtimetimercancellation.Ref
 }
 
 type TransitionRequest struct {

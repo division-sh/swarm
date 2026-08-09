@@ -5457,11 +5457,12 @@ engine:
       excludes:
       - executable delivery claim, recovery, and settlement semantics owned by '#2105'
     - name: schedule_timer_rows
-      owner: runtimepipeline.SchedulePersistence
-      sqlite_owner: internal/store.SQLiteRuntimeStore schedule methods
-      postgres_owner: internal/store.PostgresStore schedule methods
+      owner: runtimegenericschedule.Lifecycle over one closed generic activation and occurrence model; runtimepipeline.WorkflowTimerLifecycle remains the distinct workflow-timer sibling
+      sqlite_owner: internal/store.SQLiteRuntimeStore generic-schedule named operations and private workflow-timer operations
+      postgres_owner: internal/store.PostgresStore generic-schedule named operations and private workflow-timer operations
       excludes:
       - cross-process timer claim/locking semantics owned by #1087
+      - replacement, reschedule, migration, compatibility, and a generic timer framework
     - name: pipeline_coordination_workflow_instance_and_replay_rows
       owner: runtimepipeline.WorkflowPersistence consumed only by PipelineCoordinator construction; runtime consumers use named PipelineCoordinator operations
       sqlite_owner: internal/store.SQLiteRuntimeStore closed workflow operations projected through runtimepipeline.NewWorkflowPersistence
@@ -6856,6 +6857,44 @@ engine:
       either from task metadata, target projection, flow-instance shape, or event suffix. Workflow timer accepted-fire
       authorization compares the event's exact admitted RoutingSource with the activation owner; the receiver target route
       cannot substitute for producer provenance.
+    generic_schedule_lifecycle:
+      ownership: >
+        GenericScheduleLifecycle is the sole semantic owner for agent schedules, join completion and timeout schedules,
+        global boot one-shots, and global boot recurrence. Its closed model separates an immutable admission command, one
+        durable activation, an inert process-local wakeup, one deterministic occurrence, and a typed commit result. A
+        workflow_timer row is owned by WorkflowTimerLifecycle and is never interpreted by this owner.
+      admission: >
+        Every command carries an explicit schedule_key and typed due basis. The selected store compares the complete
+        immutable command under `{scope, schedule_key}` before reading a clock. A missing key creates one activation and
+        stamps admitted_at, initial due, and current due once in the same transaction; identical content returns the same
+        current or terminal activation as exact replay; changed content is a conflict. Absolute agent and join coordinates,
+        rendered boot delay, canonical UTC cron, and exact @every duration remain distinct due-basis kinds. Replay returns
+        persisted coordinates and never re-resolves relative time. Replacement, reschedule, generation, and destructive
+        upsert semantics do not exist. Persisted activation identity is not task_id, payload content, or a process key.
+      wakeup: >
+        Persistence commits before registration. A wakeup contains only activation identity and current due coordinate,
+        reloads durable facts before execution, and is fenced by lifecycle-owned bounded/coalesced recovery. Process-local
+        recurrence is forbidden: each recurring occurrence advances the durable coordinate and registers a new inert
+        one-shot wakeup only after commit. Cron is UTC; @every advances from the prior persisted coordinate. Downtime catch-up
+        processes every persisted coordinate in order and emits a typed depth warning rather than skipping work.
+      occurrence: >
+        Occurrence event identity is deterministic from activation identity plus persisted due coordinate. The selected
+        store stamps occurrence admission once and retries/restarts preserve event identity, admitted_at, and due_at exactly.
+        Event acceptance plus one-shot settlement or recurring advancement commits in one selected-store transaction and
+        returns exactly committed, retry, terminal, or stale_cancelled. Completion is a durable claim that the declared
+        publication was accepted: no effect may be marked complete before its acceptance fact commits. A committed retry is
+        exact replay and never synchronously redispatches; durable delivery recovery owns unfinished downstream dispatch.
+        Typed terminal corruption or identity conflict is persisted loudly. Canonical cancellation remains cancellation and
+        a stale callback cannot rewrite it as failure.
+      cancellation: >
+        Exact/join cancellation, run quiescence and stop, standing terminalization, and preservation cleanup retain their
+        outer selected-store transaction while delegating generic and workflow rows to distinct private family owners. Each
+        returns exact activation evidence for post-commit wakeup retirement. No raw mixed-family status writer, public SQL
+        transaction, copied comparison SQL, migration reader, or compatibility path is supported.
+      reply_and_scope: >
+        reply_context_id is immutable one-shot routing authority; recurrence with reply context is rejected before mutation.
+        Run-scoped admission requires a running or paused run. Missing or terminal linkage fails closed. start_on boot is a
+        global platform-control schedule with empty run, entity, and flow scope; no entity-scoped boot interpretation exists.
     declaration:
       description: >
         Public staged lifecycle timers are declared as stage-resident rows in schema.yaml. Legacy/kernel timers are
@@ -7024,9 +7063,11 @@ engine:
     obligation_projection:
       description: >
         One selected-store TimerObligationSnapshot is the canonical read owner for active, due, and recoverable timer
-        meaning across timer, scheduled_task, deadline, global_recurring, and workflow_timer families. Callers provide one
+        meaning across timer, scheduled_task, global_recurring, and workflow_timer families. Callers provide one
         normalized nonzero UTC observed_at; the reader does not choose a clock. The snapshot groups every structural family
-        globally and by run with deterministic ordering and zero entries for missing families.
+        globally and by run with deterministic ordering and zero entries for missing families. It also returns every exact
+        lifecycle row, including due and occurrence coordinates plus fired, cancelled, and typed failed evidence, so callers
+        never infer terminal state from aggregate counts.
       counts:
         active_count: Rows whose durable status is active, independent of run status.
         due_count: Active rows whose fire_at is less than or equal to the exact observed_at.
@@ -7046,9 +7087,9 @@ engine:
       failure_rule: Unknown structural families and invalid family/status/scope rows fail closed; no payload, SQL row,
         executable schedule, or inferred identity escapes this projection.
     crash_recovery: >
-      Restart restores only active typed workflow rows for active runs and registers their exact persisted occurrence
-      coordinates once whenever the selected workflow store and Scheduler are available, independently of whether a generic
-      ScheduleStore is configured. Runtime-scoped restoration occurs only after manager route/agent hydration succeeds.
+      Restart restores active workflow rows through WorkflowTimerLifecycle and active generic rows through
+      GenericScheduleLifecycle, registering each exact persisted occurrence coordinate once. Runtime-scoped restoration
+      occurs only after manager route/agent hydration succeeds.
       Global restoration excludes standing-service runs; a runtime that adopts an already-active standing run performs the
       same run-scoped exact-row registration only after the standing reconciliation mutation commits and its runtime route
       is installed. It does not wait for another process restart.
@@ -13862,14 +13903,21 @@ platform_tables:
         (mutually exclusive). source_timer_id, forked_from_run_id, forked_from_event_id, and reconstruction_owner are
         reserved lineage fields with no current writer. Selected-contract execution cannot populate them until #642
         supplies a long-lived fork timer owner; their presence never makes a source timer executable fork truth.
-        recurrence_cron supports cron expressions for global recurring schedules. recurrence_interval supports duration
-        strings (e.g., "24h") for entity-scoped recurring timers. task_type: timer (one-shot schedule, including global
-        non-recurring boot timers), scheduled_task (recurring entity), deadline (hard cutoff), global_recurring
-        (global recurring work), workflow_timer (run/entity-scoped canonical workflow activation, recurring or one-shot).'
+        Generic schedules persist one immutable schedule_scope plus schedule_key and one typed due basis. Absolute and
+        join-carried coordinates use due_basis_absolute; boot delays and @every intervals use due_basis_duration; UTC cron
+        uses due_basis_cron. The selected store stamps created_at and initial_fire_at once only after key lookup proves a
+        create, and exact replay returns those coordinates without consulting a new clock. recurrence_interval is reserved
+        for typed workflow_timer rows. task_type: timer (one-shot generic schedule, including global non-recurring boot
+        timers), scheduled_task (recurring run-scoped generic schedule), global_recurring (global recurring work), or
+        workflow_timer (run/entity-scoped canonical workflow activation, recurring or one-shot). Generic deadline and
+        expired lifecycle variants do not exist.'
       ddl: |
         CREATE TABLE timers (
             timer_id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             timer_name            TEXT NOT NULL,
+            schedule_scope        TEXT,
+            schedule_key          TEXT,
+            immutable_hash        TEXT,
             run_id                UUID REFERENCES runs(run_id),
             source_timer_id       UUID REFERENCES timers(timer_id),
             forked_from_run_id     UUID REFERENCES runs(run_id),
@@ -13884,8 +13932,8 @@ platform_tables:
             routing_source        JSONB NOT NULL,
             execution_mode        TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             fire_at               TIMESTAMPTZ NOT NULL,
+            initial_fire_at       TIMESTAMPTZ,
             recurring             BOOLEAN NOT NULL DEFAULT FALSE,
-            recurrence_cron       TEXT,
             recurrence_interval   TEXT,
             owner_node            TEXT,
             owner_agent           TEXT,
@@ -13896,15 +13944,33 @@ platform_tables:
             agent_flow_scope_key  TEXT,
             agent_flow_instance_id TEXT,
             reply_context_id      TEXT REFERENCES reply_contexts(reply_context_id),
-            task_type             TEXT NOT NULL DEFAULT 'timer' CHECK (task_type IN ('timer', 'scheduled_task', 'deadline', 'global_recurring', 'workflow_timer')),
-            status                TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'fired', 'cancelled', 'expired')),
+            task_id               TEXT,
+            due_basis_kind        TEXT,
+            due_basis_absolute    TIMESTAMPTZ,
+            due_basis_duration    TEXT,
+            due_basis_cron        TEXT,
+            occurrence_event_id   UUID,
+            occurrence_admitted_at TIMESTAMPTZ,
+            accepted_at           TIMESTAMPTZ,
+            cancel_cause          TEXT,
+            cancelled_at          TIMESTAMPTZ,
+            failure_code          TEXT,
+            failure_message       TEXT,
+            failed_at             TIMESTAMPTZ,
+            task_type             TEXT NOT NULL DEFAULT 'timer' CHECK (task_type IN ('timer', 'scheduled_task', 'global_recurring', 'workflow_timer')),
+            status                TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'fired', 'cancelled', 'failed')),
             fired_at              TIMESTAMPTZ,
             created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK ((task_type = 'workflow_timer' AND schedule_scope IS NULL AND schedule_key IS NULL AND immutable_hash IS NULL AND initial_fire_at IS NULL AND task_id IS NULL AND due_basis_kind IS NULL AND due_basis_absolute IS NULL AND due_basis_duration IS NULL AND due_basis_cron IS NULL AND occurrence_event_id IS NULL AND occurrence_admitted_at IS NULL AND accepted_at IS NULL AND cancel_cause IS NULL AND cancelled_at IS NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL) OR (task_type IN ('timer', 'scheduled_task', 'global_recurring') AND schedule_scope = TRIM(schedule_scope) AND NULLIF(schedule_scope, '') IS NOT NULL AND schedule_key = TRIM(schedule_key) AND NULLIF(schedule_key, '') IS NOT NULL AND immutable_hash = TRIM(immutable_hash) AND NULLIF(immutable_hash, '') IS NOT NULL AND initial_fire_at IS NOT NULL AND due_basis_kind IN ('absolute', 'delay', 'cron', 'every'))),
+            CHECK (task_type = 'workflow_timer' OR ((due_basis_kind = 'absolute' AND due_basis_absolute IS NOT NULL AND due_basis_duration IS NULL AND due_basis_cron IS NULL) OR (due_basis_kind = 'delay' AND due_basis_absolute IS NULL AND due_basis_duration IS NOT NULL AND due_basis_cron IS NULL) OR (due_basis_kind = 'cron' AND due_basis_absolute IS NULL AND due_basis_duration IS NULL AND due_basis_cron IS NOT NULL) OR (due_basis_kind = 'every' AND due_basis_absolute IS NULL AND due_basis_duration IS NOT NULL AND due_basis_cron IS NULL))),
+            CHECK (task_type = 'workflow_timer' OR ((recurring = FALSE AND due_basis_kind IN ('absolute', 'delay') AND task_type = 'timer') OR (recurring = TRUE AND due_basis_kind IN ('cron', 'every') AND task_type IN ('scheduled_task', 'global_recurring')))),
+            CHECK (task_type = 'workflow_timer' OR ((occurrence_event_id IS NULL AND occurrence_admitted_at IS NULL) OR (occurrence_event_id IS NOT NULL AND occurrence_admitted_at IS NOT NULL))),
+            CHECK (task_type = 'workflow_timer' OR ((status = 'active' AND cancel_cause IS NULL AND cancelled_at IS NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL) OR (status = 'fired' AND recurring = FALSE AND fired_at IS NOT NULL AND accepted_at IS NOT NULL AND cancel_cause IS NULL AND cancelled_at IS NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL) OR (status = 'cancelled' AND cancel_cause IS NOT NULL AND cancelled_at IS NOT NULL AND failure_code IS NULL AND failure_message IS NULL AND failed_at IS NULL) OR (status = 'failed' AND failure_code IS NOT NULL AND failed_at IS NOT NULL AND cancel_cause IS NULL AND cancelled_at IS NULL))),
             CHECK (task_type <> 'workflow_timer' OR (run_id IS NOT NULL AND entity_id IS NOT NULL AND flow_scope_key = TRIM(flow_scope_key) AND NULLIF(flow_scope_key, '') IS NOT NULL AND flow_instance_id = TRIM(flow_instance_id) AND NULLIF(flow_instance_id, '') IS NOT NULL AND flow_instance = TRIM(flow_instance) AND NULLIF(flow_instance, '') IS NOT NULL)),
             CHECK (task_type <> 'workflow_timer' OR (timer_name = TRIM(timer_name) AND NULLIF(timer_name, '') IS NOT NULL AND fire_event = TRIM(fire_event) AND NULLIF(fire_event, '') IS NOT NULL)),
             CHECK (task_type <> 'workflow_timer' OR (owner_node IS NULL AND owner_agent = TRIM(owner_agent) AND NULLIF(owner_agent, '') IS NOT NULL)),
             CHECK ((owner_kind = 'system' AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND agent_flow_scope_key IS NULL AND agent_flow_instance_id IS NULL) OR (owner_kind = 'agent' AND owner_node IS NULL AND owner_agent = TRIM(owner_agent) AND NULLIF(owner_agent, '') IS NOT NULL AND agent_name_owner = TRIM(agent_name_owner) AND NULLIF(agent_name_owner, '') IS NOT NULL AND agent_name_source IN ('declared', 'runtime_created') AND agent_route_presence IN ('present', 'root') AND ((agent_route_presence = 'root' AND agent_flow_scope_key IS NULL AND agent_flow_instance_id IS NULL AND flow_instance IS NULL) OR (agent_route_presence = 'present' AND agent_flow_scope_key = TRIM(agent_flow_scope_key) AND NULLIF(agent_flow_scope_key, '') IS NOT NULL AND agent_flow_instance_id = TRIM(agent_flow_instance_id) AND NULLIF(agent_flow_instance_id, '') IS NOT NULL AND flow_instance = TRIM(flow_instance) AND NULLIF(flow_instance, '') IS NOT NULL)))),
-            CHECK (task_type <> 'workflow_timer' OR (recurrence_cron IS NULL AND reply_context_id IS NULL)),
+            CHECK (task_type <> 'workflow_timer' OR reply_context_id IS NULL),
             CHECK ((routing_source->>'kind') IN ('root', 'flow_owned_control', 'platform_control')),
             CHECK (task_type <> 'workflow_timer' OR (SUBSTR(CAST(fire_payload AS TEXT), 1, 1) = '{' AND SUBSTR(CAST(fire_payload AS TEXT), LENGTH(CAST(fire_payload AS TEXT)), 1) = '}')),
             CHECK (task_type <> 'workflow_timer' OR fire_at >= created_at),
@@ -13916,7 +13982,8 @@ platform_tables:
             INDEX idx_timers_fire (status, fire_at),
             INDEX idx_timers_entity (entity_id) WHERE entity_id IS NOT NULL,
             INDEX idx_timers_flow (flow_instance) WHERE flow_instance IS NOT NULL,
-            INDEX idx_timers_global (task_type, status) WHERE entity_id IS NULL
+            INDEX idx_timers_global (task_type, status) WHERE entity_id IS NULL,
+            UNIQUE INDEX idx_timers_generic_schedule_key (schedule_scope, schedule_key)
         );
       scope_rules:
         entity_scoped: entity_id NOT NULL and run_id set for runtime-owned entity timers. Generic root-owned schedules have

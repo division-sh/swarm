@@ -347,7 +347,7 @@ func (e *channelAckLossExecutor) ExecuteDurableActivity(ctx context.Context, int
 }
 
 func configuredChannelExecutor(source semanticview.Source, binding packs.OutboundBindingPlan, credentials runtimecredentials.Store, activity runtimetools.DurableActivityExecutor) *runtimetools.Executor {
-	return runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+	return runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		WorkflowSource: source, ChannelBindings: []packs.OutboundBindingPlan{binding}, Credentials: credentials, ActivityExecutor: activity,
 	})
 }

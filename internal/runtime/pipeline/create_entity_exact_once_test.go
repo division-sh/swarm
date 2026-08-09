@@ -21,11 +21,11 @@ import (
 func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		setup func(t *testing.T) (*PipelineCoordinator, context.Context, *recordingPipelineBus, *recordingScheduleStore, *recordingMailboxWriteMaterializer)
+		setup func(t *testing.T) (*PipelineCoordinator, context.Context, *recordingPipelineBus, *recordingGenericScheduleWakeupOwner, *recordingMailboxWriteMaterializer)
 	}{
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (*PipelineCoordinator, context.Context, *recordingPipelineBus, *recordingScheduleStore, *recordingMailboxWriteMaterializer) {
+			setup: func(t *testing.T) (*PipelineCoordinator, context.Context, *recordingPipelineBus, *recordingGenericScheduleWakeupOwner, *recordingMailboxWriteMaterializer) {
 				db := newSQLiteWorkflowInstanceStoreTestDB(t)
 				ctx := sqliteExactOnceRunContext(t, db)
 				return newExactOnceCoordinator(t, db, newSQLiteWorkflowInstanceStoreForTest(t, db)), ctx, nil, nil, nil
@@ -33,7 +33,7 @@ func TestCreateEntityHandlerEffectsAreExactOnceAcrossStoreMutations(t *testing.T
 		},
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (*PipelineCoordinator, context.Context, *recordingPipelineBus, *recordingScheduleStore, *recordingMailboxWriteMaterializer) {
+			setup: func(t *testing.T) (*PipelineCoordinator, context.Context, *recordingPipelineBus, *recordingGenericScheduleWakeupOwner, *recordingMailboxWriteMaterializer) {
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				pc := newExactOnceCoordinator(t, db, newPostgresWorkflowInstanceStoreForTest(db))
@@ -200,7 +200,7 @@ func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *workflowInstanceSt
 		DeliveryStore:       deliveryStore,
 		DeliveryRuntime:     bus,
 		PipelineObligations: unavailablePipelineTestObligationOwner{},
-		TimerScheduleStore:  &recordingScheduleStore{},
+		GenericSchedules:    &recordingGenericScheduleWakeupOwner{},
 		MailboxMaterializer: &recordingMailboxWriteMaterializer{},
 		Module: &previewWorkflowModule{
 			bundle:        bundle,

@@ -17,7 +17,7 @@ import (
 func TestExecutorReadFlowDataReadsDeclaredFlowFile(t *testing.T) {
 	source, _ := loadFlowDataToolSource(t)
 	actor := flowDataActor()
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
 
 	defs := exec.ToolDefinitionsForActor(actor)
 	if !containsToolName(toolDefinitionNames(defs), "read_flow_data") {
@@ -54,7 +54,7 @@ func TestExecutorReadFlowDataReadsDeclaredFlowFile(t *testing.T) {
 func TestExecutorReadFlowDataFailsClosedForUndeclaredAndEscapingFiles(t *testing.T) {
 	source, root := loadFlowDataToolSourceWithAccess(t, []string{"exclusions.yaml", "escape.md"})
 	actor := flowDataActor()
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
 
 	if _, err := exec.Execute(models.WithActor(unmanagedToolTestContext(), actor), "read_flow_data", map[string]any{"filename": "missing.yaml"}); err == nil {
 		t.Fatal("Execute(read_flow_data missing.yaml) succeeded, want undeclared failure")
@@ -88,7 +88,7 @@ func TestExecutorReadFlowDataNotVisibleWithoutDeclaration(t *testing.T) {
 		FlowPath:       "support",
 		FlowDataAccess: []string{"exclusions.yaml"},
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
 
 	if containsToolName(toolDefinitionNames(exec.ToolDefinitionsForActor(actor)), "read_flow_data") {
 		t.Fatal("read_flow_data visible without flow_data_access declaration")
@@ -107,7 +107,7 @@ func TestExecutorReadFlowDataRejectsRoleModeImpersonation(t *testing.T) {
 		FlowID:        "static",
 		FlowPath:      "support",
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
 
 	if containsToolName(toolDefinitionNames(exec.ToolDefinitionsForActor(actor)), "read_flow_data") {
 		t.Fatal("read_flow_data visible through role/mode fallback impersonation")
@@ -126,7 +126,7 @@ func TestExecutorReadFlowDataIgnoresMutableActorFlowDataAccess(t *testing.T) {
 	source, root := loadFlowDataToolSource(t)
 	actor := flowDataActor()
 	actor.FlowDataAccess = []string{"escape.md"}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
 
 	if err := os.WriteFile(filepath.Join(root, "flows", "support", "data", "escape.md"), []byte("mutable grant\n"), 0o644); err != nil {
 		t.Fatalf("write escape.md: %v", err)
@@ -146,7 +146,7 @@ func TestExecutorReadFlowDataUsesContractOwnedFlowRoot(t *testing.T) {
 	actor := flowDataActor()
 	actor.FlowID = "other"
 	actor.FlowPath = "other"
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
 
 	out, err := exec.Execute(models.WithActor(unmanagedToolTestContext(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"})
 	if err != nil {
@@ -165,7 +165,7 @@ func TestExecutorReadFlowDataDiagnosticsUseFlowDataAuthorization(t *testing.T) {
 	source, _ := loadFlowDataToolSource(t)
 	actor := flowDataActor()
 	bus := &telemetryBusStub{}
-	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source})
+	exec := NewExecutorWithOptions(bus, ExecutorOptions{WorkflowSource: source})
 
 	if _, err := exec.Execute(models.WithActor(unmanagedToolTestContext(), actor), "read_flow_data", map[string]any{"filename": "exclusions.yaml"}); err != nil {
 		t.Fatalf("Execute(read_flow_data): %v", err)
@@ -184,7 +184,7 @@ func TestExecutorReadFlowDataDiagnosticsUseFlowDataAuthorization(t *testing.T) {
 
 func TestExecutorReadFlowDataRequiresWorkflowSource(t *testing.T) {
 	actor := flowDataActor()
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{})
 
 	if containsToolName(toolDefinitionNames(exec.ToolDefinitionsForActor(actor)), "read_flow_data") {
 		t.Fatal("read_flow_data visible without workflow source")

@@ -12,7 +12,6 @@ type Family string
 const (
 	FamilyTimer           Family = "timer"
 	FamilyScheduledTask   Family = "scheduled_task"
-	FamilyDeadline        Family = "deadline"
 	FamilyGlobalRecurring Family = "global_recurring"
 	FamilyWorkflowTimer   Family = "workflow_timer"
 )
@@ -20,7 +19,6 @@ const (
 var families = [...]Family{
 	FamilyTimer,
 	FamilyScheduledTask,
-	FamilyDeadline,
 	FamilyGlobalRecurring,
 	FamilyWorkflowTimer,
 }
@@ -109,6 +107,24 @@ type Snapshot struct {
 	ObservedAt     time.Time          `json:"observed_at"`
 	GlobalFamilies []FamilyObligation `json:"global_families"`
 	Runs           []RunObligations   `json:"runs"`
+	Activations    []Activation       `json:"activations"`
+}
+
+type Activation struct {
+	ActivationID              string    `json:"activation_id"`
+	Family                    Family    `json:"family"`
+	RunID                     string    `json:"run_id,omitempty"`
+	Status                    string    `json:"status"`
+	DueAt                     time.Time `json:"due_at"`
+	InitialDueAt              time.Time `json:"initial_due_at,omitempty"`
+	OccurrenceEventID         string    `json:"occurrence_event_id,omitempty"`
+	OccurrenceEventAdmittedAt time.Time `json:"occurrence_event_admitted_at,omitempty"`
+	AcceptedAt                time.Time `json:"accepted_at,omitempty"`
+	CancelCause               string    `json:"cancel_cause,omitempty"`
+	CancelledAt               time.Time `json:"cancelled_at,omitempty"`
+	FailureCode               string    `json:"failure_code,omitempty"`
+	FailureMessage            string    `json:"failure_message,omitempty"`
+	FailedAt                  time.Time `json:"failed_at,omitempty"`
 }
 
 func (s Snapshot) Run(runID string) (RunObligations, bool) {

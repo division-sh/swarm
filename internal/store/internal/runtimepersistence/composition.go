@@ -14,6 +14,7 @@ import (
 	storeeffect "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	storeevent "github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence"
+	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
@@ -74,7 +75,12 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		workspaceLookups:       workspaceLookups,
 		schemaOwner:            schemaOwner,
 	}
-	store.schedulePostgresOwner = timerObligations
+	store.timerObligationPostgresReader = timerObligations
+	genericSchedules, err := storegenericschedule.NewPostgres(backend, store.requireCurrentSchema)
+	if err != nil {
+		return nil, err
+	}
+	store.genericSchedulePostgresOwner = genericSchedules
 	apiIdempotency, err := storeapiidempotency.NewPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -172,6 +178,9 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	}
 	pipelineOwner, err := storepipeline.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, candidates, decisionOwner, deliveryOwner, replyContexts, workflowEntityQueries, workflowRoutes, eventOwner)
 	if err != nil {
+		return nil, err
+	}
+	if err := pipelineOwner.BindGenericScheduleTxOwner(genericSchedules); err != nil {
 		return nil, err
 	}
 	if err := eventOwner.BindPipeline(pipelineOwner); err != nil {
@@ -275,7 +284,12 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		workspaceLookups:       workspaceLookups,
 		nowFn:                  time.Now,
 	}
-	store.scheduleSQLiteOwner = timerObligations
+	store.timerObligationSQLiteReader = timerObligations
+	genericSchedules, err := storegenericschedule.NewSQLite(backend, store.requireCurrentSchema)
+	if err != nil {
+		return nil, err
+	}
+	store.genericScheduleSQLiteOwner = genericSchedules
 	apiIdempotency, err := storeapiidempotency.NewSQLite(backend, schema.Path(), store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -363,6 +377,9 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	}
 	pipelineOwner, err := storepipeline.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, candidates, decisionOwner, deliveryOwner, replyContexts, workflowEntityQueries, workflowRoutes, eventOwner, store.now)
 	if err != nil {
+		return nil, err
+	}
+	if err := pipelineOwner.BindGenericScheduleTxOwner(genericSchedules); err != nil {
 		return nil, err
 	}
 	if err := eventOwner.BindPipeline(pipelineOwner); err != nil {

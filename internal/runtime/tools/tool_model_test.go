@@ -198,7 +198,7 @@ func TestExecutor_HTTPToolExecutesTemplateAndResponseMapping(t *testing.T) {
 		},
 	})
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-1",
@@ -239,7 +239,7 @@ func TestExecutor_HTTPToolRejectsProviderOutputOutsideAdmittedSchema(t *testing.
 		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), output),
 		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: http.MethodGet, URL: server.URL}),
 	)
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{})
 	_, err := exec.execHTTPRequestOnce(unmanagedToolTestContext(), http.MethodGet, server.URL, http.Header{}, nil, time.Second, tool, nil)
 	failure, ok := runtimefailures.As(err)
 	if err == nil || !ok || failure.Failure.Detail.Code != "provider_response_schema_invalid" {
@@ -307,7 +307,7 @@ func TestExecutor_HTTPResponseSuccessPolicyParityCases(t *testing.T) {
 				}
 			}
 			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"policy_probe": tool}})
-			exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+			exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
 			ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1", Tools: []string{"policy_probe"}})
 			_, err := exec.Execute(ctx, "policy_probe", map[string]any{})
 			if !tc.wantFailure {
@@ -365,7 +365,7 @@ func TestExecutor_HTTPToolEncodesURLTemplateComponentsAndPreservesRawHeaderBody(
 		},
 	})
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-1",
@@ -458,7 +458,7 @@ func TestExecutor_CustomWebSearchEncodesHTTPURLTemplateComponents(t *testing.T) 
 	}))
 	defer server.Close()
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{})
 	httpExecution := mustHTTPExecution(t, server.URL+"/search/{{input.max_results}}?q={{input.query}}")
 	results, err := exec.executeCustomWebSearch(unmanagedToolTestContext(), webSearchProviderConfig{
 		HTTP:         httpExecution,
@@ -516,7 +516,7 @@ func TestExecutor_HTTPToolUsesImportedPackageCredentialBinding(t *testing.T) {
 	if err := store.Set(unmanagedToolTestContext(), "tenant_provider_key", "tenant-secret"); err != nil {
 		t.Fatalf("Set tenant_provider_key: %v", err)
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "worker-agent",
@@ -555,7 +555,7 @@ func TestExecutor_HTTPToolUsesImportedPackageCredentialBindingForRenderedActorID
 	if err := store.Set(unmanagedToolTestContext(), "tenant_provider_key", "tenant-secret"); err != nil {
 		t.Fatalf("Set tenant_provider_key: %v", err)
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "worker-agent-rendered",
@@ -586,7 +586,7 @@ func TestExecutor_HTTPToolFailsClosedWhenImportedCredentialBindingMissing(t *tes
 	if err := store.Set(unmanagedToolTestContext(), "provider_key", "ambient-secret"); err != nil {
 		t.Fatalf("Set provider_key: %v", err)
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "worker-agent",
@@ -614,7 +614,7 @@ func TestExecutor_HTTPToolFailsClosedWhenImportedCredentialRequiresMissing(t *te
 	if err := store.Set(unmanagedToolTestContext(), "provider_key", "ambient-secret"); err != nil {
 		t.Fatalf("Set provider_key: %v", err)
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "worker-agent",
@@ -643,7 +643,7 @@ func TestExecutor_NativeWebSearchUsesImportedPolicyAndCredentialBinding(t *testi
 	if err := store.Set(unmanagedToolTestContext(), "tenant_provider_key", "native-secret"); err != nil {
 		t.Fatalf("Set tenant_provider_key: %v", err)
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "worker-agent-rendered", FlowPath: "worker/instance-1", NativeTools: models.NativeToolConfig{WebSearch: true}}
 
 	cfg, err := exec.resolveWebSearchProviderConfig(actor)
@@ -716,7 +716,7 @@ func TestExecutor_MCPToolExecutesDiscoveredServerTool(t *testing.T) {
 		}},
 	})
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "agent-1",
@@ -742,7 +742,7 @@ func TestExecutor_ToolDefinitionsForActor_ExcludesContractMCPWithoutDiscovery(t 
 		},
 	})
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
 	defs := exec.ToolDefinitionsForActor(models.AgentConfig{ExecutionMode: "live", ID: "agent-1", Tools: []string{"infra.ping"}})
 
 	names := make([]string, 0, len(defs))
@@ -766,7 +766,7 @@ func TestExecutor_ToolDefinitionsForActor_UsesSharedActorRegistry(t *testing.T) 
 		},
 	})
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		WorkflowSource: source,
 		ModelRuntimes:  staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 		WorkspaceResolver: relayWorkspaceResolverStub{

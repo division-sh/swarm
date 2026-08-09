@@ -17,6 +17,7 @@ import (
 	storeeffect "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	storeevent "github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence"
+	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
@@ -66,7 +67,8 @@ type PostgresStore struct {
 	routingPostgresOwner           *storeroutingrules.RoutingPostgresOwner
 	runLifecyclePostgresOwner      *storerunlifecycle.RunLifecyclePostgresOwner
 	startupPostgresOwner           *storestartupownership.StartupPostgresOwner
-	schedulePostgresOwner          *storetimerobligation.SchedulePostgresOwner
+	timerObligationPostgresReader  *storetimerobligation.PostgresReader
+	genericSchedulePostgresOwner   *storegenericschedule.PostgresOwner
 
 	backend               *postgresbackend.Backend
 	runBundles            *storerunbundle.Postgres

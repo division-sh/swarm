@@ -219,8 +219,8 @@ func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *tes
 		t.Fatalf("write workspace input: %v", err)
 	}
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
-		ModelRuntimes:     staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
+		ModelRuntime:      nativeCapabilityRuntimeStub{},
 		WorkspaceResolver: manager,
 	})
 	exec.execWorkspaceFn = func(context.Context, workspace.ExecutionTarget, time.Duration, string, ...string) ([]byte, []byte, int, error) {
@@ -321,8 +321,8 @@ func TestExecutorHostNativeBashUsesExplicitHostManagerTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
-		ModelRuntimes:     staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
+		ModelRuntime:      nativeCapabilityRuntimeStub{},
 		WorkspaceResolver: manager,
 	})
 	actorCtx := models.WithActor(ctx, actor)
@@ -452,8 +452,8 @@ func TestNativeFallbackToolSurfaceConsumesWorkspaceExecutionTarget(t *testing.T)
 
 func TestNativeFallbackToolSurfaceRejectsStrictProviderNativeRuntime(t *testing.T) {
 	workspaceDir := t.TempDir()
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
-		ModelRuntimes: staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
+		ModelRuntime: nativeCapabilityRuntimeStub{
 			caps: llm.NativeToolCapabilities{
 				Bash:      true,
 				FileIO:    true,
@@ -508,7 +508,7 @@ func TestNativeFallbackToolSurfaceRejectsStrictProviderNativeRuntime(t *testing.
 
 func TestNativeWorkspaceCommandRequiresActorBashAuthorization(t *testing.T) {
 	workspaceDir := t.TempDir()
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		WorkspaceResolver: relayWorkspaceResolverStub{
 			target: &workspace.Target{
 				Backend: workspace.BackendHost,

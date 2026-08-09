@@ -161,6 +161,7 @@ func scanWorkflowTimerActivation(scanner workflowTimerScanner) (runtimepipeline.
 func commitWorkflowTimerReconciliation(
 	ctx context.Context,
 	decisions workflowDecisionLifecycleTxOwner,
+	genericSchedules GenericScheduleTxOwner,
 	postgres bool,
 	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
 	reserve func(context.Context) (*runLifecycleCandidateHandoffReservation, error),
@@ -179,7 +180,7 @@ func commitWorkflowTimerReconciliation(
 	var result runtimepipeline.CommittedWorkflowLifecycleMutation
 	err = run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
-		result, err = commitWorkflowEngineLifecycle(txctx, tx, runtimeAuthorActivityMutation(story), decisions, postgres, command.Plan)
+		result, err = commitWorkflowEngineLifecycle(txctx, tx, runtimeAuthorActivityMutation(story), decisions, genericSchedules, postgres, command.Plan)
 		if err != nil {
 			return err
 		}
@@ -205,7 +206,7 @@ func commitWorkflowTimerReconciliation(
 }
 
 func (s *PipelinePostgresOwner) CommitWorkflowTimerReconciliation(ctx context.Context, command runtimepipeline.WorkflowTimerReconciliationCommand) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
-	return commitWorkflowTimerReconciliation(ctx, s.DecisionPostgresOwner, true, s.runPrivateAuthorActivityMutation, reserveRunLifecycleCandidateHandoff,
+	return commitWorkflowTimerReconciliation(ctx, s.DecisionPostgresOwner, s.genericScheduleTxOwner(), true, s.runPrivateAuthorActivityMutation, reserveRunLifecycleCandidateHandoff,
 		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
 			return reservation.Prepare(s.runLifecycleCandidates, result)
 		},
@@ -215,7 +216,7 @@ func (s *PipelinePostgresOwner) CommitWorkflowTimerReconciliation(ctx context.Co
 }
 
 func (s *PipelineSQLiteOwner) CommitWorkflowTimerReconciliation(ctx context.Context, command runtimepipeline.WorkflowTimerReconciliationCommand) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
-	return commitWorkflowTimerReconciliation(ctx, s.DecisionSQLiteOwner, false,
+	return commitWorkflowTimerReconciliation(ctx, s.DecisionSQLiteOwner, s.genericScheduleTxOwner(), false,
 		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 			return s.runPrivateAuthorActivityMutation(ctx, "sqlite workflow timer reconciliation", fn)
 		}, reserveRunLifecycleCandidateHandoff,

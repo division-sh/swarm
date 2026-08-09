@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
@@ -284,18 +285,13 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 	seedDeliveryStateFixture(t, ctx, sqliteStore, activeEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-active")}, runtimedelivery.StateQueued, nil)
 	readyEvent := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.backend.ConstructionHandle(), readyEventID)
 	seedDeliveryStateFixture(t, ctx, sqliteStore, readyEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-done")}, runtimedelivery.StateDelivered, nil)
-	if _, err := sqliteStore.backend.ExecContext(ctx, `
-		INSERT INTO timers (
-			timer_id, run_id, timer_name, fire_event, fire_payload,
-			routing_source, execution_mode, fire_at, owner_agent, owner_kind, task_type, status, created_at
-		)
-		VALUES
-			(?, ?, 'due', 'quiescence.timeout', '{}', '{"kind":"platform_control","route":{}}', 'live', ?, 'timer-agent', 'system', 'timer', 'active', ?),
-			(?, ?, 'settled', 'quiescence.timeout', '{}', '{"kind":"platform_control","route":{}}', 'live', ?, 'timer-agent', 'system', 'timer', 'fired', ?)
-	`, uuid.NewString(), blockedRunID, now.Add(-time.Minute), now,
-		uuid.NewString(), readyRunID, now.Add(-time.Minute), now); err != nil {
-		t.Fatalf("seed sqlite timers: %v", err)
-	}
+	admitGenericScheduleFixture(t, ctx, sqliteStore, testRootGenericScheduleCommand(
+		t, blockedRunID, uuid.NewString(), "quiescence-due", runtimegenericschedule.AbsoluteDue(now.Add(-time.Minute)),
+	))
+	settled := admitGenericScheduleFixture(t, ctx, sqliteStore, testRootGenericScheduleCommand(
+		t, readyRunID, uuid.NewString(), "quiescence-settled", runtimegenericschedule.AbsoluteDue(now.Add(-time.Minute)),
+	))
+	cancelGenericScheduleFixture(t, ctx, sqliteStore, settled, "test_settled", now)
 	quiescenceIdentity := testAgentIdentity(t, "quiescence-agent", "quiescence")
 	quiescenceFields := testAgentIdentityStorageFields(t, quiescenceIdentity)
 	seedTestAgentRow(t, ctx, sqliteStore.backend.ConstructionHandle(), false, quiescenceIdentity, "active")

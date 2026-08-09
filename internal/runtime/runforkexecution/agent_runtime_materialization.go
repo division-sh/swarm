@@ -46,7 +46,6 @@ type SelectedContractAgentRuntimeOptions struct {
 	HumanTaskStore      runtimetools.HumanTaskCardStore
 	SessionRegistry     runtimesessions.Registry
 	ConversationStore   runtimellm.ConversationPersistence
-	ScheduleStore       runtimepipeline.SchedulePersistence
 	MailboxStore        runtimetools.MailboxPersistence
 	Workspace           workspace.Lifecycle
 	Credentials         runtimecredentials.Store
@@ -409,7 +408,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		credentials = runtimecredentials.NewEnvStore()
 	}
 	var managerRef runtimetools.Manager
-	exec := runtimetools.NewExecutorWithOptions(bus, nil, runtimetools.ExecutorOptions{
+	exec := runtimetools.NewExecutorWithOptions(bus, runtimetools.ExecutorOptions{
 		Config:             options.Config,
 		Credentials:        credentials,
 		ManagedCredentials: options.ManagedCredentials,
@@ -425,7 +424,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		ManagerProvider: func() runtimetools.Manager {
 			return managerRef
 		},
-	}, options.ScheduleStore)
+	})
 	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, mcpTurns, managerOptions.WorkOwner, func(agentID string) (runtimeactors.AgentConfig, bool) {
 		if managerRef == nil {
 			return runtimeactors.AgentConfig{}, false

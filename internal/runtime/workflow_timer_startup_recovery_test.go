@@ -15,15 +15,15 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -38,7 +38,7 @@ type workflowTimerStartupStore interface {
 	swarmruntime.EventPayloadValidationBinder
 	swarmruntime.AuthorActivityCatalogRegistrar
 	runtimerunlifecycle.CandidateOwner
-	runtimepipeline.SchedulePersistence
+	runtimegenericschedule.Store
 	runtimemanager.AgentLifecyclePersistence
 	runtimemanager.ManagerPersistence
 	runtimetimerobligation.Reader
@@ -64,7 +64,7 @@ func (s *workflowTimerStartupFlakyManagerStore) LoadAgents(ctx context.Context) 
 	return s.workflowTimerStartupStore.LoadAgents(ctx)
 }
 
-func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOnBothStores(t *testing.T) {
+func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRuntimeOnBothStores(t *testing.T) {
 	for _, backend := range []struct {
 		name string
 		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, bool)
@@ -114,7 +114,7 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 				EventPayloadValidationBinder: selected,
 				AuthorActivityRegistrars:     []swarmruntime.AuthorActivityCatalogRegistrar{selected},
 				RunLifecycleCandidates:       selected,
-				ScheduleStore:                selected,
+				GenericScheduleStore:         selected,
 				TimerObligationReader:        selected,
 				WorkflowPersistence:          workflowPersistence,
 				ManagerStore:                 selected,
@@ -149,62 +149,103 @@ func TestGenericOccurrenceShapedSchedulePublishesThroughWorkflowEnabledRuntimeOn
 				t.Fatalf("Start runtime: %v", err)
 			}
 
-			occurrence := timeridentity.WorkflowTimerOccurrenceRef{
-				Activation: timeridentity.WorkflowTimerActivationRef{
-					ActivationID:        uuid.NewString(),
-					Declaration:         "generic.opaque",
-					DeclarationRevision: "sha256:generic-opaque",
-					Cause:               timeridentity.WorkflowTimerActivationCauseInitial,
-				},
-				DueAt: time.Now().UTC().Add(50 * time.Millisecond).Truncate(time.Microsecond),
-			}.Normalize()
+			dueAt := time.Now().UTC().Add(50 * time.Millisecond).Truncate(time.Microsecond)
 			routingSource, err := events.NewRootRoutingSource(entityID)
 			if err != nil {
 				t.Fatalf("build generic schedule routing source: %v", err)
 			}
-			schedule := runtimepipeline.Schedule{
+			command := runtimegenericschedule.AdmissionCommand{
+				ScheduleKey:   "generic-occurrence-proof",
 				RunID:         runID,
-				AgentID:       "runtime",
-				OwnerKind:     runtimepipeline.ScheduleOwnerAgent,
+				OwnerID:       "runtime",
+				OwnerKind:     runtimegenericschedule.OwnerAgent,
 				AgentIdentity: agentidentitytest.RootRuntime(t, "runtime", "generic-occurrence-proof"),
 				EventType:     "generic.tick",
-				Mode:          "once",
-				At:            occurrence.DueAt,
 				EntityID:      entityID,
-				FlowInstance:  "",
-				TaskID:        occurrence.TaskID(),
-				Payload:       []byte(`{}`),
+				TaskID:        "generic-occurrence-proof",
+				Payload:       semanticvalue.EmptyObject(),
 				RoutingSource: routingSource,
-				ExecutionMode: executionmode.Live,
+				Due:           runtimegenericschedule.AbsoluteDue(dueAt),
 			}
-			if err := selected.UpsertSchedule(ctx, schedule); err != nil {
-				t.Fatalf("persist generic occurrence-shaped schedule: %v", err)
-			}
-			if err := rt.Scheduler.Register(ctx, schedule); err != nil {
-				t.Fatalf("register generic occurrence-shaped schedule: %v", err)
+			admitted, err := rt.GenericSchedules.Admit(ctx, command)
+			if err != nil {
+				t.Fatalf("admit generic occurrence-shaped schedule: %v", err)
 			}
 
 			deadline := time.Now().Add(5 * time.Second)
 			for {
 				var eventCount int
-				query := `SELECT COUNT(*) FROM events WHERE task_id = ? AND produced_by = 'runtime.scheduler' AND produced_by_type = 'platform'`
+				query := `SELECT COUNT(*) FROM events WHERE task_id = ? AND produced_by = ? AND produced_by_type = 'platform'`
+				args := []any{command.TaskID, runtimegenericschedule.OccurrenceProducerID()}
 				if postgres {
-					query = `SELECT COUNT(*) FROM events WHERE task_id = $1 AND produced_by = 'runtime.scheduler' AND produced_by_type = 'platform'`
+					query = `SELECT COUNT(*) FROM events WHERE task_id = $1 AND produced_by = $2 AND produced_by_type = 'platform'`
 				}
-				if err := db.QueryRowContext(ctx, query, occurrence.TaskID()).Scan(&eventCount); err != nil {
+				if err := db.QueryRowContext(ctx, query, args...).Scan(&eventCount); err != nil {
 					t.Fatalf("read generic scheduled event: %v", err)
 				}
-				active, err := selected.LoadActiveSchedules(ctx)
+				activation, found, err := selected.LoadGenericScheduleActivation(ctx, admitted.Activation.ID)
 				if err != nil {
-					t.Fatalf("load active generic schedules: %v", err)
+					t.Fatalf("load generic schedule activation: %v", err)
 				}
-				if eventCount == 1 && len(active) == 0 {
+				if eventCount == 1 && found && activation.Status == runtimegenericschedule.StatusFired {
 					break
 				}
 				if time.Now().After(deadline) {
-					t.Fatalf("generic occurrence-shaped fire did not publish and complete: events=%d active=%#v", eventCount, active)
+					t.Fatalf("generic occurrence-shaped fire did not publish and settle: events=%d activation=%#v found=%v", eventCount, activation, found)
 				}
 				time.Sleep(20 * time.Millisecond)
+			}
+
+			recurringCommand := command
+			recurringCommand.ScheduleKey = "generic-recurring-proof"
+			recurringCommand.TaskID = recurringCommand.ScheduleKey
+			recurringCommand.Due = runtimegenericschedule.EveryDue(40 * time.Millisecond)
+			recurring, err := rt.GenericSchedules.Admit(ctx, recurringCommand)
+			if err != nil {
+				t.Fatalf("admit recurring generic schedule: %v", err)
+			}
+
+			countEvents := func() int {
+				t.Helper()
+				query := `SELECT COUNT(DISTINCT event_id) FROM events WHERE task_id = ? AND produced_by = ? AND produced_by_type = 'platform'`
+				args := []any{recurringCommand.TaskID, runtimegenericschedule.OccurrenceProducerID()}
+				if postgres {
+					query = `SELECT COUNT(DISTINCT event_id) FROM events WHERE task_id = $1 AND produced_by = $2 AND produced_by_type = 'platform'`
+				}
+				var count int
+				if err := db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+					t.Fatalf("read recurring generic schedule events: %v", err)
+				}
+				return count
+			}
+
+			deadline = time.Now().Add(5 * time.Second)
+			for {
+				activation, found, err := selected.LoadGenericScheduleActivation(ctx, recurring.Activation.ID)
+				if err != nil {
+					t.Fatalf("load recurring generic schedule activation: %v", err)
+				}
+				if countEvents() >= 2 && found && activation.Status == runtimegenericschedule.StatusActive && activation.CurrentDueAt.After(activation.InitialDueAt) {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("recurring generic schedule did not advance through exact occurrences: activation=%#v found=%v", activation, found)
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+
+			cancelled, err := rt.GenericSchedules.Cancel(ctx, runtimegenericschedule.CancelCommand{
+				ActivationID: recurring.Activation.ID,
+				Cause:        "test_completed",
+				CancelledAt:  time.Now().UTC(),
+			})
+			if err != nil || cancelled.Outcome != runtimegenericschedule.CancelChanged {
+				t.Fatalf("cancel recurring generic schedule: result=%#v err=%v", cancelled, err)
+			}
+			settledCount := countEvents()
+			time.Sleep(120 * time.Millisecond)
+			if after := countEvents(); after != settledCount {
+				t.Fatalf("recurring generic schedule published after cancellation: before=%d after=%d", settledCount, after)
 			}
 		})
 	}

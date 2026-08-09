@@ -102,7 +102,6 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 			HumanTaskStore:    h.pg,
 			SessionRegistry:   h.pg,
 			ConversationStore: h.pg,
-			ScheduleStore:     h.pg,
 			MailboxStore:      h.pg,
 			LLMRuntime:        h.llm,
 			QuiescenceTimeout: 10 * time.Second,

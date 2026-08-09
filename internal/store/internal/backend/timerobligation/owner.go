@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -18,36 +17,29 @@ type queryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-type SchedulePostgresOwner struct {
-	backend        *postgresbackend.Backend
-	schemaGuard    func() error
-	scheduleClaims postgresScheduleClaimOwner
+type PostgresReader struct {
+	backend     *postgresbackend.Backend
+	schemaGuard func() error
 }
 
-type postgresScheduleClaimOwner struct {
-	mu   sync.Mutex
-	conn *sql.Conn
-	keys map[string]struct{}
-}
-
-func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error) (*SchedulePostgresOwner, error) {
+func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error) (*PostgresReader, error) {
 	if backend == nil || !backend.Valid() {
 		return nil, fmt.Errorf("timer obligation postgres backend is required")
 	}
 	if schemaGuard == nil {
 		return nil, fmt.Errorf("timer obligation postgres schema guard is required")
 	}
-	return &SchedulePostgresOwner{backend: backend, schemaGuard: schemaGuard}, nil
+	return &PostgresReader{backend: backend, schemaGuard: schemaGuard}, nil
 }
 
-func (o *SchedulePostgresOwner) requireCurrentSchema() error {
+func (o *PostgresReader) requireCurrentSchema() error {
 	if o == nil || o.schemaGuard == nil {
 		return fmt.Errorf("timer obligation postgres schema guard is required")
 	}
 	return o.schemaGuard()
 }
 
-func (o *SchedulePostgresOwner) Read(ctx context.Context, scope Scope, observedAt time.Time) (Snapshot, error) {
+func (o *PostgresReader) Read(ctx context.Context, scope Scope, observedAt time.Time) (Snapshot, error) {
 	if o == nil || o.backend == nil {
 		return Snapshot{}, fmt.Errorf("timer obligation postgres owner is required")
 	}
@@ -61,33 +53,47 @@ func ReadPostgresTx(ctx context.Context, tx *sql.Tx, scope Scope, observedAt tim
 	return read(ctx, tx, true, scope, observedAt)
 }
 
-type ScheduleSQLiteOwner struct {
+type SQLiteReader struct {
 	backend     *sqlitebackend.Backend
 	schemaGuard func() error
 }
 
-func NewSQLite(backend *sqlitebackend.Backend, schemaGuard func() error) (*ScheduleSQLiteOwner, error) {
+func NewSQLite(backend *sqlitebackend.Backend, schemaGuard func() error) (*SQLiteReader, error) {
 	if backend == nil || !backend.Valid() {
 		return nil, fmt.Errorf("timer obligation sqlite backend is required")
 	}
 	if schemaGuard == nil {
 		return nil, fmt.Errorf("timer obligation sqlite schema guard is required")
 	}
-	return &ScheduleSQLiteOwner{backend: backend, schemaGuard: schemaGuard}, nil
+	return &SQLiteReader{backend: backend, schemaGuard: schemaGuard}, nil
 }
 
-func (o *ScheduleSQLiteOwner) requireCurrentSchema() error {
+func (o *SQLiteReader) requireCurrentSchema() error {
 	if o == nil || o.schemaGuard == nil {
 		return fmt.Errorf("timer obligation sqlite schema guard is required")
 	}
 	return o.schemaGuard()
 }
 
-func (o *ScheduleSQLiteOwner) Read(ctx context.Context, scope Scope, observedAt time.Time) (Snapshot, error) {
+func (o *SQLiteReader) Read(ctx context.Context, scope Scope, observedAt time.Time) (Snapshot, error) {
 	if o == nil || o.backend == nil {
 		return Snapshot{}, fmt.Errorf("timer obligation sqlite owner is required")
 	}
 	return read(ctx, o.backend, false, scope, observedAt)
+}
+
+func (o *PostgresReader) ReadTimerObligations(ctx context.Context, scope Scope, observedAt time.Time) (Snapshot, error) {
+	if err := o.requireCurrentSchema(); err != nil {
+		return Snapshot{}, err
+	}
+	return o.Read(ctx, scope, observedAt)
+}
+
+func (o *SQLiteReader) ReadTimerObligations(ctx context.Context, scope Scope, observedAt time.Time) (Snapshot, error) {
+	if err := o.requireCurrentSchema(); err != nil {
+		return Snapshot{}, err
+	}
+	return o.Read(ctx, scope, observedAt)
 }
 
 func ReadSQLiteTx(ctx context.Context, tx *sql.Tx, scope Scope, observedAt time.Time) (Snapshot, error) {
@@ -112,7 +118,11 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 			COALESCE(CAST(t.run_id AS TEXT), ''),
 			t.status,
 			t.fire_at,
-			COALESCE(r.status, '')
+			COALESCE(r.status, ''),
+			CAST(t.timer_id AS TEXT), t.initial_fire_at,
+			COALESCE(CAST(t.occurrence_event_id AS TEXT), ''), t.occurrence_admitted_at, t.accepted_at,
+			COALESCE(t.cancel_cause, ''), t.cancelled_at,
+			COALESCE(t.failure_code, ''), COALESCE(t.failure_message, ''), t.failed_at
 		FROM timers t
 		LEFT JOIN runs r ON r.run_id = t.run_id
 		WHERE (? = '' OR t.run_id = ?)
@@ -126,7 +136,11 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 				COALESCE(t.run_id::text, ''),
 				t.status,
 				t.fire_at,
-				COALESCE(r.status, '')
+				COALESCE(r.status, ''),
+				t.timer_id::text, t.initial_fire_at,
+				COALESCE(t.occurrence_event_id::text, ''), t.occurrence_admitted_at, t.accepted_at,
+				COALESCE(t.cancel_cause, ''), t.cancelled_at,
+				COALESCE(t.failure_code, ''), COALESCE(t.failure_message, ''), t.failed_at
 			FROM timers t
 			LEFT JOIN runs r ON r.run_id = t.run_id
 			WHERE (NULLIF($1, '') IS NULL OR t.run_id = NULLIF($1, '')::uuid)
@@ -143,18 +157,26 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 
 	global := ZeroFamilies()
 	runs := map[string][]FamilyObligation{}
+	activations := make([]Activation, 0)
 	if scope.RunID() != "" {
 		runs[scope.RunID()] = ZeroFamilies()
 	}
 	for rows.Next() {
 		var (
-			familyValue string
-			runID       string
-			status      string
-			fireAtValue any
-			runStatus   string
+			familyValue                                                        string
+			runID                                                              string
+			status                                                             string
+			fireAtValue                                                        any
+			runStatus                                                          string
+			activation                                                         Activation
+			initialAt, occurrenceAdmittedAt, acceptedAt, cancelledAt, failedAt any
 		)
-		if err := rows.Scan(&familyValue, &runID, &status, &fireAtValue, &runStatus); err != nil {
+		if err := rows.Scan(
+			&familyValue, &runID, &status, &fireAtValue, &runStatus,
+			&activation.ActivationID, &initialAt, &activation.OccurrenceEventID,
+			&occurrenceAdmittedAt, &acceptedAt, &activation.CancelCause, &cancelledAt,
+			&activation.FailureCode, &activation.FailureMessage, &failedAt,
+		); err != nil {
 			return Snapshot{}, fmt.Errorf("scan timer obligation: %w", err)
 		}
 		fireAt, err := timerTimeValue(fireAtValue)
@@ -170,6 +192,25 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 		runStatus = strings.TrimSpace(runStatus)
 		if err := validateRow(family, runID, status, fireAt); err != nil {
 			return Snapshot{}, err
+		}
+		activation.Family = family
+		activation.RunID = runID
+		activation.Status = status
+		activation.DueAt = fireAt
+		if activation.InitialDueAt, err = optionalTimerTimeValue(initialAt); err != nil {
+			return Snapshot{}, fmt.Errorf("scan timer obligation initial_fire_at: %w", err)
+		}
+		if activation.OccurrenceEventAdmittedAt, err = optionalTimerTimeValue(occurrenceAdmittedAt); err != nil {
+			return Snapshot{}, fmt.Errorf("scan timer obligation occurrence_admitted_at: %w", err)
+		}
+		if activation.AcceptedAt, err = optionalTimerTimeValue(acceptedAt); err != nil {
+			return Snapshot{}, fmt.Errorf("scan timer obligation accepted_at: %w", err)
+		}
+		if activation.CancelledAt, err = optionalTimerTimeValue(cancelledAt); err != nil {
+			return Snapshot{}, fmt.Errorf("scan timer obligation cancelled_at: %w", err)
+		}
+		if activation.FailedAt, err = optionalTimerTimeValue(failedAt); err != nil {
+			return Snapshot{}, fmt.Errorf("scan timer obligation failed_at: %w", err)
 		}
 
 		target := global
@@ -195,6 +236,9 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 		} else {
 			runs[runID] = target
 		}
+		// Lifecycle rows remain visible after settlement so readback never
+		// infers fired, cancelled, or failed state from aggregate counts.
+		activations = append(activations, activation)
 	}
 	if err := rows.Err(); err != nil {
 		return Snapshot{}, fmt.Errorf("iterate timer obligations: %w", err)
@@ -204,6 +248,7 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 		ObservedAt:     observedAt,
 		GlobalFamilies: global,
 		Runs:           make([]RunObligations, 0, len(runs)),
+		Activations:    activations,
 	}
 	for _, runID := range SortedRunIDs(runs) {
 		snapshot.Runs = append(snapshot.Runs, RunObligations{
@@ -225,6 +270,23 @@ func timerTimeValue(raw any) (time.Time, error) {
 	default:
 		return time.Time{}, fmt.Errorf("unsupported timestamp value %T", raw)
 	}
+}
+
+func optionalTimerTimeValue(raw any) (time.Time, error) {
+	if raw == nil {
+		return time.Time{}, nil
+	}
+	switch value := raw.(type) {
+	case string:
+		if strings.TrimSpace(value) == "" {
+			return time.Time{}, nil
+		}
+	case []byte:
+		if strings.TrimSpace(string(value)) == "" {
+			return time.Time{}, nil
+		}
+	}
+	return timerTimeValue(raw)
 }
 
 func parseTimerTime(raw string) (time.Time, error) {
@@ -263,7 +325,7 @@ func familyIndex(family Family) int {
 
 func validateRow(family Family, runID, status string, fireAt time.Time) error {
 	switch status {
-	case "active", "fired", "cancelled", "expired":
+	case "active", "fired", "cancelled", "failed":
 	default:
 		return fmt.Errorf("timer family %s has invalid status %q", family, status)
 	}
@@ -273,8 +335,8 @@ func validateRow(family Family, runID, status string, fireAt time.Time) error {
 	if family == FamilyWorkflowTimer && runID == "" {
 		return fmt.Errorf("workflow timer obligation requires run_id")
 	}
-	if family == FamilyWorkflowTimer && status == "expired" {
-		return fmt.Errorf("workflow timer obligation cannot be expired")
+	if family == FamilyWorkflowTimer && status == "failed" {
+		return fmt.Errorf("workflow timer obligation cannot be failed")
 	}
 	return nil
 }

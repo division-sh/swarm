@@ -23,6 +23,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -815,18 +816,7 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
-	scheduleStore := &recordingRuntimeScheduleStore{
-		active: []runtimepipeline.Schedule{{
-			AgentID:       "runtime",
-			OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
-			EventType:     "timer.check",
-			Mode:          "once",
-			At:            time.Now().Add(time.Minute),
-			TaskID:        "recover-me",
-			RoutingSource: events.NewPlatformControlRoutingSource(),
-			ExecutionMode: executionmode.Live,
-		}},
-	}
+	scheduleStore := &recoveryDisabledScheduleStore{active: []runtimegenericschedule.Activation{recoveryGuardActivation(t, "recover-me")}}
 	eventStore := startupRecoveryMinimalEventStore{}
 	managerStore := &recoveryGuardManagerStore{}
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
@@ -840,7 +830,7 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 		DeliveryStore:         deliveryStore,
 		ManagerStore:          managerStore,
 		ManagerLifecycleStore: managerStore,
-		ScheduleStore:         scheduleStore,
+		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
 		Options: RuntimeOptions{
 			SelfCheck:      false,
@@ -964,18 +954,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
-	scheduleStore := &recordingRuntimeScheduleStore{
-		active: []runtimepipeline.Schedule{{
-			AgentID:       "runtime",
-			OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
-			EventType:     "timer.check",
-			Mode:          "once",
-			At:            time.Now().Add(time.Minute),
-			TaskID:        "recover-me",
-			RoutingSource: events.NewPlatformControlRoutingSource(),
-			ExecutionMode: executionmode.Live,
-		}},
-	}
+	scheduleStore := &recoveryDisabledScheduleStore{active: []runtimegenericschedule.Activation{recoveryGuardActivation(t, "recover-me")}}
 	eventStore := startupRecoveryMinimalEventStore{}
 	managerStore := &recoveryGuardManagerStore{}
 	deliveryStore := newRuntimeShutdownDeliveryStore(t)
@@ -989,7 +968,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 		PipelineObligations:   eventStore.PipelineObligations(),
 		ManagerStore:          managerStore,
 		ManagerLifecycleStore: managerStore,
-		ScheduleStore:         scheduleStore,
+		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
 		Options: RuntimeOptions{
 			SelfCheck:      false,
@@ -1043,7 +1022,7 @@ func TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetai
 	defer cleanup()
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	const runID = "31000000-0000-0000-0000-000000000001"
-	scheduleStore := &recordingRuntimeScheduleStore{
+	scheduleStore := &recoveryDisabledScheduleStore{
 		obligations: &runtimetimerobligation.Snapshot{
 			Runs: []runtimetimerobligation.RunObligations{{
 				RunID: runID,
@@ -1068,7 +1047,7 @@ func TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetai
 		PipelineObligations:   eventStore.PipelineObligations(),
 		ManagerStore:          managerStore,
 		ManagerLifecycleStore: managerStore,
-		ScheduleStore:         scheduleStore,
+		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
 		Options: RuntimeOptions{
 			SelfCheck:      false,
@@ -1118,154 +1097,6 @@ func TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetai
 	if _, ok := boot["timer_obligations"].(runtimetimerobligation.Snapshot); !ok {
 		t.Fatalf("boot timer_obligations = %#v, want typed snapshot", boot["timer_obligations"])
 	}
-}
-
-func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	module := loadRuntimeOwnershipWorkflowModule(t)
-	scheduleStore := &recordingRuntimeScheduleStore{
-		active: []runtimepipeline.Schedule{
-			{
-				AgentID:       "runtime",
-				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
-				EventType:     "timer.replay",
-				Mode:          "once",
-				At:            time.Now().Add(time.Minute),
-				TaskID:        "replay-me",
-				RoutingSource: events.NewPlatformControlRoutingSource(),
-				ExecutionMode: executionmode.Live,
-			},
-			{
-				AgentID:       "runtime",
-				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
-				EventType:     "timer.skip",
-				Mode:          "once",
-				At:            time.Now().Add(2 * time.Minute),
-				TaskID:        "skip-me",
-				RoutingSource: events.NewPlatformControlRoutingSource(),
-				ExecutionMode: executionmode.Live,
-			},
-			{
-				AgentID:       "runtime",
-				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
-				EventType:     "timer.drop",
-				Mode:          "once",
-				At:            time.Now().Add(3 * time.Minute),
-				TaskID:        "drop-me",
-				RoutingSource: events.NewPlatformControlRoutingSource(),
-				ExecutionMode: executionmode.Live,
-			},
-		},
-		claims: []recordedScheduleClaim{
-			{Claimed: true},
-			{Claimed: false},
-			{Err: errors.New("claim failed")},
-		},
-	}
-	eventStore := startupRecoveryMinimalEventStore{}
-	managerStore := &recoveryGuardManagerStore{}
-	deliveryStore := newRuntimeShutdownDeliveryStore(t)
-
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, scheduleStore),
-		DeliveryStore:         deliveryStore,
-		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
-		EventStore:            eventStore,
-		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
-		PipelineObligations:   eventStore.PipelineObligations(),
-		ManagerStore:          managerStore,
-		ManagerLifecycleStore: managerStore,
-		ScheduleStore:         scheduleStore,
-		TimerObligationReader: scheduleStore,
-		Options: RuntimeOptions{
-			SelfCheck:      false,
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
-		}})
-
-	if err != nil {
-		t.Fatalf("NewRuntime: %v", err)
-	}
-	if err := rt.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	defer func() {
-		if err := rt.Shutdown(); err != nil {
-			t.Fatalf("Shutdown: %v", err)
-		}
-	}()
-
-	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, db)
-	if level != "error" {
-		t.Fatalf("log level = %q, want error", level)
-	}
-	requireFailureCode(t, failure, "schedule_restore_failed")
-	if got := detailString(detail["decision_outcome"]); got != "degraded" {
-		t.Fatalf("decision_outcome = %q, want degraded", got)
-	}
-	if got := detailString(detail["decision_reason_code"]); got != string(startupRecoveryReasonScheduleRestore) {
-		t.Fatalf("decision_reason_code = %q, want %q", got, startupRecoveryReasonScheduleRestore)
-	}
-	if got := detailInt(detail["schedule_replayed_count"]); got != 1 {
-		t.Fatalf("schedule_replayed_count = %d, want 1", got)
-	}
-	if got := detailInt(detail["schedule_skipped_count"]); got != 1 {
-		t.Fatalf("schedule_skipped_count = %d, want 1", got)
-	}
-	if got := detailInt(detail["schedule_dropped_count"]); got != 1 {
-		t.Fatalf("schedule_dropped_count = %d, want 1", got)
-	}
-
-	logs := listRuntimeLogsByAction(t, db, startupTimerRecoveryAction)
-	if len(logs) != 3 {
-		t.Fatalf("timer recovery runtime logs = %d, want 3", len(logs))
-	}
-	findByEventType := func(eventType string) runtimeAftermathLog {
-		t.Helper()
-		for _, entry := range logs {
-			if strings.TrimSpace(entry.eventType) == eventType {
-				return entry
-			}
-		}
-		t.Fatalf("missing timer recovery log for event type %q in %#v", eventType, logs)
-		return runtimeAftermathLog{}
-	}
-
-	replayed := findByEventType("timer.replay")
-	if replayed.level != "info" {
-		t.Fatalf("replayed log level = %q, want info", replayed.level)
-	}
-	if got := detailString(replayed.detail["decision_outcome"]); got != "replayed" {
-		t.Fatalf("replayed decision_outcome = %q, want replayed", got)
-	}
-	if got := detailString(replayed.detail["decision_reason_code"]); got != string(startupTimerRecoveryReasonRestored) {
-		t.Fatalf("replayed decision_reason_code = %q, want %q", got, startupTimerRecoveryReasonRestored)
-	}
-
-	skipped := findByEventType("timer.skip")
-	if skipped.level != "info" {
-		t.Fatalf("skipped log level = %q, want info", skipped.level)
-	}
-	if got := detailString(skipped.detail["decision_outcome"]); got != "skipped" {
-		t.Fatalf("skipped decision_outcome = %q, want skipped", got)
-	}
-	if got := detailString(skipped.detail["decision_reason_code"]); got != string(startupTimerRecoveryReasonClaimNotAcquired) {
-		t.Fatalf("skipped decision_reason_code = %q, want %q", got, startupTimerRecoveryReasonClaimNotAcquired)
-	}
-
-	dropped := findByEventType("timer.drop")
-	if dropped.level != "warn" {
-		t.Fatalf("dropped log level = %q, want warn", dropped.level)
-	}
-	if got := detailString(dropped.detail["decision_outcome"]); got != "dropped" {
-		t.Fatalf("dropped decision_outcome = %q, want dropped", got)
-	}
-	if got := detailString(dropped.detail["decision_reason_code"]); got != string(startupTimerRecoveryReasonRestoreFailed) {
-		t.Fatalf("dropped decision_reason_code = %q, want %q", got, startupTimerRecoveryReasonRestoreFailed)
-	}
-	requireFailureCode(t, dropped.failure, "schedule_restore_failed")
 }
 
 func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) {
@@ -1446,127 +1277,4 @@ func TestRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatal(t 
 	if err := rt.Shutdown(); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
-}
-
-func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndDrop(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	module := loadRuntimeOwnershipWorkflowModule(t)
-	scheduleStore := &recordingRuntimeScheduleStore{
-		active: []runtimepipeline.Schedule{
-			{
-				AgentID:       "runtime",
-				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
-				EventType:     "timer.skip",
-				Mode:          "once",
-				At:            time.Now().Add(2 * time.Minute),
-				TaskID:        "skip-me",
-				RoutingSource: events.NewPlatformControlRoutingSource(),
-				ExecutionMode: executionmode.Live,
-			},
-			{
-				AgentID:       "runtime",
-				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
-				EventType:     "timer.drop",
-				Mode:          "once",
-				At:            time.Now().Add(3 * time.Minute),
-				TaskID:        "drop-me",
-				RoutingSource: events.NewPlatformControlRoutingSource(),
-				ExecutionMode: executionmode.Live,
-			},
-		},
-		claims: []recordedScheduleClaim{
-			{Claimed: false},
-			{Err: errors.New("claim failed")},
-		},
-	}
-	managerStore := &startupRecoveryFlakyManagerStore{
-		remainingFailures: 1,
-		loadErr:           errors.New("load agents failed"),
-	}
-	eventStore := startupRecoveryMinimalEventStore{}
-	deliveryStore := newRuntimeShutdownDeliveryStore(t)
-
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
-		WorkflowPersistence:   startupRecoveryWorkflowPersistence(db, scheduleStore),
-		DeliveryStore:         deliveryStore,
-		RuntimeLogStore:       runtimeLogPersistenceStub{db: db},
-		EventStore:            eventStore,
-		EventBusDurable:       runtimeTestSyntheticDurableDependencies(deliveryStore),
-		PipelineObligations:   eventStore.PipelineObligations(),
-		ManagerStore:          managerStore,
-		ManagerLifecycleStore: managerStore,
-		ScheduleStore:         scheduleStore,
-		TimerObligationReader: scheduleStore,
-		Options: RuntimeOptions{
-			SelfCheck:      false,
-			WorkflowModule: module,
-			LLMRuntime:     noopLLMRuntime{},
-		}})
-
-	if err != nil {
-		t.Fatalf("NewRuntime: %v", err)
-	}
-	if err := rt.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	defer func() {
-		if err := rt.Shutdown(); err != nil {
-			t.Fatalf("Shutdown: %v", err)
-		}
-	}()
-
-	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, db)
-	if level != "error" {
-		t.Fatalf("log level = %q, want error", level)
-	}
-	requireFailureCode(t, failure, "startup_recovery_inspection_failed")
-	if got := detailString(detail["decision_outcome"]); got != "degraded" {
-		t.Fatalf("decision_outcome = %q, want degraded", got)
-	}
-	if got := detailString(detail["decision_reason_code"]); got != string(startupRecoveryReasonInspectFailed) {
-		t.Fatalf("decision_reason_code = %q, want %q", got, startupRecoveryReasonInspectFailed)
-	}
-	if got := detailBool(detail["recovery_inspection_complete"]); got {
-		t.Fatalf("recovery_inspection_complete = %#v, want false", detail["recovery_inspection_complete"])
-	}
-	requireNestedFailureCode(t, detail, "recovery_inspection_failure", "startup_recovery_inspection_failed")
-	if !detailBool(detail["manager_recovery_attempted"]) {
-		t.Fatalf("manager_recovery_attempted = %#v, want true", detail["manager_recovery_attempted"])
-	}
-	if got := detailInt(detail["schedule_replayed_count"]); got != 0 {
-		t.Fatalf("schedule_replayed_count = %d, want 0", got)
-	}
-	if got := detailInt(detail["schedule_skipped_count"]); got != 1 {
-		t.Fatalf("schedule_skipped_count = %d, want 1", got)
-	}
-	if got := detailInt(detail["schedule_dropped_count"]); got != 1 {
-		t.Fatalf("schedule_dropped_count = %d, want 1", got)
-	}
-
-	logs := listRuntimeLogsByAction(t, db, startupTimerRecoveryAction)
-	if len(logs) != 2 {
-		t.Fatalf("timer recovery runtime logs = %d, want 2", len(logs))
-	}
-	findByEventType := func(eventType string) runtimeAftermathLog {
-		t.Helper()
-		for _, entry := range logs {
-			if strings.TrimSpace(entry.eventType) == eventType {
-				return entry
-			}
-		}
-		t.Fatalf("missing timer recovery log for event type %q in %#v", eventType, logs)
-		return runtimeAftermathLog{}
-	}
-
-	skipped := findByEventType("timer.skip")
-	if got := detailString(skipped.detail["decision_outcome"]); got != "skipped" {
-		t.Fatalf("skipped decision_outcome = %q, want skipped", got)
-	}
-	dropped := findByEventType("timer.drop")
-	if got := detailString(dropped.detail["decision_outcome"]); got != "dropped" {
-		t.Fatalf("dropped decision_outcome = %q, want dropped", got)
-	}
-	requireFailureCode(t, dropped.failure, "schedule_restore_failed")
 }

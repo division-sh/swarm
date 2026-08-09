@@ -200,7 +200,7 @@ func (f selectedRuntimeStoreFacade) runtimeDeps() runtime.RuntimeDeps {
 		ManagedCapabilitiesStore:       s.ManagedCapabilitiesStore,
 		DeliveryStore:                  s.DeliveryStore,
 		PipelineObligations:            s.PipelineObligations,
-		ScheduleStore:                  s.ScheduleStore,
+		GenericScheduleStore:           s.GenericScheduleStore,
 		TimerObligationReader:          s.TimerObligationReader,
 		MailboxMaterializer:            s.MailboxMaterializer,
 		DecisionCards:                  s.DecisionCards,

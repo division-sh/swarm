@@ -20,7 +20,6 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -28,7 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -407,12 +406,13 @@ func (p *servedManagerScheduleProjectionProbe) observe(ctx context.Context, _ *r
 	if !ok || standing != request.standing {
 		return fail(fmt.Errorf("Manager event execution standing projection = %p/%t, want %p", standing, ok, request.standing))
 	}
-	for _, schedule := range []runtimepipeline.Schedule{
-		{RunID: request.runID, OwnerKind: runtimepipeline.ScheduleOwnerSystem, AgentID: "standing-manager-proof", EventType: "standing.manager.proof.once", Mode: "once", At: time.Now().Add(time.Hour), TaskID: uuid.NewString(), RoutingSource: events.NewPlatformControlRoutingSource(), ExecutionMode: executionmode.Live},
-		{RunID: request.runID, OwnerKind: runtimepipeline.ScheduleOwnerSystem, AgentID: "standing-manager-proof", EventType: "standing.manager.proof.cron", Mode: "cron", Cron: "@every 1h", TaskID: uuid.NewString(), RoutingSource: events.NewPlatformControlRoutingSource(), ExecutionMode: executionmode.Live},
-	} {
-		if err := request.scheduler.Register(ctx, schedule); err != nil {
-			return fail(fmt.Errorf("register Manager-composed served standing %s schedule: %w", schedule.Mode, err))
+	for _, activationID := range []string{uuid.NewString(), uuid.NewString()} {
+		wakeup, err := runtimegenericschedule.NewWakeup(activationID, time.Now().Add(time.Hour))
+		if err != nil {
+			return fail(fmt.Errorf("construct Manager-composed served standing wakeup: %w", err))
+		}
+		if err := request.scheduler.RegisterGenericScheduleWakeup(ctx, wakeup); err != nil {
+			return fail(fmt.Errorf("register Manager-composed served standing wakeup: %w", err))
 		}
 	}
 	result := servedManagerScheduleProjectionResult{probe: servedStandingScheduleProbe{scheduler: request.scheduler, occurrence: standing}}

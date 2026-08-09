@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -47,7 +48,6 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 	completedRunID := uuid.NewString()
 	otherRunID := uuid.NewString()
 	sessionID := uuid.NewString()
-	timerID := uuid.NewString()
 	seedBundleDeleteRun(t, ctx, pg, activeRunID, "running", bundleDeleteTestHash)
 	seedBundleDeleteRun(t, ctx, pg, completedRunID, "completed", bundleDeleteTestHash)
 	seedBundleDeleteRun(t, ctx, pg, otherRunID, "running", bundleDeleteOtherHash)
@@ -62,12 +62,10 @@ func TestPostgresStore_BundleDeleteForceCleanupAndFinalMutation(t *testing.T) {
 		identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-	if _, err := pg.backend.ExecContext(ctx, `
-			INSERT INTO timers (timer_id, timer_name, run_id, fire_event, routing_source, execution_mode, fire_at, owner_kind, status)
-			VALUES ($1::uuid, 'bundle-delete-timer', $2::uuid, 'timer.fired', '{"kind":"platform_control","route":{}}'::jsonb, 'live', now() + interval '1 hour', 'system', 'active')
-		`, timerID, activeRunID); err != nil {
-		t.Fatalf("seed timer: %v", err)
-	}
+	timer := admitGenericScheduleFixture(t, ctx, pg, testRootGenericScheduleCommand(
+		t, activeRunID, uuid.NewString(), "bundle-delete-timer", runtimegenericschedule.DelayDue(time.Hour),
+	))
+	timerID := timer.ID
 
 	plan, err := pg.PlanBundleDelete(ctx, bundledelete.Request{
 		ActorTokenID: "token",

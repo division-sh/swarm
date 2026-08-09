@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -570,8 +571,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	lateMutationID := uuid.NewString()
 	activeSessionID := uuid.NewString()
 	predecessorSessionID := uuid.NewString()
-	cleanupTimerID := uuid.NewString()
-	preservedTimerID := uuid.NewString()
+	var cleanupTimerID, preservedTimerID string
 	replyContextID := "reply-v1:cleanup-" + uuid.NewString()
 	mailboxID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -634,18 +634,16 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	`, lateMutationID, lateRunID, entityID, eventID); err != nil {
 		t.Fatalf("seed preserved late mutation: %v", err)
 	}
-	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, timer_name, run_id, entity_id, flow_instance, fire_event, routing_source, execution_mode, fire_at, owner_kind)
-		VALUES ($1::uuid, 'cleanup timer', $2::uuid, $3::uuid, 'flow/a', 'timer.fire',
-		        jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow', 'flow_instance', 'flow/a', 'entity_id', $3::text)), 'live', now(), 'system')
-	`, cleanupTimerID, runID, entityID); err != nil {
-		t.Fatalf("seed cleanup timer: %v", err)
-	}
-	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, timer_name, source_timer_id, fire_event, routing_source, execution_mode, fire_at, owner_kind, task_type)
-		VALUES ($1::uuid, 'preserved source timer', $2::uuid, 'timer.global', '{"kind":"platform_control","route":{}}'::jsonb, 'live', now(), 'system', 'global_recurring')
-	`, preservedTimerID, cleanupTimerID); err != nil {
-		t.Fatalf("seed preserved source timer: %v", err)
+	cleanupTimer := admitGenericScheduleFixture(t, ctx, pg, testRootGenericScheduleCommand(
+		t, runID, entityID, "cleanup-timer", runtimegenericschedule.DelayDue(time.Hour),
+	))
+	cleanupTimerID = cleanupTimer.ID
+	preservedTimer := admitGenericScheduleFixture(t, ctx, pg, testGlobalGenericScheduleCommand(
+		"preserved-source-timer", runtimegenericschedule.EveryDue(time.Hour),
+	))
+	preservedTimerID = preservedTimer.ID
+	if _, err := pg.backend.ExecContext(ctx, `UPDATE timers SET source_timer_id = $1::uuid WHERE timer_id = $2::uuid`, cleanupTimerID, preservedTimerID); err != nil {
+		t.Fatalf("link preserved source timer: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
 		INSERT INTO reply_contexts (
@@ -1131,10 +1129,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	noRunEvent := uuid.NewString()
 	sessionID := uuid.NewString()
 	entityID := uuid.NewString()
-	timerRun := uuid.NewString()
-	timerForkRun := uuid.NewString()
 	timerForkEvent := uuid.NewString()
-	globalTimer := uuid.NewString()
 	humanTaskCardID := uuid.NewString()
 	seededAt := time.Date(2026, 5, 16, 18, 0, 0, 0, time.UTC)
 	agentIdentity := testAgentIdentity(t, "agent-a", "cleanup")
@@ -1338,25 +1333,23 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	if _, err := pg.backend.ExecContext(ctx, `INSERT INTO entity_mutations (run_id, entity_id, field, writer_type, writer_id) VALUES ($1::uuid, $2::uuid, 'status', 'platform', 'test')`, runA, entityID); err != nil {
 		t.Fatalf("seed entity mutation: %v", err)
 	}
-	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, timer_name, run_id, entity_id, flow_instance, fire_event, routing_source, execution_mode, fire_at, owner_kind) VALUES
-			($1::uuid, 'run timer', $4::uuid, $5::uuid, 'flow/a', 'timer.fire', jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow', 'flow_instance', 'flow/a', 'entity_id', $5::text)), 'live', now(), 'system'),
-			($2::uuid, 'fork run timer', NULL, $5::uuid, 'flow/a', 'timer.fire', jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow', 'flow_instance', 'flow/a', 'entity_id', $5::text)), 'live', now(), 'system'),
-			($3::uuid, 'fork event timer', NULL, $5::uuid, 'flow/a', 'timer.fire', jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'flow', 'flow_instance', 'flow/a', 'entity_id', $5::text)), 'live', now(), 'system')
-	`, timerRun, timerForkRun, timerForkEvent, runA, entityID); err != nil {
-		t.Fatalf("seed timers: %v", err)
-	}
-	if _, err := pg.backend.ExecContext(ctx, `UPDATE timers SET forked_from_run_id = $1::uuid WHERE timer_id = $2::uuid`, runB, timerForkRun); err != nil {
+	admitGenericScheduleFixture(t, ctx, pg, testRootGenericScheduleCommand(
+		t, runA, entityID, "destructive-reset-run", runtimegenericschedule.DelayDue(time.Hour),
+	))
+	forkRunTimer := admitGenericScheduleFixture(t, ctx, pg, testGlobalGenericScheduleCommand(
+		"destructive-reset-fork-run", runtimegenericschedule.DelayDue(time.Hour),
+	))
+	forkEventTimer := admitGenericScheduleFixture(t, ctx, pg, testGlobalGenericScheduleCommand(
+		"destructive-reset-fork-event", runtimegenericschedule.DelayDue(time.Hour),
+	))
+	admitGenericScheduleFixture(t, ctx, pg, testGlobalGenericScheduleCommand(
+		"destructive-reset-global", runtimegenericschedule.EveryDue(time.Hour),
+	))
+	if _, err := pg.backend.ExecContext(ctx, `UPDATE timers SET forked_from_run_id = $1::uuid WHERE timer_id = $2::uuid`, runB, forkRunTimer.ID); err != nil {
 		t.Fatalf("seed timer forked_from_run_id: %v", err)
 	}
-	if _, err := pg.backend.ExecContext(ctx, `UPDATE timers SET forked_from_event_id = $1::uuid WHERE timer_id = $2::uuid`, timerForkEvent, timerForkEvent); err != nil {
+	if _, err := pg.backend.ExecContext(ctx, `UPDATE timers SET forked_from_event_id = $1::uuid WHERE timer_id = $2::uuid`, timerForkEvent, forkEventTimer.ID); err != nil {
 		t.Fatalf("seed timer forked_from_event_id: %v", err)
-	}
-	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO timers (timer_id, timer_name, fire_event, routing_source, execution_mode, fire_at, owner_kind, task_type)
-		VALUES ($1::uuid, 'global timer', 'timer.global', '{"kind":"platform_control","route":{}}'::jsonb, 'live', now(), 'system', 'global_recurring')
-	`, globalTimer); err != nil {
-		t.Fatalf("seed global timer: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `INSERT INTO run_control_state (run_id, control_status, controlled_by) VALUES ($1::uuid, 'stopped', 'test')`, runA); err != nil {
 		t.Fatalf("seed run control: %v", err)

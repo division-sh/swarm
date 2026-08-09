@@ -762,7 +762,7 @@ func newFactoryDirectiveAgent(t *testing.T, cfg models.AgentConfig, modelRuntime
 	authority := runtimeauthority.NewSourceProvider(source)
 	emitRegistry := runtimetools.NewEmitRegistry(source, authority)
 	bus := &directiveFactoryPublishBus{}
-	exec := runtimetools.NewExecutorWithOptions(bus, nil, runtimetools.ExecutorOptions{
+	exec := runtimetools.NewExecutorWithOptions(bus, runtimetools.ExecutorOptions{
 		WorkflowSource:    source,
 		AuthorityProvider: authority,
 		EmitRegistry:      emitRegistry,

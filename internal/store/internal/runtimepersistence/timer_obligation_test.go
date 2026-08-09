@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/google/uuid"
 )
@@ -24,7 +25,7 @@ func TestTimerObligationSnapshotObservationBoundaryOnBothStores(t *testing.T) {
 			runID := runtimecorrelationRunID(t, ctx)
 			observedAt := time.Now().UTC().Truncate(time.Microsecond)
 
-			insertTimerObligationProofRow(t, ctx, db, selected, runID, "timer", observedAt)
+			insertTimerObligationProofRow(t, ctx, selected, runID, "timer", observedAt)
 			workflow := newWorkflowTimerDDLProofRow(runID)
 			workflow.createdAt = observedAt.Add(-time.Hour)
 			workflow.fireAt = observedAt.Add(time.Hour)
@@ -33,9 +34,10 @@ func TestTimerObligationSnapshotObservationBoundaryOnBothStores(t *testing.T) {
 			}
 
 			terminalRunID := uuid.NewString()
-			insertTimerObligationProofRun(t, ctx, db, selected, terminalRunID, "cancelled")
-			insertTimerObligationProofRow(t, ctx, db, selected, terminalRunID, "deadline", observedAt)
-			insertTimerObligationProofRow(t, ctx, db, selected, "", "global_recurring", observedAt.Add(time.Hour))
+			requireRunningRunForTest(t, ctx, selected, terminalRunID, observedAt.Add(-time.Hour))
+			insertTimerObligationProofRow(t, ctx, selected, terminalRunID, "timer", observedAt)
+			transitionGenericScheduleRun(t, selected, terminalRunID, true)
+			insertTimerObligationProofRow(t, ctx, selected, "", "global_recurring", observedAt.Add(time.Hour))
 
 			snapshot, err := reader.ReadTimerObligations(ctx, runtimetimerobligation.All(), observedAt)
 			if err != nil {
@@ -54,7 +56,7 @@ func TestTimerObligationSnapshotObservationBoundaryOnBothStores(t *testing.T) {
 			if !ok {
 				t.Fatalf("snapshot omitted terminal run %s", terminalRunID)
 			}
-			assertTimerFamilyObligation(t, completed.Families, runtimetimerobligation.FamilyDeadline, 1, 1, 0)
+			assertTimerFamilyObligation(t, completed.Families, runtimetimerobligation.FamilyTimer, 0, 0, 0)
 			assertTimerFamilyObligation(t, snapshot.GlobalFamilies, runtimetimerobligation.FamilyGlobalRecurring, 1, 0, 1)
 
 			scope, err := runtimetimerobligation.Run(runID)
@@ -103,7 +105,7 @@ func TestTimerObligationSnapshotDrivesRunDiagnosisOnBothStores(t *testing.T) {
 			if err := insertWorkflowTimerDDLProofRow(ctx, db, selected, workflow); err != nil {
 				t.Fatalf("insert due workflow timer: %v", err)
 			}
-			insertTimerObligationProofRow(t, ctx, db, selected, runID, "scheduled_task", observedAt.Add(time.Hour))
+			insertTimerObligationProofRow(t, ctx, selected, runID, "scheduled_task", observedAt.Add(time.Hour))
 
 			var (
 				quiescence RunTestQuiescence
@@ -136,72 +138,71 @@ func runtimecorrelationRunID(t *testing.T, ctx context.Context) string {
 	return runID
 }
 
-func insertTimerObligationProofRun(
-	t *testing.T,
-	ctx context.Context,
-	db *sql.DB,
-	selected runtimepipeline.SchedulePersistence,
-	runID, status string,
-) {
-	t.Helper()
-	sourceFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
-	if !ok {
-		t.Fatal("timer obligation proof context lacks bundle source fact")
-	}
-	state, err := storerunlifecycle.ParseState(status)
-	if err != nil {
-		t.Fatalf("parse %s timer obligation run state: %v", status, err)
-	}
-	bundleHash, bundleSource := sourceFact.StorageValues()
-	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
-		RunID: runID, State: state, BundleHash: bundleHash, BundleSource: bundleSource,
-		StartedAt: time.Now().UTC().Add(-time.Hour), EndedAt: time.Now().UTC(),
-	})
-}
-
 func insertTimerObligationProofRow(
 	t *testing.T,
 	ctx context.Context,
-	db *sql.DB,
-	selected runtimepipeline.SchedulePersistence,
+	selected any,
 	runID, family string,
 	fireAt time.Time,
 ) {
 	t.Helper()
-	insertTimerObligationProofRowTx(t, ctx, db, selected, runID, family, fireAt)
-}
-
-type timerObligationProofExecutor interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	store, ok := selected.(runtimegenericschedule.Store)
+	if !ok {
+		t.Fatalf("selected store %T lacks generic schedule admission", selected)
+	}
+	command := timerObligationProofCommand(t, runID, family, fireAt)
+	setGenericScheduleClock(t, store, func() time.Time { return fireAt.Add(-time.Hour) })
+	if admitted, err := store.AdmitGenericSchedule(ctx, command); err != nil || admitted.Outcome != runtimegenericschedule.AdmissionCreated {
+		t.Fatalf("admit %s timer obligation row = %#v, %v", family, admitted, err)
+	}
 }
 
 func insertTimerObligationProofRowTx(
 	t *testing.T,
 	ctx context.Context,
-	exec timerObligationProofExecutor,
-	selected runtimepipeline.SchedulePersistence,
+	tx *sql.Tx,
+	selected any,
 	runID, family string,
 	fireAt time.Time,
 ) {
 	t.Helper()
-	timerID := uuid.NewString()
-	query := `
-		INSERT INTO timers (
-			timer_id, run_id, timer_name, fire_event, routing_source, execution_mode, fire_at, recurring,
-			owner_agent, owner_kind, task_type, status, created_at
-		) VALUES (?, NULLIF(?, ''), ?, 'timer.proof', '{"kind":"platform_control","route":{}}', 'live', ?, ?, 'timer-proof', 'system', ?, 'active', ?)
-	`
-	args := []any{timerID, runID, "proof-" + timerID, fireAt, family == "scheduled_task" || family == "global_recurring", family, fireAt.Add(-time.Hour)}
-	if _, ok := selected.(*PostgresStore); ok {
-		query = `
-			INSERT INTO timers (
-				timer_id, run_id, timer_name, fire_event, routing_source, execution_mode, fire_at, recurring,
-				owner_agent, owner_kind, task_type, status, created_at
-			) VALUES ($1::uuid, NULLIF($2, '')::uuid, $3, 'timer.proof', '{"kind":"platform_control","route":{}}'::jsonb, 'live', $4, $5, 'timer-proof', 'system', $6, 'active', $7)
-		`
+	command := timerObligationProofCommand(t, runID, family, fireAt)
+	var (
+		admitted runtimegenericschedule.AdmissionResult
+		err      error
+	)
+	switch store := selected.(type) {
+	case *PostgresStore:
+		store.genericSchedulePostgresOwner.SetNowFnForTest(func() time.Time { return fireAt.Add(-time.Hour) })
+		admitted, err = store.genericSchedulePostgresOwner.AdmitTx(ctx, tx, command)
+	case *SQLiteRuntimeStore:
+		store.genericScheduleSQLiteOwner.SetNowFnForTest(func() time.Time { return fireAt.Add(-time.Hour) })
+		admitted, err = store.genericScheduleSQLiteOwner.AdmitTx(ctx, tx, command)
+	default:
+		t.Fatalf("unsupported selected store %T", selected)
 	}
-	if _, err := exec.ExecContext(ctx, query, args...); err != nil {
-		t.Fatalf("insert %s timer obligation row: %v", family, err)
+	if err != nil || admitted.Outcome != runtimegenericschedule.AdmissionCreated {
+		t.Fatalf("admit transactional %s timer obligation row = %#v, %v", family, admitted, err)
+	}
+}
+
+func timerObligationProofCommand(t *testing.T, runID, family string, fireAt time.Time) runtimegenericschedule.AdmissionCommand {
+	t.Helper()
+	key := "obligation-" + family + "-" + uuid.NewString()
+	switch family {
+	case "timer":
+		return testAgentGenericScheduleCommand(t, runID, "obligation-agent", "obligation/instance", uuid.NewString(), key, runtimegenericschedule.AbsoluteDue(fireAt))
+	case "scheduled_task":
+		return testAgentGenericScheduleCommand(t, runID, "obligation-agent", "obligation/instance", uuid.NewString(), key, runtimegenericschedule.EveryDue(time.Hour))
+	case "global_recurring":
+		return runtimegenericschedule.AdmissionCommand{
+			ScheduleKey: key, OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: "runtime",
+			EventType: "platform.timer_obligation_proof", Payload: semanticvalue.EmptyObject(),
+			RoutingSource: events.NewPlatformControlRoutingSource(), Due: runtimegenericschedule.EveryDue(time.Hour), TaskID: key,
+		}
+	default:
+		t.Fatalf("unsupported timer obligation proof family %q", family)
+		return runtimegenericschedule.AdmissionCommand{}
 	}
 }
 

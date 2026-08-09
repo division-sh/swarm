@@ -13,7 +13,6 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
@@ -199,75 +198,6 @@ func assertForkedEventSelectors(t *testing.T, store forkedEventSelectorSurface, 
 	}
 	if !summary.Settled() {
 		t.Fatalf("delivery selector retained frozen work for %s: %#v", eventID, summary)
-	}
-}
-
-func TestForkedSourceTimerConsumersRefuseWhileClaimsCanBeReleased(t *testing.T) {
-	for _, backend := range []string{"postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			fixture := newForkedConsumerTestBackend(t, backend)
-			ctx := testAuthorActivityBundleSourceContext()
-			schedule := runtimepipeline.Schedule{
-				RunID: fixture.sourceRun, AgentID: "freeze-agent", OwnerKind: runtimepipeline.ScheduleOwnerAgent,
-				AgentIdentity: testAgentIdentity(t, "freeze-agent", ""), EventType: "freeze.timer", Mode: "once",
-				At: fixture.forkedAt.Add(time.Hour), TaskID: "freeze-timer", Payload: []byte(`{"timer":true}`),
-			}
-			schedule = testAgentOwnedSchedule(t, schedule)
-			var store interface {
-				UpsertSchedule(context.Context, runtimepipeline.Schedule) error
-				CancelScheduleExact(context.Context, runtimepipeline.Schedule) error
-				CancelScheduleExactTerminal(context.Context, runtimepipeline.Schedule) error
-				CompleteScheduleFireExact(context.Context, runtimepipeline.Schedule) error
-				ClaimSchedule(context.Context, runtimepipeline.Schedule) (bool, error)
-				ReleaseSchedule(context.Context, runtimepipeline.Schedule) error
-				LoadActiveSchedules(context.Context) ([]runtimepipeline.Schedule, error)
-			}
-			if fixture.postgres != nil {
-				store = fixture.postgres
-			} else {
-				store = fixture.sqlite
-			}
-			if err := store.UpsertSchedule(ctx, schedule); err != nil {
-				t.Fatal(err)
-			}
-			claimed, err := store.ClaimSchedule(ctx, schedule)
-			if err != nil || !claimed {
-				t.Fatalf("active claim = %v, %v", claimed, err)
-			}
-			fixture.freeze(t)
-
-			for label, mutate := range map[string]func() error{
-				"upsert":          func() error { return store.UpsertSchedule(ctx, schedule) },
-				"cancel":          func() error { return store.CancelScheduleExact(ctx, schedule) },
-				"terminal cancel": func() error { return store.CancelScheduleExactTerminal(ctx, schedule) },
-				"fire":            func() error { return store.CompleteScheduleFireExact(ctx, schedule) },
-			} {
-				requireForkedSourceRefusal(t, "timer "+label, mutate())
-			}
-			if claimed, err := store.ClaimSchedule(ctx, schedule); err != nil || claimed {
-				t.Fatalf("post-freeze timer claim = %v, %v", claimed, err)
-			}
-			if err := store.ReleaseSchedule(ctx, schedule); err != nil {
-				t.Fatalf("release pre-freeze ownership: %v", err)
-			}
-			active, err := store.LoadActiveSchedules(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, row := range active {
-				if row.RunID == fixture.sourceRun {
-					t.Fatalf("active selector returned frozen timer: %#v", row)
-				}
-			}
-			var status string
-			query := `SELECT status FROM timers WHERE run_id = ? AND owner_agent = ? AND fire_event = ?`
-			if fixture.postgres != nil {
-				query = `SELECT status FROM timers WHERE run_id = $1::uuid AND owner_agent = $2 AND fire_event = $3`
-			}
-			if err := fixture.db.QueryRowContext(ctx, query, fixture.sourceRun, schedule.AgentID, schedule.EventType).Scan(&status); err != nil || status != "active" {
-				t.Fatalf("preserved timer status = %q, %v", status, err)
-			}
-		})
 	}
 }
 

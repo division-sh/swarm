@@ -594,5 +594,4 @@ var bundleIdentityFixtureLedger = []string{
 	"internal/store/internal/runtimepersistence/sqlite_run_trace_parity_test.go",
 	"internal/store/internal/runtimepersistence/sqlite_runtime_test.go",
 	"internal/store/storetest/event.go",
-	"internal/store/internal/runtimepersistence/workflow_timer_schedule_isolation_test.go",
 }

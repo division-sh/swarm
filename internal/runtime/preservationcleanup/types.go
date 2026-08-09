@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 )
 
 const (
@@ -85,6 +86,7 @@ type SessionResult struct {
 }
 
 type TimerResult struct {
+	Family         runtimetimercancellation.Family
 	TimerID        string
 	RunID          string
 	TimerName      string

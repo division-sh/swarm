@@ -10,6 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -349,21 +353,19 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 		t.Fatalf("seed workflow instance: %v", err)
 	}
 
-	if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `
-		INSERT INTO timers (
-			timer_name, entity_id, flow_instance, fire_event, fire_payload,
-			routing_source, execution_mode, fire_at, recurring, recurrence_cron, recurrence_interval,
-			owner_node, owner_agent, owner_kind, task_type, status
-		)
-		VALUES (
-			$1, $2::uuid, $3, $4, '{}'::jsonb,
-			jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'mutation-flow', 'flow_instance', $3::text, 'entity_id', $2::text)),
-			'live', $5, false, NULL, NULL,
-			NULL, $6, 'system', 'timer', 'active'
-		)
-	`, "task_timer", entityID, storageRef, "timer.task_timeout", now.Add(2*time.Hour), runtimeWorkflowID); err != nil {
-		t.Fatalf("insert scheduler-owned timer row: %v", err)
+	ctx := testWorkflowStoreRunContext(t, store)
+	routing, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+		FlowID: "mutation-flow", FlowInstance: storageRef, EntityID: entityID,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
+	insertGenericSchedulePersistenceFixture(t, ctx, db, true, runtimegenericschedule.AdmissionCommand{
+		ScheduleKey: "task_timer", RunID: runtimecorrelation.RunIDFromContext(ctx), EntityID: entityID, FlowInstance: storageRef,
+		OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: runtimeWorkflowID,
+		EventType: "timer.task_timeout", Payload: semanticvalue.EmptyObject(), RoutingSource: routing,
+		Due: runtimegenericschedule.AbsoluteDue(now.Add(2 * time.Hour)), TaskID: "task_timer",
+	})
 
 	if err := store.mutate(testWorkflowStoreRunContext(t, store), testWorkflowInstanceRoute(storageRef), func(instance *WorkflowInstance) {
 		instance.CurrentState = "active"

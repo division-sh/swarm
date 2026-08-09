@@ -99,7 +99,7 @@ func TestGatewayTurnContextEffectStoryScopeSelectedStoreParity(t *testing.T) {
 			}
 			seedGatewayStoryRuntime(t, selected, runID, actor, sourceFact)
 			source := loadGatewayStorySource(t, server.URL)
-			executor := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{WorkflowSource: source})
+			executor := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{WorkflowSource: source})
 			if !gatewayStoryToolOffered(executor, actor, "send_story") {
 				t.Fatalf("send_story is not offered to actor: %#v", executor.ToolDefinitionsForActor(actor))
 			}

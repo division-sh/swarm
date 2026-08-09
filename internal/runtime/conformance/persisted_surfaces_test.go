@@ -38,11 +38,13 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimesemanticview "github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -842,57 +844,6 @@ func (conformanceNoopLLMRuntime) ContinueSession(context.Context, *runtimellm.Se
 	return &runtimellm.Response{}, nil
 }
 
-type conformanceScheduleClaim struct {
-	claimed bool
-	err     error
-}
-
-type conformanceTimerRecoveryScheduleStore struct {
-	active []runtimepipeline.Schedule
-	claims []conformanceScheduleClaim
-}
-
-func (*conformanceTimerRecoveryScheduleStore) UpsertSchedule(context.Context, runtimepipeline.Schedule) error {
-	return nil
-}
-
-func (*conformanceTimerRecoveryScheduleStore) CancelScheduleExact(context.Context, runtimepipeline.Schedule) error {
-	return nil
-}
-
-func (*conformanceTimerRecoveryScheduleStore) CancelScheduleExactTerminal(context.Context, runtimepipeline.Schedule) error {
-	return nil
-}
-
-func (s *conformanceTimerRecoveryScheduleStore) LoadActiveSchedules(context.Context) ([]runtimepipeline.Schedule, error) {
-	return append([]runtimepipeline.Schedule(nil), s.active...), nil
-}
-
-func (s *conformanceTimerRecoveryScheduleStore) ClaimSchedule(context.Context, runtimepipeline.Schedule) (bool, error) {
-	if len(s.claims) == 0 {
-		return true, nil
-	}
-	claim := s.claims[0]
-	s.claims = s.claims[1:]
-	return claim.claimed, claim.err
-}
-
-func (*conformanceTimerRecoveryScheduleStore) ReleaseSchedule(context.Context, runtimepipeline.Schedule) error {
-	return nil
-}
-
-func (*conformanceTimerRecoveryScheduleStore) ReleaseScheduleClaims(context.Context) error {
-	return nil
-}
-
-func (*conformanceTimerRecoveryScheduleStore) MarkScheduleFiredExact(context.Context, runtimepipeline.Schedule) error {
-	return nil
-}
-
-func (*conformanceTimerRecoveryScheduleStore) CompleteScheduleFireExact(context.Context, runtimepipeline.Schedule) error {
-	return nil
-}
-
 type conformanceRecoveryFailureEventStore struct {
 	store    *store.PostgresStore
 	claimErr error
@@ -1026,17 +977,13 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 
-	if err := pg.UpsertSchedule(ctx, runtimepipeline.Schedule{
-		AgentID:       "runtime",
-		OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
-		EventType:     "timer.check",
-		Mode:          "once",
-		At:            time.Now().Add(time.Minute),
-		TaskID:        "recover-me",
-		RoutingSource: events.NewPlatformControlRoutingSource(),
-		ExecutionMode: executionmode.Live,
+	if _, err := pg.AdmitGenericSchedule(ctx, runtimegenericschedule.AdmissionCommand{
+		ScheduleKey: "recover-me", OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: "runtime",
+		EventType: "timer.check", Payload: semanticvalue.EmptyObject(),
+		RoutingSource: events.NewPlatformControlRoutingSource(), Due: runtimegenericschedule.DelayDue(time.Minute),
+		TaskID: "recover-me",
 	}); err != nil {
-		t.Fatalf("UpsertSchedule: %v", err)
+		t.Fatalf("AdmitGenericSchedule: %v", err)
 	}
 
 	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
@@ -1057,7 +1004,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 		ManagerLifecycleDiagnostics: pg,
 		ManagerPersistenceRoles:     conformanceManagerPersistenceRoles(pg, nil, nil),
 		SessionResetter:             pg,
-		ScheduleStore:               pg,
+		GenericScheduleStore:        pg,
 		TimerObligationReader:       pg,
 		PipelineObligations:         pg.PipelineObligations(),
 		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
@@ -1204,154 +1151,6 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 	recoveryFailure, err := runtimefailures.UnmarshalEnvelope(failureRaw)
 	if err != nil || recoveryFailure.Detail.Code != "startup_manager_recovery_failed" {
 		t.Fatalf("platform.recovery_failed failure = %#v err=%v, want startup_manager_recovery_failed", recoveryFailedPayload["failure"], err)
-	}
-}
-
-func TestStartupTimerRecoveryAftermathSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-
-	requireCanonicalRuntimeLogSurface(t, ctx, pg)
-
-	scheduleStore := &conformanceTimerRecoveryScheduleStore{
-		active: []runtimepipeline.Schedule{
-			{
-				AgentID:       "runtime",
-				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
-				EventType:     "timer.replay",
-				Mode:          "once",
-				At:            time.Now().Add(time.Minute),
-				TaskID:        "replay-me",
-				RoutingSource: events.NewPlatformControlRoutingSource(),
-				ExecutionMode: executionmode.Live,
-			},
-			{
-				AgentID:       "runtime",
-				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
-				EventType:     "timer.skip",
-				Mode:          "once",
-				At:            time.Now().Add(2 * time.Minute),
-				TaskID:        "skip-me",
-				RoutingSource: events.NewPlatformControlRoutingSource(),
-				ExecutionMode: executionmode.Live,
-			},
-			{
-				AgentID:       "runtime",
-				OwnerKind:     runtimepipeline.ScheduleOwnerSystem,
-				EventType:     "timer.drop",
-				Mode:          "once",
-				At:            time.Now().Add(3 * time.Minute),
-				TaskID:        "drop-me",
-				RoutingSource: events.NewPlatformControlRoutingSource(),
-				ExecutionMode: executionmode.Live,
-			},
-		},
-		claims: []conformanceScheduleClaim{
-			{claimed: true},
-			{claimed: false},
-			{err: fmt.Errorf("claim failed")},
-		},
-	}
-
-	rt, err := runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg, runtimepkg.RuntimeDeps{Config: &config.Config{
-		Runtime: config.RuntimeConfig{
-			RecoveryOnStartup: true,
-		},
-		LLM: config.LLMConfig{
-			Backend: "anthropic",
-		},
-	},
-		WorkflowPersistence:         runtimepipeline.NewWorkflowPersistence(pg),
-		EventStore:                  pg,
-		EventBusDurable:             conformanceDurableEventBusDependencies(pg),
-		RunLifecycleCandidates:      pg,
-		RuntimeLogStore:             pg,
-		ManagerStore:                pg,
-		ManagerLifecycleStore:       pg,
-		ManagerLifecycleDiagnostics: pg,
-		ManagerPersistenceRoles:     conformanceManagerPersistenceRoles(pg, nil, nil),
-		SessionResetter:             pg,
-		DeliveryStore:               pg,
-		ScheduleStore:               scheduleStore,
-		PipelineObligations:         pg.PipelineObligations(),
-		Options: testAuthorActivityRuntimeOptions(t, runtimepkg.RuntimeOptions{
-			SelfCheck:         false,
-			WorkflowModule:    loadConformanceRuntimeWorkflowModule(t),
-			LLMRuntime:        conformanceNoopLLMRuntime{},
-			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-			BundleSourceFact:  authorActivityTestBundleSourceFact,
-		})}))
-
-	if err != nil {
-		t.Fatalf("NewRuntime: %v", err)
-	}
-	if err := rt.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	defer func() {
-		if err := rt.Shutdown(); err != nil {
-			t.Fatalf("Shutdown: %v", err)
-		}
-	}()
-
-	reader := dashboardserver.NewSQLObservabilityReader(db, pg)
-	if reader == nil {
-		t.Fatal("NewSQLObservabilityReader returned nil")
-	}
-	logs, err := reader.ListRuntimeLogs(ctx, dashboardserver.RuntimeLogFilter{
-		Component: "scheduler",
-		Type:      "startup_recovery_timer_aftermath",
-	}, 10)
-	if err != nil {
-		t.Fatalf("ListRuntimeLogs: %v", err)
-	}
-	if len(logs) != 3 {
-		t.Fatalf("runtime log rows = %d, want 3: %#v", len(logs), logs)
-	}
-	findByEventType := func(eventType string) int {
-		t.Helper()
-		for idx, log := range logs {
-			if strings.TrimSpace(log.EventType) == eventType {
-				return idx
-			}
-		}
-		t.Fatalf("missing runtime log for event type %q in %#v", eventType, logs)
-		return -1
-	}
-
-	replayed := logs[findByEventType("timer.replay")]
-	if replayed.Action != "startup_recovery_timer_aftermath" {
-		t.Fatalf("replayed action = %q, want startup_recovery_timer_aftermath", replayed.Action)
-	}
-	replayedDetail, _ := replayed.Detail.(map[string]any)
-	if got := readString(replayedDetail["decision_outcome"]); got != "replayed" {
-		t.Fatalf("replayed detail.decision_outcome = %q, want replayed: %#v", got, replayed)
-	}
-	if got := readString(replayedDetail["decision_reason_code"]); got != "persisted_schedule_restored" {
-		t.Fatalf("replayed detail.decision_reason_code = %q, want persisted_schedule_restored", got)
-	}
-
-	skipped := logs[findByEventType("timer.skip")]
-	skippedDetail, _ := skipped.Detail.(map[string]any)
-	if got := readString(skippedDetail["decision_outcome"]); got != "skipped" {
-		t.Fatalf("skipped detail.decision_outcome = %q, want skipped", got)
-	}
-	if got := readString(skippedDetail["decision_reason_code"]); got != "schedule_claim_not_acquired" {
-		t.Fatalf("skipped detail.decision_reason_code = %q, want schedule_claim_not_acquired", got)
-	}
-
-	dropped := logs[findByEventType("timer.drop")]
-	droppedDetail, _ := dropped.Detail.(map[string]any)
-	if got := readString(droppedDetail["decision_outcome"]); got != "dropped" {
-		t.Fatalf("dropped detail.decision_outcome = %q, want dropped", got)
-	}
-	if got := readString(droppedDetail["decision_reason_code"]); got != "schedule_restore_failed" {
-		t.Fatalf("dropped detail.decision_reason_code = %q, want schedule_restore_failed", got)
-	}
-	if dropped.Failure == nil || dropped.Failure.Detail.Code != "schedule_restore_failed" {
-		t.Fatalf("dropped timer recovery failure = %#v", dropped.Failure)
 	}
 }
 
@@ -2258,7 +2057,7 @@ func newEntityToolConformanceHarness(t *testing.T) (context.Context, *runtimetoo
 	runID := uuid.NewString()
 	storetest.RequirePostgresRun(t, testAuthorActivityContext(context.Background()), db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
 		HumanTaskStore:                 pg,
 		AllowInternalLegacyEntityTools: true,

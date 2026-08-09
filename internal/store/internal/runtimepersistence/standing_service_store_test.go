@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -252,7 +253,7 @@ func TestSQLiteStandingServiceReconcileRejectsUnknownTerminalityWithCommand(t *t
 func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
+	workflowStore, genericReconciler := newGenericScheduleAwareWorkflowTestCoordinator(t, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
@@ -271,8 +272,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	unsettledEventID := uuid.NewString()
 	agentID := "standing-agent"
 	sessionID := uuid.NewString()
-	timerID := uuid.NewString()
-	fixtureCtx := testAuthorActivityContextForBundle(candidate.Source.BundleHash())
+	fixtureCtx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), created.RunID)
 	workEvent := eventtest.PersistedProjection(
 		eventID, events.EventType("standing.work"), "test", "", json.RawMessage(`{}`), 0,
 		created.RunID, "", events.EventEnvelope{}, time.Now().UTC(),
@@ -307,9 +307,9 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	if _, err := store.BindAgentSession(fixtureCtx, claimed.Claim, sessionID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.backend.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, routing_source, execution_mode, fire_at, owner_kind, status) VALUES (?, ?, ?, 'timer.fire', '{"kind":"platform_control","route":{}}', 'live', ?, 'system', 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created.RunID, time.Now().UTC().Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
+	genericActivation, workflowActivation := seedGenericScheduleTimerFamilies(
+		t, store, store.backend.ConstructionHandle(), fixtureCtx,
+	)
 	continuationAuthority, err := runtimedelivery.NewNormalExecutionAuthority(candidate.Source, "standing-lifecycle", 1)
 	if err != nil {
 		t.Fatal(err)
@@ -328,10 +328,15 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	if suspended.EffectiveState != "suspended" || suspended.Transition != "suspended" || !suspended.DeliveryContinuationRequired {
 		t.Fatalf("suspended = %#v", suspended)
 	}
+	assertGenericScheduleTimerFamilyCancellation(
+		t, store, store.backend.ConstructionHandle(), fixtureCtx,
+		genericActivation, workflowActivation, suspended.TimerCancellations,
+	)
+	assertGenericScheduleReconciled(t, genericReconciler, genericActivation.ID)
 	if got := continuationSignals.Load(); got != 1 {
 		t.Fatalf("suspend continuation signals = %d, want 1", got)
 	}
-	var runStatus, deliveryStatus, deliveryReason, sessionStatus, sessionReason, timerStatus string
+	var runStatus, deliveryStatus, deliveryReason, sessionStatus, sessionReason string
 	if err := store.backend.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = ?`, created.RunID).Scan(&runStatus); err != nil {
 		t.Fatal(err)
 	}
@@ -345,15 +350,12 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	if err := store.backend.QueryRowContext(ctx, `SELECT status, termination_reason FROM agent_sessions WHERE session_id = ?`, sessionID).Scan(&sessionStatus, &sessionReason); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.backend.QueryRowContext(ctx, `SELECT status FROM timers WHERE timer_id = ?`, timerID).Scan(&timerStatus); err != nil {
-		t.Fatal(err)
-	}
 	var pipelineOutcome, pipelineReason string
 	if err := store.backend.QueryRowContext(ctx, `SELECT outcome, reason_code FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, unsettledEventID).Scan(&pipelineOutcome, &pipelineReason); err != nil {
 		t.Fatal(err)
 	}
-	if runStatus != "paused" || deliveryStatus != "dead_letter" || deliveryReason != "standing_suspended" || sessionStatus != "terminated" || sessionReason != "cancelled" || timerStatus != "cancelled" {
-		t.Fatalf("suspend state = run:%s delivery:%s/%s session:%s/%s timer:%s", runStatus, deliveryStatus, deliveryReason, sessionStatus, sessionReason, timerStatus)
+	if runStatus != "paused" || deliveryStatus != "dead_letter" || deliveryReason != "standing_suspended" || sessionStatus != "terminated" || sessionReason != "cancelled" {
+		t.Fatalf("suspend state = run:%s delivery:%s/%s session:%s/%s", runStatus, deliveryStatus, deliveryReason, sessionStatus, sessionReason)
 	}
 	if pipelineOutcome != "dead_letter" || pipelineReason != "standing_suspended" {
 		t.Fatalf("unsettled pipeline receipt = %s/%s", pipelineOutcome, pipelineReason)
@@ -522,7 +524,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	selected := admitTestPostgresStore(t, db)
-	workflowStore := newPostgresWorkflowTestCoordinator(t, db, selected)
+	workflowStore, genericReconciler := newGenericScheduleAwareWorkflowTestCoordinator(t, selected)
 	serviceID := runtimeflowidentity.StandingServiceID("project", "ingress")
 	candidate := runtimepipeline.StandingServiceCandidate{
 		ServiceID: serviceID, PackageKey: "project", FlowID: "ingress",
@@ -538,7 +540,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	eventID := uuid.NewString()
 	unsettledEventID := uuid.NewString()
 	agentID := "standing-agent"
-	timerID := uuid.NewString()
+	fixtureCtx = runtimecorrelation.WithRunID(fixtureCtx, created[0].RunID)
 	var workEvent events.Event
 	for _, fixture := range []struct {
 		id        string
@@ -579,9 +581,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	if _, err := claimDeliveryFixture(fixtureCtx, selected, workEvent, workRoute); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO timers (timer_id, timer_name, run_id, fire_event, routing_source, execution_mode, fire_at, owner_kind, status) VALUES ($1::uuid, $2, $3::uuid, 'timer.fire', '{"kind":"platform_control","route":{}}'::jsonb, 'live', $4, 'system', 'active')`, timerID, aggregateWorkflowTimerTaskID(timerID), created[0].RunID, time.Now().UTC().Add(time.Hour)); err != nil {
-		t.Fatal(err)
-	}
+	genericActivation, workflowActivation := seedGenericScheduleTimerFamilies(t, selected, db, fixtureCtx)
 	continuationAuthority, err := runtimedelivery.NewNormalExecutionAuthority(candidate.Source, "standing-lifecycle", 1)
 	if err != nil {
 		t.Fatal(err)
@@ -599,10 +599,14 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	if suspended.EffectiveState != "suspended" || !suspended.DeliveryContinuationRequired {
 		t.Fatalf("suspended = %#v", suspended)
 	}
+	assertGenericScheduleTimerFamilyCancellation(
+		t, selected, db, fixtureCtx, genericActivation, workflowActivation, suspended.TimerCancellations,
+	)
+	assertGenericScheduleReconciled(t, genericReconciler, genericActivation.ID)
 	if got := continuationSignals.Load(); got != 1 {
 		t.Fatalf("suspend continuation signals = %d, want 1", got)
 	}
-	var runStatus, deliveryStatus, sessionStatus, timerStatus string
+	var runStatus, deliveryStatus, sessionStatus string
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, created[0].RunID).Scan(&runStatus); err != nil {
 		t.Fatal(err)
 	}
@@ -612,15 +616,12 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	if err := db.QueryRowContext(ctx, `SELECT status FROM agent_sessions WHERE run_id = $1::uuid`, created[0].RunID).Scan(&sessionStatus); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT status FROM timers WHERE run_id = $1::uuid`, created[0].RunID).Scan(&timerStatus); err != nil {
-		t.Fatal(err)
-	}
 	var pipelineOutcome, pipelineReason string
 	if err := db.QueryRowContext(ctx, `SELECT outcome, reason_code FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, unsettledEventID).Scan(&pipelineOutcome, &pipelineReason); err != nil {
 		t.Fatal(err)
 	}
-	if runStatus != "paused" || deliveryStatus != "dead_letter" || sessionStatus != "terminated" || timerStatus != "cancelled" {
-		t.Fatalf("suspend state = %s/%s/%s/%s", runStatus, deliveryStatus, sessionStatus, timerStatus)
+	if runStatus != "paused" || deliveryStatus != "dead_letter" || sessionStatus != "terminated" {
+		t.Fatalf("suspend state = %s/%s/%s", runStatus, deliveryStatus, sessionStatus)
 	}
 	if pipelineOutcome != "dead_letter" || pipelineReason != "standing_suspended" {
 		t.Fatalf("unsettled pipeline receipt = %s/%s", pipelineOutcome, pipelineReason)

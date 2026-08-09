@@ -240,7 +240,11 @@ func (pc *PipelineCoordinator) CommitDecision(ctx context.Context, card decision
 }
 
 func (pc *PipelineCoordinator) ReconcileStandingService(ctx context.Context, candidate StandingServiceCandidate) (StandingServiceReconciliation, error) {
-	return pc.workflowStore.ReconcileStandingService(ctx, candidate)
+	result, err := pc.workflowStore.ReconcileStandingService(ctx, candidate)
+	if err == nil {
+		err = pc.reconcileTimerCancellations(ctx, result.TimerCancellations)
+	}
+	return result, err
 }
 
 func (pc *PipelineCoordinator) LoadReconciledStandingService(ctx context.Context, candidate StandingServiceCandidate) (StandingServiceReconciliation, bool, error) {
@@ -248,15 +252,35 @@ func (pc *PipelineCoordinator) LoadReconciledStandingService(ctx context.Context
 }
 
 func (pc *PipelineCoordinator) ReconcileStandingServiceSet(ctx context.Context, candidates []StandingServiceCandidate) ([]StandingServiceReconciliation, error) {
-	return pc.workflowStore.ReconcileStandingServiceSet(ctx, candidates)
+	results, err := pc.workflowStore.ReconcileStandingServiceSet(ctx, candidates)
+	if err == nil {
+		for _, result := range results {
+			if err = pc.reconcileTimerCancellations(ctx, result.TimerCancellations); err != nil {
+				break
+			}
+		}
+	}
+	return results, err
 }
 
 func (pc *PipelineCoordinator) ReconcileStandingServiceReplacement(ctx context.Context, previous, candidates []StandingServiceCandidate) ([]StandingServiceReconciliation, error) {
-	return pc.workflowStore.ReconcileStandingServiceReplacement(ctx, previous, candidates)
+	results, err := pc.workflowStore.ReconcileStandingServiceReplacement(ctx, previous, candidates)
+	if err == nil {
+		for _, result := range results {
+			if err = pc.reconcileTimerCancellations(ctx, result.TimerCancellations); err != nil {
+				break
+			}
+		}
+	}
+	return results, err
 }
 
 func (pc *PipelineCoordinator) SuspendStandingService(ctx context.Context, op StandingServiceOperation) (StandingServiceReconciliation, error) {
-	return pc.workflowStore.SuspendStandingService(ctx, op)
+	result, err := pc.workflowStore.SuspendStandingService(ctx, op)
+	if err == nil {
+		err = pc.reconcileTimerCancellations(ctx, result.TimerCancellations)
+	}
+	return result, err
 }
 
 func (pc *PipelineCoordinator) ResumeStandingService(ctx context.Context, op StandingServiceOperation) (StandingServiceReconciliation, error) {
@@ -264,7 +288,11 @@ func (pc *PipelineCoordinator) ResumeStandingService(ctx context.Context, op Sta
 }
 
 func (pc *PipelineCoordinator) ResetStandingService(ctx context.Context, op StandingServiceOperation) (StandingServiceReconciliation, error) {
-	return pc.workflowStore.ResetStandingService(ctx, op)
+	result, err := pc.workflowStore.ResetStandingService(ctx, op)
+	if err == nil {
+		err = pc.reconcileTimerCancellations(ctx, result.TimerCancellations)
+	}
+	return result, err
 }
 
 func (pc *PipelineCoordinator) PublishStandingService(ctx context.Context, serviceID, runID string, generation int64) (int64, error) {

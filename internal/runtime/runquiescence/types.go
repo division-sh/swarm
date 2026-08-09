@@ -3,6 +3,8 @@ package runquiescence
 import (
 	"context"
 	"time"
+
+	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 )
 
 const (
@@ -34,6 +36,7 @@ type Result struct {
 	PipelineReceiptCount int
 	SessionCount         int
 	TimerCount           int
+	TimerCancellations   []runtimetimercancellation.Ref
 }
 
 type ServeAbandonStore interface {

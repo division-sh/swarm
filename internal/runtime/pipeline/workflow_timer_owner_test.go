@@ -23,9 +23,10 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
@@ -1298,35 +1299,20 @@ func TestWorkflowTimerLifecycleListsScopeWildcardsOnBothStores(t *testing.T) {
 			store, ctx := tc.open(t)
 			_, entityID, activation := seedWorkflowTimerOwnerActivation(t, store, ctx, &recordingPipelineBus{}, false)
 			runID := runtimecorrelation.RunIDFromContext(ctx)
-			lookalikeID := uuid.NewString()
 			lookalikeTaskID := "workflowXtimer:v1:generic"
-			if store.isSQLite() {
-				_, err := store.testDB().ExecContext(ctx, `
-					INSERT INTO timers (
-						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event,
-						fire_payload, routing_source, execution_mode, fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
-					) VALUES (?, ?, ?, ?, 'generic', 'generic.tick', '{}',
-					          json_object('kind', 'flow_owned_control', 'route', json_object('flow_id', 'generic', 'flow_instance', 'generic', 'entity_id', ?)),
-					          'live', ?, false, 'generic', 'system', 'timer', 'active', ?)
-				`, lookalikeID, runID, lookalikeTaskID, entityID, entityID, activation.FireAt, activation.CreatedAt)
-				if err != nil {
-					t.Fatalf("insert SQLite generic prefix lookalike: %v", err)
-				}
-			} else {
-				_, err := store.testDB().ExecContext(ctx, `
-					INSERT INTO timers (
-						timer_id, run_id, timer_name, entity_id, flow_instance, fire_event,
-						fire_payload, routing_source, execution_mode, fire_at, recurring, owner_agent, owner_kind, task_type, status, created_at
-					) VALUES (
-						$1::uuid, $2::uuid, $3, $4::uuid, 'generic', 'generic.tick',
-							'{}'::jsonb, jsonb_build_object('kind', 'flow_owned_control', 'route', jsonb_build_object('flow_id', 'generic', 'flow_instance', 'generic', 'entity_id', $4::text)), 'live',
-						$5, false, 'generic', 'system', 'timer', 'active', $6
-					)
-				`, lookalikeID, runID, lookalikeTaskID, entityID, activation.FireAt, activation.CreatedAt)
-				if err != nil {
-					t.Fatalf("insert PostgreSQL generic prefix lookalike: %v", err)
-				}
+			routing, err := events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+				FlowID: "generic", FlowInstance: "generic", EntityID: entityID,
+			})
+			if err != nil {
+				t.Fatal(err)
 			}
+			command := runtimegenericschedule.AdmissionCommand{
+				ScheduleKey: lookalikeTaskID, RunID: runID, EntityID: entityID, FlowInstance: "generic",
+				OwnerKind: runtimegenericschedule.OwnerSystem, OwnerID: "generic",
+				EventType: "generic.tick", Payload: semanticvalue.EmptyObject(), RoutingSource: routing,
+				Due: runtimegenericschedule.AbsoluteDue(activation.FireAt), TaskID: lookalikeTaskID,
+			}
+			insertGenericSchedulePersistenceFixture(t, ctx, store.testDB(), !store.isSQLite(), command)
 
 			for _, filter := range []struct {
 				name     string

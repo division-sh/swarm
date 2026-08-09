@@ -1486,7 +1486,7 @@ func newNotifyAllChildrenRuntime(
 		}
 		authority := runtimeauthority.NewSourceProvider(source)
 		emitRegistry := runtimetools.NewEmitRegistry(source, authority)
-		toolExecutor := runtimetools.NewExecutorWithOptions(eventBus, nil, runtimetools.ExecutorOptions{
+		toolExecutor := runtimetools.NewExecutorWithOptions(eventBus, runtimetools.ExecutorOptions{
 			Config:            cfg,
 			WorkflowSource:    source,
 			ModelRuntimes:     modelRuntimes,

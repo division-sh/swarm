@@ -15,8 +15,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
+	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	storeworkflowtimer "github.com/division-sh/swarm/internal/store/internal/backend/workflowtimer"
 	"github.com/lib/pq"
 )
 
@@ -166,10 +169,11 @@ func (s *RunLifecyclePostgresOwner) ApplyActiveRunQuiescence(ctx context.Context
 	if err != nil {
 		return runtimerunquiescence.Result{}, err
 	}
-	out.TimerCount, err = cancelActiveRunTimersTx(ctx, tx, runIDs)
+	out.TimerCancellations, err = cancelActiveRunTimerFamiliesTx(ctx, tx, true, runIDs, out.ReasonCode, now)
 	if err != nil {
 		return runtimerunquiescence.Result{}, err
 	}
+	out.TimerCount = len(out.TimerCancellations)
 	for _, run := range runs {
 		if !activeRunQuiescenceRunStatusActive(run.Status) {
 			continue
@@ -318,10 +322,11 @@ func (s *RunLifecycleSQLiteOwner) ApplyActiveRunQuiescence(ctx context.Context, 
 		if err != nil {
 			return err
 		}
-		attemptOut.TimerCount, err = sqliteCancelActiveRunTimersTx(txctx, tx, attemptRunIDs)
+		attemptOut.TimerCancellations, err = cancelActiveRunTimerFamiliesTx(txctx, tx, false, attemptRunIDs, attemptOut.ReasonCode, now)
 		if err != nil {
 			return err
 		}
+		attemptOut.TimerCount = len(attemptOut.TimerCancellations)
 		for _, run := range runs {
 			if !activeRunQuiescenceRunStatusActive(run.Status) {
 				continue
@@ -487,23 +492,6 @@ func terminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, runIDs []stri
 	return int(count), nil
 }
 
-func cancelActiveRunTimersTx(ctx context.Context, tx *sql.Tx, runIDs []string) (int, error) {
-	result, err := tx.ExecContext(ctx, `
-		UPDATE timers
-		SET status = 'cancelled'
-		WHERE run_id = ANY($1::uuid[])
-		  AND status = 'active'
-	`, pq.Array(runIDs))
-	if err != nil {
-		return 0, fmt.Errorf("cancel active run timers: %w", err)
-	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-	return int(count), nil
-}
-
 func sqliteTerminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, runIDs []string, reason string, at time.Time) (int, error) {
 	args := make([]any, 0, len(runIDs)+3)
 	args = append(args, reason, at.UTC(), at.UTC())
@@ -536,29 +524,16 @@ func (s *RunLifecycleSQLiteOwner) TerminateActiveSessionsTx(ctx context.Context,
 	return sqliteTerminateActiveRunSessionsTx(ctx, tx, runIDs, reason, at)
 }
 
-func sqliteCancelActiveRunTimersTx(ctx context.Context, tx *sql.Tx, runIDs []string) (int, error) {
-	args := make([]any, 0, len(runIDs))
-	for _, runID := range runIDs {
-		args = append(args, runID)
-	}
-	result, err := tx.ExecContext(ctx, `
-		UPDATE timers
-		SET status = 'cancelled'
-		WHERE run_id IN (`+sqlitePlaceholders(len(runIDs))+`)
-		  AND status = 'active'
-	`, args...)
+func cancelActiveRunTimerFamiliesTx(ctx context.Context, tx *sql.Tx, postgres bool, runIDs []string, cause string, at time.Time) ([]runtimetimercancellation.Ref, error) {
+	generic, err := storegenericschedule.CancelRunsTx(ctx, tx, postgres, runIDs, cause, at)
 	if err != nil {
-		return 0, fmt.Errorf("cancel sqlite active run timers: %w", err)
+		return nil, fmt.Errorf("cancel active generic schedules: %w", err)
 	}
-	count, err := result.RowsAffected()
+	workflow, err := storeworkflowtimer.CancelRunsTx(ctx, tx, postgres, runIDs)
 	if err != nil {
-		return 0, err
+		return nil, fmt.Errorf("cancel active workflow timers: %w", err)
 	}
-	return int(count), nil
-}
-
-func (s *RunLifecycleSQLiteOwner) CancelActiveTimersTx(ctx context.Context, tx *sql.Tx, runIDs []string) (int, error) {
-	return sqliteCancelActiveRunTimersTx(ctx, tx, runIDs)
+	return append(generic, workflow...), nil
 }
 
 func upsertActiveRunQuiescenceRunControlTx(ctx context.Context, tx *sql.Tx, runID, reasonCode, controlledBy string, at time.Time) error {
