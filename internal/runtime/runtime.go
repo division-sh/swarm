@@ -150,6 +150,7 @@ type validatedRuntimeDeps struct {
 	Credentials                runtimecredentials.Store
 	ManagedCredentials         runtimemanagedcredentials.Store
 	MockConnectorResponses     *providerconnectors.MockResponsePlan
+	BootEffectReachability     runtimebootverify.SourceBootEffectReachability
 	ExecutionMode              runtimeeffects.ExecutionMode
 	ProviderCredentialResolver llm.ProviderCredentialResolver
 	Authority                  runtimeauthority.Provider
@@ -560,33 +561,33 @@ func runtimeThrottleSuppressPrefixes(source semanticview.Source) []string {
 	}
 }
 
-func ensureWorkflowBootWiring(opts RuntimeOptions, executionMode runtimeeffects.ExecutionMode) (*providerconnectors.MockResponsePlan, error) {
-	return ensureWorkflowBootWiringWithHarnessPolicy(opts, executionMode, false)
+func ensureWorkflowBootWiring(opts RuntimeOptions, profile llmselection.Profile) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
+	return ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, false)
 }
 
-func ensureWorkflowBootWiringWithHarnessPolicy(opts RuntimeOptions, executionMode runtimeeffects.ExecutionMode, allowValidationHarness bool) (*providerconnectors.MockResponsePlan, error) {
+func ensureWorkflowBootWiringWithHarnessPolicy(opts RuntimeOptions, profile llmselection.Profile, allowValidationHarness bool) (*providerconnectors.MockResponsePlan, runtimebootverify.SourceBootEffectReachability, error) {
 	if opts.WorkflowModule == nil {
-		return nil, fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
+		return nil, runtimebootverify.SourceBootEffectReachability{}, fmt.Errorf("workflow module is required: configure RuntimeOptions.WorkflowModule")
 	}
 	source := opts.WorkflowModule.SemanticSource()
 	if opts.WorkspaceLifecycle != nil {
 		if err := opts.WorkspaceLifecycle.ValidateSource(context.Background(), source); err != nil {
-			return nil, fmt.Errorf("workspace validation failed: %w", err)
+			return nil, runtimebootverify.SourceBootEffectReachability{}, fmt.Errorf("workspace validation failed: %w", err)
 		}
 	}
 	validationOpts := DefaultWorkflowContractValidationOptions(opts.Credentials)
 	validationOpts.ManagedCredentials = opts.ManagedCredentials
 	validationOpts.ProviderTriggerCatalog = opts.ProviderTriggerCatalog
-	validationOpts.ExecutionMode = executionMode
+	validationOpts.LLMProfile = profile
 	validationOpts.ChannelPlans = opts.ChannelPlans
 	validationOpts.ChannelOutboundBindings = opts.ChannelOutboundBindings
 	validationOpts.AllowHarnessInputs = allowValidationHarness
 	validationOpts.AllowHarnessOutputs = allowValidationHarness
 	result, err := ValidateWorkflowContractSurface(context.Background(), source, validationOpts)
 	if err != nil {
-		return nil, err
+		return nil, runtimebootverify.SourceBootEffectReachability{}, err
 	}
-	return result.mockConnectorResponses, nil
+	return result.mockConnectorResponses, result.bootEffectReachability, nil
 }
 
 type connectorPackWorkflowModule struct {
@@ -746,7 +747,7 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 		opts.WorkflowModule = workflowModule
 		source = wrappedSource
 	}
-	mockConnectorResponses, err := ensureWorkflowBootWiringWithHarnessPolicy(opts, executionMode, allowValidationHarness)
+	mockConnectorResponses, bootEffectReachability, err := ensureWorkflowBootWiringWithHarnessPolicy(opts, profile, allowValidationHarness)
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
@@ -786,6 +787,7 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 		Credentials:                credentials,
 		ManagedCredentials:         opts.ManagedCredentials,
 		MockConnectorResponses:     mockConnectorResponses,
+		BootEffectReachability:     bootEffectReachability,
 		ExecutionMode:              executionMode,
 		ProviderCredentialResolver: providerCredentialResolver,
 		Authority:                  authorityProvider,
@@ -1243,23 +1245,27 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		},
 	}, runtimeDeps.ScheduleStore)
 	credentialValidationOptions := runtimebootverify.Options{
-		Credentials:            rt.Credentials,
-		ManagedCredentials:     rt.ManagedCredentials,
-		ExecutionMode:          boot.ExecutionMode,
-		MockConnectorResponses: boot.MockConnectorResponses,
+		Credentials:        rt.Credentials,
+		ManagedCredentials: rt.ManagedCredentials,
+		EffectReachability: boot.BootEffectReachability,
 	}
 	if missing, err := runtimebootverify.MissingStaticCredentialRequirements(ctx, source, credentialValidationOptions); err != nil {
 		return nil, fmt.Errorf("credential validation failed: %w", err)
 	} else {
 		if bootWarningsFatal() && len(missing) > 0 {
 			parts := make([]string, 0, len(missing))
+			liveAgentIDs := boot.BootEffectReachability.LiveAgentIDs()
 			for _, item := range missing {
 				requiredBy := make([]string, 0, len(item.RequiredBy))
 				for _, ref := range item.RequiredBy {
 					requiredBy = append(requiredBy, strings.TrimSpace(ref.Kind)+":"+strings.TrimSpace(ref.Name))
 				}
 				sort.Strings(requiredBy)
-				parts = append(parts, fmt.Sprintf("%s required by %s", strings.TrimSpace(item.Key), strings.Join(requiredBy, ", ")))
+				message := fmt.Sprintf("%s required by %s", strings.TrimSpace(item.Key), strings.Join(requiredBy, ", "))
+				if len(liveAgentIDs) > 0 {
+					message += " (reachable from live agents " + strings.Join(liveAgentIDs, ", ") + ")"
+				}
+				parts = append(parts, message)
 			}
 			sort.Strings(parts)
 			return nil, fmt.Errorf("missing required credentials: %s", strings.Join(parts, "; "))

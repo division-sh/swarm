@@ -6100,6 +6100,27 @@ engine:
               - ValidateManagedProviderPreflight
               - classifyWorkspaceBackendRequirement
               - runLocalClaudeCLIPreflight
+            outbound_effect_credential_admission:
+              owner: internal/runtime/bootverify.ResolveSourceBootEffectReachability
+              inputs:
+                - every declared agent resolved through internal/runtime/llm/selection.ResolveAgentExecutionSelection
+                - the immutable exact providerconnectors.MockResponsePlan compiled from the effective source
+              rule: >
+                Static and managed outbound tool credentials are required exactly when that tool's transport remains
+                reachable. A source with any live-selected agent retains every outbound tool credential requirement. An
+                all-mock source waives only a provider_connector tool whose exact effective declaration is admitted by the
+                compiled response plan; absent, mismatched, scoped-conflicting, ordinary HTTP, native, exec, MCP, listener,
+                workspace, inbound signing, and other non-tool requirements remain fail-closed. Agent-free sources retain
+                every requirement. A credential key shared by a waived tool and any surviving requirement remains required.
+                Process-global execution mode is not credential-admission authority.
+              consumers:
+                - internal/runtime/workflow_validation.go for swarm verify and serve validation
+                - internal/serveapp/builder_project_supervisor.go for Builder project validation
+                - internal/builder/handler_state.go for Builder validation RPC
+                - internal/runtime/runtime.go for final runtime boot credential admission
+              diagnostics: >
+                Mixed-source failures name the exact surviving tool requirement and the sorted live-selected agents that
+                keep outbound effects reachable. Secret and managed-token values are never exposed.
             workspace_classifier_rule: >
               The workspace backend classifier consumes each effective source-registry entry's Mock.Configured fact. An
               exact mocked agent contributes no claude_cli process-execution reason, but retains ordinary workspace
@@ -6156,9 +6177,12 @@ engine:
             conversation forks, spend rows, decision cards, mailbox/readback summaries, and author activity. Missing mode is
             invalid and old rows without it are unsupported; no defaults, fallback readers, or mode reconstruction are allowed.
         supported_surface_proof: >
-          A real served bundle, without LLM credentials, must exercise mock text, visible internal tool calls, emitted events,
-          decision-card/mailbox rendering, memory continuity across restart, hypothetical usage, and the pre-launch external
-          effect fence on both SQLite and Postgres.
+          A real served bundle, without LLM or unreachable outbound connector credentials, must exercise mock text, visible
+          internal tool calls, emitted events, exact provider-connector response materialization, decision-card/mailbox
+          rendering, memory continuity across restart, hypothetical usage, and the pre-launch external effect fence on both
+          SQLite and Postgres. Builder validation, swarm verify, serve validation, and final runtime boot must accept that
+          same source, while mixed sources and independent inbound signing, native, exec, MCP, listener, and workspace
+          requirements remain fail-closed.
       native_openai_responses_source_authority:
         promoted_by: '#1229'
         implementation_status: runtime_adapter_activated_first_subset

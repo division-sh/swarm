@@ -13,7 +13,6 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -23,7 +22,6 @@ import (
 type WorkflowContractValidationOptions struct {
 	Credentials                    runtimecredentials.Store
 	ManagedCredentials             runtimemanagedcredentials.Store
-	ExecutionMode                  executionmode.Mode
 	CheckMCPReachable              bool
 	StrictEmitSchemas              bool
 	FatalToolImplementationWarning bool
@@ -52,11 +50,17 @@ type WorkflowContractValidationResult struct {
 	HarnessOutputDeclarations        []string
 	ProductionValid                  bool
 	mockConnectorResponses           *providerconnectors.MockResponsePlan
+	bootEffectReachability           runtimebootverify.SourceBootEffectReachability
 }
 
 func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Store) WorkflowContractValidationOptions {
+	profile, err := llmselection.ResolveActiveBackend(llmselection.DefaultBackendID())
+	if err != nil {
+		panic(fmt.Sprintf("resolve built-in default LLM profile: %v", err))
+	}
 	return WorkflowContractValidationOptions{
 		Credentials:                    credentials,
+		LLMProfile:                     profile,
 		CheckMCPReachable:              true,
 		StrictEmitSchemas:              runtimeEnvBool("SWARM_EMIT_SCHEMA_STRICT", true),
 		FatalToolImplementationWarning: bootWarningsFatal(),
@@ -101,6 +105,10 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 		return result, fmt.Errorf("provider connector mock response compilation failed: %w", err)
 	}
 	result.mockConnectorResponses = mockConnectorResponses
+	result.bootEffectReachability, err = runtimebootverify.ResolveSourceBootEffectReachability(source, opts.LLMProfile, mockConnectorResponses)
+	if err != nil {
+		return result, fmt.Errorf("resolve source boot effect reachability: %w", err)
+	}
 	source, err = SourceWithProviderTriggerEvents(source, opts.ProviderTriggerCatalog)
 	if err != nil {
 		return result, fmt.Errorf("provider trigger event import failed: %w", err)
@@ -109,8 +117,7 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	result.BootReport = runtimebootverify.Run(ctx, source, runtimebootverify.Options{
 		Credentials:             opts.Credentials,
 		ManagedCredentials:      opts.ManagedCredentials,
-		ExecutionMode:           opts.ExecutionMode,
-		MockConnectorResponses:  mockConnectorResponses,
+		EffectReachability:      result.bootEffectReachability,
 		CheckMCPReachable:       opts.CheckMCPReachable,
 		ValidateModelResolution: opts.ValidateLLMModelResolution,
 		LLMProfile:              opts.LLMProfile,

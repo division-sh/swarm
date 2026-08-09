@@ -7,18 +7,19 @@ import (
 
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestCredentialChecksConsumeExactMockConnectorAdmission(t *testing.T) {
 	for _, credentialKind := range []string{"static", "managed"} {
 		t.Run(credentialKind, func(t *testing.T) {
-			source, plan := mockConnectorCredentialFixture(t, credentialKind, false)
+			source, plan := mockConnectorCredentialFixture(t, credentialKind, false, false)
+			reachability := mockConnectorEffectReachability(t, source, plan)
 			findings := newCheckerContext(context.Background(), source, Options{
-				Credentials:            bootverifyCredentialStore{values: map[string]string{}},
-				ExecutionMode:          executionmode.Mock,
-				MockConnectorResponses: plan,
+				Credentials:        bootverifyCredentialStore{values: map[string]string{}},
+				EffectReachability: reachability,
 			}).credentials()
 			for _, finding := range findings {
 				if finding.Location == "provider_credential" {
@@ -29,46 +30,78 @@ func TestCredentialChecksConsumeExactMockConnectorAdmission(t *testing.T) {
 	}
 }
 
-func TestCredentialChecksUseTypedModeRatherThanResponseArtifact(t *testing.T) {
-	source, plan := mockConnectorCredentialFixture(t, "static", false)
+func TestCredentialChecksUseTypedSelectionAndExactResponseAuthority(t *testing.T) {
+	source, plan := mockConnectorCredentialFixture(t, "static", false, false)
+	mixedSource, mixedPlan := mockConnectorCredentialFixture(t, "static", false, true)
+	mixedReachability := mockConnectorEffectReachability(t, mixedSource, mixedPlan)
+	if got := mixedReachability.LiveAgentIDs(); len(got) != 1 || got[0] != "live-agent" {
+		t.Fatalf("mixed live agents = %#v, want live-agent", got)
+	}
 	tests := []struct {
 		name        string
+		source      semanticview.Source
 		opts        Options
 		wantMissing bool
 	}{
 		{
-			name: "live retains requirement despite responder artifact",
+			name:   "all mock exact responder removes unreachable tool requirement",
+			source: source,
 			opts: Options{
-				Credentials:            bootverifyCredentialStore{values: map[string]string{}},
-				ExecutionMode:          executionmode.Live,
-				MockConnectorResponses: plan,
+				Credentials:        bootverifyCredentialStore{values: map[string]string{}},
+				EffectReachability: mockConnectorEffectReachability(t, source, plan),
+			},
+		},
+		{
+			name:   "mixed source retains reachable tool requirement",
+			source: mixedSource,
+			opts: Options{
+				Credentials:        bootverifyCredentialStore{values: map[string]string{}},
+				EffectReachability: mixedReachability,
 			},
 			wantMissing: true,
 		},
 		{
-			name: "mock without exact responder never consults tool credential",
+			name:   "all mock without exact responder retains requirement",
+			source: source,
 			opts: Options{
-				Credentials:   bootverifyCredentialStore{values: map[string]string{}},
-				ExecutionMode: executionmode.Mock,
+				Credentials:        bootverifyCredentialStore{values: map[string]string{}},
+				EffectReachability: mockConnectorEffectReachability(t, source, nil),
 			},
+			wantMissing: true,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			findings := newCheckerContext(context.Background(), source, tc.opts).credentials()
+			findings := newCheckerContext(context.Background(), tc.source, tc.opts).credentials()
 			if got := credentialFindingContains(findings, "provider_credential", "tool provider.send"); got != tc.wantMissing {
 				t.Fatalf("provider.send credential finding = %v, want %v; findings=%#v", got, tc.wantMissing, findings)
+			}
+			if tc.name == "mixed source retains reachable tool requirement" && !credentialFindingContains(findings, "provider_credential", "live-agent") {
+				t.Fatalf("mixed credential findings = %#v, want exact live actor", findings)
 			}
 		})
 	}
 }
 
+func TestCredentialChecksRetainAgentFreeToolRequirement(t *testing.T) {
+	source, plan := mockConnectorCredentialFixture(t, "static", false, false)
+	bundle := &runtimecontracts.WorkflowContractBundle{Tools: source.ToolEntries()}
+	agentFree := semanticview.Wrap(bundle)
+	reachability := mockConnectorEffectReachability(t, agentFree, plan)
+	findings := newCheckerContext(context.Background(), agentFree, Options{
+		Credentials:        bootverifyCredentialStore{values: map[string]string{}},
+		EffectReachability: reachability,
+	}).credentials()
+	if !credentialFindingContains(findings, "provider_credential", "tool provider.send") {
+		t.Fatalf("agent-free credential findings = %#v, want outbound tool requirement retained", findings)
+	}
+}
+
 func TestCredentialChecksRetainNonToolRequirementsSharingAKey(t *testing.T) {
-	source, plan := mockConnectorCredentialFixture(t, "static", true)
+	source, plan := mockConnectorCredentialFixture(t, "static", true, false)
 	findings := newCheckerContext(context.Background(), source, Options{
-		Credentials:            bootverifyCredentialStore{values: map[string]string{}},
-		ExecutionMode:          executionmode.Mock,
-		MockConnectorResponses: plan,
+		Credentials:        bootverifyCredentialStore{values: map[string]string{}},
+		EffectReachability: mockConnectorEffectReachability(t, source, plan),
 	}).credentials()
 	if !credentialFindingContains(findings, "provider_credential", "mcp_server audit") {
 		t.Fatalf("credential findings = %#v, want non-tool MCP requirement", findings)
@@ -78,7 +111,18 @@ func TestCredentialChecksRetainNonToolRequirementsSharingAKey(t *testing.T) {
 	}
 }
 
-func mockConnectorCredentialFixture(t *testing.T, credentialKind string, includeSibling bool) (semanticview.Source, *providerconnectors.MockResponsePlan) {
+func TestManagedCredentialChecksRetainMixedSourceRequirement(t *testing.T) {
+	source, plan := mockConnectorCredentialFixture(t, "managed", false, true)
+	reachability := mockConnectorEffectReachability(t, source, plan)
+	findings := newCheckerContext(context.Background(), source, Options{
+		EffectReachability: reachability,
+	}).credentials()
+	if !credentialFindingContains(findings, "provider_credential", "tool provider.send") || !credentialFindingContains(findings, "provider_credential", "live-agent") {
+		t.Fatalf("managed credential findings = %#v, want exact live actor and tool requirement", findings)
+	}
+}
+
+func mockConnectorCredentialFixture(t *testing.T, credentialKind string, includeSibling, includeUnmocked bool) (semanticview.Source, *providerconnectors.MockResponsePlan) {
 	t.Helper()
 	connector := runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")),
 
@@ -110,7 +154,24 @@ func mockConnectorCredentialFixture(t *testing.T, credentialKind string, include
 			runtimecontracts.WithToolCredentials("provider_credential"),
 		)
 	}
-	bundle := &runtimecontracts.WorkflowContractBundle{Tools: tools}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"mock-agent": {
+				ID:    "mock-agent",
+				Model: llmselection.ModelAliasRegular,
+				Mock: mockperformance.Performance{
+					Kind:   "python",
+					Module: "mocks/mock-agent.py",
+					Source: []byte("def handle(input):\n    return {}\n"),
+					Digest: "sha256:" + strings.Repeat("a", 64),
+				},
+			},
+		},
+		Tools: tools,
+	}
+	if includeUnmocked {
+		bundle.Agents["live-agent"] = runtimecontracts.AgentRegistryEntry{ID: "live-agent", Model: llmselection.ModelAliasRegular}
+	}
 	if includeSibling {
 		bundle.Policy = runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"mcp_servers": {Value: map[string]any{
@@ -124,6 +185,19 @@ func mockConnectorCredentialFixture(t *testing.T, credentialKind string, include
 		t.Fatalf("CompileMockResponsePlan: %v", err)
 	}
 	return source, plan
+}
+
+func mockConnectorEffectReachability(t *testing.T, source semanticview.Source, plan *providerconnectors.MockResponsePlan) SourceBootEffectReachability {
+	t.Helper()
+	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
+	if err != nil {
+		t.Fatalf("ResolveActiveBackend: %v", err)
+	}
+	reachability, err := ResolveSourceBootEffectReachability(source, profile, plan)
+	if err != nil {
+		t.Fatalf("ResolveSourceBootEffectReachability: %v", err)
+	}
+	return reachability
 }
 
 func credentialFindingContains(findings []Finding, location, fragment string) bool {

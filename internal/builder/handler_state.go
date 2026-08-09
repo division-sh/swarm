@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -34,7 +35,7 @@ func (h *handler) currentProjectStatus() ProjectStatus {
 	return h.projectControl.CurrentProject()
 }
 
-func (h *handler) runFullValidation(_ context.Context) ValidationResult {
+func (h *handler) runFullValidation(ctx context.Context) ValidationResult {
 	startedAt := time.Now()
 	flowCount := 0
 	source := h.currentSemanticSource()
@@ -60,9 +61,22 @@ func (h *handler) runFullValidation(_ context.Context) ValidationResult {
 		result.Summary.DurationMS = time.Since(startedAt).Milliseconds()
 		return result
 	}
-	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{
-		Credentials:       h.credentials,
-		CheckMCPReachable: true,
+	effectiveSource, err := providerconnectors.SourceWithConnectorPackImports(source)
+	if err != nil {
+		return builderValidationSetupFailure(result, startedAt, fmt.Errorf("provider connector pack import failed: %w", err))
+	}
+	mockConnectorResponses, err := providerconnectors.CompileMockResponsePlan(effectiveSource)
+	if err != nil {
+		return builderValidationSetupFailure(result, startedAt, fmt.Errorf("provider connector mock response compilation failed: %w", err))
+	}
+	effectReachability, err := runtimebootverify.ResolveSourceBootEffectReachability(effectiveSource, h.llmProfile, mockConnectorResponses)
+	if err != nil {
+		return builderValidationSetupFailure(result, startedAt, fmt.Errorf("resolve source boot effect reachability: %w", err))
+	}
+	report := runtimebootverify.Run(ctx, effectiveSource, runtimebootverify.Options{
+		Credentials:        h.credentials,
+		EffectReachability: effectReachability,
+		CheckMCPReachable:  true,
 	})
 	for _, finding := range report.Findings {
 		issue := validationIssueFromFinding(finding)
@@ -77,6 +91,18 @@ func (h *handler) runFullValidation(_ context.Context) ValidationResult {
 	}
 	result.Summary.Errors = len(result.Errors)
 	result.Summary.Warnings = len(result.Warnings)
+	result.Summary.DurationMS = time.Since(startedAt).Milliseconds()
+	return result
+}
+
+func builderValidationSetupFailure(result ValidationResult, startedAt time.Time, err error) ValidationResult {
+	result.Status = "fail"
+	result.Errors = append(result.Errors, ValidationIssue{
+		CheckID:  "workflow_contract_validation",
+		Severity: runtimebootverify.SeverityHardInvalidity,
+		Message:  strings.TrimSpace(err.Error()),
+	})
+	result.Summary.Errors = len(result.Errors)
 	result.Summary.DurationMS = time.Since(startedAt).Milliseconds()
 	return result
 }

@@ -82,7 +82,6 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	}
 	for key, value := range map[string]string{
 		"webhook_signing.telegram": "telegram-secret",
-		"telegram_bot_token":       "telegram-token",
 	} {
 		if err := credentialStore.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("set credential %s: %v", key, err)

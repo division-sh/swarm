@@ -754,10 +754,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("resolve llm backend profile for workflow validation: %w", err)
 	}
-	validationOpts.ExecutionMode, err = llmselection.ExecutionModeForProfile(profile)
-	if err != nil {
-		return serveRuntimeBundleContext{}, fmt.Errorf("resolve workflow execution mode: %w", err)
-	}
+	validationOpts.LLMProfile = profile
 	validation, err := runtime.ValidateWorkflowContractSurface(req.Ctx, loaded.source, validationOpts)
 	if err != nil {
 		return serveRuntimeBundleContext{}, err
