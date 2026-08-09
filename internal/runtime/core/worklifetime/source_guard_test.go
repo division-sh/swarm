@@ -69,10 +69,10 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"go|internal/runtime/pythonmodule/runtime.go|newInterpreterModuleForContext|305":                                     {asyncSiteSynchronousJoin, "the interpreter stderr collector is joined when module startup completes"},
 	"go|internal/runtime/pythonmodule/runtime.go|runHarness|209":                                                         {asyncSiteSynchronousJoin, "the harness execution result is joined before the call returns"},
 	"go|internal/runtime/runlifecycle/executor.go|Executor.installReserved|258":                                          {asyncSiteCanonicalOwner, "the run-lifecycle executor owns each pre-admitted completion candidate until the exact lease settles"},
-	"go|internal/runtime/runforkexecution/agent_runtime_materialization.go|startSelectedContractAgentRuntimeGateway|530": {asyncSiteCanonicalOwner, "the selected-fork gateway is admitted under and joined by its selected-fork occurrence"},
-	"go|internal/runtime/runforkexecution/runtime_container.go|selectedContractForkLocalRuntimeContainer.Publish|330":    {asyncSiteCanonicalOwner, "selected-fork publication acquires a local occurrence lease before launch and joins it"},
-	"go|internal/runtime/runtime.go|Runtime.Start|1596":                                                                  {asyncSiteCanonicalOwner, "pipeline background nodes acquire runtime leases before launch and settle on exit"},
-	"go|internal/runtime/runtime.go|Runtime.startSystemNodesAndWaitForSubscriptions|1950":                                {asyncSiteCanonicalOwner, "system-node runners acquire standing/runtime ownership and publish readiness before return"},
+	"go|internal/runtime/runforkexecution/agent_runtime_materialization.go|startSelectedContractAgentRuntimeGateway|525": {asyncSiteCanonicalOwner, "the selected-fork gateway is admitted under and joined by its selected-fork occurrence"},
+	"go|internal/runtime/runforkexecution/runtime_container.go|selectedContractForkLocalRuntimeContainer.Publish|348":    {asyncSiteCanonicalOwner, "selected-fork publication acquires a local occurrence lease before launch and joins it"},
+	"go|internal/runtime/runtime.go|Runtime.Start|1602":                                                                  {asyncSiteCanonicalOwner, "pipeline background nodes acquire runtime leases before launch and settle on exit"},
+	"go|internal/runtime/runtime.go|Runtime.startSystemNodesAndWaitForSubscriptions|1955":                                {asyncSiteCanonicalOwner, "system-node runners acquire standing/runtime ownership and publish readiness before return"},
 	"go|internal/runtime/sessions/heartbeat.go|StartLeaseHeartbeatWithErrorHandler|51":                                   {asyncSiteCanonicalOwner, "the session heartbeat exposes a stop-and-wait owner and cannot outlive it"},
 	"go|internal/serveapp/main.go|Run|1359":                                                                              {asyncSiteCanonicalOwner, "the API listener is admitted under served-process ownership and joined at shutdown"},
 	"go|internal/serveapp/main.go|Run|1363":                                                                              {asyncSiteCanonicalOwner, "the MCP listener is admitted under served-process ownership and joined at shutdown"},
@@ -346,4 +346,3 @@ func workLifetimeRepositoryRoot(t *testing.T) string {
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", ".."))
 }
-
