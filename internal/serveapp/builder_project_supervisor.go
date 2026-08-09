@@ -153,7 +153,12 @@ func newRuntimeProjectSupervisor(
 			if err != nil {
 				return err
 			}
+			profile, err := cfg.LLMBackendProfile()
+			if err != nil {
+				return fmt.Errorf("resolve llm backend profile for Builder validation: %w", err)
+			}
 			opts := runtime.DefaultWorkflowContractValidationOptions(credentialStore)
+			opts.LLMProfile = profile
 			opts.ProviderTriggerCatalog = catalog
 			_, err = runtime.ValidateWorkflowContractSurface(ctx, source, opts)
 			return err

@@ -2,6 +2,7 @@ package runtime_test
 
 import (
 	"context"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	swarmruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -77,6 +79,39 @@ func TestNewRuntime_FullyMockedBundleBootsClaudeCLIWithoutCLIBinary(t *testing.T
 	t.Cleanup(func() { _ = rt.Shutdown() })
 }
 
+func TestNewRuntime_FullyMockedBundleBootsWithoutUnreachableConnectorCredential(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.Backend = "claude_cli"
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	processOwner := worklifetime.NewProcess()
+	t.Cleanup(processOwner.Retire)
+	store := storetest.StartSQLiteRuntimeStore(t)
+	rt, err := swarmruntime.NewRuntime(testAuthorActivityContext(context.Background()), swarmruntime.RuntimeDeps{
+		Config:                   cfg,
+		EffectsStore:             store,
+		CompletionStore:          store,
+		CompletionHeartbeatStore: store,
+		LiveSessionAcquirer:      store,
+		Options: swarmruntime.RuntimeOptions{
+			SelfCheck:         false,
+			WorkflowModule:    newRuntimeTestWorkflowModule(t, fullyMockedBootAgentMemoryWithConnectorSource(t)),
+			Credentials:       credentialStore,
+			BundleSourceFact:  authorActivityTestBundleSourceFact,
+			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+			ProcessWorkOwner:  processOwner,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewRuntime without unreachable connector credential: %v", err)
+	}
+	t.Cleanup(func() { _ = rt.Shutdown() })
+}
+
 func fullyMockedBootAgentMemorySource(t *testing.T) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
@@ -103,4 +138,23 @@ func fullyMockedBootAgentMemorySource(t *testing.T) semanticview.Source {
 		bundle.Agents[id] = entry
 	}
 	return semanticview.Wrap(bundle)
+}
+
+func fullyMockedBootAgentMemoryWithConnectorSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	objectSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)
+	connector := runtimecontracts.MustToolSchemaEntry(
+		runtimecontracts.WithToolCategory("provider_connector"),
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))),
+		runtimecontracts.WithToolSchemas(objectSchema, objectSchema),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://provider.example/messages"}),
+		runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}),
+		runtimecontracts.WithToolCredentials("provider_credential"),
+	)
+	source, err := semanticview.WithRuntimeTools(fullyMockedBootAgentMemorySource(t), map[string]runtimecontracts.ToolSchemaEntry{"provider.send": connector})
+	if err != nil {
+		t.Fatalf("WithRuntimeTools: %v", err)
+	}
+	return source
 }

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -30,13 +29,19 @@ func (c *checkerContext) credentials() []Finding {
 	}
 	for _, item := range missing {
 		requiredBy := make([]string, 0, len(item.RequiredBy))
+		hasToolRequirement := false
 		for _, ref := range item.RequiredBy {
 			requiredBy = append(requiredBy, strings.TrimSpace(ref.Kind)+" "+strings.TrimSpace(ref.Name))
+			hasToolRequirement = hasToolRequirement || strings.TrimSpace(ref.Kind) == "tool"
+		}
+		message := fmtCredentialWarning(item.Key, requiredBy)
+		if hasToolRequirement {
+			message = appendLiveAgentReachability(message, c.opts.EffectReachability.LiveAgentIDs())
 		}
 		c.credentialFindings = append(c.credentialFindings, Finding{
 			CheckID:  "credential_key_exists",
 			Severity: "warning",
-			Message:  fmtCredentialWarning(item.Key, requiredBy),
+			Message:  message,
 			Location: item.Key,
 		})
 	}
@@ -55,14 +60,23 @@ func (c *checkerContext) credentials() []Finding {
 		for _, ref := range item.RequiredBy {
 			requiredBy = append(requiredBy, strings.TrimSpace(ref.Kind)+" "+strings.TrimSpace(ref.Name))
 		}
+		message := appendLiveAgentReachability(fmtManagedCredentialWarning(item, requiredBy), c.opts.EffectReachability.LiveAgentIDs())
 		c.credentialFindings = append(c.credentialFindings, Finding{
 			CheckID:  "managed_credential_state",
 			Severity: "warning",
-			Message:  fmtManagedCredentialWarning(item, requiredBy),
+			Message:  message,
 			Location: item.Key,
 		})
 	}
 	return c.credentialFindings
+}
+
+func appendLiveAgentReachability(message string, liveAgentIDs []string) string {
+	if len(liveAgentIDs) == 0 {
+		return message
+	}
+	sort.Strings(liveAgentIDs)
+	return message + " (reachable from live agents " + strings.Join(liveAgentIDs, ", ") + ")"
 }
 
 func MissingStaticCredentialRequirements(ctx context.Context, source semanticview.Source, opts Options) ([]runtimecredentials.Descriptor, error) {
@@ -86,7 +100,7 @@ func MissingStaticCredentialRequirements(ctx context.Context, source semanticvie
 func liveStaticCredentialRequirements(_ semanticview.Source, opts Options, requirements []runtimecredentials.Requirement) []runtimecredentials.Requirement {
 	out := make([]runtimecredentials.Requirement, 0, len(requirements))
 	for _, requirement := range requirements {
-		if requiresLiveCredential(opts, requirement.Kind) {
+		if requiresLiveCredential(opts, requirement.Kind, requirement.Name) {
 			out = append(out, requirement)
 		}
 	}
@@ -96,15 +110,15 @@ func liveStaticCredentialRequirements(_ semanticview.Source, opts Options, requi
 func liveManagedCredentialRequirements(_ semanticview.Source, opts Options, requirements []runtimemanagedcredentials.Requirement) []runtimemanagedcredentials.Requirement {
 	out := make([]runtimemanagedcredentials.Requirement, 0, len(requirements))
 	for _, requirement := range requirements {
-		if requiresLiveCredential(opts, requirement.Kind) {
+		if requiresLiveCredential(opts, requirement.Kind, requirement.Name) {
 			out = append(out, requirement)
 		}
 	}
 	return out
 }
 
-func requiresLiveCredential(opts Options, kind string) bool {
-	return opts.ExecutionMode != executionmode.Mock || strings.TrimSpace(kind) != "tool"
+func requiresLiveCredential(opts Options, kind, name string) bool {
+	return strings.TrimSpace(kind) != "tool" || opts.EffectReachability.ToolCredentialRequired(name)
 }
 
 func MissingManagedCredentialRequirements(ctx context.Context, source semanticview.Source, opts Options) ([]runtimemanagedcredentials.RequirementDescriptor, error) {

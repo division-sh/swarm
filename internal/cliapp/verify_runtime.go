@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
-	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -279,10 +278,6 @@ func verifyWorkflowContractValidationOptions(repo, configPath string, source sem
 	}
 	opts.ValidateLLMModelResolution = true
 	opts.LLMProfile = profile
-	opts.ExecutionMode, err = llmselection.ExecutionModeForProfile(profile)
-	if err != nil {
-		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("resolve workflow execution mode: %w", err)
-	}
 	opts.ModelAliases = configResult.Config.LLM.Models
 	providerPacks, err := LoadConfiguredProviderTriggerPacks(repo, configResult)
 	if err != nil {

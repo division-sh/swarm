@@ -9,7 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -99,18 +99,18 @@ func TestValidateWorkflowContractSurfaceRejectsProgrammaticUnknownOutputSink(t *
 }
 
 func TestEnsureWorkflowBootWiringRejectsHarnessOutputWithoutInputHarness(t *testing.T) {
-	_, err := ensureWorkflowBootWiring(RuntimeOptions{
+	_, _, err := ensureWorkflowBootWiring(RuntimeOptions{
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: loadWorkflowValidationSourceAt(t, canonicalrouting.CopyHarnessInjectionWithoutSource(t))},
-	}, runtimeeffects.ExecutionModeLive)
+	}, workflowValidationTestProfile(t))
 	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only output sink: harness") {
 		t.Fatalf("ensureWorkflowBootWiring error = %v, want harness output production rejection", err)
 	}
 }
 
 func TestEnsureWorkflowBootWiringRejectsHarnessInput(t *testing.T) {
-	_, err := ensureWorkflowBootWiring(RuntimeOptions{
+	_, _, err := ensureWorkflowBootWiring(RuntimeOptions{
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: loadHarnessInjectionValidationSource(t)},
-	}, runtimeeffects.ExecutionModeLive)
+	}, workflowValidationTestProfile(t))
 	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only input source: harness") {
 		t.Fatalf("ensureWorkflowBootWiring error = %v, want harness production rejection", err)
 	}
@@ -192,9 +192,9 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ensureWorkflowBootWiring(RuntimeOptions{
+			_, _, err := ensureWorkflowBootWiring(RuntimeOptions{
 				WorkflowModule: semanticOnlyWorkflowRuntime{source: tc.source},
-			}, runtimeeffects.ExecutionModeLive)
+			}, workflowValidationTestProfile(t))
 			if tc.wantErr {
 				if err == nil || !strings.Contains(err.Error(), tc.errContains) {
 					t.Fatalf("ensureWorkflowBootWiring error = %v, want substring %q", err, tc.errContains)
@@ -407,7 +407,6 @@ func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t
 		},
 	}
 	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
-		ExecutionMode:                  runtimeeffects.ExecutionModeMock,
 		CheckMCPReachable:              false,
 		StrictEmitSchemas:              false,
 		FatalToolImplementationWarning: false,
@@ -728,9 +727,9 @@ func TestEnsureWorkflowBootWiringFailsClosedForIncompatiblePlatformVersion(t *te
 		},
 	}}
 
-	_, err := ensureWorkflowBootWiring(RuntimeOptions{
+	_, _, err := ensureWorkflowBootWiring(RuntimeOptions{
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)},
-	}, runtimeeffects.ExecutionModeLive)
+	}, workflowValidationTestProfile(t))
 	if err == nil {
 		t.Fatal("ensureWorkflowBootWiring error = nil, want platform_version compatibility failure")
 	}
@@ -743,6 +742,15 @@ func TestEnsureWorkflowBootWiringFailsClosedForIncompatiblePlatformVersion(t *te
 			t.Fatalf("ensureWorkflowBootWiring error = %v, want substring %q", err, want)
 		}
 	}
+}
+
+func workflowValidationTestProfile(t *testing.T) llmselection.Profile {
+	t.Helper()
+	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
+	if err != nil {
+		t.Fatalf("ResolveActiveBackend: %v", err)
+	}
+	return profile
 }
 
 func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {

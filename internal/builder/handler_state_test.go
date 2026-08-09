@@ -3,9 +3,16 @@ package builder
 import (
 	"context"
 	"errors"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/mockperformance"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type projectControlStub struct {
@@ -101,4 +108,74 @@ func TestValidationIssueFromFindingPreservesCredentialSuggestionForNormalizedWar
 	if issue.Suggestion == "" {
 		t.Fatalf("suggestion missing for credential compatibility: %#v", issue)
 	}
+}
+
+func TestBuilderValidationConsumesCanonicalMockEffectReachability(t *testing.T) {
+	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
+	if err != nil {
+		t.Fatalf("ResolveActiveBackend: %v", err)
+	}
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name           string
+		includeLive    bool
+		wantCredential bool
+	}{
+		{name: "all exact mocks waive unreachable connector", wantCredential: false},
+		{name: "mixed source retains reachable connector", includeLive: true, wantCredential: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &handler{
+				credentials:    credentialStore,
+				llmProfile:     profile,
+				semanticSource: builderMockConnectorSource(tc.includeLive),
+			}
+			result := h.runFullValidation(context.Background())
+			gotCredential := false
+			for _, issue := range append(append([]ValidationIssue{}, result.Errors...), result.Warnings...) {
+				if strings.Contains(issue.Message, "provider_credential") && strings.Contains(issue.Message, "tool provider.send") {
+					gotCredential = true
+				}
+			}
+			if gotCredential != tc.wantCredential {
+				t.Fatalf("credential finding = %v, want %v; result=%#v", gotCredential, tc.wantCredential, result)
+			}
+		})
+	}
+}
+
+func builderMockConnectorSource(includeLive bool) semanticview.Source {
+	objectSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)
+	connector := runtimecontracts.MustToolSchemaEntry(
+		runtimecontracts.WithToolCategory("provider_connector"),
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))),
+		runtimecontracts.WithToolSchemas(objectSchema, objectSchema),
+		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://provider.example/messages"}),
+		runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}),
+		runtimecontracts.WithToolCredentials("provider_credential"),
+	)
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"mock-agent": {
+				ID:    "mock-agent",
+				Model: llmselection.ModelAliasRegular,
+				Mock: mockperformance.Performance{
+					Kind:   "python",
+					Module: "mocks/mock-agent.py",
+					Source: []byte("def handle(input):\n    return {}\n"),
+					Digest: "sha256:" + strings.Repeat("a", 64),
+				},
+			},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider.send": connector},
+	}
+	if includeLive {
+		bundle.Agents["live-agent"] = runtimecontracts.AgentRegistryEntry{ID: "live-agent", Model: llmselection.ModelAliasRegular}
+	}
+	return semanticview.Wrap(bundle)
 }

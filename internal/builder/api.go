@@ -10,6 +10,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 )
@@ -64,6 +65,7 @@ type Options struct {
 	Entities         EntityReader
 	Runtime          RuntimeController
 	Credentials      runtimecredentials.Store
+	LLMProfile       llmselection.Profile
 	AuthToken        string
 	Version          string
 	SemanticSource   semanticview.Source
@@ -168,6 +170,7 @@ func NewHandler(opts Options) http.Handler {
 		entities:         opts.Entities,
 		runtime:          opts.Runtime,
 		credentials:      opts.Credentials,
+		llmProfile:       opts.LLMProfile,
 		authToken:        strings.TrimSpace(opts.AuthToken),
 		version:          strings.TrimSpace(opts.Version),
 		semanticSource:   opts.SemanticSource,
