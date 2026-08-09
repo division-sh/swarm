@@ -1,7 +1,7 @@
 release-worker:
   id: release-worker
   role: release-worker
-  prompt_ref: release-worker
+  intent: prompts/release-worker.md
   model: regular
   memory: false
   native_tools:

@@ -124,7 +124,6 @@ func TestPublicEnvTemplateIsNonAuthoritative(t *testing.T) {
 	for _, forbidden := range []string{
 		"SWARM_ARTIFACT_ROOT",
 		"SWARM_MONITOR_DIR",
-		"SWARM_PROMPTS_DIR",
 		"SWARM_SQL_DEBUG",
 		"SWARM_BOOT_WARNINGS_FATAL",
 		"SWARM_EMIT_SCHEMA_STRICT",
@@ -272,7 +271,6 @@ func TestPlatformSpecIssue1640EnvClassificationCoversRetainedSlice(t *testing.T)
 		"SWARM_ENTITY_WORKDIR",
 		"SWARM_ARTIFACT_ROOT",
 		"SWARM_MONITOR_DIR",
-		"SWARM_PROMPTS_DIR",
 		"SWARM_AGENT_CONFIG_MAP_FILE",
 		"SWARM_VERIFICATION_GATES_FILE",
 		"SWARM_TOOLING_LOCK_FILE",

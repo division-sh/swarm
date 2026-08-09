@@ -930,6 +930,7 @@ requires:
 worker-agent:
   id: worker-agent
   role: worker
+  intent: {inline: "Invoke only the provider tools declared by this contract."}
   model: regular
   tools: [send_provider]
 `)

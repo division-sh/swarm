@@ -6,6 +6,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
 func TestPromptSchemaGuard_EmitFieldListsMatchEventSchemas(t *testing.T) {
@@ -34,7 +37,7 @@ func TestDerivePromptSchemaGuards_UsesCanonicalPromptResolution(t *testing.T) {
 	agentsRaw = append(agentsRaw, []byte(strings.TrimLeft(`
 schema-ref-agent:
   role: schema_ref
-  prompt_ref: shared-schema-prompt
+  intent: intent/shared-schema-prompt.md
   emit_events:
     - schema.prompt.created
 `, "\n"))...)
@@ -52,7 +55,7 @@ schema.prompt.created:
 When you call emit_schema_prompt_created with:
 - item_id: the created item id
 `)
-	if err := os.WriteFile(filepath.Join(root, "prompts", "shared-schema-prompt.md"), []byte(prompt+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "intent", "shared-schema-prompt.md"), []byte(prompt+"\n"), 0o644); err != nil {
 		t.Fatalf("write shared schema prompt: %v", err)
 	}
 
@@ -63,13 +66,58 @@ When you call emit_schema_prompt_created with:
 	cases := DerivePromptSchemaGuards(bundle)
 	found := false
 	for _, tc := range cases {
-		if filepath.Base(tc.PromptFile) == "shared-schema-prompt.md" && tc.EmitTool == "emit_schema_prompt_created" {
+		if filepath.Base(tc.IntentSource) == "shared-schema-prompt.md" && tc.EmitTool == "emit_schema_prompt_created" {
 			found = true
 			break
 		}
 	}
 	if !found {
 		t.Fatalf("expected prompt schema guard case for shared-schema-prompt.md, got %#v", cases)
+	}
+}
+
+func TestDerivePromptSchemaGuardsPreservesScopedDuplicateLogicalAgents(t *testing.T) {
+	resolve := func(provenance, content string) runtimeagentintent.Resolved {
+		t.Helper()
+		resolved, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", provenance, content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resolved
+	}
+	rootAgent := AgentRegistryEntry{
+		ResolvedIntent: resolve("agents.yaml#agents.reviewer.intent", "Root reviewer intent."),
+		EmitEvents:     []string{"review.completed"},
+	}
+	flowAgent := AgentRegistryEntry{
+		ResolvedIntent: resolve("flows/review/agents.yaml#agents.reviewer.intent", "Flow reviewer intent."),
+		EmitEvents:     []string{"review.completed"},
+	}
+	flow := FlowContractView{
+		Paths:  FlowContractPaths{ID: "review", Flow: "review"},
+		Path:   "review",
+		Agents: map[string]AgentRegistryEntry{"reviewer": flowAgent},
+	}
+	bundle := &WorkflowContractBundle{
+		Events: map[string]EventCatalogEntry{
+			"review.completed": {Payload: EventPayloadSpec{Required: []string{"review_id"}}},
+		},
+		projectContracts: map[string]ProjectContractView{
+			".": {Paths: ProjectPackagePaths{Key: "."}, Agents: map[string]AgentRegistryEntry{"reviewer": rootAgent}},
+		},
+		FlowTree: flowmodel.Tree[FlowContractView]{Root: &flow, ByID: map[string]*FlowContractView{"review": &flow}},
+	}
+
+	cases := DerivePromptSchemaGuards(bundle)
+	if len(cases) != 2 {
+		t.Fatalf("guard cases = %#v, want both scoped reviewer declarations", cases)
+	}
+	contents := map[string]bool{}
+	for _, guard := range cases {
+		contents[guard.IntentContent] = true
+	}
+	if !contents["Root reviewer intent."] || !contents["Flow reviewer intent."] {
+		t.Fatalf("guard contents = %#v, want root and flow scoped intent", contents)
 	}
 }
 
@@ -98,6 +146,7 @@ func writePromptTestBundle(t *testing.T, repoRoot string) string {
 ops-lead:
   id: ops-lead
   role: ops_lead
+  intent: intent/ops-lead.md
   manager_fallback: control-plane
   emit_events:
     - item.created
@@ -106,16 +155,16 @@ ops-lead:
 		t.Fatalf("write %s: %v", agentsPath, err)
 	}
 
-	promptsDir := filepath.Join(dstRoot, "prompts")
-	if err := os.MkdirAll(promptsDir, 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", promptsDir, err)
+	intentDir := filepath.Join(dstRoot, "intent")
+	if err := os.MkdirAll(intentDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", intentDir, err)
 	}
 	prompt := strings.TrimSpace(`
 You are the Operations Lead for {{team_name}}.
 
 When you call emit_item_created, include item_id.
 `)
-	if err := os.WriteFile(filepath.Join(promptsDir, "ops-lead.md"), []byte(prompt+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(intentDir, "ops-lead.md"), []byte(prompt+"\n"), 0o644); err != nil {
 		t.Fatalf("write prompt fixture: %v", err)
 	}
 

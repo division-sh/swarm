@@ -488,6 +488,7 @@ flows: []
   id: assistant
   role: helper
   model: regular
+  intent: {inline: "Help with assigned mocked-agent work."}
   mock:
     kind: python
     module: mocks/assistant.py

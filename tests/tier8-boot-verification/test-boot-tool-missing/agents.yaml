@@ -1,5 +1,6 @@
 tool-agent:
   model: regular
+  intent: {inline: "Complete requested work using the declared tools."}
   tools:
     - nonexistent_tool
   subscriptions:

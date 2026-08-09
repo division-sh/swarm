@@ -47,13 +47,13 @@ func TestSpawnAgentRejectsForeignExactAndPatternBeforeRegistration(t *testing.T)
 			am := newTestAgentManager(t, eb, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 				return subscriptionAdmissionTestAgent{id: cfg.ID}, nil
 			})
-			err = am.SpawnAgent(runtimeactors.AgentConfig{
+			err = am.SpawnAgent(managerTestAgentConfig(runtimeactors.AgentConfig{
 				ExecutionMode: "live",
 				ID:            "reviewer",
 				Identity:      runtimeagentidentitytest.Runtime(t, "reviewer", "subscription-admission-test", "review", "inst-1", "review/inst-1"),
 				FlowPath:      "review/inst-1",
 				Subscriptions: []string{subscription},
-			})
+			}))
 			if err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
 				t.Fatalf("SpawnAgent error = %v, want admission rejection", err)
 			}
@@ -75,13 +75,13 @@ func TestReconfigureAgentRejectsForeignSubscriptionWithoutReplacingCurrentAdmiss
 	am := newTestAgentManager(t, eb, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return subscriptionAdmissionTestAgent{id: cfg.ID}, nil
 	})
-	initial := runtimeactors.AgentConfig{
+	initial := managerTestAgentConfig(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "reviewer",
 		Identity:      runtimeagentidentitytest.Runtime(t, "reviewer", "subscription-admission-test", "review", "inst-1", "review/inst-1"),
 		FlowPath:      "review/inst-1",
 		Subscriptions: []string{"task.ready"},
-	}
+	})
 	if err := am.SpawnAgent(initial); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}

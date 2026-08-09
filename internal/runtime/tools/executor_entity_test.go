@@ -443,6 +443,7 @@ validation_case:
 validation-orchestrator:
   id: validation-orchestrator
   role: validation_orchestrator
+  intent: {inline: "Validate the current entity using only its declared contract surface."}
   tools:
     - save_entity_field
   entity_writes:
@@ -2953,6 +2954,7 @@ func roleScopedEntityToolAgentYAML(actor models.AgentConfig) string {
 	builder.WriteString("  id: ")
 	builder.WriteString(strings.TrimSpace(actor.ID))
 	builder.WriteString("\n")
+	builder.WriteString("  intent: {inline: \"Exercise the declared role-scoped entity tool contract.\"}\n")
 	if role := strings.TrimSpace(actor.Role); role != "" {
 		builder.WriteString("  role: ")
 		builder.WriteString(role)
@@ -3115,6 +3117,7 @@ func entityToolAgentYAML(actor models.AgentConfig) string {
 	builder.WriteString("  id: ")
 	builder.WriteString(strings.TrimSpace(actor.ID))
 	builder.WriteString("\n")
+	builder.WriteString("  intent: {inline: \"Exercise the declared entity tool contract.\"}\n")
 	if role := strings.TrimSpace(actor.Role); role != "" {
 		builder.WriteString("  role: ")
 		builder.WriteString(role)

@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -12,7 +11,7 @@ type PromptEntityWriteEvidence struct {
 	AgentID      string
 	Source       ContractItemSource
 	Entry        AgentRegistryEntry
-	PromptFile   string
+	IntentSource string
 	CreateEntity bool
 	SaveEntity   bool
 	SaveFields   []string
@@ -30,7 +29,7 @@ func DerivePromptEntityWriteEvidence(bundle *WorkflowContractBundle) ([]PromptEn
 		if agentID == "" {
 			continue
 		}
-		path, text, ok, err := loadPromptEntityWriteText(bundle, agentID, record.Entry, record.Source)
+		path, text, ok, err := loadPromptEntityWriteText(record.Entry)
 		if err != nil {
 			return nil, err
 		}
@@ -45,7 +44,7 @@ func DerivePromptEntityWriteEvidence(bundle *WorkflowContractBundle) ([]PromptEn
 			AgentID:      agentID,
 			Source:       record.Source,
 			Entry:        record.Entry,
-			PromptFile:   path,
+			IntentSource: path,
 			CreateEntity: createEntity,
 			SaveEntity:   saveEntity,
 			SaveFields:   saveFields,
@@ -54,7 +53,7 @@ func DerivePromptEntityWriteEvidence(bundle *WorkflowContractBundle) ([]PromptEn
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].AgentID == out[j].AgentID {
 			if out[i].Source.FlowID == out[j].Source.FlowID {
-				return out[i].PromptFile < out[j].PromptFile
+				return out[i].IntentSource < out[j].IntentSource
 			}
 			return out[i].Source.FlowID < out[j].Source.FlowID
 		}
@@ -63,20 +62,11 @@ func DerivePromptEntityWriteEvidence(bundle *WorkflowContractBundle) ([]PromptEn
 	return out, nil
 }
 
-func loadPromptEntityWriteText(bundle *WorkflowContractBundle, agentID string, entry AgentRegistryEntry, source ContractItemSource) (string, string, bool, error) {
-	mode := promptFlowPromptMode(bundle, source.FlowID)
-	resolution, ok, err := ResolvePromptFileForContractAgent(bundle, agentID, entry, source, mode)
-	if err != nil {
+func loadPromptEntityWriteText(entry AgentRegistryEntry) (string, string, bool, error) {
+	if err := entry.ResolvedIntent.Validate(); err != nil {
 		return "", "", false, err
 	}
-	if !ok {
-		return "", "", false, nil
-	}
-	raw, err := os.ReadFile(resolution.Path)
-	if err != nil {
-		return "", "", false, fmt.Errorf("read %s: %w", resolution.Path, err)
-	}
-	return resolution.Path, string(raw), true, nil
+	return entry.ResolvedIntent.Coordinate, entry.ResolvedIntent.Content, true, nil
 }
 
 func extractPromptEntityWriteEvidence(promptText string) (bool, bool, []string) {

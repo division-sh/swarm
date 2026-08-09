@@ -1104,26 +1104,17 @@ payload:
 	}
 }
 
-func TestRun_MapsMissingPromptToPromptExistsWarning(t *testing.T) {
-	source := loadTier8Fixture(t, "test-boot-prompt-missing")
-
-	report := Run(context.Background(), source, Options{})
-
-	if report.HasErrors() {
-		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
-	}
-	if !reportContains(report.Warnings(), "prompt_exists", "promptless-agent") {
-		t.Fatalf("expected prompt_exists warning, got %#v", report.Warnings())
+func TestLoad_RejectsMissingIntentDeclaration(t *testing.T) {
+	err := loadTier8FixtureError(t, "test-boot-prompt-missing")
+	if err == nil || !strings.Contains(err.Error(), "intent") {
+		t.Fatalf("load error = %v, want missing intent rejection", err)
 	}
 }
 
-func TestRun_PromptRefSatisfiesPromptExistsWarning(t *testing.T) {
-	source := loadTier8Fixture(t, "test-boot-prompt-ref")
-
-	report := Run(context.Background(), source, Options{})
-
-	if reportContains(report.Warnings(), "prompt_exists", "prompt-ref-agent") {
-		t.Fatalf("unexpected prompt_exists warning for prompt_ref backed agent, got %#v", report.Warnings())
+func TestLoad_RejectsRetiredPromptRef(t *testing.T) {
+	err := loadTier8FixtureError(t, "test-boot-prompt-ref")
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "intent:") {
+		t.Fatalf("load error = %v, want retired prompt_ref teaching rejection", err)
 	}
 }
 
@@ -1815,7 +1806,7 @@ func TestRun_ReportsArtifactRepoDeclarationOnNonArtifactAction(t *testing.T) {
 	}
 }
 
-func TestRun_MapsPromptStubToPromptExistsWarning(t *testing.T) {
+func TestRun_MapsIntentStubToIntentResolutionWarning(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-prompt-stub")
 
 	report := Run(context.Background(), source, Options{})
@@ -1823,21 +1814,15 @@ func TestRun_MapsPromptStubToPromptExistsWarning(t *testing.T) {
 	if report.HasErrors() {
 		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
 	}
-	if !reportContains(report.Warnings(), "prompt_exists", "TODO") {
-		t.Fatalf("expected prompt_exists warning for stub, got %#v", report.Warnings())
+	if !reportContains(report.Warnings(), "intent_resolution", "TODO") {
+		t.Fatalf("expected intent_resolution warning for stub, got %#v", report.Warnings())
 	}
 }
 
-func TestRun_MapsPromptRefStubToPromptExistsWarning(t *testing.T) {
-	source := loadTier8Fixture(t, "test-boot-prompt-ref-stub")
-
-	report := Run(context.Background(), source, Options{})
-
-	if report.HasErrors() {
-		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
-	}
-	if !reportContains(report.Warnings(), "prompt_exists", "TODO") {
-		t.Fatalf("expected prompt_exists warning for resolved prompt_ref stub, got %#v", report.Warnings())
+func TestLoad_RejectsRetiredPromptRefBeforeStubLint(t *testing.T) {
+	err := loadTier8FixtureError(t, "test-boot-prompt-ref-stub")
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "intent:") {
+		t.Fatalf("load error = %v, want retired prompt_ref teaching rejection", err)
 	}
 }
 
@@ -2797,6 +2782,7 @@ func TestRun_RejectsRootAgentMemory(t *testing.T) {
 	root := writeAgentMemoryValidationFixture(t, `
 root-flow:
   id: root-flow
+  intent: {inline: "Exercise root memory validation."}
   model: regular
   memory: true
   subscriptions:
@@ -2814,6 +2800,7 @@ func TestRun_DefaultsOmittedAgentMemoryButKeepsModelExplicit(t *testing.T) {
 	root := writeAgentMemoryValidationFixture(t, `
 root-defaulted:
   id: root-defaulted
+  intent: {inline: "Exercise default memory validation."}
   model: regular
   subscriptions:
     - item.created
@@ -2828,6 +2815,7 @@ root-defaulted:
 	root = writeAgentMemoryValidationFixture(t, `
 root-missing-model:
   id: root-missing-model
+  intent: {inline: "Exercise missing model validation."}
   subscriptions:
     - item.created
 `, "", "")
@@ -2845,6 +2833,7 @@ name: support
 `, `
 entity-agent:
   id: entity-agent
+  intent: {inline: "Exercise stateless flow memory."}
   model: regular
   memory: true
   subscriptions:
@@ -2868,12 +2857,14 @@ states:
 `, `
 flow-agent:
   id: flow-agent
+  intent: {inline: "Exercise flow memory."}
   model: regular
   memory: true
   subscriptions:
     - support/item.created
 entity-agent:
   id: entity-agent
+  intent: {inline: "Exercise entity memory."}
   model: regular
   memory: true
   subscriptions:
@@ -2893,6 +2884,7 @@ func TestRun_RejectsRetiredAuthoredSessionScope(t *testing.T) {
 	root := writeAgentMemoryValidationFixture(t, `
 root-global:
   id: root-global
+  intent: {inline: "Exercise retired session scope."}
   model: regular
   memory: true
   session_scope: global
@@ -2917,12 +2909,14 @@ states:
 `, `
 flow-agent:
   id: flow-agent
+  intent: {inline: "Exercise package flow memory."}
   model: regular
   memory: true
   subscriptions:
     - support/item.created
 entity-agent:
   id: entity-agent
+  intent: {inline: "Exercise package entity memory."}
   model: regular
   memory: true
   subscriptions:
@@ -2945,6 +2939,7 @@ name: support
 `, `
 entity-agent:
   id: entity-agent
+  intent: {inline: "Exercise package stateless memory."}
   model: regular
   memory: true
   subscriptions:
@@ -4819,7 +4814,7 @@ func TestRun_EntityWriterCoverageCountsExplicitAgentEntityWritesList(t *testing.
 writer:
   id: writer
   role: writer
-  prompt_ref: writer
+  intent: prompts/writer.md
   workspace_class: factory
   manager_fallback: ops
   entity_writes:
@@ -4848,7 +4843,7 @@ func TestRun_ReportsPromptCreateEntityWithoutEntityWritesAuthorization(t *testin
 writer:
   id: writer
   role: writer
-  prompt_ref: writer
+  intent: prompts/writer.md
   workspace_class: factory
   manager_fallback: ops
 `, `
@@ -4861,8 +4856,8 @@ case:
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "entity_writer_coverage", "prompt declares create_entity") {
-		t.Fatalf("expected prompt create_entity authorization error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "entity_writer_coverage", "intent declares create_entity") {
+		t.Fatalf("expected intent create_entity authorization error, got %#v", report.Errors())
 	}
 }
 
@@ -4871,7 +4866,7 @@ func TestRun_ReportsPromptSaveEntityFieldWithoutMatchingEntityWritesAuthorizatio
 writer:
   id: writer
   role: writer
-  prompt_ref: writer
+  intent: prompts/writer.md
   workspace_class: factory
   manager_fallback: ops
   entity_writes:
@@ -4901,7 +4896,7 @@ func TestRun_PromptSaveEntityFieldAllowsDeclaredDottedPathAuthorizedByRootField(
 writer:
   id: writer
   role: writer
-  prompt_ref: writer
+  intent: prompts/writer.md
   workspace_class: factory
   manager_fallback: ops
   entity_writes:
@@ -4932,7 +4927,7 @@ func TestRun_ReportsPromptSaveEntityFieldDottedPathWithoutRootAuthorization(t *t
 writer:
   id: writer
   role: writer
-  prompt_ref: writer
+  intent: prompts/writer.md
   workspace_class: factory
   manager_fallback: ops
   entity_writes:
@@ -4967,7 +4962,7 @@ func TestRun_ReportsPromptSaveEntityFieldMultilineDottedPathWithoutRootAuthoriza
 writer:
   id: writer
   role: writer
-  prompt_ref: writer
+  intent: prompts/writer.md
   workspace_class: factory
   manager_fallback: ops
   entity_writes:
@@ -5002,7 +4997,7 @@ func TestRun_ReportsPromptSaveEntityFieldUndeclaredDottedPath(t *testing.T) {
 writer:
   id: writer
   role: writer
-  prompt_ref: writer
+  intent: prompts/writer.md
   workspace_class: factory
   manager_fallback: ops
   entity_writes:
@@ -5033,7 +5028,7 @@ func TestRun_ReportsPromptSaveEntityFieldUndeclaredDottedPathWithAllAuthorizatio
 writer:
   id: writer
   role: writer
-  prompt_ref: writer
+  intent: prompts/writer.md
   workspace_class: factory
   manager_fallback: ops
   entity_writes:
@@ -5063,7 +5058,7 @@ func TestRun_ReportsPromptSaveEntityFieldReadOnlyListSelectorWithAllAuthorizatio
 writer:
   id: writer
   role: writer
-  prompt_ref: writer
+  intent: prompts/writer.md
   workspace_class: factory
   manager_fallback: ops
   entity_writes:
@@ -5093,7 +5088,7 @@ func TestRun_ReportsPromptSaveEntityFieldRootReadPinWithAllAuthorization(t *test
 writer:
   id: writer
   role: writer
-  prompt_ref: writer
+  intent: prompts/writer.md
   workspace_class: factory
   manager_fallback: ops
   entity_writes:
@@ -5137,7 +5132,7 @@ writer:
   id: writer
   type: factory
   role: writer
-  prompt_ref: writer
+  intent: prompts/writer.md
   model: regular
   subscriptions: []
   entity_writes:
@@ -5201,7 +5196,7 @@ writer:
   id: writer
   type: factory
   role: writer
-  prompt_ref: writer
+  intent: prompts/writer.md
   model: regular
   subscriptions: []
   entity_writes:
@@ -5209,6 +5204,7 @@ writer:
       save:
       - business_brief
 `)
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "prompts", "writer.md"), "Write the declared business brief.\n")
 	}
 
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
@@ -6561,6 +6557,7 @@ func TestRun_AllowsTimerFireEventWithAgentConsumer(t *testing.T) {
 		omitTimerHandler:  true,
 		flowAgents: `
 reminder-agent:
+  intent: {inline: "Handle the reminder event."}
   model: regular
   subscriptions: [timer.reminder]
   emit_events: []
@@ -7611,9 +7608,10 @@ states: [idle, done]
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), agentsYAML)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), "{}\n")
-	if strings.TrimSpace(promptText) != "" {
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "prompts", "writer.md"), promptText)
+	if strings.TrimSpace(promptText) == "" {
+		promptText = "Write the fields authorized by the contract.\n"
 	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "prompts", "writer.md"), promptText)
 	return root
 }
 
@@ -7628,6 +7626,15 @@ func loadTier8FixtureBundle(t *testing.T, fixture string) *runtimecontracts.Work
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", fixture)
 	return loadFixtureBundleAt(t, repoRoot, fixtureRoot, platformSpec)
+}
+
+func loadTier8FixtureError(t *testing.T, fixture string) error {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", fixture)
+	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	return err
 }
 
 func loadFixtureBundle(t *testing.T, relativeRoot string) *runtimecontracts.WorkflowContractBundle {

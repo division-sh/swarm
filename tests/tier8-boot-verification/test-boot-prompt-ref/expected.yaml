@@ -3,4 +3,6 @@ trigger:
 
 expected:
 
-  boot_result: success
+  boot_result: error
+  error_category: INTENT-INVALID
+  error_contains: "RETIRED: agent field prompt_ref"

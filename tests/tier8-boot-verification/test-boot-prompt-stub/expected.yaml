@@ -3,5 +3,5 @@ trigger:
 expected:
 
   boot_result: warning
-  error_category: PROMPT-STUB
+  error_category: INTENT-TODO
   error_contains: "TODO"

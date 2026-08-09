@@ -3,6 +3,6 @@ trigger:
 
 expected:
 
-  boot_result: warning
-  error_category: PROMPT-STUB
-  error_contains: "TODO"
+  boot_result: error
+  error_category: INTENT-INVALID
+  error_contains: "RETIRED: agent field prompt_ref"

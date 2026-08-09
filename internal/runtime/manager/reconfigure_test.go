@@ -46,14 +46,14 @@ func TestReconfigureAgent_AuthorityHandoffPrecedesSuccessorProjection(t *testing
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	})
 	const flowPath = "review/inst-1"
-	oldParent := models.AgentConfig{ExecutionMode: "live", ID: "old-parent", FlowPath: flowPath}
-	newParent := models.AgentConfig{ExecutionMode: "live", ID: "new-parent", FlowPath: flowPath}
-	target := models.AgentConfig{
+	oldParent := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "old-parent", FlowPath: flowPath})
+	newParent := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "new-parent", FlowPath: flowPath})
+	target := managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "worker",
 		FlowPath:      flowPath,
 		ParentAgent:   oldParent.ID,
-	}
+	})
 	for _, cfg := range []models.AgentConfig{oldParent, newParent, target} {
 		if err := am.SpawnAgent(cfg); err != nil {
 			t.Fatalf("SpawnAgent(%s): %v", cfg.ID, err)
@@ -114,12 +114,12 @@ func TestReconfigureAgent_AuthorityHandoffFailureLeavesProjectionUnchanged(t *te
 	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{})
-	cfg := models.AgentConfig{
+	cfg := managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "worker",
 		FlowPath:      "review/inst-1",
 		Tools:         []string{"tool-old"},
-	}
+	})
 	if err := am.SpawnAgent(cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
@@ -159,12 +159,12 @@ func TestReconfigureAgent_PersistenceFailureRestoresPriorAuthorityAndProjection(
 	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{LifecycleStore: probe})
-	cfg := models.AgentConfig{
+	cfg := managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "worker",
 		FlowPath:      "review/inst-1",
 		Tools:         []string{"tool-old"},
-	}
+	})
 	if err := am.SpawnAgent(cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
@@ -206,11 +206,11 @@ func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInv
 		builds++
 		return &reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{Sessions: registry})
-	cfg := models.AgentConfig{
+	cfg := managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "same-current-agent", Tools: []string{"tool-a"},
 		Memory: agentmemory.Authored(true), FlowPath: "same-current/instance",
-	}
+	})
 	if err := am.SpawnAgent(cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestReconfigureAgent_MemoryEnabledConfigChangeRotatesExactIdentity(t *testi
 	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{Sessions: registry})
-	cfg := models.AgentConfig{ExecutionMode: "live", ID: "memory-agent", Memory: agentmemory.Authored(true), FlowPath: "review/inst-1"}
+	cfg := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "memory-agent", Memory: agentmemory.Authored(true), FlowPath: "review/inst-1"})
 	if err := am.SpawnAgent(cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestReconfigureAgent_ExplicitFalseTerminatesReusableMemory(t *testing.T) {
 	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{Sessions: registry})
-	cfg := models.AgentConfig{ExecutionMode: "live", ID: "disable-memory-agent", Memory: agentmemory.Authored(true), FlowPath: "support/inst-1"}
+	cfg := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "disable-memory-agent", Memory: agentmemory.Authored(true), FlowPath: "support/inst-1"})
 	if err := am.SpawnAgent(cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestReconfigureAgent_ExplicitTrueStartsFreshAndOmissionRetains(t *testing.T
 	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
 	}, AgentManagerOptions{Sessions: registry})
-	cfg := models.AgentConfig{ExecutionMode: "live", ID: "enable-memory-agent", Memory: agentmemory.Authored(false), FlowPath: "support/inst-1"}
+	cfg := managerTestAgentConfig(models.AgentConfig{ExecutionMode: "live", ID: "enable-memory-agent", Memory: agentmemory.Authored(false), FlowPath: "support/inst-1"})
 	if err := am.SpawnAgent(cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}

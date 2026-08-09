@@ -322,8 +322,8 @@ func legacyCategoryToCheckID(raw string) string {
 	switch strings.TrimSpace(strings.ToUpper(raw)) {
 	case "TOOL-MISSING":
 		return "tool_resolution"
-	case "PROMPT-MISSING", "PROMPT-STUB":
-		return "prompt_exists"
+	case "INTENT-INVALID", "INTENT-TODO":
+		return "intent_resolution"
 	case "POLICY-CONFLICT":
 		return "policy_conflict_detection"
 	case "EVENT-NO-CONSUMER":

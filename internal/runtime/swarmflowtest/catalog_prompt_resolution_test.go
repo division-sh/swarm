@@ -5,39 +5,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestCatalogPromptSemanticSourceAndMode_UsesFlowRefModeAndPackageKey(t *testing.T) {
-	dir := catalogPromptResolutionFixture(t)
-	bundle := catalogLoadBootBundle(t, dir)
-	semanticBundle, ok := semanticview.Bundle(bundle.Source)
-	if !ok {
-		t.Fatal("expected semantic bundle")
-	}
-
-	source, mode := catalogPromptSemanticSourceAndMode(semanticBundle, catalogBootScope{Name: "support"}, "support-agent")
-	if source.PackageKey != "extras" {
-		t.Fatalf("PackageKey = %q, want extras", source.PackageKey)
-	}
-	if source.FlowID != "support" {
-		t.Fatalf("FlowID = %q, want support", source.FlowID)
-	}
-	if mode != "review" {
-		t.Fatalf("mode = %q, want review", mode)
-	}
-}
-
-func TestCatalogPromptIssues_UsesSemanticPromptScope(t *testing.T) {
+func TestCatalogIntentIssues_UsesSemanticScopedArtifact(t *testing.T) {
 	dir := catalogPromptResolutionFixture(t)
 	bundle := catalogLoadBootBundle(t, dir)
 	scope := catalogBootScope{Name: "support"}
 	agent := map[string]any{
-		"id":         "support-agent",
-		"prompt_ref": "shared",
-		"model":      "regular",
-		"mode":       "session",
+		"id":     "support-agent",
+		"intent": "intent/shared.md",
+		"model":  "regular",
 	}
 
 	if issues := catalogPromptIssues(bundle, scope, "support-agent", agent); len(issues) != 0 {
@@ -45,38 +22,19 @@ func TestCatalogPromptIssues_UsesSemanticPromptScope(t *testing.T) {
 	}
 }
 
-func TestCatalogPromptIssues_PrefersSchemaModeOverFlowRefMode(t *testing.T) {
+func TestCatalogIntentIssues_ReportsTODOFromResolvedArtifact(t *testing.T) {
 	dir := catalogPromptResolutionFixture(t)
-	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "flows", "support", "schema.yaml"), `
-name: support
-mode: schema-review
-initial_state: waiting
-states: [waiting, done]
-terminal_states: [done]
-`)
-	if err := os.Remove(filepath.Join(dir, "extras", "prompts", "shared.review.md")); err != nil {
-		t.Fatalf("remove flow-ref prompt: %v", err)
-	}
-	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "prompts", "shared.schema-review.md"), "You are the schema-mode support agent.\n")
+	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "flows", "support", "intent", "shared.md"), "<!-- TODO: finish scoped business intent -->\n")
 
 	bundle := catalogLoadBootBundle(t, dir)
-	semanticBundle, ok := semanticview.Bundle(bundle.Source)
-	if !ok {
-		t.Fatal("expected semantic bundle")
-	}
-	_, mode := catalogPromptSemanticSourceAndMode(semanticBundle, catalogBootScope{Name: "support"}, "support-agent")
-	if mode != "schema-review" {
-		t.Fatalf("mode = %q, want schema-review", mode)
-	}
-
 	agent := map[string]any{
-		"id":         "support-agent",
-		"prompt_ref": "shared",
-		"model":      "regular",
-		"mode":       "session",
+		"id":     "support-agent",
+		"intent": "intent/shared.md",
+		"model":  "regular",
 	}
-	if issues := catalogPromptIssues(bundle, catalogBootScope{Name: "support"}, "support-agent", agent); len(issues) != 0 {
-		t.Fatalf("catalogPromptIssues returned %#v, want no issues", issues)
+	issues := catalogPromptIssues(bundle, catalogBootScope{Name: "support"}, "support-agent", agent)
+	if len(issues) != 1 || issues[0].Category != "INTENT-TODO" {
+		t.Fatalf("catalogPromptIssues returned %#v, want INTENT-TODO", issues)
 	}
 }
 
@@ -97,7 +55,7 @@ flows: []
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "nodes.yaml"), "{}\n")
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "policy.yaml"), "{}\n")
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "tools.yaml"), "{}\n")
-	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "prompts", "shared.md"), "<!-- TODO: wrong root fallback -->\n")
+	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "intent", "shared.md"), "<!-- TODO: unreferenced root intent -->\n")
 
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "package.yaml"), `
 name: extras
@@ -113,7 +71,6 @@ flows:
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "nodes.yaml"), "{}\n")
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "policy.yaml"), "{}\n")
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "tools.yaml"), "{}\n")
-	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "prompts", "shared.review.md"), "You are the scoped support agent.\n")
 
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "flows", "support", "schema.yaml"), `
 name: support
@@ -124,10 +81,11 @@ terminal_states: [done]
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "flows", "support", "agents.yaml"), `
 support-agent:
   id: support-agent
-  prompt_ref: shared
+  intent: intent/shared.md
   model: regular
   memory: true
 `)
+	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "flows", "support", "intent", "shared.md"), "You are the scoped support agent.\n")
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "flows", "support", "events.yaml"), "{}\n")
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "flows", "support", "nodes.yaml"), "{}\n")
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "flows", "support", "policy.yaml"), "{}\n")

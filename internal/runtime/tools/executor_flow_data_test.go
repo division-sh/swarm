@@ -240,6 +240,7 @@ flows:
 factory-cto:
   id: factory-cto
   role: factory_cto
+  intent: {inline: "Read only the flow data declared by this contract."}
 `+toolFlowDataAccessYAML(access))
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), "{}\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "data", "exclusions.yaml"), "blocked: true\n")

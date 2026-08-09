@@ -139,6 +139,7 @@ type catalogBootBundle struct {
 	AllPolicy map[string]any
 	AllTools  map[string]any
 	Source    semanticview.Source
+	LoadError error
 }
 
 type catalogNodeContract struct {
@@ -1064,6 +1065,8 @@ func catalogLoadBootBundle(t testing.TB, dir string) catalogBootBundle {
 	semanticBundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, dir, platformSpec)
 	if err == nil {
 		bundle.Source = semanticview.Wrap(semanticBundle)
+	} else {
+		bundle.LoadError = err
 	}
 	entries, err := os.ReadDir(filepath.Join(dir, "flows"))
 	if err != nil && !os.IsNotExist(err) {
@@ -1396,85 +1399,47 @@ func catalogBootScopeLabel(scope catalogBootScope) string {
 func catalogPromptIssues(bundle catalogBootBundle, scope catalogBootScope, agentID string, agent map[string]any) []catalogBootIssue {
 	scopeLabel := catalogBootScopeLabel(scope)
 	missing := func() catalogBootIssue {
-		return catalogBootIssue{Severity: "warning", Category: "PROMPT-MISSING", Message: fmt.Sprintf("%s/%s: no prompt file", scopeLabel, agentID)}
+		if bundle.LoadError != nil {
+			message := bundle.LoadError.Error()
+			if strings.Contains(message, "agent intent") || strings.Contains(message, "agent field prompt_ref") || strings.Contains(message, "agent field prompt_inputs") {
+				return catalogBootIssue{Severity: "error", Category: "INTENT-INVALID", Message: message}
+			}
+		}
+		return catalogBootIssue{Severity: "error", Category: "INTENT-INVALID", Message: fmt.Sprintf("%s/%s: no resolved intent artifact", scopeLabel, agentID)}
 	}
 	stub := func() catalogBootIssue {
-		return catalogBootIssue{Severity: "warning", Category: "PROMPT-STUB", Message: fmt.Sprintf("%s/%s: prompt contains TODO", scopeLabel, agentID)}
+		return catalogBootIssue{Severity: "warning", Category: "INTENT-TODO", Message: fmt.Sprintf("%s/%s: resolved intent contains TODO", scopeLabel, agentID)}
 	}
 
-	if semanticBundle, ok := semanticview.Bundle(bundle.Source); ok {
-		source, mode := catalogPromptSemanticSourceAndMode(semanticBundle, scope, agentID)
-		resolution, found, err := runtimecontracts.ResolvePromptFileForContractAgent(semanticBundle, agentID, catalogPromptAgentEntry(agent), source, mode)
-		if err != nil || !found {
-			return []catalogBootIssue{missing()}
-		}
-		raw, err := os.ReadFile(resolution.Path)
-		if err != nil {
-			return nil
-		}
-		if strings.Contains(string(raw), "<!-- TODO") && !strings.Contains(string(raw), "<!-- DEFERRED") {
-			return []catalogBootIssue{stub()}
-		}
-		return nil
+	entry, ok := catalogResolvedIntentEntry(bundle.Source, scope, agentID)
+	if !ok || entry.ResolvedIntent.Validate() != nil {
+		return []catalogBootIssue{missing()}
 	}
-
-	promptPath := filepath.Join(scope.Dir, "prompts", agentID+".md")
-	content, err := os.ReadFile(promptPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []catalogBootIssue{missing()}
-		}
-		return nil
-	}
-	if strings.Contains(string(content), "<!-- TODO") && !strings.Contains(string(content), "<!-- DEFERRED") {
+	if strings.Contains(entry.ResolvedIntent.Content, "<!-- TODO") && !strings.Contains(entry.ResolvedIntent.Content, "<!-- DEFERRED") {
 		return []catalogBootIssue{stub()}
 	}
 	return nil
 }
 
-func catalogPromptSemanticSourceAndMode(bundle *runtimecontracts.WorkflowContractBundle, scope catalogBootScope, agentID string) (runtimecontracts.ContractItemSource, string) {
-	if bundle == nil {
-		return runtimecontracts.ContractItemSource{Layer: "project"}, catalogBootText(scope.Schema["mode"])
+func catalogResolvedIntentEntry(source semanticview.Source, scope catalogBootScope, agentID string) (runtimecontracts.AgentRegistryEntry, bool) {
+	agentID = strings.TrimSpace(agentID)
+	if source == nil || agentID == "" {
+		return runtimecontracts.AgentRegistryEntry{}, false
 	}
 	if scope.Root {
-		source := runtimecontracts.ContractItemSource{Layer: "project"}
-		if resolved, ok := bundle.AgentContractSource(agentID); ok && strings.TrimSpace(resolved.FlowID) == "" {
-			source = resolved
+		for _, project := range source.ProjectScopes() {
+			if entry, ok := project.Agents[agentID]; ok {
+				return entry, true
+			}
 		}
-		return source, catalogBootText(scope.Schema["mode"])
+		return runtimecontracts.AgentRegistryEntry{}, false
 	}
-
-	flowID := strings.TrimSpace(scope.Name)
-	source := runtimecontracts.ContractItemSource{FlowID: flowID, Layer: "flow"}
-	mode := catalogBootText(scope.Schema["mode"])
-	if flow, ok := bundle.FlowViewByID(flowID); ok && flow != nil {
-		semanticFlowID := strings.TrimSpace(flow.Paths.ID)
-		if semanticFlowID == "" {
-			semanticFlowID = flowID
-		}
-		source = runtimecontracts.ContractItemSource{
-			PackageKey: strings.TrimSpace(flow.Paths.PackageKey),
-			FlowID:     semanticFlowID,
-			Layer:      "flow",
-		}
-		if pathMode := strings.TrimSpace(flow.Paths.Mode); pathMode != "" {
-			mode = pathMode
-		}
-		if semanticMode := strings.TrimSpace(flow.Schema.Mode); semanticMode != "" {
-			mode = semanticMode
-		}
+	flow, ok := source.FlowScopeByID(strings.TrimSpace(scope.Name))
+	if !ok {
+		return runtimecontracts.AgentRegistryEntry{}, false
 	}
-	return source, mode
-}
-
-func catalogPromptAgentEntry(agent map[string]any) runtimecontracts.AgentRegistryEntry {
-	return runtimecontracts.AgentRegistryEntry{
-		ID:             catalogBootText(agent["id"]),
-		Role:           catalogBootText(agent["role"]),
-		PromptRef:      catalogBootText(agent["prompt_ref"]),
-		WorkspaceClass: catalogBootText(agent["workspace_class"]),
-		EmitEvents:     catalogStringSlice(agent["emit_events"]),
-	}
+	entry, ok := flow.Agents[agentID]
+	return entry, ok
 }
 
 func catalogRequiredAgentIssues(scope catalogBootScope) []catalogBootIssue {

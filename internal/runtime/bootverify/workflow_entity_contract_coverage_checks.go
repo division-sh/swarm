@@ -315,16 +315,16 @@ func wave1PromptEntityWriteAuthorizationFindings(source semanticview.Source) []F
 			findings = append(findings, Finding{
 				CheckID:  "entity_writer_coverage",
 				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("agent %s prompt declares create_entity for flow %s entity_type %s without matching agents.yaml entity_writes.%s.create authorization", item.AgentID, defaultFlowLabel(contract.FlowID), contract.EntityType, contract.EntityType),
-				Location: item.PromptFile,
+				Message:  fmt.Sprintf("agent %s intent declares create_entity for flow %s entity_type %s without matching agents.yaml entity_writes.%s.create authorization", item.AgentID, defaultFlowLabel(contract.FlowID), contract.EntityType, contract.EntityType),
+				Location: item.IntentSource,
 			})
 		}
 		if item.SaveEntity && (!ok || !writeDecl.Save.Declared()) {
 			findings = append(findings, Finding{
 				CheckID:  "entity_writer_coverage",
 				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("agent %s prompt declares save_entity_field for flow %s entity_type %s without matching agents.yaml entity_writes.%s.save authorization", item.AgentID, defaultFlowLabel(contract.FlowID), contract.EntityType, contract.EntityType),
-				Location: item.PromptFile,
+				Message:  fmt.Sprintf("agent %s intent declares save_entity_field for flow %s entity_type %s without matching agents.yaml entity_writes.%s.save authorization", item.AgentID, defaultFlowLabel(contract.FlowID), contract.EntityType, contract.EntityType),
+				Location: item.IntentSource,
 			})
 			continue
 		}
@@ -336,8 +336,8 @@ func wave1PromptEntityWriteAuthorizationFindings(source semanticview.Source) []F
 				findings = append(findings, Finding{
 					CheckID:  "entity_writer_coverage",
 					Severity: SeverityHardInvalidity,
-					Message:  fmt.Sprintf("agent %s prompt declares save_entity_field for undeclared field path %s on flow %s entity_type %s: %v", item.AgentID, field, defaultFlowLabel(contract.FlowID), contract.EntityType, err),
-					Location: item.PromptFile,
+					Message:  fmt.Sprintf("agent %s intent declares save_entity_field for undeclared field path %s on flow %s entity_type %s: %v", item.AgentID, field, defaultFlowLabel(contract.FlowID), contract.EntityType, err),
+					Location: item.IntentSource,
 				})
 				continue
 			}
@@ -348,8 +348,8 @@ func wave1PromptEntityWriteAuthorizationFindings(source semanticview.Source) []F
 				findings = append(findings, Finding{
 					CheckID:  "entity_writer_coverage",
 					Severity: SeverityHardInvalidity,
-					Message:  fmt.Sprintf("agent %s prompt declares save_entity_field for field %s on flow %s entity_type %s without matching agents.yaml entity_writes.%s.save authorization", item.AgentID, field, defaultFlowLabel(contract.FlowID), contract.EntityType, contract.EntityType),
-					Location: item.PromptFile,
+					Message:  fmt.Sprintf("agent %s intent declares save_entity_field for field %s on flow %s entity_type %s without matching agents.yaml entity_writes.%s.save authorization", item.AgentID, field, defaultFlowLabel(contract.FlowID), contract.EntityType, contract.EntityType),
+					Location: item.IntentSource,
 				})
 			}
 		}

@@ -3,7 +3,6 @@ package agents
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -13,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -24,19 +22,15 @@ import (
 )
 
 type LLMAgent struct {
-	cfg            models.AgentConfig
-	subscriptions  []events.EventType
-	conversation   *llm.Conversation
-	scopeKey       string
-	promptCache    map[string]string
-	promptResolver runtimecontracts.PromptResolver
-	toolExecutor   actorScopedToolExecutor
-	mu             sync.Mutex
+	cfg           models.AgentConfig
+	subscriptions []events.EventType
+	conversation  *llm.Conversation
+	scopeKey      string
+	toolExecutor  actorScopedToolExecutor
+	mu            sync.Mutex
 }
 
-type LLMAgentOptions struct {
-	PromptResolver runtimecontracts.PromptResolver
-}
+type LLMAgentOptions struct{}
 
 type actorScopedToolExecutor interface {
 	llm.CapabilityAwareToolExecutor
@@ -47,7 +41,7 @@ type contextAwareActorScopedToolExecutor interface {
 	ToolDefinitionsForActorInContext(context.Context, models.AgentConfig) []llm.ToolDefinition
 }
 
-func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, opts LLMAgentOptions) (*LLMAgent, error) {
+func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, _ LLMAgentOptions) (*LLMAgent, error) {
 	subs := make([]events.EventType, 0, len(cfg.Subscriptions))
 	for _, s := range cfg.Subscriptions {
 		if strings.TrimSpace(s) == "" {
@@ -56,7 +50,10 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 		subs = append(subs, events.EventType(s))
 	}
 
-	systemPrompt := strings.TrimSpace(extractSystemPrompt(cfg))
+	if err := cfg.ValidateIntentCarrier(); err != nil {
+		return nil, err
+	}
+	systemPrompt := cfg.SystemPrompt
 	systemPrompt = appendPromptPostamble(systemPrompt)
 
 	maxTurns := 100
@@ -75,23 +72,17 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 	}
 	c := llm.NewConversation(cfg.ID, "", systemPrompt, tools, cfg.Memory, maxTurns, modelRuntime)
 	c.SetToolExecutor(toolExecutor)
-	promptCache := map[string]string{}
-	if systemPrompt != "" {
-		promptCache[""] = systemPrompt
-	}
 	return &LLMAgent{
-		cfg:            cfg,
-		subscriptions:  subs,
-		conversation:   c,
-		promptCache:    promptCache,
-		promptResolver: opts.PromptResolver,
-		toolExecutor:   toolExecutor,
+		cfg:           cfg,
+		subscriptions: subs,
+		conversation:  c,
+		toolExecutor:  toolExecutor,
 	}, nil
 }
 
 func NewLLMAgentFactory(modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, opts LLMAgentOptions) runtimemanager.AgentFactory {
 	return func(cfg models.AgentConfig) (runtimemanager.Agent, error) {
-		if strings.TrimSpace(extractSystemPrompt(cfg)) == "" {
+		if err := cfg.ValidateIntentCarrier(); err != nil {
 			agentID := strings.TrimSpace(cfg.ID)
 			if agentID == "" {
 				agentID = strings.TrimSpace(cfg.Role)
@@ -99,7 +90,7 @@ func NewLLMAgentFactory(modelRuntime llm.Runtime, toolExecutor actorScopedToolEx
 			if agentID == "" {
 				agentID = "unknown-agent"
 			}
-			return nil, errors.New("missing required system_prompt for agent " + agentID)
+			return nil, fmt.Errorf("invalid resolved intent carrier for agent %s: %w", agentID, err)
 		}
 		agentTools := toolExecutor.ToolDefinitionsForActor(cfg)
 		return newLLMAgent(cfg, modelRuntime, toolExecutor, agentTools, opts)
@@ -115,7 +106,6 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	a.applyPromptForEvent(evt)
 	a.prepareConversationForInvocation(evt)
 	if !a.cfg.ExecutionMode.Valid() {
 		return nil, fmt.Errorf("agent %s has no resolved execution mode", strings.TrimSpace(a.cfg.ID))
@@ -171,133 +161,10 @@ func (a *LLMAgent) applyTurnToolDefinitions(ctx context.Context) {
 	}
 }
 
-func (a *LLMAgent) applyPromptForEvent(evt events.Event) {
-	if a == nil || a.conversation == nil {
-		return
-	}
-	prompt := strings.TrimSpace(a.resolvePromptForMode(promptModeFromEvent(evt)))
-	if prompt == "" {
-		return
-	}
-	if strings.TrimSpace(a.conversation.SystemPrompt) == prompt {
-		return
-	}
-	a.conversation.SystemPrompt = prompt
-	a.conversation.Reset()
-	a.scopeKey = ""
-}
-
-func (a *LLMAgent) resolvePromptForMode(mode string) string {
-	if a == nil || a.conversation == nil {
-		return ""
-	}
-	mode = strings.TrimSpace(mode)
-	cacheKey := mode
-	if a.promptCache == nil {
-		a.promptCache = map[string]string{}
-	}
-	if cached, ok := a.promptCache[cacheKey]; ok {
-		return strings.TrimSpace(cached)
-	}
-
-	if a.promptResolver == nil {
-		return strings.TrimSpace(a.promptCache[""])
-	}
-	prompt, found, err := a.promptResolver.LoadPromptForAgent(a.cfg, mode)
-	if err != nil {
-		processWarn(
-			"agent-llm",
-			"contract prompt load failed agent_id=%s mode=%s err=%v",
-			strings.TrimSpace(a.cfg.ID),
-			strings.TrimSpace(mode),
-			err,
-		)
-	}
-	if found && strings.TrimSpace(prompt) != "" {
-		prompt = strings.TrimSpace(prompt)
-		prompt = appendPromptPostamble(prompt)
-		a.promptCache[cacheKey] = prompt
-		if cacheKey == "" {
-			a.promptCache[""] = prompt
-		}
-		return prompt
-	}
-
-	if cacheKey != "" {
-		if fallback, ok := a.promptCache[""]; ok && strings.TrimSpace(fallback) != "" {
-			fallback = strings.TrimSpace(fallback)
-			a.promptCache[cacheKey] = fallback
-			return fallback
-		}
-	}
-
-	base := strings.TrimSpace(extractSystemPrompt(a.cfg))
-	if base == "" {
-		base = strings.TrimSpace(a.conversation.SystemPrompt)
-	}
-	if base != "" {
-		base = appendPromptPostamble(base)
-		a.promptCache[""] = base
-		if cacheKey != "" {
-			a.promptCache[cacheKey] = base
-		}
-	}
-	return base
-}
-
-func expandConfigPromptTemplate(prompt string, raw json.RawMessage) string {
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" || len(raw) == 0 {
-		return prompt
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(raw, &obj); err != nil || len(obj) == 0 {
-		return prompt
-	}
-	replacer := make([]string, 0, len(obj)*2)
-	for key, value := range obj {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		rendered := stringifyPromptTemplateValue(value)
-		replacer = append(replacer,
-			"{{"+key+"}}", rendered,
-			"{"+key+"}", rendered,
-		)
-	}
-	if len(replacer) == 0 {
-		return prompt
-	}
-	return strings.NewReplacer(replacer...).Replace(prompt)
-}
-
-func stringifyPromptTemplateValue(value any) string {
-	switch typed := value.(type) {
-	case nil:
-		return ""
-	case string:
-		return strings.TrimSpace(typed)
-	case json.RawMessage:
-		return strings.TrimSpace(string(typed))
-	default:
-		if raw, err := json.MarshalIndent(value, "", "  "); err == nil {
-			return strings.TrimSpace(string(raw))
-		}
-		return strings.TrimSpace(fmt.Sprintf("%v", value))
-	}
-}
-
-func promptModeFromEvent(evt events.Event) string {
-	payload := sharedjson.ParsePayloadMap(evt.Payload())
-	return strings.TrimSpace(sharedjson.AsString(payload["mode"]))
-}
-
 const promptEnvironmentPostamble = "## Environment\n\nWorkspace: /workspace (read-write logical path)\nReference data: /data (read-only logical path)\nContracts: /opt/swarm/contracts (read-only logical path)\nDocker-backed command execution exposes these as OS paths. Trusted host bash is full host-user shell execution from the workspace backing directory; use relative paths for workspace files, and absolute path availability follows the host deployment namespace and OS permissions."
 
 func appendPromptPostamble(prompt string) string {
-	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
+	if strings.TrimSpace(prompt) == "" {
 		return ""
 	}
 	if promptHasEnvironmentPostambleContract(prompt) {
@@ -424,7 +291,6 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive runtimeagentcontrol.
 	}
 	directiveText := strings.TrimSpace(directive.Directive)
 	evt := directive.Event
-	a.applyPromptForEvent(evt)
 	a.prepareConversationForInvocation(evt)
 
 	ctx = models.WithActor(ctx, a.cfg)
@@ -499,20 +365,6 @@ func toolMessageHasSuccessfulResult(raw string) bool {
 		}
 	}
 	return false
-}
-
-func extractSystemPrompt(cfg models.AgentConfig) string {
-	if len(cfg.Config) == 0 || !json.Valid(cfg.Config) {
-		return ""
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(cfg.Config, &obj); err != nil {
-		return ""
-	}
-	if v, ok := obj["system_prompt"].(string); ok {
-		return v
-	}
-	return ""
 }
 
 func formatEventForAgent(cfg models.AgentConfig, evt events.Event, _ []llm.ToolDefinition) string {

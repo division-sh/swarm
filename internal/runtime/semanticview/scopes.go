@@ -11,7 +11,6 @@ type ProjectScope struct {
 	OwningFlowID string
 	Depth        int
 	Manifest     runtimecontracts.ProjectPackageDocument
-	PromptsDir   string
 	Nodes        map[string]runtimecontracts.SystemNodeContract
 	Events       map[string]runtimecontracts.EventCatalogEntry
 	Agents       map[string]runtimecontracts.AgentRegistryEntry
@@ -27,7 +26,6 @@ type FlowScope struct {
 	PackageKey    string
 	Mode          string
 	DataDir       string
-	PromptsDir    string
 	InputEvents   []string
 	OutputEvents  []string
 	AutoEmitEvent string
@@ -91,7 +89,6 @@ func flowScopeFromView(view runtimecontracts.FlowContractView) FlowScope {
 		PackageKey:    strings.TrimSpace(view.Paths.PackageKey),
 		Mode:          flowModeFromView(view),
 		DataDir:       strings.TrimSpace(view.Paths.DataDir),
-		PromptsDir:    strings.TrimSpace(view.Paths.PromptsDir),
 		InputEvents:   append([]string{}, view.Schema.Pins.Inputs.Events...),
 		OutputEvents:  append([]string{}, view.Schema.Pins.Outputs.Events...),
 		AutoEmitEvent: strings.TrimSpace(view.Schema.AutoEmitOnCreate.Event),

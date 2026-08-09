@@ -949,12 +949,12 @@ func TestClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBusDescend
 		childCompleted: make(chan struct{}),
 	}
 	am := newTestAgentManager(t, eventBus, func(runtimeactors.AgentConfig) (Agent, error) { return agent, nil })
-	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: runtimeactors.AgentConfig{
+	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Config: managerTestAgentConfig(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agent.ID(),
 		Identity:      managerAgentIdentity(agent.ID()),
 		Subscriptions: []string{"test.lane.root", "test.lane.child"},
-	}}, false); err != nil {
+	})}, false); err != nil {
 		t.Fatalf("spawn lane test agent: %v", err)
 	}
 	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {

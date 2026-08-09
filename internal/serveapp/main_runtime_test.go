@@ -9349,7 +9349,7 @@ func writeServeRuntimeNativeBashFixture(t *testing.T) string {
 %s:
   id: %s
   role: %s
-  prompt_ref: %s
+  intent: prompts/%s.md
   model: regular
   native_tools:
     bash: true

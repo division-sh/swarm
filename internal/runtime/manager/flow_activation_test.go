@@ -1195,10 +1195,11 @@ func testFlowBundle(autoEmit string) *runtimecontracts.WorkflowContractBundle {
 		},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"reviewer": {
-				ID:            "reviewer",
-				Type:          "generic",
-				Role:          "reviewer",
-				Subscriptions: []string{"task.started"},
+				ID:             "reviewer",
+				Type:           "generic",
+				Role:           "reviewer",
+				ResolvedIntent: managerTestResolvedIntent("reviewer"),
+				Subscriptions:  []string{"task.started"},
 			},
 		},
 	}
@@ -1252,7 +1253,7 @@ func testFlowRouteRevisionBundle(nodeEvent string) *runtimecontracts.WorkflowCon
 func testFlowBundleWithTwoAgents(autoEmit string) *runtimecontracts.WorkflowContractBundle {
 	bundle := testFlowBundle(autoEmit)
 	bundle.FlowTree.ByID["review"].Agents["writer"] = runtimecontracts.AgentRegistryEntry{
-		ID: "writer", Type: "generic", Role: "writer", Subscriptions: []string{"task.started"},
+		ID: "writer", Type: "generic", Role: "writer", ResolvedIntent: managerTestResolvedIntent("writer"), Subscriptions: []string{"task.started"},
 	}
 	registerTestFlowAgentOwner(bundle, "review", "writer")
 	return bundle
@@ -1277,10 +1278,11 @@ func testNestedFlowBundle() *runtimecontracts.WorkflowContractBundle {
 		Paths: runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"worker": {
-				ID:            "worker",
-				Type:          "generic",
-				Role:          "worker",
-				Subscriptions: []string{"micro.started"},
+				ID:             "worker",
+				Type:           "generic",
+				Role:           "worker",
+				ResolvedIntent: managerTestResolvedIntent("worker"),
+				Subscriptions:  []string{"micro.started"},
 			},
 		},
 	}
@@ -1322,10 +1324,11 @@ func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
 		Paths: runtimecontracts.FlowContractPaths{ID: "analyzer-flow"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"analyzer": {
-				Type:          "generic",
-				Role:          "analyzer",
-				Subscriptions: []string{"analysis.requested"},
-				EmitEvents:    []string{"analysis.done"},
+				Type:           "generic",
+				Role:           "analyzer",
+				ResolvedIntent: managerTestResolvedIntent("analyzer"),
+				Subscriptions:  []string{"analysis.requested"},
+				EmitEvents:     []string{"analysis.done"},
 			},
 		},
 	}
@@ -1854,7 +1857,7 @@ func TestDynamicFlowRuntimeReadinessRejectsCurrentFactWithOldSemanticSource(t *t
 	oldBundle := testFlowBundle("")
 	currentBundle := testFlowBundle("")
 	currentBundle.FlowTree.ByID["review"].Agents["editor"] = runtimecontracts.AgentRegistryEntry{
-		ID: "editor", Type: "generic", Role: "editor",
+		ID: "editor", Type: "generic", Role: "editor", ResolvedIntent: managerTestResolvedIntent("editor"),
 	}
 	registerTestFlowAgentOwner(currentBundle, "review", "editor")
 	oldSource := semanticview.Wrap(oldBundle)
@@ -2664,11 +2667,11 @@ func TestHydrateForStartupRetiresTerminalDynamicFlowProcessTopology(t *testing.T
 		},
 	}
 	agents := &flowActivationTestStore{upserts: []PersistedAgent{{
-		Config: models.AgentConfig{
+		Config: managerTestAgentConfig(models.AgentConfig{
 			ID:       "reviewer",
 			Identity: plan.Agents[0].Identity,
 			FlowPath: req.Instance.InstancePath,
-		},
+		}),
 		Status: "active",
 	}}}
 	routeStore := &flowActivationTestRouteStore{statusByPath: map[string]string{
@@ -2748,9 +2751,9 @@ func TestEnsureFlowInstanceReconcilesRevisedSemanticSourceIntoReadinessOwner(t *
 	writer := revisedBundle.FlowTree.ByID["review"].Agents["writer"]
 	writer.Role = "writer-v2"
 	revisedBundle.FlowTree.ByID["review"].Agents["writer"] = writer
-	revisedBundle.FlowTree.ByID["review"].Agents["editor"] = runtimecontracts.AgentRegistryEntry{
+	revisedBundle.FlowTree.ByID["review"].Agents["editor"] = managerTestAgentEntry("editor", runtimecontracts.AgentRegistryEntry{
 		ID: "editor", Type: "generic", Role: "editor", Subscriptions: []string{"task.started"},
-	}
+	})
 	registerTestFlowAgentOwner(revisedBundle, "review", "editor")
 	revisedReq := testActivationRequest(revisedBundle, "review", "inst-1", "ent-1", "review/inst-1")
 	restarted := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
@@ -2887,10 +2890,11 @@ func TestActivateFlowInstanceUsesSameBuiltinsForAgentAndRouteMaterialization(t *
 	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle("")
 	bundle.FlowTree.ByID["review"].Agents["reviewer"] = runtimecontracts.AgentRegistryEntry{
-		ID:            "reviewer-{flow_instance_path}",
-		Type:          "generic",
-		Role:          "reviewer",
-		Subscriptions: []string{"task.started"},
+		ID:             "reviewer-{flow_instance_path}",
+		Type:           "generic",
+		Role:           "reviewer",
+		ResolvedIntent: managerTestResolvedIntent("reviewer"),
+		Subscriptions:  []string{"task.started"},
 	}
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
@@ -3954,12 +3958,12 @@ func TestBuildFlowAgentConfig_ExternalizesLocalSubscriptionsFromExactFlowPath(t 
 		"ent-1",
 		"child/grandchild/inst-1",
 		"worker",
-		runtimecontracts.AgentRegistryEntry{
+		managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{
 			ID:            "worker",
 			Type:          "generic",
 			Role:          "worker",
 			Subscriptions: []string{"micro.started"},
-		},
+		}),
 		map[string]string{"instance_id": "inst-1"},
 		map[string]struct{}{"micro.started": {}},
 		map[string]any{},
@@ -4095,25 +4099,25 @@ func TestEnsureStaticAgentsForScopeRegistersRootAndFlowSubscriptions(t *testing.
 	})
 
 	rootAgents := map[string]runtimecontracts.AgentRegistryEntry{
-		"test-agent": {
+		"test-agent": managerTestAgentEntry("test-agent", runtimecontracts.AgentRegistryEntry{
 			ID:            "test-agent",
 			Type:          "generic",
 			Role:          "test-agent",
 			Subscriptions: []string{"task.assigned"},
 			EmitEvents:    []string{"task.completed"},
-		},
+		}),
 	}
 	if err := am.ensureStaticAgentsForScope(testAuthorActivityContext(context.Background()), source, "", "", rootAgents); err != nil {
 		t.Fatalf("ensureStaticAgentsForScope(root): %v", err)
 	}
 	flowAgents := map[string]runtimecontracts.AgentRegistryEntry{
-		"operator": {
+		"operator": managerTestAgentEntry("operator", runtimecontracts.AgentRegistryEntry{
 			ID:            "operator",
 			Type:          "generic",
 			Role:          "operator",
 			Subscriptions: []string{"work.requested"},
 			EmitEvents:    []string{"work.completed"},
-		},
+		}),
 	}
 	if err := am.ensureStaticAgentsForScope(testAuthorActivityContext(context.Background()), source, "ops-flow", "ops-flow", flowAgents); err != nil {
 		t.Fatalf("ensureStaticAgentsForScope(flow): %v", err)
@@ -4251,6 +4255,7 @@ backend:
   id: backend-{vertical_id}
   type: generic
   role: backend
+  intent: {inline: "Handle backend work for this flow instance."}
   model: regular
   memory: true
   subscriptions:
@@ -4314,6 +4319,7 @@ backend:
   id: backend-{vertical_id}
   type: generic
   role: backend
+  intent: {inline: "Handle backend work for this flow instance."}
   model: regular
   memory: true
   subscriptions:
@@ -4345,7 +4351,7 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 		"ent-1",
 		"review/inst-1",
 		"reviewer",
-		runtimecontracts.AgentRegistryEntry{
+		managerTestAgentEntry("reviewer", runtimecontracts.AgentRegistryEntry{
 			ID:              "reviewer",
 			Type:            "generic",
 			Role:            "reviewer",
@@ -4353,7 +4359,7 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 			NativeTools:     map[string]any{"bash": true, "file_io": true},
 			EmitEvents:      []string{"task.completed", "task.completed", "review.failed"},
 			MaxTurnsPerTask: 7,
-		},
+		}),
 		map[string]string{"instance_id": "inst-1"},
 		map[string]struct{}{"task.completed": {}, "review.failed": {}},
 		map[string]any{},
@@ -4375,11 +4381,33 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 	}
 }
 
+func TestBuildFlowAgentConfigRejectsPayloadDerivedNestedSystemPromptBeforeMaterialization(t *testing.T) {
+	_, err := buildFlowAgentConfig(
+		semanticview.Wrap(testFlowBundle("")),
+		"review",
+		"inst-1",
+		"ent-1",
+		"review/inst-1",
+		"reviewer",
+		managerTestAgentEntry("reviewer", runtimecontracts.AgentRegistryEntry{
+			ID:   "reviewer",
+			Type: "generic",
+			Role: "reviewer",
+		}),
+		map[string]string{"instance_id": "inst-1"},
+		map[string]struct{}{},
+		map[string]any{"opaque": []any{map[string]any{"system_prompt": "obsolete"}}},
+	)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "config.opaque[0].system_prompt") {
+		t.Fatalf("buildFlowAgentConfig error = %v, want nested authored system_prompt rejection", err)
+	}
+}
+
 func TestStaticAndDynamicFlowAgentConfigRejectForeignExactAndPattern(t *testing.T) {
 	source := semanticview.Wrap(testFlowBundle(""))
 	for _, subscription := range []string{"foreign/task.ready", "foreign/**/task.ready"} {
 		t.Run(strings.ReplaceAll(subscription, "/", "_"), func(t *testing.T) {
-			entry := runtimecontracts.AgentRegistryEntry{ID: "reviewer", Type: "generic", Subscriptions: []string{subscription}}
+			entry := managerTestAgentEntry("reviewer", runtimecontracts.AgentRegistryEntry{ID: "reviewer", Type: "generic", Subscriptions: []string{subscription}})
 			if _, err := buildStaticFlowAgentConfig(source, "review", "review", "reviewer", entry, map[string]struct{}{"task.started": {}}); err == nil || !strings.Contains(err.Error(), "cannot cross a flow boundary") {
 				t.Fatalf("buildStaticFlowAgentConfig error = %v, want admission rejection", err)
 			}
@@ -4474,6 +4502,7 @@ flows:
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "static_support", "agents.yaml"), `
 worker:
+  intent: {inline: "Handle static support requests."}
   model: regular
   subscriptions:
     - static_support.requested
@@ -4482,6 +4511,7 @@ worker:
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "template_support", "agents.yaml"), `
 worker:
   id: worker
+  intent: {inline: "Handle template support requests."}
   model: regular
   subscriptions:
     - template_support.requested

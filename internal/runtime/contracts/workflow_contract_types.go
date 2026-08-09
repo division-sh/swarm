@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
@@ -27,7 +28,6 @@ type ContractPaths struct {
 	ProjectAgentsFile     string
 	ProjectToolsFile      string
 	ProjectPolicyFile     string
-	ProjectPromptsDir     string
 	PlatformSpecFile      string
 	VerificationGatesFile string
 	ToolingLockFile       string
@@ -1122,7 +1122,6 @@ type ProjectPackagePaths struct {
 	ProjectAgentsFile string
 	ProjectToolsFile  string
 	ProjectPolicyFile string
-	ProjectPromptsDir string
 	Flows             []FlowContractPaths
 }
 type FlowContractPaths struct {
@@ -1142,7 +1141,6 @@ type FlowContractPaths struct {
 	AgentsFile   string
 	ToolsFile    string
 	PolicyFile   string
-	PromptsDir   string
 }
 type ProjectPackageDocument struct {
 	Name            string               `yaml:"name"`
@@ -1852,7 +1850,8 @@ type AgentRegistryEntry struct {
 	ID                     string                          `yaml:"id"`
 	Type                   string                          `yaml:"type"`
 	Role                   string                          `yaml:"role"`
-	PromptRef              string                          `yaml:"prompt_ref"`
+	Intent                 runtimeagentintent.Source       `yaml:"intent" json:"intent"`
+	ResolvedIntent         runtimeagentintent.Resolved     `yaml:"-" json:"resolved_intent"`
 	EntityWrites           map[string]AgentEntityWriteDecl `yaml:"entity_writes"`
 	Permissions            []string                        `yaml:"permissions" json:"permissions,omitempty"`
 	PermissionsBundle      string                          `yaml:"permissions_bundle" json:"permissions_bundle,omitempty"`
@@ -1864,7 +1863,6 @@ type AgentRegistryEntry struct {
 	Mock                   mockperformance.Performance     `yaml:"mock" json:"mock,omitempty"`
 	MemoryPlan             agentmemory.Plan                `yaml:"-" json:"memory_plan"`
 	MaxTurnsPerTask        int                             `yaml:"max_turns_per_task"`
-	PromptInputs           []string                        `yaml:"prompt_inputs" json:"prompt_inputs,omitempty"`
 	Subscriptions          []string                        `yaml:"subscriptions"`
 	SubscriptionsBootstrap []string                        `yaml:"subscriptions_bootstrap"`
 	SubscribesTo           []string                        `yaml:"subscribes_to"`
@@ -1931,6 +1929,8 @@ func validateAgentRegistryEntryYAMLFields(value *yaml.Node) (map[string]bool, er
 				return nil, fmt.Errorf("RETIRED: agent field subscriptions_bootstrap is retired; use subscriptions")
 			case "subscribes_to":
 				return nil, fmt.Errorf("RETIRED: agent field subscribes_to is retired for agents.yaml; use subscriptions")
+			case "prompt_ref", "prompt_inputs":
+				return nil, fmt.Errorf("RETIRED: agent field %s is retired; declare exactly one intent source with intent:", field)
 			case "profile", "agent_defaults", "agent_profiles", "runtime_id_template":
 				return nil, fmt.Errorf("UNSUPPORTED: agent field %s is reserved for future agent-defaults/profile support and is not accepted by Layer 1 platform defaults", field)
 			default:
@@ -1947,7 +1947,7 @@ var agentRegistryEntryFieldOptions = map[string]struct{}{
 	"id":                 {},
 	"type":               {},
 	"role":               {},
-	"prompt_ref":         {},
+	"intent":             {},
 	"entity_writes":      {},
 	"permissions":        {},
 	"permissions_bundle": {},
@@ -1959,7 +1959,6 @@ var agentRegistryEntryFieldOptions = map[string]struct{}{
 	"mock":               {},
 	"max_turns_per_task": {},
 	"subscriptions":      {},
-	"prompt_inputs":      {},
 	"tools":              {},
 	"native_tools":       {},
 	"flow_data_access":   {},

@@ -3,6 +3,6 @@ trigger:
 
 expected:
 
-  boot_result: warning
-  error_category: PROMPT-MISSING
-  error_contains: "promptless-agent"
+  boot_result: error
+  error_category: INTENT-INVALID
+  error_contains: "agent intent source is required"
