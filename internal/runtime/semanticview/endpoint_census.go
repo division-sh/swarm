@@ -152,12 +152,10 @@ func (i TypedPubSubConsumerIssue) Evidence() []string {
 	return out
 }
 
-type LegacyQualifiedSubscription struct {
-	ID             string                `json:"id"`
-	Consumer       AuthoredEventEndpoint `json:"consumer"`
-	TargetFlowID   string                `json:"target_flow_id"`
-	TargetFlowPath string                `json:"target_flow_path"`
-	Event          FlowEventProof        `json:"event"`
+type InvalidAuthoredSubscription struct {
+	ID        string                        `json:"id"`
+	Consumer  AuthoredEventEndpoint         `json:"consumer"`
+	Admission AuthoredSubscriptionAdmission `json:"-"`
 }
 
 type NodeProducerAssertion struct {
@@ -384,6 +382,14 @@ func (c AuthoredEventEndpointCensus) ResolveTypedPubSubConsumerMatches(producer 
 	matches := make([]TypedPubSubConsumerMatch, 0)
 	issues := make([]TypedPubSubConsumerIssue, 0)
 	for _, consumer := range c.consumers {
+		if consumer.Kind == EventEndpointRequiredAgentRole {
+			// Required-agent subscriptions prove role fulfillment, not an
+			// executable delivery relation.
+			continue
+		}
+		if admission, classified := endpointSubscriptionAdmission(c.source, consumer); classified && !admission.Admitted() {
+			continue
+		}
 		if strings.TrimSpace(producer.FlowID) == strings.TrimSpace(consumer.FlowID) {
 			if !endpointMatchesProof(c.source, consumer, proof) {
 				continue
@@ -518,100 +524,30 @@ func typedPubSubConsumerIssueSortKey(issue TypedPubSubConsumerIssue) string {
 	return strings.Join([]string{issue.Producer.ID, issue.Consumer.ID, issue.Event.EventKey(), issue.Failure}, "\x00")
 }
 
-// LegacyQualifiedSubscriptions returns retired exact subscriptions that cross
-// a flow boundary instead of using pins and connect. They are validation facts,
-// not executable routing authority.
-func (c AuthoredEventEndpointCensus) LegacyQualifiedSubscriptions() []LegacyQualifiedSubscription {
+// InvalidAuthoredSubscriptions returns every classified authored consumer that
+// cannot become validation, liveness, or runtime route authority.
+func (c AuthoredEventEndpointCensus) InvalidAuthoredSubscriptions() []InvalidAuthoredSubscription {
 	if c.source == nil {
-		return []LegacyQualifiedSubscription{}
+		return []InvalidAuthoredSubscription{}
 	}
-	flows := append([]FlowScope(nil), c.source.FlowScopes()...)
-	sort.SliceStable(flows, func(i, j int) bool {
-		left := eventidentity.Normalize(flows[i].Path)
-		right := eventidentity.Normalize(flows[j].Path)
-		if len(left) != len(right) {
-			return len(left) > len(right)
-		}
-		return left < right
-	})
-	out := make([]LegacyQualifiedSubscription, 0)
+	out := make([]InvalidAuthoredSubscription, 0)
 	for _, consumer := range c.consumers {
-		if consumer.Pattern || !runtimeDeliveryConsumer(consumer.Kind) {
+		admission, classified := endpointSubscriptionAdmission(c.source, consumer)
+		if !classified || admission.Admitted() || admission.Authored() == "" {
 			continue
 		}
-		authored := eventidentity.Normalize(consumer.Event.Authored)
-		if !strings.Contains(authored, "/") {
-			continue
-		}
-		if strings.Contains(authored, "://") {
-			legacy := LegacyQualifiedSubscription{
-				Consumer: consumer,
-				Event:    consumer.Event,
-			}
-			legacy.ID = legacyQualifiedSubscriptionID(legacy)
-			out = append(out, legacy)
-			continue
-		}
-		consumerPath := eventidentity.Normalize(c.source.FlowPath(consumer.FlowID))
-		candidates := []string{authored}
-		if consumerPath != "" && !strings.HasPrefix(authored, consumerPath+"/") {
-			candidates = append(candidates, consumerPath+"/"+authored)
-		}
-		matched := false
-		for _, canonical := range candidates {
-			if consumerPath != "" && strings.HasPrefix(canonical, consumerPath+"/") {
-				local := strings.TrimPrefix(canonical, consumerPath+"/")
-				if local != "" && !strings.Contains(local, "/") {
-					continue
-				}
-			}
-			for _, flow := range flows {
-				flowID := strings.TrimSpace(flow.ID)
-				flowPath := eventidentity.Normalize(flow.Path)
-				if flowID == "" || flowID == strings.TrimSpace(consumer.FlowID) || flowPath == "" || !strings.HasPrefix(canonical, flowPath+"/") {
-					continue
-				}
-				local := eventidentity.Normalize(strings.TrimPrefix(canonical, flowPath+"/"))
-				if local == "" {
-					continue
-				}
-				proof := ResolveFlowEventProof(c.source, flowID, local)
-				if !proof.HasSchema || eventidentity.Normalize(proof.Canonical) != canonical {
-					continue
-				}
-				legacy := LegacyQualifiedSubscription{
-					Consumer:       consumer,
-					TargetFlowID:   flowID,
-					TargetFlowPath: flowPath,
-					Event:          proof,
-				}
-				legacy.ID = legacyQualifiedSubscriptionID(legacy)
-				out = append(out, legacy)
-				matched = true
-				break
-			}
-			if matched {
-				break
-			}
-		}
+		invalid := InvalidAuthoredSubscription{Consumer: consumer, Admission: admission}
+		invalid.ID = invalidAuthoredSubscriptionID(invalid)
+		out = append(out, invalid)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 
-func runtimeDeliveryConsumer(kind EventEndpointKind) bool {
-	switch kind {
-	case EventEndpointNodeHandler, EventEndpointNodeGenerated, EventEndpointAgent, EventEndpointTimer:
-		return true
-	default:
-		return false
-	}
-}
-
-func legacyQualifiedSubscriptionID(subscription LegacyQualifiedSubscription) string {
-	parts := []string{subscription.Consumer.ID, subscription.TargetFlowID, subscription.Event.EventKey()}
+func invalidAuthoredSubscriptionID(subscription InvalidAuthoredSubscription) string {
+	parts := []string{subscription.Consumer.ID, string(subscription.Admission.Failure()), subscription.Admission.Authored()}
 	digest := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
-	return "legacy-subscription-" + hex.EncodeToString(digest[:8])
+	return "invalid-subscription-" + hex.EncodeToString(digest[:8])
 }
 
 func (c AuthoredEventEndpointCensus) matchingEndpoints(endpoints []AuthoredEventEndpoint, flowID, eventType string) []AuthoredEventEndpoint {
@@ -1208,6 +1144,9 @@ func endpointMatchesProof(source Source, endpoint AuthoredEventEndpoint, proof F
 	if source == nil {
 		return false
 	}
+	if admission, classified := endpointSubscriptionAdmission(source, endpoint); classified && !admission.Admitted() {
+		return false
+	}
 	if endpoint.Pattern {
 		if matched, scoped := ImportBoundaryWildcardSubscriptionMatches(source, endpoint.PackageKey, endpoint.FlowID, "", nil, endpoint.Event.Authored, proof.EventKey()); scoped {
 			return matched
@@ -1215,6 +1154,42 @@ func endpointMatchesProof(source Source, endpoint AuthoredEventEndpoint, proof F
 	}
 	return flowEventMatchesWithoutTopology(source, endpoint.FlowID, endpoint.Event.Authored, proof.EventKey()) ||
 		eventidentity.Normalize(endpoint.Event.Canonical) == eventidentity.Normalize(proof.Canonical)
+}
+
+func endpointSubscriptionAdmission(source Source, endpoint AuthoredEventEndpoint) (AuthoredSubscriptionAdmission, bool) {
+	if endpoint.Direction != EventEndpointConsumer {
+		return AuthoredSubscriptionAdmission{}, false
+	}
+	consumerKind := AuthoredSubscriptionConsumerKind("")
+	consumerID := ""
+	switch endpoint.Kind {
+	case EventEndpointNodeHandler, EventEndpointNodeGenerated:
+		consumerKind = AuthoredSubscriptionConsumerNode
+		consumerID = endpoint.NodeID
+	case EventEndpointAgent:
+		consumerKind = AuthoredSubscriptionConsumerAgent
+		consumerID = endpoint.AgentID
+	case EventEndpointTimer:
+		consumerKind = AuthoredSubscriptionConsumerTimer
+		consumerID = endpoint.TimerID
+	default:
+		return AuthoredSubscriptionAdmission{}, false
+	}
+	flowPath := eventidentity.Normalize(endpoint.FlowPath)
+	if flowPath == "" && source != nil {
+		flowPath = eventidentity.Normalize(source.FlowPath(endpoint.FlowID))
+	}
+	localEvents, inputEvents := authoredSubscriptionFlowEvents(source, endpoint.FlowID)
+	return ClassifyAuthoredSubscription(source, AuthoredSubscriptionRequest{
+		ConsumerKind: consumerKind,
+		ConsumerID:   consumerID,
+		FlowID:       endpoint.FlowID,
+		FlowPath:     flowPath,
+		PackageKey:   endpoint.PackageKey,
+		LocalEvents:  localEvents,
+		InputEvents:  inputEvents,
+		Authored:     endpoint.Event.Authored,
+	}), true
 }
 
 func declaredInputIdentityMatches(source Source, endpoint AuthoredEventEndpoint, identity string) bool {
@@ -1266,17 +1241,9 @@ func resolveNodeHandlerProof(source Source, nodeID, eventType string) (string, b
 	if source == nil {
 		return "", false
 	}
-	if _, ok := source.NodeEventHandlers(nodeID)[strings.TrimSpace(eventType)]; ok {
-		return strings.TrimSpace(eventType), true
-	}
-	if bundle, ok := Bundle(source); ok && bundle != nil {
-		resolution := bundle.ResolveNodeEventHandler(nodeID, eventType)
-		if resolution.Matched {
-			return strings.TrimSpace(resolution.AuthoredEventType), true
-		}
-	}
-	if _, ok := source.NodeEventHandler(nodeID, eventType); ok {
-		return strings.TrimSpace(eventType), true
+	resolution := ResolveNodeSubscriptionHandler(source, nodeID, eventType)
+	if resolution.Matched {
+		return strings.TrimSpace(resolution.HandlerEventKey), true
 	}
 	return "", false
 }

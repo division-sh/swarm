@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -76,41 +75,13 @@ func resolvedExecutionHandler(source semanticview.Source, nodeID, eventType stri
 	if source == nil {
 		return executionHandlerResolution{}
 	}
-	if handler, ok := source.NodeEventHandler(nodeID, eventType); ok {
+	resolved := semanticview.ResolveNodeSubscriptionHandler(source, nodeID, eventType)
+	if resolved.Matched {
 		return executionHandlerResolution{
-			handler:         handler,
-			handlerEventKey: matchedHandlerEventKeyFromHandlers(source.NodeEventHandlers(nodeID), eventType),
+			handler:         resolved.Handler,
+			handlerEventKey: resolved.HandlerEventKey,
 			matched:         true,
 		}
 	}
-	if semanticview.ImportBoundaryWildcardHandlerFallbackDenied(source, nodeID, eventType) {
-		return executionHandlerResolution{}
-	}
-	if bundle, ok := semanticview.Bundle(source); ok {
-		resolved := bundle.ResolveNodeEventHandler(nodeID, eventType)
-		if resolved.Matched {
-			return executionHandlerResolution{
-				handler:         resolved.Handler,
-				handlerEventKey: strings.TrimSpace(resolved.AuthoredEventType),
-				matched:         true,
-			}
-		}
-	}
 	return executionHandlerResolution{}
-}
-
-func matchedHandlerEventKeyFromHandlers(handlers map[string]runtimecontracts.SystemNodeEventHandler, eventType string) string {
-	eventType = strings.TrimSpace(eventType)
-	for key := range handlers {
-		if strings.TrimSpace(key) == eventType {
-			return strings.TrimSpace(key)
-		}
-	}
-	for key := range handlers {
-		key = strings.TrimSpace(key)
-		if key != "" && eventidentity.MatchPattern(key, eventType) {
-			return key
-		}
-	}
-	return eventType
 }

@@ -136,6 +136,22 @@ func TestActiveHandlerResolution_AllowsGrantedImportBoundaryWildcard(t *testing.
 	}
 }
 
+func TestActiveHandlerResolutionRejectsQualifiedExactRawBundleFallback(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "tasks"}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"listener": {ID: "listener", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"child/task.done": handler}},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+			"listener": {"child/task.done": handler},
+		}},
+	}
+	active := activeHandlerResolution(semanticview.Wrap(bundle), "listener", "child/task.done")
+	if active.AccumulatorName != "" || active.AuthoredEventType != "" || active.CanonicalEventType != "" {
+		t.Fatalf("qualified exact handler reached accumulator fallback: %#v", active)
+	}
+}
+
 func issuesContain(issues []Issue, want string) bool {
 	for _, issue := range issues {
 		if strings.Contains(issue.Message, want) {

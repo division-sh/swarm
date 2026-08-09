@@ -157,6 +157,21 @@ func TestResolvedExecutionHandler_AllowsGrantedImportBoundaryWildcard(t *testing
 	}
 }
 
+func TestResolvedExecutionHandlerRejectsQualifiedExactRawBundleFallback(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{AdvancesTo: "done"}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"listener": {ID: "listener", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"child/task.done": handler}},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+			"listener": {"child/task.done": handler},
+		}},
+	}
+	if resolved := resolvedExecutionHandler(semanticview.Wrap(bundle), "listener", "child/task.done"); resolved.matched {
+		t.Fatalf("qualified exact handler reached engine fallback: %#v", resolved)
+	}
+}
+
 func loadEngineImportBoundaryWildcardSource(t *testing.T, observeGrant string) semanticview.Source {
 	t.Helper()
 	repoRoot := engineRepoRoot(t)

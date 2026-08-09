@@ -112,14 +112,82 @@ func TestWorkflowNodeHarnessInputKeepsOnlyAuthoredLocalSubscription(t *testing.T
 	harness := loadHarnessInjectionPipelineSource(t, canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection))
 	withoutSource := loadHarnessInjectionPipelineSource(t, canonicalrouting.CopyHarnessInjectionWithoutSource(t))
 
-	got := workflowNodeSubscriptionAliases(harness, "worker-node", "work.requested")
-	want := workflowNodeSubscriptionAliases(withoutSource, "worker-node", "work.requested")
+	got, err := workflowNodeSubscriptionAliases(harness, "worker-node", "work.requested")
+	if err != nil {
+		t.Fatalf("harness subscription aliases: %v", err)
+	}
+	want, err := workflowNodeSubscriptionAliases(withoutSource, "worker-node", "work.requested")
+	if err != nil {
+		t.Fatalf("plain subscription aliases: %v", err)
+	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("harness subscriptions = %#v, undeclared subscriptions = %#v", got, want)
 	}
 	if strings.Join(got, ",") != "worker/work.requested,work.requested" {
 		t.Fatalf("subscriptions = %#v, want only ordinary authored local aliases", got)
 	}
+}
+
+func TestWorkflowNodeProjectionRejectsQualifiedExactHandlerBeforeExecution(t *testing.T) {
+	for _, authored := range []string{"child/task.done", "missing/task.done", "child/grandchild/task.done", "swarm://child/task.done"} {
+		t.Run(strings.ReplaceAll(authored, "/", "_"), func(t *testing.T) {
+			source := workflowNodeExactSubscriptionSource(authored)
+			if aliases, err := workflowNodeSubscriptionAliases(source, "listener", authored); err == nil || aliases != nil {
+				t.Fatalf("subscription aliases = %#v error = %v, want typed rejection", aliases, err)
+			}
+			if _, ok := source.NodeEventHandler("listener", "child/task.done"); ok {
+				t.Fatal("invalid authored handler resolved through the semantic source")
+			}
+			if resolved := workflowNodeEventHandlerResolutionForEventType(source, "listener", "child/task.done"); resolved.Matched {
+				t.Fatalf("invalid authored handler reached execution projection: %#v", resolved)
+			}
+			node := NewNode(source.NodeEntries()["listener"], source, nil, nil)
+			if subscriptions := node.Subscriptions(); len(subscriptions) != 0 {
+				t.Fatalf("invalid authored subscription reached node executor: %#v", subscriptions)
+			}
+			if _, err := LoadWorkflowNodes(source); err == nil || !strings.Contains(err.Error(), "must use a local event name") {
+				t.Fatalf("LoadWorkflowNodes error = %v, want typed exact rejection", err)
+			}
+		})
+	}
+}
+
+func TestWorkflowNodeProjectionPreservesLocalExactHandler(t *testing.T) {
+	source := workflowNodeExactSubscriptionSource("task.done")
+	aliases, err := workflowNodeSubscriptionAliases(source, "listener", "task.done")
+	if err != nil {
+		t.Fatalf("workflowNodeSubscriptionAliases: %v", err)
+	}
+	if got := strings.Join(aliases, ","); got != "child/task.done,task.done" {
+		t.Fatalf("aliases = %q, want canonical and local exact forms", got)
+	}
+	if _, ok := source.NodeEventHandler("listener", "child/task.done"); !ok {
+		t.Fatal("local authored handler did not resolve from its canonical runtime event")
+	}
+	if resolved := workflowNodeEventHandlerResolutionForEventType(source, "listener", "child/task.done"); !resolved.Matched || resolved.HandlerEventKey != "task.done" {
+		t.Fatalf("handler resolution = %#v, want local exact handler", resolved)
+	}
+}
+
+func workflowNodeExactSubscriptionSource(authored string) semanticview.Source {
+	node := runtimecontracts.SystemNodeContract{
+		ID:            "listener",
+		SubscribesTo:  []string{authored},
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{authored: {}},
+	}
+	flow := runtimecontracts.FlowContractView{
+		Path:   "child",
+		Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
+		Nodes:  map[string]runtimecontracts.SystemNodeContract{"listener": node},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
+		},
+	})
 }
 
 func loadHarnessInjectionPipelineSource(t *testing.T, root string) semanticview.Source {

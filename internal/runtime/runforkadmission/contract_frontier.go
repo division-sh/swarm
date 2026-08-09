@@ -363,7 +363,7 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, eventNam
 			seenNodes[recipient.ID()] = struct{}{}
 		}
 		projected := runfork.NewRunForkContractFrontierRecipient(
-			typedRecipient, recipient.Path(), "compiled_connect_evaluation", recipient.AgentIdentity(),
+			typedRecipient, recipient.Path(), "connect_route_plan", recipient.AgentIdentity(),
 		)
 		key := contractFrontierRecipientIdentity{
 			recipient:     projected.Recipient,

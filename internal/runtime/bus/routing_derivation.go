@@ -450,7 +450,11 @@ func (rt *RouteTable) addFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 			if err := rt.addConnectRecipientLocked(templateDef.FlowID, templateDef.InputEvents, rawPattern, subscriber, instancePath); err != nil {
 				return err
 			}
-			for _, resolved := range routeResolveSubscriberPatterns(rt.source, templateDef.PackageKey, templateDef.FlowID, templateDef.InputEvents, instancePath, templateDef.LocalEvents, rawPattern) {
+			resolvedPatterns, err := routeResolveSubscriberPatterns(rt.source, subscriberTemplate.Kind, templateDef.PackageKey, templateDef.FlowID, templateDef.InputEvents, instancePath, templateDef.LocalEvents, rawPattern)
+			if err != nil {
+				return err
+			}
+			for _, resolved := range resolvedPatterns {
 				if strings.TrimSpace(resolved.EventPattern) == "" {
 					continue
 				}
@@ -727,7 +731,7 @@ func (rt *RouteTable) addTopLevelRootInputNodeRoutesLocked(source semanticview.S
 			if subscriberID == "" {
 				subscriberID = semanticNodeID
 			}
-			if semanticNodeID == "" || !normalizedStringListContains(source.NodeRuntimeSubscriptions(semanticNodeID), eventType) {
+			if semanticNodeID == "" || !routeNodeSubscribesToLocalExact(source, semanticNodeID, eventType) {
 				continue
 			}
 			if rootInputFlowOwnsNodeRoute(source, semanticNodeID, eventType) {
@@ -790,7 +794,7 @@ func (rt *RouteTable) addRootInputFlowNodeRoutesLocked(source semanticview.Sourc
 				if subscriberID == "" {
 					subscriberID = semanticNodeID
 				}
-				if semanticNodeID == "" || !normalizedStringListContains(source.NodeRuntimeSubscriptions(semanticNodeID), eventType) {
+				if semanticNodeID == "" || !routeNodeSubscribesToLocalExact(source, semanticNodeID, eventType) {
 					continue
 				}
 				rt.rootInputRoutes[eventType] = appendUniqueSubscriber(rt.rootInputRoutes[eventType], Subscriber{
@@ -814,6 +818,20 @@ func routeRootInputEventSet(source semanticview.Source) map[string]struct{} {
 		out[eventType] = struct{}{}
 	}
 	return out
+}
+
+func routeNodeSubscribesToLocalExact(source semanticview.Source, nodeID, eventType string) bool {
+	eventType = eventidentity.Normalize(eventType)
+	if source == nil || eventType == "" {
+		return false
+	}
+	for _, authored := range source.NodeRuntimeSubscriptions(nodeID) {
+		admission := semanticview.ClassifyNodeSubscription(source, nodeID, authored)
+		if admission.Admitted() && !admission.Pattern() && admission.LocalEvent() == eventType {
+			return true
+		}
+	}
+	return false
 }
 
 func (rt *RouteTable) addEventPathsLocked(basePath string, localEvents map[string]struct{}) []string {
@@ -967,7 +985,11 @@ func (rt *RouteTable) addAgentPatternsLocked(
 			if err := rt.addConnectRecipientLocked(routingFlowID, inputEvents, rawPattern, subscriber, ""); err != nil {
 				return err
 			}
-			for _, resolved := range routeResolveSubscriberPatterns(source, packageKey, routingFlowID, inputEvents, basePath, localEvents, rawPattern) {
+			resolvedPatterns, err := routeResolveSubscriberPatterns(source, subscriberAgent, packageKey, agentFlowID, inputEvents, agentPath, localEvents, rawPattern)
+			if err != nil {
+				return err
+			}
+			for _, resolved := range resolvedPatterns {
 				if strings.TrimSpace(resolved.EventPattern) == "" {
 					continue
 				}
@@ -998,13 +1020,14 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageK
 			if err := rt.addConnectRecipientLocked(flowID, inputEvents, rawPattern, subscriber, ""); err != nil {
 				return err
 			}
-			for _, resolved := range routeResolveSubscriberPatterns(source, packageKey, flowID, inputEvents, basePath, localEvents, rawPattern) {
+			resolvedPatterns, err := routeResolveSubscriberPatterns(source, subscriberNode, packageKey, flowID, inputEvents, basePath, localEvents, rawPattern)
+			if err != nil {
+				return err
+			}
+			for _, resolved := range resolvedPatterns {
 				if strings.TrimSpace(resolved.EventPattern) == "" {
 					continue
 				}
-				rt.addResolvedPatternLocked(subscriber, resolved, "")
-			}
-			if resolved := routeResolveNodeCanonicalPattern(source, basePath, semanticNodeID, rawPattern); strings.TrimSpace(resolved.EventPattern) != "" {
 				rt.addResolvedPatternLocked(subscriber, resolved, "")
 			}
 		}
@@ -1201,37 +1224,6 @@ func routeStaticPrefixBeforeWildcard(pattern string) string {
 	return strings.Join(prefix, "/")
 }
 
-func routeResolveNodeCanonicalPattern(source semanticview.Source, basePath, nodeID, rawPattern string) routeResolvedPattern {
-	if source == nil || strings.Trim(strings.TrimSpace(basePath), "/") == "" || strings.TrimSpace(nodeID) == "" {
-		return routeResolvedPattern{}
-	}
-	rawPattern = eventidentity.Normalize(rawPattern)
-	if rawPattern == "" || strings.Contains(rawPattern, "*") {
-		return routeResolvedPattern{}
-	}
-	resolved := eventidentity.Normalize(source.ResolveNodeEventReference(nodeID, rawPattern))
-	if resolved == "" || resolved == rawPattern || strings.Contains(resolved, "*") {
-		return routeResolvedPattern{}
-	}
-	if !routeExactPatternOwnedByScope(basePath, resolved) {
-		return routeResolvedPattern{}
-	}
-	return routeResolvedPattern{
-		EventPattern: resolved,
-		routeSource:  subscriberRouteSourceSubscription,
-	}
-}
-
-func routeExactPatternOwnedByScope(basePath, pattern string) bool {
-	basePath = eventidentity.Normalize(basePath)
-	pattern = eventidentity.Normalize(pattern)
-	if basePath == "" || pattern == "" || !strings.HasPrefix(pattern, basePath+"/") {
-		return false
-	}
-	local := strings.TrimPrefix(pattern, basePath+"/")
-	return local != "" && !strings.Contains(local, "/")
-}
-
 func (rt *RouteTable) rebuildLocked() {
 	rt.routes = make(map[string][]Subscriber)
 	eventTypes := sortedStringKeys(rt.eventPath)
@@ -1315,11 +1307,18 @@ func routeEventKeys(events map[string]runtimecontracts.EventCatalogEntry) map[st
 
 func routeSubscriberTemplates(source semanticview.Source, scope semanticview.FlowScope) ([]routeSubscriberTemplate, error) {
 	out := make([]routeSubscriberTemplate, 0, len(scope.Agents)+len(scope.Nodes))
+	localEvents := routeFlowLocalEventSet(source, scope)
 	for _, key := range sortedStringKeys(scope.Agents) {
 		entry := scope.Agents[key]
 		patterns := normalizeStringList(entry.Subscriptions)
 		if len(patterns) == 0 {
 			continue
+		}
+		for _, pattern := range patterns {
+			admission := routeClassifyAuthoredSubscription(source, subscriberAgent, scope.PackageKey, scope.ID, scope.InputEvents, scope.Path, localEvents, pattern)
+			if !admission.Admitted() {
+				return nil, fmt.Errorf("route subscriber agent %s: %s", key, admission.Message())
+			}
 		}
 		owner, ok := semanticview.AgentDeclarationOwner(source, scope.ID, key)
 		if !ok {
@@ -1345,6 +1344,12 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 		}
 		if len(patterns) == 0 {
 			continue
+		}
+		for _, pattern := range patterns {
+			admission := routeClassifyAuthoredSubscription(source, subscriberNode, scope.PackageKey, scope.ID, scope.InputEvents, scope.Path, localEvents, pattern)
+			if !admission.Admitted() {
+				return nil, fmt.Errorf("route subscriber node %s: %s", key, admission.Message())
+			}
 		}
 		out = append(out, routeSubscriberTemplate{
 			IDTemplate:  subscriberID,
@@ -1390,71 +1395,68 @@ func routeFlowIDForPath(source semanticview.Source, flowPath string) string {
 	return ""
 }
 
-func routeResolvedPatternsForList(source semanticview.Source, packageKey, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, patterns []string) []routeResolvedPattern {
-	out := make([]routeResolvedPattern, 0, len(patterns))
-	for _, raw := range patterns {
-		out = append(out, routeResolveSubscriberPatterns(source, packageKey, flowID, inputEvents, basePath, localEvents, raw)...)
-	}
-	return out
-}
-
-func routeResolveSubscriberPatterns(source semanticview.Source, packageKey, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, raw string) []routeResolvedPattern {
+func routeResolveSubscriberPatterns(source semanticview.Source, kind subscriberKind, packageKey, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, raw string) ([]routeResolvedPattern, error) {
 	raw = eventidentity.Normalize(raw)
 	flowID = strings.TrimSpace(flowID)
 	if raw == "" {
-		return nil
+		return nil, nil
 	}
-	if flowID != "" && source != nil && source.FlowHasInputEvent(flowID, raw) {
-		patterns := routeInputProducerPatterns(runtimepinrouting.ResolveFlowInputProducer(source, flowID, raw).AutoWireResolution())
+	admission := routeClassifyAuthoredSubscription(source, kind, packageKey, flowID, inputEvents, basePath, localEvents, raw)
+	if !admission.Admitted() {
+		return nil, fmt.Errorf("route subscriber %s", admission.Message())
+	}
+	localEvent := admission.LocalEvent()
+	if !admission.Pattern() && flowID != "" && source != nil && source.FlowHasInputEvent(flowID, localEvent) {
+		patterns := routeInputProducerPatterns(runtimepinrouting.ResolveFlowInputProducer(source, flowID, localEvent).AutoWireResolution())
 		if len(patterns) > 0 {
-			return patterns
+			return patterns, nil
 		}
 	}
-	if source != nil {
-		if strings.Contains(raw, "*") {
-			resolution := semanticview.ResolveImportBoundaryWildcardSubscription(source, packageKey, flowID, basePath, localEvents, raw)
-			if resolution.Scoped {
-				out := make([]routeResolvedPattern, 0, len(resolution.Patterns))
-				for _, pattern := range resolution.Patterns {
-					eventPattern := eventidentity.Normalize(pattern.EventPattern)
-					if eventPattern == "" {
-						continue
-					}
-					routeSource, ok := subscriberRouteSourceFromCode(pattern.RouteSource)
-					if !ok || !routeSource.importBoundaryWildcard() {
-						continue
-					}
-					out = append(out, routeResolvedPattern{
-						EventPattern:       eventPattern,
-						MatchPattern:       eventPattern,
-						routeSource:        routeSource,
-						LocalizedEvent:     pattern.LocalizedEvent,
-						RoutePath:          routeImportBoundarySubscriberPath(source, packageKey, flowID, basePath),
-						SourceTemplatePath: pattern.SourceTemplatePath,
-						SourceLocalEvent:   pattern.SourceLocalEvent,
-					})
-				}
-				return out
+	if admission.Class() == semanticview.AuthoredSubscriptionImportedPattern {
+		resolution := semanticview.ResolveImportBoundaryWildcardSubscription(source, packageKey, flowID, basePath, localEvents, raw)
+		out := make([]routeResolvedPattern, 0, len(resolution.Patterns))
+		for _, pattern := range resolution.Patterns {
+			eventPattern := eventidentity.Normalize(pattern.EventPattern)
+			if eventPattern == "" {
+				continue
 			}
-		}
-	}
-	if !strings.Contains(raw, "*") && strings.Contains(raw, "/") && !routeExactPatternOwnedByScope(basePath, raw) {
-		return nil
-	}
-	scope := routeEventIdentityScope(basePath, localEvents, inputEvents)
-	pattern := scope.ResolveSubscriptionPattern(raw, routeDescendantScopes(source, flowID))
-	if pattern == raw && !strings.Contains(raw, "/") && strings.Trim(strings.TrimSpace(basePath), "/") != "" {
-		for localEvent := range localEvents {
-			if eventidentity.MatchPattern(raw, localEvent) {
-				pattern = eventidentity.Normalize(strings.Trim(strings.TrimSpace(basePath), "/") + "/" + raw)
-				break
+			routeSource, ok := subscriberRouteSourceFromCode(pattern.RouteSource)
+			if !ok || !routeSource.importBoundaryWildcard() {
+				continue
 			}
+			out = append(out, routeResolvedPattern{
+				EventPattern:       eventPattern,
+				MatchPattern:       eventPattern,
+				routeSource:        routeSource,
+				LocalizedEvent:     pattern.LocalizedEvent,
+				RoutePath:          routeImportBoundarySubscriberPath(source, packageKey, flowID, basePath),
+				SourceTemplatePath: pattern.SourceTemplatePath,
+				SourceLocalEvent:   pattern.SourceLocalEvent,
+			})
 		}
+		return out, nil
 	}
-	if pattern == "" {
-		return nil
+	out := make([]routeResolvedPattern, 0, len(admission.RoutePatterns()))
+	for _, pattern := range admission.RoutePatterns() {
+		out = append(out, routeResolvedPattern{EventPattern: pattern, routeSource: subscriberRouteSourceSubscription})
 	}
-	return []routeResolvedPattern{{EventPattern: pattern, routeSource: subscriberRouteSourceSubscription}}
+	return out, nil
+}
+
+func routeClassifyAuthoredSubscription(source semanticview.Source, kind subscriberKind, packageKey, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, raw string) semanticview.AuthoredSubscriptionAdmission {
+	consumerKind := semanticview.AuthoredSubscriptionConsumerNode
+	if kind == subscriberAgent {
+		consumerKind = semanticview.AuthoredSubscriptionConsumerAgent
+	}
+	return semanticview.ClassifyAuthoredSubscription(source, semanticview.AuthoredSubscriptionRequest{
+		ConsumerKind: consumerKind,
+		FlowID:       flowID,
+		FlowPath:     basePath,
+		PackageKey:   packageKey,
+		LocalEvents:  localEvents,
+		InputEvents:  inputEvents,
+		Authored:     raw,
+	})
 }
 
 func routeImportBoundarySubscriberPath(source semanticview.Source, packageKey, flowID, basePath string) string {
@@ -1526,33 +1528,6 @@ func routeEventIdentityScope(basePath string, localEvents map[string]struct{}, i
 		LocalEvents: sortedStringKeys(localEvents),
 		InputEvents: append([]string{}, inputEvents...),
 	}
-}
-
-func routeDescendantScopes(source semanticview.Source, flowID string) []eventidentity.DescendantScope {
-	flowID = strings.TrimSpace(flowID)
-	if source == nil || flowID == "" {
-		return nil
-	}
-	parentPath := eventidentity.Normalize(source.FlowPath(flowID))
-	if parentPath == "" {
-		return nil
-	}
-	out := make([]eventidentity.DescendantScope, 0)
-	for _, scope := range source.FlowScopes() {
-		descendantPath := eventidentity.Normalize(scope.Path)
-		if descendantPath == "" || !strings.HasPrefix(descendantPath, parentPath+"/") {
-			continue
-		}
-		localEvents := sortedStringKeys(workflowScopeLocalEvents(scope))
-		if len(localEvents) == 0 {
-			continue
-		}
-		out = append(out, eventidentity.DescendantScope{
-			Path:        descendantPath,
-			LocalEvents: localEvents,
-		})
-	}
-	return out
 }
 
 func routeRenderTemplate(raw string, vars map[string]string) string {

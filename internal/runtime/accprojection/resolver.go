@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -137,69 +136,16 @@ func activeHandlerResolution(source semanticview.Source, nodeID, eventType strin
 	if source == nil {
 		return active
 	}
-	if handler, ok := source.NodeEventHandler(nodeID, eventType); ok {
-		active.AuthoredEventType = activeHandlerAuthoredEventType(source, nodeID, eventType)
+	resolved := semanticview.ResolveNodeSubscriptionHandler(source, nodeID, eventType)
+	if resolved.Matched {
+		active.AuthoredEventType = resolved.HandlerEventKey
 		active.CanonicalEventType = canonicalNodeEvent(source, nodeID, active.AuthoredEventType)
-		if handler.Accumulate != nil {
-			active.AccumulatorName = strings.TrimSpace(handler.Accumulate.Into)
+		if resolved.Handler.Accumulate != nil {
+			active.AccumulatorName = strings.TrimSpace(resolved.Handler.Accumulate.Into)
 		}
 		return active
 	}
-	if semanticview.ImportBoundaryWildcardHandlerFallbackDenied(source, nodeID, eventType) {
-		return active
-	}
-	if bundle, ok := semanticview.Bundle(source); ok && bundle != nil {
-		resolved := bundle.ResolveNodeEventHandler(nodeID, eventType)
-		if resolved.Matched {
-			active.AuthoredEventType = strings.TrimSpace(resolved.AuthoredEventType)
-			active.CanonicalEventType = normalizeEventType(resolved.CanonicalEventType)
-			if resolved.Handler.Accumulate != nil {
-				active.AccumulatorName = strings.TrimSpace(resolved.Handler.Accumulate.Into)
-			}
-			return active
-		}
-	}
-	node, ok := source.NodeEntries()[strings.TrimSpace(nodeID)]
-	if !ok {
-		return active
-	}
-	handler, ok := node.EventHandlers[normalizeEventType(eventType)]
-	if !ok || handler.Accumulate == nil {
-		return active
-	}
-	active.AuthoredEventType = normalizeEventType(eventType)
-	active.CanonicalEventType = canonicalNodeEvent(source, nodeID, eventType)
-	active.AccumulatorName = strings.TrimSpace(handler.Accumulate.Into)
 	return active
-}
-
-func activeHandlerAuthoredEventType(source semanticview.Source, nodeID, eventType string) string {
-	eventType = normalizeEventType(eventType)
-	if source == nil || eventType == "" {
-		return eventType
-	}
-	handlers := source.NodeEventHandlers(nodeID)
-	for key := range handlers {
-		if normalizeEventType(key) == eventType {
-			return strings.TrimSpace(key)
-		}
-	}
-	for key := range handlers {
-		pattern := normalizeEventType(key)
-		if pattern == "" || !strings.Contains(pattern, "*") {
-			continue
-		}
-		if matched, scoped := semanticview.ImportBoundaryWildcardSubscriptionMatchesNode(source, nodeID, pattern, eventType); scoped {
-			if matched {
-				return strings.TrimSpace(key)
-			}
-			continue
-		}
-		if eventidentity.MatchPattern(pattern, eventType) {
-			return strings.TrimSpace(key)
-		}
-	}
-	return eventType
 }
 
 func issueRelevantToHandler(source semanticview.Source, issue Issue, flowID, nodeID, eventType, accumulatorName string, active activeHandler) bool {
@@ -244,13 +190,10 @@ func handlerEventMatches(source semanticview.Source, nodeID, authoredEventType, 
 	if authoredEventType == "" || runtimeEventType == "" {
 		return false
 	}
-	if semanticview.ImportBoundaryWildcardHandlerFallbackDenied(source, nodeID, runtimeEventType) {
+	if active.AuthoredEventType == "" {
 		return false
 	}
-	if authoredEventType == runtimeEventType {
-		return true
-	}
-	if active.AuthoredEventType != "" && authoredEventType == active.AuthoredEventType {
+	if authoredEventType == active.AuthoredEventType {
 		return true
 	}
 	authoredCanonical := canonicalNodeEvent(source, nodeID, authoredEventType)

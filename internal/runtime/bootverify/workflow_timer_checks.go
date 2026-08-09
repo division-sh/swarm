@@ -198,6 +198,16 @@ func (c *checkerContext) validateTimerTrigger(timer runtimecontracts.WorkflowTim
 			})
 		}
 	case timeridentity.TriggerKindEvent:
+		admission := semanticview.ClassifyTimerSubscription(c.source, timer.ID, timer.FlowID, trigger.Name)
+		if !admission.Admitted() {
+			c.timerFindings = append(c.timerFindings, Finding{
+				CheckID:  "timer_validation",
+				Severity: "error",
+				Message:  fmt.Sprintf("timer %s %s: %s", timer.ID, field, admission.Message()),
+				Location: strings.TrimSpace(timer.ID),
+			})
+			return
+		}
 		ref := semanticview.ResolveFlowEventProof(c.source, timer.FlowID, trigger.Name)
 		if !ref.HasSchema {
 			c.timerFindings = append(c.timerFindings, Finding{
@@ -426,7 +436,7 @@ func timerFireEventHasConsumer(source semanticview.Source, ref semanticview.Flow
 	}
 	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).MatchingConsumers(ref.FlowID, ref.EventKey()) {
 		switch endpoint.Kind {
-		case semanticview.EventEndpointNodeHandler, semanticview.EventEndpointAgent, semanticview.EventEndpointRequiredAgentRole:
+		case semanticview.EventEndpointNodeHandler, semanticview.EventEndpointAgent:
 			return true
 		}
 	}

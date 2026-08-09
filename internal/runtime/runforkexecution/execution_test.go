@@ -1655,7 +1655,7 @@ fi
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002303, 0).UTC()
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, loaded.BundleSourceFact)
+	seedSelectedExecutionRootSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, loaded.BundleSourceFact)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -4390,6 +4390,20 @@ func seedSelectedExecutionSourceRunWithRoutes(
 		events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("test-node")}, extraRoutes, sourceFacts...)
 }
 
+func seedSelectedExecutionRootSourceRun(
+	t *testing.T,
+	db *sql.DB,
+	sourceRunID, entityID, sourceEventID, eventName string,
+	at time.Time,
+	sourceFacts ...runtimecorrelation.BundleSourceFact,
+) events.Event {
+	return seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
+		t, db, sourceRunID, entityID, sourceEventID, eventName, at,
+		selectedExecutionTestAgentRoute(t, "test-agent", "worker"), nil,
+		eventtest.RootRoutingSource(entityID), events.EventEnvelope{Scope: events.EventScopeGlobal}, sourceFacts...,
+	)
+}
+
 func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	t *testing.T,
 	db *sql.DB,
@@ -4397,6 +4411,25 @@ func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	at time.Time,
 	primaryRoute events.DeliveryRoute,
 	extraRoutes []events.DeliveryRoute,
+	sourceFacts ...runtimecorrelation.BundleSourceFact,
+) events.Event {
+	routingSource := eventtest.ConcreteTemplateRoutingSource("flow_a", "flow-a/1", entityID)
+	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1")
+	return seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
+		t, db, sourceRunID, entityID, sourceEventID, eventName, at,
+		primaryRoute, extraRoutes, routingSource, envelope, sourceFacts...,
+	)
+}
+
+func seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
+	t *testing.T,
+	db *sql.DB,
+	sourceRunID, entityID, sourceEventID, eventName string,
+	at time.Time,
+	primaryRoute events.DeliveryRoute,
+	extraRoutes []events.DeliveryRoute,
+	routingSource events.RoutingSource,
+	envelope events.EventEnvelope,
 	sourceFacts ...runtimecorrelation.BundleSourceFact,
 ) events.Event {
 	t.Helper()
@@ -4414,9 +4447,8 @@ func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
 		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), Source: sourceFact,
 	})
-	routingSource := eventtest.ConcreteTemplateRoutingSource("flow_a", "flow-a/1", entityID)
 	event := eventtest.ExistingRunRootIngressWithRoutingSource(sourceEventID, events.EventType(eventName), "source-runtime", "", payload, 0, sourceRunID,
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), routingSource, at)
+		envelope, routingSource, at)
 	routes := append([]events.DeliveryRoute{primaryRoute}, extraRoutes...)
 	commitRunForkTestEvent(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), event, routes)
 	if _, err := db.ExecContext(ctx, `

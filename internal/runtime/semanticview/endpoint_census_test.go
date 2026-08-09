@@ -377,7 +377,7 @@ func TestTypedPubSubCrossFlowRelationDeduplicatesProofAndFailsClosedOnAmbiguity(
 	}
 }
 
-func TestLegacyQualifiedSubscriptionsResolveConsumerRelativeDescendantIdentity(t *testing.T) {
+func TestInvalidAuthoredSubscriptionsRejectConsumerRelativeDescendantIdentity(t *testing.T) {
 	grandchild := runtimecontracts.FlowContractView{
 		Paths:  runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild", PackageKey: "flows/child/flows/grandchild"},
 		Path:   "child/grandchild",
@@ -400,17 +400,17 @@ func TestLegacyQualifiedSubscriptionsResolveConsumerRelativeDescendantIdentity(t
 		},
 	}}
 
-	legacy := BuildAuthoredEventEndpointCensus(Wrap(bundle)).LegacyQualifiedSubscriptions()
-	if len(legacy) != 1 {
-		t.Fatalf("retired subscriptions = %#v, want one child-relative qualified consumer", legacy)
+	invalid := BuildAuthoredEventEndpointCensus(Wrap(bundle)).InvalidAuthoredSubscriptions()
+	if len(invalid) != 1 {
+		t.Fatalf("invalid subscriptions = %#v, want one child-relative qualified consumer", invalid)
 	}
-	got := legacy[0]
-	if got.Consumer.NodeID != "listener" || got.Consumer.Event.Authored != "grandchild/task.done" || got.TargetFlowID != "grandchild" || got.Event.Canonical != "child/grandchild/task.done" {
-		t.Fatalf("retired subscription = %#v, want child-relative listener targeting grandchild", got)
+	got := invalid[0]
+	if got.Consumer.NodeID != "listener" || got.Consumer.Event.Authored != "grandchild/task.done" || got.Admission.Failure() != AuthoredSubscriptionFailureQualifiedExact {
+		t.Fatalf("invalid subscription = %#v, want child-relative listener rejected before resolution", got)
 	}
 }
 
-func TestLegacyQualifiedSubscriptionsPreserveAbsoluteSiblingIdentity(t *testing.T) {
+func TestInvalidAuthoredSubscriptionsRejectAbsoluteSiblingIdentity(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
 		Paths:  runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "flows/producer"},
 		Path:   "producer",
@@ -432,17 +432,17 @@ func TestLegacyQualifiedSubscriptionsPreserveAbsoluteSiblingIdentity(t *testing.
 		},
 	}}
 
-	legacy := BuildAuthoredEventEndpointCensus(Wrap(bundle)).LegacyQualifiedSubscriptions()
-	if len(legacy) != 1 {
-		t.Fatalf("retired subscriptions = %#v, want one absolute sibling consumer", legacy)
+	invalid := BuildAuthoredEventEndpointCensus(Wrap(bundle)).InvalidAuthoredSubscriptions()
+	if len(invalid) != 1 {
+		t.Fatalf("invalid subscriptions = %#v, want one absolute sibling consumer", invalid)
 	}
-	got := legacy[0]
-	if got.Consumer.NodeID != "listener" || got.Consumer.Event.Authored != "producer/task.done" || got.TargetFlowID != "producer" || got.Event.Canonical != "producer/task.done" {
-		t.Fatalf("retired subscription = %#v, want consumer listener targeting producer", got)
+	got := invalid[0]
+	if got.Consumer.NodeID != "listener" || got.Consumer.Event.Authored != "producer/task.done" || got.Admission.Failure() != AuthoredSubscriptionFailureQualifiedExact {
+		t.Fatalf("invalid subscription = %#v, want sibling listener rejected before resolution", got)
 	}
 }
 
-func TestLegacyQualifiedSubscriptionsRejectFullURIWithoutFlowPathResolution(t *testing.T) {
+func TestInvalidAuthoredSubscriptionsRejectFullURIWithoutFlowPathResolution(t *testing.T) {
 	root := runtimecontracts.FlowContractView{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"listener": {
@@ -457,13 +457,13 @@ func TestLegacyQualifiedSubscriptionsRejectFullURIWithoutFlowPathResolution(t *t
 		Nodes:    root.Nodes,
 	}
 
-	legacy := BuildAuthoredEventEndpointCensus(Wrap(bundle)).LegacyQualifiedSubscriptions()
-	if len(legacy) != 1 {
-		t.Fatalf("retired subscriptions = %#v, want one full-URI exact consumer", legacy)
+	invalid := BuildAuthoredEventEndpointCensus(Wrap(bundle)).InvalidAuthoredSubscriptions()
+	if len(invalid) != 1 {
+		t.Fatalf("invalid subscriptions = %#v, want one full-URI exact consumer", invalid)
 	}
-	got := legacy[0]
-	if got.Consumer.NodeID != "listener" || got.Consumer.Event.Authored != "myapp://producer/task.done" || got.TargetFlowID != "" || got.Event.Canonical != "myapp://producer/task.done" {
-		t.Fatalf("retired subscription = %#v, want unresolved full-URI listener fact", got)
+	got := invalid[0]
+	if got.Consumer.NodeID != "listener" || got.Consumer.Event.Authored != "myapp://producer/task.done" || got.Admission.Failure() != AuthoredSubscriptionFailureQualifiedExact {
+		t.Fatalf("invalid subscription = %#v, want unresolved full-URI listener fact", got)
 	}
 }
 
@@ -533,7 +533,7 @@ func assertEndpointSourceLine(t *testing.T, endpoints []AuthoredEventEndpoint, k
 	t.Fatalf("endpoint kind=%s node=%q agent=%q event=%q not found: %#v", kind, nodeID, agentID, eventType, endpoints)
 }
 
-func TestLegacyQualifiedSubscriptionsExcludeConnectedInputDelivery(t *testing.T) {
+func TestInvalidAuthoredSubscriptionsExcludeConnectedInputDelivery(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
@@ -544,8 +544,8 @@ func TestLegacyQualifiedSubscriptionsExcludeConnectedInputDelivery(t *testing.T)
 		t.Fatalf("load connected fixture: %v", err)
 	}
 
-	if legacy := BuildAuthoredEventEndpointCensus(Wrap(bundle)).LegacyQualifiedSubscriptions(); len(legacy) != 0 {
-		t.Fatalf("connected input delivery misclassified as legacy direct delivery: %#v", legacy)
+	if invalid := BuildAuthoredEventEndpointCensus(Wrap(bundle)).InvalidAuthoredSubscriptions(); len(invalid) != 0 {
+		t.Fatalf("connected input delivery misclassified as invalid authored subscription: %#v", invalid)
 	}
 }
 

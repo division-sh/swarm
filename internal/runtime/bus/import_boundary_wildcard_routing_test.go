@@ -727,12 +727,8 @@ func TestImportBoundaryWildcardExplicitCrossTreeSubscriptionWithoutGrantFailsClo
 	if !importBoundaryWildcardReportContains(report.Errors(), "flow_package_wildcard_observe_grant", "no package-subtree candidate") {
 		t.Fatalf("expected ungranted_or_unknown_subscription, got %#v", report.Errors())
 	}
-	rt, err := runtimebus.DeriveRouteTable(source)
-	if err != nil {
-		t.Fatalf("DeriveRouteTable: %v", err)
-	}
-	if routes := rt.Resolve("producer/task.done"); len(routes) != 0 {
-		t.Fatalf("Resolve(producer/task.done) = %#v, want no route for ungranted explicit cross-tree wildcard", routes)
+	if _, err := runtimebus.DeriveRouteTable(source); err == nil || !strings.Contains(err.Error(), "no imported-package subtree candidate or bind.observe grant") {
+		t.Fatalf("DeriveRouteTable error = %v, want typed wildcard admission failure", err)
 	}
 }
 

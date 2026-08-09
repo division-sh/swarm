@@ -90,45 +90,26 @@ func AdmitFlowOwnedAgentSubscriptions(source Source, req FlowOwnedAgentSubscript
 	if req.PackageKey != "" {
 		req.PackageKey = normalizeImportPackageKey(req.PackageKey)
 	}
-	imported := source != nil && req.PackageKey != "" && importBoundaryPackageImported(source, req.PackageKey)
 	persisted := make([]string, 0, len(req.Subscriptions))
 	routes := make([]string, 0, len(req.Subscriptions))
 	for _, authored := range req.Subscriptions {
-		authored = eventidentity.Normalize(authored)
-		if authored == "" {
+		admission := ClassifyAuthoredSubscription(source, AuthoredSubscriptionRequest{
+			ConsumerKind: AuthoredSubscriptionConsumerAgent,
+			ConsumerID:   req.AgentID,
+			FlowID:       req.FlowID,
+			FlowPath:     req.FlowPath,
+			PackageKey:   req.PackageKey,
+			LocalEvents:  localEvents,
+			Authored:     authored,
+		})
+		if admission.Authored() == "" {
 			continue
 		}
-		if strings.Contains(authored, "*") {
-			if imported {
-				resolution := ResolveImportBoundaryWildcardSubscription(source, req.PackageKey, req.FlowID, req.FlowPath, localEvents, authored)
-				if !resolution.Scoped || len(resolution.Patterns) == 0 {
-					return FlowOwnedAgentSubscriptionAdmission{}, fmt.Errorf(
-						"agent %q subscription %q has no imported-package subtree candidate or bind.observe grant; declare a narrow observe grant or use package.yaml connect",
-						req.AgentID,
-						authored,
-					)
-				}
-				persisted = append(persisted, authored)
-				for _, pattern := range resolution.Patterns {
-					routes = append(routes, pattern.EventPattern)
-				}
-				continue
-			}
-			resolved, err := admitNonImportAgentPattern(req.FlowPath, authored)
-			if err != nil {
-				return FlowOwnedAgentSubscriptionAdmission{}, fmt.Errorf("agent %q subscription %q: %w", req.AgentID, authored, err)
-			}
-			persisted = append(persisted, resolved)
-			routes = append(routes, resolved)
-			continue
+		if !admission.Admitted() {
+			return FlowOwnedAgentSubscriptionAdmission{}, fmt.Errorf("%s; declare a receiver-local event or typed bind.observe grant and use package.yaml connect for delivery", admission.Message())
 		}
-
-		resolved, err := admitSameScopeAgentExact(req.FlowPath, authored)
-		if err != nil {
-			return FlowOwnedAgentSubscriptionAdmission{}, fmt.Errorf("agent %q subscription %q: %w", req.AgentID, authored, err)
-		}
-		persisted = append(persisted, resolved)
-		routes = append(routes, resolved)
+		persisted = append(persisted, admission.PersistedValue())
+		routes = append(routes, admission.RoutePatterns()...)
 	}
 
 	return FlowOwnedAgentSubscriptionAdmission{

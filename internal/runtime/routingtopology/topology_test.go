@@ -380,8 +380,8 @@ func TestExactQualifiedSubscriptionFixturesUseCanonicalAncestorEdge(t *testing.T
 				t.Fatalf("load fixture: %v", err)
 			}
 			source := semanticview.Wrap(bundle)
-			if legacy := semanticview.BuildAuthoredEventEndpointCensus(source).LegacyQualifiedSubscriptions(); len(legacy) != 0 {
-				t.Fatalf("retired qualified subscriptions survive: %#v", legacy)
+			if invalid := semanticview.BuildAuthoredEventEndpointCensus(source).InvalidAuthoredSubscriptions(); len(invalid) != 0 {
+				t.Fatalf("invalid authored subscriptions survive: %#v", invalid)
 			}
 			connectEdges := 0
 			for _, edge := range Build(source).Edges {
@@ -401,8 +401,8 @@ func TestExactQualifiedSubscriptionFixturesUseCanonicalAncestorEdge(t *testing.T
 			t.Fatalf("load fixture: %v", err)
 		}
 		source := semanticview.Wrap(bundle)
-		if legacy := semanticview.BuildAuthoredEventEndpointCensus(source).LegacyQualifiedSubscriptions(); len(legacy) != 0 {
-			t.Fatalf("retired qualified subscriptions survive: %#v", legacy)
+		if invalid := semanticview.BuildAuthoredEventEndpointCensus(source).InvalidAuthoredSubscriptions(); len(invalid) != 0 {
+			t.Fatalf("invalid authored subscriptions survive: %#v", invalid)
 		}
 		connectEdges := 0
 		for _, edge := range Build(source).Edges {

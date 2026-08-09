@@ -3363,7 +3363,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 	ctx := eventBusTestRunContext(t, db)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	module, bundle := mixedNodeRouteWorkflowModule(t)
-	const eventType = "child/child.start"
+	const eventType = "route.start"
 	const rootEntityID = "11111111-1111-1111-1111-222222222222"
 	const childEntityID = "11111111-1111-1111-1111-333333333333"
 	emptyRoute := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("project-observer")}
@@ -3459,18 +3459,21 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		}},
 	}
 	child := runtimecontracts.FlowContractView{
-		Path:   "child",
-		Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+		Path:  "child",
+		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: runtimecontracts.FlowModeStatic,
+			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{Events: []string{"route.start"}}},
+		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"child.start": {},
+			"route.start": {},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"child-intake": {
 				ID:            "child-intake",
 				ExecutionType: "system_node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"child.start": handler,
+					"route.start": handler,
 				},
 			},
 		},
@@ -3479,14 +3482,14 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		Path:  "",
 		Paths: runtimecontracts.FlowContractPaths{ID: "mixed-route"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"child/child.start": {},
+			"route.start": {},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"project-observer": {
 				ID:            "project-observer",
 				ExecutionType: "system_node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"child/child.start": handler,
+					"route.start": handler,
 				},
 			},
 		},
@@ -3505,10 +3508,10 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 			},
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"project-observer": {
-					"child/child.start": handler,
+					"route.start": handler,
 				},
 				"child-intake": {
-					"child.start": handler,
+					"route.start": handler,
 				},
 			},
 		},
@@ -3533,16 +3536,16 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		workflowNodes: []runtimepipeline.WorkflowNode{
 			{
 				ID:            "project-observer",
-				Subscriptions: []events.EventType{"child/child.start"},
+				Subscriptions: []events.EventType{"route.start"},
 				Policies: map[string]runtimepipeline.WorkflowEventPolicy{
-					"child/child.start": {Consume: true},
+					"route.start": {Consume: true},
 				},
 			},
 			{
 				ID:            "child-intake",
-				Subscriptions: []events.EventType{"child/child.start"},
+				Subscriptions: []events.EventType{"route.start"},
 				Policies: map[string]runtimepipeline.WorkflowEventPolicy{
-					"child/child.start": {Consume: true},
+					"route.start": {Consume: true},
 				},
 			},
 		},

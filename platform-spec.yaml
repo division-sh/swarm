@@ -4470,6 +4470,10 @@ engine:
         a hard invalidity and cannot create or disambiguate an inter-flow route.
       same_scope_agent_identity: Flow-owned agent admission may retain an already-normalized qualified exact identity only
         when it resolves to the declaring agent flow. This is a same-scope route carrier, not authored inter-flow authority.
+      timer_event_references: Timer start_on/cancel_on event references are exact receiver-local names. Slash-qualified,
+        full-URI, and wildcard timer event references are hard invalidities and cannot become subscription or route authority.
+      required_agent_fulfillment: Required-agent subscription declarations prove role fulfillment only. They are not
+        executable subscribers, event-liveness evidence, or runtime route authority.
       inter_flow_delivery: Declare output/input pins and parent connect, then subscribe to the receiver-local input event.
       wildcard_observation: Imported cross-boundary wildcard observation is separately governed by typed bind.observe
         authorization and cannot become qualified exact delivery authority.
@@ -4478,6 +4482,7 @@ engine:
       subscribes_to: Exact node subscriptions use local names. Flow-owned agent exact subscriptions may be local or an
         already-normalized same-scope identity accepted by typed admission. Cross-boundary slash-qualified and full-URI exact
         values are invalid. Imported cross-boundary patterns require typed bind.observe authorization.
+      timer_event_references: Always local exact names. Timers do not resolve qualified or wildcard subscription paths.
       emit_events: Always local names. The platform externalizes at emission time.
       events_yaml: Always local names. Flow-scoped at load time.
       pins: Always local names. Parent connect binds output pins to receiver input pins for topology; same-name pin matching

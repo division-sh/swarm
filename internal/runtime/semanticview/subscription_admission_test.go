@@ -1,0 +1,83 @@
+package semanticview
+
+import "testing"
+
+func TestClassifyAuthoredSubscriptionExactAdmissionMatrix(t *testing.T) {
+	tests := []struct {
+		name      string
+		kind      AuthoredSubscriptionConsumerKind
+		authored  string
+		wantClass AuthoredSubscriptionAdmissionClass
+		wantFail  AuthoredSubscriptionFailure
+	}{
+		{name: "node local", kind: AuthoredSubscriptionConsumerNode, authored: "task.done", wantClass: AuthoredSubscriptionLocalExact},
+		{name: "node same scope qualified", kind: AuthoredSubscriptionConsumerNode, authored: "child/task.done", wantFail: AuthoredSubscriptionFailureQualifiedExact},
+		{name: "node unresolved qualified", kind: AuthoredSubscriptionConsumerNode, authored: "missing/task.done", wantFail: AuthoredSubscriptionFailureQualifiedExact},
+		{name: "node descendant qualified", kind: AuthoredSubscriptionConsumerNode, authored: "child/grandchild/task.done", wantFail: AuthoredSubscriptionFailureQualifiedExact},
+		{name: "node full uri", kind: AuthoredSubscriptionConsumerNode, authored: "swarm://child/task.done", wantFail: AuthoredSubscriptionFailureQualifiedExact},
+		{name: "agent local", kind: AuthoredSubscriptionConsumerAgent, authored: "task.done", wantClass: AuthoredSubscriptionLocalExact},
+		{name: "agent same scope qualified", kind: AuthoredSubscriptionConsumerAgent, authored: "child/task.done", wantClass: AuthoredSubscriptionSameScopeAgentExact},
+		{name: "agent unresolved qualified", kind: AuthoredSubscriptionConsumerAgent, authored: "missing/task.done", wantFail: AuthoredSubscriptionFailureQualifiedExact},
+		{name: "agent descendant qualified", kind: AuthoredSubscriptionConsumerAgent, authored: "child/grandchild/task.done", wantFail: AuthoredSubscriptionFailureQualifiedExact},
+		{name: "agent full uri", kind: AuthoredSubscriptionConsumerAgent, authored: "swarm://child/task.done", wantFail: AuthoredSubscriptionFailureQualifiedExact},
+		{name: "timer local", kind: AuthoredSubscriptionConsumerTimer, authored: "task.done", wantClass: AuthoredSubscriptionLocalExact},
+		{name: "timer qualified", kind: AuthoredSubscriptionConsumerTimer, authored: "child/task.done", wantFail: AuthoredSubscriptionFailureQualifiedExact},
+		{name: "timer full uri", kind: AuthoredSubscriptionConsumerTimer, authored: "swarm://child/task.done", wantFail: AuthoredSubscriptionFailureQualifiedExact},
+		{name: "timer wildcard", kind: AuthoredSubscriptionConsumerTimer, authored: "task.*", wantFail: AuthoredSubscriptionFailureTimerPatternForbidden},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			admission := ClassifyAuthoredSubscription(nil, AuthoredSubscriptionRequest{
+				ConsumerKind: tc.kind,
+				ConsumerID:   "consumer",
+				FlowID:       "child",
+				FlowPath:     "child",
+				Authored:     tc.authored,
+			})
+			if admission.Class() != tc.wantClass || admission.Failure() != tc.wantFail {
+				t.Fatalf("admission = class %q failure %q message %q, want class %q failure %q", admission.Class(), admission.Failure(), admission.Message(), tc.wantClass, tc.wantFail)
+			}
+			if got := admission.Admitted(); got != (tc.wantFail == "") {
+				t.Fatalf("Admitted() = %t, want %t", got, tc.wantFail == "")
+			}
+		})
+	}
+}
+
+func TestAuthoredSubscriptionAdmissionMatchesOnlyAuthorizedPatternProjection(t *testing.T) {
+	admission := AuthoredSubscriptionAdmission{
+		authored:      "producer/**/task.done",
+		routePatterns: []string{"worker/**/task.done"},
+		class:         AuthoredSubscriptionImportedPattern,
+	}
+	if admission.Matches("producer/task.done") {
+		t.Fatal("raw authored wildcard bypassed the authorized route projection")
+	}
+	if !admission.Matches("worker/instance-1/task.done") {
+		t.Fatal("authorized route projection did not match its admitted event")
+	}
+}
+
+func TestAuthoredSubscriptionAdmissionMatchesTypedReceiverInputWithoutOpeningInvalidExact(t *testing.T) {
+	local := ClassifyAuthoredSubscription(nil, AuthoredSubscriptionRequest{
+		ConsumerKind: AuthoredSubscriptionConsumerNode,
+		ConsumerID:   "listener",
+		FlowPath:     "receiver",
+		InputEvents:  []string{"task.ready"},
+		Authored:     "task.ready",
+	})
+	if !local.MatchesReceiverInput("producer/task.ready", "receiver", []string{"task.ready"}) {
+		t.Fatal("admitted receiver-local exact did not match its typed input event")
+	}
+	invalid := ClassifyAuthoredSubscription(nil, AuthoredSubscriptionRequest{
+		ConsumerKind: AuthoredSubscriptionConsumerNode,
+		ConsumerID:   "listener",
+		FlowPath:     "receiver",
+		InputEvents:  []string{"task.ready"},
+		Authored:     "producer/task.ready",
+	})
+	if invalid.MatchesReceiverInput("producer/task.ready", "receiver", []string{"task.ready"}) {
+		t.Fatal("invalid qualified exact bypassed admission through receiver input localization")
+	}
+}
