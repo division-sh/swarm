@@ -108,6 +108,24 @@ func TestEventBusExactSubscriptionAdmissionPreservesLocalNodeAndSameScopeAgentRo
 	}
 }
 
+func TestEventBusLocalNodeWildcardAdmissionPreservesScope(t *testing.T) {
+	for _, authored := range []string{"task.*", "*.done", "*", "missing.*"} {
+		t.Run(authored, func(t *testing.T) {
+			routes, err := runtimebus.DeriveRouteTable(exactSubscriptionRouteSource(authored, nil))
+			if err != nil {
+				t.Fatalf("DeriveRouteTable: %v", err)
+			}
+			wantLocal := authored != "missing.*"
+			if got := len(routes.Resolve("child/task.done")); (got == 1) != wantLocal {
+				t.Fatalf("Resolve(child/task.done) count = %d, want local match %t", got, wantLocal)
+			}
+			if got := routes.Resolve("sibling/task.done"); len(got) != 0 {
+				t.Fatalf("Resolve(sibling/task.done) = %#v, want no cross-scope subscriber", got)
+			}
+		})
+	}
+}
+
 func TestEventBusTemplateAgentSameScopeExactAdmissionRendersConcreteInstanceRoute(t *testing.T) {
 	bundle := routeMaterializationConfigVarBundle()
 	flow := bundle.FlowTree.ByID["operating"]

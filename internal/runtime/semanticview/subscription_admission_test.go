@@ -50,6 +50,37 @@ func TestClassifyAuthoredSubscriptionExactAdmissionMatrix(t *testing.T) {
 	}
 }
 
+func TestClassifyAuthoredSubscriptionScopesNonRootNodePatterns(t *testing.T) {
+	for _, authored := range []string{"task.*", "*.done", "*", "missing.*", "*/task.done", "**/task.done"} {
+		t.Run(authored, func(t *testing.T) {
+			admission := ClassifyAuthoredSubscription(nil, AuthoredSubscriptionRequest{
+				ConsumerKind: AuthoredSubscriptionConsumerNode,
+				ConsumerID:   "listener",
+				FlowID:       "child",
+				FlowPath:     "child",
+				LocalEvents:  map[string]struct{}{"task.done": {}},
+				Authored:     authored,
+			})
+			want := "child/" + authored
+			if !admission.Admitted() || admission.Class() != AuthoredSubscriptionLocalPattern {
+				t.Fatalf("admission = class %q failure %q, want admitted local pattern", admission.Class(), admission.Failure())
+			}
+			if got := admission.RoutePatterns(); len(got) != 1 || got[0] != want {
+				t.Fatalf("route patterns = %#v, want %#v", got, []string{want})
+			}
+		})
+	}
+
+	root := ClassifyAuthoredSubscription(nil, AuthoredSubscriptionRequest{
+		ConsumerKind: AuthoredSubscriptionConsumerNode,
+		ConsumerID:   "root-listener",
+		Authored:     "*.done",
+	})
+	if got := root.RoutePatterns(); len(got) != 1 || got[0] != "*.done" {
+		t.Fatalf("root route patterns = %#v, want existing root wildcard behavior", got)
+	}
+}
+
 func TestAuthoredSubscriptionAdmissionMatchesOnlyAuthorizedPatternProjection(t *testing.T) {
 	admission := AuthoredSubscriptionAdmission{
 		authored:      "producer/**/task.done",
@@ -85,6 +116,19 @@ func TestAuthoredSubscriptionAdmissionMatchesTypedReceiverInputWithoutOpeningInv
 	if invalid.MatchesReceiverInput("producer/task.ready", "receiver", []string{"task.ready"}) {
 		t.Fatal("invalid qualified exact bypassed admission through receiver input localization")
 	}
+	wildcard := ClassifyAuthoredSubscription(nil, AuthoredSubscriptionRequest{
+		ConsumerKind: AuthoredSubscriptionConsumerNode,
+		ConsumerID:   "listener",
+		FlowPath:     "receiver",
+		InputEvents:  []string{"task.ready"},
+		Authored:     "*",
+	})
+	if !wildcard.MatchesReceiverInput("producer/task.ready", "receiver", []string{"task.ready"}) {
+		t.Fatal("wildcard did not match an event localized through a declared receiver input")
+	}
+	if wildcard.MatchesReceiverInput("producer/task.other", "receiver", []string{"task.ready"}) {
+		t.Fatal("wildcard matched an event that was not localized through a declared receiver input")
+	}
 }
 
 func TestResolveNodeSubscriptionHandlerPrioritizesExactBeforeWildcard(t *testing.T) {
@@ -113,5 +157,40 @@ func TestResolveNodeSubscriptionHandlerPrioritizesExactBeforeWildcard(t *testing
 	resolved := ResolveNodeSubscriptionHandler(source, "listener", "child/task.completed")
 	if !resolved.Matched || resolved.HandlerEventKey != "task.completed" {
 		t.Fatalf("resolved handler = %#v, want exact task.completed before wildcard", resolved)
+	}
+}
+
+func TestResolveNodeSubscriptionHandlerScopesLocalWildcardToOwnerFlow(t *testing.T) {
+	for _, authored := range []string{"task.*", "*"} {
+		t.Run(authored, func(t *testing.T) {
+			child := runtimecontracts.FlowContractView{
+				Path:   "child",
+				Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+				Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
+				Nodes: map[string]runtimecontracts.SystemNodeContract{
+					"listener": {ID: "listener", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{authored: {}}},
+				},
+			}
+			sibling := runtimecontracts.FlowContractView{
+				Path:   "sibling",
+				Paths:  runtimecontracts.FlowContractPaths{ID: "sibling", Flow: "sibling"},
+				Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
+			}
+			root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child, sibling}}
+			source := Wrap(&runtimecontracts.WorkflowContractBundle{FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+				Root: &root,
+				ByID: map[string]*runtimecontracts.FlowContractView{
+					"child":   &root.Children[0],
+					"sibling": &root.Children[1],
+				},
+			}})
+
+			if got := ResolveNodeSubscriptionHandler(source, "listener", "child/task.done"); !got.Matched || got.HandlerEventKey != authored {
+				t.Fatalf("local resolution = %#v, want handler %q", got, authored)
+			}
+			if got := ResolveNodeSubscriptionHandler(source, "listener", "sibling/task.done"); got.Matched {
+				t.Fatalf("sibling resolution = %#v, want no cross-scope handler", got)
+			}
+		})
 	}
 }

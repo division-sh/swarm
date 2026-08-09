@@ -136,6 +136,16 @@ func (a AuthoredSubscriptionAdmission) MatchesReceiverInput(eventType, flowPath 
 	if localized == "" {
 		return false
 	}
+	declaredInput := false
+	for _, input := range inputEvents {
+		if eventidentity.Normalize(input) == localized {
+			declaredInput = true
+			break
+		}
+	}
+	if !declaredInput {
+		return false
+	}
 	if a.Pattern() {
 		return eventidentity.MatchPattern(a.authored, localized)
 	}
@@ -190,12 +200,7 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 			}
 			pattern = resolved
 		} else {
-			scope := eventidentity.Scope{
-				Path:        req.FlowPath,
-				LocalEvents: sortedSubscriptionEventSet(req.LocalEvents),
-				InputEvents: append([]string(nil), req.InputEvents...),
-			}
-			pattern = scope.ResolveSubscriptionPattern(req.Authored, authoredSubscriptionDescendants(source, req.FlowID))
+			pattern = admitNonImportNodePattern(source, req)
 		}
 		if pattern == "" {
 			return failedAuthoredSubscription(result, AuthoredSubscriptionFailurePatternUnauthorized,
@@ -239,6 +244,18 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 	result.persistedValue = req.Authored
 	result.routePatterns = []string{resolved}
 	return result
+}
+
+func admitNonImportNodePattern(source Source, req AuthoredSubscriptionRequest) string {
+	if req.FlowPath != "" && !strings.Contains(req.Authored, "/") {
+		return req.FlowPath + "/" + req.Authored
+	}
+	scope := eventidentity.Scope{
+		Path:        req.FlowPath,
+		LocalEvents: sortedSubscriptionEventSet(req.LocalEvents),
+		InputEvents: append([]string(nil), req.InputEvents...),
+	}
+	return scope.ResolveSubscriptionPattern(req.Authored, authoredSubscriptionDescendants(source, req.FlowID))
 }
 
 func ClassifyNodeSubscription(source Source, nodeID, authored string) AuthoredSubscriptionAdmission {

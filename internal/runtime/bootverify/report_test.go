@@ -791,6 +791,39 @@ consumer-node:
 	}
 }
 
+func TestRun_TreatsScopedLocalWildcardAsSameFlowDeadEventLiveness(t *testing.T) {
+	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
+		name: "dead-event-schema-local-wildcard",
+		flows: map[string]deadEventSchemaFlowFiles{
+			"child": {
+				events: "ticket.ready: {}\n",
+				nodes: `
+consumer-node:
+  id: consumer-node
+  execution_type: system_node
+  subscribes_to:
+    - ticket.*
+  event_handlers:
+    ticket.*: {}
+`,
+			},
+			"sibling": {
+				events: "ticket.ready: {}\n",
+			},
+		},
+	})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "child/ticket.ready") {
+		t.Fatalf("scoped local wildcard did not keep child declaration live: %#v", report.Warnings())
+	}
+	if !reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "sibling/ticket.ready") {
+		t.Fatalf("child-local wildcard incorrectly kept sibling declaration live: %#v", report.Warnings())
+	}
+}
+
 func TestRun_DoesNotUseSameLocalNameAcrossFlowsByCoincidenceForDeadEventSchema(t *testing.T) {
 	root := writeDeadEventSchemaFixture(t, deadEventSchemaFixtureOptions{
 		name: "dead-event-schema-coincidental-name",

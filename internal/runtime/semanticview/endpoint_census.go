@@ -1144,8 +1144,19 @@ func endpointMatchesProof(source Source, endpoint AuthoredEventEndpoint, proof F
 	if source == nil {
 		return false
 	}
-	if admission, classified := endpointSubscriptionAdmission(source, endpoint); classified && !admission.Admitted() {
-		return false
+	if admission, classified := endpointSubscriptionAdmission(source, endpoint); classified {
+		if !admission.Admitted() {
+			return false
+		}
+		if admission.Matches(proof.EventKey()) {
+			return true
+		}
+		flowPath := eventidentity.Normalize(endpoint.FlowPath)
+		if flowPath == "" {
+			flowPath = eventidentity.Normalize(source.FlowPath(endpoint.FlowID))
+		}
+		_, inputEvents := authoredSubscriptionFlowEvents(source, endpoint.FlowID)
+		return admission.MatchesReceiverInput(proof.EventKey(), flowPath, inputEvents)
 	}
 	if endpoint.Pattern {
 		if matched, scoped := ImportBoundaryWildcardSubscriptionMatches(source, endpoint.PackageKey, endpoint.FlowID, "", nil, endpoint.Event.Authored, proof.EventKey()); scoped {
@@ -1240,6 +1251,14 @@ func fanInInputMatchesHandler(source Source, endpoint AuthoredEventEndpoint, han
 func resolveNodeHandlerProof(source Source, nodeID, eventType string) (string, bool) {
 	if source == nil {
 		return "", false
+	}
+	authored := eventidentity.Normalize(eventType)
+	if admission := ClassifyNodeSubscription(source, nodeID, authored); admission.Admitted() {
+		for key := range source.NodeEventHandlers(nodeID) {
+			if eventidentity.Normalize(key) == authored {
+				return authored, true
+			}
+		}
 	}
 	resolution := ResolveNodeSubscriptionHandler(source, nodeID, eventType)
 	if resolution.Matched {
