@@ -89,7 +89,7 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 	}, nil
 }
 
-func NewLLMAgentFactory(modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, opts LLMAgentOptions) runtimemanager.AgentFactory {
+func NewLLMAgentFactory(runtimes llm.AgentRuntimeResolver, toolExecutor actorScopedToolExecutor, opts LLMAgentOptions) runtimemanager.AgentFactory {
 	return func(cfg models.AgentConfig) (runtimemanager.Agent, error) {
 		if strings.TrimSpace(extractSystemPrompt(cfg)) == "" {
 			agentID := strings.TrimSpace(cfg.ID)
@@ -100,6 +100,13 @@ func NewLLMAgentFactory(modelRuntime llm.Runtime, toolExecutor actorScopedToolEx
 				agentID = "unknown-agent"
 			}
 			return nil, errors.New("missing required system_prompt for agent " + agentID)
+		}
+		if runtimes == nil {
+			return nil, errors.New("agent llm runtime resolver is required")
+		}
+		modelRuntime, err := runtimes.RuntimeForAgent(cfg)
+		if err != nil {
+			return nil, err
 		}
 		agentTools := toolExecutor.ToolDefinitionsForActor(cfg)
 		return newLLMAgent(cfg, modelRuntime, toolExecutor, agentTools, opts)

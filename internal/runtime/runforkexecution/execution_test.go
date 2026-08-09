@@ -1910,8 +1910,11 @@ func TestSelectedContractForkManagedPreflightExecutesEligibleMCPToolCall(t *test
 	ctx := runForkTestContext(t)
 	container := buildSelectedForkProofContainer(t, ctx, db)
 
-	manager := runtimemanager.NewAgentManager(nil, nil)
-	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ID: "selected-health-agent", Role: "selected_health"}); err != nil {
+	manager := runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
+		LLMBackend:        llmselection.BackendClaudeCLI,
+		ReceiverExecution: eventreceiver.NormalExecution(),
+	})
+	if err := manager.SpawnAgent(runtimeactors.AgentConfig{ID: "selected-health-agent", Role: "selected_health", Model: llmselection.ModelAliasRegular}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	executor := &selectedForkStartupProbeExecutor{}
@@ -1932,6 +1935,14 @@ func TestSelectedContractForkManagedPreflightExecutesEligibleMCPToolCall(t *test
 	}
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	cfg := &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendClaudeCLI}}
+	profile, err := cfg.LLMBackendProfile()
+	if err != nil {
+		t.Fatalf("resolve selected-fork llm profile: %v", err)
+	}
+	runtimes, err := runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{}, selectedForkStartupRuntime{})
+	if err != nil {
+		t.Fatalf("build selected-fork runtime set: %v", err)
+	}
 	proof := container.Proof()
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx = runtimeeffects.WithAuthority(ctx, container.authority)
@@ -1939,7 +1950,7 @@ func TestSelectedContractForkManagedPreflightExecutesEligibleMCPToolCall(t *test
 	ctx = managedexecution.WithAdmission(ctx, container.admission)
 	surfaceIDs, err := swaruntime.ValidateManagedProviderPreflight(
 		ctx, cfg, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), binding,
-		&runtimellm.ClaudeCLIRuntime{}, selectedForkStartupVisibleSurfaceProbe{}, turns, executor, manager,
+		runtimes, turns, executor, manager,
 		swaruntime.ManagedProviderPreflightAuthority{
 			ExecutionKind:        managedcapabilities.ExecutionSelectedContractFork,
 			ExecutionAuthorityID: proof.RuntimeExecutionID,
@@ -2026,6 +2037,18 @@ func selectedForkStartupProbeCapabilities(names []string) toolcapabilities.Set {
 }
 
 type selectedForkStartupVisibleSurfaceProbe struct{}
+
+type selectedForkStartupRuntime struct {
+	runtimellm.NoopRuntime
+}
+
+func (selectedForkStartupRuntime) ProviderContract() runtimellm.ProviderContract {
+	return runtimellm.ClaudeCLIProviderContract()
+}
+
+func (selectedForkStartupRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, actor runtimeactors.AgentConfig, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Response, error) {
+	return selectedForkStartupVisibleSurfaceProbe{}.ProbeStartupVisibleToolSurface(ctx, actor, systemPrompt, tools)
+}
 
 func (selectedForkStartupVisibleSurfaceProbe) ProbeStartupVisibleToolSurface(ctx context.Context, _ runtimeactors.AgentConfig, _ string, _ []runtimellm.ToolDefinition) (*runtimellm.Response, error) {
 	surface, ok := managedcapabilities.FromContext(ctx)

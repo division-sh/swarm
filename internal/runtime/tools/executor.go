@@ -47,7 +47,7 @@ type Executor struct {
 	channelOperations              map[string]channelOperation
 	activityExecutor               DurableActivityExecutor
 	workspaces                     workspace.Resolver
-	modelRuntime                   llm.Runtime
+	modelRuntimes                  llm.AgentRuntimeResolver
 	authority                      runtimeauthority.Provider
 	emitRegistry                   *EmitRegistry
 	authorizer                     *ToolAuthorizer
@@ -92,7 +92,7 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		channelOperations:              compileChannelOperations(opts.ChannelBindings),
 		activityExecutor:               opts.ActivityExecutor,
 		workspaces:                     opts.WorkspaceResolver,
-		modelRuntime:                   opts.ModelRuntime,
+		modelRuntimes:                  opts.ModelRuntimes,
 		authority:                      runtimeauthority.ProviderOrNoop(opts.AuthorityProvider),
 		externalDispatchAdmission:      newExternalDispatchAdmissionController(),
 		allowInternalLegacyEntityTools: opts.AllowInternalLegacyEntityTools,
@@ -138,14 +138,15 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 	return exec
 }
 
-// SetModelRuntime updates the provider contract used by native-tool admission.
-func (e *Executor) SetModelRuntime(runtime llm.Runtime) {
+// SetModelRuntimes updates the actor-scoped provider contract owner used by
+// native-tool admission.
+func (e *Executor) SetModelRuntimes(runtimes llm.AgentRuntimeResolver) {
 	if e == nil {
 		return
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.modelRuntime = runtime
+	e.modelRuntimes = runtimes
 }
 
 func (e *Executor) contractDefinitions() ([]llm.ToolDefinition, error) {

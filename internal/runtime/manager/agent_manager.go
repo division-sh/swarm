@@ -19,11 +19,9 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
-	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -389,9 +387,6 @@ func (am *AgentManager) spawnAgentInternalForSourceWithTopology(
 	if err != nil {
 		return fmt.Errorf("agent %q requires a concrete identity: %w", strings.TrimSpace(rec.Config.ID), err)
 	}
-	if strings.TrimSpace(rec.Config.LLMBackend) == "" {
-		rec.Config.LLMBackend = am.llmBackend
-	}
 	if err := am.resolveAgentModel(&rec.Config); err != nil {
 		return err
 	}
@@ -504,17 +499,25 @@ func (am *AgentManager) resolveAgentModel(cfg *models.AgentConfig) error {
 		return fmt.Errorf("agent config is required")
 	}
 	cfg.NormalizeRuntimeDescriptor()
+	configuredProfile, err := llmselection.ResolveActiveBackend(am.llmBackend)
+	if err != nil {
+		return fmt.Errorf("agent %s invalid configured llm backend %q: %w", strings.TrimSpace(cfg.ID), strings.TrimSpace(am.llmBackend), err)
+	}
+	selection, err := llmselection.ResolveAgentExecutionSelection(configuredProfile, cfg.Mock.Configured())
+	if err != nil {
+		return fmt.Errorf("agent %s execution selection failed: %w", strings.TrimSpace(cfg.ID), err)
+	}
+	cfg.LLMBackend = selection.Profile.ID
+	cfg.ResolvedLLMProvider = selection.Profile.Provider
+	cfg.ResolvedLLMTransport = selection.Profile.Transport
+	cfg.ExecutionMode = selection.Mode
 	if strings.TrimSpace(cfg.Model) == "" {
 		if am.requireModelResolution {
 			return fmt.Errorf("agent %s missing model", strings.TrimSpace(cfg.ID))
 		}
 		return nil
 	}
-	profile, err := llmselection.ResolveActiveBackend(cfg.LLMBackend)
-	if err != nil {
-		return fmt.Errorf("agent %s invalid llm_backend %q: %w", strings.TrimSpace(cfg.ID), strings.TrimSpace(cfg.LLMBackend), err)
-	}
-	resolved, err := llmselection.ResolveModel(profile, llmselection.ModelResolution{
+	resolved, err := llmselection.ResolveModel(selection.Profile, llmselection.ModelResolution{
 		Model:  cfg.Model,
 		Models: am.modelAliases,
 	})
@@ -526,18 +529,6 @@ func (am *AgentManager) resolveAgentModel(cfg *models.AgentConfig) error {
 	cfg.ResolvedModel = resolved.ConcreteModel
 	cfg.ResolvedLLMProvider = resolved.Provider
 	cfg.ResolvedLLMTransport = resolved.Transport
-	executionMode, err := llmselection.ExecutionModeForProfile(profile)
-	if err != nil {
-		return fmt.Errorf("agent %s execution mode resolution failed: %w", strings.TrimSpace(cfg.ID), err)
-	}
-	cfg.ExecutionMode = executionMode
-	if executionMode == runtimeeffects.ExecutionModeMock {
-		if !cfg.Mock.Configured() {
-			return fmt.Errorf("agent %s selects llm_backend %q but does not declare a mock performance", strings.TrimSpace(cfg.ID), profile.ID)
-		}
-	} else {
-		cfg.Mock = mockperformance.Performance{}
-	}
 	return nil
 }
 

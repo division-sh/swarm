@@ -768,7 +768,7 @@ func TestExecutor_ToolDefinitionsForActor_UsesSharedActorRegistry(t *testing.T) 
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
 		WorkflowSource: source,
-		ModelRuntime:   nativeCapabilityRuntimeStub{},
+		ModelRuntimes:  staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 		WorkspaceResolver: relayWorkspaceResolverStub{
 			target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()},
 		},

@@ -35,21 +35,43 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 	if f.Cfg == nil {
 		return nil, fmt.Errorf("llm runtime config is required")
 	}
-	if f.CompletionController == nil || !f.CompletionController.CompletionEnabled() {
-		return nil, fmt.Errorf("llm completion execution controller is required")
-	}
 	profile, err := f.Cfg.LLMBackendProfile()
 	if err != nil {
 		return nil, err
+	}
+	prepared, err := f.prepare()
+	if err != nil {
+		return nil, err
+	}
+	return prepared.buildProfile(profile)
+}
+
+func (f RuntimeFactory) prepare() (RuntimeFactory, error) {
+	if f.Cfg == nil {
+		return RuntimeFactory{}, fmt.Errorf("llm runtime config is required")
+	}
+	if _, err := f.Cfg.LLMBackendProfile(); err != nil {
+		return RuntimeFactory{}, err
+	}
+	if f.CompletionController == nil || !f.CompletionController.CompletionEnabled() {
+		return RuntimeFactory{}, fmt.Errorf("llm completion execution controller is required")
 	}
 	if f.Sessions == nil {
 		f.Sessions = sessions.NewInMemoryRegistry(f.Cfg.LLM.Session.LockTTL)
 	}
 	if f.LiveSessions == nil {
-		return nil, fmt.Errorf("llm live session acquirer is required")
+		return RuntimeFactory{}, fmt.Errorf("llm live session acquirer is required")
 	}
 	if f.LockOwner == "" {
 		f.LockOwner = defaultLockOwner()
+	}
+	return f, nil
+}
+
+func (f RuntimeFactory) buildProfile(profile llmselection.Profile) (Runtime, error) {
+	profile, err := llmselection.ResolveActiveBackend(profile.ID)
+	if err != nil {
+		return nil, err
 	}
 
 	providerAdmission := NewProviderAdmissionRegistry(f.Cfg)

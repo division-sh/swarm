@@ -398,7 +398,7 @@ func TestExecutor_NativeWebSearchHardcodedProviderUsesRateLimit(t *testing.T) {
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
 		WorkflowSource: rateLimitedNativeWebSearchSource("brave", "1/40ms", "500ms", nil),
 		Credentials:    nativeWebSearchCredentialStore{"brave_search_api_key": "secret"},
-		ModelRuntime:   nativeCapabilityRuntimeStub{},
+		ModelRuntimes:  staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 	})
 	exec.httpClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		recorder.record()
@@ -437,7 +437,7 @@ func TestExecutor_NativeWebSearchCustomProviderUsesRateLimit(t *testing.T) {
 	}
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
 		WorkflowSource: rateLimitedNativeWebSearchSource("custom", "1/40ms", "500ms", customHTTP),
-		ModelRuntime:   nativeCapabilityRuntimeStub{},
+		ModelRuntimes:  staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 	})
 	ctx := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",
@@ -465,7 +465,7 @@ func TestExecutor_NativeWebSearchInheritedProviderPolicySharesBucketAcrossFlows(
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
 		WorkflowSource: rateLimitedNativeWebSearchSiblingFlowSource(server.URL),
-		ModelRuntime:   nativeCapabilityRuntimeStub{},
+		ModelRuntimes:  staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 	})
 	first := models.WithActor(unmanagedToolTestContext(), models.AgentConfig{
 		ExecutionMode: "live",

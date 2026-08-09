@@ -25,6 +25,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -90,13 +91,12 @@ type selectedContractAgentRuntimeFactory struct {
 }
 
 type selectedContractAgentRuntimePreflight struct {
-	config       *config.Config
-	source       semanticview.Source
-	gateway      toolgateway.Binding
-	modelRuntime runtimellm.Runtime
-	probe        runtimellm.StartupVisibleToolSurfaceProber
-	turns        runtimellm.MCPTurnContextStore
-	tools        *runtimetools.Executor
+	config   *config.Config
+	source   semanticview.Source
+	gateway  toolgateway.Binding
+	runtimes *runtimellm.AgentRuntimeSet
+	turns    runtimellm.MCPTurnContextStore
+	tools    *runtimetools.Executor
 }
 
 func selectedContractManagerOptions(options runtimemanager.AgentManagerOptions, bus *runtimebus.EventBus, ports *selectedContractExecutionPorts, pipeline *runtimepipeline.PipelineCoordinator) runtimemanager.AgentManagerOptions {
@@ -290,8 +290,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			builder.preflight.config,
 			builder.preflight.source,
 			builder.preflight.gateway,
-			builder.preflight.modelRuntime,
-			builder.preflight.probe,
+			builder.preflight.runtimes,
 			builder.preflight.turns,
 			builder.preflight.tools,
 			manager,
@@ -382,12 +381,16 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	if managerOptions.Workspaces == nil {
 		managerOptions.Workspaces = options.Workspace
 	}
-	if options.Config != nil && strings.TrimSpace(managerOptions.LLMBackend) == "" {
-		profile, err := options.Config.LLMBackendProfile()
+	var backendProfile llmselection.Profile
+	if options.Config != nil {
+		backendProfile, err = options.Config.LLMBackendProfile()
 		if err != nil {
 			return selectedContractAgentRuntimeFactory{}, err
 		}
-		managerOptions.LLMBackend = profile.ID
+		if configured := strings.TrimSpace(managerOptions.LLMBackend); configured != "" && configured != backendProfile.ID {
+			return selectedContractAgentRuntimeFactory{}, fmt.Errorf("selected-contract manager llm backend %q conflicts with runtime default %q", configured, backendProfile.ID)
+		}
+		managerOptions.LLMBackend = backendProfile.ID
 	}
 	budget := swaruntime.NewBudgetTracker(ports.budget, bus, options.Config, options.MailboxStore, nil, source)
 	managerOptions.Budget = budget
@@ -405,7 +408,6 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	if credentials == nil {
 		credentials = runtimecredentials.NewEnvStore()
 	}
-	modelRuntime := options.LLMRuntime
 	var managerRef runtimetools.Manager
 	exec := runtimetools.NewExecutorWithOptions(bus, nil, runtimetools.ExecutorOptions{
 		Config:             options.Config,
@@ -418,7 +420,6 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		WorkflowInstances:  pipeline,
 		WorkflowSource:     source,
 		WorkspaceResolver:  options.Workspace,
-		ModelRuntime:       modelRuntime,
 		AuthorityProvider:  authority,
 		EmitRegistry:       emitRegistry,
 		ManagerProvider: func() runtimetools.Manager {
@@ -435,28 +436,26 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	if err != nil {
 		return selectedContractAgentRuntimeFactory{}, fmt.Errorf("start selected-fork tool gateway: %w", err)
 	}
-	if modelRuntime == nil {
-		modelRuntime, err = runtimellm.RuntimeFactory{
-			Cfg:                  options.Config,
-			Sessions:             options.SessionRegistry,
-			LiveSessions:         ports.liveSessions,
-			Conversations:        options.ConversationStore,
-			Workspaces:           options.Workspace,
-			Events:               bus,
-			MCPTurns:             mcpTurns,
-			ToolGateway:          binding,
-			Credentials:          options.ProviderCredentials,
-			CompletionController: runtimeeffects.NewCompletionController(ports.effects, ports.completion, ports.completionHeartbeat, budget),
-		}.Build()
-		if err != nil {
-			if cleanup != nil {
-				cleanup()
-			}
-			return selectedContractAgentRuntimeFactory{}, fmt.Errorf("build selected-fork agent runtime: %w", err)
+	runtimes, err := runtimellm.NewAgentRuntimeSet(backendProfile, runtimellm.RuntimeFactory{
+		Cfg:                  options.Config,
+		Sessions:             options.SessionRegistry,
+		LiveSessions:         ports.liveSessions,
+		Conversations:        options.ConversationStore,
+		Workspaces:           options.Workspace,
+		Events:               bus,
+		MCPTurns:             mcpTurns,
+		ToolGateway:          binding,
+		Credentials:          options.ProviderCredentials,
+		CompletionController: runtimeeffects.NewCompletionController(ports.effects, ports.completion, ports.completionHeartbeat, budget),
+	}, options.LLMRuntime)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
 		}
+		return selectedContractAgentRuntimeFactory{}, fmt.Errorf("build selected-fork agent runtime resolver: %w", err)
 	}
-	exec.SetModelRuntime(modelRuntime)
-	factory := runtimeagents.NewLLMAgentFactory(modelRuntime, exec, runtimeagents.LLMAgentOptions{
+	exec.SetModelRuntimes(runtimes)
+	factory := runtimeagents.NewLLMAgentFactory(runtimes, exec, runtimeagents.LLMAgentOptions{
 		PromptResolver: promptResolver,
 	})
 	return selectedContractAgentRuntimeFactory{
@@ -467,16 +466,12 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		},
 		cleanup: cleanup,
 		preflight: &selectedContractAgentRuntimePreflight{
-			config:       options.Config,
-			source:       source,
-			gateway:      binding,
-			modelRuntime: modelRuntime,
-			probe: func() runtimellm.StartupVisibleToolSurfaceProber {
-				probe, _ := runtimellm.StartupVisibleToolSurfaceProberForRuntime(modelRuntime)
-				return probe
-			}(),
-			turns: mcpTurns,
-			tools: exec,
+			config:   options.Config,
+			source:   source,
+			gateway:  binding,
+			runtimes: runtimes,
+			turns:    mcpTurns,
+			tools:    exec,
 		},
 	}, nil
 }

@@ -69,6 +69,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/llm/cli_tool_result_relay.go:runWorkspaceCommand:process_launch:1":                                  ownerManagedAgent,
 	"internal/runtime/llm/openai_compatible_runtime.go:sendRequest:http_do:1":                                             ownerManagedAgent,
 	"internal/runtime/llm/openai_responses_runtime.go:sendRequest:http_do:1":                                              ownerManagedAgent,
+	"internal/runtime/llm/runtime_resolver.go:get:http_do:1":                                                              ownerRuntimeDependency,
 	"internal/runtime/managedcredentials/store.go:exchange:http_do:1":                                                     ownerManagedAgent,
 	"internal/runtime/managedcredentials/store.go:exchangeGitHubAppInstallation:http_do:1":                                ownerManagedAgent,
 	"internal/runtime/managedcredentials/store.go:writeLocked:filesystem_write:1":                                         ownerCredentialLifecycle,

@@ -45,7 +45,7 @@ func (r WorkspaceCapabilityReason) String() string {
 	case WorkspaceReasonLifecycle:
 		return "declared agents use runtime-mediated workspace lifecycle"
 	case WorkspaceReasonClaudeCLI:
-		return fmt.Sprintf("agent %s uses claude_cli backend", workspaceBackendAgentLabel(r.AgentID))
+		return fmt.Sprintf("unmocked agent %s uses claude_cli backend", workspaceBackendAgentLabel(r.AgentID))
 	case WorkspaceReasonNativeBash:
 		return fmt.Sprintf("agent %s has native_tools.bash", workspaceBackendAgentLabel(r.AgentID))
 	case WorkspaceReasonExecTool:
@@ -267,7 +267,11 @@ func classifyWorkspaceBackendRequirement(cfg *config.Config, source semanticview
 	for _, agentID := range agentIDs {
 		entry := entries[agentID]
 		label := workspaceBackendAgentLabel(agentID, entry.ID, entry.Role)
-		if profile.ID == llmselection.BackendClaudeCLI {
+		selection, err := llmselection.ResolveAgentExecutionSelection(profile, entry.Mock.Configured())
+		if err != nil {
+			return "", nil, fmt.Errorf("agent %s execution selection: %w", label, err)
+		}
+		if selection.Profile.ID == llmselection.BackendClaudeCLI {
 			class = workspaceCapabilityExec
 			reasons = append(reasons, WorkspaceCapabilityReason{Kind: WorkspaceReasonClaudeCLI, AgentID: label})
 		}

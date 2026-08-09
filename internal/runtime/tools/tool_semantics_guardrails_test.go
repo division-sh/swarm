@@ -135,7 +135,7 @@ func TestToolDefinitionsForActor_IncludesEnabledNativeTools(t *testing.T) {
 	t.Parallel()
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
-		ModelRuntime: nativeCapabilityRuntimeStub{},
+		ModelRuntimes: staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 		WorkspaceResolver: relayWorkspaceResolverStub{
 			target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()},
 		},

@@ -257,7 +257,7 @@ type Runtime struct {
 	Budget             *BudgetTracker
 	Credentials        runtimecredentials.Store
 	ManagedCredentials runtimemanagedcredentials.Store
-	LLM                llm.Runtime
+	LLMRuntimes        *llm.AgentRuntimeSet
 	ToolExecutor       *runtimetools.Executor
 	Manager            *runtimemanager.AgentManager
 	RuntimeIngress     *runtimeingress.Controller
@@ -1185,29 +1185,29 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	if err != nil {
 		return nil, err
 	}
-	modelRuntime := opts.LLMRuntime
-	if modelRuntime == nil {
-		if runtimeDeps.EffectsStore == nil || runtimeDeps.CompletionStore == nil || runtimeDeps.CompletionHeartbeatStore == nil {
-			return nil, fmt.Errorf("selected runtime store does not implement completion execution authority")
-		}
-		modelRuntime, err = llm.RuntimeFactory{
-			Cfg:                  cfg,
-			Sessions:             runtimeDeps.SessionRegistry,
-			LiveSessions:         runtimeDeps.LiveSessionAcquirer,
-			Conversations:        runtimeDeps.ConversationStore,
-			Workspaces:           rt.Workspace,
-			Events:               rt.Bus,
-			MCPTurns:             rt.MCPTurns,
-			ToolGateway:          opts.ToolGatewayBinding,
-			Credentials:          boot.ProviderCredentialResolver.Store,
-			CompletionController: runtimeeffects.NewCompletionController(runtimeDeps.EffectsStore, runtimeDeps.CompletionStore, runtimeDeps.CompletionHeartbeatStore, rt.Budget),
-		}.Build()
-		if err != nil {
-			return nil, fmt.Errorf("build runtime: %w", err)
-		}
+	var completionController *runtimeeffects.Controller
+	if runtimeDeps.EffectsStore != nil && runtimeDeps.CompletionStore != nil && runtimeDeps.CompletionHeartbeatStore != nil {
+		completionController = runtimeeffects.NewCompletionController(runtimeDeps.EffectsStore, runtimeDeps.CompletionStore, runtimeDeps.CompletionHeartbeatStore, rt.Budget)
 	}
-	rt.LLM = modelRuntime
-	if warnings, err := runtimetools.ValidateNativeToolBootConfig(ctx, source, rt.Credentials, modelRuntime, rt.Workspace); err != nil {
+	if opts.LLMRuntime == nil && completionController == nil {
+		return nil, fmt.Errorf("selected runtime store does not implement completion execution authority")
+	}
+	rt.LLMRuntimes, err = llm.NewAgentRuntimeSet(backendProfile, llm.RuntimeFactory{
+		Cfg:                  cfg,
+		Sessions:             runtimeDeps.SessionRegistry,
+		LiveSessions:         runtimeDeps.LiveSessionAcquirer,
+		Conversations:        runtimeDeps.ConversationStore,
+		Workspaces:           rt.Workspace,
+		Events:               rt.Bus,
+		MCPTurns:             rt.MCPTurns,
+		ToolGateway:          opts.ToolGatewayBinding,
+		Credentials:          boot.ProviderCredentialResolver.Store,
+		CompletionController: completionController,
+	}, opts.LLMRuntime)
+	if err != nil {
+		return nil, fmt.Errorf("build agent runtime resolver: %w", err)
+	}
+	if warnings, err := runtimetools.ValidateNativeToolBootConfig(ctx, source, rt.Credentials, rt.LLMRuntimes, rt.Workspace); err != nil {
 		return nil, fmt.Errorf("native tool validation failed: %w", err)
 	} else {
 		if bootWarningsFatal() && len(warnings) > 0 {
@@ -1235,7 +1235,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		ChannelBindings:    opts.ChannelOutboundBindings,
 		ActivityExecutor:   rt.Pipeline,
 		WorkspaceResolver:  rt.Workspace,
-		ModelRuntime:       rt.LLM,
+		ModelRuntimes:      rt.LLMRuntimes,
 		AuthorityProvider:  rt.Authority,
 		EmitRegistry:       rt.EmitRegistry,
 		ManagerProvider: func() runtimetools.Manager {
@@ -1300,7 +1300,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			slog.Warn("managed credential requirement warning", "key", item.Key, "status", item.Status, "required_by", strings.Join(requiredBy, ", "))
 		}
 	}
-	factory := runtimeagents.NewLLMAgentFactory(rt.LLM, rt.ToolExecutor, runtimeagents.LLMAgentOptions{
+	factory := runtimeagents.NewLLMAgentFactory(rt.LLMRuntimes, rt.ToolExecutor, runtimeagents.LLMAgentOptions{
 		PromptResolver: rt.PromptResolver,
 	})
 	lifecycleStore := runtimeDeps.ManagerLifecycleStore
@@ -1744,7 +1744,6 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		return fmt.Errorf("claude runtime workspace validation failed: %w", err)
 	}
 	rt.emitBootProgress(14, "workspace_validation_and_system_containers", "ok", fmt.Sprintf("%d system containers", len(rt.Options.SystemContainers)))
-	startupProbe, _ := llm.StartupVisibleToolSurfaceProberForRuntime(rt.LLM)
 	startupAuthority, err := rt.currentStartupProbeAuthority()
 	if err != nil {
 		rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
@@ -1764,7 +1763,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			return err
 		}
 	}
-	surfaceIDs, err := ValidateManagedProviderPreflight(ctx, rt.Config, source, rt.Options.ToolGatewayBinding, rt.LLM, startupProbe, rt.MCPTurns, rt.ToolExecutor, rt.Manager, preflightAuthority)
+	surfaceIDs, err := ValidateManagedProviderPreflight(ctx, rt.Config, source, rt.Options.ToolGatewayBinding, rt.LLMRuntimes, rt.MCPTurns, rt.ToolExecutor, rt.Manager, preflightAuthority)
 	if err != nil {
 		rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
 		return fmt.Errorf("claude runtime mcp validation failed: %w", err)
@@ -2239,7 +2238,6 @@ func (rt *Runtime) verifyBootPublished(ch <-chan *worklifetime.EventDelivery) er
 	case <-time.After(1 * time.Second):
 		return fmt.Errorf("eventbus publish/subscribe timeout")
 	}
-	_ = rt.LLM
 	return nil
 }
 

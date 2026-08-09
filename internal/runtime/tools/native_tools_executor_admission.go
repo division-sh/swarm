@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -11,21 +12,36 @@ func (e *Executor) ValidateNativeToolAdmission(ctx context.Context, actor models
 	if e == nil || !actor.NativeTools.Any() {
 		return nil
 	}
-	return ValidateNativeToolAgentAdmission(ctx, actor, e.nativeToolAdmissionOptions())
+	opts, err := e.nativeToolAdmissionOptions(actor)
+	if err != nil {
+		return err
+	}
+	return ValidateNativeToolAgentAdmission(ctx, actor, opts)
 }
 
-func (e *Executor) nativeToolAdmissionOptions() NativeToolAdmissionOptions {
+func (e *Executor) nativeToolAdmissionOptions(actor models.AgentConfig) (NativeToolAdmissionOptions, error) {
 	if e == nil {
-		return NativeToolAdmissionOptions{}
+		return NativeToolAdmissionOptions{}, nil
 	}
 	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return NativeToolAdmissionOptions{
-		Runtime:     e.modelRuntime,
-		Credentials: e.credentials,
-		Source:      e.workflowSource,
-		Workspaces:  e.workspaces,
+	runtimes := e.modelRuntimes
+	credentials := e.credentials
+	source := e.workflowSource
+	workspaces := e.workspaces
+	e.mu.RUnlock()
+	if runtimes == nil {
+		return NativeToolAdmissionOptions{}, fmt.Errorf("agent llm runtime resolver is required")
 	}
+	runtime, err := runtimes.RuntimeForAgent(actor)
+	if err != nil {
+		return NativeToolAdmissionOptions{}, err
+	}
+	return NativeToolAdmissionOptions{
+		Runtime:     runtime,
+		Credentials: credentials,
+		Source:      source,
+		Workspaces:  workspaces,
+	}, nil
 }
 
 func (e *Executor) nativeToolAdmittedForTool(ctx context.Context, actor models.AgentConfig, toolName string) bool {
@@ -38,7 +54,11 @@ func (e *Executor) nativeToolAdmissionForTool(ctx context.Context, actor models.
 	if !isNativeFallbackToolName(toolName) {
 		return true, ""
 	}
-	for _, decision := range NativeToolAdmissionDecisions(ctx, actor, e.nativeToolAdmissionOptions()) {
+	opts, err := e.nativeToolAdmissionOptions(actor)
+	if err != nil {
+		return false, err.Error()
+	}
+	for _, decision := range NativeToolAdmissionDecisions(ctx, actor, opts) {
 		for _, name := range decision.ToolNames {
 			if normalizeNativeToolName(name) != toolName {
 				continue

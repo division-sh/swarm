@@ -13,7 +13,7 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
-func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Source, store runtimecredentials.Store, runtime llm.Runtime, workspaces workspace.Resolver) ([]error, error) {
+func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Source, store runtimecredentials.Store, runtimes *llm.AgentRuntimeSet, workspaces workspace.Resolver) ([]error, error) {
 	if source == nil {
 		return nil, nil
 	}
@@ -22,6 +22,20 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 		entry := source.AgentEntries()[agentID]
 		actor := nativeToolAgentConfig(agentID, entry)
 		if !actor.NativeTools.Any() {
+			continue
+		}
+		if runtimes == nil {
+			failures = append(failures, fmt.Sprintf("agent %s llm runtime resolver is required", strings.TrimSpace(agentID)))
+			continue
+		}
+		selection, err := runtimes.SelectionForArtifact(entry.Mock.Configured())
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("agent %s execution selection: %v", strings.TrimSpace(agentID), err))
+			continue
+		}
+		modelRuntime, err := runtimes.RuntimeForSelection(selection)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("agent %s llm runtime: %v", strings.TrimSpace(agentID), err))
 			continue
 		}
 		if owner, ok := semanticview.AgentDeclarationOwner(source, "", agentID); ok {
@@ -37,7 +51,7 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 			}
 		}
 		if err := ValidateNativeToolAgentAdmission(ctx, actor, NativeToolAdmissionOptions{
-			Runtime:     runtime,
+			Runtime:     modelRuntime,
 			Credentials: store,
 			Source:      source,
 			Workspaces:  workspaces,

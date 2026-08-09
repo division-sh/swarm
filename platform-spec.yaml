@@ -6041,20 +6041,77 @@ engine:
             and activated as openai_responses by #1229/#1224; provider identity openai remains intentionally separate from
             backend profile id and openai must not be accepted as a selector alias.
       mock_agent_runtime:
-        promoted_by: '#2075'
+        promoted_by: '#2075, #2172'
         implementation_status: python_only_tier_1_active
         owner: internal/runtime/llm.MockRuntime behind internal/runtime/llm.ProviderContract
         selection:
-          backend_profile: mock
-          execution_mode: mock
+          owner: internal/runtime/llm/selection.ResolveAgentExecutionSelection
+          configured_default: llm.backend
+          exact_override: generation-owned AgentConfig.Mock.Configured
           rule: >
-            Backend resolution assigns the typed live or mock execution mode before conversation, tool visibility,
-            completion authorization, or persistence. Missing or conflicting mode is invalid; no reader infers mode from
-            provider names, artifact presence, or persisted defaults. Source-level mock artifact presence is not backend
-            selection: live profiles omit that inactive alternative from the selected runtime descriptor, while the mock
-            profile retains and requires the exact generation-captured artifact.
+            llm.backend is the configured default for agents without an exact mock. A generation-owned exact Python mock
+            selects the mock profile and typed mock execution mode for that agent before model resolution, conversation
+            construction, tool/provider admission, completion authorization, or persistence. The mock profile requires and
+            retains the exact captured artifact. Live selections carry no mock artifact. Missing or conflicting backend,
+            provider, transport, mode, or artifact state is invalid; no downstream reader may infer or override selection.
+          runtime_binding:
+            owner: internal/runtime/llm.AgentRuntimeSet
+            rule: >
+              Every agent conversation is constructed with the concrete runtime selected by its resolved descriptor. The
+              configured live adapter and mock adapter are typed lazy slots, not a context-switched runtime multiplexer.
+              Fully mocked sources never construct or consult the unreachable live adapter. Mixed sources bind exact mocked
+              agents to MockRuntime and all other agents to the configured live adapter.
+            construction_consumers:
+              - internal/runtime/runtime.go ordinary managed runtime
+              - internal/runtime/runforkexecution/agent_runtime_materialization.go selected-contract served and standalone runtime
+              - internal/serveapp/main.go conversation fork-chat sandbox runtime
+            descriptor_consumers:
+              - internal/runtime/manager.AgentManager.resolveAgentModel
+              - internal/runtime/agents.NewLLMAgentFactory
+              - internal/runtime/llm.AgentRuntimeSet.RuntimeForAgent
+              - internal/runtime/runforkexecution.validateSelectedContractAgentExecutionSelections
+              - internal/runtime/bootverify.checkerContext model alias validation
+            provider_tool_consumers:
+              - internal/runtime/tools.Executor native-tool definition and admission
+              - internal/runtime/tools.ValidateNativeToolBootConfig
+              - internal/runtime.ValidateManagedProviderPreflight
+              - internal/cliapp.workspaceAdmittedForkChatExecutor
+            lifecycle_consumers:
+              - static agent materialization
+              - template instance materialization
+              - dynamic reconfiguration and clone
+              - persistence and recovery
+              - selected-contract ephemeral materialization
+              - conversation fork-chat source snapshot
+          fully_mocked_provider_startup_waiver:
+            promoted_by: '#2172'
+            owner: effective source agent registry entry Mock.Configured fact consumed through ResolveAgentExecutionSelection
+            rule: >
+              A configured exact Python mock selects in-process mock execution for that agent even when runtime config names
+              a live provider profile. When every declared agent is mock-configured, no provider turn is reachable, so the
+              complete provider startup chain is waived. Mixed bundles remain fail-closed for every unmocked agent, and
+              teaching errors must name the sorted unmocked agent ids.
+            consumers:
+              - validateSelectedBackendCredentialForDeclaredAgents
+              - validateSelectedBackendCredentialForActiveAgents
+              - validateClaudeStartupConfig
+              - validateClaudeStartupConfigForActiveAgents
+              - validateClaudeManagedAgentWorkspaces
+              - ValidateManagedProviderPreflight
+              - classifyWorkspaceBackendRequirement
+              - runLocalClaudeCLIPreflight
+            workspace_classifier_rule: >
+              The workspace backend classifier consumes each effective source-registry entry's Mock.Configured fact. An
+              exact mocked agent contributes no claude_cli process-execution reason, but retains ordinary workspace
+              lifecycle/write requirements and any independently declared exec-class capability. Any unmocked claude_cli
+              agent remains exec-capable and host execution is refused with the unmocked agent named.
+            cli_preflight_rule: >
+              Local CLI preflight consumes the typed workspace decision and skips provider credential resolution and
+              Claude-specific command proof only when no claude_cli reason remains. Listener admission, retired gateway URL
+              rejection, contract-secret admission, workspace lifecycle/source validation, and Docker/image requirements
+              selected by independent native or exec-class capabilities are never waived.
         authoring:
-          runtime_config: 'llm.backend: mock'
+          runtime_config: A live provider profile may remain selected globally; each exact agent mock selects in-process mock execution for that agent.
           agent_performance:
             shape: '{mock: {kind: python, module: <contracts-root-relative .py file>}}'
             kind: python

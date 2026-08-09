@@ -346,3 +346,4 @@ func workLifetimeRepositoryRoot(t *testing.T) string {
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", ".."))
 }
+

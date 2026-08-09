@@ -174,20 +174,19 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 		return selectedContractForkLocalRuntimeContainer{}, err
 	}
 	mode := runtimeeffects.ExecutionModeLive
+	var profile llmselection.Profile
 	if cfg := req.AgentRuntime.Options.Config; cfg != nil {
-		profile, profileErr := cfg.LLMBackendProfile()
-		if profileErr != nil {
-			return selectedContractForkLocalRuntimeContainer{}, profileErr
+		profile, err = cfg.LLMBackendProfile()
+		if err != nil {
+			return selectedContractForkLocalRuntimeContainer{}, err
 		}
-		mode, profileErr = llmselection.ExecutionModeForProfile(profile)
-		if profileErr != nil {
-			return selectedContractForkLocalRuntimeContainer{}, profileErr
+		mode, err = llmselection.ExecutionModeForProfile(profile)
+		if err != nil {
+			return selectedContractForkLocalRuntimeContainer{}, err
 		}
 	}
-	for _, record := range req.AgentRuntime.Records {
-		if record.Config.ExecutionMode.Valid() && record.Config.ExecutionMode != mode {
-			return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("selected-contract agent %s execution mode %s conflicts with selected backend mode %s", record.Config.ID, record.Config.ExecutionMode, mode)
-		}
+	if err := validateSelectedContractAgentExecutionSelections(profile, req.AgentRuntime.Records); err != nil {
+		return selectedContractForkLocalRuntimeContainer{}, err
 	}
 	issued, err := ports.runtimeExecution.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
 		Admission: req.Admission, ContainerPlanFingerprint: containerFingerprint,
@@ -224,6 +223,25 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 		proof: proof, req: req, ports: ports, authority: authority, admission: admission,
 		runtimeInstanceID: strings.TrimSpace(scope.RuntimeInstanceID),
 	}, nil
+}
+
+func validateSelectedContractAgentExecutionSelections(profile llmselection.Profile, records []runtimemanager.PersistedAgent) error {
+	if profile.ID == "" {
+		return nil
+	}
+	for _, record := range records {
+		selection, selectionErr := llmselection.ResolveAgentExecutionSelection(profile, record.Config.Mock.Configured())
+		if selectionErr != nil {
+			return fmt.Errorf("selected-contract agent %s execution selection: %w", record.Config.ID, selectionErr)
+		}
+		if record.Config.ExecutionMode.Valid() && record.Config.ExecutionMode != selection.Mode {
+			return fmt.Errorf("selected-contract agent %s execution mode %s conflicts with effective selection mode %s", record.Config.ID, record.Config.ExecutionMode, selection.Mode)
+		}
+		if backend := strings.TrimSpace(record.Config.LLMBackend); backend != "" && backend != selection.Profile.ID {
+			return fmt.Errorf("selected-contract agent %s llm backend %s conflicts with effective selection %s", record.Config.ID, backend, selection.Profile.ID)
+		}
+	}
+	return nil
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Proof() SelectedContractForkLocalRuntimeContainer {

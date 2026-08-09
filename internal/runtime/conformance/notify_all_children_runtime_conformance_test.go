@@ -1476,18 +1476,26 @@ func newNotifyAllChildrenRuntime(
 			eventBus,
 			runtimeeffects.NewCompletionController(effectStore, completionStore, heartbeatStore, discardCompletionSpendProjection{}),
 		)
+		profile, err := llmselection.ResolveActiveBackend(llmselection.BackendMock)
+		if err != nil {
+			t.Fatalf("resolve mock profile: %v", err)
+		}
+		modelRuntimes, err := runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{}, modelRuntime)
+		if err != nil {
+			t.Fatalf("build mock agent runtime set: %v", err)
+		}
 		authority := runtimeauthority.NewSourceProvider(source)
 		emitRegistry := runtimetools.NewEmitRegistry(source, authority)
 		toolExecutor := runtimetools.NewExecutorWithOptions(eventBus, nil, runtimetools.ExecutorOptions{
 			Config:            cfg,
 			WorkflowSource:    source,
-			ModelRuntime:      modelRuntime,
+			ModelRuntimes:     modelRuntimes,
 			AuthorityProvider: authority,
 			EmitRegistry:      emitRegistry,
 		})
 		promptResolver = runtimecontracts.NewBundlePromptResolver(bundle)
 		agentFactory = runtimeagents.NewLLMAgentFactory(
-			modelRuntime,
+			modelRuntimes,
 			toolExecutor,
 			runtimeagents.LLMAgentOptions{PromptResolver: promptResolver},
 		)

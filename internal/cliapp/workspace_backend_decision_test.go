@@ -8,7 +8,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
@@ -156,21 +159,21 @@ func TestWorkspaceBackendHostRemediationUsesTypedExecReasons(t *testing.T) {
 		{
 			name:            "claude only offers API backend as complete alternative",
 			agent:           runtimecontracts.AgentRegistryEntry{ID: "worker"},
-			wantProblem:     []string{"agent worker uses claude_cli backend"},
+			wantProblem:     []string{"unmocked agent worker uses claude_cli backend"},
 			wantRemediation: []string{"Use Docker", "llm.backend: anthropic", "Docker-free local run"},
 			wantClaudeOnly:  true,
 		},
 		{
 			name:              "mixed native bash names every blocker and requires host authorization",
 			agent:             runtimecontracts.AgentRegistryEntry{ID: "worker", NativeTools: map[string]any{"bash": true}},
-			wantProblem:       []string{"agent worker uses claude_cli backend", "agent worker has native_tools.bash"},
+			wantProblem:       []string{"unmocked agent worker uses claude_cli backend", "agent worker has native_tools.bash"},
 			wantRemediation:   []string{"Use Docker", "llm.backend: anthropic", "workspace.allow_exec_on_host: true"},
 			forbidRemediation: "or switch to an API backend",
 		},
 		{
 			name:              "mixed exec tool names every blocker and requires host authorization",
 			agent:             runtimecontracts.AgentRegistryEntry{ID: "worker", Tools: []string{"shell"}},
-			wantProblem:       []string{"agent worker uses claude_cli backend", "agent worker has exec-class tool shell"},
+			wantProblem:       []string{"unmocked agent worker uses claude_cli backend", "agent worker has exec-class tool shell"},
 			wantRemediation:   []string{"Use Docker", "llm.backend: anthropic", "workspace.allow_exec_on_host: true"},
 			forbidRemediation: "or switch to an API backend",
 		},
@@ -207,6 +210,75 @@ func TestWorkspaceBackendHostRemediationUsesTypedExecReasons(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWorkspaceBackendClaudeCLIUsesEffectivePerAgentMockSelection(t *testing.T) {
+	mocked := testWorkspaceBackendMockPerformance()
+	t.Run("fully mocked bundle keeps ordinary host workspace lifecycle", func(t *testing.T) {
+		decision, err := DecideWorkspaceBackend(WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+			Agents: map[string]runtimecontracts.AgentRegistryEntry{
+				"alpha": {ID: "alpha", Mock: mocked},
+				"beta":  {ID: "beta", Mock: mocked},
+			},
+		}))
+		if err != nil {
+			t.Fatalf("DecideWorkspaceBackend: %v", err)
+		}
+		if decision.Backend != workspace.BackendHost || decision.CapabilityClass != workspaceCapabilityWorkspaceWrite {
+			t.Fatalf("decision = %#v, want host workspace-write lifecycle", decision)
+		}
+		if workspaceBackendHasReason(decision.Reasons, WorkspaceReasonClaudeCLI) {
+			t.Fatalf("fully mocked agents contributed claude_cli execution reason: %#v", decision.Reasons)
+		}
+		if !workspaceBackendHasReason(decision.Reasons, WorkspaceReasonLifecycle) {
+			t.Fatalf("fully mocked agents lost ordinary workspace lifecycle reason: %#v", decision.Reasons)
+		}
+	})
+
+	t.Run("mixed bundle refuses host and names only unmocked Claude agent", func(t *testing.T) {
+		preference := WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "workspace.backend", PreferenceExplicit: true}
+		decision, err := DecideWorkspaceBackend(preference, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+			Agents: map[string]runtimecontracts.AgentRegistryEntry{
+				"mocked-worker": {ID: "mocked-worker", Mock: mocked},
+				"live-worker":   {ID: "live-worker"},
+			},
+		}))
+		if err == nil {
+			t.Fatal("DecideWorkspaceBackend unexpectedly admitted mixed claude_cli bundle on host")
+		}
+		if !strings.Contains(err.Error(), "unmocked agent live-worker uses claude_cli backend") {
+			t.Fatalf("error = %q, want named unmocked agent", err)
+		}
+		if strings.Contains(err.Error(), "unmocked agent mocked-worker") {
+			t.Fatalf("error misclassified mocked agent as live: %q", err)
+		}
+		var claudeAgents []string
+		for _, reason := range decision.Reasons {
+			if reason.Kind == WorkspaceReasonClaudeCLI {
+				claudeAgents = append(claudeAgents, reason.AgentID)
+			}
+		}
+		if len(claudeAgents) != 1 || claudeAgents[0] != "live-worker" {
+			t.Fatalf("claude_cli reasons = %v, want only live-worker; all reasons=%#v", claudeAgents, decision.Reasons)
+		}
+	})
+
+	t.Run("mock does not waive independently declared native execution", func(t *testing.T) {
+		decision, err := DecideWorkspaceBackend(WorkspaceBackendSelection{}, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+			Agents: map[string]runtimecontracts.AgentRegistryEntry{
+				"worker": {ID: "worker", Mock: mocked, NativeTools: map[string]any{"bash": true}},
+			},
+		}))
+		if err != nil {
+			t.Fatalf("DecideWorkspaceBackend: %v", err)
+		}
+		if decision.Backend != workspace.BackendDocker || decision.CapabilityClass != workspaceCapabilityExec {
+			t.Fatalf("decision = %#v, want Docker for independent native bash execution", decision)
+		}
+		if workspaceBackendHasReason(decision.Reasons, WorkspaceReasonClaudeCLI) || !workspaceBackendHasReason(decision.Reasons, WorkspaceReasonNativeBash) {
+			t.Fatalf("reasons = %#v, want native bash without claude_cli", decision.Reasons)
+		}
+	})
 }
 
 func TestWorkspaceBackendReasonsPreserveEveryAgentCapabilityAcrossAggregateClass(t *testing.T) {
@@ -266,7 +338,7 @@ func TestConfiguredWorkspaceLifecycleForBackendNoWorkspace(t *testing.T) {
 }
 
 func TestWorkspaceAdmittedForkChatExecutorRejectsClaudeCLIWithoutDocker(t *testing.T) {
-	executor := NewWorkspaceAdmittedForkChatExecutor(recordingForkChatExecutor{}, testWorkspaceBackendConfig(llmselection.BackendClaudeCLI), WorkspaceBackendSelection{Backend: WorkspaceBackendNone, NoWorkspace: true})
+	executor := NewWorkspaceAdmittedForkChatExecutor(recordingForkChatExecutor{}, staticWorkspaceAgentRuntimeResolver{runtime: &runtimellm.ClaudeCLIRuntime{}}, WorkspaceBackendSelection{Backend: WorkspaceBackendNone, NoWorkspace: true})
 	_, err := executor.ExecuteForkChat(context.Background(), store.ConversationForkChatPrepared{}, "inspect")
 	if err == nil || !strings.Contains(err.Error(), "conversation.fork_chat") || !strings.Contains(err.Error(), "claude_cli") {
 		t.Fatalf("ExecuteForkChat error = %v, want forkchat claude_cli admission failure", err)
@@ -275,7 +347,7 @@ func TestWorkspaceAdmittedForkChatExecutorRejectsClaudeCLIWithoutDocker(t *testi
 
 func TestWorkspaceAdmittedForkChatExecutorAllowsAPIBackend(t *testing.T) {
 	inner := recordingForkChatExecutor{result: store.ConversationForkChatExecution{AssistantMessage: "ok"}}
-	executor := NewWorkspaceAdmittedForkChatExecutor(inner, testWorkspaceBackendConfig(llmselection.BackendOpenAIResponses), WorkspaceBackendSelection{Backend: WorkspaceBackendNone, NoWorkspace: true})
+	executor := NewWorkspaceAdmittedForkChatExecutor(inner, staticWorkspaceAgentRuntimeResolver{runtime: &runtimellm.OpenAIResponsesRuntime{}}, WorkspaceBackendSelection{Backend: WorkspaceBackendNone, NoWorkspace: true})
 	got, err := executor.ExecuteForkChat(context.Background(), store.ConversationForkChatPrepared{}, "inspect")
 	if err != nil {
 		t.Fatalf("ExecuteForkChat: %v", err)
@@ -289,10 +361,27 @@ type recordingForkChatExecutor struct {
 	result store.ConversationForkChatExecution
 }
 
+type staticWorkspaceAgentRuntimeResolver struct {
+	runtime runtimellm.Runtime
+}
+
+func (r staticWorkspaceAgentRuntimeResolver) RuntimeForAgent(models.AgentConfig) (runtimellm.Runtime, error) {
+	return r.runtime, nil
+}
+
 func (r recordingForkChatExecutor) ExecuteForkChat(context.Context, store.ConversationForkChatPrepared, string) (store.ConversationForkChatExecution, error) {
 	return r.result, nil
 }
 
 func testWorkspaceBackendConfig(backend string) *config.Config {
 	return &config.Config{LLM: config.LLMConfig{Backend: backend}}
+}
+
+func testWorkspaceBackendMockPerformance() mockperformance.Performance {
+	return mockperformance.Performance{
+		Kind:   mockperformance.KindPython,
+		Module: "mocks/worker.py",
+		Source: []byte("def handle(input):\n    return {'text': 'ok'}\n"),
+		Digest: "sha256:test",
+	}
 }

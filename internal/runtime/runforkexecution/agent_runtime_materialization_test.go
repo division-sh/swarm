@@ -22,7 +22,10 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -231,7 +234,8 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 		AgentRuntime: selectedContractAgentRuntimePlan{
 			Proof: SelectedContractAgentRuntimeMaterialization{AgentRecipients: []agentidentity.Identity{mockIdentity}},
 			Options: SelectedContractAgentRuntimeOptions{
-				Config: &config.Config{LLM: config.LLMConfig{Backend: "mock"}},
+				Config:     &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendClaudeCLI}},
+				LLMRuntime: runtimellm.NoopRuntime{},
 				AgentManagerOptions: runtimemanager.AgentManagerOptions{
 					WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(),
 				},
@@ -243,6 +247,22 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 	}
 	if builder.factory == nil {
 		t.Fatal("selected-contract mock runtime returned no agent factory")
+	}
+	actor := runtimeactors.AgentConfig{
+		ID: "mock-agent", LLMBackend: llmselection.BackendMock,
+		ResolvedLLMProvider: llmselection.ProviderMock, ResolvedLLMTransport: llmselection.TransportMock,
+		ExecutionMode: runtimeeffects.ExecutionModeMock,
+		Mock: mockperformance.Performance{
+			Kind: mockperformance.KindPython, Module: "mocks/mock-agent.py", SourcePath: "mocks/mock-agent.py",
+			Source: []byte("def handle(input):\n    return {'text': 'selected mock'}\n"), Digest: "sha256:selected-contract-mock-agent",
+		},
+	}
+	modelRuntime, err := builder.preflight.runtimes.RuntimeForAgent(actor)
+	if err != nil {
+		t.Fatalf("resolve selected-contract exact mock runtime: %v", err)
+	}
+	if _, ok := modelRuntime.(*runtimellm.MockRuntime); !ok {
+		t.Fatalf("selected-contract exact mock runtime = %T, want *llm.MockRuntime", modelRuntime)
 	}
 	if builder.cleanup != nil {
 		builder.cleanup()

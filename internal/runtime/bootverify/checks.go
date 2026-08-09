@@ -301,14 +301,23 @@ func newCheckerContext(ctx context.Context, source semanticview.Source, opts Opt
 	}
 }
 
-func (c *checkerContext) appendAgentModelAliasFindings(findings []Finding, agentLabel, model string) []Finding {
+func (c *checkerContext) appendAgentModelAliasFindings(findings []Finding, agentLabel, model string, mockConfigured bool) []Finding {
 	if c != nil && c.opts.ValidateModelResolution {
-		resolved, err := llmselection.ResolveModel(c.opts.LLMProfile, llmselection.ModelResolution{
+		selection, err := llmselection.ResolveAgentExecutionSelection(c.opts.LLMProfile, mockConfigured)
+		if err != nil {
+			return append(findings, Finding{
+				CheckID:  "invalid_field_detection",
+				Severity: "error",
+				Message:  fmt.Sprintf("agent %s execution selection failed: %v", agentLabel, err),
+				Location: agentLabel,
+			})
+		}
+		resolved, err := llmselection.ResolveModel(selection.Profile, llmselection.ModelResolution{
 			Model:  model,
 			Models: c.opts.ModelAliases,
 		})
 		if err != nil {
-			backend := strings.TrimSpace(c.opts.LLMProfile.ID)
+			backend := strings.TrimSpace(selection.Profile.ID)
 			if backend == "" {
 				backend = "selected backend"
 			}
@@ -682,7 +691,7 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 				})
 				continue
 			}
-			c.invalidFindings = c.appendAgentModelAliasFindings(c.invalidFindings, agentLabel, agent.Model)
+			c.invalidFindings = c.appendAgentModelAliasFindings(c.invalidFindings, agentLabel, agent.Model, agent.Mock.Configured())
 			c.invalidFindings = appendAgentMemoryFindings(c.invalidFindings, scopeLabel, semanticview.ResolveAgentMemoryProof(c.source, semanticview.AgentMemoryLocator{
 				AgentID:         agentID,
 				ProjectScopeKey: scope.Key,
@@ -777,7 +786,7 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 				})
 				continue
 			}
-			c.invalidFindings = c.appendAgentModelAliasFindings(c.invalidFindings, agentLabel, agent.Model)
+			c.invalidFindings = c.appendAgentModelAliasFindings(c.invalidFindings, agentLabel, agent.Model, agent.Mock.Configured())
 			c.invalidFindings = appendAgentMemoryFindings(c.invalidFindings, scopeLabel, semanticview.ResolveAgentMemoryProof(c.source, semanticview.AgentMemoryLocator{
 				AgentID: agentID,
 				FlowID:  scope.ID,

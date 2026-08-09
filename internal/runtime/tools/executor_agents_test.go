@@ -1233,6 +1233,7 @@ func TestExecAgentHire_DeniesDelegatedPermissionEscalation(t *testing.T) {
 		Manager:           manager,
 		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 		WorkflowSource:    source,
+		ModelRuntimes:     staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 	})
 
 	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
@@ -1273,6 +1274,7 @@ func TestExecAgentHire_DeniesDelegatedToolEscalation(t *testing.T) {
 		Manager:           manager,
 		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 		WorkflowSource:    source,
+		ModelRuntimes:     staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 	})
 
 	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
@@ -1315,6 +1317,7 @@ func TestExecAgentHire_DeniesRoleBasedEmitEscalation(t *testing.T) {
 		Manager:           manager,
 		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 		WorkflowSource:    source,
+		ModelRuntimes:     staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 	})
 
 	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
@@ -1353,7 +1356,7 @@ func TestExecAgentHire_AllowsDelegablePrivileges(t *testing.T) {
 		Manager:           manager,
 		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 		WorkflowSource:    source,
-		ModelRuntime:      nativeCapabilityRuntimeStub{},
+		ModelRuntimes:     staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 		WorkspaceResolver: relayWorkspaceResolverStub{
 			target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()},
 		},
@@ -1419,6 +1422,7 @@ func TestExecAgentHire_RejectsUnresolvedParentBeforeSpawn(t *testing.T) {
 		Manager:           manager,
 		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 		WorkflowSource:    source,
+		ModelRuntimes:     staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 	})
 	actor := models.AgentConfig{
 		ExecutionMode: "live",
@@ -1497,6 +1501,7 @@ func TestExecAgentHire_FailsClosedWhenNativeToolFallbackIsNotAdmitted(t *testing
 		Manager:           manager,
 		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 		WorkflowSource:    source,
+		ModelRuntimes:     staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 	})
 
 	_, err := exec.ExecAgentHireDirect(models.AgentConfig{
@@ -1736,6 +1741,7 @@ func TestExecAgentReconfigure_FailsClosedWhenNativeToolFallbackIsNotAdmitted(t *
 		Manager:           manager,
 		AuthorityProvider: runtimeauthority.NewSourceProvider(source),
 		WorkflowSource:    source,
+		ModelRuntimes:     staticAgentRuntimeResolver{runtime: nativeCapabilityRuntimeStub{}},
 	})
 
 	_, err := exec.ExecAgentReconfigureDirect(models.AgentConfig{

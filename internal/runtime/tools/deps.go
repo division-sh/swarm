@@ -66,7 +66,7 @@ type ExecutorOptions struct {
 	ChannelBindings    []packs.OutboundBindingPlan
 	ActivityExecutor   DurableActivityExecutor
 	WorkspaceResolver  workspace.Resolver
-	ModelRuntime       llm.Runtime
+	ModelRuntimes      llm.AgentRuntimeResolver
 	AuthorityProvider  runtimeauthority.Provider
 	EmitRegistry       *EmitRegistry
 	// Trusted runtime/test escape hatch for exercising retained legacy handlers.

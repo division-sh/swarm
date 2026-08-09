@@ -817,12 +817,16 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}, nil
 }
 
-func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding, providerCredentials runtimecredentials.Store, effectStore runtimeeffects.Store, completionStore runtimeeffects.CompletionStore, heartbeatStore runtimeeffects.CompletionHeartbeatStore, projector runtimeeffects.CompletionSpendProjector) (runtimellm.Runtime, error) {
+func buildForkChatSandboxLLMRuntimes(cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding, providerCredentials runtimecredentials.Store, effectStore runtimeeffects.Store, completionStore runtimeeffects.CompletionStore, heartbeatStore runtimeeffects.CompletionHeartbeatStore, projector runtimeeffects.CompletionSpendProjector) (*runtimellm.AgentRuntimeSet, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
 	}
+	profile, err := cfg.LLMBackendProfile()
+	if err != nil {
+		return nil, err
+	}
 	registry := sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL)
-	return runtimellm.RuntimeFactory{
+	return runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{
 		Cfg:                  cfg,
 		Sessions:             registry,
 		LiveSessions:         runtimellm.NewTransientLiveSessionAcquirer(registry),
@@ -831,7 +835,7 @@ func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Res
 		ToolGateway:          binding,
 		Credentials:          providerCredentials,
 		CompletionController: runtimeeffects.NewCompletionController(effectStore, completionStore, heartbeatStore, projector),
-	}.Build()
+	}, nil)
 }
 
 func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
@@ -1204,7 +1208,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(5, "forkchat_sandbox", fmt.Errorf("selected runtime store does not implement completion execution authority"))
 		return 1
 	}
-	forkChatLLM, err := buildForkChatSandboxLLMRuntime(cfg, workspaces, toolGatewayBinding, providerCredentialStore, stores.EffectsStore, stores.CompletionStore, stores.CompletionHeartbeatStore, rt.Budget)
+	forkChatLLM, err := buildForkChatSandboxLLMRuntimes(cfg, workspaces, toolGatewayBinding, providerCredentialStore, stores.EffectsStore, stores.CompletionStore, stores.CompletionHeartbeatStore, rt.Budget)
 	if err != nil {
 		presenter.fail(5, "forkchat_sandbox", err)
 		return 1
@@ -1289,7 +1293,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		BundleDelete:              apiStoreCaps.BundleDelete,
 		ConversationForks:         apiStoreCaps.ConversationForks,
 		ConversationForkLifecycle: apiStoreCaps.ConversationForkLifecycle,
-		ForkChatExecutor:          cliapp.NewWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), cfg, primaryWorkspaceBackend),
+		ForkChatExecutor:          cliapp.NewWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), forkChatLLM, primaryWorkspaceBackend),
 		RunBundleContext:          apiStoreCaps.RunBundleContext,
 		TestSetup:                 apiStoreCaps.TestSetup,
 		RunForkAvailability:       apiStoreCaps.RunForkAvailability,

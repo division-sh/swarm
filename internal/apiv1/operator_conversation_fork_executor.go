@@ -17,15 +17,15 @@ import (
 )
 
 type LLMForkChatExecutor struct {
-	Runtime runtimellm.Runtime
+	Runtimes runtimellm.AgentRuntimeResolver
 }
 
-func NewLLMForkChatExecutor(runtime runtimellm.Runtime) *LLMForkChatExecutor {
-	return &LLMForkChatExecutor{Runtime: runtime}
+func NewLLMForkChatExecutor(runtimes runtimellm.AgentRuntimeResolver) *LLMForkChatExecutor {
+	return &LLMForkChatExecutor{Runtimes: runtimes}
 }
 
 func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared store.ConversationForkChatPrepared, message string) (store.ConversationForkChatExecution, error) {
-	if e == nil || e.Runtime == nil {
+	if e == nil || e.Runtimes == nil {
 		return store.ConversationForkChatExecution{}, fmt.Errorf("conversation fork chat llm runtime is required")
 	}
 	message = strings.TrimSpace(message)
@@ -41,9 +41,13 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared stor
 	}
 	ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	actor := conversationForkChatActor(prepared)
+	modelRuntime, err := e.Runtimes.RuntimeForAgent(actor)
+	if err != nil {
+		return store.ConversationForkChatExecution{}, fmt.Errorf("resolve conversation fork chat llm runtime: %w", err)
+	}
 	tools := conversationForkChatToolDefinitions(prepared)
 	toolExec := newConversationForkChatToolExecutor(prepared)
-	conv := runtimellm.NewConversation(actor.ID, prepared.Fork.ForkID, conversationForkChatSystemPrompt(prepared), tools, agentmemory.PlatformDefault(), 8, e.Runtime)
+	conv := runtimellm.NewConversation(actor.ID, prepared.Fork.ForkID, conversationForkChatSystemPrompt(prepared), tools, agentmemory.PlatformDefault(), 8, modelRuntime)
 	conv.SetToolExecutor(toolExec)
 	ctx = runtimeactors.WithActor(ctx, actor)
 	ctx = runtimeeffects.WithExecutionMode(ctx, actor.ExecutionMode)
