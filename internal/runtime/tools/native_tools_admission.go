@@ -221,6 +221,7 @@ func nativeToolAgentConfig(agentID string, entry runtimecontracts.AgentRegistryE
 		Role:            strings.TrimSpace(entry.Role),
 		Model:           strings.TrimSpace(entry.Model),
 		Memory:          entry.MemoryPlan,
+		Mock:            entry.Mock,
 		MaxTurnsPerTask: entry.MaxTurnsPerTask,
 		Subscriptions:   append([]string{}, entry.Subscriptions...),
 		EmitEvents:      append([]string{}, entry.EmitEvents...),
