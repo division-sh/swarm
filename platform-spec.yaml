@@ -14567,6 +14567,17 @@ run_model:
       selected-fork suppressors, change generic non-agent/dead-letter replay policy, or make CLI, API, dashboard, or
       Builder surfaces semantic owners. Non-diagnostic platform/node/system event outcomes remain fail-closed or split
       unless a separate approved owner changes that policy.'
+    selected_contract_platform_activity_frontier_policy: 'Selected-contract frontier admission names
+      runtime.run_fork.contract_frontier_admission.platform_activity_runtime as the canonical runtime owner for
+      platform.activity_requested. That platform-internal owner is admission evidence, not a node/agent delivery
+      recipient: recipient planning emits no synthetic route, authored subscriptions cannot claim the event, and the
+      fork-local workflow runtime consumes the persisted fork event through its platform interceptor. Workflow-state
+      preparation for a selected activity frontier event consumes only the event-owned typed routing_source. A root
+      source maps to fork run scope; a declared static flow requires its exact semantic scope; and a declared template
+      flow preserves its exact in-scope instance. Missing entities, unknown flows, source-kind/schema conflicts,
+      out-of-scope paths, and conflicting routes fail closed before materialization. Completed/non-frontier activity
+      history does not project workflow state. Source recipients and source subscriptions remain invalid as selected
+      fork execution truth.'
     selected_contract_route_admission: 'Selected-contract route/subscription reconstruction admission is a
       non-mutating prerequisite owned by runtime.run_fork.selected_contract_route_admission. It consumes
       runtime.run_fork.contract_frontier_admission for selected frontier work, consumes the fixed planner route state,

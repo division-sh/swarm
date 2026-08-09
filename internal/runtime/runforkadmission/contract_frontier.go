@@ -68,14 +68,18 @@ func AdmitContractFrontier(req ContractFrontierRequest) (runfork.RunForkContract
 	incompleteRoutes := map[string]bool{}
 	for i := range frontier {
 		eventName := frontier[i].EventName
+		runtimeOwners := append([]string(nil), req.Source.RuntimeEventOwners(eventName)...)
+		if owner, ok := runfork.RunForkSelectedContractPlatformRuntimeOwner(eventName); ok {
+			runtimeOwners = append(runtimeOwners, owner)
+		}
 		if len(frontier[i].DerivedRecipients) > 0 {
-			frontier[i].RuntimeEventOwners = sortedUnique(req.Source.RuntimeEventOwners(eventName))
+			frontier[i].RuntimeEventOwners = sortedUnique(runtimeOwners)
 			continue
 		}
 		source := contractFrontierRoutingSource(req.Plan.PendingWork, frontier[i].SourceEventID)
 		evaluation := contractFrontierRouteEvaluation(routeTable, eventName, source)
 		incompleteRoutes[frontier[i].SourceEventID] = incompleteRoutes[frontier[i].SourceEventID] || evaluation.requiresRuntimeResolution
-		frontier[i].RuntimeEventOwners = sortedUnique(req.Source.RuntimeEventOwners(eventName))
+		frontier[i].RuntimeEventOwners = sortedUnique(runtimeOwners)
 		if evaluation.connectMatched {
 			frontier[i].WorkflowNodeSubscribers = evaluation.nodeIDs
 			frontier[i].DerivedRecipients = evaluation.recipients

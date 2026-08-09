@@ -34,6 +34,10 @@ profiles:
       - catalog-required-smoke
       - runtime-full
       - store-full
+      - store-runtime-full-01
+      - store-runtime-full-02
+      - store-runtime-full-03
+      - store-runtime-full-04
   pr-escalated:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
@@ -43,6 +47,10 @@ profiles:
       - catalog-full
       - runtime-full
       - store-full
+      - store-runtime-full-01
+      - store-runtime-full-02
+      - store-runtime-full-03
+      - store-runtime-full-04
   full:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
@@ -52,6 +60,10 @@ profiles:
       - catalog-full
       - runtime-full
       - store-full
+      - store-runtime-full-01
+      - store-runtime-full-02
+      - store-runtime-full-03
+      - store-runtime-full-04
   nightly:
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
@@ -61,6 +73,10 @@ profiles:
       - catalog-full
       - runtime-full
       - store-full
+      - store-runtime-full-01
+      - store-runtime-full-02
+      - store-runtime-full-03
+      - store-runtime-full-04
 units:
   catalog-required-inventory:
     packages:
@@ -97,10 +113,37 @@ units:
   store-full:
     packages:
       - github.com/division-sh/swarm/internal/store
-      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
-    budget_class: full
+    budget_class: broad
+  store-runtime-full-01:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    run: ^(Test[A-E].*|Example.*|Fuzz.*)$
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  store-runtime-full-02:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    run: ^Test[F-O].*$
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  store-runtime-full-03:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    run: ^Test[P-Q].*$
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  store-runtime-full-04:
+    packages:
+      - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
+    run: ^Test[R-Z].*$
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
   selected-store-fast:
     packages:
       - github.com/division-sh/swarm/internal/store

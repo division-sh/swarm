@@ -2,8 +2,12 @@ package testtiming
 
 import (
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -205,12 +209,23 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		t.Fatalf("runtime-full unit = %#v, want one complete uncached internal/runtime proof", runtimeUnit)
 	}
 	storeUnit, ok := policy.Units["store-full"]
-	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage, runtimePersistencePackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" {
-		t.Fatalf("store-full unit = %#v, want complete uncached facade and runtime-persistence proof", storeUnit)
+	if !ok || !slices.Equal(storeUnit.Packages, []string{storePackage}) || storeUnit.Run != "" || storeUnit.CountMode != "count-1" || storeUnit.BudgetClass != "broad" {
+		t.Fatalf("store-full unit = %#v, want complete uncached facade proof", storeUnit)
 	}
+	storeRuntimeUnits := []string{"store-runtime-full-01", "store-runtime-full-02", "store-runtime-full-03", "store-runtime-full-04"}
+	storeRuntimePatterns := make([]*regexp.Regexp, 0, len(storeRuntimeUnits))
+	for _, unitID := range storeRuntimeUnits {
+		unit, exists := policy.Units[unitID]
+		if !exists || !slices.Equal(unit.Packages, []string{runtimePersistencePackage}) || unit.Run == "" || unit.CountMode != "count-1" || unit.BudgetClass != "broad" {
+			t.Fatalf("%s unit = %#v, want one filtered uncached runtime-persistence proof", unitID, unit)
+		}
+		storeRuntimePatterns = append(storeRuntimePatterns, regexp.MustCompile(unit.Run))
+	}
+	assertGoProofPartition(t, filepath.Join(root, "internal", "store", "internal", "runtimepersistence"), storeRuntimePatterns)
 	for _, profileName := range []string{testplanning.ProfilePRCommon, testplanning.ProfilePREscalated, testplanning.ProfileFull, testplanning.ProfileNightly} {
 		foundRuntime := false
 		foundStore := false
+		foundStoreRuntime := map[string]bool{}
 		for _, unit := range policy.Profiles[profileName].Units {
 			if unit == "runtime-full" {
 				foundRuntime = true
@@ -218,12 +233,22 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 			if unit == "store-full" {
 				foundStore = true
 			}
+			for _, storeRuntimeUnit := range storeRuntimeUnits {
+				if unit == storeRuntimeUnit {
+					foundStoreRuntime[storeRuntimeUnit] = true
+				}
+			}
 		}
 		if !foundRuntime {
 			t.Errorf("profile %s does not include runtime-full", profileName)
 		}
 		if !foundStore {
 			t.Errorf("profile %s does not include store-full", profileName)
+		}
+		for _, storeRuntimeUnit := range storeRuntimeUnits {
+			if !foundStoreRuntime[storeRuntimeUnit] {
+				t.Errorf("profile %s does not include %s", profileName, storeRuntimeUnit)
+			}
 		}
 	}
 
@@ -266,6 +291,54 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	for _, required := range []string{"required-full", "catalog-full", "selected-store-fast"} {
 		if !used[required] {
 			t.Errorf("canonical projection %s has no consumer", required)
+		}
+	}
+}
+
+func assertGoProofPartition(t *testing.T, dir string, patterns []*regexp.Regexp) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matchedPatterns := make([]bool, len(patterns))
+	proofs := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, entry.Name()), nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", entry.Name(), err)
+		}
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Recv != nil || function.Name == nil {
+				continue
+			}
+			name := function.Name.Name
+			if name == "TestMain" || (!strings.HasPrefix(name, "Test") && !strings.HasPrefix(name, "Example") && !strings.HasPrefix(name, "Fuzz")) {
+				continue
+			}
+			proofs++
+			matches := 0
+			for index, pattern := range patterns {
+				if pattern.MatchString(name) {
+					matches++
+					matchedPatterns[index] = true
+				}
+			}
+			if matches != 1 {
+				t.Errorf("runtime-persistence proof %s matches %d store partitions, want exactly one", name, matches)
+			}
+		}
+	}
+	if proofs == 0 {
+		t.Fatal("runtime-persistence proof inventory is empty")
+	}
+	for index, matched := range matchedPatterns {
+		if !matched {
+			t.Errorf("store partition %d matches no runtime-persistence proof", index+1)
 		}
 	}
 }

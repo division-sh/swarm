@@ -510,7 +510,11 @@ func packageDiagnostics(opts EvaluationOptions, grouped map[string]*evidenceAtte
 			continue
 		}
 		for _, timing := range group.primary.Report.Packages {
-			observed[timing.Package] = timing
+			current := observed[timing.Package]
+			current.Package = timing.Package
+			current.Result = timing.Result
+			current.Elapsed += timing.Elapsed
+			observed[timing.Package] = current
 		}
 	}
 

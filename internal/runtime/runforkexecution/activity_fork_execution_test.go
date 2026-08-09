@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -100,12 +101,21 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 				RevisionID: sourceGeneration.RevisionID,
 			}
 			sourceRequestEventID := activityidentity.RequestEventID(sourceFact)
-			seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceRequestEventID, "platform.activity_requested", at)
+			routingSource := eventtest.StaticFlowRoutingSource("flow_a", "flow_a", entityID)
+			seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
+				t, db, sourceRunID, entityID, sourceRequestEventID, "platform.activity_requested", at,
+				events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("test-node")}, nil,
+				routingSource,
+				events.EnvelopeForSourceRoute(events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow_a"), routingSource.Route()),
+			)
+			if _, err := db.ExecContext(ctx, `UPDATE entity_state SET flow_instance = 'flow_a' WHERE run_id = $1::uuid AND entity_id = $2::uuid`, sourceRunID, entityID); err != nil {
+				t.Fatalf("canonicalize source activity workflow state route: %v", err)
+			}
 			seedSelectedContractActivityLoop(t, db, sourceRunID, entityID, sourceRequestEventID, activation, at)
 			seedSelectedContractActivityRequest(t, db, sourceRunID, sourceRequestEventID, selectedContractActivityRequestPayload{
 				ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"},
 				EffectClass: string(tt.effectClass), SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
-				RetryMaxAttempts: 1, ForkPolicy: string(tt.forkPolicy), EntityID: entityID, FlowInstance: "flow-a/1",
+				RetryMaxAttempts: 1, ForkPolicy: string(tt.forkPolicy), EntityID: entityID, FlowInstance: "flow_a",
 				NodeID: "test-node", FlowID: "flow_a", HandlerEventKey: "review.requested",
 				SourceEventID: initiatingEventID, SourceRunID: sourceRunID, Attempt: 1,
 				Generation: sourceGeneration, LoopStage: "review",
@@ -235,36 +245,38 @@ type selectedContractActivityRequestPayload struct {
 }
 
 func selectedContractActivitySource(serverURL string, effectClass runtimecontracts.ActivityEffectClass) semanticview.Source {
+	return selectedContractActivitySourceWithMode(serverURL, effectClass, runtimecontracts.FlowModeStatic)
+}
+
+func selectedContractActivitySourceWithMode(serverURL string, effectClass runtimecontracts.ActivityEffectClass, mode string) semanticview.Source {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Activity: runtimecontracts.ActivitySpec{ID: "connector", Tool: "provider.connector"},
 	}
 	node := runtimecontracts.SystemNodeContract{
 		ID: "test-node", ExecutionType: runtimecontracts.SystemNodeExecutionType,
-		SubscribesTo:  []string{"platform.activity_requested"},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"review.requested": handler},
 	}
 	flow := runtimecontracts.FlowContractView{
 		Paths:  runtimecontracts.FlowContractPaths{ID: "flow_a", PackageKey: "activity-fork-proof", Dir: "flows/flow_a"},
-		Schema: runtimecontracts.FlowSchemaDocument{Name: "flow_a", InitialState: "pending", States: []string{"pending"}},
+		Schema: runtimecontracts.FlowSchemaDocument{Name: "flow_a", Mode: mode, InitialState: "pending", States: []string{"pending"}},
 		Nodes:  map[string]runtimecontracts.SystemNodeContract{"test-node": node}, Path: "flow_a",
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "activity-fork-proof", Version: "v1", InitialStage: "pending",
 			FlowInitial: map[string]string{"flow_a": "pending"}, FlowStates: map[string][]string{"flow_a": {"pending"}},
-			EventOwners: map[string][]string{"platform.activity_requested": {"test-node"}},
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"test-node": {"review.requested": handler},
 			},
 			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
 				"test-node": {
 					ID: "test-node", ExecutionType: runtimecontracts.SystemNodeExecutionType,
-					RuntimeSubscriptions: []string{"platform.activity_requested"},
-					Produces:             []string{"flow_a/connector.succeeded", "flow_a/connector.failed"},
+					Produces: []string{"flow_a/connector.succeeded", "flow_a/connector.failed"},
 				},
 			},
 		},
-		FlowTree: runtimecontracts.FlowTree{Root: &flow, ByPath: map[string]*runtimecontracts.FlowContractView{"flow_a": &flow}, ByID: map[string]*runtimecontracts.FlowContractView{"flow_a": &flow}},
+		FlowTree:    runtimecontracts.FlowTree{Root: &flow, ByPath: map[string]*runtimecontracts.FlowContractView{"flow_a": &flow}, ByID: map[string]*runtimecontracts.FlowContractView{"flow_a": &flow}},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"flow_a": flow.Schema},
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"provider.connector": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(effectClass))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: strings.TrimRight(serverURL, "/")})),
 		},
@@ -275,8 +287,7 @@ func selectedContractActivitySource(serverURL string, effectClass runtimecontrac
 func selectedContractActivityLoadedSource(source semanticview.Source, selection runfork.RunForkContractSelection) LoadedSelectedContractSource {
 	workflow := runtimepipeline.NewWorkflowDefinition("activity-fork-proof", []runtimepipeline.WorkflowStage{{Name: "pending"}}, nil)
 	nodes := []runtimepipeline.WorkflowNode{{
-		ID: "test-node", Subscriptions: []events.EventType{"platform.activity_requested"}, ExecutionType: runtimecontracts.SystemNodeExecutionType,
-		Policies: map[string]runtimepipeline.WorkflowEventPolicy{"platform.activity_requested": {Consume: true, RequireEntity: true}},
+		ID: "test-node", ExecutionType: runtimecontracts.SystemNodeExecutionType,
 	}}
 	return LoadedSelectedContractSource{
 		Selection: selection, Source: source, BundleSourceFact: testEphemeralBundleSourceFact(runForkTestBundleHash),
@@ -345,7 +356,7 @@ func seedSelectedContractActivityAttempt(t *testing.T, db *sql.DB, fact activity
 			result_event_id, result_event_type, result_payload, failure, input_hash, loop_generation, loop_stage,
 			started_at, completed_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow-a/1', 'test-node', 'review.requested',
+			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow_a', 'test-node', 'review.requested',
 			'connector', 'provider.connector', 'non_idempotent_write', 1, $5, 'flow_a/connector.succeeded', 'flow_a/connector.failed',
 			$6::uuid, $7, $8::jsonb, $9::jsonb, $10, $11::jsonb, 'review', $12, $12, $12
 		)
