@@ -125,7 +125,20 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load proof policy: %v", err)
 	}
+	const cliappPackage = "github.com/division-sh/swarm/internal/cliapp"
+	cliappUnit, ok := policy.Units["catalog-required-verify"]
+	if !ok {
+		t.Fatal("proof policy omits catalog-required-verify")
+	}
+	if len(cliappUnit.Packages) != 1 || cliappUnit.Packages[0] != cliappPackage {
+		t.Fatalf("catalog-required-verify packages = %v, want [%s]", cliappUnit.Packages, cliappPackage)
+	}
+	if strings.TrimSpace(cliappUnit.Run) != "" {
+		t.Fatalf("catalog-required-verify run filter = %q, want unfiltered full package", cliappUnit.Run)
+	}
 	requiredUnits := []string{"catalog-required-inventory", "catalog-required-verify"}
+	planPackages := append([]string{"github.com/division-sh/swarm/internal/events"}, policy.SpecialPackages...)
+	model := testplanning.WeightModel{Version: 1, SourceRunID: "issue-2143-ci-owner-guard", Packages: map[string]float64{}}
 	for _, profileName := range []string{
 		testplanning.ProfilePRCommon,
 		testplanning.ProfilePREscalated,
@@ -144,6 +157,25 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		}
 		if !containsString(profile.Units, catalogUnit) {
 			t.Errorf("profile %s omits %s", profileName, catalogUnit)
+		}
+		plan, err := testplanning.BuildPlan(policy, model, planPackages, profileName, "catalog CI owner guard", "issue-2143")
+		if err != nil {
+			t.Fatalf("build %s plan: %v", profileName, err)
+		}
+		owners := 0
+		for _, unit := range plan.Units {
+			for _, pkg := range unit.Packages {
+				if pkg != cliappPackage {
+					continue
+				}
+				owners++
+				if unit.ID != "catalog-required-verify" || strings.TrimSpace(unit.Run) != "" {
+					t.Errorf("profile %s cliapp owner = %s run=%q, want catalog-required-verify unfiltered", profileName, unit.ID, unit.Run)
+				}
+			}
+		}
+		if owners != 1 {
+			t.Errorf("profile %s cliapp owner count = %d, want 1", profileName, owners)
 		}
 	}
 	for _, changedPath := range []string{
