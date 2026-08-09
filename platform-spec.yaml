@@ -6111,19 +6111,21 @@ engine:
             outbound_effect_credential_admission:
               owner: internal/runtime/bootverify.ResolveSourceBootEffectReachability
               inputs:
-                - every declared agent resolved through internal/runtime/llm/selection.ResolveAgentExecutionSelection
+                - every project-scoped and flow-scoped agent declaration resolved through internal/runtime/llm/selection.ResolveAgentExecutionSelection
                 - the immutable exact providerconnectors.MockResponsePlan compiled from the effective source
-                - every effective declarative workflow activity from runtime/contracts.WorkflowContractBundle.ActivitySites
+                - every project-scoped and flow-scoped node declaration lowered through runtime/contracts.ActivitySitesForNode
               rule: >
                 Static and managed outbound tool credentials are required exactly when that tool's transport remains
                 reachable. A source with any live-selected agent retains every outbound tool credential requirement. An
                 all-mock source waives only a provider_connector tool whose exact effective declaration is admitted by the
                 compiled response plan and which is absent from every declarative workflow activity site. Declarative
                 activity sites remain live-reachable from non-agent ingress, including operator publication, regardless of
-                the agent census. Absent or mismatched responders, scoped conflicts, ordinary HTTP, native, exec, MCP,
-                listener, workspace, inbound signing, and other non-tool requirements remain fail-closed. Agent-free sources
-                retain every requirement. A credential key shared by a waived tool and any surviving requirement remains
-                required. Process-global execution mode is not credential-admission authority.
+                the agent census. Flattened aliases are not census authority: ambiguous local agent or node ids remain
+                represented by every canonical project/flow declaration, while flat declarations are consumed only when no
+                scoped declaration represents that local id. Absent or mismatched responders, scoped conflicts, ordinary
+                HTTP, native, exec, MCP, listener, workspace, inbound signing, and other non-tool requirements remain
+                fail-closed. Agent-free sources retain every requirement. A credential key shared by a waived tool and any
+                surviving requirement remains required. Process-global execution mode is not credential-admission authority.
               consumers:
                 - internal/runtime/workflow_validation.go for swarm verify and serve validation
                 - internal/cliapp/local_preflight.go for doctor contract-secret admission
@@ -6131,9 +6133,10 @@ engine:
                 - internal/builder/handler_state.go for Builder validation RPC
                 - internal/runtime/runtime.go for final runtime boot credential admission
               diagnostics: >
-                Mixed-source failures name the exact surviving tool requirement and the sorted live-selected agents that
-                keep outbound effects reachable. Declarative-activity failures name the exact effective node/handler site.
-                Secret and managed-token values are never exposed.
+                Mixed-source failures name the exact surviving tool requirement and the sorted live-selected declarations
+                that keep outbound effects reachable, scope-qualified when local ids are ambiguous. Declarative-activity
+                failures name the exact effective project/flow node and handler site. Secret and managed-token values are
+                never exposed.
             workspace_classifier_rule: >
               The workspace backend classifier consumes each effective source-registry entry's Mock.Configured fact. An
               exact mocked agent contributes no claude_cli process-execution reason, but retains ordinary workspace
