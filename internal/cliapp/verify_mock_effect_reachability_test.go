@@ -17,9 +17,10 @@ func TestVerifyConsumesCanonicalMockEffectReachability(t *testing.T) {
 	configPath := writeTestVerifyRuntimeConfig(t)
 
 	for _, tc := range []struct {
-		name        string
-		includeLive bool
-		wantFailure []string
+		name            string
+		includeLive     bool
+		includeActivity bool
+		wantFailure     []string
 	}{
 		{name: "global live with all exact mocks needs no outbound credential"},
 		{
@@ -27,9 +28,14 @@ func TestVerifyConsumesCanonicalMockEffectReachability(t *testing.T) {
 			includeLive: true,
 			wantFailure: []string{"live-agent", "provider_credential", "tool provider.send"},
 		},
+		{
+			name:            "all mocks retain effect reachable from live workflow activity",
+			includeActivity: true,
+			wantFailure:     []string{"provider_credential", "tool provider.send", "stub-agent-node", "task.requested"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			contractsPath := writeVerifyMockConnectorFixture(t, tc.includeLive)
+			contractsPath := writeVerifyMockConnectorFixture(t, tc.includeLive, tc.includeActivity)
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
 				"verify", "--contracts", contractsPath, "--config", configPath,
@@ -45,18 +51,18 @@ func TestVerifyConsumesCanonicalMockEffectReachability(t *testing.T) {
 				return
 			}
 			if code == 0 {
-				t.Fatalf("mixed verify unexpectedly succeeded: %s", combined)
+				t.Fatalf("verify unexpectedly succeeded: %s", combined)
 			}
 			for _, want := range tc.wantFailure {
 				if !strings.Contains(combined, want) {
-					t.Fatalf("mixed verify output missing %q: %s", want, combined)
+					t.Fatalf("verify output missing %q: %s", want, combined)
 				}
 			}
 		})
 	}
 }
 
-func writeVerifyMockConnectorFixture(t *testing.T, includeLive bool) string {
+func writeVerifyMockConnectorFixture(t *testing.T, includeLive, includeActivity bool) string {
 	t.Helper()
 	root := writeDoctorMockExecutionFixture(t, doctorMockExecutionFixtureOptions{IncludeUnmocked: includeLive})
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "stub-agent.md"), "You are a deterministic verification agent.\n")
@@ -81,6 +87,24 @@ provider.send:
     method: POST
     url: https://provider.example/messages
 `)
+	if includeActivity {
+		writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+stub-agent-node:
+  id: stub-agent-node
+  execution_type: system_node
+  subscribes_to: [task.requested]
+  produces: [task.completed]
+  event_handlers:
+    task.requested:
+      advances_to: done
+      emit:
+        event: task.completed
+      activity:
+        id: provider_send
+        tool: provider.send
+        input: {}
+`)
+	}
 	if _, ok := loadWorkflowValidationBundleAt(t, root).Tools["provider.send"]; !ok {
 		t.Fatal("verification fixture omitted provider.send from the effective tool catalog")
 	}

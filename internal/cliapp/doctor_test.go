@@ -348,7 +348,7 @@ func TestDoctorPreflightConsumesEffectiveAgentExecutionSelection(t *testing.T) {
 	})
 
 	t.Run("fully mocked connector waives only its exact outbound secret", func(t *testing.T) {
-		report, code, stderr := runDoctorPreflightJSON(t, writeDoctorClaudeHostConfig(t, ""), writeVerifyMockConnectorFixture(t, false), llmselection.BackendClaudeCLI)
+		report, code, stderr := runDoctorPreflightJSON(t, writeDoctorClaudeHostConfig(t, ""), writeVerifyMockConnectorFixture(t, false, false), llmselection.BackendClaudeCLI)
 		if code != 0 {
 			t.Fatalf("code = %d, want success; stderr=%s findings=%#v", code, stderr, report.Findings)
 		}
@@ -359,7 +359,7 @@ func TestDoctorPreflightConsumesEffectiveAgentExecutionSelection(t *testing.T) {
 	})
 
 	t.Run("mixed connector retains its exact outbound secret", func(t *testing.T) {
-		report, code, _ := runDoctorPreflightJSON(t, writeDoctorClaudeHostConfig(t, ""), writeVerifyMockConnectorFixture(t, true), llmselection.BackendAnthropic)
+		report, code, _ := runDoctorPreflightJSON(t, writeDoctorClaudeHostConfig(t, ""), writeVerifyMockConnectorFixture(t, true, false), llmselection.BackendAnthropic)
 		if code != CLIExitRuntime {
 			t.Fatalf("code = %d, want %d; findings=%#v", code, CLIExitRuntime, report.Findings)
 		}
@@ -438,6 +438,22 @@ func TestDoctorPreflightConsumesEffectiveAgentExecutionSelection(t *testing.T) {
 		for _, forbidden := range []string{"missing_backend_credential", "backend_credential_skipped_no_claude_execution", "workspace_claude_cli_not_required"} {
 			if localPreflightReportHasCode(report, forbidden) {
 				t.Fatalf("non-Claude report contains Claude finding %q: %#v", forbidden, report.Findings)
+			}
+		}
+	})
+
+	t.Run("all mocked connector retains secret for live workflow activity", func(t *testing.T) {
+		report, code, _ := runDoctorPreflightJSON(t, writeDoctorClaudeHostConfig(t, ""), writeVerifyMockConnectorFixture(t, false, true), llmselection.BackendClaudeCLI)
+		if code != CLIExitRuntime {
+			t.Fatalf("code = %d, want %d; findings=%#v", code, CLIExitRuntime, report.Findings)
+		}
+		finding, ok := localPreflightReportFinding(report, "missing_contract_secret")
+		if !ok || finding.Status != LocalPreflightStatusFailed || finding.Severity != LocalPreflightSeverityBlocker {
+			t.Fatalf("workflow activity contract secret finding = %#v, want failed blocker", finding)
+		}
+		for _, want := range []string{"provider_credential", "tool:provider.send", "stub-agent-node", "task.requested"} {
+			if !strings.Contains(finding.Message, want) {
+				t.Fatalf("workflow activity contract secret finding missing %q: %#v", want, finding)
 			}
 		}
 	})

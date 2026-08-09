@@ -97,6 +97,40 @@ func TestCredentialChecksRetainAgentFreeToolRequirement(t *testing.T) {
 	}
 }
 
+func TestCredentialChecksRetainAllMockToolUsedByLiveWorkflowActivity(t *testing.T) {
+	source, plan := mockConnectorCredentialFixture(t, "static", false, false)
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("mock connector source has no canonical bundle")
+	}
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"provider-sender": {
+			ID: "provider-sender",
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"provider.requested": {Activity: runtimecontracts.ActivitySpec{ID: "provider_send", Tool: "provider.send"}},
+				"provider.rule_requested": {Rules: []runtimecontracts.HandlerRuleEntry{{
+					ID: "send", Condition: "true", Activity: runtimecontracts.ActivitySpec{ID: "provider_rule_send", Tool: "provider.send"},
+				}}},
+			},
+		},
+	}
+	source = semanticview.Wrap(bundle)
+	reachability := mockConnectorEffectReachability(t, source, plan)
+	if sites := reachability.LiveWorkflowActivitySites("provider.send"); len(sites) != 2 ||
+		!strings.Contains(strings.Join(sites, "\n"), "node provider-sender handler provider.requested") ||
+		!strings.Contains(strings.Join(sites, "\n"), "node provider-sender handler provider.rule_requested") {
+		t.Fatalf("live workflow activity sites = %#v", sites)
+	}
+	findings := newCheckerContext(context.Background(), source, Options{
+		Credentials:        bootverifyCredentialStore{values: map[string]string{}},
+		EffectReachability: reachability,
+	}).credentials()
+	if !credentialFindingContains(findings, "provider_credential", "tool provider.send") ||
+		!credentialFindingContains(findings, "provider_credential", "node provider-sender handler provider.requested") {
+		t.Fatalf("credential findings = %#v, want live workflow activity requirement retained", findings)
+	}
+}
+
 func TestCredentialChecksRetainNonToolRequirementsSharingAKey(t *testing.T) {
 	source, plan := mockConnectorCredentialFixture(t, "static", true, false)
 	findings := newCheckerContext(context.Background(), source, Options{
