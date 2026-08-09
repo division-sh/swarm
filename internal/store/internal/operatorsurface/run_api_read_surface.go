@@ -10,39 +10,17 @@ import (
 	"strings"
 	"time"
 
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
-
-type RunHeader struct {
-	RunID            string                        `json:"run_id"`
-	Status           string                        `json:"status"`
-	Origin           runtimerunlifecycle.RunOrigin `json:"origin"`
-	EntityCount      int                           `json:"entity_count"`
-	EventCount       int                           `json:"event_count"`
-	StartedAt        time.Time                     `json:"started_at"`
-	EndedAt          *time.Time                    `json:"ended_at,omitempty"`
-	ContinuedAsRunID string                        `json:"continued_as_run_id,omitempty"`
-	Failure          *runtimefailures.Envelope     `json:"failure,omitempty"`
-	ControlReason    string                        `json:"control_reason,omitempty"`
-}
-
-type RunHeaderListOptions struct {
-	Status     string
-	BundleHash string
-	Since      *time.Time
-	Until      *time.Time
-	Limit      int
-	Cursor     string
-}
 
 type runHeaderCursor struct {
 	StartedAt string `json:"started_at"`
 	RunID     string `json:"run_id"`
 }
 
-func defaultRunHeaderListOptions(opts RunHeaderListOptions) RunHeaderListOptions {
+func defaultRunHeaderListOptions(opts operatorread.RunHeaderListOptions) operatorread.RunHeaderListOptions {
 	opts.Status = strings.ToLower(strings.TrimSpace(opts.Status))
 	opts.BundleHash = strings.TrimSpace(opts.BundleHash)
 	opts.Cursor = strings.TrimSpace(opts.Cursor)
@@ -55,38 +33,38 @@ func defaultRunHeaderListOptions(opts RunHeaderListOptions) RunHeaderListOptions
 	return opts
 }
 
-func (s *OperatorPostgres) requireRunHeaderAccess() error {
+func (s *RunPostgres) requireRunHeaderAccess() error {
 	return s.requireCurrentSchema()
 }
 
-func (s *OperatorPostgres) LoadRunHeader(ctx context.Context, runID string) (RunHeader, error) {
+func (s *RunPostgres) LoadRunHeader(ctx context.Context, runID string) (operatorread.RunHeader, error) {
 	if s == nil || s.backend == nil {
-		return RunHeader{}, fmt.Errorf("postgres store is required")
+		return operatorread.RunHeader{}, fmt.Errorf("postgres store is required")
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
-		return RunHeader{}, ErrRunNotFound
+		return operatorread.RunHeader{}, operatorread.ErrRunNotFound
 	}
 	if _, err := uuid.Parse(runID); err != nil {
-		return RunHeader{}, ErrRunNotFound
+		return operatorread.RunHeader{}, operatorread.ErrRunNotFound
 	}
 	if err := s.requireRunHeaderAccess(); err != nil {
-		return RunHeader{}, err
+		return operatorread.RunHeader{}, err
 	}
 	row := s.backend.QueryRowContext(ctx, runHeaderSelectSQL()+`
 WHERE r.run_id = $1::uuid
 `, runID)
 	header, err := scanRunHeader(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return RunHeader{}, ErrRunNotFound
+		return operatorread.RunHeader{}, operatorread.ErrRunNotFound
 	}
 	if err != nil {
-		return RunHeader{}, err
+		return operatorread.RunHeader{}, err
 	}
 	return header, nil
 }
 
-func (s *OperatorPostgres) LoadRunOrigin(ctx context.Context, runID string) (runtimerunlifecycle.RunOrigin, error) {
+func (s *RunPostgres) LoadRunOrigin(ctx context.Context, runID string) (runtimerunlifecycle.RunOrigin, error) {
 	header, err := s.LoadRunHeader(ctx, runID)
 	if err != nil {
 		return runtimerunlifecycle.RunOrigin{}, err
@@ -94,7 +72,7 @@ func (s *OperatorPostgres) LoadRunOrigin(ctx context.Context, runID string) (run
 	return header.Origin, nil
 }
 
-func (s *OperatorPostgres) ListRunHeaders(ctx context.Context, opts RunHeaderListOptions) ([]RunHeader, string, error) {
+func (s *RunPostgres) ListRunHeaders(ctx context.Context, opts operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error) {
 	if s == nil || s.backend == nil {
 		return nil, "", fmt.Errorf("postgres store is required")
 	}
@@ -138,7 +116,7 @@ LIMIT $%d
 		return nil, "", err
 	}
 	defer rows.Close()
-	headers := make([]RunHeader, 0, opts.Limit)
+	headers := make([]operatorread.RunHeader, 0, opts.Limit)
 	for rows.Next() {
 		header, err := scanRunHeader(rows)
 		if err != nil {
@@ -205,8 +183,8 @@ type runHeaderScanner interface {
 	Scan(dest ...any) error
 }
 
-func scanRunHeader(row runHeaderScanner) (RunHeader, error) {
-	var header RunHeader
+func scanRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
+	var header operatorread.RunHeader
 	var endedAt sql.NullTime
 	var failureRaw []byte
 	var bundleHash, bundleSource string
@@ -235,7 +213,7 @@ func scanRunHeader(row runHeaderScanner) (RunHeader, error) {
 		&failureRaw,
 		&header.ControlReason,
 	); err != nil {
-		return RunHeader{}, err
+		return operatorread.RunHeader{}, err
 	}
 	header.Status = strings.ToLower(strings.TrimSpace(header.Status))
 	var err error
@@ -243,18 +221,18 @@ func scanRunHeader(row runHeaderScanner) (RunHeader, error) {
 		originKind, eventID, eventType, serviceID, generation, sourceRunID, sourceEventID,
 	)
 	if err != nil {
-		return RunHeader{}, fmt.Errorf("run %s origin: %w", header.RunID, err)
+		return operatorread.RunHeader{}, fmt.Errorf("run %s origin: %w", header.RunID, err)
 	}
 	if err := validateRunHeaderStandingRelation(
 		header.RunID, header.Origin, standingRelationCount, matchingStandingRelationCount,
 	); err != nil {
-		return RunHeader{}, err
+		return operatorread.RunHeader{}, err
 	}
 	header.ContinuedAsRunID = strings.TrimSpace(header.ContinuedAsRunID)
 	header.ControlReason = strings.TrimSpace(header.ControlReason)
 	failure, err := decodeStoredFailure(failureRaw)
 	if err != nil {
-		return RunHeader{}, err
+		return operatorread.RunHeader{}, err
 	}
 	header.Failure = failure
 	if endedAt.Valid {
@@ -263,12 +241,12 @@ func scanRunHeader(row runHeaderScanner) (RunHeader, error) {
 	}
 	header.StartedAt = header.StartedAt.UTC()
 	if err := validateRunHeaderLifecycle(header, bundleHash, bundleSource); err != nil {
-		return RunHeader{}, err
+		return operatorread.RunHeader{}, err
 	}
 	return header, nil
 }
 
-func validateRunHeaderLifecycle(header RunHeader, bundleHash, bundleSource string) error {
+func validateRunHeaderLifecycle(header operatorread.RunHeader, bundleHash, bundleSource string) error {
 	state, err := runtimerunlifecycle.ParseState(header.Status)
 	if err != nil {
 		return fmt.Errorf("run %s lifecycle: %w", header.RunID, err)
@@ -315,7 +293,7 @@ func validateRunHeaderStandingRelation(
 	return nil
 }
 
-func encodeRunHeaderCursor(header RunHeader) string {
+func encodeRunHeaderCursor(header operatorread.RunHeader) string {
 	raw, _ := json.Marshal(runHeaderCursor{
 		StartedAt: header.StartedAt.UTC().Format(time.RFC3339Nano),
 		RunID:     strings.TrimSpace(header.RunID),
@@ -326,19 +304,19 @@ func encodeRunHeaderCursor(header RunHeader) string {
 func decodeRunHeaderCursor(cursor string) (time.Time, string, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(cursor))
 	if err != nil {
-		return time.Time{}, "", ErrInvalidRunListCursor
+		return time.Time{}, "", operatorread.ErrInvalidRunListCursor
 	}
 	var decoded runHeaderCursor
 	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return time.Time{}, "", ErrInvalidRunListCursor
+		return time.Time{}, "", operatorread.ErrInvalidRunListCursor
 	}
 	startedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(decoded.StartedAt))
 	if err != nil {
-		return time.Time{}, "", ErrInvalidRunListCursor
+		return time.Time{}, "", operatorread.ErrInvalidRunListCursor
 	}
 	runID := strings.TrimSpace(decoded.RunID)
 	if runID == "" {
-		return time.Time{}, "", ErrInvalidRunListCursor
+		return time.Time{}, "", operatorread.ErrInvalidRunListCursor
 	}
 	return startedAt, runID, nil
 }

@@ -12,8 +12,6 @@ import (
 
 const (
 	DefaultOperationName = "runtime.destructive_reset"
-	DefaultLockKey       = "swarm:runtime:destructive-reset"
-	defaultLockKey       = DefaultLockKey
 
 	QuiescenceControlledBy = DefaultOperationName
 	QuiescenceReasonCode   = "runtime_nuke_cancelled"
@@ -30,7 +28,6 @@ const (
 var (
 	ErrInvalidRequest       = errors.New("invalid destructive reset request")
 	ErrOperationInProgress  = errors.New("destructive reset operation already in progress")
-	ErrIdempotencyConflict  = errors.New("destructive reset idempotency conflict")
 	ErrPlannerNotConfigured = errors.New("destructive reset planner is not configured")
 	ErrLockNotConfigured    = errors.New("destructive reset lock manager is not configured")
 	ErrLockLeaseMissing     = errors.New("destructive reset lock lease is missing")
@@ -38,7 +35,6 @@ var (
 
 type Request struct {
 	ActorTokenID      string
-	IdempotencyKey    string
 	RequestHash       string
 	DryRun            bool
 	IncludeBundles    bool
@@ -240,16 +236,34 @@ type Planner interface {
 }
 
 type LockManager interface {
-	TryAcquire(context.Context, string) (LockLease, bool, error)
+	AcquireDestructiveReset(context.Context) (LockLease, bool, error)
 }
 
 type LockLease interface {
 	Release(context.Context) error
 }
 
-type IdempotencyStore interface {
-	LoadResetResult(context.Context, IdempotencyKey) (StoredResult, bool, error)
-	StoreResetResult(context.Context, StoredResult) error
+type QuiescenceApplier interface {
+	Apply(context.Context, QuiescenceRequest) (QuiescenceResult, error)
+}
+
+type CleanupApplier interface {
+	Apply(context.Context, CleanupRequest) (CleanupResult, error)
+}
+
+type ContainerStopper interface {
+	Apply(context.Context, ContainerResetRequest) (ContainerResetResult, error)
+}
+
+type RuntimeContextQuiescer interface {
+	QuiesceAllRuntimeContexts(context.Context) error
+}
+
+type ExecutionResult struct {
+	Plan       Result
+	Quiescence QuiescenceResult
+	Cleanup    CleanupResult
+	Containers ContainerResetResult
 }
 
 type QuiescenceStore interface {
@@ -285,36 +299,8 @@ type ContainerIdentity struct {
 	FlowInstance   string
 }
 
-type IdempotencyKey struct {
-	OperationName  string
-	ActorTokenID   string
-	IdempotencyKey string
-}
-
-type StoredResult struct {
-	Key         IdempotencyKey
-	RequestHash string
-	Result      Result
-	StoredAt    time.Time
-}
-
-type IdempotencyConflictError struct {
-	Key                    IdempotencyKey
-	OriginalRequestHash    string
-	ConflictingRequestHash string
-}
-
-func (e *IdempotencyConflictError) Error() string {
-	return ErrIdempotencyConflict.Error()
-}
-
-func (e *IdempotencyConflictError) Is(target error) bool {
-	return target == ErrIdempotencyConflict
-}
-
 func (r Request) normalize(now time.Time) (Request, error) {
 	r.ActorTokenID = strings.TrimSpace(r.ActorTokenID)
-	r.IdempotencyKey = strings.TrimSpace(r.IdempotencyKey)
 	r.RequestHash = strings.TrimSpace(r.RequestHash)
 	if !r.IncludeBundlesSet {
 		r.IncludeBundles = true
@@ -322,9 +308,6 @@ func (r Request) normalize(now time.Time) (Request, error) {
 	}
 	if r.ActorTokenID == "" {
 		return Request{}, fmt.Errorf("%w: actor token id is required", ErrInvalidRequest)
-	}
-	if r.IdempotencyKey != "" && r.RequestHash == "" {
-		return Request{}, fmt.Errorf("%w: request hash is required when idempotency key is present", ErrInvalidRequest)
 	}
 	if r.RequestedAt.IsZero() {
 		r.RequestedAt = now
@@ -338,14 +321,4 @@ func (r Request) includeBundles() bool {
 		return true
 	}
 	return r.IncludeBundles
-}
-
-func (k IdempotencyKey) normalized() IdempotencyKey {
-	k.OperationName = strings.TrimSpace(k.OperationName)
-	if k.OperationName == "" {
-		k.OperationName = DefaultOperationName
-	}
-	k.ActorTokenID = strings.TrimSpace(k.ActorTokenID)
-	k.IdempotencyKey = strings.TrimSpace(k.IdempotencyKey)
-	return k
 }

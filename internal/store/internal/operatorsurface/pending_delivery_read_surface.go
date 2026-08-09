@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
@@ -19,38 +20,6 @@ import (
 
 const pendingAgentDeliveryCursorKind = "agent.diagnose.queue"
 
-const DefaultPendingAgentDeliveryDetailLimit = 50
-const MaxPendingAgentDeliveryDetailLimit = 500
-const MaxAgentDiagnosisQueueLimit = 200
-
-type PendingAgentDeliveryFacts struct {
-	PendingCount        int
-	OldestPendingAgeSec int
-}
-
-type PendingAgentDeliveryListOptions struct {
-	AgentIdentity agentidentity.Identity
-	Since         time.Time
-	Limit         int
-	Cursor        string
-}
-
-type PendingAgentDeliveryPage struct {
-	PendingCount        int
-	OldestPendingAgeSec int
-	PendingDeliveries   []PendingAgentDeliveryDetail
-	NextCursor          string
-}
-
-type PendingAgentDeliveryDetail struct {
-	DeliveryID string
-	EventID    string
-	EventName  string
-	EnqueuedAt time.Time
-	Attempts   int
-	Event      events.Event `json:"-"`
-}
-
 type pendingAgentDeliveryCursor struct {
 	Kind       string `json:"kind"`
 	EnqueuedAt string `json:"enqueued_at"`
@@ -58,7 +27,7 @@ type pendingAgentDeliveryCursor struct {
 	DeliveryID string `json:"delivery_id"`
 }
 
-func (s *OperatorPostgres) ListPendingAgentDeliveryFacts(ctx context.Context, identities []agentidentity.Identity, since time.Time) (map[agentidentity.Identity]PendingAgentDeliveryFacts, error) {
+func (s *AgentPostgres) ListPendingAgentDeliveryFacts(ctx context.Context, identities []agentidentity.Identity, since time.Time) (map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
@@ -73,17 +42,17 @@ func (s *OperatorPostgres) ListPendingAgentDeliveryFacts(ctx context.Context, id
 	return pendingAgentDeliveryFactsFromAggregates(normalized, aggregates, time.Now()), nil
 }
 
-func (s *OperatorPostgres) ListPendingAgentDeliveryDetails(ctx context.Context, opts PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error) {
+func (s *AgentPostgres) ListPendingAgentDeliveryDetails(ctx context.Context, opts operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryPage, error) {
 	opts, cursor, empty, err := normalizePendingAgentDeliveryOptions(opts)
 	if err != nil || empty {
-		return PendingAgentDeliveryPage{PendingDeliveries: []PendingAgentDeliveryDetail{}}, err
+		return operatorread.PendingAgentDeliveryPage{PendingDeliveries: []operatorread.PendingAgentDeliveryDetail{}}, err
 	}
 	if err := s.requireCurrentSchema(); err != nil {
-		return PendingAgentDeliveryPage{}, err
+		return operatorread.PendingAgentDeliveryPage{}, err
 	}
 	aggregates, err := operatorPostgresDelivery.AgentPendingAggregates(ctx, s.backend, []agentidentity.Identity{opts.AgentIdentity}, opts.Since)
 	if err != nil {
-		return PendingAgentDeliveryPage{}, err
+		return operatorread.PendingAgentDeliveryPage{}, err
 	}
 	page, err := operatorPostgresDelivery.AgentPendingReferencePage(ctx, s.backend, runtimedelivery.AgentPendingPageQuery{
 		AgentIdentity: opts.AgentIdentity,
@@ -92,14 +61,14 @@ func (s *OperatorPostgres) ListPendingAgentDeliveryDetails(ctx context.Context, 
 		After:         cursor,
 	})
 	if err != nil {
-		return PendingAgentDeliveryPage{}, err
+		return operatorread.PendingAgentDeliveryPage{}, err
 	}
 	return pendingAgentDeliveryPageFromProjection(ctx, opts.AgentIdentity, aggregates, page, time.Now(), func(ctx context.Context, eventID string) (eventrecord.Record, bool, error) {
 		return eventrecordpostgres.Load(ctx, s.backend, eventID)
 	})
 }
 
-func (s *OperatorSQLite) ListPendingAgentDeliveryFacts(ctx context.Context, identities []agentidentity.Identity, since time.Time) (map[agentidentity.Identity]PendingAgentDeliveryFacts, error) {
+func (s *AgentSQLite) ListPendingAgentDeliveryFacts(ctx context.Context, identities []agentidentity.Identity, since time.Time) (map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts, error) {
 	normalized, err := normalizePendingAgentIdentities(identities)
 	if err != nil {
 		return nil, err
@@ -111,20 +80,20 @@ func (s *OperatorSQLite) ListPendingAgentDeliveryFacts(ctx context.Context, iden
 	return pendingAgentDeliveryFactsFromAggregates(normalized, aggregates, s.now()), nil
 }
 
-func (s *OperatorSQLite) ListPendingAgentDeliveryDetails(ctx context.Context, opts PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error) {
+func (s *AgentSQLite) ListPendingAgentDeliveryDetails(ctx context.Context, opts operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryPage, error) {
 	opts, cursor, empty, err := normalizePendingAgentDeliveryOptions(opts)
 	if err != nil || empty {
-		return PendingAgentDeliveryPage{PendingDeliveries: []PendingAgentDeliveryDetail{}}, err
+		return operatorread.PendingAgentDeliveryPage{PendingDeliveries: []operatorread.PendingAgentDeliveryDetail{}}, err
 	}
 	aggregates, err := operatorSQLiteDelivery.AgentPendingAggregates(ctx, s.backend, []agentidentity.Identity{opts.AgentIdentity}, opts.Since)
 	if err != nil {
-		return PendingAgentDeliveryPage{}, err
+		return operatorread.PendingAgentDeliveryPage{}, err
 	}
 	page, err := operatorSQLiteDelivery.AgentPendingReferencePage(ctx, s.backend, runtimedelivery.AgentPendingPageQuery{
 		AgentIdentity: opts.AgentIdentity, Since: opts.Since, Limit: opts.Limit, After: cursor,
 	})
 	if err != nil {
-		return PendingAgentDeliveryPage{}, err
+		return operatorread.PendingAgentDeliveryPage{}, err
 	}
 	return pendingAgentDeliveryPageFromProjection(ctx, opts.AgentIdentity, aggregates, page, s.now(), func(ctx context.Context, eventID string) (eventrecord.Record, bool, error) {
 		return eventrecordsqlite.Load(ctx, s.backend, eventID)
@@ -148,7 +117,7 @@ func normalizePendingAgentIdentities(identities []agentidentity.Identity) ([]age
 	return out, nil
 }
 
-func normalizePendingAgentDeliveryOptions(opts PendingAgentDeliveryListOptions) (PendingAgentDeliveryListOptions, *runtimedelivery.AgentPendingPosition, bool, error) {
+func normalizePendingAgentDeliveryOptions(opts operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryListOptions, *runtimedelivery.AgentPendingPosition, bool, error) {
 	opts.AgentIdentity = opts.AgentIdentity.Normalize()
 	opts.Cursor = strings.TrimSpace(opts.Cursor)
 	if opts.AgentIdentity.IsZero() {
@@ -158,10 +127,10 @@ func normalizePendingAgentDeliveryOptions(opts PendingAgentDeliveryListOptions) 
 		return opts, nil, false, fmt.Errorf("pending agent delivery identity: %w", err)
 	}
 	if opts.Limit == 0 {
-		opts.Limit = DefaultPendingAgentDeliveryDetailLimit
+		opts.Limit = operatorread.DefaultPendingAgentDeliveryDetailLimit
 	}
-	if opts.Limit < 0 || opts.Limit > MaxPendingAgentDeliveryDetailLimit {
-		return opts, nil, false, fmt.Errorf("pending agent delivery detail limit must be from 1 to %d", MaxPendingAgentDeliveryDetailLimit)
+	if opts.Limit < 0 || opts.Limit > operatorread.MaxPendingAgentDeliveryDetailLimit {
+		return opts, nil, false, fmt.Errorf("pending agent delivery detail limit must be from 1 to %d", operatorread.MaxPendingAgentDeliveryDetailLimit)
 	}
 	if opts.Cursor == "" {
 		return opts, nil, false, nil
@@ -173,17 +142,17 @@ func normalizePendingAgentDeliveryOptions(opts PendingAgentDeliveryListOptions) 
 	return opts, &cursor, false, nil
 }
 
-func pendingAgentDeliveryFactsFromAggregates(identities []agentidentity.Identity, aggregates []runtimedelivery.AgentPendingAggregate, now time.Time) map[agentidentity.Identity]PendingAgentDeliveryFacts {
-	out := make(map[agentidentity.Identity]PendingAgentDeliveryFacts, len(identities))
+func pendingAgentDeliveryFactsFromAggregates(identities []agentidentity.Identity, aggregates []runtimedelivery.AgentPendingAggregate, now time.Time) map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts {
+	out := make(map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts, len(identities))
 	for _, identity := range identities {
-		out[identity] = PendingAgentDeliveryFacts{}
+		out[identity] = operatorread.PendingAgentDeliveryFacts{}
 	}
 	for _, aggregate := range aggregates {
 		age := int(now.Sub(aggregate.OldestEventAt).Seconds())
 		if age < 0 {
 			age = 0
 		}
-		out[aggregate.AgentIdentity] = PendingAgentDeliveryFacts{
+		out[aggregate.AgentIdentity] = operatorread.PendingAgentDeliveryFacts{
 			PendingCount:        aggregate.Count,
 			OldestPendingAgeSec: age,
 		}
@@ -198,12 +167,12 @@ func pendingAgentDeliveryPageFromProjection(
 	page runtimedelivery.AgentPendingReferencePage,
 	now time.Time,
 	load func(context.Context, string) (eventrecord.Record, bool, error),
-) (PendingAgentDeliveryPage, error) {
+) (operatorread.PendingAgentDeliveryPage, error) {
 	facts := pendingAgentDeliveryFactsFromAggregates([]agentidentity.Identity{identity}, aggregates, now)[identity]
-	out := PendingAgentDeliveryPage{
+	out := operatorread.PendingAgentDeliveryPage{
 		PendingCount:        facts.PendingCount,
 		OldestPendingAgeSec: facts.OldestPendingAgeSec,
-		PendingDeliveries:   make([]PendingAgentDeliveryDetail, 0, len(page.References)),
+		PendingDeliveries:   make([]operatorread.PendingAgentDeliveryDetail, 0, len(page.References)),
 	}
 	for _, reference := range page.References {
 		durable, found, err := load(ctx, reference.Snapshot.EventID)
@@ -211,23 +180,23 @@ func pendingAgentDeliveryPageFromProjection(
 			if err == nil {
 				err = eventrecord.Missing(reference.Snapshot.EventID)
 			}
-			return PendingAgentDeliveryPage{}, err
+			return operatorread.PendingAgentDeliveryPage{}, err
 		}
 		admitted, err := durable.Decode()
 		if err != nil {
-			return PendingAgentDeliveryPage{}, err
+			return operatorread.PendingAgentDeliveryPage{}, err
 		}
 		event := admitted.Event()
 		if event.ID() != reference.Snapshot.EventID || !event.CreatedAt().UTC().Equal(reference.EventCreatedAt.UTC()) {
-			return PendingAgentDeliveryPage{}, fmt.Errorf("pending agent delivery event %s changed during hydration", reference.Snapshot.EventID)
+			return operatorread.PendingAgentDeliveryPage{}, fmt.Errorf("pending agent delivery event %s changed during hydration", reference.Snapshot.EventID)
 		}
 		delivery, err := events.NewDeliveryEvent(event, reference.Snapshot.Route)
 		if err != nil {
-			return PendingAgentDeliveryPage{}, err
+			return operatorread.PendingAgentDeliveryPage{}, err
 		}
 		detail, err := pendingAgentDeliveryDetailFromReference(reference, delivery.Event())
 		if err != nil {
-			return PendingAgentDeliveryPage{}, err
+			return operatorread.PendingAgentDeliveryPage{}, err
 		}
 		out.PendingDeliveries = append(out.PendingDeliveries, detail)
 	}
@@ -237,8 +206,8 @@ func pendingAgentDeliveryPageFromProjection(
 	return out, nil
 }
 
-func pendingAgentDeliveryDetailFromReference(reference runtimedelivery.AgentPendingReference, event events.Event) (PendingAgentDeliveryDetail, error) {
-	detail := PendingAgentDeliveryDetail{
+func pendingAgentDeliveryDetailFromReference(reference runtimedelivery.AgentPendingReference, event events.Event) (operatorread.PendingAgentDeliveryDetail, error) {
+	detail := operatorread.PendingAgentDeliveryDetail{
 		DeliveryID: strings.TrimSpace(reference.Snapshot.DeliveryID),
 		EventID:    strings.TrimSpace(event.ID()),
 		EventName:  strings.TrimSpace(string(event.Type())),
@@ -247,24 +216,24 @@ func pendingAgentDeliveryDetailFromReference(reference runtimedelivery.AgentPend
 		Event:      event,
 	}
 	if detail.DeliveryID == "" {
-		return PendingAgentDeliveryDetail{}, fmt.Errorf("pending agent delivery detail delivery_id is required")
+		return operatorread.PendingAgentDeliveryDetail{}, fmt.Errorf("pending agent delivery detail delivery_id is required")
 	}
 	if detail.EventID == "" {
-		return PendingAgentDeliveryDetail{}, fmt.Errorf("pending agent delivery detail event_id is required")
+		return operatorread.PendingAgentDeliveryDetail{}, fmt.Errorf("pending agent delivery detail event_id is required")
 	}
 	if detail.EventName == "" {
-		return PendingAgentDeliveryDetail{}, fmt.Errorf("pending agent delivery detail event_name is required")
+		return operatorread.PendingAgentDeliveryDetail{}, fmt.Errorf("pending agent delivery detail event_name is required")
 	}
 	if detail.EnqueuedAt.IsZero() {
-		return PendingAgentDeliveryDetail{}, fmt.Errorf("pending agent delivery detail enqueued_at is required")
+		return operatorread.PendingAgentDeliveryDetail{}, fmt.Errorf("pending agent delivery detail enqueued_at is required")
 	}
 	if detail.Attempts < 0 {
-		return PendingAgentDeliveryDetail{}, fmt.Errorf("pending agent delivery detail attempts must be non-negative")
+		return operatorread.PendingAgentDeliveryDetail{}, fmt.Errorf("pending agent delivery detail attempts must be non-negative")
 	}
 	return detail, nil
 }
 
-func encodePendingAgentDeliveryCursor(detail PendingAgentDeliveryDetail) string {
+func encodePendingAgentDeliveryCursor(detail operatorread.PendingAgentDeliveryDetail) string {
 	raw, _ := json.Marshal(pendingAgentDeliveryCursor{
 		Kind:       pendingAgentDeliveryCursorKind,
 		EnqueuedAt: detail.EnqueuedAt.UTC().Format(time.RFC3339Nano),
@@ -277,27 +246,27 @@ func encodePendingAgentDeliveryCursor(detail PendingAgentDeliveryDetail) string 
 func decodePendingAgentDeliveryCursor(raw string) (runtimedelivery.AgentPendingPosition, error) {
 	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(raw))
 	if err != nil {
-		return runtimedelivery.AgentPendingPosition{}, ErrInvalidPendingAgentDeliveryCursor
+		return runtimedelivery.AgentPendingPosition{}, operatorread.ErrInvalidPendingAgentDeliveryCursor
 	}
 	var cursor pendingAgentDeliveryCursor
 	if err := json.Unmarshal(decoded, &cursor); err != nil {
-		return runtimedelivery.AgentPendingPosition{}, ErrInvalidPendingAgentDeliveryCursor
+		return runtimedelivery.AgentPendingPosition{}, operatorread.ErrInvalidPendingAgentDeliveryCursor
 	}
 	if strings.TrimSpace(cursor.Kind) != pendingAgentDeliveryCursorKind ||
 		strings.TrimSpace(cursor.EventID) == "" ||
 		strings.TrimSpace(cursor.DeliveryID) == "" ||
 		strings.TrimSpace(cursor.EnqueuedAt) == "" {
-		return runtimedelivery.AgentPendingPosition{}, ErrInvalidPendingAgentDeliveryCursor
+		return runtimedelivery.AgentPendingPosition{}, operatorread.ErrInvalidPendingAgentDeliveryCursor
 	}
 	enqueuedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(cursor.EnqueuedAt))
 	if err != nil {
-		return runtimedelivery.AgentPendingPosition{}, ErrInvalidPendingAgentDeliveryCursor
+		return runtimedelivery.AgentPendingPosition{}, operatorread.ErrInvalidPendingAgentDeliveryCursor
 	}
 	if _, err := uuid.Parse(strings.TrimSpace(cursor.EventID)); err != nil {
-		return runtimedelivery.AgentPendingPosition{}, ErrInvalidPendingAgentDeliveryCursor
+		return runtimedelivery.AgentPendingPosition{}, operatorread.ErrInvalidPendingAgentDeliveryCursor
 	}
 	if _, err := uuid.Parse(strings.TrimSpace(cursor.DeliveryID)); err != nil {
-		return runtimedelivery.AgentPendingPosition{}, ErrInvalidPendingAgentDeliveryCursor
+		return runtimedelivery.AgentPendingPosition{}, operatorread.ErrInvalidPendingAgentDeliveryCursor
 	}
 	return runtimedelivery.AgentPendingPosition{
 		EventCreatedAt: enqueuedAt.UTC(),

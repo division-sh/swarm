@@ -7,12 +7,12 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 )
 
-var _ runtimebus.ActiveAgentDescriptorLister = (*OperatorPostgres)(nil)
-var _ runtimebus.ActiveAgentDescriptorLister = (*OperatorSQLite)(nil)
+var _ runtimebus.ActiveAgentDescriptorLister = (*AgentPostgres)(nil)
+var _ runtimebus.ActiveAgentDescriptorLister = (*AgentSQLite)(nil)
 
 // ListActiveAgentDescriptors implements runtime.ActiveAgentDescriptorLister for
 // explicit runtime delivery planning against persisted agent metadata.
-func (s *OperatorPostgres) ListActiveAgentDescriptors(ctx context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
+func (s *AgentPostgres) ListActiveAgentDescriptors(ctx context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("db unavailable")
 	}
@@ -55,7 +55,7 @@ func (s *OperatorPostgres) ListActiveAgentDescriptors(ctx context.Context) ([]ru
 
 // ListActiveAgentDescriptors gives SQLite the same transaction-visible
 // delivery-planning surface as PostgreSQL.
-func (s *OperatorSQLite) ListActiveAgentDescriptors(ctx context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
+func (s *AgentSQLite) ListActiveAgentDescriptors(ctx context.Context) ([]runtimebus.ActiveAgentDescriptor, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}

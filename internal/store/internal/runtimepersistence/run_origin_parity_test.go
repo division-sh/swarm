@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -19,8 +20,8 @@ import (
 )
 
 type runOriginReadStore interface {
-	LoadRunHeader(context.Context, string) (RunHeader, error)
-	ListRunHeaders(context.Context, RunHeaderListOptions) ([]RunHeader, string, error)
+	LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
+	ListRunHeaders(context.Context, operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error)
 }
 
 func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
@@ -292,7 +293,7 @@ func requireListedRunOrigin(
 	want runtimerunlifecycle.RunOrigin,
 ) {
 	t.Helper()
-	headers, _, err := reader.ListRunHeaders(ctx, RunHeaderListOptions{Limit: 500})
+	headers, _, err := reader.ListRunHeaders(ctx, operatorread.RunHeaderListOptions{Limit: 500})
 	if err != nil {
 		t.Fatalf("list run headers: %v", err)
 	}

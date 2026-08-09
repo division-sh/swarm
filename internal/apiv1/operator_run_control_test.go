@@ -5,9 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"testing"
 	"time"
+
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -55,9 +56,9 @@ func TestOperatorRunStopDoesNotReplayCommittedTransitionAfterReconciliationFailu
 			}}
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: OperatorReadHandlers(OperatorReadOptions{
+				Handlers: OperatorRunControlHandlers(RunControlHandlerOptions{
 					Idempotency: pg,
-					RunControl:  controller,
+					Controller:  controller,
 				}),
 			})
 			runID := uuid.NewString()
@@ -97,7 +98,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 	bus.SetRunDispatchGate(controller)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:         func() time.Time { return time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC) },
 			Ready:       func() bool { return true },
 			Database:    fakePinger{},
@@ -195,7 +196,7 @@ func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
 	bus.SetRunDispatchGate(controller)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Idempotency: pg,
 			RunControl:  controller,
 		}),

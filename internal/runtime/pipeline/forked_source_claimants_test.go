@@ -4,9 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"testing"
 	"time"
+
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"

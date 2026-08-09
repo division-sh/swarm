@@ -9,18 +9,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
 type operatorConversationProjectionTestBackend struct {
 	store interface {
-		ListOperatorConversationTurns(context.Context, OperatorConversationTurnListOptions) (OperatorConversationTurnListResult, error)
-		LoadOperatorPublicConversationTurn(context.Context, string, string) (OperatorPublicConversationTurnDetail, error)
+		ListOperatorConversationTurns(context.Context, operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error)
+		LoadOperatorPublicConversationTurn(context.Context, string, string) (operatorread.OperatorPublicConversationTurnDetail, error)
 	}
 	owner interface {
-		ResolveConversationForkPoint(context.Context, string, ConversationForkPointSelector) (ConversationForkPointDescriptor, error)
+		ResolveConversationForkPoint(context.Context, string, runfork.ConversationForkPointSelector) (runfork.ConversationForkPointDescriptor, error)
 	}
 	db     *sql.DB
 	sqlite bool
@@ -36,11 +38,11 @@ type operatorConversationProjectionFixture struct {
 }
 
 type operatorConversationProjectionParityResult struct {
-	Pages          [][]OperatorConversationTurnListItem
-	Exact          OperatorPublicConversationTurn
-	Mixed          OperatorPublicConversationTurn
-	TurnCoordinate ConversationForkPointDescriptor
-	TimeCoordinate ConversationForkPointDescriptor
+	Pages          [][]operatorread.OperatorConversationTurnListItem
+	Exact          operatorread.OperatorPublicConversationTurn
+	Mixed          operatorread.OperatorPublicConversationTurn
+	TurnCoordinate runfork.ConversationForkPointDescriptor
+	TimeCoordinate runfork.ConversationForkPointDescriptor
 	AmbiguousEvent string
 	BeforeHistory  string
 	MalformedTurn  string
@@ -341,17 +343,17 @@ func seedOperatorConversationProjectionTurn(
 func proveOperatorConversationProjectionBackend(t *testing.T, backend operatorConversationProjectionTestBackend, fixture operatorConversationProjectionFixture) operatorConversationProjectionParityResult {
 	t.Helper()
 	ctx := testAuthorActivityContext()
-	first, err := backend.store.ListOperatorConversationTurns(ctx, OperatorConversationTurnListOptions{SessionID: fixture.sessionID, Limit: 2})
+	first, err := backend.store.ListOperatorConversationTurns(ctx, operatorread.OperatorConversationTurnListOptions{SessionID: fixture.sessionID, Limit: 2})
 	if err != nil {
 		t.Fatalf("list first turn page: %v", err)
 	}
 	if len(first.Turns) != 2 || first.NextCursor == "" || first.Turns[0].TurnID != fixture.turnIDs[3] || first.Turns[0].Ordinal != 4 || first.Turns[1].TurnID != fixture.turnIDs[2] || first.Turns[1].Ordinal != 3 {
 		t.Fatalf("first turn page = %#v", first)
 	}
-	if first.Turns[0].ActivityCounts != (OperatorConversationActivityCounts{Dispatch: 1, Tool: 1, ToolResult: 1, Publish: 1, Output: 1, Failure: 1}) {
+	if first.Turns[0].ActivityCounts != (operatorread.OperatorConversationActivityCounts{Dispatch: 1, Tool: 1, ToolResult: 1, Publish: 1, Output: 1, Failure: 1}) {
 		t.Fatalf("mixed compact activity counts = %#v", first.Turns[0].ActivityCounts)
 	}
-	second, err := backend.store.ListOperatorConversationTurns(ctx, OperatorConversationTurnListOptions{SessionID: fixture.sessionID, Limit: 2, Cursor: first.NextCursor})
+	second, err := backend.store.ListOperatorConversationTurns(ctx, operatorread.OperatorConversationTurnListOptions{SessionID: fixture.sessionID, Limit: 2, Cursor: first.NextCursor})
 	if err != nil {
 		t.Fatalf("list second turn page: %v", err)
 	}
@@ -365,7 +367,7 @@ func proveOperatorConversationProjectionBackend(t *testing.T, backend operatorCo
 		t.Fatalf("nullable/unavailable token facts leaked values: first=%#v second=%#v", first.Turns[1].Tokens, second.Turns[1].Tokens)
 	}
 	seen := map[string]bool{}
-	for _, page := range [][]OperatorConversationTurnListItem{first.Turns, second.Turns} {
+	for _, page := range [][]operatorread.OperatorConversationTurnListItem{first.Turns, second.Turns} {
 		for _, turn := range page {
 			if seen[turn.TurnID] {
 				t.Fatalf("turn %s repeated across cursor pages", turn.TurnID)
@@ -413,31 +415,31 @@ func proveOperatorConversationProjectionBackend(t *testing.T, backend operatorCo
 		t.Fatalf("public turn projection leaked private evidence: %s", projectionJSON)
 	}
 
-	turnCoordinate, err := backend.owner.ResolveConversationForkPoint(ctx, fixture.sessionID, ConversationForkPointSelector{Kind: "turn", TurnID: fixture.turnIDs[1]})
+	turnCoordinate, err := backend.owner.ResolveConversationForkPoint(ctx, fixture.sessionID, runfork.ConversationForkPointSelector{Kind: "turn", TurnID: fixture.turnIDs[1]})
 	if err != nil || turnCoordinate.TurnIndex != 2 {
 		t.Fatalf("turn coordinate = %#v, err=%v", turnCoordinate, err)
 	}
 	tieAt := fixture.tieAt
-	timeCoordinate, err := backend.owner.ResolveConversationForkPoint(ctx, fixture.sessionID, ConversationForkPointSelector{Kind: "time", At: &tieAt})
+	timeCoordinate, err := backend.owner.ResolveConversationForkPoint(ctx, fixture.sessionID, runfork.ConversationForkPointSelector{Kind: "time", At: &tieAt})
 	if err != nil || timeCoordinate.TurnIndex != 3 || timeCoordinate.TurnID != fixture.turnIDs[2] {
 		t.Fatalf("time coordinate = %#v, err=%v", timeCoordinate, err)
 	}
-	_, ambiguousErr := backend.owner.ResolveConversationForkPoint(ctx, fixture.sessionID, ConversationForkPointSelector{Kind: "event", EventID: fixture.sharedEventID})
+	_, ambiguousErr := backend.owner.ResolveConversationForkPoint(ctx, fixture.sessionID, runfork.ConversationForkPointSelector{Kind: "event", EventID: fixture.sharedEventID})
 	if ambiguousErr == nil || !strings.Contains(ambiguousErr.Error(), "event matches multiple source turns") {
 		t.Fatalf("ambiguous event error = %v", ambiguousErr)
 	}
 	before := fixture.firstAt.Add(-time.Millisecond)
-	_, beforeErr := backend.owner.ResolveConversationForkPoint(ctx, fixture.sessionID, ConversationForkPointSelector{Kind: "time", At: &before})
+	_, beforeErr := backend.owner.ResolveConversationForkPoint(ctx, fixture.sessionID, runfork.ConversationForkPointSelector{Kind: "time", At: &before})
 	if beforeErr == nil || !strings.Contains(beforeErr.Error(), "does not select a source turn") {
 		t.Fatalf("before-history error = %v", beforeErr)
 	}
-	_, malformedErr := backend.store.ListOperatorConversationTurns(ctx, OperatorConversationTurnListOptions{SessionID: fixture.malformedSessionID})
+	_, malformedErr := backend.store.ListOperatorConversationTurns(ctx, operatorread.OperatorConversationTurnListOptions{SessionID: fixture.malformedSessionID})
 	if malformedErr == nil || !strings.Contains(malformedErr.Error(), "tool_name is required") {
 		t.Fatalf("malformed public turn error = %v", malformedErr)
 	}
 
 	return operatorConversationProjectionParityResult{
-		Pages:          [][]OperatorConversationTurnListItem{first.Turns, second.Turns},
+		Pages:          [][]operatorread.OperatorConversationTurnListItem{first.Turns, second.Turns},
 		Exact:          detail.Turn,
 		Mixed:          mixed.Turn,
 		TurnCoordinate: turnCoordinate,

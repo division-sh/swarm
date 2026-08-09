@@ -91,11 +91,31 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.postgres = bundleCatalog
-	operatorSurface, err := storeoperatorsurface.NewPostgres(backend, store.requireCurrentSchema, store)
+	operatorObservability, err := storeoperatorsurface.NewObservabilityPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
-	store.operatorPostgres = operatorSurface
+	store.operatorObservabilityPostgres = operatorObservability
+	operatorConversation, err := storeoperatorsurface.NewConversationPostgres(backend, store.requireCurrentSchema, store)
+	if err != nil {
+		return nil, err
+	}
+	store.operatorConversationPostgres = operatorConversation
+	operatorRun, err := storeoperatorsurface.NewRunPostgres(backend, store.requireCurrentSchema, store, operatorObservability)
+	if err != nil {
+		return nil, err
+	}
+	store.operatorRunPostgres = operatorRun
+	operatorEntity, err := storeoperatorsurface.NewEntityPostgres(backend, store.requireCurrentSchema)
+	if err != nil {
+		return nil, err
+	}
+	store.operatorEntityPostgres = operatorEntity
+	operatorAgent, err := storeoperatorsurface.NewAgentPostgres(backend, store.requireCurrentSchema, store, operatorConversation, operatorObservability)
+	if err != nil {
+		return nil, err
+	}
+	store.operatorAgentPostgres = operatorAgent
 	routingRules, err := storeroutingrules.NewPostgres(backend)
 	if err != nil {
 		return nil, err
@@ -116,11 +136,16 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.mailboxPostgresOwner = mailbox
-	adminOwner, err := storeadmin.NewPostgres(backend, store.requireCurrentSchema)
+	bundleDeleteOwner, err := storeadmin.NewBundleDeletePostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
-	store.adminPostgresOwner = adminOwner
+	store.bundleDeletePostgresOwner = bundleDeleteOwner
+	destructiveResetOwner, err := storeadmin.NewDestructiveResetPostgres(backend, store.requireCurrentSchema)
+	if err != nil {
+		return nil, err
+	}
+	store.destructiveResetPostgresOwner = destructiveResetOwner
 	activityJournal, err := storeactivityjournal.NewPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -300,11 +325,31 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.sQLite = bundleCatalog
-	operatorSurface, err := storeoperatorsurface.NewSQLite(backend, store.requireCurrentSchema, store.now, store)
+	operatorObservability, err := storeoperatorsurface.NewObservabilitySQLite(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
 	}
-	store.operatorSQLite = operatorSurface
+	store.operatorObservabilitySQLite = operatorObservability
+	operatorConversation, err := storeoperatorsurface.NewConversationSQLite(backend, store.requireCurrentSchema, store)
+	if err != nil {
+		return nil, err
+	}
+	store.operatorConversationSQLite = operatorConversation
+	operatorRun, err := storeoperatorsurface.NewRunSQLite(backend, store.requireCurrentSchema, store.now, store, operatorObservability)
+	if err != nil {
+		return nil, err
+	}
+	store.operatorRunSQLite = operatorRun
+	operatorEntity, err := storeoperatorsurface.NewEntitySQLite(backend, store.requireCurrentSchema)
+	if err != nil {
+		return nil, err
+	}
+	store.operatorEntitySQLite = operatorEntity
+	operatorAgent, err := storeoperatorsurface.NewAgentSQLite(backend, store.requireCurrentSchema, store.now, store, operatorConversation, operatorObservability)
+	if err != nil {
+		return nil, err
+	}
+	store.operatorAgentSQLite = operatorAgent
 	activityJournal, err := storeactivityjournal.NewSQLite(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err

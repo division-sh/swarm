@@ -20,8 +20,6 @@ type Coordinator struct {
 	Containers         ManagedContainerStopper
 	RuntimeQuiescer    RuntimeQuiescer
 	Now                func() time.Time
-	Operation          string
-	LockKey            string
 }
 
 type RuntimeQuiescer interface {
@@ -50,7 +48,7 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out Result, ret
 		return Result{}, fmt.Errorf("bundle delete lock manager is required")
 	}
 
-	lease, acquired, err := c.Locks.TryAcquire(ctx, c.lockKey())
+	lease, acquired, err := c.Locks.AcquireBundleDelete(ctx)
 	if err != nil {
 		return Result{}, err
 	}
@@ -92,6 +90,9 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out Result, ret
 	}
 	containers, err := c.managedContainersForPlan(ctx, plan)
 	if err != nil {
+		if cancellationErr := contextCancellationError(ctx, err); cancellationErr != nil {
+			return Result{}, cancellationErr
+		}
 		return result.withPartialFailure("managed_containers", err), nil
 	}
 	result.Plan.EntityContainers = containers
@@ -99,6 +100,9 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out Result, ret
 	if req.DryRun {
 		containerResult, err := c.applyContainers(ctx, req, result.Plan, preservationcleanup.Result{})
 		if err != nil {
+			if cancellationErr := contextCancellationError(ctx, err); cancellationErr != nil {
+				return Result{}, cancellationErr
+			}
 			return result.withPartialFailure("managed_containers", err).asDryRun(), nil
 		}
 		result.Status = "dry_run"
@@ -126,6 +130,9 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out Result, ret
 		Targets:       targets,
 	})
 	if err != nil {
+		if cancellationErr := contextCancellationError(ctx, err); cancellationErr != nil {
+			return Result{}, cancellationErr
+		}
 		return result.withPartialFailure("preservation_cleanup", err), nil
 	}
 	result.Cleanup = cleanup
@@ -134,6 +141,9 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out Result, ret
 
 	containerResult, err := c.applyContainers(ctx, req, result.Plan, cleanup)
 	if err != nil {
+		if cancellationErr := contextCancellationError(ctx, err); cancellationErr != nil {
+			return Result{}, cancellationErr
+		}
 		return result.withPartialFailure("managed_containers", err), nil
 	}
 	result.Containers = containerResult
@@ -152,6 +162,9 @@ func (c *Coordinator) Execute(ctx context.Context, req Request) (out Result, ret
 		RequestedAt:   req.RequestedAt,
 	})
 	if err != nil {
+		if cancellationErr := contextCancellationError(ctx, err); cancellationErr != nil {
+			return Result{}, cancellationErr
+		}
 		return result.withPartialFailure("phase_5_bundle_delete", err), nil
 	}
 	result.FinalMutation = final
@@ -229,17 +242,17 @@ func (c *Coordinator) now() time.Time {
 }
 
 func (c *Coordinator) operationName() string {
-	if c == nil || strings.TrimSpace(c.Operation) == "" {
-		return DefaultOperationName
-	}
-	return strings.TrimSpace(c.Operation)
+	return DefaultOperationName
 }
 
-func (c *Coordinator) lockKey() string {
-	if c == nil || strings.TrimSpace(c.LockKey) == "" {
-		return destructivereset.DefaultLockKey
+func contextCancellationError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
 	}
-	return strings.TrimSpace(c.LockKey)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return nil
 }
 
 func (r Result) withPartialFailure(scope string, err error) Result {

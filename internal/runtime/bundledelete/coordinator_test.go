@@ -35,9 +35,6 @@ func TestCoordinatorExecutesForceDeleteOwnerChain(t *testing.T) {
 	if owner.cleanupRequest.Targets[0].ReasonCode != preservationcleanup.BundleForceDeletedReason {
 		t.Fatalf("cleanup reason = %q", owner.cleanupRequest.Targets[0].ReasonCode)
 	}
-	if owner.lockKey != destructivereset.DefaultLockKey {
-		t.Fatalf("lock key = %q, want shared destructive key %q", owner.lockKey, destructivereset.DefaultLockKey)
-	}
 }
 
 func TestCoordinatorDryRunDoesNotMutateCleanupOrFinalizer(t *testing.T) {
@@ -81,6 +78,23 @@ func TestCoordinatorPhaseFailureStopsBeforeFinalMutation(t *testing.T) {
 	}
 	if got, want := owner.calls, []string{"lock", "plan", "inventory", "quiesce", "cleanup", "containers"}; !stringSlicesEqual(got, want) {
 		t.Fatalf("partial calls = %#v, want %#v", got, want)
+	}
+}
+
+func TestCoordinatorCancellationIsNotRecordedAsPartialFailure(t *testing.T) {
+	owner := newFakeOwners("00000000-0000-0000-0000-000000000101")
+	owner.inventoryErr = context.Canceled
+	result, err := owner.coordinator(time.Now()).Execute(context.Background(), Request{
+		ActorTokenID: "token",
+		RequestHash:  "hash",
+		BundleHash:   testBundleHash,
+		Force:        true,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Execute cancellation error = %v, want context canceled", err)
+	}
+	if result.PartialFailure || result.Status == "partial_failure" {
+		t.Fatalf("cancellation result = %#v, must not become a partial business result", result)
 	}
 }
 
@@ -132,11 +146,11 @@ const testBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 type fakeOwners struct {
 	calls           []string
-	lockKey         string
 	lockAcquired    bool
 	runID           string
 	cleanupRequest  preservationcleanup.Request
 	containerFailed bool
+	inventoryErr    error
 	quiesceErr      error
 	lockReleaseErr  error
 }
@@ -163,9 +177,8 @@ func (o *fakeOwners) QuiesceBundleRuntime(_ context.Context, _ string) error {
 	return o.quiesceErr
 }
 
-func (o *fakeOwners) TryAcquire(_ context.Context, lockKey string) (destructivereset.LockLease, bool, error) {
+func (o *fakeOwners) AcquireBundleDelete(context.Context) (LockLease, bool, error) {
 	o.calls = append(o.calls, "lock")
-	o.lockKey = lockKey
 	if !o.lockAcquired {
 		return nil, false, nil
 	}
@@ -194,6 +207,9 @@ func (o *fakeOwners) PlanBundleDelete(_ context.Context, req Request) (Plan, err
 
 func (o *fakeOwners) ManagedResetContainerInventory(_ context.Context) ([]destructivereset.ContainerRef, error) {
 	o.calls = append(o.calls, "inventory")
+	if o.inventoryErr != nil {
+		return nil, o.inventoryErr
+	}
 	return []destructivereset.ContainerRef{{
 		Name:          "swarm-agent-1",
 		Kind:          "agent",

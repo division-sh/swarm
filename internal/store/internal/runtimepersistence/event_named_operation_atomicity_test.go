@@ -112,7 +112,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 				}
 				conflicting := req
 				conflicting.Commit.Event = conflict
-				if outcome, err := commitSelectedForkEventOutcome(ctx, store, conflicting); !errors.Is(err, ErrEventIdentityConflict) || outcome != runtimebus.EventAppendOutcomeUnknown {
+				if outcome, err := commitSelectedForkEventOutcome(ctx, store, conflicting); !errors.Is(err, events.ErrEventIdentityConflict) || outcome != runtimebus.EventAppendOutcomeUnknown {
 					t.Fatalf("conflict outcome=%v err=%v", outcome, err)
 				}
 				assertSelectedForkOperationCounts(t, ctx, fixture, req.Commit.Event.ID(), want)

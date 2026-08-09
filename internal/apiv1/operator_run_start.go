@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 const runStartIDempotencyTTL = 24 * time.Hour
@@ -25,40 +25,41 @@ type bundleIdentityParam struct {
 	BundleHash string
 }
 
-func OperatorRunStartHandlers(opts OperatorReadOptions) map[string]MethodHandler {
+func OperatorRunStartHandlers(opts RunStartHandlerOptions) map[string]MethodHandler {
 	if !runStartConfigured(opts) {
 		return nil
 	}
-	now := opts.Now
+	now := opts.Publication.Now
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	return map[string]MethodHandler{
 		"run.start": func(ctx context.Context, req Request) (any, error) {
-			return executeRunStart(ctx, req, opts, now().UTC())
+			return executeRunStart(ctx, req, opts.Publication, now().UTC())
 		},
 	}
 }
 
-func runStartConfigured(opts OperatorReadOptions) bool {
-	if opts.Idempotency == nil {
+func runStartConfigured(opts RunStartHandlerOptions) bool {
+	publication := opts.Publication
+	if publication.Idempotency == nil {
 		return false
 	}
-	if runtimeContextManager(opts) != nil {
+	if runtimeContextManager(publication.RuntimeContexts) != nil {
 		return true
 	}
-	return opts.Source != nil &&
-		opts.Events != nil &&
-		strings.TrimSpace(opts.Bundle.BundleHash) != ""
+	return publication.Source != nil &&
+		publication.Events != nil &&
+		strings.TrimSpace(publication.Bundle.BundleHash) != ""
 }
 
-func executeRunStart(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+func executeRunStart(ctx context.Context, req Request, opts EventPublicationOptions, now time.Time) (any, error) {
 	cfg := eventPublicationConfig{
 		sourceAgent:                    func(Request) string { return "api.v1" },
 		rootInputOnly:                  true,
 		injectRunIDEntityIDWhenMissing: true,
 		publishError:                   runStartEventPublishError,
-		buildCompletion: func(_ context.Context, _ OperatorReadOptions, params eventPublicationParams) (any, string, error) {
+		buildCompletion: func(_ context.Context, _ EventPublicationOptions, params eventPublicationParams) (any, string, error) {
 			return runStartResult{RunID: params.RunID, Status: "running"}, params.RunID, nil
 		},
 	}
@@ -96,7 +97,7 @@ func bundleIdentityInputParam(params map[string]any) (bundleIdentityParam, error
 }
 
 func runStartIdempotencyError(err error) error {
-	var conflict *store.APIIdempotencyConflictError
+	var conflict *apiidempotency.ConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
 			"original_request_hash":    conflict.OriginalRequestHash,

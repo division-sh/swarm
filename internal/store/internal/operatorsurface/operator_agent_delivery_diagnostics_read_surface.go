@@ -4,86 +4,15 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
-
-const (
-	DefaultAgentDeliveryDiagnosticsLimit = 50
-	MaxAgentDeliveryDiagnosticsLimit     = 200
-)
-
-var ErrInvalidAgentDeliveryDiagnosticsCursor = errors.New("invalid agent delivery diagnostics cursor")
-
-type AgentDeliveryDiagnosticsCursorError struct {
-	Field string
-}
-
-func (e AgentDeliveryDiagnosticsCursorError) Error() string {
-	field := strings.TrimSpace(e.Field)
-	if field == "" {
-		field = "cursor"
-	}
-	return fmt.Sprintf("invalid agent delivery diagnostics %s", field)
-}
-
-func (e AgentDeliveryDiagnosticsCursorError) Unwrap() error {
-	return ErrInvalidAgentDeliveryDiagnosticsCursor
-}
-
-type OperatorAgentDeliveryDiagnosticsOptions struct {
-	FailureLimit     int
-	FailureCursor    string
-	DeadLetterLimit  int
-	DeadLetterCursor string
-}
-
-type OperatorAgentDeliveryDiagnostics struct {
-	AgentID               string                                  `json:"agent_id"`
-	Summary               OperatorAgentDeliveryDiagnosticsSummary `json:"summary"`
-	Failures              []OperatorAgentDeliveryFailure          `json:"failures"`
-	FailuresNextCursor    string                                  `json:"failures_next_cursor,omitempty"`
-	DeadLetters           []OperatorAgentDeadLetterDelivery       `json:"dead_letters"`
-	DeadLettersNextCursor string                                  `json:"dead_letters_next_cursor,omitempty"`
-}
-
-type OperatorAgentDeliveryDiagnosticsSummary struct {
-	Failures24h    int `json:"failures_24h"`
-	DeadLetters24h int `json:"dead_letters_24h"`
-}
-
-type OperatorAgentDeliveryFailure struct {
-	DeliveryID string                    `json:"delivery_id"`
-	EventID    string                    `json:"event_id"`
-	EventName  string                    `json:"event_name"`
-	RunID      string                    `json:"run_id,omitempty"`
-	EntityID   string                    `json:"entity_id,omitempty"`
-	Status     string                    `json:"status"`
-	ReasonCode string                    `json:"reason_code,omitempty"`
-	Failure    *runtimefailures.Envelope `json:"failure,omitempty"`
-	RetryCount int                       `json:"retry_count"`
-	OccurredAt time.Time                 `json:"occurred_at"`
-}
-
-type OperatorAgentDeadLetterDelivery struct {
-	DeliveryID        string                     `json:"delivery_id"`
-	EventID           string                     `json:"event_id"`
-	EventName         string                     `json:"event_name"`
-	RunID             string                     `json:"run_id,omitempty"`
-	EntityID          string                     `json:"entity_id,omitempty"`
-	Status            string                     `json:"status"`
-	ReasonCode        string                     `json:"reason_code,omitempty"`
-	Failure           *runtimefailures.Envelope  `json:"failure,omitempty"`
-	RetryCount        int                        `json:"retry_count"`
-	OccurredAt        time.Time                  `json:"occurred_at"`
-	DeadLetterRecords []OperatorDeadLetterRecord `json:"dead_letter_records"`
-}
 
 type agentDeliveryDiagnosticsCursor struct {
 	Kind       string `json:"kind"`
@@ -91,43 +20,26 @@ type agentDeliveryDiagnosticsCursor struct {
 	DeliveryID string `json:"delivery_id"`
 }
 
-type agentDeliveryDiagnosticSnapshotReader interface {
-	deliveryDiagnosticSnapshotPageForAgent(context.Context, runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error)
-	deliveryDiagnosticCountsForAgentSince(context.Context, agentidentity.Identity, time.Time) (runtimedelivery.AgentDiagnosticCounts, error)
+func (s *AgentPostgres) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryDiagnosticsOptions) (operatorread.OperatorAgentDeliveryDiagnostics, error) {
+	return NewOperatorAgentReadSurface(s.backend, s, 0).LoadOperatorAgentDeliveryDiagnostics(ctx, identity, opts)
 }
 
-type operatorDeliveryDeadLetterReader interface {
-	LoadOperatorDeliveryDeadLetters(context.Context, string, int64) ([]OperatorDeadLetterRecord, error)
-}
-
-func (s *OperatorPostgres) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryDiagnosticsOptions) (OperatorAgentDeliveryDiagnostics, error) {
-	return NewOperatorAgentConversationReadSurface(s.backend, s, 0).LoadOperatorAgentDeliveryDiagnostics(ctx, identity, opts)
-}
-
-func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentDeliveryDiagnosticsOptions) (OperatorAgentDeliveryDiagnostics, error) {
+func (r *OperatorAgentReadSurface) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryDiagnosticsOptions) (operatorread.OperatorAgentDeliveryDiagnostics, error) {
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {
-		return OperatorAgentDeliveryDiagnostics{}, ErrAgentNotFound
+		return operatorread.OperatorAgentDeliveryDiagnostics{}, operatorread.ErrAgentNotFound
 	}
 	if err := r.requireAgentDeliveryDiagnosticsAccess(); err != nil {
-		return OperatorAgentDeliveryDiagnostics{}, err
+		return operatorread.OperatorAgentDeliveryDiagnostics{}, err
 	}
 	if err := r.ensureAgentDeliveryDiagnosticsAgentExists(ctx, identity); err != nil {
-		return OperatorAgentDeliveryDiagnostics{}, err
+		return operatorread.OperatorAgentDeliveryDiagnostics{}, err
 	}
 
 	opts = defaultOperatorAgentDeliveryDiagnosticsOptions(opts)
-	reader, ok := r.owner.(agentDeliveryDiagnosticSnapshotReader)
-	if !ok {
-		return OperatorAgentDeliveryDiagnostics{}, fmt.Errorf("operator agent delivery diagnostics requires canonical bounded delivery snapshots")
-	}
-	counts, failures, deadLetters, err := loadAgentDeliveryDiagnosticSnapshotPages(ctx, reader, identity, opts)
+	counts, failures, deadLetters, err := loadAgentDeliveryDiagnosticSnapshotPages(ctx, r.source, identity, opts)
 	if err != nil {
-		return OperatorAgentDeliveryDiagnostics{}, err
-	}
-	deadLetterReader, ok := r.owner.(operatorDeliveryDeadLetterReader)
-	if !ok {
-		return OperatorAgentDeliveryDiagnostics{}, fmt.Errorf("operator agent delivery diagnostics requires canonical dead-letter projection")
+		return operatorread.OperatorAgentDeliveryDiagnostics{}, err
 	}
 	return buildAgentDeliveryDiagnostics(identity.AgentID(), counts, failures, deadLetters,
 		func(eventID string) (deliveryLifecycleEventMetadata, error) {
@@ -145,40 +57,40 @@ func (r *OperatorAgentConversationReadSurface) LoadOperatorAgentDeliveryDiagnost
 			event := admitted.Event()
 			return deliveryLifecycleEventMetadata{EventName: string(event.Type()), RunID: event.RunID(), EntityID: event.EntityID()}, nil
 		},
-		func(deliveryID string, claimVersion int64) ([]OperatorDeadLetterRecord, error) {
-			return deadLetterReader.LoadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
+		func(deliveryID string, claimVersion int64) ([]operatorread.OperatorDeadLetterRecord, error) {
+			return r.source.LoadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
 		})
 }
 
-func defaultOperatorAgentDeliveryDiagnosticsOptions(opts OperatorAgentDeliveryDiagnosticsOptions) OperatorAgentDeliveryDiagnosticsOptions {
+func defaultOperatorAgentDeliveryDiagnosticsOptions(opts operatorread.OperatorAgentDeliveryDiagnosticsOptions) operatorread.OperatorAgentDeliveryDiagnosticsOptions {
 	if opts.FailureLimit <= 0 {
-		opts.FailureLimit = DefaultAgentDeliveryDiagnosticsLimit
+		opts.FailureLimit = operatorread.DefaultAgentDeliveryDiagnosticsLimit
 	}
-	if opts.FailureLimit > MaxAgentDeliveryDiagnosticsLimit {
-		opts.FailureLimit = MaxAgentDeliveryDiagnosticsLimit
+	if opts.FailureLimit > operatorread.MaxAgentDeliveryDiagnosticsLimit {
+		opts.FailureLimit = operatorread.MaxAgentDeliveryDiagnosticsLimit
 	}
 	if opts.DeadLetterLimit <= 0 {
-		opts.DeadLetterLimit = DefaultAgentDeliveryDiagnosticsLimit
+		opts.DeadLetterLimit = operatorread.DefaultAgentDeliveryDiagnosticsLimit
 	}
-	if opts.DeadLetterLimit > MaxAgentDeliveryDiagnosticsLimit {
-		opts.DeadLetterLimit = MaxAgentDeliveryDiagnosticsLimit
+	if opts.DeadLetterLimit > operatorread.MaxAgentDeliveryDiagnosticsLimit {
+		opts.DeadLetterLimit = operatorread.MaxAgentDeliveryDiagnosticsLimit
 	}
 	opts.FailureCursor = strings.TrimSpace(opts.FailureCursor)
 	opts.DeadLetterCursor = strings.TrimSpace(opts.DeadLetterCursor)
 	return opts
 }
 
-func (r *OperatorAgentConversationReadSurface) requireAgentDeliveryDiagnosticsAccess() error {
+func (r *OperatorAgentReadSurface) requireAgentDeliveryDiagnosticsAccess() error {
 	if r == nil || r.db == nil {
 		return fmt.Errorf("operator agent delivery diagnostics read owner requires postgres store")
 	}
-	return r.owner.RequireCurrentSchema()
+	return r.source.RequireCurrentSchema()
 }
 
-func (r *OperatorAgentConversationReadSurface) ensureAgentDeliveryDiagnosticsAgentExists(ctx context.Context, identity agentidentity.Identity) error {
+func (r *OperatorAgentReadSurface) ensureAgentDeliveryDiagnosticsAgentExists(ctx context.Context, identity agentidentity.Identity) error {
 	fields, err := agentIdentityFields(identity)
 	if err != nil {
-		return ErrAgentNotFound
+		return operatorread.ErrAgentNotFound
 	}
 	var exists bool
 	if err := r.db.QueryRowContext(ctx, `
@@ -199,7 +111,7 @@ func (r *OperatorAgentConversationReadSurface) ensureAgentDeliveryDiagnosticsAge
 		return fmt.Errorf("load agent delivery diagnostics agent: %w", err)
 	}
 	if !exists {
-		return ErrAgentNotFound
+		return operatorread.ErrAgentNotFound
 	}
 	return nil
 }
@@ -216,14 +128,14 @@ func encodeAgentDeliveryDiagnosticsCursor(kind string, occurredAt time.Time, del
 func decodeAgentDeliveryDiagnosticsCursor(raw, kind, field string) (agentDeliveryDiagnosticsCursor, error) {
 	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(raw))
 	if err != nil {
-		return agentDeliveryDiagnosticsCursor{}, AgentDeliveryDiagnosticsCursorError{Field: field}
+		return agentDeliveryDiagnosticsCursor{}, operatorread.AgentDeliveryDiagnosticsCursorError{Field: field}
 	}
 	var cursor agentDeliveryDiagnosticsCursor
 	if err := json.Unmarshal(decoded, &cursor); err != nil {
-		return agentDeliveryDiagnosticsCursor{}, AgentDeliveryDiagnosticsCursorError{Field: field}
+		return agentDeliveryDiagnosticsCursor{}, operatorread.AgentDeliveryDiagnosticsCursorError{Field: field}
 	}
 	if strings.TrimSpace(cursor.Kind) != strings.TrimSpace(kind) {
-		return agentDeliveryDiagnosticsCursor{}, AgentDeliveryDiagnosticsCursorError{Field: field}
+		return agentDeliveryDiagnosticsCursor{}, operatorread.AgentDeliveryDiagnosticsCursorError{Field: field}
 	}
 	return cursor, nil
 }
@@ -234,27 +146,27 @@ func buildAgentDeliveryDiagnostics(
 	failures runtimedelivery.SnapshotPage,
 	deadLetters runtimedelivery.SnapshotPage,
 	loadEvent func(string) (deliveryLifecycleEventMetadata, error),
-	loadDeliveryDeadLetters func(string, int64) ([]OperatorDeadLetterRecord, error),
-) (OperatorAgentDeliveryDiagnostics, error) {
-	result := OperatorAgentDeliveryDiagnostics{
+	loadDeliveryDeadLetters func(string, int64) ([]operatorread.OperatorDeadLetterRecord, error),
+) (operatorread.OperatorAgentDeliveryDiagnostics, error) {
+	result := operatorread.OperatorAgentDeliveryDiagnostics{
 		AgentID:  agentID,
-		Summary:  OperatorAgentDeliveryDiagnosticsSummary{Failures24h: counts.Failures, DeadLetters24h: counts.DeadLetters},
-		Failures: []OperatorAgentDeliveryFailure{}, DeadLetters: []OperatorAgentDeadLetterDelivery{},
+		Summary:  operatorread.OperatorAgentDeliveryDiagnosticsSummary{Failures24h: counts.Failures, DeadLetters24h: counts.DeadLetters},
+		Failures: []operatorread.OperatorAgentDeliveryFailure{}, DeadLetters: []operatorread.OperatorAgentDeadLetterDelivery{},
 	}
 	for _, snapshot := range failures.Snapshots {
 		if snapshot.Status != runtimedelivery.StatusFailed {
-			return OperatorAgentDeliveryDiagnostics{}, fmt.Errorf("canonical failure page returned delivery status %q", snapshot.Status)
+			return operatorread.OperatorAgentDeliveryDiagnostics{}, fmt.Errorf("canonical failure page returned delivery status %q", snapshot.Status)
 		}
 		occurredAt := deliveryDiagnosticOccurredAt(snapshot)
 		metadata, err := loadEvent(snapshot.EventID)
 		if err != nil {
-			return OperatorAgentDeliveryDiagnostics{}, err
+			return operatorread.OperatorAgentDeliveryDiagnostics{}, err
 		}
 		runID := snapshot.RunID
 		if runID == "" {
 			runID = metadata.RunID
 		}
-		result.Failures = append(result.Failures, OperatorAgentDeliveryFailure{
+		result.Failures = append(result.Failures, operatorread.OperatorAgentDeliveryFailure{
 			DeliveryID: snapshot.DeliveryID, EventID: snapshot.EventID, EventName: metadata.EventName,
 			RunID: runID, EntityID: metadata.EntityID, Status: string(snapshot.Status),
 			ReasonCode: snapshot.ReasonCode, Failure: runtimefailures.CloneEnvelope(snapshot.Failure),
@@ -263,12 +175,12 @@ func buildAgentDeliveryDiagnostics(
 	}
 	for _, snapshot := range deadLetters.Snapshots {
 		if snapshot.Status != runtimedelivery.StatusDeadLetter {
-			return OperatorAgentDeliveryDiagnostics{}, fmt.Errorf("canonical dead-letter page returned delivery status %q", snapshot.Status)
+			return operatorread.OperatorAgentDeliveryDiagnostics{}, fmt.Errorf("canonical dead-letter page returned delivery status %q", snapshot.Status)
 		}
 		occurredAt := deliveryDiagnosticOccurredAt(snapshot)
 		metadata, err := loadEvent(snapshot.EventID)
 		if err != nil {
-			return OperatorAgentDeliveryDiagnostics{}, err
+			return operatorread.OperatorAgentDeliveryDiagnostics{}, err
 		}
 		runID := snapshot.RunID
 		if runID == "" {
@@ -276,9 +188,9 @@ func buildAgentDeliveryDiagnostics(
 		}
 		records, err := loadDeliveryDeadLetters(snapshot.DeliveryID, snapshot.ClaimVersion)
 		if err != nil {
-			return OperatorAgentDeliveryDiagnostics{}, err
+			return operatorread.OperatorAgentDeliveryDiagnostics{}, err
 		}
-		result.DeadLetters = append(result.DeadLetters, OperatorAgentDeadLetterDelivery{
+		result.DeadLetters = append(result.DeadLetters, operatorread.OperatorAgentDeadLetterDelivery{
 			DeliveryID: snapshot.DeliveryID, EventID: snapshot.EventID, EventName: metadata.EventName,
 			RunID: runID, EntityID: metadata.EntityID, Status: string(snapshot.Status),
 			ReasonCode: snapshot.ReasonCode, Failure: runtimefailures.CloneEnvelope(snapshot.Failure),
@@ -298,9 +210,9 @@ func buildAgentDeliveryDiagnostics(
 
 func loadAgentDeliveryDiagnosticSnapshotPages(
 	ctx context.Context,
-	reader agentDeliveryDiagnosticSnapshotReader,
+	reader OperatorAgentReadSource,
 	identity agentidentity.Identity,
-	opts OperatorAgentDeliveryDiagnosticsOptions,
+	opts operatorread.OperatorAgentDeliveryDiagnosticsOptions,
 ) (runtimedelivery.AgentDiagnosticCounts, runtimedelivery.SnapshotPage, runtimedelivery.SnapshotPage, error) {
 	failureCursorAt, failureCursorID, err := decodeDeliveryDiagnosticsPosition(opts.FailureCursor, "agent.delivery_diagnostics.failures", "failure_cursor")
 	if err != nil {
@@ -310,18 +222,18 @@ func loadAgentDeliveryDiagnosticSnapshotPages(
 	if err != nil {
 		return runtimedelivery.AgentDiagnosticCounts{}, runtimedelivery.SnapshotPage{}, runtimedelivery.SnapshotPage{}, err
 	}
-	counts, err := reader.deliveryDiagnosticCountsForAgentSince(ctx, identity, time.Now().UTC().Add(-24*time.Hour))
+	counts, err := reader.DeliveryDiagnosticCountsForAgentSince(ctx, identity, time.Now().UTC().Add(-24*time.Hour))
 	if err != nil {
 		return runtimedelivery.AgentDiagnosticCounts{}, runtimedelivery.SnapshotPage{}, runtimedelivery.SnapshotPage{}, err
 	}
-	failures, err := reader.deliveryDiagnosticSnapshotPageForAgent(ctx, runtimedelivery.AgentDiagnosticPageQuery{
+	failures, err := reader.DeliveryDiagnosticSnapshotPageForAgent(ctx, runtimedelivery.AgentDiagnosticPageQuery{
 		AgentIdentity: identity, Status: runtimedelivery.StatusFailed,
 		BeforeOccurredAt: failureCursorAt, BeforeDeliveryID: failureCursorID, Limit: opts.FailureLimit,
 	})
 	if err != nil {
 		return runtimedelivery.AgentDiagnosticCounts{}, runtimedelivery.SnapshotPage{}, runtimedelivery.SnapshotPage{}, err
 	}
-	deadLetters, err := reader.deliveryDiagnosticSnapshotPageForAgent(ctx, runtimedelivery.AgentDiagnosticPageQuery{
+	deadLetters, err := reader.DeliveryDiagnosticSnapshotPageForAgent(ctx, runtimedelivery.AgentDiagnosticPageQuery{
 		AgentIdentity: identity, Status: runtimedelivery.StatusDeadLetter,
 		BeforeOccurredAt: deadCursorAt, BeforeDeliveryID: deadCursorID, Limit: opts.DeadLetterLimit,
 	})
@@ -351,7 +263,7 @@ func decodeDeliveryDiagnosticsPosition(raw, kind, field string) (time.Time, stri
 	}
 	occurredAt, err := time.Parse(time.RFC3339Nano, cursor.OccurredAt)
 	if err != nil || strings.TrimSpace(cursor.DeliveryID) == "" {
-		return time.Time{}, "", AgentDeliveryDiagnosticsCursorError{Field: field}
+		return time.Time{}, "", operatorread.AgentDeliveryDiagnosticsCursorError{Field: field}
 	}
 	return occurredAt.UTC(), strings.TrimSpace(cursor.DeliveryID), nil
 }

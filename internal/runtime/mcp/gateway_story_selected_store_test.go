@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"

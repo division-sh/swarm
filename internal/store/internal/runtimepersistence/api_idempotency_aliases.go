@@ -1,9 +1,0 @@
-package runtimepersistence
-
-import storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
-
-type APIIdempotencyCompletion = storeapiidempotency.APIIdempotencyCompletion
-type APIIdempotencyConflictError = storeapiidempotency.APIIdempotencyConflictError
-type APIIdempotencyRequest = storeapiidempotency.APIIdempotencyRequest
-
-var ErrAPIIdempotencyConflict = storeapiidempotency.ErrAPIIdempotencyConflict

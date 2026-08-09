@@ -8,16 +8,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/bundlecatalog"
 	swruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 const bundleDeleteIdempotencyTTL = 24 * time.Hour
 
-func OperatorBundleDeleteHandlers(opts OperatorReadOptions) map[string]MethodHandler {
-	if opts.BundleDelete == nil || opts.Idempotency == nil {
+func OperatorBundleDeleteHandlers(opts BundleDeleteHandlerOptions) map[string]MethodHandler {
+	if opts.Executor == nil || opts.Idempotency == nil {
 		return nil
 	}
 	now := opts.Now
@@ -31,7 +32,7 @@ func OperatorBundleDeleteHandlers(opts OperatorReadOptions) map[string]MethodHan
 	}
 }
 
-func executeBundleDelete(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+func executeBundleDelete(ctx context.Context, req Request, opts BundleDeleteHandlerOptions, now time.Time) (any, error) {
 	bundleHash, err := requiredBundleHashParam(req.Params, "bundle_hash")
 	if err != nil {
 		return nil, err
@@ -48,7 +49,7 @@ func executeBundleDelete(ctx context.Context, req Request, opts OperatorReadOpti
 	if err != nil {
 		return nil, err
 	}
-	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
+	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: idempotencyKey,
@@ -56,8 +57,8 @@ func executeBundleDelete(ctx context.Context, req Request, opts OperatorReadOpti
 		ResourceID:     bundleHash,
 		TTL:            bundleDeleteIdempotencyTTL,
 		Now:            now,
-	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		result, err := opts.BundleDelete.Execute(ctx, bundledelete.Request{
+	}, func(ctx context.Context) (apiidempotency.Completion, error) {
+		result, err := opts.Executor.Execute(ctx, bundledelete.Request{
 			ActorTokenID: req.ActorTokenID,
 			RequestHash:  req.RequestHash,
 			BundleHash:   bundleHash,
@@ -66,13 +67,13 @@ func executeBundleDelete(ctx context.Context, req Request, opts OperatorReadOpti
 			RequestedAt:  now,
 		})
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
 		response, err := json.Marshal(result)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
-		return store.APIIdempotencyCompletion{
+		return apiidempotency.Completion{
 			ResourceID: bundleHash,
 			Response:   response,
 		}, nil
@@ -93,7 +94,7 @@ func executeBundleDelete(ctx context.Context, req Request, opts OperatorReadOpti
 	return stored, nil
 }
 
-func deactivateRuntimeContextAfterBundleDelete(opts OperatorReadOptions, result bundledelete.Result) {
+func deactivateRuntimeContextAfterBundleDelete(opts BundleDeleteHandlerOptions, result bundledelete.Result) {
 	if opts.RuntimeContexts == nil || result.Force || result.DryRun || strings.TrimSpace(result.BundleHash) == "" {
 		return
 	}
@@ -130,7 +131,7 @@ func bundleDeleteMadeRuntimeContextUnavailable(result bundledelete.Result) bool 
 }
 
 func bundleDeleteError(bundleHash string, err error) error {
-	var conflict *store.APIIdempotencyConflictError
+	var conflict *apiidempotency.ConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
 			"original_request_hash":    conflict.OriginalRequestHash,
@@ -141,7 +142,7 @@ func bundleDeleteError(bundleHash string, err error) error {
 			},
 		})
 	}
-	if errors.Is(err, store.ErrBundleNotFound) || errors.Is(err, bundledelete.ErrBundleNotFound) {
+	if errors.Is(err, bundlecatalog.ErrNotFound) || errors.Is(err, bundledelete.ErrBundleNotFound) {
 		return NewApplicationError(BundleNotFoundCode, false, map[string]any{"bundle_hash": bundleHash})
 	}
 	if errors.Is(err, bundledelete.ErrOperationInProgress) || errors.Is(err, destructivereset.ErrOperationInProgress) {

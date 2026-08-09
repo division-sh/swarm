@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
@@ -21,9 +23,9 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 	now := activeConversationForkTestClock()
 	source := seedSQLiteConversationForkSource(t, s, now)
 
-	turnFork, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
+	turnFork, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
-		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
+		ForkPoint:       runfork.ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
 		CreatedBy:       "actor-token",
 		Now:             now,
 	})
@@ -33,13 +35,13 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 	if turnFork.SourceRunID != source.runID || turnFork.SourceAgentID != source.agentID || turnFork.ForkPoint.TurnID != source.turn1ID {
 		t.Fatalf("turn fork lineage = %#v", turnFork)
 	}
-	if !turnFork.ExpiresAt.Equal(now.Add(ConversationForkLifecycleTTL)) || turnFork.State != "active" {
+	if !turnFork.ExpiresAt.Equal(now.Add(runfork.ConversationForkLifecycleTTL)) || turnFork.State != "active" {
 		t.Fatalf("turn fork lifecycle = %#v", turnFork)
 	}
 
-	eventFork, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
+	eventFork, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
-		ForkPoint:       ConversationForkPointSelector{Kind: "event", EventID: source.event2ID},
+		ForkPoint:       runfork.ConversationForkPointSelector{Kind: "event", EventID: source.event2ID},
 		CreatedBy:       "actor-token",
 		Now:             now.Add(time.Second),
 	})
@@ -51,9 +53,9 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 	}
 
 	timePoint := source.turn1At.Add(30 * time.Second)
-	timeFork, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
+	timeFork, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
-		ForkPoint:       ConversationForkPointSelector{Kind: "time", At: &timePoint},
+		ForkPoint:       runfork.ConversationForkPointSelector{Kind: "time", At: &timePoint},
 		CreatedBy:       "actor-token",
 		Now:             now.Add(2 * time.Second),
 	})
@@ -64,14 +66,14 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 		t.Fatalf("time fork point = %#v", timeFork.ForkPoint)
 	}
 
-	page, err := s.ListOperatorConversationForks(ctx, ConversationForkListOptions{SourceSessionID: source.sessionID, Limit: 2, Now: now.Add(3 * time.Second)})
+	page, err := s.ListOperatorConversationForks(ctx, runfork.ConversationForkListOptions{SourceSessionID: source.sessionID, Limit: 2, Now: now.Add(3 * time.Second)})
 	if err != nil {
 		t.Fatalf("ListOperatorConversationForks page 1: %v", err)
 	}
 	if len(page.Forks) != 2 || page.NextCursor == "" {
 		t.Fatalf("page 1 = %#v", page)
 	}
-	page2, err := s.ListOperatorConversationForks(ctx, ConversationForkListOptions{SourceSessionID: source.sessionID, Limit: 2, Cursor: page.NextCursor, Now: now.Add(3 * time.Second)})
+	page2, err := s.ListOperatorConversationForks(ctx, runfork.ConversationForkListOptions{SourceSessionID: source.sessionID, Limit: 2, Cursor: page.NextCursor, Now: now.Add(3 * time.Second)})
 	if err != nil {
 		t.Fatalf("ListOperatorConversationForks page 2: %v", err)
 	}
@@ -80,14 +82,14 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 	}
 
 	firstMessage := "inspect fork 0"
-	prepared, err := s.PrepareOperatorConversationForkChat(ctx, ConversationForkChatPrepareRequest{
+	prepared, err := s.PrepareOperatorConversationForkChat(ctx, runfork.ConversationForkChatPrepareRequest{
 		ForkID: turnFork.ForkID, Message: firstMessage, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
 		RequestHash: runtimeeffects.Fingerprint([]byte(firstMessage)), Now: now.Add(4 * time.Second),
 	})
 	if err != nil {
 		t.Fatalf("PrepareOperatorConversationForkChat: %v", err)
 	}
-	if prepared.Snapshot.SourceTurn.TurnID != source.turn1ID || prepared.Snapshot.SnapshotOwner != ConversationForkChatSnapshotOwner {
+	if prepared.Snapshot.SourceTurn.TurnID != source.turn1ID || prepared.Snapshot.SnapshotOwner != runfork.ConversationForkChatSnapshotOwner {
 		t.Fatalf("prepared snapshot = %#v", prepared.Snapshot)
 	}
 
@@ -103,7 +105,7 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 			turnPrepared := prepared
 			if i > 0 {
 				var err error
-				turnPrepared, err = s.PrepareOperatorConversationForkChat(ctx, ConversationForkChatPrepareRequest{
+				turnPrepared, err = s.PrepareOperatorConversationForkChat(ctx, runfork.ConversationForkChatPrepareRequest{
 					ForkID: turnFork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
 					RequestHash: runtimeeffects.Fingerprint([]byte(message)), Now: now.Add(time.Duration(4+i) * time.Second),
 				})
@@ -113,17 +115,17 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 				}
 			}
 			settleForkChatCompletionForTest(t, ctx, s, turnPrepared, 1, now.Add(time.Duration(5+i)*time.Second))
-			result, err := s.RecordOperatorConversationForkChat(ctx, ConversationForkChatRecordRequest{
+			result, err := s.RecordOperatorConversationForkChat(ctx, runfork.ConversationForkChatRecordRequest{
 				ForkID:       turnFork.ForkID,
 				Message:      message,
 				ActorTokenID: "actor-token",
 				Prepared:     turnPrepared,
-				Execution: ConversationForkChatExecution{
+				Execution: runfork.ConversationForkChatExecution{
 					AssistantMessage: "sandbox result",
 					AvailableTools:   turnPrepared.AvailableTools,
 					ExecutionOwner:   turnPrepared.ExecutionOwner,
 					FenceGeneration:  turnPrepared.FenceGeneration,
-					ToolCalls: []OperatorConversationToolCall{{
+					ToolCalls: []operatorread.OperatorConversationToolCall{{
 						ToolUseID: "tool-" + uuid.NewString(),
 						Name:      "emit_event",
 						Arguments: json.RawMessage(`{"event_name":"forkchat.note"}`),

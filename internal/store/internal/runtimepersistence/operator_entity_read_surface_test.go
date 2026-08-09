@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -54,7 +55,7 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 		t.Fatalf("seed flow instances: %v", err)
 	}
 
-	page1, err := pg.ListOperatorEntities(ctx, OperatorEntityListOptions{
+	page1, err := pg.ListOperatorEntities(ctx, operatorread.OperatorEntityListOptions{
 		RunID: runA,
 		Flow:  "review",
 		Type:  "mvp_spec",
@@ -69,7 +70,7 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if got := page1.Entities[0].EntityType; got != "mvp_spec" {
 		t.Fatalf("page1 entity_type = %q, want mvp_spec", got)
 	}
-	page2, err := pg.ListOperatorEntities(ctx, OperatorEntityListOptions{
+	page2, err := pg.ListOperatorEntities(ctx, operatorread.OperatorEntityListOptions{
 		RunID:  runA,
 		Flow:   "review",
 		Type:   "mvp_spec",
@@ -103,57 +104,57 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 		t.Fatalf("full accumulated notes = %#v, want two entries", full.Accumulated["notes"])
 	}
 	assertOperatorLoopProjection(t, full)
-	if _, err := pg.LoadOperatorEntity(ctx, sharedEntity, ""); !errors.Is(err, ErrAmbiguousEntityRunID) {
-		t.Fatalf("LoadOperatorEntity ambiguous = %v, want ErrAmbiguousEntityRunID", err)
+	if _, err := pg.LoadOperatorEntity(ctx, sharedEntity, ""); !errors.Is(err, operatorread.ErrAmbiguousEntityRunID) {
+		t.Fatalf("LoadOperatorEntity ambiguous = %v, want operatorread.ErrAmbiguousEntityRunID", err)
 	}
-	if _, err := pg.LoadOperatorEntity(ctx, uuid.NewString(), ""); !errors.Is(err, ErrEntityNotFound) {
-		t.Fatalf("LoadOperatorEntity missing = %v, want ErrEntityNotFound", err)
+	if _, err := pg.LoadOperatorEntity(ctx, uuid.NewString(), ""); !errors.Is(err, operatorread.ErrEntityNotFound) {
+		t.Fatalf("LoadOperatorEntity missing = %v, want operatorread.ErrEntityNotFound", err)
 	}
 
-	stateAgg, err := pg.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "current_state"})
+	stateAgg, err := pg.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "current_state"})
 	if err != nil {
 		t.Fatalf("AggregateOperatorEntities current_state: %v", err)
 	}
 	if stateAgg.Counts["collecting"] != 2 || stateAgg.Counts["done"] != 1 {
 		t.Fatalf("state aggregate = %#v", stateAgg.Counts)
 	}
-	typedStateAgg, err := pg.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "current_state", Type: "mvp_spec"})
+	typedStateAgg, err := pg.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "current_state", Type: "mvp_spec"})
 	if err != nil {
 		t.Fatalf("AggregateOperatorEntities typed current_state: %v", err)
 	}
 	if typedStateAgg.Counts["collecting"] != 1 || typedStateAgg.Counts["done"] != 1 || typedStateAgg.Counts["ticket"] != 0 {
 		t.Fatalf("typed state aggregate = %#v", typedStateAgg.Counts)
 	}
-	typeAgg, err := pg.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "entity_type"})
+	typeAgg, err := pg.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "entity_type"})
 	if err != nil {
 		t.Fatalf("AggregateOperatorEntities entity_type: %v", err)
 	}
 	if typeAgg.Counts["mvp_spec"] != 2 || typeAgg.Counts["ticket"] != 1 || typeAgg.Counts["default"] != 0 {
 		t.Fatalf("entity_type aggregate = %#v", typeAgg.Counts)
 	}
-	fieldAgg, err := pg.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "fields.priority"})
+	fieldAgg, err := pg.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "fields.priority"})
 	if err != nil {
 		t.Fatalf("AggregateOperatorEntities fields.priority: %v", err)
 	}
 	if fieldAgg.Counts["high"] != 2 || fieldAgg.Counts["low"] != 1 {
 		t.Fatalf("field aggregate = %#v", fieldAgg.Counts)
 	}
-	versionAgg, err := pg.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "workflow_version"})
+	versionAgg, err := pg.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "workflow_version"})
 	if err != nil {
 		t.Fatalf("AggregateOperatorEntities workflow_version: %v", err)
 	}
 	if versionAgg.Counts["v1"] != 2 || versionAgg.Counts["v2"] != 1 {
 		t.Fatalf("workflow version aggregate = %#v", versionAgg.Counts)
 	}
-	nameAgg, err := pg.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "workflow_name"})
+	nameAgg, err := pg.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "workflow_name"})
 	if err != nil {
 		t.Fatalf("AggregateOperatorEntities workflow_name: %v", err)
 	}
 	if nameAgg.Counts["review"] != 2 || nameAgg.Counts["triage"] != 1 {
 		t.Fatalf("workflow name aggregate = %#v", nameAgg.Counts)
 	}
-	if _, err := pg.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "fields.priority->unsafe"}); !errors.Is(err, ErrInvalidEntityReadParam) {
-		t.Fatalf("AggregateOperatorEntities unsafe group = %v, want ErrInvalidEntityReadParam", err)
+	if _, err := pg.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "fields.priority->unsafe"}); !errors.Is(err, operatorread.ErrInvalidEntityReadParam) {
+		t.Fatalf("AggregateOperatorEntities unsafe group = %v, want operatorread.ErrInvalidEntityReadParam", err)
 	}
 }
 
@@ -200,7 +201,7 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 		t.Fatalf("seed sqlite flow instances: %v", err)
 	}
 
-	page1, err := sqliteStore.ListOperatorEntities(ctx, OperatorEntityListOptions{
+	page1, err := sqliteStore.ListOperatorEntities(ctx, operatorread.OperatorEntityListOptions{
 		RunID: runA,
 		Flow:  "review",
 		Type:  "mvp_spec",
@@ -215,7 +216,7 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if got := page1.Entities[0].EntityType; got != "mvp_spec" {
 		t.Fatalf("page1 entity_type = %q, want mvp_spec", got)
 	}
-	page2, err := sqliteStore.ListOperatorEntities(ctx, OperatorEntityListOptions{
+	page2, err := sqliteStore.ListOperatorEntities(ctx, operatorread.OperatorEntityListOptions{
 		RunID:  runA,
 		Flow:   "review",
 		Type:   "mvp_spec",
@@ -228,7 +229,7 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if len(page2.Entities) != 1 || page2.Entities[0].EntityID != entityB {
 		t.Fatalf("page2 = %#v", page2)
 	}
-	stateFiltered, err := sqliteStore.ListOperatorEntities(ctx, OperatorEntityListOptions{RunID: runA, CurrentState: "collecting", Limit: 10})
+	stateFiltered, err := sqliteStore.ListOperatorEntities(ctx, operatorread.OperatorEntityListOptions{RunID: runA, CurrentState: "collecting", Limit: 10})
 	if err != nil {
 		t.Fatalf("ListOperatorEntities current_state: %v", err)
 	}
@@ -256,72 +257,72 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 	if notes, ok := full.Accumulated["notes"].([]any); !ok || len(notes) != 2 {
 		t.Fatalf("full accumulated notes = %#v, want two entries", full.Accumulated["notes"])
 	}
-	if _, err := sqliteStore.LoadOperatorEntity(ctx, sharedEntity, ""); !errors.Is(err, ErrAmbiguousEntityRunID) {
-		t.Fatalf("LoadOperatorEntity ambiguous = %v, want ErrAmbiguousEntityRunID", err)
+	if _, err := sqliteStore.LoadOperatorEntity(ctx, sharedEntity, ""); !errors.Is(err, operatorread.ErrAmbiguousEntityRunID) {
+		t.Fatalf("LoadOperatorEntity ambiguous = %v, want operatorread.ErrAmbiguousEntityRunID", err)
 	}
-	if _, err := sqliteStore.LoadOperatorEntity(ctx, uuid.NewString(), ""); !errors.Is(err, ErrEntityNotFound) {
-		t.Fatalf("LoadOperatorEntity missing = %v, want ErrEntityNotFound", err)
+	if _, err := sqliteStore.LoadOperatorEntity(ctx, uuid.NewString(), ""); !errors.Is(err, operatorread.ErrEntityNotFound) {
+		t.Fatalf("LoadOperatorEntity missing = %v, want operatorread.ErrEntityNotFound", err)
 	}
-	if _, err := sqliteStore.LoadOperatorEntity(ctx, "not-a-uuid", ""); !errors.Is(err, ErrInvalidEntityReadParam) {
-		t.Fatalf("LoadOperatorEntity invalid entity id = %v, want ErrInvalidEntityReadParam", err)
+	if _, err := sqliteStore.LoadOperatorEntity(ctx, "not-a-uuid", ""); !errors.Is(err, operatorread.ErrInvalidEntityReadParam) {
+		t.Fatalf("LoadOperatorEntity invalid entity id = %v, want operatorread.ErrInvalidEntityReadParam", err)
 	}
-	if _, err := sqliteStore.LoadOperatorEntity(ctx, entityA, "not-a-uuid"); !errors.Is(err, ErrInvalidEntityReadParam) {
-		t.Fatalf("LoadOperatorEntity invalid run id = %v, want ErrInvalidEntityReadParam", err)
+	if _, err := sqliteStore.LoadOperatorEntity(ctx, entityA, "not-a-uuid"); !errors.Is(err, operatorread.ErrInvalidEntityReadParam) {
+		t.Fatalf("LoadOperatorEntity invalid run id = %v, want operatorread.ErrInvalidEntityReadParam", err)
 	}
-	if _, err := sqliteStore.ListOperatorEntities(ctx, OperatorEntityListOptions{RunID: "not-a-uuid"}); !errors.Is(err, ErrInvalidEntityReadParam) {
-		t.Fatalf("ListOperatorEntities invalid run id = %v, want ErrInvalidEntityReadParam", err)
+	if _, err := sqliteStore.ListOperatorEntities(ctx, operatorread.OperatorEntityListOptions{RunID: "not-a-uuid"}); !errors.Is(err, operatorread.ErrInvalidEntityReadParam) {
+		t.Fatalf("ListOperatorEntities invalid run id = %v, want operatorread.ErrInvalidEntityReadParam", err)
 	}
-	if _, err := sqliteStore.ListOperatorEntities(ctx, OperatorEntityListOptions{Cursor: "bad"}); !errors.Is(err, ErrInvalidEntityCursor) {
-		t.Fatalf("ListOperatorEntities invalid cursor = %v, want ErrInvalidEntityCursor", err)
+	if _, err := sqliteStore.ListOperatorEntities(ctx, operatorread.OperatorEntityListOptions{Cursor: "bad"}); !errors.Is(err, operatorread.ErrInvalidEntityCursor) {
+		t.Fatalf("ListOperatorEntities invalid cursor = %v, want operatorread.ErrInvalidEntityCursor", err)
 	}
 
-	stateAgg, err := sqliteStore.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "current_state"})
+	stateAgg, err := sqliteStore.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "current_state"})
 	if err != nil {
 		t.Fatalf("AggregateOperatorEntities current_state: %v", err)
 	}
 	if stateAgg.Counts["collecting"] != 2 || stateAgg.Counts["done"] != 1 {
 		t.Fatalf("state aggregate = %#v", stateAgg.Counts)
 	}
-	typedStateAgg, err := sqliteStore.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "current_state", Type: "mvp_spec"})
+	typedStateAgg, err := sqliteStore.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "current_state", Type: "mvp_spec"})
 	if err != nil {
 		t.Fatalf("AggregateOperatorEntities typed current_state: %v", err)
 	}
 	if typedStateAgg.Counts["collecting"] != 1 || typedStateAgg.Counts["done"] != 1 || typedStateAgg.Counts["ticket"] != 0 {
 		t.Fatalf("typed state aggregate = %#v", typedStateAgg.Counts)
 	}
-	typeAgg, err := sqliteStore.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "entity_type"})
+	typeAgg, err := sqliteStore.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "entity_type"})
 	if err != nil {
 		t.Fatalf("AggregateOperatorEntities entity_type: %v", err)
 	}
 	if typeAgg.Counts["mvp_spec"] != 2 || typeAgg.Counts["ticket"] != 1 || typeAgg.Counts["default"] != 0 {
 		t.Fatalf("entity_type aggregate = %#v", typeAgg.Counts)
 	}
-	fieldAgg, err := sqliteStore.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "fields.priority"})
+	fieldAgg, err := sqliteStore.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "fields.priority"})
 	if err != nil {
 		t.Fatalf("AggregateOperatorEntities fields.priority: %v", err)
 	}
 	if fieldAgg.Counts["high"] != 2 || fieldAgg.Counts["low"] != 1 {
 		t.Fatalf("field aggregate = %#v", fieldAgg.Counts)
 	}
-	versionAgg, err := sqliteStore.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "workflow_version"})
+	versionAgg, err := sqliteStore.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "workflow_version"})
 	if err != nil {
 		t.Fatalf("AggregateOperatorEntities workflow_version: %v", err)
 	}
 	if versionAgg.Counts["v1"] != 2 || versionAgg.Counts["v2"] != 1 {
 		t.Fatalf("workflow version aggregate = %#v", versionAgg.Counts)
 	}
-	nameAgg, err := sqliteStore.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "workflow_name"})
+	nameAgg, err := sqliteStore.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "workflow_name"})
 	if err != nil {
 		t.Fatalf("AggregateOperatorEntities workflow_name: %v", err)
 	}
 	if nameAgg.Counts["review"] != 2 || nameAgg.Counts["triage"] != 1 {
 		t.Fatalf("workflow name aggregate = %#v", nameAgg.Counts)
 	}
-	if _, err := sqliteStore.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: runA, GroupBy: "fields.priority->unsafe"}); !errors.Is(err, ErrInvalidEntityReadParam) {
-		t.Fatalf("AggregateOperatorEntities unsafe group = %v, want ErrInvalidEntityReadParam", err)
+	if _, err := sqliteStore.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: runA, GroupBy: "fields.priority->unsafe"}); !errors.Is(err, operatorread.ErrInvalidEntityReadParam) {
+		t.Fatalf("AggregateOperatorEntities unsafe group = %v, want operatorread.ErrInvalidEntityReadParam", err)
 	}
-	if _, err := sqliteStore.AggregateOperatorEntities(ctx, OperatorEntityAggregateOptions{RunID: "not-a-uuid"}); !errors.Is(err, ErrInvalidEntityReadParam) {
-		t.Fatalf("AggregateOperatorEntities invalid run id = %v, want ErrInvalidEntityReadParam", err)
+	if _, err := sqliteStore.AggregateOperatorEntities(ctx, operatorread.OperatorEntityAggregateOptions{RunID: "not-a-uuid"}); !errors.Is(err, operatorread.ErrInvalidEntityReadParam) {
+		t.Fatalf("AggregateOperatorEntities invalid run id = %v, want operatorread.ErrInvalidEntityReadParam", err)
 	}
 }
 
@@ -347,7 +348,7 @@ func operatorLoopAccumulatedJSON(t *testing.T, runID, entityID string, now time.
 	return string(raw)
 }
 
-func assertOperatorLoopProjection(t *testing.T, full OperatorEntityFull) {
+func assertOperatorLoopProjection(t *testing.T, full operatorread.OperatorEntityFull) {
 	t.Helper()
 	if _, leaked := full.Accumulated[loopruntime.BucketKey]; leaked {
 		t.Fatalf("reserved loop state leaked through accumulated readback: %#v", full.Accumulated)

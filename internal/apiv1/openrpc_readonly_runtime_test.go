@@ -12,10 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/bundlecatalog"
+	"github.com/division-sh/swarm/internal/mailbox"
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 const readOnlyRuntimeProbeTestName = "TestOpenRPCReadOnlyHTTPRuntimeProbes"
@@ -198,7 +202,7 @@ type readOnlyHTTPRuntimeErrorProbe struct {
 	Method  string
 	Params  map[string]any
 	Code    string
-	Options func(*testing.T) OperatorReadOptions
+	Options func(*testing.T) testOperatorCapabilities
 }
 
 func readOnlyHTTPRuntimeMethods(t *testing.T, api *apispec.APISpecification, openRPC apispec.OpenRPCDocument, matrix openRPCComplianceMatrix) []string {
@@ -313,9 +317,9 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "agent.delivery_diagnostics",
 			Params: map[string]any{"agent_id": "missing"},
 			Code:   AgentNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
-				opts.AgentConversations = &fakeAgentConversationReadStore{agentDeliveryDiagnosticsErr: store.ErrAgentNotFound}
+				opts.AgentConversations = &fakeAgentConversationReadStore{agentDeliveryDiagnosticsErr: operatorread.ErrAgentNotFound}
 				return opts
 			},
 		},
@@ -323,9 +327,9 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "agent.delivery_lifecycle",
 			Params: map[string]any{"agent_id": "missing"},
 			Code:   AgentNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
-				opts.AgentDeliveryLifecycle = &fakeAgentConversationReadStore{agentDeliveryLifecycleErr: store.ErrAgentNotFound}
+				opts.AgentDeliveryLifecycle = &fakeAgentConversationReadStore{agentDeliveryLifecycleErr: operatorread.ErrAgentNotFound}
 				return opts
 			},
 		},
@@ -333,9 +337,9 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "agent.diagnose",
 			Params: map[string]any{"agent_id": "missing"},
 			Code:   AgentNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
-				opts.AgentConversations = &fakeAgentConversationReadStore{agentDiagnosisErr: store.ErrAgentNotFound}
+				opts.AgentConversations = &fakeAgentConversationReadStore{agentDiagnosisErr: operatorread.ErrAgentNotFound}
 				return opts
 			},
 		},
@@ -343,9 +347,9 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "agent.usage",
 			Params: map[string]any{"agent_id": "missing"},
 			Code:   AgentNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
-				opts.AgentUsage = &fakeAgentConversationReadStore{agentUsageErr: store.ErrAgentNotFound}
+				opts.AgentUsage = &fakeAgentConversationReadStore{agentUsageErr: operatorread.ErrAgentNotFound}
 				return opts
 			},
 		},
@@ -353,9 +357,9 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "agent.get",
 			Params: map[string]any{"agent_id": "missing"},
 			Code:   AgentNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
-				opts.AgentConversations = &fakeAgentConversationReadStore{agentErr: store.ErrAgentNotFound}
+				opts.AgentConversations = &fakeAgentConversationReadStore{agentErr: operatorread.ErrAgentNotFound}
 				return opts
 			},
 		},
@@ -363,7 +367,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "bundle.agents",
 			Params: map[string]any{"bundle_hash": readOnlyProbeMissingBundleHash},
 			Code:   BundleNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
 				opts.BundleCatalog = &fakeBundleCatalogReadStore{missing: map[string]bool{readOnlyProbeMissingBundleHash: true}}
 				return opts
@@ -373,7 +377,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "bundle.get",
 			Params: map[string]any{"bundle_hash": readOnlyProbeMissingBundleHash},
 			Code:   BundleNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
 				opts.BundleCatalog = &fakeBundleCatalogReadStore{missing: map[string]bool{readOnlyProbeMissingBundleHash: true}}
 				return opts
@@ -383,9 +387,9 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "conversation.list_turns",
 			Params: map[string]any{"session_id": "missing"},
 			Code:   SessionNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
-				opts.AgentConversations = &fakeAgentConversationReadStore{conversationTurnsErr: store.ErrSessionNotFound}
+				opts.AgentConversations = &fakeAgentConversationReadStore{conversationTurnsErr: operatorread.ErrSessionNotFound}
 				return opts
 			},
 		},
@@ -393,9 +397,9 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "conversation.get_turn",
 			Params: map[string]any{"session_id": "missing", "turn_id": "turn-1"},
 			Code:   SessionNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
-				opts.AgentConversations = &fakeAgentConversationReadStore{conversationTurnErr: store.ErrSessionNotFound}
+				opts.AgentConversations = &fakeAgentConversationReadStore{conversationTurnErr: operatorread.ErrSessionNotFound}
 				return opts
 			},
 		},
@@ -403,9 +407,9 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "conversation.get_turn",
 			Params: map[string]any{"session_id": "sess-1", "turn_id": "missing-turn"},
 			Code:   TurnNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
-				opts.AgentConversations = &fakeAgentConversationReadStore{conversationTurnErr: store.ErrTurnNotFound}
+				opts.AgentConversations = &fakeAgentConversationReadStore{conversationTurnErr: operatorread.ErrTurnNotFound}
 				return opts
 			},
 		},
@@ -413,9 +417,9 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "conversation.fork_view",
 			Params: map[string]any{"fork_id": "00000000-0000-0000-0000-000000000999"},
 			Code:   ForkNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
-				opts.ConversationForks = &fakeConversationForkLifecycleStore{viewErr: store.ErrConversationForkNotFound}
+				opts.ConversationForks = &fakeConversationForkLifecycleStore{viewErr: runfork.ErrConversationForkNotFound}
 				return opts
 			},
 		},
@@ -423,9 +427,9 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "entity.get",
 			Params: map[string]any{"entity_id": "missing"},
 			Code:   EntityNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
-				opts.Entities = &fakeEntityReadStore{getErr: store.ErrEntityNotFound}
+				opts.Entities = &fakeEntityReadStore{getErr: operatorread.ErrEntityNotFound}
 				return opts
 			},
 		},
@@ -433,7 +437,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "event.get",
 			Params: map[string]any{"event_id": "missing"},
 			Code:   EventNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				return readOnlyRuntimeProbeOptions(t)
 			},
 		},
@@ -441,7 +445,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "event.list",
 			Params: map[string]any{"filter": map[string]any{}},
 			Code:   EventObservationRunScopeRequiredCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				return readOnlyRuntimeProbeOptions(t)
 			},
 		},
@@ -449,7 +453,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "mailbox.get",
 			Params: map[string]any{"mailbox_id": "missing"},
 			Code:   MailboxNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				return readOnlyRuntimeProbeOptions(t)
 			},
 		},
@@ -457,7 +461,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "run.diagnose",
 			Params: map[string]any{"run_id": "missing"},
 			Code:   RunNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				return readOnlyRuntimeProbeOptions(t)
 			},
 		},
@@ -465,7 +469,7 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "run.get",
 			Params: map[string]any{"run_id": "missing"},
 			Code:   RunNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				return readOnlyRuntimeProbeOptions(t)
 			},
 		},
@@ -473,16 +477,16 @@ func readOnlyHTTPRuntimeErrorProbes() []readOnlyHTTPRuntimeErrorProbe {
 			Method: "run.trace",
 			Params: map[string]any{"run_id": "missing"},
 			Code:   RunNotFoundCode,
-			Options: func(t *testing.T) OperatorReadOptions {
+			Options: func(t *testing.T) testOperatorCapabilities {
 				opts := readOnlyRuntimeProbeOptions(t)
-				opts.Observability = &fakeObservabilityReadStore{traceErr: store.ErrRunNotFound}
+				opts.Observability = &fakeObservabilityReadStore{traceErr: operatorread.ErrRunNotFound}
 				return opts
 			},
 		},
 	}
 }
 
-func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
+func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 	t.Helper()
 	now := time.Unix(1700000000, 0).UTC()
 	runID := "run-1"
@@ -491,12 +495,12 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 	forkID := "00000000-0000-0000-0000-000000000301"
 	forkSessionID := "00000000-0000-0000-0000-000000000201"
 	forkTurnID := "00000000-0000-0000-0000-000000000401"
-	fork := store.OperatorConversationForkSession{
+	fork := runfork.OperatorConversationForkSession{
 		ForkID:          forkID,
 		SourceSessionID: forkSessionID,
 		SourceRunID:     "00000000-0000-0000-0000-000000000501",
 		SourceAgentID:   "agent-1",
-		ForkPoint: store.ConversationForkPointDescriptor{
+		ForkPoint: runfork.ConversationForkPointDescriptor{
 			Kind:       "turn",
 			TurnIndex:  1,
 			TurnID:     forkTurnID,
@@ -504,12 +508,12 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 		},
 		CreatedBy: "token",
 		CreatedAt: now,
-		ExpiresAt: now.Add(store.ConversationForkLifecycleTTL),
+		ExpiresAt: now.Add(runfork.ConversationForkLifecycleTTL),
 		State:     "active",
-		Turns:     []store.OperatorConversationTurn{},
+		Turns:     []operatorread.OperatorConversationTurn{},
 	}
 	decisionProbeState := &mutatingRuntimeProbeState{now: now}
-	return OperatorReadOptions{
+	return testOperatorCapabilities{
 		Now:      func() time.Time { return now },
 		Ready:    func() bool { return true },
 		Database: fakePinger{},
@@ -520,7 +524,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 			SupportedTransports: []string{"tcp"},
 		},
 		Runs: &fakeRunReadStore{
-			headers: map[string]store.RunHeader{
+			headers: map[string]operatorread.RunHeader{
 				runID: {
 					RunID:       runID,
 					Status:      "running",
@@ -530,7 +534,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					StartedAt:   now.Add(-time.Hour),
 				},
 			},
-			reports: map[string]store.RunDebugReport{
+			reports: map[string]operatorread.RunDebugReport{
 				runID: {
 					RunID:          runID,
 					RunTableStatus: "running",
@@ -544,14 +548,14 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 			},
 		},
 		Observability: &fakeObservabilityReadStore{
-			traceRows: map[string][]store.RunDebugTraceRow{
+			traceRows: map[string][]operatorread.RunDebugTraceRow{
 				runID: {{
 					EventID:        eventID,
 					EventName:      "scan.requested",
 					EventCreatedAt: now,
 				}},
 			},
-			events: map[string]store.OperatorEventFull{
+			events: map[string]operatorread.OperatorEventFull{
 				eventID: {
 					EventID:       eventID,
 					EventName:     "scan.requested",
@@ -561,11 +565,11 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					Source:        "runtime",
 					ProducerType:  events.EventProducerPlatform,
 					Payload:       map[string]any{"ok": true},
-					Deliveries:    []store.OperatorEventDelivery{},
-					DeadLetters:   []store.OperatorDeadLetterRecord{},
+					Deliveries:    []operatorread.OperatorEventDelivery{},
+					DeadLetters:   []operatorread.OperatorDeadLetterRecord{},
 				},
 			},
-			logs: []store.OperatorRuntimeLogEntry{{
+			logs: []operatorread.OperatorRuntimeLogEntry{{
 				LogID:     "log-1",
 				TS:        now,
 				Level:     "info",
@@ -575,7 +579,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 				SessionID: sessionID,
 				Message:   "probe",
 			}},
-			incidents: []store.OperatorRuntimeIncident{{
+			incidents: []operatorread.OperatorRuntimeIncident{{
 				IncidentID:    "inc-1",
 				FirstSeen:     now,
 				LastSeen:      now,
@@ -587,7 +591,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 			}},
 		},
 		Entities: &fakeEntityReadStore{
-			listResult: store.OperatorEntityListResult{Entities: []store.OperatorEntitySummary{{
+			listResult: operatorread.OperatorEntityListResult{Entities: []operatorread.OperatorEntitySummary{{
 				EntityID:     "entity-1",
 				RunID:        runID,
 				FlowInstance: "review/primary",
@@ -597,8 +601,8 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 				CreatedAt:    now,
 				UpdatedAt:    now,
 			}}},
-			getResult: store.OperatorEntityFull{
-				Entity: store.OperatorEntitySummary{EntityID: "entity-1", RunID: runID, CurrentState: "collecting"},
+			getResult: operatorread.OperatorEntityFull{
+				Entity: operatorread.OperatorEntitySummary{EntityID: "entity-1", RunID: runID, CurrentState: "collecting"},
 				Fields: map[string]any{"priority": "high"},
 				Gates:  map[string]bool{"approved": true},
 				Accumulated: map[string]any{
@@ -607,10 +611,10 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					"notes":       []any{"a", map[string]any{"text": "probe"}},
 				},
 			},
-			aggregate: store.OperatorEntityAggregateResult{Counts: map[string]int{"collecting": 1}},
+			aggregate: operatorread.OperatorEntityAggregateResult{Counts: map[string]int{"collecting": 1}},
 		},
 		BundleCatalog: &fakeBundleCatalogReadStore{
-			listResult: store.BundleCatalogListResult{Bundles: []store.BundleCatalogSummary{{
+			listResult: bundlecatalog.ListResult{Bundles: []bundlecatalog.Summary{{
 				BundleHash:    readOnlyProbeBundleHash,
 				AgentCount:    1,
 				HasData:       false,
@@ -618,7 +622,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 				Metadata:      map[string]any{"source": "probe"},
 				IngestedAt:    now,
 			}}},
-			details: map[string]store.BundleCatalogDetail{
+			details: map[string]bundlecatalog.Detail{
 				readOnlyProbeBundleHash: {
 					BundleHash:    readOnlyProbeBundleHash,
 					ContentYAML:   "name: probe",
@@ -630,9 +634,9 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					IngestedAt:    now,
 				},
 			},
-			agents: map[string]store.BundleCatalogAgentsResult{
+			agents: map[string]bundlecatalog.AgentsResult{
 				readOnlyProbeBundleHash: {
-					Agents: []store.BundleCatalogAgentDefinition{{
+					Agents: []bundlecatalog.AgentDefinition{{
 						AgentID:       "researcher",
 						Role:          "research",
 						Type:          "managed",
@@ -648,7 +652,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 			},
 		},
 		AgentConversations: &fakeAgentConversationReadStore{
-			listAgentsResult: store.OperatorAgentListResult{Agents: []store.OperatorAgentSummary{{
+			listAgentsResult: operatorread.OperatorAgentListResult{Agents: []operatorread.OperatorAgentSummary{{
 				AgentID:       "agent-1",
 				Role:          "researcher",
 				Type:          "managed",
@@ -659,7 +663,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 				FlowInstance:  "research/inst-1",
 				Status:        "running",
 			}}},
-			agentResult: store.OperatorAgentDetail{Agent: store.OperatorAgentSummary{
+			agentResult: operatorread.OperatorAgentDetail{Agent: operatorread.OperatorAgentSummary{
 				AgentID:       "agent-1",
 				Role:          "researcher",
 				Type:          "managed",
@@ -670,13 +674,13 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 				FlowInstance:  "research/inst-1",
 				Status:        "running",
 			}},
-			agentDiagnosisResult: store.OperatorAgentDiagnosis{
+			agentDiagnosisResult: operatorread.OperatorAgentDiagnosis{
 				AgentID: "agent-1",
 				Status:  "running",
-				Queue: store.OperatorAgentDiagnosisQueue{
+				Queue: operatorread.OperatorAgentDiagnosisQueue{
 					PendingCount:            2,
 					OldestPendingAgeSeconds: 30,
-					PendingDeliveries: []store.OperatorAgentPendingDelivery{{
+					PendingDeliveries: []operatorread.OperatorAgentPendingDelivery{{
 						DeliveryID: "delivery-1",
 						EventID:    "event-1",
 						EventName:  "task.ready",
@@ -684,23 +688,23 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 						Attempts:   1,
 					}},
 				},
-				DeliveryLifecycle: &store.OperatorAgentDeliveryLifecycle{
+				DeliveryLifecycle: &operatorread.OperatorAgentDeliveryLifecycle{
 					State:         "active",
 					BlockingLayer: "session_execution",
 				},
-				Active: &store.OperatorAgentDiagnosisActive{
+				Active: &operatorread.OperatorAgentDiagnosisActive{
 					TurnID:   "22222222-2222-2222-2222-222222222222",
 					TaskID:   "task-1",
 					EntityID: "33333333-3333-3333-3333-333333333333",
 				},
-				LastToolOutcome: &store.OperatorAgentLastToolOutcome{
+				LastToolOutcome: &operatorread.OperatorAgentLastToolOutcome{
 					TurnID:    "22222222-2222-2222-2222-222222222222",
 					ToolName:  "selected_tool",
 					ToolUseID: "toolu-selected",
 					OK:        true,
 				},
-				RuntimeState: &store.OperatorAgentDiagnosisRuntimeState{
-					Watchdog: &store.OperatorAgentDiagnosisWatchdog{
+				RuntimeState: &operatorread.OperatorAgentDiagnosisRuntimeState{
+					Watchdog: &operatorread.OperatorAgentDiagnosisWatchdog{
 						State:         "no_output",
 						BlockingLayer: "session_execution",
 						Action:        "session_no_output",
@@ -709,29 +713,29 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					},
 				},
 			},
-			agentUsageResult: store.OperatorAgentUsage{
+			agentUsageResult: operatorread.OperatorAgentUsage{
 				AgentID: "agent-1",
-				Window: store.OperatorAgentUsageWindow{
+				Window: operatorread.OperatorAgentUsageWindow{
 					Since: ptrTime(now.Add(-time.Hour)),
 					Until: ptrTime(now),
 				},
-				Usage: store.OperatorAgentUsageByAccounting{
-					Exact: store.OperatorAgentUsageTotals{
+				Usage: operatorread.OperatorAgentUsageByAccounting{
+					Exact: operatorread.OperatorAgentUsageTotals{
 						LedgerEntries:    1,
 						InputTokens:      100,
 						OutputTokens:     25,
 						EstimatedCostUSD: 0.000675,
 					},
-					Estimated: store.OperatorAgentUsageTotals{
+					Estimated: operatorread.OperatorAgentUsageTotals{
 						LedgerEntries:    1,
 						InputTokens:      50,
 						OutputTokens:     10,
 						EstimatedCostUSD: 0.000300,
 					},
 				},
-				Breakdown: []store.OperatorAgentUsageBreakdown{{
+				Breakdown: []operatorread.OperatorAgentUsageBreakdown{{
 					ExecutionMode:   "live",
-					UsageAccounting: store.AgentUsageAccountingExact,
+					UsageAccounting: operatorread.AgentUsageAccountingExact,
 					InvocationType:  "anthropic",
 					Model:           "claude-3-5-sonnet",
 					ModelAlias:      "regular",
@@ -740,7 +744,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					Transport:       "api",
 					ResolvedModel:   "claude-3-5-sonnet",
 					CostDisplay:     "$0.000675 estimated",
-					Totals: store.OperatorAgentUsageTotals{
+					Totals: operatorread.OperatorAgentUsageTotals{
 						LedgerEntries:    1,
 						InputTokens:      100,
 						OutputTokens:     25,
@@ -748,7 +752,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					},
 				}, {
 					ExecutionMode:   "live",
-					UsageAccounting: store.AgentUsageAccountingEstimated,
+					UsageAccounting: operatorread.AgentUsageAccountingEstimated,
 					InvocationType:  "claude_cli",
 					Model:           "sonnet",
 					ModelAlias:      "regular",
@@ -757,7 +761,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					Transport:       "cli",
 					ResolvedModel:   "sonnet",
 					CostDisplay:     "$0.000300 estimated",
-					Totals: store.OperatorAgentUsageTotals{
+					Totals: operatorread.OperatorAgentUsageTotals{
 						LedgerEntries:    1,
 						InputTokens:      50,
 						OutputTokens:     10,
@@ -765,9 +769,9 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					},
 				}},
 			},
-			agentDeliveryLifecycleResult: store.OperatorAgentDeliveryLifecycleList{
+			agentDeliveryLifecycleResult: operatorread.OperatorAgentDeliveryLifecycleList{
 				AgentID: "agent-1",
-				Deliveries: []store.OperatorAgentDeliveryLifecycleRow{{
+				Deliveries: []operatorread.OperatorAgentDeliveryLifecycleRow{{
 					DeliveryID:        "delivery-lifecycle-1",
 					EventID:           "event-lifecycle-1",
 					EventName:         "task.ready",
@@ -780,13 +784,13 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					DeliveryCreatedAt: now.Add(-3 * time.Minute),
 				}},
 			},
-			agentDeliveryDiagnosticsResult: store.OperatorAgentDeliveryDiagnostics{
+			agentDeliveryDiagnosticsResult: operatorread.OperatorAgentDeliveryDiagnostics{
 				AgentID: "agent-1",
-				Summary: store.OperatorAgentDeliveryDiagnosticsSummary{
+				Summary: operatorread.OperatorAgentDeliveryDiagnosticsSummary{
 					Failures24h:    1,
 					DeadLetters24h: 1,
 				},
-				Failures: []store.OperatorAgentDeliveryFailure{{
+				Failures: []operatorread.OperatorAgentDeliveryFailure{{
 					DeliveryID: "delivery-failed-1",
 					EventID:    "event-failed-1",
 					EventName:  "task.failed",
@@ -798,7 +802,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					RetryCount: 2,
 					OccurredAt: now.Add(-time.Minute),
 				}},
-				DeadLetters: []store.OperatorAgentDeadLetterDelivery{{
+				DeadLetters: []operatorread.OperatorAgentDeadLetterDelivery{{
 					DeliveryID: "delivery-dead-1",
 					EventID:    "event-dead-1",
 					EventName:  "task.dead",
@@ -809,7 +813,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					Failure:    testFailure("retry_exhausted"),
 					RetryCount: 3,
 					OccurredAt: now.Add(-2 * time.Minute),
-					DeadLetterRecords: []store.OperatorDeadLetterRecord{{
+					DeadLetterRecords: []operatorread.OperatorDeadLetterRecord{{
 						DeadLetterID: "dead-letter-1",
 						Failure:      *testFailure("retry_exhausted"),
 						RetryCount:   3,
@@ -819,7 +823,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					}},
 				}},
 			},
-			listConversationsResult: store.OperatorConversationListResult{Conversations: []store.OperatorConversationSummary{{
+			listConversationsResult: operatorread.OperatorConversationListResult{Conversations: []operatorread.OperatorConversationSummary{{
 				SessionID:    sessionID,
 				AgentID:      "agent-1",
 				RunID:        runID,
@@ -828,21 +832,21 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 				MessageCount: 2,
 				Status:       "active",
 			}}},
-			conversationTurnsResult: store.OperatorConversationTurnListResult{
-				Conversation: store.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
-				Turns: []store.OperatorConversationTurnListItem{{TurnID: "turn-1", ExecutionMode: "live", Ordinal: 1, CompletedAt: now, DurationMS: 25,
+			conversationTurnsResult: operatorread.OperatorConversationTurnListResult{
+				Conversation: operatorread.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
+				Turns: []operatorread.OperatorConversationTurnListItem{{TurnID: "turn-1", ExecutionMode: "live", Ordinal: 1, CompletedAt: now, DurationMS: 25,
 					TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true}},
 			},
-			conversationTurnResult: store.OperatorPublicConversationTurnDetail{
-				Session: store.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
-				Turn: store.OperatorPublicConversationTurn{TurnID: "turn-1", ExecutionMode: "live", Ordinal: 1, CompletedAt: now.Add(time.Second), DurationMS: 25,
-					TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true, Activity: []store.OperatorConversationActivity{}},
+			conversationTurnResult: operatorread.OperatorPublicConversationTurnDetail{
+				Session: operatorread.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
+				Turn: operatorread.OperatorPublicConversationTurn{TurnID: "turn-1", ExecutionMode: "live", Ordinal: 1, CompletedAt: now.Add(time.Second), DurationMS: 25,
+					TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true, Activity: []operatorread.OperatorConversationActivity{}},
 			},
 		},
 		AgentDeliveryLifecycle: &fakeAgentConversationReadStore{
-			agentDeliveryLifecycleResult: store.OperatorAgentDeliveryLifecycleList{
+			agentDeliveryLifecycleResult: operatorread.OperatorAgentDeliveryLifecycleList{
 				AgentID: "agent-1",
-				Deliveries: []store.OperatorAgentDeliveryLifecycleRow{{
+				Deliveries: []operatorread.OperatorAgentDeliveryLifecycleRow{{
 					DeliveryID:        "delivery-lifecycle-1",
 					EventID:           "event-lifecycle-1",
 					EventName:         "task.ready",
@@ -857,29 +861,29 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 			},
 		},
 		AgentUsage: &fakeAgentConversationReadStore{
-			agentUsageResult: store.OperatorAgentUsage{
+			agentUsageResult: operatorread.OperatorAgentUsage{
 				AgentID: "agent-1",
-				Window: store.OperatorAgentUsageWindow{
+				Window: operatorread.OperatorAgentUsageWindow{
 					Since: ptrTime(now.Add(-time.Hour)),
 					Until: ptrTime(now),
 				},
-				Usage: store.OperatorAgentUsageByAccounting{
-					Exact: store.OperatorAgentUsageTotals{
+				Usage: operatorread.OperatorAgentUsageByAccounting{
+					Exact: operatorread.OperatorAgentUsageTotals{
 						LedgerEntries:    1,
 						InputTokens:      100,
 						OutputTokens:     25,
 						EstimatedCostUSD: 0.000675,
 					},
-					Estimated: store.OperatorAgentUsageTotals{
+					Estimated: operatorread.OperatorAgentUsageTotals{
 						LedgerEntries:    1,
 						InputTokens:      50,
 						OutputTokens:     10,
 						EstimatedCostUSD: 0.000300,
 					},
 				},
-				Breakdown: []store.OperatorAgentUsageBreakdown{{
+				Breakdown: []operatorread.OperatorAgentUsageBreakdown{{
 					ExecutionMode:   "live",
-					UsageAccounting: store.AgentUsageAccountingExact,
+					UsageAccounting: operatorread.AgentUsageAccountingExact,
 					InvocationType:  "anthropic",
 					Model:           "claude-3-5-sonnet",
 					ModelAlias:      "regular",
@@ -888,7 +892,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					Transport:       "api",
 					ResolvedModel:   "claude-3-5-sonnet",
 					CostDisplay:     "$0.000675 estimated",
-					Totals: store.OperatorAgentUsageTotals{
+					Totals: operatorread.OperatorAgentUsageTotals{
 						LedgerEntries:    1,
 						InputTokens:      100,
 						OutputTokens:     25,
@@ -896,7 +900,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					},
 				}, {
 					ExecutionMode:   "live",
-					UsageAccounting: store.AgentUsageAccountingEstimated,
+					UsageAccounting: operatorread.AgentUsageAccountingEstimated,
 					InvocationType:  "claude_cli",
 					Model:           "sonnet",
 					ModelAlias:      "regular",
@@ -905,7 +909,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 					Transport:       "cli",
 					ResolvedModel:   "sonnet",
 					CostDisplay:     "$0.000300 estimated",
-					Totals: store.OperatorAgentUsageTotals{
+					Totals: operatorread.OperatorAgentUsageTotals{
 						LedgerEntries:    1,
 						InputTokens:      50,
 						OutputTokens:     10,
@@ -915,7 +919,7 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 			},
 		},
 		ConversationForks: &fakeConversationForkLifecycleStore{
-			listResult: store.ConversationForkListResult{Forks: []store.OperatorConversationForkSession{fork}},
+			listResult: runfork.ConversationForkListResult{Forks: []runfork.OperatorConversationForkSession{fork}},
 			viewResult: fork,
 		},
 		Idempotency:   newMutatingProbeIdempotencyStore(),
@@ -929,9 +933,9 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 	}
 }
 
-func newReadOnlyRuntimeProbeHandler(t *testing.T, opts OperatorReadOptions) (*Handler, map[string]int) {
+func newReadOnlyRuntimeProbeHandler(t *testing.T, opts testOperatorCapabilities) (*Handler, map[string]int) {
 	t.Helper()
-	allHandlers := OperatorReadHandlers(opts)
+	allHandlers := testOperatorHandlers(opts)
 	calls := map[string]int{}
 	handlers := map[string]MethodHandler{}
 	for _, methodName := range approvedReadOnlyHTTPRuntimeMethods() {
@@ -1221,12 +1225,12 @@ func sortedProbeFixtureMethods(fixtures map[string]readOnlyHTTPRuntimeFixture) [
 }
 
 type readOnlyMailboxProbeStore struct {
-	items   []store.MailboxV1Item
-	details map[string]store.MailboxV1ItemDetail
+	items   []mailbox.V1Item
+	details map[string]mailbox.V1ItemDetail
 }
 
 func newReadOnlyMailboxProbeStore(now time.Time) *readOnlyMailboxProbeStore {
-	item := store.MailboxV1Item{
+	item := mailbox.V1Item{
 		MailboxID:     "mailbox-1",
 		Type:          "review_request",
 		Status:        "pending",
@@ -1238,12 +1242,12 @@ func newReadOnlyMailboxProbeStore(now time.Time) *readOnlyMailboxProbeStore {
 		CreatedAt:     now.Format(time.RFC3339Nano),
 	}
 	return &readOnlyMailboxProbeStore{
-		items: []store.MailboxV1Item{item},
-		details: map[string]store.MailboxV1ItemDetail{
+		items: []mailbox.V1Item{item},
+		details: map[string]mailbox.V1ItemDetail{
 			item.MailboxID: {
 				Item:    item,
 				Payload: map[string]any{"title": "probe"},
-				History: []store.MailboxV1HistoryEntry{{
+				History: []mailbox.V1HistoryEntry{{
 					Action:       "created",
 					ActorTokenID: "system",
 					TS:           now.Format(time.RFC3339Nano),
@@ -1253,14 +1257,14 @@ func newReadOnlyMailboxProbeStore(now time.Time) *readOnlyMailboxProbeStore {
 	}
 }
 
-func (s *readOnlyMailboxProbeStore) ListV1MailboxItems(context.Context, store.MailboxV1ListOptions) ([]store.MailboxV1Item, string, error) {
-	return append([]store.MailboxV1Item(nil), s.items...), "", nil
+func (s *readOnlyMailboxProbeStore) ListV1MailboxItems(context.Context, mailbox.V1ListOptions) ([]mailbox.V1Item, string, error) {
+	return append([]mailbox.V1Item(nil), s.items...), "", nil
 }
 
-func (s *readOnlyMailboxProbeStore) GetV1MailboxItem(_ context.Context, mailboxID string) (store.MailboxV1ItemDetail, error) {
+func (s *readOnlyMailboxProbeStore) GetV1MailboxItem(_ context.Context, mailboxID string) (mailbox.V1ItemDetail, error) {
 	detail, ok := s.details[mailboxID]
 	if !ok {
-		return store.MailboxV1ItemDetail{}, store.ErrMailboxV1NotFound
+		return mailbox.V1ItemDetail{}, mailbox.ErrV1NotFound
 	}
 	return detail, nil
 }

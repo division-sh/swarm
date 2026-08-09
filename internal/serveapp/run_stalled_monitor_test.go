@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/runtime/runstalled"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -14,13 +16,13 @@ func TestRunStalledSnapshotFromDebugReportUsesProjectRunOperationalStatus(t *tes
 	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name       string
-		report     store.RunDebugReport
+		report     operatorread.RunDebugReport
 		wantLayer  string
 		wantReason string
 	}{
 		{
 			name: "delivery lifecycle",
-			report: store.RunDebugReport{
+			report: operatorread.RunDebugReport{
 				RunID:          "run-delivery",
 				RunTableStatus: "running",
 				LastEventAt:    now,
@@ -30,11 +32,11 @@ func TestRunStalledSnapshotFromDebugReportUsesProjectRunOperationalStatus(t *tes
 		},
 		{
 			name: "scoring terminal outcome",
-			report: store.RunDebugReport{
+			report: operatorread.RunDebugReport{
 				RunID:          "run-scoring",
 				RunTableStatus: "running",
 				LastEventAt:    now,
-				EventCounts: []store.RunDebugEventCount{
+				EventCounts: []operatorread.RunDebugEventCount{
 					{EventName: "scoring/scoring.requested", Count: 1},
 				},
 			},
@@ -43,11 +45,11 @@ func TestRunStalledSnapshotFromDebugReportUsesProjectRunOperationalStatus(t *tes
 		},
 		{
 			name: "active delivery remains running",
-			report: store.RunDebugReport{
+			report: operatorread.RunDebugReport{
 				RunID:          "run-active",
 				RunTableStatus: "running",
 				LastEventAt:    now,
-				Deliveries: []store.RunDebugDeliveryCount{
+				Deliveries: []operatorread.RunDebugDeliveryCount{
 					{Status: "in_progress", Count: 1},
 				},
 			},
@@ -77,7 +79,7 @@ func TestRunStalledSnapshotFromDebugReportUsesProjectRunOperationalStatus(t *tes
 func TestRunStalledSnapshotFromDebugReportUsesNonEscalationProgressTimestamp(t *testing.T) {
 	progressAt := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	selfAlertAt := progressAt.Add(10 * time.Minute)
-	report := store.RunDebugReport{
+	report := operatorread.RunDebugReport{
 		RunID:          "run-self-alert",
 		RunTableStatus: "running",
 		LastEventAt:    selfAlertAt,
@@ -95,7 +97,7 @@ func TestServeRunStalledReaderLoadsSnapshotProgressFromStore(t *testing.T) {
 	ctx := context.Background()
 	progressAt := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	reader := &serveRunStalledReader{store: fakeRunStalledReadStore{
-		report: store.RunDebugReport{
+		report: operatorread.RunDebugReport{
 			RunID:          "run-1",
 			RunTableStatus: "running",
 			LastEventAt:    progressAt.Add(10 * time.Minute),
@@ -125,21 +127,21 @@ func TestSelectedStoreFacadeRunStalledReaderUsesSelectedOwner(t *testing.T) {
 }
 
 type fakeRunStalledReadStore struct {
-	report       store.RunDebugReport
+	report       operatorread.RunDebugReport
 	flowInstance string
 	progressAt   time.Time
 }
 
-func (s fakeRunStalledReadStore) ListRunHeaders(context.Context, store.RunHeaderListOptions) ([]store.RunHeader, string, error) {
+func (s fakeRunStalledReadStore) ListRunHeaders(context.Context, operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error) {
 	return nil, "", nil
 }
 
-func (s fakeRunStalledReadStore) LoadRunDebugReport(context.Context, string, store.RunDebugQueryOptions) (store.RunDebugReport, error) {
+func (s fakeRunStalledReadStore) LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
 	return s.report, nil
 }
 
-func (s fakeRunStalledReadStore) ListOperatorEvents(context.Context, store.OperatorEventListOptions) (store.OperatorEventListResult, error) {
-	return store.OperatorEventListResult{}, nil
+func (s fakeRunStalledReadStore) ListOperatorEvents(context.Context, operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error) {
+	return operatorread.OperatorEventListResult{}, nil
 }
 
 func (s fakeRunStalledReadStore) LoadLatestRunFlowInstance(context.Context, string) (string, error) {

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func (s *OperatorPostgres) LoadLatestRunFlowInstance(ctx context.Context, runID string) (string, error) {
+func (s *RunPostgres) LoadLatestRunFlowInstance(ctx context.Context, runID string) (string, error) {
 	if s == nil || s.backend == nil {
 		return "", fmt.Errorf("postgres store is required")
 	}
@@ -35,7 +35,7 @@ func (s *OperatorPostgres) LoadLatestRunFlowInstance(ctx context.Context, runID 
 	return strings.Trim(flowInstance, "/"), nil
 }
 
-func (s *OperatorPostgres) LoadLatestRunNonEscalationProgressAt(ctx context.Context, runID, escalationEventName string) (time.Time, error) {
+func (s *RunPostgres) LoadLatestRunNonEscalationProgressAt(ctx context.Context, runID, escalationEventName string) (time.Time, error) {
 	if s == nil || s.backend == nil {
 		return time.Time{}, fmt.Errorf("postgres store is required")
 	}
@@ -59,7 +59,7 @@ func (s *OperatorPostgres) LoadLatestRunNonEscalationProgressAt(ctx context.Cont
 	return progressAt, nil
 }
 
-func (s *OperatorSQLite) LoadLatestRunFlowInstance(ctx context.Context, runID string) (string, error) {
+func (s *RunSQLite) LoadLatestRunFlowInstance(ctx context.Context, runID string) (string, error) {
 	if s == nil || s.backend == nil {
 		return "", fmt.Errorf("sqlite runtime store is required")
 	}
@@ -85,7 +85,7 @@ func (s *OperatorSQLite) LoadLatestRunFlowInstance(ctx context.Context, runID st
 	return strings.Trim(flowInstance, "/"), nil
 }
 
-func (s *OperatorSQLite) LoadLatestRunNonEscalationProgressAt(ctx context.Context, runID, escalationEventName string) (time.Time, error) {
+func (s *RunSQLite) LoadLatestRunNonEscalationProgressAt(ctx context.Context, runID, escalationEventName string) (time.Time, error) {
 	if s == nil || s.backend == nil {
 		return time.Time{}, fmt.Errorf("sqlite runtime store is required")
 	}

@@ -4,7 +4,11 @@ package runtimepersistence
 import (
 	context "context"
 	json "encoding/json"
+	apiidempotency "github.com/division-sh/swarm/internal/apiidempotency"
+	bundlecatalog "github.com/division-sh/swarm/internal/bundlecatalog"
 	events "github.com/division-sh/swarm/internal/events"
+	mailbox "github.com/division-sh/swarm/internal/mailbox"
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
 	runtime "github.com/division-sh/swarm/internal/runtime"
 	activityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
 	agentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
@@ -44,17 +48,19 @@ import (
 	timerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	tools "github.com/division-sh/swarm/internal/runtime/tools"
 	workflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
-	apiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
-	pipelinepersistence "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
-	runforkpersistence "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
-	bundlecatalog "github.com/division-sh/swarm/internal/store/internal/bundlecatalog"
-	mailboxpersistence "github.com/division-sh/swarm/internal/store/internal/mailboxpersistence"
-	operatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
 	time "time"
 )
 
 func (s *PostgresStore) Acquire(ctx context.Context, identity agentmemory.Identity, lockOwner string) (*sessions.Lease, error) {
 	return s.lLMPostgresOwner.Acquire(ctx, identity, lockOwner)
+}
+
+func (s *PostgresStore) AcquireBundleDelete(ctx context.Context) (bundledelete.LockLease, bool, error) {
+	return s.bundleDeletePostgresOwner.AcquireBundleDelete(ctx)
+}
+
+func (s *PostgresStore) AcquireDestructiveReset(ctx context.Context) (destructivereset.LockLease, bool, error) {
+	return s.destructiveResetPostgresOwner.AcquireDestructiveReset(ctx)
 }
 
 func (s *PostgresStore) AcquireLiveSession(ctx context.Context, identity agentmemory.Identity, lockOwner string) (*sessions.Lease, llm.ConversationRecord, error) {
@@ -89,8 +95,8 @@ func (s *PostgresStore) AdoptSessionID(ctx context.Context, identity agentmemory
 	return s.lLMPostgresOwner.AdoptSessionID(ctx, identity, lockOwner, newSessionID)
 }
 
-func (s *PostgresStore) AggregateOperatorEntities(ctx context.Context, opts operatorsurface.OperatorEntityAggregateOptions) (operatorsurface.OperatorEntityAggregateResult, error) {
-	return s.operatorPostgres.AggregateOperatorEntities(ctx, opts)
+func (s *PostgresStore) AggregateOperatorEntities(ctx context.Context, opts operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateResult, error) {
+	return s.operatorEntityPostgres.AggregateOperatorEntities(ctx, opts)
 }
 
 func (s *PostgresStore) AppendAgentTurn(ctx context.Context, rec llm.AgentTurnRecord) error {
@@ -102,7 +108,7 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runqui
 }
 
 func (s *PostgresStore) ApplyBundleDeleteFinalMutation(ctx context.Context, req bundledelete.FinalMutationRequest) (bundledelete.FinalMutationResult, error) {
-	return s.adminPostgresOwner.ApplyBundleDeleteFinalMutation(ctx, req)
+	return s.bundleDeletePostgresOwner.ApplyBundleDeleteFinalMutation(ctx, req)
 }
 
 func (s *PostgresStore) ApplyBundleForceDeletePreservationCleanup(ctx context.Context, req preservationcleanup.Request) (preservationcleanup.Result, error) {
@@ -110,7 +116,7 @@ func (s *PostgresStore) ApplyBundleForceDeletePreservationCleanup(ctx context.Co
 }
 
 func (s *PostgresStore) ApplyDestructiveResetCleanup(ctx context.Context, req destructivereset.CleanupRequest) (destructivereset.CleanupResult, error) {
-	return s.adminPostgresOwner.ApplyDestructiveResetCleanup(ctx, req)
+	return s.destructiveResetPostgresOwner.ApplyDestructiveResetCleanup(ctx, req)
 }
 
 func (s *PostgresStore) ApplyServeAbandonActiveRunQuiescence(ctx context.Context, at time.Time) (runquiescence.Result, error) {
@@ -257,7 +263,7 @@ func (s *PostgresStore) CreateHumanTaskCard(ctx context.Context, card decisionca
 	return s.decisionPostgresOwner.CreateHumanTaskCard(ctx, card, continuation)
 }
 
-func (s *PostgresStore) CreateOperatorConversationFork(ctx context.Context, req runforkpersistence.ConversationForkCreateRequest) (runforkpersistence.OperatorConversationForkSession, error) {
+func (s *PostgresStore) CreateOperatorConversationFork(ctx context.Context, req runfork.ConversationForkCreateRequest) (runfork.OperatorConversationForkSession, error) {
 	return s.runForkPostgresOwner.CreateOperatorConversationFork(ctx, req)
 }
 
@@ -289,7 +295,7 @@ func (s *PostgresStore) DeleteFlowInstanceRoute(ctx context.Context, identity fl
 	return s.pipelinePostgresOwner.DeleteFlowInstanceRoute(ctx, identity)
 }
 
-func (s *PostgresStore) DeleteOperatorConversationFork(ctx context.Context, forkID string, now time.Time) (runforkpersistence.ConversationForkDeleteResult, error) {
+func (s *PostgresStore) DeleteOperatorConversationFork(ctx context.Context, forkID string, now time.Time) (runfork.ConversationForkDeleteResult, error) {
 	return s.runForkPostgresOwner.DeleteOperatorConversationFork(ctx, forkID, now)
 }
 
@@ -325,7 +331,7 @@ func (s *PostgresStore) ExpireMailboxItems(ctx context.Context, limit int) ([]to
 	return s.mailboxPostgresOwner.ExpireMailboxItems(ctx, limit)
 }
 
-func (s *PostgresStore) FailOperatorConversationForkChat(ctx context.Context, req runforkpersistence.ConversationForkChatFailureRequest) error {
+func (s *PostgresStore) FailOperatorConversationForkChat(ctx context.Context, req runfork.ConversationForkChatFailureRequest) error {
 	return s.runForkPostgresOwner.FailOperatorConversationForkChat(ctx, req)
 }
 
@@ -353,7 +359,7 @@ func (s *PostgresStore) GetMailboxItem(ctx context.Context, id string) (tools.Ma
 	return s.mailboxPostgresOwner.GetMailboxItem(ctx, id)
 }
 
-func (s *PostgresStore) GetV1MailboxItem(ctx context.Context, id string) (mailboxpersistence.MailboxV1ItemDetail, error) {
+func (s *PostgresStore) GetV1MailboxItem(ctx context.Context, id string) (mailbox.V1ItemDetail, error) {
 	return s.mailboxPostgresOwner.GetV1MailboxItem(ctx, id)
 }
 
@@ -365,7 +371,7 @@ func (s *PostgresStore) HeartbeatCompletionAttempt(ctx context.Context, attempt 
 	return s.effectPostgresOwner.HeartbeatCompletionAttempt(ctx, attempt, now, lease)
 }
 
-func (s *PostgresStore) HeartbeatOperatorConversationForkChat(ctx context.Context, prepared runforkpersistence.ConversationForkChatPrepared, now time.Time) error {
+func (s *PostgresStore) HeartbeatOperatorConversationForkChat(ctx context.Context, prepared runfork.ConversationForkChatPrepared, now time.Time) error {
 	return s.runForkPostgresOwner.HeartbeatOperatorConversationForkChat(ctx, prepared, now)
 }
 
@@ -394,15 +400,15 @@ func (s *PostgresStore) IssueRunForkSelectedContractRuntimeExecution(ctx context
 }
 
 func (s *PostgresStore) ListActiveAgentDescriptors(ctx context.Context) ([]bus.ActiveAgentDescriptor, error) {
-	return s.operatorPostgres.ListActiveAgentDescriptors(ctx)
+	return s.operatorAgentPostgres.ListActiveAgentDescriptors(ctx)
 }
 
 func (s *PostgresStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]bus.ActiveFlowInstanceDescriptor, error) {
 	return s.pipelinePostgresOwner.ListActiveFlowInstanceDescriptors(ctx)
 }
 
-func (s *PostgresStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorsurface.AgentDeliveryLifecycleFacts, error) {
-	return s.operatorPostgres.ListAgentDeliveryLifecycleFacts(ctx, identities)
+func (s *PostgresStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error) {
+	return s.operatorAgentPostgres.ListAgentDeliveryLifecycleFacts(ctx, identities)
 }
 
 func (s *PostgresStore) ListAuthorActivity(ctx context.Context, opts authoractivity.ListOptions) (authoractivity.ListResult, error) {
@@ -413,11 +419,11 @@ func (s *PostgresStore) ListBudgetProjectionTargets(ctx context.Context, termina
 	return s.budgetPostgresOwner.ListBudgetProjectionTargets(ctx, terminalStates)
 }
 
-func (s *PostgresStore) ListBundleCatalog(ctx context.Context, opts bundlecatalog.BundleCatalogListOptions) (bundlecatalog.BundleCatalogListResult, error) {
+func (s *PostgresStore) ListBundleCatalog(ctx context.Context, opts bundlecatalog.ListOptions) (bundlecatalog.ListResult, error) {
 	return s.postgres.ListBundleCatalog(ctx, opts)
 }
 
-func (s *PostgresStore) ListBundleCatalogAgents(ctx context.Context, bundleHash string) (bundlecatalog.BundleCatalogAgentsResult, error) {
+func (s *PostgresStore) ListBundleCatalogAgents(ctx context.Context, bundleHash string) (bundlecatalog.AgentsResult, error) {
 	return s.postgres.ListBundleCatalogAgents(ctx, bundleHash)
 }
 
@@ -469,56 +475,56 @@ func (s *PostgresStore) ListMailboxItems(ctx context.Context, status string, lim
 	return s.mailboxPostgresOwner.ListMailboxItems(ctx, status, limit)
 }
 
-func (s *PostgresStore) ListOperatorAgents(ctx context.Context, opts operatorsurface.OperatorAgentListOptions) (operatorsurface.OperatorAgentListResult, error) {
-	return s.operatorPostgres.ListOperatorAgents(ctx, opts)
+func (s *PostgresStore) ListOperatorAgents(ctx context.Context, opts operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error) {
+	return s.operatorAgentPostgres.ListOperatorAgents(ctx, opts)
 }
 
-func (s *PostgresStore) ListOperatorConversationForks(ctx context.Context, opts runforkpersistence.ConversationForkListOptions) (runforkpersistence.ConversationForkListResult, error) {
+func (s *PostgresStore) ListOperatorConversationForks(ctx context.Context, opts runfork.ConversationForkListOptions) (runfork.ConversationForkListResult, error) {
 	return s.runForkPostgresOwner.ListOperatorConversationForks(ctx, opts)
 }
 
-func (s *PostgresStore) ListOperatorConversations(ctx context.Context, opts operatorsurface.OperatorConversationListOptions) (operatorsurface.OperatorConversationListResult, error) {
-	return s.operatorPostgres.ListOperatorConversations(ctx, opts)
+func (s *PostgresStore) ListOperatorConversations(ctx context.Context, opts operatorread.OperatorConversationListOptions) (operatorread.OperatorConversationListResult, error) {
+	return s.operatorConversationPostgres.ListOperatorConversations(ctx, opts)
 }
 
-func (s *PostgresStore) ListOperatorEntities(ctx context.Context, opts operatorsurface.OperatorEntityListOptions) (operatorsurface.OperatorEntityListResult, error) {
-	return s.operatorPostgres.ListOperatorEntities(ctx, opts)
+func (s *PostgresStore) ListOperatorEntities(ctx context.Context, opts operatorread.OperatorEntityListOptions) (operatorread.OperatorEntityListResult, error) {
+	return s.operatorEntityPostgres.ListOperatorEntities(ctx, opts)
 }
 
-func (s *PostgresStore) ListOperatorEvents(ctx context.Context, opts operatorsurface.OperatorEventListOptions) (operatorsurface.OperatorEventListResult, error) {
-	return s.operatorPostgres.ListOperatorEvents(ctx, opts)
+func (s *PostgresStore) ListOperatorEvents(ctx context.Context, opts operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error) {
+	return s.operatorObservabilityPostgres.ListOperatorEvents(ctx, opts)
 }
 
-func (s *PostgresStore) ListOperatorRuntimeIncidents(ctx context.Context, opts operatorsurface.OperatorRuntimeIncidentListOptions) (operatorsurface.OperatorRuntimeIncidentListResult, error) {
-	return s.operatorPostgres.ListOperatorRuntimeIncidents(ctx, opts)
+func (s *PostgresStore) ListOperatorRuntimeIncidents(ctx context.Context, opts operatorread.OperatorRuntimeIncidentListOptions) (operatorread.OperatorRuntimeIncidentListResult, error) {
+	return s.operatorObservabilityPostgres.ListOperatorRuntimeIncidents(ctx, opts)
 }
 
-func (s *PostgresStore) ListOperatorRuntimeLogs(ctx context.Context, opts operatorsurface.OperatorRuntimeLogListOptions) (operatorsurface.OperatorRuntimeLogListResult, error) {
-	return s.operatorPostgres.ListOperatorRuntimeLogs(ctx, opts)
+func (s *PostgresStore) ListOperatorRuntimeLogs(ctx context.Context, opts operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error) {
+	return s.operatorObservabilityPostgres.ListOperatorRuntimeLogs(ctx, opts)
 }
 
-func (s *PostgresStore) ListPendingAgentDeliveryDetails(ctx context.Context, opts operatorsurface.PendingAgentDeliveryListOptions) (operatorsurface.PendingAgentDeliveryPage, error) {
-	return s.operatorPostgres.ListPendingAgentDeliveryDetails(ctx, opts)
+func (s *PostgresStore) ListPendingAgentDeliveryDetails(ctx context.Context, opts operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryPage, error) {
+	return s.operatorAgentPostgres.ListPendingAgentDeliveryDetails(ctx, opts)
 }
 
-func (s *PostgresStore) ListPendingAgentDeliveryFacts(ctx context.Context, identities []agentidentity.Identity, since time.Time) (map[agentidentity.Identity]operatorsurface.PendingAgentDeliveryFacts, error) {
-	return s.operatorPostgres.ListPendingAgentDeliveryFacts(ctx, identities, since)
+func (s *PostgresStore) ListPendingAgentDeliveryFacts(ctx context.Context, identities []agentidentity.Identity, since time.Time) (map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts, error) {
+	return s.operatorAgentPostgres.ListPendingAgentDeliveryFacts(ctx, identities, since)
 }
 
 func (s *PostgresStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]manager.AgentLifecycleDiagnostic, error) {
 	return s.agentPostgresOwner.ListPendingAgentLifecycleDiagnostics(ctx, limit)
 }
 
-func (s *PostgresStore) ListRunDebugRuns(ctx context.Context, limit int) ([]operatorsurface.RunDebugRunSummary, error) {
-	return s.operatorPostgres.ListRunDebugRuns(ctx, limit)
+func (s *PostgresStore) ListRunDebugRuns(ctx context.Context, limit int) ([]operatorread.RunDebugRunSummary, error) {
+	return s.operatorRunPostgres.ListRunDebugRuns(ctx, limit)
 }
 
 func (s *PostgresStore) ListRunForkSelectedContractRouteRecoveries(ctx context.Context) ([]runfork.RunForkSelectedContractRouteRecovery, error) {
 	return s.runForkPostgresOwner.ListRunForkSelectedContractRouteRecoveries(ctx)
 }
 
-func (s *PostgresStore) ListRunHeaders(ctx context.Context, opts operatorsurface.RunHeaderListOptions) ([]operatorsurface.RunHeader, string, error) {
-	return s.operatorPostgres.ListRunHeaders(ctx, opts)
+func (s *PostgresStore) ListRunHeaders(ctx context.Context, opts operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error) {
+	return s.operatorRunPostgres.ListRunHeaders(ctx, opts)
 }
 
 func (s *PostgresStore) ListSelectedContractRouteRecoveryRecords(ctx context.Context) ([]manager.SelectedContractRouteRecoveryRecord, error) {
@@ -533,7 +539,7 @@ func (s *PostgresStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, 
 	return s.mailboxPostgresOwner.ListUnnotifiedCriticalMailboxItems(ctx, limit)
 }
 
-func (s *PostgresStore) ListV1MailboxItems(ctx context.Context, opts mailboxpersistence.MailboxV1ListOptions) ([]mailboxpersistence.MailboxV1Item, string, error) {
+func (s *PostgresStore) ListV1MailboxItems(ctx context.Context, opts mailbox.V1ListOptions) ([]mailbox.V1Item, string, error) {
 	return s.mailboxPostgresOwner.ListV1MailboxItems(ctx, opts)
 }
 
@@ -565,7 +571,7 @@ func (s *PostgresStore) LoadAgentsSpec(ctx context.Context) ([]manager.Persisted
 	return s.agentPostgresOwner.LoadAgentsSpec(ctx)
 }
 
-func (s *PostgresStore) LoadBundleCatalog(ctx context.Context, bundleHash string) (bundlecatalog.BundleCatalogDetail, error) {
+func (s *PostgresStore) LoadBundleCatalog(ctx context.Context, bundleHash string) (bundlecatalog.Detail, error) {
 	return s.postgres.LoadBundleCatalog(ctx, bundleHash)
 }
 
@@ -602,47 +608,43 @@ func (s *PostgresStore) LoadInboundPublicationByIdentity(ctx context.Context, pr
 }
 
 func (s *PostgresStore) LoadLatestRunFlowInstance(ctx context.Context, runID string) (string, error) {
-	return s.operatorPostgres.LoadLatestRunFlowInstance(ctx, runID)
+	return s.operatorRunPostgres.LoadLatestRunFlowInstance(ctx, runID)
 }
 
 func (s *PostgresStore) LoadLatestRunNonEscalationProgressAt(ctx context.Context, runID string, escalationEventName string) (time.Time, error) {
-	return s.operatorPostgres.LoadLatestRunNonEscalationProgressAt(ctx, runID, escalationEventName)
+	return s.operatorRunPostgres.LoadLatestRunNonEscalationProgressAt(ctx, runID, escalationEventName)
 }
 
-func (s *PostgresStore) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (operatorsurface.OperatorAgentDetail, error) {
-	return s.operatorPostgres.LoadOperatorAgent(ctx, identity)
+func (s *PostgresStore) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (operatorread.OperatorAgentDetail, error) {
+	return s.operatorAgentPostgres.LoadOperatorAgent(ctx, identity)
 }
 
-func (s *PostgresStore) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, identity agentidentity.Identity, opts operatorsurface.OperatorAgentDeliveryDiagnosticsOptions) (operatorsurface.OperatorAgentDeliveryDiagnostics, error) {
-	return s.operatorPostgres.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, opts)
+func (s *PostgresStore) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryDiagnosticsOptions) (operatorread.OperatorAgentDeliveryDiagnostics, error) {
+	return s.operatorAgentPostgres.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, opts)
 }
 
-func (s *PostgresStore) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, identity agentidentity.Identity, opts operatorsurface.OperatorAgentDeliveryLifecycleOptions) (operatorsurface.OperatorAgentDeliveryLifecycleList, error) {
-	return s.operatorPostgres.LoadOperatorAgentDeliveryLifecycle(ctx, identity, opts)
+func (s *PostgresStore) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryLifecycleOptions) (operatorread.OperatorAgentDeliveryLifecycleList, error) {
+	return s.operatorAgentPostgres.LoadOperatorAgentDeliveryLifecycle(ctx, identity, opts)
 }
 
-func (s *PostgresStore) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts operatorsurface.OperatorAgentDiagnosisOptions) (operatorsurface.OperatorAgentDiagnosis, error) {
-	return s.operatorPostgres.LoadOperatorAgentDiagnosis(ctx, identity, opts)
+func (s *PostgresStore) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDiagnosisOptions) (operatorread.OperatorAgentDiagnosis, error) {
+	return s.operatorAgentPostgres.LoadOperatorAgentDiagnosis(ctx, identity, opts)
 }
 
-func (s *PostgresStore) LoadOperatorAgentUsage(ctx context.Context, identity agentidentity.Identity, opts operatorsurface.OperatorAgentUsageOptions) (operatorsurface.OperatorAgentUsage, error) {
-	return s.operatorPostgres.LoadOperatorAgentUsage(ctx, identity, opts)
+func (s *PostgresStore) LoadOperatorAgentUsage(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentUsageOptions) (operatorread.OperatorAgentUsage, error) {
+	return s.operatorAgentPostgres.LoadOperatorAgentUsage(ctx, identity, opts)
 }
 
-func (s *PostgresStore) LoadOperatorConversationFork(ctx context.Context, forkID string) (runforkpersistence.OperatorConversationForkSession, error) {
+func (s *PostgresStore) LoadOperatorConversationFork(ctx context.Context, forkID string) (runfork.OperatorConversationForkSession, error) {
 	return s.runForkPostgresOwner.LoadOperatorConversationFork(ctx, forkID)
 }
 
-func (s *PostgresStore) LoadOperatorDeliveryDeadLetters(ctx context.Context, deliveryID string, claimVersion int64) ([]operatorsurface.OperatorDeadLetterRecord, error) {
-	return s.operatorPostgres.LoadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
+func (s *PostgresStore) LoadOperatorEntity(ctx context.Context, entityID string, runID string) (operatorread.OperatorEntityFull, error) {
+	return s.operatorEntityPostgres.LoadOperatorEntity(ctx, entityID, runID)
 }
 
-func (s *PostgresStore) LoadOperatorEntity(ctx context.Context, entityID string, runID string) (operatorsurface.OperatorEntityFull, error) {
-	return s.operatorPostgres.LoadOperatorEntity(ctx, entityID, runID)
-}
-
-func (s *PostgresStore) LoadOperatorEvent(ctx context.Context, eventID string) (operatorsurface.OperatorEventFull, error) {
-	return s.operatorPostgres.LoadOperatorEvent(ctx, eventID)
+func (s *PostgresStore) LoadOperatorEvent(ctx context.Context, eventID string) (operatorread.OperatorEventFull, error) {
+	return s.operatorObservabilityPostgres.LoadOperatorEvent(ctx, eventID)
 }
 
 func (s *PostgresStore) LoadPreparedPublishEvent(ctx context.Context, eventID string) (events.AdmittedEvent, bool, error) {
@@ -669,16 +671,16 @@ func (s *PostgresStore) LoadRoutingRules(ctx context.Context) ([]manager.Persist
 	return s.routingPostgresOwner.LoadRoutingRules(ctx)
 }
 
-func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, opts operatorsurface.RunDebugQueryOptions) (operatorsurface.RunDebugReport, error) {
-	return s.operatorPostgres.LoadRunDebugReport(ctx, runID, opts)
+func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
+	return s.operatorRunPostgres.LoadRunDebugReport(ctx, runID, opts)
 }
 
-func (s *PostgresStore) LoadRunDebugTrace(ctx context.Context, runID string, opts operatorsurface.RunDebugTraceQueryOptions) ([]operatorsurface.RunDebugTraceRow, error) {
-	return s.operatorPostgres.LoadRunDebugTrace(ctx, runID, opts)
+func (s *PostgresStore) LoadRunDebugTrace(ctx context.Context, runID string, opts operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, error) {
+	return s.operatorRunPostgres.LoadRunDebugTrace(ctx, runID, opts)
 }
 
-func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string, opts operatorsurface.RunDebugTraceQueryOptions) ([]operatorsurface.RunDebugTraceRow, string, error) {
-	return s.operatorPostgres.LoadRunDebugTracePage(ctx, runID, opts)
+func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string, opts operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, string, error) {
+	return s.operatorRunPostgres.LoadRunDebugTracePage(ctx, runID, opts)
 }
 
 func (s *PostgresStore) LoadRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractBinding, bool, error) {
@@ -693,8 +695,8 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Cont
 	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, workflowStates)
 }
 
-func (s *PostgresStore) LoadRunHeader(ctx context.Context, runID string) (operatorsurface.RunHeader, error) {
-	return s.operatorPostgres.LoadRunHeader(ctx, runID)
+func (s *PostgresStore) LoadRunHeader(ctx context.Context, runID string) (operatorread.RunHeader, error) {
+	return s.operatorRunPostgres.LoadRunHeader(ctx, runID)
 }
 
 func (s *PostgresStore) LoadRunLifecycleSnapshot(ctx context.Context, runID string) (bus.RunLifecycleSnapshot, error) {
@@ -702,11 +704,11 @@ func (s *PostgresStore) LoadRunLifecycleSnapshot(ctx context.Context, runID stri
 }
 
 func (s *PostgresStore) LoadRunOrigin(ctx context.Context, runID string) (runlifecycle.RunOrigin, error) {
-	return s.operatorPostgres.LoadRunOrigin(ctx, runID)
+	return s.operatorRunPostgres.LoadRunOrigin(ctx, runID)
 }
 
-func (s *PostgresStore) LoadRunTestQuiescence(ctx context.Context, runID string, observedAt time.Time) (operatorsurface.RunTestQuiescence, error) {
-	return s.operatorPostgres.LoadRunTestQuiescence(ctx, runID, observedAt)
+func (s *PostgresStore) LoadRunTestQuiescence(ctx context.Context, runID string, observedAt time.Time) (operatorread.RunTestQuiescence, error) {
+	return s.operatorRunPostgres.LoadRunTestQuiescence(ctx, runID, observedAt)
 }
 
 func (s *PostgresStore) LoadRuntimeIngressState(ctx context.Context) (ingress.State, error) {
@@ -782,14 +784,14 @@ func (s *PostgresStore) PipelineObligations() pipelineobligation.Store {
 }
 
 func (s *PostgresStore) PlanBundleDelete(ctx context.Context, req bundledelete.Request) (bundledelete.Plan, error) {
-	return s.adminPostgresOwner.PlanBundleDelete(ctx, req)
+	return s.bundleDeletePostgresOwner.PlanBundleDelete(ctx, req)
 }
 
 func (s *PostgresStore) PlanRunFork(ctx context.Context, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
 	return s.runForkPostgresOwner.PlanRunFork(ctx, req)
 }
 
-func (s *PostgresStore) PrepareOperatorConversationForkChat(ctx context.Context, req runforkpersistence.ConversationForkChatPrepareRequest) (runforkpersistence.ConversationForkChatPrepared, error) {
+func (s *PostgresStore) PrepareOperatorConversationForkChat(ctx context.Context, req runfork.ConversationForkChatPrepareRequest) (runfork.ConversationForkChatPrepared, error) {
 	return s.runForkPostgresOwner.PrepareOperatorConversationForkChat(ctx, req)
 }
 
@@ -818,7 +820,7 @@ func (s *PostgresStore) Read(ctx context.Context, scope timerobligation.Scope, o
 }
 
 func (s *PostgresStore) ReadResetInventory(ctx context.Context) (destructivereset.Inventory, error) {
-	return s.adminPostgresOwner.ReadResetInventory(ctx)
+	return s.destructiveResetPostgresOwner.ReadResetInventory(ctx)
 }
 
 func (s *PostgresStore) ReadTimerObligations(ctx context.Context, scope timerobligation.Scope, observedAt time.Time) (timerobligation.Snapshot, error) {
@@ -861,7 +863,7 @@ func (s *PostgresStore) RecordDirectiveExecuted(ctx context.Context, operationID
 	return s.agentPostgresOwner.RecordDirectiveExecuted(ctx, operationID, ownerID, response, now)
 }
 
-func (s *PostgresStore) RecordOperatorConversationForkChat(ctx context.Context, req runforkpersistence.ConversationForkChatRecordRequest) (runforkpersistence.ConversationForkChatResult, error) {
+func (s *PostgresStore) RecordOperatorConversationForkChat(ctx context.Context, req runfork.ConversationForkChatRecordRequest) (runfork.ConversationForkChatResult, error) {
 	return s.runForkPostgresOwner.RecordOperatorConversationForkChat(ctx, req)
 }
 
@@ -917,10 +919,6 @@ func (s *PostgresStore) RequireActiveRunSource(ctx context.Context, runID string
 	return s.runLifecyclePostgresOwner.RequireActiveRunSource(ctx, runID)
 }
 
-func (s *PostgresStore) RequireCurrentSchema() error {
-	return s.operatorPostgres.RequireCurrentSchema()
-}
-
 func (s *PostgresStore) RequireGateRouteAdmitted(ctx context.Context, runID string) error {
 	return s.pipelinePostgresOwner.RequireGateRouteAdmitted(ctx, runID)
 }
@@ -961,7 +959,7 @@ func (s *PostgresStore) ResolveAuthorActivityEventDescriptor(scope authoractivit
 	return s.activityPostgresOwner.ResolveAuthorActivityEventDescriptor(scope, name)
 }
 
-func (s *PostgresStore) ResolveConversationForkPoint(ctx context.Context, sourceSessionID string, selector runforkpersistence.ConversationForkPointSelector) (runforkpersistence.ConversationForkPointDescriptor, error) {
+func (s *PostgresStore) ResolveConversationForkPoint(ctx context.Context, sourceSessionID string, selector runfork.ConversationForkPointSelector) (runfork.ConversationForkPointDescriptor, error) {
 	return s.runForkPostgresOwner.ResolveConversationForkPoint(ctx, sourceSessionID, selector)
 }
 
@@ -970,7 +968,7 @@ func (s *PostgresStore) ResolveFlowInstance(ctx context.Context, runID string, e
 }
 
 func (s *PostgresStore) ResolveLatestRunDebugRunID(ctx context.Context) (string, error) {
-	return s.operatorPostgres.ResolveLatestRunDebugRunID(ctx)
+	return s.operatorRunPostgres.ResolveLatestRunDebugRunID(ctx)
 }
 
 func (s *PostgresStore) ResolveOperatorAgentIdentity(ctx context.Context, agentID string, flowInstance string) (agentidentity.Identity, error) {
@@ -1041,7 +1039,7 @@ func (s *PostgresStore) SettleSuccess(ctx context.Context, claim deliverylifecyc
 	return s.deliveryPostgresOwner.SettleSuccess(ctx, claim, sideEffects, duration)
 }
 
-func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req pipelinepersistence.ScenarioSetupRequest) (pipelinepersistence.ScenarioSetupResult, error) {
+func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error) {
 	return s.pipelinePostgresOwner.SetupScenarioEntities(ctx, req)
 }
 
@@ -1097,10 +1095,6 @@ func (s *PostgresStore) TransitionRuntimeIngressState(ctx context.Context, targe
 	return s.runtimeIngressPostgresOwner.TransitionRuntimeIngressState(ctx, target, reason, controlledBy, now)
 }
 
-func (s *PostgresStore) TryAcquire(ctx context.Context, lockKey string) (destructivereset.LockLease, bool, error) {
-	return s.adminPostgresOwner.TryAcquire(ctx, lockKey)
-}
-
 func (s *PostgresStore) UpdateLiveSessionWatchdog(ctx context.Context, update llm.ConversationWatchdogUpdate) error {
 	return s.lLMPostgresOwner.UpdateLiveSessionWatchdog(ctx, update)
 }
@@ -1109,7 +1103,7 @@ func (s *PostgresStore) UpsertAgent(ctx context.Context, rec manager.PersistedAg
 	return s.agentPostgresOwner.UpsertAgent(ctx, rec)
 }
 
-func (s *PostgresStore) UpsertBundleCatalog(ctx context.Context, req bundlecatalog.BundleCatalogUpsert) (bundlecatalog.BundleCatalogUpsertResult, error) {
+func (s *PostgresStore) UpsertBundleCatalog(ctx context.Context, req bundlecatalog.Upsert) (bundlecatalog.UpsertResult, error) {
 	return s.postgres.UpsertBundleCatalog(ctx, req)
 }
 
@@ -1129,7 +1123,7 @@ func (s *PostgresStore) ValidateInboundPublicationIntegrity(ctx context.Context)
 	return s.eventPostgresOwner.ValidateInboundPublicationIntegrity(ctx)
 }
 
-func (s *PostgresStore) WithAPIIdempotency(ctx context.Context, req apiidempotency.APIIdempotencyRequest, execute func(context.Context) (apiidempotency.APIIdempotencyCompletion, error)) (apiidempotency.APIIdempotencyCompletion, bool, error) {
+func (s *PostgresStore) WithAPIIdempotency(ctx context.Context, req apiidempotency.Request, execute func(context.Context) (apiidempotency.Completion, error)) (apiidempotency.Completion, bool, error) {
 	return s.postgresOwner.WithAPIIdempotency(ctx, req, execute)
 }
 
@@ -1161,8 +1155,8 @@ func (s *SQLiteRuntimeStore) AdoptSessionID(ctx context.Context, identity agentm
 	return s.lLMSQLiteOwner.AdoptSessionID(ctx, identity, lockOwner, newSessionID)
 }
 
-func (s *SQLiteRuntimeStore) AggregateOperatorEntities(ctx context.Context, opts operatorsurface.OperatorEntityAggregateOptions) (operatorsurface.OperatorEntityAggregateResult, error) {
-	return s.operatorSQLite.AggregateOperatorEntities(ctx, opts)
+func (s *SQLiteRuntimeStore) AggregateOperatorEntities(ctx context.Context, opts operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateResult, error) {
+	return s.operatorEntitySQLite.AggregateOperatorEntities(ctx, opts)
 }
 
 func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec llm.AgentTurnRecord) error {
@@ -1313,7 +1307,7 @@ func (s *SQLiteRuntimeStore) CreateHumanTaskCard(ctx context.Context, card decis
 	return s.decisionSQLiteOwner.CreateHumanTaskCard(ctx, card, continuation)
 }
 
-func (s *SQLiteRuntimeStore) CreateOperatorConversationFork(ctx context.Context, req runforkpersistence.ConversationForkCreateRequest) (runforkpersistence.OperatorConversationForkSession, error) {
+func (s *SQLiteRuntimeStore) CreateOperatorConversationFork(ctx context.Context, req runfork.ConversationForkCreateRequest) (runfork.OperatorConversationForkSession, error) {
 	return s.runForkSQLiteOwner.CreateOperatorConversationFork(ctx, req)
 }
 
@@ -1341,7 +1335,7 @@ func (s *SQLiteRuntimeStore) DeleteFlowInstanceRoute(ctx context.Context, identi
 	return s.pipelineSQLiteOwner.DeleteFlowInstanceRoute(ctx, identity)
 }
 
-func (s *SQLiteRuntimeStore) DeleteOperatorConversationFork(ctx context.Context, forkID string, now time.Time) (runforkpersistence.ConversationForkDeleteResult, error) {
+func (s *SQLiteRuntimeStore) DeleteOperatorConversationFork(ctx context.Context, forkID string, now time.Time) (runfork.ConversationForkDeleteResult, error) {
 	return s.runForkSQLiteOwner.DeleteOperatorConversationFork(ctx, forkID, now)
 }
 
@@ -1373,7 +1367,7 @@ func (s *SQLiteRuntimeStore) ExpireMailboxItems(ctx context.Context, limit int) 
 	return s.mailboxSQLiteOwner.ExpireMailboxItems(ctx, limit)
 }
 
-func (s *SQLiteRuntimeStore) FailOperatorConversationForkChat(ctx context.Context, req runforkpersistence.ConversationForkChatFailureRequest) error {
+func (s *SQLiteRuntimeStore) FailOperatorConversationForkChat(ctx context.Context, req runfork.ConversationForkChatFailureRequest) error {
 	return s.runForkSQLiteOwner.FailOperatorConversationForkChat(ctx, req)
 }
 
@@ -1401,7 +1395,7 @@ func (s *SQLiteRuntimeStore) GetMailboxItem(ctx context.Context, id string) (too
 	return s.mailboxSQLiteOwner.GetMailboxItem(ctx, id)
 }
 
-func (s *SQLiteRuntimeStore) GetV1MailboxItem(ctx context.Context, id string) (mailboxpersistence.MailboxV1ItemDetail, error) {
+func (s *SQLiteRuntimeStore) GetV1MailboxItem(ctx context.Context, id string) (mailbox.V1ItemDetail, error) {
 	return s.mailboxSQLiteOwner.GetV1MailboxItem(ctx, id)
 }
 
@@ -1413,7 +1407,7 @@ func (s *SQLiteRuntimeStore) HeartbeatCompletionAttempt(ctx context.Context, att
 	return s.effectSQLiteOwner.HeartbeatCompletionAttempt(ctx, attempt, now, lease)
 }
 
-func (s *SQLiteRuntimeStore) HeartbeatOperatorConversationForkChat(ctx context.Context, prepared runforkpersistence.ConversationForkChatPrepared, now time.Time) error {
+func (s *SQLiteRuntimeStore) HeartbeatOperatorConversationForkChat(ctx context.Context, prepared runfork.ConversationForkChatPrepared, now time.Time) error {
 	return s.runForkSQLiteOwner.HeartbeatOperatorConversationForkChat(ctx, prepared, now)
 }
 
@@ -1442,15 +1436,15 @@ func (s *SQLiteRuntimeStore) IssueRunForkSelectedContractRuntimeExecution(ctx co
 }
 
 func (s *SQLiteRuntimeStore) ListActiveAgentDescriptors(ctx context.Context) ([]bus.ActiveAgentDescriptor, error) {
-	return s.operatorSQLite.ListActiveAgentDescriptors(ctx)
+	return s.operatorAgentSQLite.ListActiveAgentDescriptors(ctx)
 }
 
 func (s *SQLiteRuntimeStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]bus.ActiveFlowInstanceDescriptor, error) {
 	return s.pipelineSQLiteOwner.ListActiveFlowInstanceDescriptors(ctx)
 }
 
-func (s *SQLiteRuntimeStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorsurface.AgentDeliveryLifecycleFacts, error) {
-	return s.operatorSQLite.ListAgentDeliveryLifecycleFacts(ctx, identities)
+func (s *SQLiteRuntimeStore) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error) {
+	return s.operatorAgentSQLite.ListAgentDeliveryLifecycleFacts(ctx, identities)
 }
 
 func (s *SQLiteRuntimeStore) ListAuthorActivity(ctx context.Context, opts authoractivity.ListOptions) (authoractivity.ListResult, error) {
@@ -1461,11 +1455,11 @@ func (s *SQLiteRuntimeStore) ListBudgetProjectionTargets(ctx context.Context, te
 	return s.budgetSQLiteOwner.ListBudgetProjectionTargets(ctx, terminalStates)
 }
 
-func (s *SQLiteRuntimeStore) ListBundleCatalog(ctx context.Context, opts bundlecatalog.BundleCatalogListOptions) (bundlecatalog.BundleCatalogListResult, error) {
+func (s *SQLiteRuntimeStore) ListBundleCatalog(ctx context.Context, opts bundlecatalog.ListOptions) (bundlecatalog.ListResult, error) {
 	return s.sQLite.ListBundleCatalog(ctx, opts)
 }
 
-func (s *SQLiteRuntimeStore) ListBundleCatalogAgents(ctx context.Context, bundleHash string) (bundlecatalog.BundleCatalogAgentsResult, error) {
+func (s *SQLiteRuntimeStore) ListBundleCatalogAgents(ctx context.Context, bundleHash string) (bundlecatalog.AgentsResult, error) {
 	return s.sQLite.ListBundleCatalogAgents(ctx, bundleHash)
 }
 
@@ -1505,40 +1499,40 @@ func (s *SQLiteRuntimeStore) ListMailboxItems(ctx context.Context, status string
 	return s.mailboxSQLiteOwner.ListMailboxItems(ctx, status, limit)
 }
 
-func (s *SQLiteRuntimeStore) ListOperatorAgents(ctx context.Context, opts operatorsurface.OperatorAgentListOptions) (operatorsurface.OperatorAgentListResult, error) {
-	return s.operatorSQLite.ListOperatorAgents(ctx, opts)
+func (s *SQLiteRuntimeStore) ListOperatorAgents(ctx context.Context, opts operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error) {
+	return s.operatorAgentSQLite.ListOperatorAgents(ctx, opts)
 }
 
-func (s *SQLiteRuntimeStore) ListOperatorConversationForks(ctx context.Context, opts runforkpersistence.ConversationForkListOptions) (runforkpersistence.ConversationForkListResult, error) {
+func (s *SQLiteRuntimeStore) ListOperatorConversationForks(ctx context.Context, opts runfork.ConversationForkListOptions) (runfork.ConversationForkListResult, error) {
 	return s.runForkSQLiteOwner.ListOperatorConversationForks(ctx, opts)
 }
 
-func (s *SQLiteRuntimeStore) ListOperatorConversations(ctx context.Context, opts operatorsurface.OperatorConversationListOptions) (operatorsurface.OperatorConversationListResult, error) {
-	return s.operatorSQLite.ListOperatorConversations(ctx, opts)
+func (s *SQLiteRuntimeStore) ListOperatorConversations(ctx context.Context, opts operatorread.OperatorConversationListOptions) (operatorread.OperatorConversationListResult, error) {
+	return s.operatorConversationSQLite.ListOperatorConversations(ctx, opts)
 }
 
-func (s *SQLiteRuntimeStore) ListOperatorEntities(ctx context.Context, opts operatorsurface.OperatorEntityListOptions) (operatorsurface.OperatorEntityListResult, error) {
-	return s.operatorSQLite.ListOperatorEntities(ctx, opts)
+func (s *SQLiteRuntimeStore) ListOperatorEntities(ctx context.Context, opts operatorread.OperatorEntityListOptions) (operatorread.OperatorEntityListResult, error) {
+	return s.operatorEntitySQLite.ListOperatorEntities(ctx, opts)
 }
 
-func (s *SQLiteRuntimeStore) ListOperatorEvents(ctx context.Context, opts operatorsurface.OperatorEventListOptions) (operatorsurface.OperatorEventListResult, error) {
-	return s.operatorSQLite.ListOperatorEvents(ctx, opts)
+func (s *SQLiteRuntimeStore) ListOperatorEvents(ctx context.Context, opts operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error) {
+	return s.operatorObservabilitySQLite.ListOperatorEvents(ctx, opts)
 }
 
-func (s *SQLiteRuntimeStore) ListOperatorRuntimeIncidents(ctx context.Context, opts operatorsurface.OperatorRuntimeIncidentListOptions) (operatorsurface.OperatorRuntimeIncidentListResult, error) {
-	return s.operatorSQLite.ListOperatorRuntimeIncidents(ctx, opts)
+func (s *SQLiteRuntimeStore) ListOperatorRuntimeIncidents(ctx context.Context, opts operatorread.OperatorRuntimeIncidentListOptions) (operatorread.OperatorRuntimeIncidentListResult, error) {
+	return s.operatorObservabilitySQLite.ListOperatorRuntimeIncidents(ctx, opts)
 }
 
-func (s *SQLiteRuntimeStore) ListOperatorRuntimeLogs(ctx context.Context, opts operatorsurface.OperatorRuntimeLogListOptions) (operatorsurface.OperatorRuntimeLogListResult, error) {
-	return s.operatorSQLite.ListOperatorRuntimeLogs(ctx, opts)
+func (s *SQLiteRuntimeStore) ListOperatorRuntimeLogs(ctx context.Context, opts operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error) {
+	return s.operatorObservabilitySQLite.ListOperatorRuntimeLogs(ctx, opts)
 }
 
 func (s *SQLiteRuntimeStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]manager.AgentLifecycleDiagnostic, error) {
 	return s.agentSQLiteOwner.ListPendingAgentLifecycleDiagnostics(ctx, limit)
 }
 
-func (s *SQLiteRuntimeStore) ListRunHeaders(ctx context.Context, opts operatorsurface.RunHeaderListOptions) ([]operatorsurface.RunHeader, string, error) {
-	return s.operatorSQLite.ListRunHeaders(ctx, opts)
+func (s *SQLiteRuntimeStore) ListRunHeaders(ctx context.Context, opts operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error) {
+	return s.operatorRunSQLite.ListRunHeaders(ctx, opts)
 }
 
 func (s *SQLiteRuntimeStore) ListStandingServiceStatuses(ctx context.Context) ([]pipeline.StandingServiceStatus, error) {
@@ -1549,7 +1543,7 @@ func (s *SQLiteRuntimeStore) ListUnnotifiedCriticalMailboxItems(ctx context.Cont
 	return s.mailboxSQLiteOwner.ListUnnotifiedCriticalMailboxItems(ctx, limit)
 }
 
-func (s *SQLiteRuntimeStore) ListV1MailboxItems(ctx context.Context, opts mailboxpersistence.MailboxV1ListOptions) ([]mailboxpersistence.MailboxV1Item, string, error) {
+func (s *SQLiteRuntimeStore) ListV1MailboxItems(ctx context.Context, opts mailbox.V1ListOptions) ([]mailbox.V1Item, string, error) {
 	return s.mailboxSQLiteOwner.ListV1MailboxItems(ctx, opts)
 }
 
@@ -1577,7 +1571,7 @@ func (s *SQLiteRuntimeStore) LoadAgentLifecycleState(ctx context.Context, identi
 	return s.agentSQLiteOwner.LoadAgentLifecycleState(ctx, identity)
 }
 
-func (s *SQLiteRuntimeStore) LoadBundleCatalog(ctx context.Context, bundleHash string) (bundlecatalog.BundleCatalogDetail, error) {
+func (s *SQLiteRuntimeStore) LoadBundleCatalog(ctx context.Context, bundleHash string) (bundlecatalog.Detail, error) {
 	return s.sQLite.LoadBundleCatalog(ctx, bundleHash)
 }
 
@@ -1610,47 +1604,43 @@ func (s *SQLiteRuntimeStore) LoadInboundPublicationByIdentity(ctx context.Contex
 }
 
 func (s *SQLiteRuntimeStore) LoadLatestRunFlowInstance(ctx context.Context, runID string) (string, error) {
-	return s.operatorSQLite.LoadLatestRunFlowInstance(ctx, runID)
+	return s.operatorRunSQLite.LoadLatestRunFlowInstance(ctx, runID)
 }
 
 func (s *SQLiteRuntimeStore) LoadLatestRunNonEscalationProgressAt(ctx context.Context, runID string, escalationEventName string) (time.Time, error) {
-	return s.operatorSQLite.LoadLatestRunNonEscalationProgressAt(ctx, runID, escalationEventName)
+	return s.operatorRunSQLite.LoadLatestRunNonEscalationProgressAt(ctx, runID, escalationEventName)
 }
 
-func (s *SQLiteRuntimeStore) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (operatorsurface.OperatorAgentDetail, error) {
-	return s.operatorSQLite.LoadOperatorAgent(ctx, identity)
+func (s *SQLiteRuntimeStore) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (operatorread.OperatorAgentDetail, error) {
+	return s.operatorAgentSQLite.LoadOperatorAgent(ctx, identity)
 }
 
-func (s *SQLiteRuntimeStore) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, identity agentidentity.Identity, opts operatorsurface.OperatorAgentDeliveryDiagnosticsOptions) (operatorsurface.OperatorAgentDeliveryDiagnostics, error) {
-	return s.operatorSQLite.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, opts)
+func (s *SQLiteRuntimeStore) LoadOperatorAgentDeliveryDiagnostics(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryDiagnosticsOptions) (operatorread.OperatorAgentDeliveryDiagnostics, error) {
+	return s.operatorAgentSQLite.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, opts)
 }
 
-func (s *SQLiteRuntimeStore) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, identity agentidentity.Identity, opts operatorsurface.OperatorAgentDeliveryLifecycleOptions) (operatorsurface.OperatorAgentDeliveryLifecycleList, error) {
-	return s.operatorSQLite.LoadOperatorAgentDeliveryLifecycle(ctx, identity, opts)
+func (s *SQLiteRuntimeStore) LoadOperatorAgentDeliveryLifecycle(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDeliveryLifecycleOptions) (operatorread.OperatorAgentDeliveryLifecycleList, error) {
+	return s.operatorAgentSQLite.LoadOperatorAgentDeliveryLifecycle(ctx, identity, opts)
 }
 
-func (s *SQLiteRuntimeStore) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts operatorsurface.OperatorAgentDiagnosisOptions) (operatorsurface.OperatorAgentDiagnosis, error) {
-	return s.operatorSQLite.LoadOperatorAgentDiagnosis(ctx, identity, opts)
+func (s *SQLiteRuntimeStore) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDiagnosisOptions) (operatorread.OperatorAgentDiagnosis, error) {
+	return s.operatorAgentSQLite.LoadOperatorAgentDiagnosis(ctx, identity, opts)
 }
 
-func (s *SQLiteRuntimeStore) LoadOperatorAgentUsage(ctx context.Context, identity agentidentity.Identity, opts operatorsurface.OperatorAgentUsageOptions) (operatorsurface.OperatorAgentUsage, error) {
-	return s.operatorSQLite.LoadOperatorAgentUsage(ctx, identity, opts)
+func (s *SQLiteRuntimeStore) LoadOperatorAgentUsage(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentUsageOptions) (operatorread.OperatorAgentUsage, error) {
+	return s.operatorAgentSQLite.LoadOperatorAgentUsage(ctx, identity, opts)
 }
 
-func (s *SQLiteRuntimeStore) LoadOperatorConversationFork(ctx context.Context, forkID string) (runforkpersistence.OperatorConversationForkSession, error) {
+func (s *SQLiteRuntimeStore) LoadOperatorConversationFork(ctx context.Context, forkID string) (runfork.OperatorConversationForkSession, error) {
 	return s.runForkSQLiteOwner.LoadOperatorConversationFork(ctx, forkID)
 }
 
-func (s *SQLiteRuntimeStore) LoadOperatorDeliveryDeadLetters(ctx context.Context, deliveryID string, claimVersion int64) ([]operatorsurface.OperatorDeadLetterRecord, error) {
-	return s.operatorSQLite.LoadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
+func (s *SQLiteRuntimeStore) LoadOperatorEntity(ctx context.Context, entityID string, runID string) (operatorread.OperatorEntityFull, error) {
+	return s.operatorEntitySQLite.LoadOperatorEntity(ctx, entityID, runID)
 }
 
-func (s *SQLiteRuntimeStore) LoadOperatorEntity(ctx context.Context, entityID string, runID string) (operatorsurface.OperatorEntityFull, error) {
-	return s.operatorSQLite.LoadOperatorEntity(ctx, entityID, runID)
-}
-
-func (s *SQLiteRuntimeStore) LoadOperatorEvent(ctx context.Context, eventID string) (operatorsurface.OperatorEventFull, error) {
-	return s.operatorSQLite.LoadOperatorEvent(ctx, eventID)
+func (s *SQLiteRuntimeStore) LoadOperatorEvent(ctx context.Context, eventID string) (operatorread.OperatorEventFull, error) {
+	return s.operatorObservabilitySQLite.LoadOperatorEvent(ctx, eventID)
 }
 
 func (s *SQLiteRuntimeStore) LoadPreparedPublishEvent(ctx context.Context, eventID string) (events.AdmittedEvent, bool, error) {
@@ -1673,16 +1663,16 @@ func (s *SQLiteRuntimeStore) LoadReplyContext(ctx context.Context, id string) (r
 	return s.replySQLiteOwner.LoadReplyContext(ctx, id)
 }
 
-func (s *SQLiteRuntimeStore) LoadRunDebugReport(ctx context.Context, runID string, opts operatorsurface.RunDebugQueryOptions) (operatorsurface.RunDebugReport, error) {
-	return s.operatorSQLite.LoadRunDebugReport(ctx, runID, opts)
+func (s *SQLiteRuntimeStore) LoadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
+	return s.operatorRunSQLite.LoadRunDebugReport(ctx, runID, opts)
 }
 
-func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID string, opts operatorsurface.RunDebugTraceQueryOptions) ([]operatorsurface.RunDebugTraceRow, string, error) {
-	return s.operatorSQLite.LoadRunDebugTracePage(ctx, runID, opts)
+func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID string, opts operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, string, error) {
+	return s.operatorRunSQLite.LoadRunDebugTracePage(ctx, runID, opts)
 }
 
-func (s *SQLiteRuntimeStore) LoadRunHeader(ctx context.Context, runID string) (operatorsurface.RunHeader, error) {
-	return s.operatorSQLite.LoadRunHeader(ctx, runID)
+func (s *SQLiteRuntimeStore) LoadRunHeader(ctx context.Context, runID string) (operatorread.RunHeader, error) {
+	return s.operatorRunSQLite.LoadRunHeader(ctx, runID)
 }
 
 func (s *SQLiteRuntimeStore) LoadRunLifecycleSnapshot(ctx context.Context, runID string) (bus.RunLifecycleSnapshot, error) {
@@ -1690,11 +1680,11 @@ func (s *SQLiteRuntimeStore) LoadRunLifecycleSnapshot(ctx context.Context, runID
 }
 
 func (s *SQLiteRuntimeStore) LoadRunOrigin(ctx context.Context, runID string) (runlifecycle.RunOrigin, error) {
-	return s.operatorSQLite.LoadRunOrigin(ctx, runID)
+	return s.operatorRunSQLite.LoadRunOrigin(ctx, runID)
 }
 
-func (s *SQLiteRuntimeStore) LoadRunTestQuiescence(ctx context.Context, runID string, observedAt time.Time) (operatorsurface.RunTestQuiescence, error) {
-	return s.operatorSQLite.LoadRunTestQuiescence(ctx, runID, observedAt)
+func (s *SQLiteRuntimeStore) LoadRunTestQuiescence(ctx context.Context, runID string, observedAt time.Time) (operatorread.RunTestQuiescence, error) {
+	return s.operatorRunSQLite.LoadRunTestQuiescence(ctx, runID, observedAt)
 }
 
 func (s *SQLiteRuntimeStore) LoadRuntimeIngressState(ctx context.Context) (ingress.State, error) {
@@ -1761,7 +1751,7 @@ func (s *SQLiteRuntimeStore) PipelineObligations() pipelineobligation.Store {
 	return s.pipelineSQLiteOwner.PipelineObligations()
 }
 
-func (s *SQLiteRuntimeStore) PrepareOperatorConversationForkChat(ctx context.Context, req runforkpersistence.ConversationForkChatPrepareRequest) (runforkpersistence.ConversationForkChatPrepared, error) {
+func (s *SQLiteRuntimeStore) PrepareOperatorConversationForkChat(ctx context.Context, req runfork.ConversationForkChatPrepareRequest) (runfork.ConversationForkChatPrepared, error) {
 	return s.runForkSQLiteOwner.PrepareOperatorConversationForkChat(ctx, req)
 }
 
@@ -1829,7 +1819,7 @@ func (s *SQLiteRuntimeStore) RecordDirectiveExecuted(ctx context.Context, operat
 	return s.agentSQLiteOwner.RecordDirectiveExecuted(ctx, operationID, ownerID, response, now)
 }
 
-func (s *SQLiteRuntimeStore) RecordOperatorConversationForkChat(ctx context.Context, req runforkpersistence.ConversationForkChatRecordRequest) (runforkpersistence.ConversationForkChatResult, error) {
+func (s *SQLiteRuntimeStore) RecordOperatorConversationForkChat(ctx context.Context, req runfork.ConversationForkChatRecordRequest) (runfork.ConversationForkChatResult, error) {
 	return s.runForkSQLiteOwner.RecordOperatorConversationForkChat(ctx, req)
 }
 
@@ -1881,10 +1871,6 @@ func (s *SQLiteRuntimeStore) RequireActiveRunSource(ctx context.Context, runID s
 	return s.runLifecycleSQLiteOwner.RequireActiveRunSource(ctx, runID)
 }
 
-func (s *SQLiteRuntimeStore) RequireCurrentSchema() error {
-	return s.operatorSQLite.RequireCurrentSchema()
-}
-
 func (s *SQLiteRuntimeStore) RequireGateRouteAdmitted(ctx context.Context, runID string) error {
 	return s.pipelineSQLiteOwner.RequireGateRouteAdmitted(ctx, runID)
 }
@@ -1921,7 +1907,7 @@ func (s *SQLiteRuntimeStore) ResolveAuthorActivityEventDescriptor(scope authorac
 	return s.activitySQLiteOwner.ResolveAuthorActivityEventDescriptor(scope, name)
 }
 
-func (s *SQLiteRuntimeStore) ResolveConversationForkPoint(ctx context.Context, sourceSessionID string, selector runforkpersistence.ConversationForkPointSelector) (runforkpersistence.ConversationForkPointDescriptor, error) {
+func (s *SQLiteRuntimeStore) ResolveConversationForkPoint(ctx context.Context, sourceSessionID string, selector runfork.ConversationForkPointSelector) (runfork.ConversationForkPointDescriptor, error) {
 	return s.runForkSQLiteOwner.ResolveConversationForkPoint(ctx, sourceSessionID, selector)
 }
 
@@ -2001,7 +1987,7 @@ func (s *SQLiteRuntimeStore) SettleSuccess(ctx context.Context, claim deliveryli
 	return s.deliverySQLiteOwner.SettleSuccess(ctx, claim, sideEffects, duration)
 }
 
-func (s *SQLiteRuntimeStore) SetupScenarioEntities(ctx context.Context, req pipelinepersistence.ScenarioSetupRequest) (pipelinepersistence.ScenarioSetupResult, error) {
+func (s *SQLiteRuntimeStore) SetupScenarioEntities(ctx context.Context, req pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error) {
 	return s.pipelineSQLiteOwner.SetupScenarioEntities(ctx, req)
 }
 
@@ -2077,6 +2063,6 @@ func (s *SQLiteRuntimeStore) ValidateInboundPublicationIntegrity(ctx context.Con
 	return s.eventSQLiteOwner.ValidateInboundPublicationIntegrity(ctx)
 }
 
-func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req apiidempotency.APIIdempotencyRequest, execute func(context.Context) (apiidempotency.APIIdempotencyCompletion, error)) (apiidempotency.APIIdempotencyCompletion, bool, error) {
+func (s *SQLiteRuntimeStore) WithAPIIdempotency(ctx context.Context, req apiidempotency.Request, execute func(context.Context) (apiidempotency.Completion, error)) (apiidempotency.Completion, bool, error) {
 	return s.sQLiteOwner.WithAPIIdempotency(ctx, req, execute)
 }

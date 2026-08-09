@@ -8,12 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
+	swruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -30,6 +32,10 @@ type RunForkAvailabilityStore interface {
 
 type RunForkExecutor interface {
 	ExecuteRunFork(context.Context, RunForkExecutionRequest) (RunForkExecutionResult, error)
+}
+
+type RunForkExecutorSelector interface {
+	SelectRunForkExecutor(*swruntime.BundleContext, *swruntime.Runtime) (RunForkExecutor, error)
 }
 
 type RunForkExecutionRequest struct {
@@ -59,6 +65,17 @@ type SelectedContractRunForkExecutor struct {
 	SourceLoader                   runtimerunforkexecution.SelectedContractSourceLoader
 	ContractSelection              runfork.RunForkContractSelection
 	AgentRuntime                   runtimerunforkexecution.SelectedContractAgentRuntimeOptions
+}
+
+func (e SelectedContractRunForkExecutor) SelectRunForkExecutor(contextDef *swruntime.BundleContext, selectedRuntime *swruntime.Runtime) (RunForkExecutor, error) {
+	if contextDef == nil || selectedRuntime == nil {
+		return nil, fmt.Errorf("selected run fork runtime context is required")
+	}
+	e.AgentRuntime.Config = selectedRuntime.Config
+	e.AgentRuntime.Workspace = selectedRuntime.Workspace
+	e.AgentRuntime.Credentials = selectedRuntime.Credentials
+	e.ContractSelection = runtimerunforkadmission.SelectedContractSelection(contextDef.Source, contextDef.ContractsRoot)
+	return e, nil
 }
 
 func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req RunForkExecutionRequest) (RunForkExecutionResult, error) {
@@ -98,8 +115,8 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 	}, nil
 }
 
-func OperatorRunForkHandlers(opts OperatorReadOptions) map[string]MethodHandler {
-	if opts.RunForkAvailability == nil || opts.RunFork == nil || opts.Idempotency == nil {
+func OperatorRunForkHandlers(opts RunForkHandlerOptions) map[string]MethodHandler {
+	if opts.Availability == nil || opts.Executor == nil || opts.Idempotency == nil {
 		return nil
 	}
 	now := opts.Now
@@ -113,19 +130,19 @@ func OperatorRunForkHandlers(opts OperatorReadOptions) map[string]MethodHandler 
 	}
 }
 
-func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions, now time.Time) (any, error) {
 	params, err := runForkParamsFromRequest(req.Params)
 	if err != nil {
 		return nil, err
 	}
-	availability, err := opts.RunForkAvailability.LoadRunBundleAvailability(ctx, params.SourceRunID)
+	availability, err := opts.Availability.LoadRunBundleAvailability(ctx, params.SourceRunID)
 	if err != nil {
 		return nil, runForkError(params.SourceRunID, params.ForkEventID, err)
 	}
 	if availability.DataIntegrityError() {
 		return nil, NewApplicationError(BundleDataIntegrityErrorCode, false, runForkAvailabilityDetails(availability))
 	}
-	loadedEphemeralCandidate := runtimeContextManager(opts) != nil &&
+	loadedEphemeralCandidate := runtimeContextManager(opts.RuntimeContexts) != nil &&
 		availability.BundleSource.IsEphemeral() &&
 		strings.TrimSpace(availability.BundleHash) != ""
 	if !availability.Available() && !loadedEphemeralCandidate {
@@ -148,12 +165,20 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 			"reason":        "source run has no canonical bundle_hash",
 		})
 	}
-	selectedOpts := opts
+	executor := opts.Executor
 	selectedCtx := ctx
 	var contractSelection runfork.RunForkContractSelection
-	if runtimeContextManager(opts) != nil {
+	if runtimeContextManager(opts.RuntimeContexts) != nil {
 		var contextErr error
-		selectedCtx, selectedOpts, _, contextErr = runtimeBundleContextByHash(ctx, opts, targetBundleHash, params.SourceRunID)
+		var selected selectedRuntimeContext
+		selectedCtx, selected, contextErr = runtimeBundleContextByHash(ctx, opts.RuntimeContexts, targetBundleHash, params.SourceRunID)
+		if contextErr != nil {
+			return nil, contextErr
+		}
+		if opts.Selector == nil {
+			return nil, fmt.Errorf("run fork executor selector is required for loaded runtime contexts")
+		}
+		executor, contextErr = opts.Selector.SelectRunForkExecutor(selected.BundleContext, selected.Runtime)
 		if contextErr != nil {
 			return nil, contextErr
 		}
@@ -174,7 +199,7 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 	}
 	params.BundleHash = targetBundleHash
 
-	completion, replay, err := selectedOpts.Idempotency.WithAPIIdempotency(selectedCtx, store.APIIdempotencyRequest{
+	completion, replay, err := opts.Idempotency.WithAPIIdempotency(selectedCtx, apiidempotency.Request{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: params.IdempotencyKey,
@@ -182,8 +207,8 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 		ResourceID:     params.SourceRunID,
 		TTL:            runForkIdempotencyTTL,
 		Now:            now,
-	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		result, err := selectedOpts.RunFork.ExecuteRunFork(ctx, RunForkExecutionRequest{
+	}, func(ctx context.Context) (apiidempotency.Completion, error) {
+		result, err := executor.ExecuteRunFork(ctx, RunForkExecutionRequest{
 			SourceRunID:         params.SourceRunID,
 			ForkEventID:         params.ForkEventID,
 			BundleHash:          params.BundleHash,
@@ -191,19 +216,19 @@ func executeRunFork(ctx context.Context, req Request, opts OperatorReadOptions, 
 			ContractSelection:   contractSelection,
 		})
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, runForkError(params.SourceRunID, params.ForkEventID, err)
+			return apiidempotency.Completion{}, runForkError(params.SourceRunID, params.ForkEventID, err)
 		}
 		if result.BundleHash == "" {
 			result.BundleHash = params.BundleHash
 		}
 		if err := validateRunForkExecutionResult(result); err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
 		response, err := json.Marshal(result)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
-		return store.APIIdempotencyCompletion{ResourceID: result.ForkRunID, Response: response}, nil
+		return apiidempotency.Completion{ResourceID: result.ForkRunID, Response: response}, nil
 	})
 	if err != nil {
 		return nil, runForkError(params.SourceRunID, params.ForkEventID, err)
@@ -325,7 +350,7 @@ func runForkError(sourceRunID, forkEventID string, err error) error {
 	if errors.As(err, &applicationErr) {
 		return applicationErr
 	}
-	var conflict *store.APIIdempotencyConflictError
+	var conflict *apiidempotency.ConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
 			"original_request_hash":    conflict.OriginalRequestHash,
@@ -350,6 +375,8 @@ func runForkError(sourceRunID, forkEventID string, err error) error {
 			details["current_status"] = string(inactive.State)
 		}
 		return NewApplicationError(RunAlreadyTerminalCode, false, details)
+	case errors.Is(err, runbundle.ErrRunNotFound):
+		return NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": strings.TrimSpace(sourceRunID)})
 	case strings.Contains(msg, UnsupportedBundleHashForkCode):
 		return NewApplicationError(UnsupportedBundleHashForkCode, false, map[string]any{
 			"run_id":             strings.TrimSpace(sourceRunID),
@@ -377,8 +404,6 @@ func runForkError(sourceRunID, forkEventID string, err error) error {
 		return NewApplicationError(EventNotFoundCode, false, map[string]any{"event_id": eventID})
 	case strings.Contains(msg, "no source-run event"):
 		return NewInvalidParamsError(map[string]any{"field": "fork_event_id", "reason": msg, "source_run_id": strings.TrimSpace(sourceRunID)})
-	case strings.Contains(msg, "not found") && strings.Contains(msg, "run"):
-		return NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": strings.TrimSpace(sourceRunID)})
 	case strings.Contains(msg, "fork point --at"):
 		return NewInvalidParamsError(map[string]any{"field": "fork_event_id", "reason": msg})
 	default:

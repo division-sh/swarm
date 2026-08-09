@@ -10,9 +10,10 @@ import (
 	"strings"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/events"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -86,19 +87,19 @@ func ValidateRootInputs(inputs []RootInput) error {
 }
 
 type EventLister interface {
-	ListOperatorEvents(context.Context, store.OperatorEventListOptions) (store.OperatorEventListResult, error)
+	ListOperatorEvents(context.Context, operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error)
 }
 
-func LoadOperatorEvents(ctx context.Context, lister EventLister, runID string) (map[string]store.OperatorEventFull, error) {
+func LoadOperatorEvents(ctx context.Context, lister EventLister, runID string) (map[string]operatorread.OperatorEventFull, error) {
 	if lister == nil {
 		return nil, fmt.Errorf("catalog operator event lister is required")
 	}
-	out := map[string]store.OperatorEventFull{}
+	out := map[string]operatorread.OperatorEventFull{}
 	cursor := ""
 	seenCursors := map[string]struct{}{}
 	for {
-		page, err := lister.ListOperatorEvents(ctx, store.OperatorEventListOptions{
-			Filter: store.OperatorEventListFilter{RunID: strings.TrimSpace(runID)},
+		page, err := lister.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{
+			Filter: operatorread.OperatorEventListFilter{RunID: strings.TrimSpace(runID)},
 			Limit:  100, Cursor: cursor, Order: "asc", ExcludeRuntimeLogs: true,
 		})
 		if err != nil {
@@ -169,7 +170,7 @@ type projectionDeadLetter struct {
 	HandlerNode string                   `json:"handler_node,omitempty"`
 }
 
-func Project(eventsByID map[string]store.OperatorEventFull, runID string, roots []RootInput) ([]byte, error) {
+func Project(eventsByID map[string]operatorread.OperatorEventFull, runID string, roots []RootInput) ([]byte, error) {
 	if err := ValidateRootInputs(roots); err != nil {
 		return nil, err
 	}

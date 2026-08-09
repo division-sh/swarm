@@ -9,7 +9,7 @@ import (
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 )
 
-func (s *AdminPostgresOwner) ReadResetInventory(ctx context.Context) (destructivereset.Inventory, error) {
+func (s *DestructiveResetPostgresOwner) ReadResetInventory(ctx context.Context) (destructivereset.Inventory, error) {
 	if s == nil || s.backend == nil {
 		return destructivereset.Inventory{}, fmt.Errorf("postgres store is required")
 	}
@@ -47,7 +47,7 @@ func (s *AdminPostgresOwner) ReadResetInventory(ctx context.Context) (destructiv
 	return out, nil
 }
 
-func (s *AdminPostgresOwner) readDestructiveResetInventoryRuns(ctx context.Context) ([]destructivereset.RunRef, error) {
+func (s *DestructiveResetPostgresOwner) readDestructiveResetInventoryRuns(ctx context.Context) ([]destructivereset.RunRef, error) {
 	rows, err := s.backend.QueryContext(ctx, `
 		SELECT run_id::text, COALESCE(status, '')
 		FROM runs
@@ -71,7 +71,7 @@ func (s *AdminPostgresOwner) readDestructiveResetInventoryRuns(ctx context.Conte
 	return out, nil
 }
 
-func (s *AdminPostgresOwner) readDestructiveResetInventoryDeliveries(ctx context.Context) ([]destructivereset.DeliveryRef, error) {
+func (s *DestructiveResetPostgresOwner) readDestructiveResetInventoryDeliveries(ctx context.Context) ([]destructivereset.DeliveryRef, error) {
 	adapter, err := deliveryadapter.NewAdapter(deliveryadapter.DialectPostgres)
 	if err != nil {
 		return nil, err

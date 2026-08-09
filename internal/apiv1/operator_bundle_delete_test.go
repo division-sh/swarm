@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/bundlecatalog"
 	swruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -13,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -25,7 +25,7 @@ func TestOperatorBundleDeleteForceUsesOwnerChainAndIdempotency(t *testing.T) {
 	idempotency := newRecordingAPIIdempotencyStore()
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:          func() time.Time { return now },
 			Ready:        func() bool { return true },
 			Database:     fakePinger{},
@@ -73,7 +73,7 @@ func TestOperatorBundleDeleteForceErrors(t *testing.T) {
 		err  error
 		code string
 	}{
-		{name: "missing bundle", err: store.ErrBundleNotFound, code: BundleNotFoundCode},
+		{name: "missing bundle", err: bundlecatalog.ErrNotFound, code: BundleNotFoundCode},
 		{name: "busy", err: bundledelete.ErrOperationInProgress, code: BundleDeleteInProgressCode},
 	}
 	for _, tt := range tests {
@@ -81,7 +81,7 @@ func TestOperatorBundleDeleteForceErrors(t *testing.T) {
 			executor := &recordingBundleDeleteExecutor{bundleHash: runStartTestBundleHash, err: tt.err}
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: OperatorReadHandlers(OperatorReadOptions{
+				Handlers: testOperatorHandlers(testOperatorCapabilities{
 					Ready:        func() bool { return true },
 					Database:     fakePinger{},
 					Idempotency:  newRecordingAPIIdempotencyStore(),
@@ -104,10 +104,10 @@ func TestOperatorBundleDeleteForceErrors(t *testing.T) {
 }
 
 func TestOperatorBundleDeleteNonForceMissingBundleError(t *testing.T) {
-	executor := &recordingBundleDeleteExecutor{bundleHash: runStartTestBundleHash, err: store.ErrBundleNotFound}
+	executor := &recordingBundleDeleteExecutor{bundleHash: runStartTestBundleHash, err: bundlecatalog.ErrNotFound}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Ready:        func() bool { return true },
 			Database:     fakePinger{},
 			Idempotency:  newRecordingAPIIdempotencyStore(),
@@ -133,7 +133,7 @@ func TestOperatorBundleDeleteDeactivatesLoadedRuntimeContext(t *testing.T) {
 	executor := &recordingBundleDeleteExecutor{bundleHash: runStartTestBundleHash}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:             func() time.Time { return now },
 			Ready:           func() bool { return true },
 			Database:        fakePinger{},
@@ -198,7 +198,7 @@ func TestOperatorBundleDeleteForceDoesNotInferRuntimeDeactivationFromResult(t *t
 			executor := &staticBundleDeleteResultExecutor{result: tt.result}
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: OperatorReadHandlers(OperatorReadOptions{
+				Handlers: testOperatorHandlers(testOperatorCapabilities{
 					Now:             func() time.Time { return now },
 					Ready:           func() bool { return true },
 					Database:        fakePinger{},
@@ -226,7 +226,7 @@ func TestOperatorBundleDeleteNonForceUsesOwnerChainAndIdempotency(t *testing.T) 
 	idempotency := newRecordingAPIIdempotencyStore()
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:          func() time.Time { return now },
 			Ready:        func() bool { return true },
 			Database:     fakePinger{},
@@ -287,7 +287,7 @@ func TestOperatorBundleDeleteNonForceActiveRunsError(t *testing.T) {
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Ready:        func() bool { return true },
 			Database:     fakePinger{},
 			Idempotency:  newRecordingAPIIdempotencyStore(),
@@ -317,7 +317,7 @@ func TestOperatorBundleDeleteActiveRunsSentinelErrorOmitsRunRefs(t *testing.T) {
 	executor := &recordingBundleDeleteExecutor{bundleHash: runStartTestBundleHash, err: bundledelete.ErrActiveRunsRemain}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Ready:        func() bool { return true },
 			Database:     fakePinger{},
 			Idempotency:  newRecordingAPIIdempotencyStore(),
@@ -369,7 +369,7 @@ func TestOperatorBundleDeleteBlocksPostDeleteNewWorkFromPersistedRuntimeSource(t
 			runtimeContexts := newBundleDeleteRuntimeContextManager(t)
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: OperatorReadHandlers(OperatorReadOptions{
+				Handlers: testOperatorHandlers(testOperatorCapabilities{
 					Now:              func() time.Time { return time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC) },
 					Ready:            func() bool { return true },
 					Database:         fakePinger{},

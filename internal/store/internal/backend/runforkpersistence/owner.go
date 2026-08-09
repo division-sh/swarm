@@ -13,7 +13,6 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
@@ -26,7 +25,6 @@ import (
 	storefailurecodec "github.com/division-sh/swarm/internal/store/internal/failurecodec"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
-	storeerrors "github.com/division-sh/swarm/internal/store/internal/storeerrors"
 )
 
 type schemaAdmissionOwner interface {
@@ -42,16 +40,8 @@ type eventCommitOwner interface {
 }
 
 type runLifecycleCandidateHandoffReservation = storerunhandoff.CandidateHandoff
-type APIIdempotencyConflictError = storeapiidempotency.APIIdempotencyConflictError
-type EntityReadParamError = storeerrors.EntityReadParamError
 type persistedAgentProjection = storeagent.PersistedAgentProjection
 
-var ErrConversationForkNotFound = storeerrors.ErrConversationForkNotFound
-var ErrInvalidConversationForkCursor = storeerrors.ErrInvalidConversationForkCursor
-var ErrInvalidConversationCursor = storeerrors.ErrInvalidConversationCursor
-var ErrTurnNotFound = storeerrors.ErrTurnNotFound
-var ErrEventNotFound = storeerrors.ErrEventNotFound
-var ErrSessionNotFound = storeerrors.ErrSessionNotFound
 var agentIdentityFields = storeagent.IdentityFields
 var hydratePersistedAgentConfig = storeagent.HydrateAgentConfig
 var decodeStoredFailure = storefailurecodec.Decode
@@ -59,20 +49,6 @@ var DecodeConversationRuntimeStateDescriptor = storeoperatorsurface.DecodeConver
 var projectOperatorConversationSummaryMetadata = storeoperatorsurface.ProjectOperatorConversationSummaryMetadata
 
 func traceTimePtr(value time.Time) *time.Time { return storeoperatorsurface.TraceTimePtr(value) }
-
-type OperatorConversationToolCall = storeoperatorsurface.OperatorConversationToolCall
-type OperatorConversationToolResult = storeoperatorsurface.OperatorConversationToolResult
-type OperatorConversationTurn = storeoperatorsurface.OperatorConversationTurn
-type OperatorConversationTurnBlock = storeoperatorsurface.OperatorConversationTurnBlock
-type OperatorConversationActivity = storeoperatorsurface.OperatorConversationActivity
-type OperatorConversationActivityCounts = storeoperatorsurface.OperatorConversationActivityCounts
-type OperatorConversationSummary = storeoperatorsurface.OperatorConversationSummary
-type OperatorConversationTokenUsage = storeoperatorsurface.OperatorConversationTokenUsage
-type OperatorConversationTurnListItem = storeoperatorsurface.OperatorConversationTurnListItem
-type OperatorConversationTurnListOptions = storeoperatorsurface.OperatorConversationTurnListOptions
-type OperatorConversationTurnListResult = storeoperatorsurface.OperatorConversationTurnListResult
-type OperatorPublicConversationTurn = storeoperatorsurface.OperatorPublicConversationTurn
-type OperatorPublicConversationTurnDetail = storeoperatorsurface.OperatorPublicConversationTurnDetail
 
 var operatorConversationQuerySources = storeoperatorsurface.OperatorConversationQuerySources
 var sqliteOperatorConversationQuerySources = storeoperatorsurface.SQLiteOperatorConversationQuerySources

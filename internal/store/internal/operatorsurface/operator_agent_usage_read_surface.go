@@ -6,132 +6,85 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-)
-
-const (
-	AgentUsageAccountingExact     = "exact"
-	AgentUsageAccountingEstimated = "estimated"
 )
 
 // OperatorAgentUsageReadStore is the backend-neutral owner for the public
 // per-agent usage read surface over canonical spend_ledger facts.
 type OperatorAgentUsageReadStore interface {
-	LoadOperatorAgentUsage(context.Context, agentidentity.Identity, OperatorAgentUsageOptions) (OperatorAgentUsage, error)
+	LoadOperatorAgentUsage(context.Context, agentidentity.Identity, operatorread.OperatorAgentUsageOptions) (operatorread.OperatorAgentUsage, error)
 }
 
-var _ OperatorAgentUsageReadStore = (*OperatorPostgres)(nil)
-var _ OperatorAgentUsageReadStore = (*OperatorSQLite)(nil)
+var _ OperatorAgentUsageReadStore = (*AgentPostgres)(nil)
+var _ OperatorAgentUsageReadStore = (*AgentSQLite)(nil)
 
-type OperatorAgentUsageOptions struct {
-	Since *time.Time
-	Until *time.Time
-}
-
-type OperatorAgentUsage struct {
-	AgentID   string                         `json:"agent_id"`
-	Window    OperatorAgentUsageWindow       `json:"window"`
-	Usage     OperatorAgentUsageByAccounting `json:"usage"`
-	Breakdown []OperatorAgentUsageBreakdown  `json:"breakdown"`
-}
-
-type OperatorAgentUsageWindow struct {
-	Since *time.Time `json:"since,omitempty"`
-	Until *time.Time `json:"until,omitempty"`
-}
-
-type OperatorAgentUsageByAccounting struct {
-	Exact     OperatorAgentUsageTotals `json:"exact"`
-	Estimated OperatorAgentUsageTotals `json:"estimated"`
-}
-
-type OperatorAgentUsageTotals struct {
-	LedgerEntries    int     `json:"ledger_entries"`
-	InputTokens      int64   `json:"input_tokens"`
-	OutputTokens     int64   `json:"output_tokens"`
-	EstimatedCostUSD float64 `json:"estimated_cost_usd"`
-}
-
-type OperatorAgentUsageBreakdown struct {
-	ExecutionMode   string                   `json:"execution_mode"`
-	UsageAccounting string                   `json:"usage_accounting"`
-	InvocationType  string                   `json:"invocation_type"`
-	Model           string                   `json:"model"`
-	ModelAlias      string                   `json:"model_alias"`
-	BackendProfile  string                   `json:"backend_profile"`
-	Provider        string                   `json:"provider"`
-	Transport       string                   `json:"transport"`
-	ResolvedModel   string                   `json:"resolved_model"`
-	CostDisplay     string                   `json:"cost_display"`
-	Totals          OperatorAgentUsageTotals `json:"totals"`
-}
-
-func (s *OperatorPostgres) LoadOperatorAgentUsage(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentUsageOptions) (OperatorAgentUsage, error) {
+func (s *AgentPostgres) LoadOperatorAgentUsage(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentUsageOptions) (operatorread.OperatorAgentUsage, error) {
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {
-		return OperatorAgentUsage{}, ErrAgentNotFound
+		return operatorread.OperatorAgentUsage{}, operatorread.ErrAgentNotFound
 	}
 	if err := validateOperatorAgentUsageWindow(opts); err != nil {
-		return OperatorAgentUsage{}, err
+		return operatorread.OperatorAgentUsage{}, err
 	}
 	if err := s.requireAgentUsageAccess(); err != nil {
-		return OperatorAgentUsage{}, err
+		return operatorread.OperatorAgentUsage{}, err
 	}
 	if err := s.ensureAgentUsageAgentExists(ctx, identity); err != nil {
-		return OperatorAgentUsage{}, err
+		return operatorread.OperatorAgentUsage{}, err
 	}
 	breakdown, err := s.loadAgentUsageBreakdown(ctx, identity, opts)
 	if err != nil {
-		return OperatorAgentUsage{}, err
+		return operatorread.OperatorAgentUsage{}, err
 	}
 	return buildOperatorAgentUsage(identity.AgentID(), opts, breakdown)
 }
 
-func (s *OperatorSQLite) LoadOperatorAgentUsage(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentUsageOptions) (OperatorAgentUsage, error) {
+func (s *AgentSQLite) LoadOperatorAgentUsage(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentUsageOptions) (operatorread.OperatorAgentUsage, error) {
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {
-		return OperatorAgentUsage{}, ErrAgentNotFound
+		return operatorread.OperatorAgentUsage{}, operatorread.ErrAgentNotFound
 	}
 	if err := validateOperatorAgentUsageWindow(opts); err != nil {
-		return OperatorAgentUsage{}, err
+		return operatorread.OperatorAgentUsage{}, err
 	}
 	if err := s.requireAgentUsageAccess(); err != nil {
-		return OperatorAgentUsage{}, err
+		return operatorread.OperatorAgentUsage{}, err
 	}
 	if err := s.ensureAgentUsageAgentExists(ctx, identity); err != nil {
-		return OperatorAgentUsage{}, err
+		return operatorread.OperatorAgentUsage{}, err
 	}
 	breakdown, err := s.loadAgentUsageBreakdown(ctx, identity, opts)
 	if err != nil {
-		return OperatorAgentUsage{}, err
+		return operatorread.OperatorAgentUsage{}, err
 	}
 	return buildOperatorAgentUsage(identity.AgentID(), opts, breakdown)
 }
 
-func buildOperatorAgentUsage(agentID string, opts OperatorAgentUsageOptions, breakdown []OperatorAgentUsageBreakdown) (OperatorAgentUsage, error) {
-	result := OperatorAgentUsage{
+func buildOperatorAgentUsage(agentID string, opts operatorread.OperatorAgentUsageOptions, breakdown []operatorread.OperatorAgentUsageBreakdown) (operatorread.OperatorAgentUsage, error) {
+	result := operatorread.OperatorAgentUsage{
 		AgentID:   agentID,
-		Window:    OperatorAgentUsageWindow{Since: copyTimePtr(opts.Since), Until: copyTimePtr(opts.Until)},
+		Window:    operatorread.OperatorAgentUsageWindow{Since: copyTimePtr(opts.Since), Until: copyTimePtr(opts.Until)},
 		Breakdown: breakdown,
 	}
 	if result.Breakdown == nil {
-		result.Breakdown = []OperatorAgentUsageBreakdown{}
+		result.Breakdown = []operatorread.OperatorAgentUsageBreakdown{}
 	}
 	for _, row := range breakdown {
 		switch row.UsageAccounting {
-		case AgentUsageAccountingExact:
+		case operatorread.AgentUsageAccountingExact:
 			result.Usage.Exact = addOperatorAgentUsageTotals(result.Usage.Exact, row.Totals)
-		case AgentUsageAccountingEstimated:
+		case operatorread.AgentUsageAccountingEstimated:
 			result.Usage.Estimated = addOperatorAgentUsageTotals(result.Usage.Estimated, row.Totals)
 		default:
-			return OperatorAgentUsage{}, fmt.Errorf("agent usage read owner returned unsupported usage_accounting %q", row.UsageAccounting)
+			return operatorread.OperatorAgentUsage{}, fmt.Errorf("agent usage read owner returned unsupported usage_accounting %q", row.UsageAccounting)
 		}
 	}
 	return result, nil
 }
 
-func validateOperatorAgentUsageWindow(opts OperatorAgentUsageOptions) error {
+func validateOperatorAgentUsageWindow(opts operatorread.OperatorAgentUsageOptions) error {
 	if opts.Since != nil && opts.Until != nil && !opts.Since.Before(*opts.Until) {
 		return fmt.Errorf("agent usage window requires since before until")
 	}
@@ -146,8 +99,8 @@ func copyTimePtr(value *time.Time) *time.Time {
 	return &copied
 }
 
-func addOperatorAgentUsageTotals(a, b OperatorAgentUsageTotals) OperatorAgentUsageTotals {
-	return OperatorAgentUsageTotals{
+func addOperatorAgentUsageTotals(a, b operatorread.OperatorAgentUsageTotals) operatorread.OperatorAgentUsageTotals {
+	return operatorread.OperatorAgentUsageTotals{
 		LedgerEntries:    a.LedgerEntries + b.LedgerEntries,
 		InputTokens:      a.InputTokens + b.InputTokens,
 		OutputTokens:     a.OutputTokens + b.OutputTokens,
@@ -155,18 +108,18 @@ func addOperatorAgentUsageTotals(a, b OperatorAgentUsageTotals) OperatorAgentUsa
 	}
 }
 
-func (s *OperatorPostgres) requireAgentUsageAccess() error {
+func (s *AgentPostgres) requireAgentUsageAccess() error {
 	return s.requireCurrentSchema()
 }
 
-func (s *OperatorSQLite) requireAgentUsageAccess() error {
+func (s *AgentSQLite) requireAgentUsageAccess() error {
 	return s.requireCurrentSchema()
 }
 
-func (s *OperatorPostgres) ensureAgentUsageAgentExists(ctx context.Context, identity agentidentity.Identity) error {
+func (s *AgentPostgres) ensureAgentUsageAgentExists(ctx context.Context, identity agentidentity.Identity) error {
 	fields, err := agentIdentityFields(identity)
 	if err != nil {
-		return ErrAgentNotFound
+		return operatorread.ErrAgentNotFound
 	}
 	var exists bool
 	if err := s.backend.QueryRowContext(ctx, `
@@ -187,15 +140,15 @@ func (s *OperatorPostgres) ensureAgentUsageAgentExists(ctx context.Context, iden
 		return fmt.Errorf("load agent usage agent: %w", err)
 	}
 	if !exists {
-		return ErrAgentNotFound
+		return operatorread.ErrAgentNotFound
 	}
 	return nil
 }
 
-func (s *OperatorSQLite) ensureAgentUsageAgentExists(ctx context.Context, identity agentidentity.Identity) error {
+func (s *AgentSQLite) ensureAgentUsageAgentExists(ctx context.Context, identity agentidentity.Identity) error {
 	fields, err := agentIdentityFields(identity)
 	if err != nil {
-		return ErrAgentNotFound
+		return operatorread.ErrAgentNotFound
 	}
 	var count int
 	if err := s.backend.QueryRowContext(ctx, `
@@ -214,12 +167,12 @@ func (s *OperatorSQLite) ensureAgentUsageAgentExists(ctx context.Context, identi
 		return fmt.Errorf("load agent usage agent: %w", err)
 	}
 	if count == 0 {
-		return ErrAgentNotFound
+		return operatorread.ErrAgentNotFound
 	}
 	return nil
 }
 
-func (s *OperatorPostgres) loadAgentUsageBreakdown(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentUsageOptions) ([]OperatorAgentUsageBreakdown, error) {
+func (s *AgentPostgres) loadAgentUsageBreakdown(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentUsageOptions) ([]operatorread.OperatorAgentUsageBreakdown, error) {
 	fields, err := identity.StorageFields()
 	if err != nil {
 		return nil, err
@@ -282,9 +235,9 @@ func (s *OperatorPostgres) loadAgentUsageBreakdown(ctx context.Context, identity
 	}
 	defer rows.Close()
 
-	var out []OperatorAgentUsageBreakdown
+	var out []operatorread.OperatorAgentUsageBreakdown
 	for rows.Next() {
-		var row OperatorAgentUsageBreakdown
+		var row operatorread.OperatorAgentUsageBreakdown
 		if err := rows.Scan(
 			&row.ExecutionMode,
 			&row.UsageAccounting,
@@ -323,7 +276,7 @@ func (s *OperatorPostgres) loadAgentUsageBreakdown(ctx context.Context, identity
 	return out, nil
 }
 
-func (s *OperatorSQLite) loadAgentUsageBreakdown(ctx context.Context, identity agentidentity.Identity, opts OperatorAgentUsageOptions) ([]OperatorAgentUsageBreakdown, error) {
+func (s *AgentSQLite) loadAgentUsageBreakdown(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentUsageOptions) ([]operatorread.OperatorAgentUsageBreakdown, error) {
 	fields, err := identity.StorageFields()
 	if err != nil {
 		return nil, err
@@ -386,9 +339,9 @@ func (s *OperatorSQLite) loadAgentUsageBreakdown(ctx context.Context, identity a
 	}
 	defer rows.Close()
 
-	var out []OperatorAgentUsageBreakdown
+	var out []operatorread.OperatorAgentUsageBreakdown
 	for rows.Next() {
-		var row OperatorAgentUsageBreakdown
+		var row operatorread.OperatorAgentUsageBreakdown
 		if err := rows.Scan(
 			&row.ExecutionMode,
 			&row.UsageAccounting,
@@ -427,12 +380,12 @@ func (s *OperatorSQLite) loadAgentUsageBreakdown(ctx context.Context, identity a
 	return out, nil
 }
 
-func validateOperatorAgentUsageBreakdown(row OperatorAgentUsageBreakdown) error {
+func validateOperatorAgentUsageBreakdown(row operatorread.OperatorAgentUsageBreakdown) error {
 	if mode, ok := executionmode.Parse(row.ExecutionMode); !ok || string(mode) != row.ExecutionMode {
 		return fmt.Errorf("agent usage read owner returned unsupported execution_mode %q", row.ExecutionMode)
 	}
 	switch row.UsageAccounting {
-	case AgentUsageAccountingExact, AgentUsageAccountingEstimated:
+	case operatorread.AgentUsageAccountingExact, operatorread.AgentUsageAccountingEstimated:
 	default:
 		return fmt.Errorf("agent usage read owner returned unsupported usage_accounting %q", row.UsageAccounting)
 	}

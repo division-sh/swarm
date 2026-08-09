@@ -6,11 +6,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"

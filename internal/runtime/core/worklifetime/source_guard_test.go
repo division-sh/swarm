@@ -33,8 +33,8 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"after_func|internal/runtime/manager/runtime.go|AgentManager.launchExecutionLoop|1649":                               {asyncSiteCanonicalOwner, "the exact agent-generation cancellation is bridged into the pre-admitted Manager lease and joined with that loop"},
 	"go|cmd/swarm-test-postgres/main.go|run|74":                                                                          {asyncSiteSynchronousJoin, "the test harness joins command completion through its result channel"},
 	"go|internal/apiv1/handler.go|webSocketSession.run|435":                                                              {asyncSiteCanonicalOwner, "the process-owned websocket session settles after the writer goroutine exits"},
-	"go|internal/apiv1/operator_conversation_fork.go|executeConversationForkChatWithHeartbeat|268":                       {asyncSiteCanonicalOwner, "the operation heartbeat has a typed lease and is canceled and joined by the enclosing call"},
-	"go|internal/apiv1/subscriptions.go|ownedSubscriptionWork.Start|95":                                                  {asyncSiteCanonicalOwner, "owned subscription work settles its process lease after the polling loop exits"},
+	"go|internal/apiv1/operator_conversation_fork.go|executeConversationForkChatWithHeartbeat|271":                       {asyncSiteCanonicalOwner, "the operation heartbeat has a typed lease and is canceled and joined by the enclosing call"},
+	"go|internal/apiv1/subscriptions.go|ownedSubscriptionWork.Start|97":                                                  {asyncSiteCanonicalOwner, "owned subscription work settles its process lease after the polling loop exits"},
 	"go|internal/builder/handler_ws.go|wsClient.handleSubscribe|95":                                                      {asyncSiteSynchronousJoin, "the websocket client owns and joins its subscription pump on close"},
 	"go|internal/builder/runs_control.go|runHub.startRun|124":                                                            {asyncSiteCanonicalOwner, "run execution is admitted under the served-process occurrence and settles before teardown"},
 	"go|internal/cliapp/events.go|subscribeEvents|818":                                                                   {asyncSiteSynchronousJoin, "the CLI subscription closes and joins its read loop"},
@@ -78,7 +78,7 @@ var productionAsyncSiteLedger = map[string]asyncSiteLedgerEntry{
 	"go|internal/runtime/sessions/heartbeat.go|StartLeaseHeartbeatWithErrorHandler|51":                                   {asyncSiteCanonicalOwner, "the session heartbeat exposes a stop-and-wait owner and cannot outlive it"},
 	"go|internal/serveapp/main.go|Run|1360":                                                                              {asyncSiteCanonicalOwner, "the API listener is admitted under served-process ownership and joined at shutdown"},
 	"go|internal/serveapp/main.go|Run|1364":                                                                              {asyncSiteCanonicalOwner, "the MCP listener is admitted under served-process ownership and joined at shutdown"},
-	"go|internal/serveapp/run_stalled_monitor.go|startServeRunStalledEscalation|50":                                      {asyncSiteCanonicalOwner, "the stalled-run monitor has a process lease and exact stop-and-wait completion"},
+	"go|internal/serveapp/run_stalled_monitor.go|startServeRunStalledEscalation|51":                                      {asyncSiteCanonicalOwner, "the stalled-run monitor has a process lease and exact stop-and-wait completion"},
 	"go|internal/serveapp/serve_author_activity.go|newServeAuthorActivityFollower|56":                                    {asyncSiteCanonicalOwner, "the author-activity follower has a process lease and exact close/join path"},
 }
 

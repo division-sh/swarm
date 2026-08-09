@@ -290,7 +290,7 @@ func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 			if changed.Equal(base) {
 				t.Fatal("changed record remained equal")
 			}
-			if duplicate, err := resolveExistingEventIdentity(base.EventID, base, changed, true); duplicate || !errors.Is(err, ErrEventIdentityConflict) {
+			if duplicate, err := resolveExistingEventIdentity(base.EventID, base, changed, true); duplicate || !errors.Is(err, events.ErrEventIdentityConflict) {
 				t.Fatalf("duplicate=%v err=%v, want identity conflict", duplicate, err)
 			}
 		})
@@ -310,7 +310,7 @@ func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 				t.Fatalf("exact duplicate: outcome=%v err=%v", outcome, err)
 			}
 			conflict := eventtest.RunCreatingRootIngress(baseEvent.ID(), baseEvent.Type(), baseEvent.SourceAgent(), baseEvent.TaskID(), []byte(`{"value":2}`), baseEvent.ChainDepth(), baseEvent.RunID(), "", baseEvent.NormalizedEnvelope(), baseEvent.CreatedAt())
-			if _, err := commitSemanticEventFixtureOutcome(ctx, store, conflict, nil, "direct"); !errors.Is(err, ErrEventIdentityConflict) {
+			if _, err := commitSemanticEventFixtureOutcome(ctx, store, conflict, nil, "direct"); !errors.Is(err, events.ErrEventIdentityConflict) {
 				t.Fatalf("conflicting duplicate error = %v", err)
 			}
 			nestedID := uuid.NewString()
@@ -319,7 +319,7 @@ func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 				t.Fatalf("nested initial commit: outcome=%v err=%v", outcome, err)
 			}
 			nestedConflict := eventtest.RunCreatingRootIngress(nestedID, nested.Type(), nested.SourceAgent(), nested.TaskID(), []byte(`{"nested":{"b":null}}`), 0, nested.RunID(), "", events.EventEnvelope{}, nested.CreatedAt())
-			if _, err := commitSemanticEventFixtureOutcome(ctx, store, nestedConflict, nil, "direct"); !errors.Is(err, ErrEventIdentityConflict) {
+			if _, err := commitSemanticEventFixtureOutcome(ctx, store, nestedConflict, nil, "direct"); !errors.Is(err, events.ErrEventIdentityConflict) {
 				t.Fatalf("nested null-key duplicate error = %v", err)
 			}
 		})

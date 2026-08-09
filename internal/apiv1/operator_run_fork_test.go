@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	swruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 const (
@@ -190,7 +190,7 @@ func TestOperatorRunForkHandlersFailClosedOnBundleAvailability(t *testing.T) {
 
 func TestOperatorRunForkHandlersMapSourceAndEventErrors(t *testing.T) {
 	t.Run("source run missing", func(t *testing.T) {
-		handler := runForkTestHandler(t, &recordingRunForkAvailability{err: errors.New("run " + runForkTestSourceRunID + " not found")}, &recordingRunForkExecutor{})
+		handler := runForkTestHandler(t, &recordingRunForkAvailability{err: fmt.Errorf("run %s not found: %w", runForkTestSourceRunID, runbundle.ErrRunNotFound)}, &recordingRunForkExecutor{})
 		resp := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q}}`, runForkTestSourceRunID))
 		if resp.Error == nil || asMap(t, resp.Error.Data)["code"] != RunNotFoundCode {
 			t.Fatalf("run.fork missing source error = %#v, want %s", resp.Error, RunNotFoundCode)
@@ -261,7 +261,7 @@ func runForkTestHandler(t *testing.T, availability RunForkAvailabilityStore, exe
 	t.Helper()
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:                 func() time.Time { return time.Unix(1700000000, 0).UTC() },
 			RunForkAvailability: availability,
 			RunFork:             executor,
@@ -308,7 +308,7 @@ func (s *recordingRunForkAvailability) LoadRunBundleAvailability(_ context.Conte
 	}
 	availability, ok := s.rows[strings.TrimSpace(runID)]
 	if !ok {
-		return runbundle.Availability{}, fmt.Errorf("run %s not found: %w", strings.TrimSpace(runID), store.ErrRunNotFound)
+		return runbundle.Availability{}, fmt.Errorf("run %s not found: %w", strings.TrimSpace(runID), runbundle.ErrRunNotFound)
 	}
 	return availability, nil
 }
@@ -331,4 +331,8 @@ func (e *recordingRunForkExecutor) ExecuteRunFork(_ context.Context, req RunFork
 		result.BundleHash = req.BundleHash
 	}
 	return result, nil
+}
+
+func (e *recordingRunForkExecutor) SelectRunForkExecutor(*swruntime.BundleContext, *swruntime.Runtime) (RunForkExecutor, error) {
+	return e, nil
 }

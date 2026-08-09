@@ -3,11 +3,12 @@ package tools_test
 import (
 	"context"
 	"encoding/json"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"

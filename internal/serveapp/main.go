@@ -130,6 +130,7 @@ type storeBundle struct {
 	EventPayloadValidationBinder   runtime.EventPayloadValidationBinder
 	InboundPayloadValidationBinder runtime.EventPayloadValidationBinder
 	AuthorActivityRegistrars       []runtime.AuthorActivityCatalogRegistrar
+	AuthorActivityReader           serveAuthorActivityReader
 	RunControlStore                runtimeruncontrol.Store
 	RunLifecycleCandidates         runtimerunlifecycle.CandidateOwner
 	WorkflowPersistence            runtimepipeline.WorkflowPersistence
@@ -157,6 +158,7 @@ type storeBundle struct {
 	BudgetSpendStore               budgetspend.Store
 	InboundStore                   runtime.InboundPersistence
 	MailboxAPIStore                apiv1.MailboxAPIStore
+	MailboxNoticeAcknowledgment    apiv1.MailboxNoticeAcknowledgmentStore
 	DecisionCards                  decisioncard.Store
 	ProposedEffects                decisioncard.ProposedEffectStore
 	DecisionCardHumanTasks         decisioncard.HumanTaskStore
@@ -215,8 +217,20 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 				Store:            pg,
 			}
 		}
+		runFork := apiv1.SelectedContractRunForkExecutor{
+			ExecuteSelectedContractRunFork: selectedPostgresRunForkExecutionFunc(pg, stores.WorkflowPersistence),
+			SourceLoader:                   runForkSourceLoader,
+			ContractSelection:              runtimerunforkadmission.SelectedContractSelection(req.Source, req.ContractsRoot),
+			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
+				Config: req.Config, EntityStore: stores.ToolEntityStore, HumanTaskStore: stores.HumanTaskStore,
+				SessionRegistry: stores.SessionRegistry, ConversationStore: stores.ConversationStore,
+				MailboxStore: stores.MailboxStore, Workspace: req.Workspaces,
+				Credentials: req.Credentials, ManagedCredentials: req.ManagedCredentials, ProviderCredentials: req.ProviderCredentials,
+			},
+		}
 		return selectedAPICapabilities{
-			BundleCatalog: pg,
+			BundleCatalog:  pg,
+			BundleRegister: pg,
 			BundleDelete: &runtimebundledelete.Coordinator{
 				Planner:            pg,
 				Cleaner:            pg,
@@ -229,27 +243,17 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 			ConversationForks:         pg,
 			ConversationForkLifecycle: pg,
 			RunForkAvailability:       pg,
-			RunFork: apiv1.SelectedContractRunForkExecutor{
-				ExecuteSelectedContractRunFork: selectedPostgresRunForkExecutionFunc(pg, stores.WorkflowPersistence),
-				SourceLoader:                   runForkSourceLoader,
-				ContractSelection:              runtimerunforkadmission.SelectedContractSelection(req.Source, req.ContractsRoot),
-				AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
-					Config:              req.Config,
-					EntityStore:         stores.ToolEntityStore,
-					HumanTaskStore:      stores.HumanTaskStore,
-					SessionRegistry:     stores.SessionRegistry,
-					ConversationStore:   stores.ConversationStore,
-					MailboxStore:        stores.MailboxStore,
-					Workspace:           req.Workspaces,
-					Credentials:         req.Credentials,
-					ManagedCredentials:  req.ManagedCredentials,
-					ProviderCredentials: req.ProviderCredentials,
-				},
+			RunFork:                   runFork,
+			RunForkSelector:           runFork,
+			RuntimeContexts:           req.RuntimeContextManager,
+			ResetCoordinator: &runtimedestructivereset.Coordinator{
+				Planner:         resetPlanner,
+				Locks:           pg,
+				Quiescer:        runtimedestructivereset.Quiescer{Store: pg},
+				Cleaner:         runtimedestructivereset.Cleaner{Store: pg},
+				Containers:      runtimedestructivereset.ManagedContainerStopper{Runtime: req.Workspaces},
+				RuntimeContexts: req.RuntimeContextManager,
 			},
-			RuntimeContexts:  req.RuntimeContextManager,
-			ResetCoordinator: &runtimedestructivereset.Coordinator{Planner: resetPlanner, Locks: pg},
-			ResetQuiescer:    runtimedestructivereset.Quiescer{Store: pg},
-			ResetCleaner:     runtimedestructivereset.Cleaner{Store: pg},
 		}, nil
 	}
 }
@@ -355,6 +359,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, constructionDB *sql.DB
 		EventPayloadValidationBinder:   pg,
 		InboundPayloadValidationBinder: pg,
 		AuthorActivityRegistrars:       []runtime.AuthorActivityCatalogRegistrar{pg},
+		AuthorActivityReader:           pg,
 		RunControlStore:                pg,
 		RunLifecycleCandidates:         pg,
 		WorkflowPersistence:            workflowPersistence,
@@ -386,6 +391,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, constructionDB *sql.DB
 		BudgetSpendStore:            pg,
 		InboundStore:                pg,
 		MailboxAPIStore:             pg,
+		MailboxNoticeAcknowledgment: pg,
 		DecisionCards:               pg,
 		ProposedEffects:             pg,
 		DecisionCardHumanTasks:      pg,
@@ -1273,57 +1279,52 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
-	apiReadOptions := apiv1.OperatorReadOptions{
-		RepoRoot:         repo,
-		PlatformSpecPath: resolvedPlatformSpecPath,
-		Ready: func() bool {
-			return ready.Load()
-		},
-		Database:                  apiStoreCaps.Database,
-		Runs:                      apiStoreCaps.Runs,
-		Observability:             apiStoreCaps.Observability,
-		Entities:                  apiStoreCaps.Entities,
-		AgentConversations:        apiStoreCaps.AgentConversations,
-		AgentDeliveryLifecycle:    stores.AgentDeliveryLifecycleStore,
-		AgentUsage:                stores.AgentUsageStore,
-		BundleCatalog:             apiStoreCaps.BundleCatalog,
-		BundleDelete:              apiStoreCaps.BundleDelete,
-		ConversationForks:         apiStoreCaps.ConversationForks,
-		ConversationForkLifecycle: apiStoreCaps.ConversationForkLifecycle,
-		ForkChatExecutor:          cliapp.NewWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), forkChatLLM, primaryWorkspaceBackend),
-		RunBundleContext:          apiStoreCaps.RunBundleContext,
-		TestSetup:                 apiStoreCaps.TestSetup,
-		RunForkAvailability:       apiStoreCaps.RunForkAvailability,
-		RunFork:                   apiStoreCaps.RunFork,
-		AgentControl:              dashboardDynamicAgentControl{supervisor: supervisor},
-		Mailbox:                   stores.MailboxAPIStore,
-		DecisionCards:             stores.DecisionCards,
-		DecisionAuthority:         rt.Pipeline,
-		Idempotency:               stores.IdempotencyStore,
-		Events:                    rt.Bus,
-		RunControl:                rt.RunControl,
-		StandingServices:          &serveStandingServiceController{manager: runtimeContextManager},
-		RuntimeIngress:            rt.RuntimeIngress,
-		RuntimeContexts:           apiStoreCaps.RuntimeContexts,
-		ResetCoordinator:          apiStoreCaps.ResetCoordinator,
-		ResetQuiescer:             apiStoreCaps.ResetQuiescer,
-		ResetCleaner:              apiStoreCaps.ResetCleaner,
-		ResetContainers:           runtimedestructivereset.ManagedContainerStopper{Runtime: workspaces},
-		Source:                    source,
-		Bundle:                    bootBundleIdentity,
-		RuntimeIdentity: apiv1.RuntimeIdentityResult{
-			RuntimeInstanceID:   runtimeInstanceID,
-			StartedAt:           bootStartedAt.Format(time.RFC3339Nano),
-			APIVersion:          "v1",
-			SupportedTransports: []string{"tcp"},
-		},
+	readyFn := func() bool { return ready.Load() }
+	publication := apiv1.EventPublicationOptions{
+		Idempotency: stores.IdempotencyStore, Events: rt.Bus, Acknowledged: rt.Bus, RecipientPlans: rt.Bus, BundleSource: rt.Bus,
+		Runs: apiStoreCaps.Runs, Entities: apiStoreCaps.Entities, Observability: apiStoreCaps.Observability,
+		RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts,
+		Source: source, Bundle: bootBundleIdentity,
 	}
+	runtimeIdentity := apiv1.RuntimeIdentityResult{
+		RuntimeInstanceID:   runtimeInstanceID,
+		StartedAt:           bootStartedAt.Format(time.RFC3339Nano),
+		APIVersion:          "v1",
+		SupportedTransports: []string{"tcp"},
+	}
+	handlers := apiv1.MergeOperatorHandlers(
+		apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{Ready: readyFn, Database: apiStoreCaps.Database, Bundle: bootBundleIdentity}),
+		apiv1.OperatorRuntimeIdentityHandlers(apiv1.RuntimeIdentityHandlerOptions{Identity: runtimeIdentity}),
+		apiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{Runs: apiStoreCaps.Runs}),
+		apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: apiStoreCaps.Observability}),
+		apiv1.OperatorEntityHandlers(apiv1.EntityHandlerOptions{Entities: apiStoreCaps.Entities}),
+		apiv1.OperatorAgentConversationHandlers(apiv1.AgentConversationHandlerOptions{Conversations: apiStoreCaps.AgentConversations, DeliveryLifecycle: stores.AgentDeliveryLifecycleStore, Usage: stores.AgentUsageStore}),
+		apiv1.OperatorBundleCatalogHandlers(apiv1.BundleCatalogHandlerOptions{Catalog: apiStoreCaps.BundleCatalog}),
+		apiv1.OperatorBundleRegisterHandlers(apiv1.BundleRegisterHandlerOptions{RepoRoot: repo, PlatformSpecPath: resolvedPlatformSpecPath, Register: apiStoreCaps.BundleRegister, Idempotency: stores.IdempotencyStore}),
+		apiv1.OperatorBundleDeleteHandlers(apiv1.BundleDeleteHandlerOptions{Executor: apiStoreCaps.BundleDelete, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorConversationForkHandlers(apiv1.ConversationForkHandlerOptions{Reads: apiStoreCaps.ConversationForks, Lifecycle: apiStoreCaps.ConversationForkLifecycle, Chat: cliapp.NewWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), forkChatLLM, primaryWorkspaceBackend), Idempotency: stores.IdempotencyStore}),
+		apiv1.OperatorMailboxHandlers(apiv1.MailboxHandlerOptions{Mailbox: stores.MailboxAPIStore}),
+		apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: stores.DecisionCards, ProposedEffects: stores.ProposedEffects, Mailbox: stores.MailboxAPIStore, NoticeAcknowledgment: stores.MailboxNoticeAcknowledgment, Authority: rt.Pipeline, BundleSource: rt.Bus, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorRunStartHandlers(apiv1.RunStartHandlerOptions{Publication: publication}),
+		apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: publication}),
+		apiv1.OperatorEventReplayHandlers(apiv1.EventReplayHandlerOptions{Idempotency: stores.IdempotencyStore, Events: rt.Bus, Observability: apiStoreCaps.Observability, AgentConversations: apiStoreCaps.AgentConversations, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorTestSetupHandlers(apiv1.TestSetupHandlerOptions{Setup: apiStoreCaps.TestSetup, Idempotency: stores.IdempotencyStore, RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts, BundleSource: rt.Bus, Source: source}),
+		apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{Availability: apiStoreCaps.RunForkAvailability, Executor: apiStoreCaps.RunFork, Selector: apiStoreCaps.RunForkSelector, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorRunControlHandlers(apiv1.RunControlHandlerOptions{Controller: rt.RunControl, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorStandingServiceHandlers(apiv1.StandingServiceHandlerOptions{Controller: &serveStandingServiceController{manager: runtimeContextManager}, Idempotency: stores.IdempotencyStore}),
+		apiv1.OperatorRuntimeControlHandlers(apiv1.RuntimeControlHandlerOptions{Ingress: rt.RuntimeIngress, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorRuntimeNukeHandlers(apiv1.RuntimeNukeHandlerOptions{Coordinator: apiStoreCaps.ResetCoordinator, Idempotency: stores.IdempotencyStore}),
+		apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{Controller: dashboardDynamicAgentControl{supervisor: supervisor}, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+	)
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
 		PlatformSpecPath: resolvedPlatformSpecPath,
 		AuthTokens:       apiAuth.Tokens,
 		ProcessWorkOwner: processWorkOwner,
-		Handlers:         apiv1.OperatorReadHandlers(apiReadOptions),
-		Subscriptions:    apiv1.OperatorSubscriptions(apiReadOptions),
+		Handlers:         handlers,
+		Subscriptions: apiv1.OperatorSubscriptions(apiv1.SubscriptionOptions{
+			Ready: readyFn, Database: apiStoreCaps.Database, Observability: apiStoreCaps.Observability,
+			DecisionCards: stores.DecisionCards, ProposedEffects: stores.ProposedEffects, Bundle: bootBundleIdentity,
+		}),
 	})
 	if err != nil {
 		presenter.fail(20, "api_initialization", err)
@@ -2237,6 +2238,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			EventPayloadValidationBinder:   sqliteStore,
 			InboundPayloadValidationBinder: sqliteStore,
 			AuthorActivityRegistrars:       []runtime.AuthorActivityCatalogRegistrar{sqliteStore},
+			AuthorActivityReader:           sqliteStore,
 			RunControlStore:                sqliteStore,
 			RunLifecycleCandidates:         sqliteStore,
 			WorkflowPersistence:            workflowPersistence,
@@ -2268,6 +2270,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			BudgetSpendStore:            sqliteStore,
 			InboundStore:                sqliteStore,
 			MailboxAPIStore:             sqliteStore,
+			MailboxNoticeAcknowledgment: sqliteStore,
 			DecisionCards:               sqliteStore,
 			ProposedEffects:             sqliteStore,
 			DecisionCardHumanTasks:      sqliteStore,

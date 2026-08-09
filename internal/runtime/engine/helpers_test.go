@@ -10,9 +10,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 
+	"time"
+
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"gopkg.in/yaml.v3"
-	"time"
 )
 
 func TestArrivalIdentifier_PriorityOrder(t *testing.T) {

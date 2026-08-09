@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -30,8 +30,8 @@ type agentDirectiveResult struct {
 	DirectiveEventType string `json:"directive_event_type"`
 }
 
-func OperatorAgentControlHandlers(opts OperatorReadOptions) map[string]MethodHandler {
-	if opts.AgentControl == nil || opts.Idempotency == nil {
+func OperatorAgentControlHandlers(opts AgentControlHandlerOptions) map[string]MethodHandler {
+	if opts.Controller == nil || opts.Idempotency == nil {
 		return nil
 	}
 	now := opts.Now
@@ -48,7 +48,7 @@ func OperatorAgentControlHandlers(opts OperatorReadOptions) map[string]MethodHan
 	}
 }
 
-func executeAgentSendDirective(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+func executeAgentSendDirective(ctx context.Context, req Request, opts AgentControlHandlerOptions, now time.Time) (any, error) {
 	_ = now
 	agentID, err := requiredStringParam(req.Params, "agent_id")
 	if err != nil {
@@ -70,20 +70,25 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts OperatorRe
 	if err != nil {
 		return nil, err
 	}
-	selectedOpts := opts
-	if runtimeContextManager(opts) != nil {
-		if strings.TrimSpace(runID) == "" && multiRuntimeContextMode(opts) {
+	controller := opts.Controller
+	if runtimeContextManager(opts.RuntimeContexts) != nil {
+		if strings.TrimSpace(runID) == "" && multiRuntimeContextMode(opts.RuntimeContexts) {
 			return nil, runtimeContextRequiredError(req.Method, "run_id is required to select a runtime context in multi-context DB-loaded mode")
 		}
 		if strings.TrimSpace(runID) != "" {
 			var err error
-			ctx, selectedOpts, _, err = runtimeBundleContextByRun(ctx, opts, runID)
+			var selected selectedRuntimeContext
+			ctx, selected, _, err = runtimeBundleContextByRun(ctx, opts.RuntimeContexts, runID)
 			if err != nil {
 				return nil, err
 			}
+			if selected.Runtime == nil || selected.Runtime.Manager == nil {
+				return nil, fmt.Errorf("agent control owner is required for the selected runtime")
+			}
+			controller = selected.Runtime.Manager
 		}
 	}
-	result, err := selectedOpts.AgentControl.SendDirective(ctx, runtimeagentcontrol.SendDirectiveRequest{
+	result, err := controller.SendDirective(ctx, runtimeagentcontrol.SendDirectiveRequest{
 		AgentID:        agentID,
 		FlowInstance:   flowInstance,
 		Directive:      directive,
@@ -108,8 +113,8 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts OperatorRe
 	}, nil
 }
 
-func executeAgentRestart(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
-	if multiRuntimeContextMode(opts) {
+func executeAgentRestart(ctx context.Context, req Request, opts AgentControlHandlerOptions, now time.Time) (any, error) {
+	if multiRuntimeContextMode(opts.RuntimeContexts) {
 		return nil, runtimeContextRequiredError(req.Method, "agent restart is not supported in multi-context DB-loaded mode without an explicit runtime context")
 	}
 	agentID, err := requiredStringParam(req.Params, "agent_id")
@@ -128,7 +133,7 @@ func executeAgentRestart(ctx context.Context, req Request, opts OperatorReadOpti
 	if strings.TrimSpace(idempotencyKey) != "" {
 		operationID = uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join([]string{req.Method, req.ActorTokenID, idempotencyKey}, "\x00"))).String()
 	}
-	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
+	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: idempotencyKey,
@@ -136,16 +141,16 @@ func executeAgentRestart(ctx context.Context, req Request, opts OperatorReadOpti
 		ResourceID:     agentControlResourceID(agentID, flowInstance),
 		TTL:            agentControlIdempotencyTTL,
 		Now:            now,
-	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		result, err := opts.AgentControl.Restart(ctx, runtimeagentcontrol.RestartRequest{AgentID: agentID, FlowInstance: flowInstance, OperationID: operationID})
+	}, func(ctx context.Context) (apiidempotency.Completion, error) {
+		result, err := opts.Controller.Restart(ctx, runtimeagentcontrol.RestartRequest{AgentID: agentID, FlowInstance: flowInstance, OperationID: operationID})
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, agentControlError(req.Method, agentID, err)
+			return apiidempotency.Completion{}, agentControlError(req.Method, agentID, err)
 		}
 		response, err := json.Marshal(okResult{OK: true})
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
-		return store.APIIdempotencyCompletion{ResourceID: result.AgentID, Response: response}, nil
+		return apiidempotency.Completion{ResourceID: result.AgentID, Response: response}, nil
 	})
 	if err != nil {
 		return nil, agentControlError(req.Method, agentID, err)
@@ -193,7 +198,7 @@ func agentControlError(method, agentID string, err error) error {
 			return NewApplicationError(AgentDirectiveOutcomeIndeterminateCode, false, details)
 		}
 	}
-	var conflict *store.APIIdempotencyConflictError
+	var conflict *apiidempotency.ConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
 			"original_request_hash":    conflict.OriginalRequestHash,

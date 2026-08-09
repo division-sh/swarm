@@ -9,6 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
@@ -19,7 +22,6 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -32,21 +34,21 @@ type eventPublishResult struct {
 }
 
 type eventPublishDelivery struct {
-	DeliveryID     string                           `json:"delivery_id"`
-	SubscriberType string                           `json:"subscriber_type"`
-	SubscriberID   string                           `json:"subscriber_id"`
-	SessionID      string                           `json:"session_id,omitempty"`
-	Status         string                           `json:"status"`
-	ReasonCode     string                           `json:"reason_code,omitempty"`
-	Failure        *runtimefailures.Envelope        `json:"failure,omitempty"`
-	Attempt        int                              `json:"attempt"`
-	RetryCount     int                              `json:"retry_count"`
-	RetryScheduled bool                             `json:"retry_scheduled"`
-	Terminal       bool                             `json:"terminal"`
-	CreatedAt      *time.Time                       `json:"created_at,omitempty"`
-	StartedAt      *time.Time                       `json:"started_at,omitempty"`
-	FinishedAt     *time.Time                       `json:"finished_at,omitempty"`
-	DeadLetters    []store.OperatorDeadLetterRecord `json:"dead_letters,omitempty"`
+	DeliveryID     string                                  `json:"delivery_id"`
+	SubscriberType string                                  `json:"subscriber_type"`
+	SubscriberID   string                                  `json:"subscriber_id"`
+	SessionID      string                                  `json:"session_id,omitempty"`
+	Status         string                                  `json:"status"`
+	ReasonCode     string                                  `json:"reason_code,omitempty"`
+	Failure        *runtimefailures.Envelope               `json:"failure,omitempty"`
+	Attempt        int                                     `json:"attempt"`
+	RetryCount     int                                     `json:"retry_count"`
+	RetryScheduled bool                                    `json:"retry_scheduled"`
+	Terminal       bool                                    `json:"terminal"`
+	CreatedAt      *time.Time                              `json:"created_at,omitempty"`
+	StartedAt      *time.Time                              `json:"started_at,omitempty"`
+	FinishedAt     *time.Time                              `json:"finished_at,omitempty"`
+	DeadLetters    []operatorread.OperatorDeadLetterRecord `json:"dead_letters,omitempty"`
 }
 
 type eventPublicationParams struct {
@@ -78,33 +80,34 @@ type eventPublicationConfig struct {
 	injectRunIDEntityIDOnlyNewRun  bool
 	durablePublishAck              bool
 	publishError                   func(eventPublicationParams, error) error
-	buildCompletion                func(context.Context, OperatorReadOptions, eventPublicationParams) (any, string, error)
+	buildCompletion                func(context.Context, EventPublicationOptions, eventPublicationParams) (any, string, error)
 }
 
-type eventAcknowledgedPublisher interface {
+type AcknowledgedEventPublisher interface {
 	PublishAcknowledged(context.Context, events.Event) error
 }
 
-func OperatorEventPublishHandlers(opts OperatorReadOptions) map[string]MethodHandler {
-	if !eventPublishConfigured(opts) {
+func OperatorEventPublishHandlers(opts EventPublishHandlerOptions) map[string]MethodHandler {
+	if !eventPublishConfigured(opts.Publication) {
 		return nil
 	}
-	now := opts.Now
+	now := opts.Publication.Now
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	return map[string]MethodHandler{
 		"event.publish": func(ctx context.Context, req Request) (any, error) {
-			return executeEventPublish(ctx, req, opts, now().UTC())
+			return executeEventPublish(ctx, req, opts.Publication, now().UTC())
 		},
 	}
 }
 
-func eventPublishConfigured(opts OperatorReadOptions) bool {
-	return runStartConfigured(opts) && opts.Runs != nil && opts.Observability != nil
+func eventPublishConfigured(opts EventPublicationOptions) bool {
+	return runStartConfigured(RunStartHandlerOptions{Publication: opts}) &&
+		opts.Acknowledged != nil && opts.RecipientPlans != nil && opts.Runs != nil && opts.Observability != nil
 }
 
-func executeEventPublish(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+func executeEventPublish(ctx context.Context, req Request, opts EventPublicationOptions, now time.Time) (any, error) {
 	cfg := eventPublicationConfig{
 		sourceAgent:                    eventPublishSourceAgent,
 		allowEmitterParam:              true,
@@ -114,7 +117,7 @@ func executeEventPublish(ctx context.Context, req Request, opts OperatorReadOpti
 		injectRunIDEntityIDOnlyNewRun:  true,
 		durablePublishAck:              true,
 		publishError:                   eventPublishPublishError,
-		buildCompletion: func(_ context.Context, _ OperatorReadOptions, params eventPublicationParams) (any, string, error) {
+		buildCompletion: func(_ context.Context, _ EventPublicationOptions, params eventPublicationParams) (any, string, error) {
 			return eventPublishResult{
 				EventID:                  params.EventID,
 				RunID:                    params.RunID,
@@ -142,7 +145,7 @@ func executeEventPublish(ctx context.Context, req Request, opts OperatorReadOpti
 	return result, nil
 }
 
-func eventPublishStoredResult(completion store.APIIdempotencyCompletion) (eventPublishResult, error) {
+func eventPublishStoredResult(completion apiidempotency.Completion) (eventPublishResult, error) {
 	var stored eventPublishResult
 	if err := json.Unmarshal(completion.Response, &stored); err != nil {
 		return eventPublishResult{}, err
@@ -150,13 +153,13 @@ func eventPublishStoredResult(completion store.APIIdempotencyCompletion) (eventP
 	return stored, nil
 }
 
-func eventPublishResultFromStore(ctx context.Context, opts OperatorReadOptions, completion store.APIIdempotencyCompletion, stored eventPublishResult) (eventPublishResult, error) {
+func eventPublishResultFromStore(ctx context.Context, opts EventPublicationOptions, completion apiidempotency.Completion, stored eventPublishResult) (eventPublishResult, error) {
 	eventID := strings.TrimSpace(completion.ResourceID)
 	if eventID == "" {
 		eventID = strings.TrimSpace(stored.EventID)
 	}
 	event, err := opts.Observability.LoadOperatorEvent(ctx, eventID)
-	if errors.Is(err, store.ErrEventNotFound) {
+	if errors.Is(err, operatorread.ErrEventNotFound) {
 		return eventPublishResult{}, fmt.Errorf("load published event %s: %w", eventID, err)
 	}
 	if err != nil {
@@ -178,78 +181,74 @@ func eventPublishResultFromStore(ctx context.Context, opts OperatorReadOptions, 
 func executeOperatorEventPublication(
 	ctx context.Context,
 	req Request,
-	opts OperatorReadOptions,
+	opts EventPublicationOptions,
 	now time.Time,
 	cfg eventPublicationConfig,
-) (store.APIIdempotencyCompletion, bool, error) {
+) (apiidempotency.Completion, bool, error) {
 	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
 	if err != nil {
-		return store.APIIdempotencyCompletion{}, false, err
+		return apiidempotency.Completion{}, false, err
 	}
-	return opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
+	return opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
 		TTL:            runStartIDempotencyTTL,
 		Now:            now,
-	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
+	}, func(ctx context.Context) (apiidempotency.Completion, error) {
 		params, bundleIdentity, err := eventPublicationParamsFromRequest(req, cfg)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
 		selectedOpts := opts
 		ctx, selectedOpts, params, err = resolveEventPublicationBundleScope(ctx, opts, params, bundleIdentity, cfg)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
 		if !cfg.rootInputOnly {
 			requestedEventName := params.EventName
 			resolvedEventName, err := resolveEventPublicationEventName(selectedOpts.Source, params.EventName)
 			if err != nil {
-				return store.APIIdempotencyCompletion{}, err
+				return apiidempotency.Completion{}, err
 			}
 			params.EventName = resolvedEventName
 			params.TargetRouteRequired = eventPublicationSelectsTemplateInputEvent(selectedOpts.Source, requestedEventName, resolvedEventName)
 		}
 		params, err = validateEventPublication(ctx, selectedOpts, params, cfg)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
 		publication, err := eventPublicationEvent(params, now)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
-		if err := publishEventPublication(ctx, selectedOpts.Events, publication, cfg); err != nil {
+		if err := publishEventPublication(ctx, selectedOpts, publication, cfg); err != nil {
 			if cfg.publishError != nil {
-				return store.APIIdempotencyCompletion{}, cfg.publishError(params, err)
+				return apiidempotency.Completion{}, cfg.publishError(params, err)
 			}
-			return store.APIIdempotencyCompletion{}, eventCatalogPublishError(params.EventName, err)
+			return apiidempotency.Completion{}, eventCatalogPublishError(params.EventName, err)
 		}
 		result, resourceID, err := cfg.buildCompletion(ctx, selectedOpts, params)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
 		response, err := json.Marshal(result)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
-		return store.APIIdempotencyCompletion{
+		return apiidempotency.Completion{
 			ResourceID: resourceID,
 			Response:   response,
 		}, nil
 	})
 }
 
-func publishEventPublication(ctx context.Context, publisher EventPublisher, evt events.Event, cfg eventPublicationConfig) error {
+func publishEventPublication(ctx context.Context, opts EventPublicationOptions, evt events.Event, cfg eventPublicationConfig) error {
 	if cfg.durablePublishAck {
-		acknowledged, ok := publisher.(eventAcknowledgedPublisher)
-		if !ok || acknowledged == nil {
-			return errors.New("durable event.publish acknowledgment requires acknowledged publisher")
-		}
-		return acknowledged.PublishAcknowledged(ctx, evt)
+		return opts.Acknowledged.PublishAcknowledged(ctx, evt)
 	}
-	return publisher.Publish(ctx, evt)
+	return opts.Events.Publish(ctx, evt)
 }
 
 func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) (eventPublicationParams, bundleIdentityParam, error) {
@@ -457,7 +456,7 @@ func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) (
 	return events.NewOperatorInjectedEvent(events.OperatorInjectedEventInput{Facts: facts, RunID: params.RunID, Provenance: provenance})
 }
 
-func validateEventPublication(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams, cfg eventPublicationConfig) (eventPublicationParams, error) {
+func validateEventPublication(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams, cfg eventPublicationConfig) (eventPublicationParams, error) {
 	if cfg.rootInputOnly {
 		_, err := runtimerunstart.ValidateInputEvents(opts.Source, []string{params.EventName})
 		if err != nil {
@@ -497,7 +496,7 @@ func validateEventPublication(ctx context.Context, opts OperatorReadOptions, par
 			return params, err
 		}
 		header, err := runs.LoadRunHeader(ctx, params.RunID)
-		if errors.Is(err, store.ErrRunNotFound) {
+		if errors.Is(err, operatorread.ErrRunNotFound) {
 			return params, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": params.RunID})
 		}
 		if err != nil {
@@ -514,7 +513,7 @@ func validateEventPublication(ctx context.Context, opts OperatorReadOptions, par
 	}
 	if params.SourceEventID != "" {
 		sourceEvent, err := opts.Observability.LoadOperatorEvent(ctx, params.SourceEventID)
-		if errors.Is(err, store.ErrEventNotFound) {
+		if errors.Is(err, operatorread.ErrEventNotFound) {
 			return params, NewApplicationError(EventNotFoundCode, false, map[string]any{"event_id": params.SourceEventID})
 		}
 		if err != nil {
@@ -543,7 +542,7 @@ func validateEventPublication(ctx context.Context, opts OperatorReadOptions, par
 	return params, nil
 }
 
-func enrichExistingRunEventPublicationRoute(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams) (eventPublicationParams, error) {
+func enrichExistingRunEventPublicationRoute(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams) (eventPublicationParams, error) {
 	if params.TargetRouteSet {
 		return enrichExistingRunEventPublicationTargetRoute(ctx, opts, params)
 	}
@@ -555,7 +554,7 @@ func enrichExistingRunEventPublicationRoute(ctx context.Context, opts OperatorRe
 		return params, err
 	}
 	entity, err := entities.LoadOperatorEntity(ctx, params.EntityID, params.RunID)
-	if errors.Is(err, store.ErrEntityNotFound) {
+	if errors.Is(err, operatorread.ErrEntityNotFound) {
 		return params, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
 			"event_name":      params.EventName,
 			"run_id":          params.RunID,
@@ -571,13 +570,13 @@ func enrichExistingRunEventPublicationRoute(ctx context.Context, opts OperatorRe
 	return params, nil
 }
 
-func enrichExistingRunEventPublicationPrimaryEntity(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams) (eventPublicationParams, error) {
+func enrichExistingRunEventPublicationPrimaryEntity(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams) (eventPublicationParams, error) {
 	entities, err := requireEntityReadStore(opts.Entities)
 	if err != nil {
 		return params, nil
 	}
 	entity, err := entities.LoadOperatorEntity(ctx, params.RunID, params.RunID)
-	if errors.Is(err, store.ErrEntityNotFound) {
+	if errors.Is(err, operatorread.ErrEntityNotFound) {
 		return params, nil
 	}
 	if err != nil {
@@ -633,7 +632,7 @@ func eventPublicationSelectsTemplateInputEvent(source semanticview.Source, reque
 	return false
 }
 
-func enrichExistingRunEventPublicationTargetRoute(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams) (eventPublicationParams, error) {
+func enrichExistingRunEventPublicationTargetRoute(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams) (eventPublicationParams, error) {
 	target := params.TargetRoute.Normalized()
 	if target.EntityID == "" || target.FlowInstance == "" {
 		return params, NewInvalidParamsError(map[string]any{"field": "target", "reason": "flow_instance and entity_id are required"})
@@ -643,7 +642,7 @@ func enrichExistingRunEventPublicationTargetRoute(ctx context.Context, opts Oper
 		return params, err
 	}
 	entity, err := entities.LoadOperatorEntity(ctx, target.EntityID, params.RunID)
-	if errors.Is(err, store.ErrEntityNotFound) {
+	if errors.Is(err, operatorread.ErrEntityNotFound) {
 		return params, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
 			"event_name":      params.EventName,
 			"run_id":          params.RunID,
@@ -674,13 +673,13 @@ func enrichExistingRunEventPublicationTargetRoute(ctx context.Context, opts Oper
 	return params, nil
 }
 
-type eventPublishRecipientPlanChecker interface {
+type EventRecipientPlanChecker interface {
 	CheckPublishRecipientPlan(context.Context, events.Event) (runtimebus.PublishRecipientPlan, error)
 }
 
-func validateExistingRunEventPublicationRecipientPlan(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams, cfg eventPublicationConfig) error {
-	checker, ok := opts.Events.(eventPublishRecipientPlanChecker)
-	if !ok || checker == nil {
+func validateExistingRunEventPublicationRecipientPlan(ctx context.Context, opts EventPublicationOptions, params eventPublicationParams, cfg eventPublicationConfig) error {
+	checker := opts.RecipientPlans
+	if checker == nil {
 		return NewApplicationError(EventPublishFailedCode, true, map[string]any{
 			"event_name": params.EventName,
 			"event_id":   params.EventID,
@@ -799,7 +798,7 @@ func eventPublishFailureError(params eventPublicationParams, err error, retryabl
 	})
 }
 
-func eventPublishDeliveries(in []store.OperatorEventDelivery) []eventPublishDelivery {
+func eventPublishDeliveries(in []operatorread.OperatorEventDelivery) []eventPublishDelivery {
 	out := make([]eventPublishDelivery, 0, len(in))
 	seen := map[string]struct{}{}
 	for _, delivery := range in {
@@ -814,7 +813,7 @@ func eventPublishDeliveries(in []store.OperatorEventDelivery) []eventPublishDeli
 	return out
 }
 
-func eventPublishDeliveryFromStore(delivery store.OperatorEventDelivery) eventPublishDelivery {
+func eventPublishDeliveryFromStore(delivery operatorread.OperatorEventDelivery) eventPublishDelivery {
 	attempt := delivery.RetryCount + 1
 	if attempt < 1 {
 		attempt = 1
@@ -835,7 +834,7 @@ func eventPublishDeliveryFromStore(delivery store.OperatorEventDelivery) eventPu
 		CreatedAt:      cloneTimePtr(delivery.CreatedAt),
 		StartedAt:      cloneTimePtr(delivery.StartedAt),
 		FinishedAt:     cloneTimePtr(delivery.FinishedAt),
-		DeadLetters:    append([]store.OperatorDeadLetterRecord(nil), delivery.DeadLetters...),
+		DeadLetters:    append([]operatorread.OperatorDeadLetterRecord(nil), delivery.DeadLetters...),
 	}
 }
 

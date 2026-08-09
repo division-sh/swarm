@@ -387,7 +387,7 @@ func (h *runHub) awaitCompletion(ctx context.Context, runID string, rt *runtimep
 			}
 			continue
 		}
-		snapshot, err := h.loadCanonicalRunLifecycle(ctx, rt, runID)
+		snapshot, err := h.loadCanonicalRunLifecycle(ctx, runID)
 		if err != nil {
 			h.markTerminal(runID)
 			observationFailure := runCompletionObservationFailure()
@@ -497,15 +497,11 @@ func (h *runHub) runControl(ctx context.Context, runID string) (*runtimeruncontr
 	return rt.RunControl, use, nil
 }
 
-func (h *runHub) loadCanonicalRunLifecycle(ctx context.Context, rt *runtimepkg.Runtime, runID string) (runtimebus.RunLifecycleSnapshot, error) {
-	if rt == nil || rt.Bus == nil {
+func (h *runHub) loadCanonicalRunLifecycle(ctx context.Context, runID string) (runtimebus.RunLifecycleSnapshot, error) {
+	if h == nil || h.runDebug == nil {
 		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run lifecycle observation is not configured")
 	}
-	reader, ok := rt.Bus.Store().(runtimebus.RunLifecycleReadPersistence)
-	if !ok || reader == nil {
-		return runtimebus.RunLifecycleSnapshot{}, fmt.Errorf("run lifecycle observation is not supported")
-	}
-	return reader.LoadRunLifecycleSnapshot(ctx, runID)
+	return h.runDebug.LoadRunLifecycleSnapshot(ctx, runID)
 }
 
 func runCompletionObservationFailure() runtimefailures.Envelope {

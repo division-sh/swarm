@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
@@ -30,11 +32,11 @@ func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 	since := time.Date(2026, 5, 21, 9, 0, 0, 0, time.UTC)
 	until := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
 	for _, rec := range []budgetspend.SpendRecord{
-		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", AgentIdentity: agent1, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 100, OutputTokens: 25, CostUSD: 0.000675, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: since},
-		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", AgentIdentity: agent1, Model: "sonnet", ModelAlias: "regular", BackendProfile: "claude_cli", Provider: "claude", Transport: "cli", ResolvedModel: "sonnet", InputTokens: 50, OutputTokens: 10, CostUSD: 0.000300, InvocationType: "claude_cli", UsageAccounting: storepkg.AgentUsageAccountingEstimated, RecordedAt: since.Add(time.Minute)},
-		{ExecutionMode: "mock", FlowInstance: "flow/a", AgentID: "agent-1", AgentIdentity: agent1, Model: "mock-regular", ModelAlias: "regular", BackendProfile: "mock", Provider: "mock", Transport: "in_process", ResolvedModel: "mock-regular", InputTokens: 5, OutputTokens: 2, CostUSD: 0.000025, InvocationType: "mock_python", UsageAccounting: storepkg.AgentUsageAccountingEstimated, RecordedAt: since.Add(2 * time.Minute)},
-		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", AgentIdentity: agent1, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 7, OutputTokens: 3, CostUSD: 0.000010, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: until},
-		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-2", AgentIdentity: agent2, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 999, OutputTokens: 999, CostUSD: 1.000000, InvocationType: "anthropic", UsageAccounting: storepkg.AgentUsageAccountingExact, RecordedAt: since.Add(time.Minute)},
+		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", AgentIdentity: agent1, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 100, OutputTokens: 25, CostUSD: 0.000675, InvocationType: "anthropic", UsageAccounting: operatorread.AgentUsageAccountingExact, RecordedAt: since},
+		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", AgentIdentity: agent1, Model: "sonnet", ModelAlias: "regular", BackendProfile: "claude_cli", Provider: "claude", Transport: "cli", ResolvedModel: "sonnet", InputTokens: 50, OutputTokens: 10, CostUSD: 0.000300, InvocationType: "claude_cli", UsageAccounting: operatorread.AgentUsageAccountingEstimated, RecordedAt: since.Add(time.Minute)},
+		{ExecutionMode: "mock", FlowInstance: "flow/a", AgentID: "agent-1", AgentIdentity: agent1, Model: "mock-regular", ModelAlias: "regular", BackendProfile: "mock", Provider: "mock", Transport: "in_process", ResolvedModel: "mock-regular", InputTokens: 5, OutputTokens: 2, CostUSD: 0.000025, InvocationType: "mock_python", UsageAccounting: operatorread.AgentUsageAccountingEstimated, RecordedAt: since.Add(2 * time.Minute)},
+		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-1", AgentIdentity: agent1, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 7, OutputTokens: 3, CostUSD: 0.000010, InvocationType: "anthropic", UsageAccounting: operatorread.AgentUsageAccountingExact, RecordedAt: until},
+		{ExecutionMode: "live", FlowInstance: "flow/a", AgentID: "agent-2", AgentIdentity: agent2, Model: "claude-3-5-sonnet", ModelAlias: "regular", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api", ResolvedModel: "claude-3-5-sonnet", InputTokens: 999, OutputTokens: 999, CostUSD: 1.000000, InvocationType: "anthropic", UsageAccounting: operatorread.AgentUsageAccountingExact, RecordedAt: since.Add(time.Minute)},
 	} {
 		if err := sqliteStore.RecordSpend(ctx, rec); err != nil {
 			t.Fatalf("RecordSpend(%s/%s): %v", rec.AgentID, rec.UsageAccounting, err)
@@ -43,7 +45,7 @@ func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			AgentUsage: sqliteStore,
 		}),
 	})
@@ -66,7 +68,7 @@ func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 		t.Fatalf("breakdown = %#v, want three rows", result["breakdown"])
 	}
 	first := asMap(t, breakdown[0])
-	if first["usage_accounting"] != storepkg.AgentUsageAccountingExact || first["model"] != "claude-3-5-sonnet" || first["provider"] != "anthropic" || first["transport"] != "api" || first["resolved_model"] != "claude-3-5-sonnet" {
+	if first["usage_accounting"] != operatorread.AgentUsageAccountingExact || first["model"] != "claude-3-5-sonnet" || first["provider"] != "anthropic" || first["transport"] != "api" || first["resolved_model"] != "claude-3-5-sonnet" {
 		t.Fatalf("first breakdown = %#v", first)
 	}
 	mock := asMap(t, breakdown[2])
@@ -121,7 +123,7 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			AgentDeliveryLifecycle: sqliteStore,
 		}),
 	})

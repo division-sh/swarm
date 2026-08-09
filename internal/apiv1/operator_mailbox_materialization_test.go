@@ -62,7 +62,7 @@ func TestOperatorMailboxHandlersSQLiteReadsMaterializedMailboxWrite(t *testing.T
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Ready:    func() bool { return true },
 			Database: fakePinger{},
 			Mailbox:  sqliteStore,

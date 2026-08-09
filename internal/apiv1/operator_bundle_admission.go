@@ -9,24 +9,23 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 type RunBundleContextStore interface {
 	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
 }
 
-type runtimeBundleSourceFactProvider interface {
+type BundleSourceAdmitter interface {
 	AdmitBundleSourceFact(context.Context) (context.Context, error)
 }
 
 func resolveEventPublicationBundleScope(
 	ctx context.Context,
-	opts OperatorReadOptions,
+	opts EventPublicationOptions,
 	params eventPublicationParams,
 	identity bundleIdentityParam,
 	cfg eventPublicationConfig,
-) (context.Context, OperatorReadOptions, eventPublicationParams, error) {
+) (context.Context, EventPublicationOptions, eventPublicationParams, error) {
 	requestedHash := strings.TrimSpace(identity.BundleHash)
 	runAvailability, hasRunContext, err := eventPublicationRunBundleContext(ctx, opts, params, cfg)
 	if err != nil {
@@ -41,11 +40,15 @@ func resolveEventPublicationBundleScope(
 		if requestedHash != "" && runAvailability.BundleHash != "" && requestedHash != runAvailability.BundleHash {
 			return ctx, opts, params, NewApplicationError(BundleMismatchCode, false, bundleMismatchDetails(params.RunID, requestedHash, runAvailability))
 		}
-		if runtimeContextManager(opts) != nil {
-			var selectedOpts OperatorReadOptions
-			ctx, selectedOpts, runAvailability, err = runtimeBundleContextByRun(ctx, opts, params.RunID)
+		if runtimeContextManager(opts.RuntimeContexts) != nil {
+			var selected selectedRuntimeContext
+			ctx, selected, runAvailability, err = runtimeBundleContextByRun(ctx, opts.RuntimeContexts, params.RunID)
 			if err != nil {
 				return ctx, opts, params, err
+			}
+			selectedOpts, selectionErr := eventPublicationOptionsForRuntime(opts, selected)
+			if selectionErr != nil {
+				return ctx, opts, params, selectionErr
 			}
 			runFact, decodeErr := runtimecorrelation.DecodeBundleSourceFact(runAvailability.BundleHash, runAvailability.BundleSource.String())
 			currentFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
@@ -56,7 +59,7 @@ func resolveEventPublicationBundleScope(
 			}
 			var publisherFact runtimecorrelation.BundleSourceFact
 			var hasPublisherFact bool
-			ctx, publisherFact, hasPublisherFact, err = eventPublicationRuntimeSourceContext(ctx, selectedOpts.Events)
+			ctx, publisherFact, hasPublisherFact, err = eventPublicationRuntimeSourceContext(ctx, selectedOpts.BundleSource)
 			if err != nil || !hasPublisherFact || !publisherFact.Matches(runFact) {
 				return ctx, opts, params, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
 					"run_id": params.RunID, "bundle_hash": runAvailability.BundleHash, "cause": "runtime_source_fact_mismatch",
@@ -80,7 +83,7 @@ func resolveEventPublicationBundleScope(
 		}
 		var publisherFact runtimecorrelation.BundleSourceFact
 		var hasPublisherFact bool
-		ctx, publisherFact, hasPublisherFact, err = eventPublicationRuntimeSourceContext(ctx, opts.Events)
+		ctx, publisherFact, hasPublisherFact, err = eventPublicationRuntimeSourceContext(ctx, opts.BundleSource)
 		if err != nil || !hasPublisherFact || !publisherFact.Matches(currentFact) {
 			return ctx, opts, params, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
 				"run_id": params.RunID, "bundle_hash": runAvailability.BundleHash, "cause": "runtime_source_fact_mismatch",
@@ -90,8 +93,8 @@ func resolveEventPublicationBundleScope(
 	}
 	var currentFact runtimecorrelation.BundleSourceFact
 	var hasCurrentFact bool
-	if runtimeContextManager(opts) == nil {
-		ctx, currentFact, hasCurrentFact, err = eventPublicationRuntimeSourceContext(ctx, opts.Events)
+	if runtimeContextManager(opts.RuntimeContexts) == nil {
+		ctx, currentFact, hasCurrentFact, err = eventPublicationRuntimeSourceContext(ctx, opts.BundleSource)
 		if err != nil {
 			return ctx, opts, params, err
 		}
@@ -109,19 +112,22 @@ func resolveEventPublicationBundleScope(
 		}
 		return ctx, opts, params, NewApplicationError(BundleScopeRequiredCode, false, details)
 	}
-	if runtimeContextManager(opts) != nil {
-		var selectedOpts OperatorReadOptions
-		var contextDef any
-		ctx, selectedOpts, contextDef, err = runtimeBundleContextByHash(ctx, opts, resolvedHash, params.RunID)
+	if runtimeContextManager(opts.RuntimeContexts) != nil {
+		var selected selectedRuntimeContext
+		ctx, selected, err = runtimeBundleContextByHash(ctx, opts.RuntimeContexts, resolvedHash, params.RunID)
 		if err != nil {
 			return ctx, opts, params, err
 		}
-		if contextDef == nil {
+		if selected.BundleContext == nil {
 			return ctx, opts, params, NewApplicationError(BundleUnavailableCode, false, map[string]any{
 				"bundle_hash": resolvedHash,
 				"run_id":      strings.TrimSpace(params.RunID),
 				"cause":       "runtime_context_not_loaded",
 			})
+		}
+		selectedOpts, selectionErr := eventPublicationOptionsForRuntime(opts, selected)
+		if selectionErr != nil {
+			return ctx, opts, params, selectionErr
 		}
 		currentFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
 		if !ok {
@@ -131,7 +137,7 @@ func resolveEventPublicationBundleScope(
 		}
 		var publisherFact runtimecorrelation.BundleSourceFact
 		var hasPublisherFact bool
-		ctx, publisherFact, hasPublisherFact, err = eventPublicationRuntimeSourceContext(ctx, selectedOpts.Events)
+		ctx, publisherFact, hasPublisherFact, err = eventPublicationRuntimeSourceContext(ctx, selectedOpts.BundleSource)
 		if err != nil || !hasPublisherFact || !publisherFact.Matches(currentFact) {
 			return ctx, opts, params, NewApplicationError(BundleDataIntegrityErrorCode, false, map[string]any{
 				"bundle_hash": resolvedHash, "run_id": strings.TrimSpace(params.RunID), "cause": "runtime_source_fact_mismatch",
@@ -161,6 +167,18 @@ func resolveEventPublicationBundleScope(
 	return ctx, opts, params, err
 }
 
+func eventPublicationOptionsForRuntime(opts EventPublicationOptions, selected selectedRuntimeContext) (EventPublicationOptions, error) {
+	if selected.BundleContext == nil || selected.Runtime == nil || selected.Runtime.Bus == nil {
+		return EventPublicationOptions{}, fmt.Errorf("event publication owner is required for the selected runtime")
+	}
+	opts.Source = selected.BundleContext.Source
+	opts.Events = selected.Runtime.Bus
+	opts.Acknowledged = selected.Runtime.Bus
+	opts.RecipientPlans = selected.Runtime.Bus
+	opts.BundleSource = selected.Runtime.Bus
+	return opts, nil
+}
+
 func eventPublicationSourceContext(ctx context.Context, fact runtimecorrelation.BundleSourceFact) (context.Context, error) {
 	if err := fact.Validate(); err != nil {
 		return ctx, fmt.Errorf("resolve event publication bundle source fact: %w", err)
@@ -177,11 +195,10 @@ func eventPublicationSourceContext(ctx context.Context, fact runtimecorrelation.
 	return runtimeauthoractivity.WithScope(ctx, scope), nil
 }
 
-func eventPublicationRuntimeSourceContext(ctx context.Context, publisher EventPublisher) (context.Context, runtimecorrelation.BundleSourceFact, bool, error) {
-	provider, ok := publisher.(runtimeBundleSourceFactProvider)
-	if ok && provider != nil {
+func eventPublicationRuntimeSourceContext(ctx context.Context, publisher BundleSourceAdmitter) (context.Context, runtimecorrelation.BundleSourceFact, bool, error) {
+	if publisher != nil {
 		var err error
-		ctx, err = provider.AdmitBundleSourceFact(ctx)
+		ctx, err = publisher.AdmitBundleSourceFact(ctx)
 		if err != nil {
 			return ctx, runtimecorrelation.BundleSourceFact{}, false, err
 		}
@@ -192,7 +209,7 @@ func eventPublicationRuntimeSourceContext(ctx context.Context, publisher EventPu
 
 func eventPublicationRunBundleContext(
 	ctx context.Context,
-	opts OperatorReadOptions,
+	opts EventPublicationOptions,
 	params eventPublicationParams,
 	cfg eventPublicationConfig,
 ) (runbundle.Availability, bool, error) {
@@ -204,7 +221,7 @@ func eventPublicationRunBundleContext(
 		return runbundle.Availability{}, false, errors.New("run bundle context store is required")
 	}
 	availability, err := reader.LoadRunBundleAvailability(ctx, params.RunID)
-	if errors.Is(err, store.ErrRunNotFound) {
+	if errors.Is(err, runbundle.ErrRunNotFound) {
 		if cfg.requireExistingExplicitRun {
 			return runbundle.Availability{}, false, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": params.RunID})
 		}

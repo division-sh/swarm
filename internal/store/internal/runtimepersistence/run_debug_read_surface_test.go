@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -16,6 +17,7 @@ import (
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
@@ -46,7 +48,7 @@ func seedRunDebugAgent(t *testing.T, pg *PostgresStore, ctx context.Context, age
 	}
 }
 
-func assertRunTestQuiescence(t *testing.T, got RunTestQuiescence, want RunTestQuiescence) {
+func assertRunTestQuiescence(t *testing.T, got operatorread.RunTestQuiescence, want operatorread.RunTestQuiescence) {
 	t.Helper()
 	if got != want {
 		t.Fatalf("TestQuiescence = %#v, want %#v", got, want)
@@ -208,7 +210,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	successfulDelivery := seedDeliveryStateFixture(t, ctx, pg, targetEvent, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient("node-success")}, runtimedelivery.StateDelivered, nil)
 	setPostgresDeliveryFixtureTimes(t, ctx, db, successfulDelivery, now.Add(15*time.Second), now.Add(20*time.Second))
 	successDeliveryID := successfulDelivery.DeliveryID
-	report, err := pg.LoadRunDebugReport(ctx, targetRunID, RunDebugQueryOptions{
+	report, err := pg.LoadRunDebugReport(ctx, targetRunID, operatorread.RunDebugQueryOptions{
 		LogsAllLevels:   false,
 		Component:       "scheduler",
 		EventLimit:      10,
@@ -340,11 +342,11 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 		t.Fatalf("seed sessions: %v", err)
 	}
 
-	blocked, err := pg.LoadRunDebugReport(ctx, blockedRunID, RunDebugQueryOptions{})
+	blocked, err := pg.LoadRunDebugReport(ctx, blockedRunID, operatorread.RunDebugQueryOptions{})
 	if err != nil {
 		t.Fatalf("LoadRunDebugReport blocked: %v", err)
 	}
-	assertRunTestQuiescence(t, blocked.TestQuiescence, RunTestQuiescence{
+	assertRunTestQuiescence(t, blocked.TestQuiescence, operatorread.RunTestQuiescence{
 		Ready:                   false,
 		ActiveDeliveries:        1,
 		UnsettledPipelineEvents: 1,
@@ -352,11 +354,11 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 		ActiveSessionLeases:     1,
 	})
 
-	ready, err := pg.LoadRunDebugReport(ctx, readyRunID, RunDebugQueryOptions{})
+	ready, err := pg.LoadRunDebugReport(ctx, readyRunID, operatorread.RunDebugQueryOptions{})
 	if err != nil {
 		t.Fatalf("LoadRunDebugReport ready: %v", err)
 	}
-	assertRunTestQuiescence(t, ready.TestQuiescence, RunTestQuiescence{Ready: true})
+	assertRunTestQuiescence(t, ready.TestQuiescence, operatorread.RunTestQuiescence{Ready: true})
 }
 
 func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(t *testing.T) {
@@ -452,7 +454,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 		t.Fatalf("seed turn: %v", err)
 	}
 
-	rows, err := pg.LoadRunDebugTrace(ctx, runID, RunDebugTraceQueryOptions{Limit: 10})
+	rows, err := pg.LoadRunDebugTrace(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTrace: %v", err)
 	}
@@ -565,7 +567,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 		t.Fatalf("seed late turn: %v", err)
 	}
 
-	rows, err := pg.LoadRunDebugTrace(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, Since: &since})
+	rows, err := pg.LoadRunDebugTrace(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10, Since: &since})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTrace since: %v", err)
 	}
@@ -642,7 +644,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 		t.Fatalf("seed turn: %v", err)
 	}
 
-	rows, err := pg.LoadRunDebugTrace(ctx, runID, RunDebugTraceQueryOptions{Limit: 10})
+	rows, err := pg.LoadRunDebugTrace(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTrace: %v", err)
 	}
@@ -659,7 +661,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 }
 
 func TestRunDebugTraceSessionSourcesUseCanonicalRunIDColumns(t *testing.T) {
-	sql := runDebugTraceSessionSources()
+	sql := storeoperatorsurface.RunDebugTraceSessionSources()
 	if strings.Count(sql, "run_id") < 2 {
 		t.Fatalf("session source sql = %q, want canonical run_id projection for both sources", sql)
 	}

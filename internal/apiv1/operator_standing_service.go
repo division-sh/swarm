@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -23,8 +23,8 @@ type standingServiceResult struct {
 	Transition     string `json:"transition"`
 }
 
-func OperatorStandingServiceHandlers(opts OperatorReadOptions) map[string]MethodHandler {
-	if opts.StandingServices == nil || opts.Idempotency == nil {
+func OperatorStandingServiceHandlers(opts StandingServiceHandlerOptions) map[string]MethodHandler {
+	if opts.Controller == nil || opts.Idempotency == nil {
 		return nil
 	}
 	return map[string]MethodHandler{
@@ -40,7 +40,7 @@ func OperatorStandingServiceHandlers(opts OperatorReadOptions) map[string]Method
 	}
 }
 
-func executeStandingServiceOperation(ctx context.Context, req Request, opts OperatorReadOptions, action string) (any, error) {
+func executeStandingServiceOperation(ctx context.Context, req Request, opts StandingServiceHandlerOptions, action string) (any, error) {
 	serviceID := strings.TrimSpace(stringParam(req.Params, "service_id"))
 	parsed, err := uuid.Parse(serviceID)
 	if err != nil {
@@ -56,34 +56,34 @@ func executeStandingServiceOperation(ctx context.Context, req Request, opts Oper
 		return nil, err
 	}
 	now := time.Now().UTC()
-	completion, _, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
+	completion, _, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method: req.Method, ActorTokenID: req.ActorTokenID, IdempotencyKey: idempotencyKey,
 		RequestHash: req.RequestHash, ResourceID: serviceID, TTL: standingServiceIdempotencyTTL, Now: now,
-	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
+	}, func(ctx context.Context) (apiidempotency.Completion, error) {
 		operation := runtimepipeline.StandingServiceOperation{ServiceID: serviceID, Actor: "api.v1", Reason: reason}
 		var reconciled runtimepipeline.StandingServiceReconciliation
 		var operationErr error
 		switch action {
 		case "suspend":
-			reconciled, operationErr = opts.StandingServices.SuspendStandingService(ctx, operation)
+			reconciled, operationErr = opts.Controller.SuspendStandingService(ctx, operation)
 		case "resume":
-			reconciled, operationErr = opts.StandingServices.ResumeStandingService(ctx, operation)
+			reconciled, operationErr = opts.Controller.ResumeStandingService(ctx, operation)
 		case "reset":
-			reconciled, operationErr = opts.StandingServices.ResetStandingService(ctx, operation)
+			reconciled, operationErr = opts.Controller.ResetStandingService(ctx, operation)
 		default:
 			operationErr = fmt.Errorf("unsupported standing service action %q", action)
 		}
 		if operationErr != nil {
-			return store.APIIdempotencyCompletion{}, standingServiceOperationError(serviceID, operationErr)
+			return apiidempotency.Completion{}, standingServiceOperationError(serviceID, operationErr)
 		}
 		response, err := json.Marshal(standingServiceResult{
 			ServiceID: reconciled.ServiceID, RunID: reconciled.RunID, Generation: reconciled.Generation,
 			EffectiveState: reconciled.EffectiveState, Transition: reconciled.Transition,
 		})
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
-		return store.APIIdempotencyCompletion{ResourceID: serviceID, Response: response}, nil
+		return apiidempotency.Completion{ResourceID: serviceID, Response: response}, nil
 	})
 	if err != nil {
 		return nil, standingServiceOperationError(serviceID, err)
@@ -96,7 +96,7 @@ func executeStandingServiceOperation(ctx context.Context, req Request, opts Oper
 }
 
 func standingServiceOperationError(serviceID string, err error) error {
-	var conflict *store.APIIdempotencyConflictError
+	var conflict *apiidempotency.ConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
 			"original_request_hash": conflict.OriginalRequestHash, "conflicting_request_hash": conflict.ConflictingRequestHash,

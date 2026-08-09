@@ -555,21 +555,15 @@ func TestPostgresStartupOwnershipUsesRetainedSessionWithPoolSizeOne(t *testing.T
 }
 
 func TestPostgresDestructiveResetLockReleasesExactSession(t *testing.T) {
-	dsn, db, _ := testutil.StartPostgres(t)
+	_, db, _ := testutil.StartPostgres(t)
 	selected := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
-	lockKey := "test:destructive-reset:" + uuid.NewString()
-	lease, acquired, err := selected.TryAcquire(ctx, lockKey)
+	lease, acquired, err := selected.AcquireDestructiveReset(ctx)
 	if err != nil || !acquired || lease == nil {
 		t.Fatalf("acquire destructive reset lock lease=%#v acquired=%v err=%v", lease, acquired, err)
 	}
 
-	foreignDB, err := sql.Open("postgres", dsn)
-	if err != nil {
-		t.Fatalf("open foreign pool: %v", err)
-	}
-	defer foreignDB.Close()
-	foreignTx, err := foreignDB.BeginTx(ctx, nil)
+	foreignTx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin foreign transaction: %v", err)
 	}
@@ -577,7 +571,13 @@ func TestPostgresDestructiveResetLockReleasesExactSession(t *testing.T) {
 	if err := lease.Release(runtimepipelinefixture.WithSQLTx(ctx, foreignTx)); err != nil {
 		t.Fatalf("release destructive reset lease: %v", err)
 	}
-	assertIndependentAdvisoryLockAvailable(t, dsn, lockKey)
+	reacquired, acquired, err := selected.AcquireDestructiveReset(ctx)
+	if err != nil || !acquired || reacquired == nil {
+		t.Fatalf("reacquire destructive reset lease=%#v acquired=%v err=%v", reacquired, acquired, err)
+	}
+	if err := reacquired.Release(ctx); err != nil {
+		t.Fatalf("release reacquired destructive reset lease: %v", err)
+	}
 }
 
 func TestPostgresTerminalAdvisoryReleaseFailureDiscardsExactSession(t *testing.T) {

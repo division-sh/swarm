@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/google/uuid"
@@ -17,9 +18,9 @@ import (
 type deliveryReadProjectionStore interface {
 	authorActivityReceiptStore
 	runtimedelivery.Store
-	ListPendingAgentDeliveryFacts(context.Context, []agentidentity.Identity, time.Time) (map[agentidentity.Identity]PendingAgentDeliveryFacts, error)
-	ListPendingAgentDeliveryDetails(context.Context, PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error)
-	ListAgentDeliveryLifecycleFacts(context.Context, []agentidentity.Identity) (map[agentidentity.Identity]AgentDeliveryLifecycleFacts, error)
+	ListPendingAgentDeliveryFacts(context.Context, []agentidentity.Identity, time.Time) (map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts, error)
+	ListPendingAgentDeliveryDetails(context.Context, operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryPage, error)
+	ListAgentDeliveryLifecycleFacts(context.Context, []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error)
 }
 
 func TestPendingAgentDeliveryRetryEligibilityPreservesSubsecondStoreParity(t *testing.T) {
@@ -75,7 +76,7 @@ func TestPendingAgentDeliveryRetryEligibilityPreservesSubsecondStoreParity(t *te
 			if _, err := fixture.db.ExecContext(ctx, query, args...); err != nil {
 				t.Fatalf("make retry eligible: %v", err)
 			}
-			page, err := selected.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{
+			page, err := selected.ListPendingAgentDeliveryDetails(ctx, operatorread.PendingAgentDeliveryListOptions{
 				AgentIdentity: identity,
 				Since:         event.CreatedAt().Add(-time.Minute),
 				Limit:         10,
@@ -145,7 +146,7 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 				t.Fatalf("pending aggregate = %#v, want three obligations with positive age", facts[pageIdentity])
 			}
 
-			first, err := selected.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{
+			first, err := selected.ListPendingAgentDeliveryDetails(ctx, operatorread.PendingAgentDeliveryListOptions{
 				AgentIdentity: pageIdentity, Since: base.Add(-time.Minute), Limit: 1,
 			})
 			if err != nil {
@@ -154,7 +155,7 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 			if len(first.PendingDeliveries) != 1 || first.PendingDeliveries[0].DeliveryID != siblingIDs[0] || first.NextCursor == "" {
 				t.Fatalf("first pending page = %#v, want first exact sibling plus cursor", first)
 			}
-			second, err := selected.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{
+			second, err := selected.ListPendingAgentDeliveryDetails(ctx, operatorread.PendingAgentDeliveryListOptions{
 				AgentIdentity: pageIdentity, Since: base.Add(-time.Minute), Limit: 1, Cursor: first.NextCursor,
 			})
 			if err != nil {

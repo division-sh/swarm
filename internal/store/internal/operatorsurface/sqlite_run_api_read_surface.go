@@ -9,41 +9,42 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/google/uuid"
 )
 
-func (s *OperatorSQLite) requireRunHeaderAccess() error {
+func (s *RunSQLite) requireRunHeaderAccess() error {
 	return s.requireCurrentSchema()
 }
 
-func (s *OperatorSQLite) LoadRunHeader(ctx context.Context, runID string) (RunHeader, error) {
+func (s *RunSQLite) LoadRunHeader(ctx context.Context, runID string) (operatorread.RunHeader, error) {
 	if err := s.requireRunHeaderAccess(); err != nil {
-		return RunHeader{}, err
+		return operatorread.RunHeader{}, err
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
-		return RunHeader{}, ErrRunNotFound
+		return operatorread.RunHeader{}, operatorread.ErrRunNotFound
 	}
 	if _, err := uuid.Parse(runID); err != nil {
-		return RunHeader{}, ErrRunNotFound
+		return operatorread.RunHeader{}, operatorread.ErrRunNotFound
 	}
 	row := s.backend.QueryRowContext(ctx, sqliteRunHeaderSelectSQL()+`
 WHERE r.run_id = ?
 `, runID)
 	header, err := scanSQLiteRunHeader(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return RunHeader{}, ErrRunNotFound
+		return operatorread.RunHeader{}, operatorread.ErrRunNotFound
 	}
 	if err != nil {
-		return RunHeader{}, err
+		return operatorread.RunHeader{}, err
 	}
 	return header, nil
 }
 
-func (s *OperatorSQLite) LoadRunOrigin(ctx context.Context, runID string) (runtimerunlifecycle.RunOrigin, error) {
+func (s *RunSQLite) LoadRunOrigin(ctx context.Context, runID string) (runtimerunlifecycle.RunOrigin, error) {
 	header, err := s.LoadRunHeader(ctx, runID)
 	if err != nil {
 		return runtimerunlifecycle.RunOrigin{}, err
@@ -51,7 +52,7 @@ func (s *OperatorSQLite) LoadRunOrigin(ctx context.Context, runID string) (runti
 	return header.Origin, nil
 }
 
-func (s *OperatorSQLite) ListRunHeaders(ctx context.Context, opts RunHeaderListOptions) ([]RunHeader, string, error) {
+func (s *RunSQLite) ListRunHeaders(ctx context.Context, opts operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error) {
 	if err := s.requireRunHeaderAccess(); err != nil {
 		return nil, "", err
 	}
@@ -92,7 +93,7 @@ LIMIT ?
 		return nil, "", err
 	}
 	defer rows.Close()
-	headers := make([]RunHeader, 0, opts.Limit)
+	headers := make([]operatorread.RunHeader, 0, opts.Limit)
 	for rows.Next() {
 		header, err := scanSQLiteRunHeader(rows)
 		if err != nil {
@@ -111,13 +112,13 @@ LIMIT ?
 	return headers, nextCursor, nil
 }
 
-func (s *OperatorSQLite) LoadRunDebugReport(ctx context.Context, runID string, opts RunDebugQueryOptions) (RunDebugReport, error) {
+func (s *RunSQLite) LoadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
 	opts = defaultRunDebugQueryOptions(opts)
 	header, err := s.LoadRunHeader(ctx, runID)
 	if err != nil {
-		return RunDebugReport{}, err
+		return operatorread.RunDebugReport{}, err
 	}
-	report := RunDebugReport{
+	report := operatorread.RunDebugReport{
 		RunID:          header.RunID,
 		RunTableStatus: header.Status,
 		Failure:        runtimefailures.CloneEnvelope(header.Failure),
@@ -132,87 +133,87 @@ func (s *OperatorSQLite) LoadRunDebugReport(ctx context.Context, runID string, o
 		report.RootEventType = header.Origin.EventType()
 	}
 	if lastEventAt, ok, err := s.sqliteRunLastEventAt(ctx, header.RunID); err != nil {
-		return RunDebugReport{}, err
+		return operatorread.RunDebugReport{}, err
 	} else if ok {
 		report.LastEventAt = lastEventAt
 	}
 	eventCounts, err := s.sqliteRunDebugEventCounts(ctx, header.RunID)
 	if err != nil {
-		return RunDebugReport{}, err
+		return operatorread.RunDebugReport{}, err
 	}
 	report.EventCounts = eventCounts
 	deliveries, err := s.sqliteRunDebugDeliveryCounts(ctx, header.RunID)
 	if err != nil {
-		return RunDebugReport{}, err
+		return operatorread.RunDebugReport{}, err
 	}
 	report.Deliveries = deliveries
 	failedDeliveries, err := s.sqliteRunDebugFailureDeliveries(ctx, header.RunID, opts.DeadLetterLimit)
 	if err != nil {
-		return RunDebugReport{}, err
+		return operatorread.RunDebugReport{}, err
 	}
 	report.FailedDeliveries = failedDeliveries
 	testQuiescence, err := s.LoadRunTestQuiescence(ctx, header.RunID, s.now())
 	if err != nil {
-		return RunDebugReport{}, err
+		return operatorread.RunDebugReport{}, err
 	}
 	report.TestQuiescence = testQuiescence
 	events, err := s.sqliteRunDebugEvents(ctx, header.RunID, opts.EventLimit)
 	if err != nil {
-		return RunDebugReport{}, err
+		return operatorread.RunDebugReport{}, err
 	}
 	report.Events = events
 	logs, err := s.sqliteRunDebugRuntimeLogs(ctx, header.RunID, opts)
 	if err != nil {
-		return RunDebugReport{}, err
+		return operatorread.RunDebugReport{}, err
 	}
 	report.RuntimeLogs = logs
 	logSummary, warnErrorCount, err := s.sqliteRunDebugRuntimeLogSummary(ctx, header.RunID, opts.Component)
 	if err != nil {
-		return RunDebugReport{}, err
+		return operatorread.RunDebugReport{}, err
 	}
 	report.RuntimeLogSummary = logSummary
 	report.WarnErrorLogCount = warnErrorCount
 	return report, nil
 }
 
-func (s *OperatorSQLite) LoadRunTestQuiescence(ctx context.Context, runID string, observedAt time.Time) (RunTestQuiescence, error) {
-	var out RunTestQuiescence
+func (s *RunSQLite) LoadRunTestQuiescence(ctx context.Context, runID string, observedAt time.Time) (operatorread.RunTestQuiescence, error) {
+	var out operatorread.RunTestQuiescence
 	summary, err := s.summarizeDeliveryRun(ctx, runID)
 	if err != nil {
-		return RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence active deliveries: %w", err)
+		return operatorread.RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence active deliveries: %w", err)
 	}
 	out.ActiveDeliveries = summary.Pending + summary.InProgress + summary.RetryScheduled
 	if s.runtime == nil {
-		return RunTestQuiescence{}, fmt.Errorf("run debug runtime diagnostics source is required")
+		return operatorread.RunTestQuiescence{}, fmt.Errorf("run debug runtime diagnostics source is required")
 	}
 	pipelineSummary, err := s.runtime.PipelineObligations().SummarizeRun(ctx, runID)
 	if err != nil {
-		return RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence unsettled pipeline events: %w", err)
+		return operatorread.RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence unsettled pipeline events: %w", err)
 	}
 	out.UnsettledPipelineEvents = pipelineSummary.Replayable + pipelineSummary.Deferred
 	scope, err := runtimetimerobligation.Run(runID)
 	if err != nil {
-		return RunTestQuiescence{}, err
+		return operatorread.RunTestQuiescence{}, err
 	}
 	timerSnapshot, err := s.runtime.ReadTimerObligations(ctx, scope, observedAt)
 	if err != nil {
-		return RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence timer obligations: %w", err)
+		return operatorread.RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence timer obligations: %w", err)
 	}
 	runTimers, ok := timerSnapshot.Run(runID)
 	if !ok {
-		return RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence timer obligations: snapshot omitted requested run")
+		return operatorread.RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence timer obligations: snapshot omitted requested run")
 	}
 	out.DueTimers = runTimers.Totals().DueCount
 	activeSessionLeases, err := s.sqliteRunActiveSessionLeaseCount(ctx, runID)
 	if err != nil {
-		return RunTestQuiescence{}, err
+		return operatorread.RunTestQuiescence{}, err
 	}
 	out.ActiveSessionLeases = activeSessionLeases
 	out.Ready = runTestQuiescenceReady(out)
 	return out, nil
 }
 
-func (s *OperatorSQLite) sqliteRunActiveSessionLeaseCount(ctx context.Context, runID string) (int, error) {
+func (s *RunSQLite) sqliteRunActiveSessionLeaseCount(ctx context.Context, runID string) (int, error) {
 	rows, err := s.backend.QueryContext(ctx, `
 		SELECT lease_expires_at
 		FROM agent_sessions
@@ -280,8 +281,8 @@ FROM runs r
 `
 }
 
-func scanSQLiteRunHeader(row runHeaderScanner) (RunHeader, error) {
-	var header RunHeader
+func scanSQLiteRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
+	var header operatorread.RunHeader
 	var startedRaw, endedRaw any
 	var failureRaw any
 	var bundleHash, bundleSource string
@@ -310,17 +311,17 @@ func scanSQLiteRunHeader(row runHeaderScanner) (RunHeader, error) {
 		&failureRaw,
 		&header.ControlReason,
 	); err != nil {
-		return RunHeader{}, err
+		return operatorread.RunHeader{}, err
 	}
 	startedAt, ok, err := sqliteTimeValue(startedRaw)
 	if err != nil {
-		return RunHeader{}, err
+		return operatorread.RunHeader{}, err
 	}
 	if ok {
 		header.StartedAt = startedAt
 	}
 	if endedAt, ok, err := sqliteTimeValue(endedRaw); err != nil {
-		return RunHeader{}, err
+		return operatorread.RunHeader{}, err
 	} else if ok {
 		header.EndedAt = &endedAt
 	}
@@ -329,27 +330,27 @@ func scanSQLiteRunHeader(row runHeaderScanner) (RunHeader, error) {
 		originKind, eventID, eventType, serviceID, generation, sourceRunID, sourceEventID,
 	)
 	if err != nil {
-		return RunHeader{}, fmt.Errorf("run %s origin: %w", header.RunID, err)
+		return operatorread.RunHeader{}, fmt.Errorf("run %s origin: %w", header.RunID, err)
 	}
 	if err := validateRunHeaderStandingRelation(
 		header.RunID, header.Origin, standingRelationCount, matchingStandingRelationCount,
 	); err != nil {
-		return RunHeader{}, err
+		return operatorread.RunHeader{}, err
 	}
 	header.ContinuedAsRunID = strings.TrimSpace(header.ContinuedAsRunID)
 	header.ControlReason = strings.TrimSpace(header.ControlReason)
 	failure, err := decodeStoredFailure(failureRaw)
 	if err != nil {
-		return RunHeader{}, err
+		return operatorread.RunHeader{}, err
 	}
 	header.Failure = failure
 	if err := validateRunHeaderLifecycle(header, bundleHash, bundleSource); err != nil {
-		return RunHeader{}, err
+		return operatorread.RunHeader{}, err
 	}
 	return header, nil
 }
 
-func (s *OperatorSQLite) sqliteRunLastEventAt(ctx context.Context, runID string) (time.Time, bool, error) {
+func (s *RunSQLite) sqliteRunLastEventAt(ctx context.Context, runID string) (time.Time, bool, error) {
 	var raw any
 	if err := s.backend.QueryRowContext(ctx, `SELECT MAX(created_at) FROM events WHERE run_id = ?`, runID).Scan(&raw); err != nil {
 		return time.Time{}, false, fmt.Errorf("load sqlite run last event timestamp: %w", err)
@@ -357,7 +358,7 @@ func (s *OperatorSQLite) sqliteRunLastEventAt(ctx context.Context, runID string)
 	return sqliteTimeValue(raw)
 }
 
-func (s *OperatorSQLite) sqliteRunDebugEventCounts(ctx context.Context, runID string) ([]RunDebugEventCount, error) {
+func (s *RunSQLite) sqliteRunDebugEventCounts(ctx context.Context, runID string) ([]operatorread.RunDebugEventCount, error) {
 	rows, err := s.backend.QueryContext(ctx, `
 		SELECT event_name, COUNT(*)
 		FROM events
@@ -369,9 +370,9 @@ func (s *OperatorSQLite) sqliteRunDebugEventCounts(ctx context.Context, runID st
 		return nil, fmt.Errorf("query sqlite run debug event counts: %w", err)
 	}
 	defer rows.Close()
-	out := []RunDebugEventCount{}
+	out := []operatorread.RunDebugEventCount{}
 	for rows.Next() {
-		var item RunDebugEventCount
+		var item operatorread.RunDebugEventCount
 		if err := rows.Scan(&item.EventName, &item.Count); err != nil {
 			return nil, fmt.Errorf("scan sqlite run debug event count: %w", err)
 		}
@@ -383,7 +384,7 @@ func (s *OperatorSQLite) sqliteRunDebugEventCounts(ctx context.Context, runID st
 	return out, nil
 }
 
-func (s *OperatorSQLite) sqliteRunDebugDeliveryCounts(ctx context.Context, runID string) ([]RunDebugDeliveryCount, error) {
+func (s *RunSQLite) sqliteRunDebugDeliveryCounts(ctx context.Context, runID string) ([]operatorread.RunDebugDeliveryCount, error) {
 	counts, err := s.deliveryRunDiagnosticCounts(ctx, runID)
 	if err != nil {
 		return nil, fmt.Errorf("query sqlite run debug delivery counts: %w", err)
@@ -391,7 +392,7 @@ func (s *OperatorSQLite) sqliteRunDebugDeliveryCounts(ctx context.Context, runID
 	return runDebugDeliveryCounts(counts), nil
 }
 
-func (s *OperatorSQLite) sqliteRunDebugFailureDeliveries(ctx context.Context, runID string, limit int) ([]RunDebugFailureDelivery, error) {
+func (s *RunSQLite) sqliteRunDebugFailureDeliveries(ctx context.Context, runID string, limit int) ([]operatorread.RunDebugFailureDelivery, error) {
 	if limit <= 0 {
 		limit = 10
 	}
@@ -414,12 +415,12 @@ func (s *OperatorSQLite) sqliteRunDebugFailureDeliveries(ctx context.Context, ru
 			}
 			event := admitted.Event()
 			return deliveryLifecycleEventMetadata{EventName: string(event.Type()), RunID: event.RunID(), EntityID: event.EntityID()}, nil
-		}, func(deliveryID string, claimVersion int64) ([]OperatorDeadLetterRecord, error) {
-			return s.LoadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
+		}, func(deliveryID string, claimVersion int64) ([]operatorread.OperatorDeadLetterRecord, error) {
+			return s.deadLetters.LoadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
 		})
 }
 
-func (s *OperatorSQLite) sqliteRunDebugEvents(ctx context.Context, runID string, limit int) ([]RunDebugEvent, error) {
+func (s *RunSQLite) sqliteRunDebugEvents(ctx context.Context, runID string, limit int) ([]operatorread.RunDebugEvent, error) {
 	rows, err := s.backend.QueryContext(ctx, `
 		SELECT event_id, event_name, COALESCE(entity_id, ''), created_at,
 		       COALESCE(produced_by, ''), COALESCE(produced_by_type, ''), payload
@@ -432,9 +433,9 @@ func (s *OperatorSQLite) sqliteRunDebugEvents(ctx context.Context, runID string,
 		return nil, fmt.Errorf("query sqlite run debug events: %w", err)
 	}
 	defer rows.Close()
-	out := []RunDebugEvent{}
+	out := []operatorread.RunDebugEvent{}
 	for rows.Next() {
-		var item RunDebugEvent
+		var item operatorread.RunDebugEvent
 		var createdRaw, payloadRaw any
 		if err := rows.Scan(&item.EventID, &item.EventName, &item.EntityID, &createdRaw, &item.Source, &item.SourceType, &payloadRaw); err != nil {
 			return nil, fmt.Errorf("scan sqlite run debug event: %w", err)
@@ -453,7 +454,7 @@ func (s *OperatorSQLite) sqliteRunDebugEvents(ctx context.Context, runID string,
 	return out, nil
 }
 
-func (s *OperatorSQLite) sqliteRunDebugRuntimeLogs(ctx context.Context, runID string, opts RunDebugQueryOptions) ([]RunDebugRuntimeLog, error) {
+func (s *RunSQLite) sqliteRunDebugRuntimeLogs(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) ([]operatorread.RunDebugRuntimeLog, error) {
 	where := []string{"run_id = ?", "event_name = 'platform.runtime_log'"}
 	args := []any{runID}
 	if !opts.LogsAllLevels {
@@ -475,9 +476,9 @@ func (s *OperatorSQLite) sqliteRunDebugRuntimeLogs(ctx context.Context, runID st
 		return nil, fmt.Errorf("query sqlite run debug runtime logs: %w", err)
 	}
 	defer rows.Close()
-	out := []RunDebugRuntimeLog{}
+	out := []operatorread.RunDebugRuntimeLog{}
 	for rows.Next() {
-		var log OperatorRuntimeLogEntry
+		var log operatorread.OperatorRuntimeLogEntry
 		var createdRaw, payloadRaw any
 		if err := rows.Scan(&log.LogID, &createdRaw, &log.EntityID, &payloadRaw); err != nil {
 			return nil, fmt.Errorf("scan sqlite run debug runtime log: %w", err)
@@ -490,14 +491,14 @@ func (s *OperatorSQLite) sqliteRunDebugRuntimeLogs(ctx context.Context, runID st
 		if err := applySQLiteRuntimeLogPayload(&log, sqliteJSONRawMessage(payloadRaw)); err != nil {
 			return nil, fmt.Errorf("decode sqlite run debug runtime log: %w", err)
 		}
-		detail, _ := json.Marshal(log.Details)
-		item := RunDebugRuntimeLog{
+		detail, _ := json.Marshal(log.CanonicalDetail)
+		item := operatorread.RunDebugRuntimeLog{
 			EventID:   strings.TrimSpace(log.LogID),
 			Level:     strings.TrimSpace(log.Level),
 			Message:   strings.TrimSpace(log.Message),
 			Component: strings.TrimSpace(log.Component),
-			Action:    strings.TrimSpace(sqliteObservabilityString(log.Details["action"])),
-			EventType: strings.TrimSpace(sqliteObservabilityString(log.Details["event_type"])),
+			Action:    log.Action,
+			EventType: log.EventType,
 			AgentID:   strings.TrimSpace(log.Source),
 			EntityID:  strings.TrimSpace(log.EntityID),
 			Failure:   runtimefailures.CloneEnvelope(log.Failure),
@@ -512,7 +513,7 @@ func (s *OperatorSQLite) sqliteRunDebugRuntimeLogs(ctx context.Context, runID st
 	return out, nil
 }
 
-func (s *OperatorSQLite) sqliteRunDebugRuntimeLogSummary(ctx context.Context, runID, component string) ([]RunDebugRuntimeSummary, int, error) {
+func (s *RunSQLite) sqliteRunDebugRuntimeLogSummary(ctx context.Context, runID, component string) ([]operatorread.RunDebugRuntimeSummary, int, error) {
 	where := []string{"run_id = ?", "event_name = 'platform.runtime_log'"}
 	args := []any{runID}
 	component = strings.TrimSpace(component)
@@ -540,10 +541,10 @@ func (s *OperatorSQLite) sqliteRunDebugRuntimeLogSummary(ctx context.Context, ru
 		return nil, 0, fmt.Errorf("query sqlite run debug runtime log summary: %w", err)
 	}
 	defer rows.Close()
-	out := []RunDebugRuntimeSummary{}
+	out := []operatorread.RunDebugRuntimeSummary{}
 	warnErrorCount := 0
 	for rows.Next() {
-		var item RunDebugRuntimeSummary
+		var item operatorread.RunDebugRuntimeSummary
 		if err := rows.Scan(&item.Level, &item.Component, &item.Action, &item.Count); err != nil {
 			return nil, 0, fmt.Errorf("scan sqlite run debug runtime log summary: %w", err)
 		}

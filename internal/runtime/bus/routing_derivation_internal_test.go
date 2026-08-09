@@ -4,9 +4,10 @@ import (
 	"context"
 	"testing"
 
+	"time"
+
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"time"
 )
 
 func TestRouteTableResolve_WildcardSubscriberMatchesActiveConcreteChildEventWithoutMaterializedKey(t *testing.T) {

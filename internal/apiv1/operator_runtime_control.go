@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 const runtimeControlIdempotencyTTL = 24 * time.Hour
@@ -22,8 +22,8 @@ type okResult struct {
 	OK bool `json:"ok"`
 }
 
-func OperatorRuntimeControlHandlers(opts OperatorReadOptions) map[string]MethodHandler {
-	if opts.RuntimeIngress == nil || opts.Idempotency == nil {
+func OperatorRuntimeControlHandlers(opts RuntimeControlHandlerOptions) map[string]MethodHandler {
+	if opts.Ingress == nil || opts.Idempotency == nil {
 		return nil
 	}
 	now := opts.Now
@@ -40,22 +40,22 @@ func OperatorRuntimeControlHandlers(opts OperatorReadOptions) map[string]MethodH
 	}
 }
 
-func executeRuntimeIngressControl(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time, pause bool) (any, error) {
-	if multiRuntimeContextMode(opts) {
+func executeRuntimeIngressControl(ctx context.Context, req Request, opts RuntimeControlHandlerOptions, now time.Time, pause bool) (any, error) {
+	if multiRuntimeContextMode(opts.RuntimeContexts) {
 		return nil, runtimeContextRequiredError(req.Method, "runtime ingress control is not supported in multi-context DB-loaded mode without an explicit runtime context")
 	}
 	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
 	if err != nil {
 		return nil, err
 	}
-	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
+	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
 		TTL:            runtimeControlIdempotencyTTL,
 		Now:            now,
-	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
+	}, func(ctx context.Context) (apiidempotency.Completion, error) {
 		var result runtimeingress.TransitionResult
 		var err error
 		controlReq := runtimeingress.TransitionRequest{
@@ -64,18 +64,18 @@ func executeRuntimeIngressControl(ctx context.Context, req Request, opts Operato
 			Now:          now,
 		}
 		if pause {
-			result, err = opts.RuntimeIngress.Pause(ctx, controlReq)
+			result, err = opts.Ingress.Pause(ctx, controlReq)
 		} else {
-			result, err = opts.RuntimeIngress.Resume(ctx, controlReq)
+			result, err = opts.Ingress.Resume(ctx, controlReq)
 		}
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, runtimeIngressControlError(err)
+			return apiidempotency.Completion{}, runtimeIngressControlError(err)
 		}
 		response, err := json.Marshal(okResult{OK: true})
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
-		return store.APIIdempotencyCompletion{
+		return apiidempotency.Completion{
 			ResourceID: string(result.Status),
 			Response:   response,
 		}, nil
@@ -100,7 +100,7 @@ func runtimeIngressControlError(err error) error {
 	case errors.Is(err, runtimeingress.ErrNotPaused):
 		return NewApplicationError(RuntimeNotPausedCode, false, nil)
 	}
-	var conflict *store.APIIdempotencyConflictError
+	var conflict *apiidempotency.ConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
 			"original_request_hash":    conflict.OriginalRequestHash,

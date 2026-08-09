@@ -3,85 +3,19 @@ package mailboxpersistence
 import (
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	mailboxcontract "github.com/division-sh/swarm/internal/mailbox"
+
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
 )
 
-var ErrMailboxV1NotFound = errors.New("mailbox item not found")
-var ErrMailboxV1InvalidCursor = errors.New("invalid mailbox cursor")
-
-type MailboxV1ListOptions struct {
-	Status     string
-	RunID      string
-	EntityID   string
-	Type       string
-	Priority   string
-	AnchorKind string
-	Limit      int
-	Cursor     string
-}
-
-type MailboxV1Item struct {
-	MailboxID      string         `json:"mailbox_id"`
-	Type           string         `json:"type"`
-	Status         string         `json:"status"`
-	Priority       string         `json:"priority"`
-	SourceEventID  string         `json:"source_event_id"`
-	ExecutionMode  string         `json:"execution_mode,omitempty"`
-	SourceRunID    string         `json:"-"`
-	SourceFlow     string         `json:"source_flow"`
-	SourceEntityID string         `json:"source_entity_id,omitempty"`
-	Payload        map[string]any `json:"payload"`
-	CreatedAt      string         `json:"created_at"`
-	DecidedAt      string         `json:"decided_at,omitempty"`
-	Decision       string         `json:"decision,omitempty"`
-	DeferredUntil  string         `json:"deferred_until,omitempty"`
-}
-
-type MailboxV1HistoryEntry struct {
-	Action          string         `json:"action"`
-	ActorTokenID    string         `json:"actor_token_id"`
-	TS              string         `json:"ts"`
-	DecisionPayload map[string]any `json:"decision_payload,omitempty"`
-	Reason          string         `json:"reason,omitempty"`
-}
-
-type MailboxV1ItemDetail struct {
-	Item          MailboxV1Item           `json:"item"`
-	Payload       map[string]any          `json:"payload"`
-	History       []MailboxV1HistoryEntry `json:"history"`
-	DecisionSheet *MailboxV1DecisionSheet `json:"decision_sheet,omitempty"`
-}
-
-type MailboxV1DecisionSheet struct {
-	EntityContext     MailboxV1EntityContext     `json:"entity_context"`
-	DownstreamPreview MailboxV1DownstreamPreview `json:"downstream_preview"`
-}
-
-type MailboxV1EntityContext struct {
-	Available bool                                     `json:"available"`
-	Reason    string                                   `json:"reason,omitempty"`
-	Entity    *storeoperatorsurface.OperatorEntityFull `json:"entity,omitempty"`
-}
-
-type MailboxV1DownstreamPreview struct {
-	Available        bool     `json:"available"`
-	Reason           string   `json:"reason,omitempty"`
-	EventName        string   `json:"event_name,omitempty"`
-	Subscribers      []string `json:"subscribers"`
-	SubscriberSource string   `json:"subscriber_source"`
-}
-
-func (s *MailboxPostgresOwner) ListV1MailboxItems(ctx context.Context, opts MailboxV1ListOptions) ([]MailboxV1Item, string, error) {
+func (s *MailboxPostgresOwner) ListV1MailboxItems(ctx context.Context, opts mailboxcontract.V1ListOptions) ([]mailboxcontract.V1Item, string, error) {
 	if s == nil || s.backend == nil {
 		return nil, "", fmt.Errorf("postgres store is required")
 	}
@@ -97,7 +31,7 @@ func (s *MailboxPostgresOwner) ListV1MailboxItems(ctx context.Context, opts Mail
 	if opts.Limit > 200 {
 		opts.Limit = 200
 	}
-	cursor, err := decodeMailboxV1Cursor(opts.Cursor)
+	cursor, err := mailboxcontract.DecodeV1Cursor(opts.Cursor)
 	if err != nil {
 		return nil, "", err
 	}
@@ -141,32 +75,32 @@ func (s *MailboxPostgresOwner) ListV1MailboxItems(ctx context.Context, opts Mail
 	nextCursor := ""
 	if len(rowItems) > opts.Limit {
 		next := rowItems[opts.Limit-1]
-		nextCursor = encodeMailboxV1Cursor(next.CreatedAtTime, next.ID)
+		nextCursor = mailboxcontract.EncodeV1Cursor(next.CreatedAtTime, next.ID)
 		rowItems = rowItems[:opts.Limit]
 	}
-	items := make([]MailboxV1Item, 0, len(rowItems))
+	items := make([]mailboxcontract.V1Item, 0, len(rowItems))
 	for _, row := range rowItems {
 		items = append(items, row.projectItem())
 	}
 	return items, nextCursor, nil
 }
 
-func (s *MailboxPostgresOwner) GetV1MailboxItem(ctx context.Context, id string) (MailboxV1ItemDetail, error) {
+func (s *MailboxPostgresOwner) GetV1MailboxItem(ctx context.Context, id string) (mailboxcontract.V1ItemDetail, error) {
 	if s == nil || s.backend == nil {
-		return MailboxV1ItemDetail{}, fmt.Errorf("postgres store is required")
+		return mailboxcontract.V1ItemDetail{}, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
-		return MailboxV1ItemDetail{}, err
+		return mailboxcontract.V1ItemDetail{}, err
 	}
 	if strings.TrimSpace(id) == "" {
-		return MailboxV1ItemDetail{}, ErrMailboxV1NotFound
+		return mailboxcontract.V1ItemDetail{}, mailboxcontract.ErrV1NotFound
 	}
 	if _, err := s.ExpireMailboxItems(ctx, 200); err != nil {
-		return MailboxV1ItemDetail{}, err
+		return mailboxcontract.V1ItemDetail{}, err
 	}
 	row, err := s.loadMailboxV1Row(ctx, id)
 	if err != nil {
-		return MailboxV1ItemDetail{}, err
+		return mailboxcontract.V1ItemDetail{}, err
 	}
 	return row.projectDetail(), nil
 }
@@ -179,47 +113,7 @@ func replyDeliveryContext(replyContextID string) events.DeliveryContext {
 	return events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}}.Normalized()
 }
 
-type Cursor struct {
-	CreatedAt time.Time `json:"created_at"`
-	MailboxID string    `json:"mailbox_id"`
-}
-
-func decodeMailboxV1Cursor(raw string) (Cursor, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return Cursor{}, nil
-	}
-	decoded, err := base64.RawURLEncoding.DecodeString(raw)
-	if err != nil {
-		return Cursor{}, ErrMailboxV1InvalidCursor
-	}
-	var cursor Cursor
-	if err := json.Unmarshal(decoded, &cursor); err != nil {
-		return Cursor{}, ErrMailboxV1InvalidCursor
-	}
-	if cursor.CreatedAt.IsZero() || strings.TrimSpace(cursor.MailboxID) == "" {
-		return Cursor{}, ErrMailboxV1InvalidCursor
-	}
-	return cursor, nil
-}
-
-func encodeMailboxV1Cursor(createdAt time.Time, mailboxID string) string {
-	raw, _ := json.Marshal(Cursor{CreatedAt: createdAt.UTC(), MailboxID: strings.TrimSpace(mailboxID)})
-	return base64.RawURLEncoding.EncodeToString(raw)
-}
-
-// EncodeMailboxV1Cursor returns the opaque continuation token for an item in
-// the canonical mailbox creation order. Tagged mailbox projections use it to
-// advance notice and decision-card owners independently.
-func EncodeMailboxV1Cursor(createdAt time.Time, mailboxID string) string {
-	return encodeMailboxV1Cursor(createdAt, mailboxID)
-}
-
-func DecodeMailboxV1Cursor(raw string) (Cursor, error) {
-	return decodeMailboxV1Cursor(raw)
-}
-
-func mailboxV1ListWhere(opts MailboxV1ListOptions, cursor Cursor) (string, []any) {
+func mailboxV1ListWhere(opts mailboxcontract.V1ListOptions, cursor mailboxcontract.V1Cursor) (string, []any) {
 	clauses := []string{"1=1"}
 	args := []any{}
 	add := func(clause string, value any) {
@@ -333,7 +227,7 @@ func (s *MailboxPostgresOwner) loadMailboxV1RowTx(ctx context.Context, tx *sql.T
 		return mailboxV1Row{}, err
 	}
 	if len(items) == 0 {
-		return mailboxV1Row{}, ErrMailboxV1NotFound
+		return mailboxV1Row{}, mailboxcontract.ErrV1NotFound
 	}
 	return items[0], nil
 }
@@ -394,8 +288,8 @@ func validateMailboxV1ExecutionMode(raw string) error {
 	return nil
 }
 
-func (r mailboxV1Row) projectItem() MailboxV1Item {
-	item := MailboxV1Item{
+func (r mailboxV1Row) projectItem() mailboxcontract.V1Item {
+	item := mailboxcontract.V1Item{
 		MailboxID:      strings.TrimSpace(r.ID),
 		Type:           strings.TrimSpace(r.Type),
 		Status:         mailboxV1APIStatus(r.Status, r.Decision, r.DeferredUntil),
@@ -418,8 +312,8 @@ func (r mailboxV1Row) projectItem() MailboxV1Item {
 	return item
 }
 
-func (r mailboxV1Row) projectDetail() MailboxV1ItemDetail {
-	history := []MailboxV1HistoryEntry{{
+func (r mailboxV1Row) projectDetail() mailboxcontract.V1ItemDetail {
+	history := []mailboxcontract.V1HistoryEntry{{
 		Action:       "created",
 		ActorTokenID: strings.TrimSpace(coalesce(r.FromAgent, "system")),
 		TS:           r.CreatedAtTime.UTC().Format(time.RFC3339Nano),
@@ -429,7 +323,7 @@ func (r mailboxV1Row) projectDetail() MailboxV1ItemDetail {
 		if action == "" && r.DeferredUntil.Valid {
 			action = "deferred"
 		}
-		entry := MailboxV1HistoryEntry{
+		entry := mailboxcontract.V1HistoryEntry{
 			Action:       action,
 			ActorTokenID: strings.TrimSpace(coalesce(r.DecidedBy, "unknown")),
 			TS:           r.DecidedAt.Time.UTC().Format(time.RFC3339Nano),
@@ -439,7 +333,7 @@ func (r mailboxV1Row) projectDetail() MailboxV1ItemDetail {
 		}
 		history = append(history, entry)
 	}
-	return MailboxV1ItemDetail{
+	return mailboxcontract.V1ItemDetail{
 		Item:    r.projectItem(),
 		Payload: cloneMailboxV1Payload(r.Payload),
 		History: history,

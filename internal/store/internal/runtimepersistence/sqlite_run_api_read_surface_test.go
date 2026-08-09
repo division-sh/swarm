@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -145,7 +146,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 		t.Fatalf("header.EntityCount = %d, want entity_state count 1 despite stale run counter and event overcount", header.EntityCount)
 	}
 
-	firstPage, cursor, err := sqliteStore.ListRunHeaders(ctx, RunHeaderListOptions{Limit: 1})
+	firstPage, cursor, err := sqliteStore.ListRunHeaders(ctx, operatorread.RunHeaderListOptions{Limit: 1})
 	if err != nil {
 		t.Fatalf("ListRunHeaders first page: %v", err)
 	}
@@ -158,14 +159,14 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	if cursor == "" {
 		t.Fatal("cursor empty for truncated sqlite run list")
 	}
-	secondPage, next, err := sqliteStore.ListRunHeaders(ctx, RunHeaderListOptions{Limit: 1, Cursor: cursor})
+	secondPage, next, err := sqliteStore.ListRunHeaders(ctx, operatorread.RunHeaderListOptions{Limit: 1, Cursor: cursor})
 	if err != nil {
 		t.Fatalf("ListRunHeaders second page: %v", err)
 	}
 	if len(secondPage) != 1 || secondPage[0].RunID != older || next != "" {
 		t.Fatalf("second page = %#v cursor=%q, want older only and no next cursor", secondPage, next)
 	}
-	filtered, _, err := sqliteStore.ListRunHeaders(ctx, RunHeaderListOptions{Status: "running", BundleHash: bundleA, Limit: 10})
+	filtered, _, err := sqliteStore.ListRunHeaders(ctx, operatorread.RunHeaderListOptions{Status: "running", BundleHash: bundleA, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListRunHeaders filtered: %v", err)
 	}
@@ -173,7 +174,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 		t.Fatalf("filtered = %#v, want newer only", filtered)
 	}
 
-	report, err := sqliteStore.LoadRunDebugReport(ctx, newer, RunDebugQueryOptions{EventLimit: 2})
+	report, err := sqliteStore.LoadRunDebugReport(ctx, newer, operatorread.RunDebugQueryOptions{EventLimit: 2})
 	if err != nil {
 		t.Fatalf("LoadRunDebugReport: %v", err)
 	}
@@ -200,9 +201,9 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	if got := report.FailedDeliveries[1]; got.DeliveryID != agentFailedDeliveryID || got.SubscriberType != "agent" || got.RetryCount != 1 || !got.RetryScheduled || got.Terminal || got.Failure == nil || got.Failure.Detail.Code != "agent_failure" {
 		t.Fatalf("agent failed delivery evidence = %#v", got)
 	}
-	traceRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, newer, RunDebugTraceQueryOptions{
+	traceRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, newer, operatorread.RunDebugTraceQueryOptions{
 		Limit: 10,
-		Filter: RunDebugTraceFilter{
+		Filter: operatorread.RunDebugTraceFilter{
 			DeliveryStatuses: []string{"failed"},
 		},
 	})
@@ -316,11 +317,11 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 		t.Fatalf("seed sqlite sessions: %v", err)
 	}
 
-	blocked, err := sqliteStore.LoadRunDebugReport(ctx, blockedRunID, RunDebugQueryOptions{})
+	blocked, err := sqliteStore.LoadRunDebugReport(ctx, blockedRunID, operatorread.RunDebugQueryOptions{})
 	if err != nil {
 		t.Fatalf("LoadRunDebugReport blocked: %v", err)
 	}
-	assertRunTestQuiescence(t, blocked.TestQuiescence, RunTestQuiescence{
+	assertRunTestQuiescence(t, blocked.TestQuiescence, operatorread.RunTestQuiescence{
 		Ready:                   false,
 		ActiveDeliveries:        1,
 		UnsettledPipelineEvents: 1,
@@ -328,17 +329,17 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 		ActiveSessionLeases:     1,
 	})
 
-	ready, err := sqliteStore.LoadRunDebugReport(ctx, readyRunID, RunDebugQueryOptions{})
+	ready, err := sqliteStore.LoadRunDebugReport(ctx, readyRunID, operatorread.RunDebugQueryOptions{})
 	if err != nil {
 		t.Fatalf("LoadRunDebugReport ready: %v", err)
 	}
-	assertRunTestQuiescence(t, ready.TestQuiescence, RunTestQuiescence{Ready: true})
+	assertRunTestQuiescence(t, ready.TestQuiescence, operatorread.RunTestQuiescence{Ready: true})
 }
 
 func TestSQLiteRunAPIReadSurface_LoadRunHeaderNotFound(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	_, err := sqliteStore.LoadRunHeader(testAuthorActivityContext(), uuid.NewString())
-	if !errors.Is(err, ErrRunNotFound) {
-		t.Fatalf("LoadRunHeader error = %v, want ErrRunNotFound", err)
+	if !errors.Is(err, operatorread.ErrRunNotFound) {
+		t.Fatalf("LoadRunHeader error = %v, want operatorread.ErrRunNotFound", err)
 	}
 }

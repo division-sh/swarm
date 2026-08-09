@@ -15,8 +15,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/bundlecatalog"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/store"
 
 	"golang.org/x/text/unicode/norm"
 	"gopkg.in/yaml.v3"
@@ -25,7 +26,7 @@ import (
 const bundleRegisterIdempotencyTTL = 24 * time.Hour
 
 type BundleCatalogRegisterStore interface {
-	UpsertBundleCatalog(context.Context, store.BundleCatalogUpsert) (store.BundleCatalogUpsertResult, error)
+	UpsertBundleCatalog(context.Context, bundlecatalog.Upsert) (bundlecatalog.UpsertResult, error)
 }
 
 type bundleRegisterResult struct {
@@ -59,11 +60,8 @@ type bundleRegistrationRuntimeContext struct {
 	PlatformSpecPath string
 }
 
-func OperatorBundleRegisterHandlers(opts OperatorReadOptions) map[string]MethodHandler {
-	if opts.BundleCatalog == nil || opts.Idempotency == nil {
-		return nil
-	}
-	if _, ok := opts.BundleCatalog.(BundleCatalogRegisterStore); !ok {
+func OperatorBundleRegisterHandlers(opts BundleRegisterHandlerOptions) map[string]MethodHandler {
+	if opts.Register == nil || opts.Idempotency == nil {
 		return nil
 	}
 	now := opts.Now
@@ -77,11 +75,8 @@ func OperatorBundleRegisterHandlers(opts OperatorReadOptions) map[string]MethodH
 	}
 }
 
-func executeBundleRegister(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
-	writer, err := requireBundleCatalogRegisterStore(opts.BundleCatalog)
-	if err != nil {
-		return nil, err
-	}
+func executeBundleRegister(ctx context.Context, req Request, opts BundleRegisterHandlerOptions, now time.Time) (any, error) {
+	writer := opts.Register
 	params, err := bundleRegistrationParamsFromRequest(req.Params)
 	if err != nil {
 		return nil, err
@@ -90,30 +85,30 @@ func executeBundleRegister(ctx context.Context, req Request, opts OperatorReadOp
 	if err != nil {
 		return nil, err
 	}
-	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
+	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
 		TTL:            bundleRegisterIdempotencyTTL,
 		Now:            now,
-	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
+	}, func(ctx context.Context) (apiidempotency.Completion, error) {
 		projection, err := buildBundleRegistrationProjection(params, bundleRegistrationRuntimeContextFromOptions(opts))
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
-		upsert, err := writer.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
+		upsert, err := writer.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
 			BundleHash:  projection.BundleHash,
 			ContentYAML: projection.ContentYAML,
 			ParsedJSON:  projection.ParsedJSON,
 			DataBlob:    projection.DataBlob,
 			Metadata:    projection.Metadata,
 		})
-		if errors.Is(err, store.ErrBundleCatalogConflict) {
-			return store.APIIdempotencyCompletion{}, NewApplicationError(BundleRegisterConflictCode, false, map[string]any{"bundle_hash": projection.BundleHash})
+		if errors.Is(err, bundlecatalog.ErrConflict) {
+			return apiidempotency.Completion{}, NewApplicationError(BundleRegisterConflictCode, false, map[string]any{"bundle_hash": projection.BundleHash})
 		}
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
 		result := bundleRegisterResult{
 			BundleHash:    upsert.Detail.BundleHash,
@@ -123,9 +118,9 @@ func executeBundleRegister(ctx context.Context, req Request, opts OperatorReadOp
 		}
 		raw, err := json.Marshal(result)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
-		return store.APIIdempotencyCompletion{ResourceID: result.BundleHash, Response: raw}, nil
+		return apiidempotency.Completion{ResourceID: result.BundleHash, Response: raw}, nil
 	})
 	if err != nil {
 		return nil, bundleRegisterIdempotencyError(err)
@@ -440,16 +435,8 @@ func verifyBundleRegistrationInputsConsumed(inputs []bundleRegistrationMateriali
 	return nil
 }
 
-func requireBundleCatalogRegisterStore(reads BundleCatalogReadStore) (BundleCatalogRegisterStore, error) {
-	writer, ok := reads.(BundleCatalogRegisterStore)
-	if !ok || writer == nil {
-		return nil, fmt.Errorf("bundle catalog register store is required")
-	}
-	return writer, nil
-}
-
 func bundleRegisterIdempotencyError(err error) error {
-	var conflict *store.APIIdempotencyConflictError
+	var conflict *apiidempotency.ConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
 			"original_request_hash":    conflict.OriginalRequestHash,
@@ -463,7 +450,7 @@ func bundleRegisterIdempotencyError(err error) error {
 	return err
 }
 
-func bundleRegistrationRuntimeContextFromOptions(opts OperatorReadOptions) bundleRegistrationRuntimeContext {
+func bundleRegistrationRuntimeContextFromOptions(opts BundleRegisterHandlerOptions) bundleRegistrationRuntimeContext {
 	repoRoot := strings.TrimSpace(opts.RepoRoot)
 	platformSpec := strings.TrimSpace(opts.PlatformSpecPath)
 	if platformSpec == "" {

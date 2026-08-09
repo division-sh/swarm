@@ -97,8 +97,8 @@ rows:
       - {kind: openrpc_method, method: event.subscribe}
       - {kind: go_test, name: TestEventPublishUsesEventPublishV1RPCWithBoundParams}
       - {kind: go_test, name: TestEventPublishMalformedResultsFailClosed}
-      - {kind: go_test, name: TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity}
-      - {kind: go_test, name: TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows}
+      - {kind: go_test, name: TestObservabilityProjection_ListEvents_FiltersTypedSubscriberIdentity}
+      - {kind: go_test, name: TestObservabilityProjection_GetEvent_UsesCanonicalDeliveryRows}
     notes: >
       Closed #1345 owns public/operator typed readback. Green readback is
       explicitly consumer proof only, not route authority proof.
@@ -584,8 +584,8 @@ rows:
       - {kind: artifact, path: internal/apiv1/testdata/public_surface_backend_matrix.yaml}
     proof_refs:
       - {kind: go_test, name: TestEventPublishUsesEventPublishV1RPCWithBoundParams}
-      - {kind: go_test, name: TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity}
-      - {kind: go_test, name: TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows}
+      - {kind: go_test, name: TestObservabilityProjection_ListEvents_FiltersTypedSubscriberIdentity}
+      - {kind: go_test, name: TestObservabilityProjection_GetEvent_UsesCanonicalDeliveryRows}
     notes: >
       Public/operator surfaces prove typed projection only. They do not create,
       fabricate, or backfill delivery authority.
@@ -603,8 +603,8 @@ rows:
       - {kind: spec_ref, path: platform-spec.yaml, ref: subscriber_type}
     proof_refs:
       - {kind: go_test, name: TestEventBusAgentDispatchDoesNotCrossSameIDNodeRouteTargets}
-      - {kind: go_test, name: TestSQLObservabilityReader_ListEvents_FiltersTypedSubscriberIdentity}
-      - {kind: go_test, name: TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows}
+      - {kind: go_test, name: TestObservabilityProjection_ListEvents_FiltersTypedSubscriberIdentity}
+      - {kind: go_test, name: TestObservabilityProjection_GetEvent_UsesCanonicalDeliveryRows}
     notes: >
       A matching raw subscriber_id is not enough when agent and node recipients
       can share names. Typed subscriber identity is the read and write boundary.

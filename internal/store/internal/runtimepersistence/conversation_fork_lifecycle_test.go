@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -23,9 +25,9 @@ func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *test
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now)
 
-	created, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
+	created, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
-		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
+		ForkPoint:       runfork.ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
 		CreatedBy:       "actor-token",
 		Now:             now,
 	})
@@ -38,16 +40,16 @@ func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *test
 	if created.ForkPoint.Kind != "turn" || created.ForkPoint.TurnIndex != 1 || created.ForkPoint.TurnID != source.turn1ID || created.ForkPoint.EventID != "" {
 		t.Fatalf("created fork point = %#v", created.ForkPoint)
 	}
-	if created.CreatedBy != "actor-token" || !created.CreatedAt.Equal(now) || !created.ExpiresAt.Equal(now.Add(ConversationForkLifecycleTTL)) || created.State != "active" {
+	if created.CreatedBy != "actor-token" || !created.CreatedAt.Equal(now) || !created.ExpiresAt.Equal(now.Add(runfork.ConversationForkLifecycleTTL)) || created.State != "active" {
 		t.Fatalf("created fork lifecycle fields = %#v", created)
 	}
 	if created.Turns == nil || len(created.Turns) != 0 {
 		t.Fatalf("created fork turns = %#v, want empty array", created.Turns)
 	}
 
-	eventFork, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
+	eventFork, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
-		ForkPoint:       ConversationForkPointSelector{Kind: "event", EventID: source.event2ID},
+		ForkPoint:       runfork.ConversationForkPointSelector{Kind: "event", EventID: source.event2ID},
 		CreatedBy:       "actor-token",
 		Now:             now.Add(time.Second),
 	})
@@ -59,9 +61,9 @@ func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *test
 	}
 
 	timePoint := source.turn1At.Add(30 * time.Second)
-	timeFork, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
+	timeFork, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
-		ForkPoint:       ConversationForkPointSelector{Kind: "time", At: &timePoint},
+		ForkPoint:       runfork.ConversationForkPointSelector{Kind: "time", At: &timePoint},
 		CreatedBy:       "actor-token",
 		Now:             now.Add(2 * time.Second),
 	})
@@ -72,7 +74,7 @@ func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *test
 		t.Fatalf("time fork point = %#v", timeFork.ForkPoint)
 	}
 
-	page, err := s.ListOperatorConversationForks(ctx, ConversationForkListOptions{
+	page, err := s.ListOperatorConversationForks(ctx, runfork.ConversationForkListOptions{
 		SourceSessionID: source.sessionID,
 		Limit:           2,
 		Now:             now.Add(3 * time.Second),
@@ -83,7 +85,7 @@ func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *test
 	if len(page.Forks) != 2 || page.NextCursor == "" {
 		t.Fatalf("page1 = %#v, want 2 forks and cursor", page)
 	}
-	page2, err := s.ListOperatorConversationForks(ctx, ConversationForkListOptions{
+	page2, err := s.ListOperatorConversationForks(ctx, runfork.ConversationForkListOptions{
 		SourceSessionID: source.sessionID,
 		Limit:           2,
 		Cursor:          page.NextCursor,
@@ -119,7 +121,7 @@ func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *test
 		t.Fatalf("deleted again result = %#v", deletedAgain)
 	}
 
-	pageAfterDelete, err := s.ListOperatorConversationForks(ctx, ConversationForkListOptions{SourceSessionID: source.sessionID, Limit: 10, Now: now.Add(6 * time.Second)})
+	pageAfterDelete, err := s.ListOperatorConversationForks(ctx, runfork.ConversationForkListOptions{SourceSessionID: source.sessionID, Limit: 10, Now: now.Add(6 * time.Second)})
 	if err != nil {
 		t.Fatalf("ListOperatorConversationForks after delete: %v", err)
 	}
@@ -149,31 +151,31 @@ func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testi
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now)
 
-	_, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
+	_, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
-		ForkPoint:       ConversationForkPointSelector{Kind: "event", EventID: uuid.NewString()},
+		ForkPoint:       runfork.ConversationForkPointSelector{Kind: "event", EventID: uuid.NewString()},
 		CreatedBy:       "actor-token",
 		Now:             now,
 	})
-	if !errors.Is(err, ErrEventNotFound) {
-		t.Fatalf("event selector mismatch error = %v, want ErrEventNotFound", err)
+	if !errors.Is(err, operatorread.ErrEventNotFound) {
+		t.Fatalf("event selector mismatch error = %v, want operatorread.ErrEventNotFound", err)
 	}
 
-	_, err = s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
+	_, err = s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
-		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID, EventID: source.event1ID},
+		ForkPoint:       runfork.ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID, EventID: source.event1ID},
 		CreatedBy:       "actor-token",
 		Now:             now,
 	})
-	var paramErr *EntityReadParamError
+	var paramErr *operatorread.EntityReadParamError
 	if !errors.As(err, &paramErr) || paramErr.Field != "fork_point" {
 		t.Fatalf("mixed selector error = %v, want fork_point param error", err)
 	}
 
 	beforeFirstTurn := source.turn1At.Add(-time.Second)
-	_, err = s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
+	_, err = s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
-		ForkPoint:       ConversationForkPointSelector{Kind: "time", At: &beforeFirstTurn},
+		ForkPoint:       runfork.ConversationForkPointSelector{Kind: "time", At: &beforeFirstTurn},
 		CreatedBy:       "actor-token",
 		Now:             now,
 	})
@@ -181,9 +183,9 @@ func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testi
 		t.Fatalf("time selector before first turn error = %v, want fork_point.at param error", err)
 	}
 
-	_, err = s.ListOperatorConversationForks(ctx, ConversationForkListOptions{Cursor: "not-a-cursor", Now: now})
-	if !errors.Is(err, ErrInvalidConversationForkCursor) {
-		t.Fatalf("invalid cursor error = %v, want ErrInvalidConversationForkCursor", err)
+	_, err = s.ListOperatorConversationForks(ctx, runfork.ConversationForkListOptions{Cursor: "not-a-cursor", Now: now})
+	if !errors.Is(err, runfork.ErrInvalidConversationForkCursor) {
+		t.Fatalf("invalid cursor error = %v, want runfork.ErrInvalidConversationForkCursor", err)
 	}
 }
 
@@ -236,16 +238,16 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 		t.Fatalf("count runs before chat: %v", err)
 	}
 
-	fork, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
+	fork, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
-		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
+		ForkPoint:       runfork.ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
 		CreatedBy:       "actor-token",
 		Now:             now,
 	})
 	if err != nil {
 		t.Fatalf("CreateOperatorConversationFork: %v", err)
 	}
-	prepared, err := s.PrepareOperatorConversationForkChat(ctx, ConversationForkChatPrepareRequest{
+	prepared, err := s.PrepareOperatorConversationForkChat(ctx, runfork.ConversationForkChatPrepareRequest{
 		ForkID: fork.ForkID, Message: "inspect the fork", Method: "conversation.fork_chat",
 		ActorTokenID: "actor-token", RequestHash: runtimeeffects.Fingerprint([]byte("inspect the fork")),
 		Now: now.Add(time.Second),
@@ -254,17 +256,17 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 		t.Fatalf("PrepareOperatorConversationForkChat: %v", err)
 	}
 	settleForkChatCompletionForTest(t, ctx, s, prepared, 1, now.Add(1500*time.Millisecond))
-	result, err := s.RecordOperatorConversationForkChat(ctx, ConversationForkChatRecordRequest{
+	result, err := s.RecordOperatorConversationForkChat(ctx, runfork.ConversationForkChatRecordRequest{
 		ForkID:       fork.ForkID,
 		Message:      "inspect the fork",
 		ActorTokenID: "actor-token",
 		Prepared:     prepared,
-		Execution: ConversationForkChatExecution{
+		Execution: runfork.ConversationForkChatExecution{
 			AssistantMessage: "snapshot says Before; requested writes were stubbed",
 			AvailableTools:   prepared.AvailableTools,
 			ExecutionOwner:   prepared.ExecutionOwner,
 			FenceGeneration:  prepared.FenceGeneration,
-			ToolCalls: []OperatorConversationToolCall{
+			ToolCalls: []operatorread.OperatorConversationToolCall{
 				{
 					ToolUseID: "tool-1",
 					Name:      "fork_snapshot_read_entities",
@@ -299,7 +301,7 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	if result.ForkID != fork.ForkID || result.Turn.TurnIndex != 1 || result.Turn.TurnID == "" || !result.Turn.ParseOK {
 		t.Fatalf("chat result turn = %#v", result)
 	}
-	if result.Snapshot.SnapshotOwner != ConversationForkChatSnapshotOwner || result.SandboxPolicy.Owner != ConversationForkChatSandboxOwner {
+	if result.Snapshot.SnapshotOwner != runfork.ConversationForkChatSnapshotOwner || result.SandboxPolicy.Owner != runfork.ConversationForkChatSandboxOwner {
 		t.Fatalf("owners = snapshot %q policy %q", result.Snapshot.SnapshotOwner, result.SandboxPolicy.Owner)
 	}
 	if len(result.Snapshot.EntitySnapshot) != 1 {
@@ -315,13 +317,13 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 		t.Fatalf("snapshot read tool args = %#v", readArgs)
 	}
 	readResult := conversationForkToolCallMap(t, readCall.Result)
-	if readResult["status"] != "read_from_snapshot" || readResult["snapshot_owner"] != ConversationForkChatSnapshotOwner || readResult["entity_count"] != float64(1) {
+	if readResult["status"] != "read_from_snapshot" || readResult["snapshot_owner"] != runfork.ConversationForkChatSnapshotOwner || readResult["entity_count"] != float64(1) {
 		t.Fatalf("snapshot read tool result = %#v", readResult)
 	}
 	for _, toolName := range []string{"save_entity_field", "emit_event", "run_start"} {
 		call := requireConversationForkToolCall(t, result.Turn.ToolCalls, toolName)
 		stub := conversationForkToolCallMap(t, call.Result)
-		if stub["status"] != "stubbed" || stub["owner"] != ConversationForkChatSandboxOwner || stub["live_mutation"] != false {
+		if stub["status"] != "stubbed" || stub["owner"] != runfork.ConversationForkChatSandboxOwner || stub["live_mutation"] != false {
 			t.Fatalf("%s stub result = %#v", toolName, stub)
 		}
 	}
@@ -332,7 +334,7 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 		t.Fatalf("unrequested tool call persisted: %#v", *call)
 	}
 	var responsePayload struct {
-		ToolCalls []OperatorConversationToolCall `json:"tool_calls"`
+		ToolCalls []operatorread.OperatorConversationToolCall `json:"tool_calls"`
 	}
 	if err := json.Unmarshal(result.Turn.ResponsePayload, &responsePayload); err != nil {
 		t.Fatalf("decode forkchat response payload: %v", err)
@@ -398,12 +400,12 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	if _, err := s.DeleteOperatorConversationFork(ctx, fork.ForkID, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("DeleteOperatorConversationFork: %v", err)
 	}
-	_, err = s.PrepareOperatorConversationForkChat(ctx, ConversationForkChatPrepareRequest{
+	_, err = s.PrepareOperatorConversationForkChat(ctx, runfork.ConversationForkChatPrepareRequest{
 		ForkID: fork.ForkID, Message: "after delete", Method: "conversation.fork_chat",
 		ActorTokenID: "actor-token", RequestHash: runtimeeffects.Fingerprint([]byte("after delete")),
 		Now: now.Add(3 * time.Second),
 	})
-	var paramErr *EntityReadParamError
+	var paramErr *operatorread.EntityReadParamError
 	if !errors.As(err, &paramErr) || paramErr.Field != "fork_id" {
 		t.Fatalf("deleted fork chat error = %v, want fork_id invalid params", err)
 	}
@@ -415,9 +417,9 @@ func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now)
-	fork, err := s.CreateOperatorConversationFork(ctx, ConversationForkCreateRequest{
+	fork, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
-		ForkPoint:       ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
+		ForkPoint:       runfork.ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
 		CreatedBy:       "actor-token",
 		Now:             now,
 	})
@@ -433,7 +435,7 @@ func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T
 		go func(i int) {
 			defer wg.Done()
 			message := fmt.Sprintf("concurrent fork chat %d", i)
-			prepared, err := s.PrepareOperatorConversationForkChat(ctx, ConversationForkChatPrepareRequest{
+			prepared, err := s.PrepareOperatorConversationForkChat(ctx, runfork.ConversationForkChatPrepareRequest{
 				ForkID: fork.ForkID, Message: message, Method: "conversation.fork_chat", ActorTokenID: "actor-token",
 				RequestHash: runtimeeffects.Fingerprint([]byte(message)), Now: now.Add(time.Duration(i+1) * time.Second),
 			})
@@ -442,12 +444,12 @@ func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T
 				return
 			}
 			settleForkChatCompletionForTest(t, ctx, s, prepared, 1, now.Add(time.Duration(i+2)*time.Second))
-			result, err := s.RecordOperatorConversationForkChat(ctx, ConversationForkChatRecordRequest{
+			result, err := s.RecordOperatorConversationForkChat(ctx, runfork.ConversationForkChatRecordRequest{
 				ForkID:       fork.ForkID,
 				Message:      message,
 				ActorTokenID: "actor-token",
 				Prepared:     prepared,
-				Execution: ConversationForkChatExecution{
+				Execution: runfork.ConversationForkChatExecution{
 					AssistantMessage: "concurrent result",
 					AvailableTools:   prepared.AvailableTools,
 					ExecutionOwner:   prepared.ExecutionOwner,
@@ -486,7 +488,7 @@ type forkChatCompletionTestStore interface {
 	runtimeeffects.CompletionHeartbeatStore
 }
 
-func settleForkChatCompletionForTest(t *testing.T, ctx context.Context, s forkChatCompletionTestStore, prepared ConversationForkChatPrepared, ordinal int, now time.Time) {
+func settleForkChatCompletionForTest(t *testing.T, ctx context.Context, s forkChatCompletionTestStore, prepared runfork.ConversationForkChatPrepared, ordinal int, now time.Time) {
 	t.Helper()
 	authority := runtimeeffects.Authority{
 		Kind: runtimeeffects.AuthorityConversationForkChat, ID: prepared.ForkTurnID,
@@ -529,7 +531,7 @@ func settleForkChatCompletionForTest(t *testing.T, ctx context.Context, s forkCh
 	}
 }
 
-func requireConversationForkToolCall(t *testing.T, calls []OperatorConversationToolCall, name string) OperatorConversationToolCall {
+func requireConversationForkToolCall(t *testing.T, calls []operatorread.OperatorConversationToolCall, name string) operatorread.OperatorConversationToolCall {
 	t.Helper()
 	if call := findConversationForkToolCall(calls, name); call != nil {
 		if len(call.Result) == 0 {
@@ -538,10 +540,10 @@ func requireConversationForkToolCall(t *testing.T, calls []OperatorConversationT
 		return *call
 	}
 	t.Fatalf("tool call %s missing from %#v", name, calls)
-	return OperatorConversationToolCall{}
+	return operatorread.OperatorConversationToolCall{}
 }
 
-func findConversationForkToolCall(calls []OperatorConversationToolCall, name string) *OperatorConversationToolCall {
+func findConversationForkToolCall(calls []operatorread.OperatorConversationToolCall, name string) *operatorread.OperatorConversationToolCall {
 	for i := range calls {
 		if calls[i].Name == name {
 			return &calls[i]

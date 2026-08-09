@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -14,6 +13,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -905,7 +907,7 @@ func TestOperatorEventPublishPreCommitFailureFailsClosedWithDeclaredError(t *tes
 	}
 }
 
-func TestOperatorEventPublishFailsClosedWithoutDurableAckPublisher(t *testing.T) {
+func TestOperatorEventPublishIsUnavailableWithoutDurableAckPublisher(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
@@ -918,11 +920,11 @@ func TestOperatorEventPublishFailsClosedWithoutDurableAckPublisher(t *testing.T)
 		t.Fatal("event.publish without durable ack publisher error = nil")
 	}
 	data := asMap(t, published.Error.Data)
-	if data["code"] != EventPublishFailedCode {
-		t.Fatalf("event.publish without durable ack publisher data = %#v, want %s", data, EventPublishFailedCode)
+	if data["code"] != MethodUnavailableCode {
+		t.Fatalf("event.publish without durable ack publisher data = %#v, want %s", data, MethodUnavailableCode)
 	}
 	details := asMap(t, data["details"])
-	if details["event_name"] != "scan.requested" || details["phase"] != "publish" || !strings.Contains(fmt.Sprint(details["reason"]), "durable event.publish acknowledgment requires acknowledged publisher") {
+	if details["method"] != "event.publish" {
 		t.Fatalf("event.publish without durable ack publisher details = %#v", details)
 	}
 	if publisher.publishCalls != 0 {
@@ -1322,7 +1324,7 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 	}
 }
 
-func TestOperatorEventPublishExplicitRunRequiresRecipientPlanCheckerBeforePersistence(t *testing.T) {
+func TestOperatorEventPublishExplicitRunIsUnavailableWithoutRecipientPlanChecker(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -1349,15 +1351,12 @@ func TestOperatorEventPublishExplicitRunRequiresRecipientPlanCheckerBeforePersis
 		t.Fatal("missing recipient-plan checker event.publish error = nil")
 	}
 	data := asMap(t, rejected.Error.Data)
-	if data["code"] != EventPublishFailedCode {
-		t.Fatalf("missing recipient-plan checker data = %#v, want %s", data, EventPublishFailedCode)
+	if data["code"] != MethodUnavailableCode {
+		t.Fatalf("missing recipient-plan checker data = %#v, want %s", data, MethodUnavailableCode)
 	}
 	details := asMap(t, data["details"])
-	if details["phase"] != "publish" {
-		t.Fatalf("missing recipient-plan checker details = %#v, want phase=publish", details)
-	}
-	if reason := stringValue(t, details["reason"], "reason"); !strings.Contains(reason, "recipient planning unavailable") {
-		t.Fatalf("missing recipient-plan checker reason = %q", reason)
+	if details["method"] != "event.publish" {
+		t.Fatalf("missing recipient-plan checker details = %#v", details)
 	}
 	if got := countAllRunRows(t, db); got != 1 {
 		t.Fatalf("run rows after missing recipient-plan checker = %d, want 1", got)
@@ -1867,7 +1866,7 @@ func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observab
 	entities, _ := runs.(EntityReadStore)
 	return testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:              func() time.Time { return time.Now().UTC() },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
@@ -1963,11 +1962,11 @@ type failOnceEventReadStore struct {
 	err error
 }
 
-func (s *failOnceEventReadStore) LoadOperatorEvent(ctx context.Context, eventID string) (store.OperatorEventFull, error) {
+func (s *failOnceEventReadStore) LoadOperatorEvent(ctx context.Context, eventID string) (operatorread.OperatorEventFull, error) {
 	if s.err != nil {
 		err := s.err
 		s.err = nil
-		return store.OperatorEventFull{}, err
+		return operatorread.OperatorEventFull{}, err
 	}
 	return s.ObservabilityReadStore.LoadOperatorEvent(ctx, eventID)
 }

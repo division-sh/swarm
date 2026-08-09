@@ -63,7 +63,11 @@ type SQLiteRuntimeStore struct {
 	lLMSQLiteOwner               *storellm.LLMSQLiteOwner
 	managedCapabilitySQLiteOwner *storemanagedcapability.ManagedCapabilitySQLiteOwner
 	mailboxSQLiteOwner           *storemailbox.MailboxSQLiteOwner
-	operatorSQLite               *storeoperatorsurface.OperatorSQLite
+	operatorRunSQLite            *storeoperatorsurface.RunSQLite
+	operatorEntitySQLite         *storeoperatorsurface.EntitySQLite
+	operatorAgentSQLite          *storeoperatorsurface.AgentSQLite
+	operatorConversationSQLite   *storeoperatorsurface.ConversationSQLite
+	operatorObservabilitySQLite  *storeoperatorsurface.ObservabilitySQLite
 	pipelineSQLiteOwner          *storepipeline.PipelineSQLiteOwner
 	replySQLiteOwner             *storereplycontext.ReplySQLiteOwner
 	runForkSQLiteOwner           *storerunfork.RunForkSQLiteOwner

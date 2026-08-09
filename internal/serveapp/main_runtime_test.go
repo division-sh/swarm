@@ -22,6 +22,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/bundlecatalog"
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -626,7 +629,7 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 	if err != nil {
 		t.Fatalf("BuildBundleCatalogProjection: %v", err)
 	}
-	if _, err := pg.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
+	if _, err := pg.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
 		BundleHash:  projection.BundleHash,
 		ContentYAML: projection.ContentYAML,
 		ParsedJSON:  projection.ParsedJSON,
@@ -701,7 +704,7 @@ func TestRunServeRuntimeDBLoadedUsesEmbeddedSpecBeforeCatalogRead(t *testing.T) 
 	if err != nil {
 		t.Fatalf("BuildBundleCatalogProjection: %v", err)
 	}
-	if _, err := pg.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
+	if _, err := pg.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
 		BundleHash:  projection.BundleHash,
 		ContentYAML: projection.ContentYAML,
 		ParsedJSON:  projection.ParsedJSON,
@@ -885,7 +888,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	if err != nil {
 		t.Fatalf("BuildBundleCatalogProjection: %v", err)
 	}
-	if _, err := pg.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
+	if _, err := pg.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
 		BundleHash:  projection.BundleHash,
 		ContentYAML: projection.ContentYAML,
 		ParsedJSON:  projection.ParsedJSON,
@@ -1240,7 +1243,7 @@ func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetI
 		"source": sourceProjection,
 		"target": targetProjection,
 	} {
-		if _, err := pg.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
+		if _, err := pg.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
 			BundleHash:  projection.BundleHash,
 			ContentYAML: projection.ContentYAML,
 			ParsedJSON:  projection.ParsedJSON,
@@ -2283,16 +2286,16 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	keyPrefix := "issue-1997-" + rt.Backend + "-" + fixture.SessionID
 
 	create := func(selector map[string]any, key string) struct {
-		Fork                store.OperatorConversationForkSession `json:"fork"`
-		IdempotencyReplayed bool                                  `json:"idempotency_replayed"`
+		Fork                runfork.OperatorConversationForkSession `json:"fork"`
+		IdempotencyReplayed bool                                    `json:"idempotency_replayed"`
 	} {
 		params := map[string]any{"source_session_id": fixture.SessionID, "fork_point": selector}
 		if key != "" {
 			params["idempotency_key"] = key
 		}
 		var result struct {
-			Fork                store.OperatorConversationForkSession `json:"fork"`
-			IdempotencyReplayed bool                                  `json:"idempotency_replayed"`
+			Fork                runfork.OperatorConversationForkSession `json:"fork"`
+			IdempotencyReplayed bool                                    `json:"idempotency_replayed"`
 		}
 		requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork", params, &result)
 		return result
@@ -2317,8 +2320,8 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	if turnFork.Fork.SourceRunID != fixture.RunID || turnFork.Fork.SourceAgentID != fixture.AgentID || turnFork.Fork.ForkPoint.TurnID != fixture.Turn1ID || turnFork.Fork.State != "active" {
 		t.Fatalf("%s turn fork = %#v", rt.Backend, turnFork)
 	}
-	if got := turnFork.Fork.ExpiresAt.Sub(turnFork.Fork.CreatedAt); got != store.ConversationForkLifecycleTTL {
-		t.Fatalf("%s fork TTL = %s, want %s", rt.Backend, got, store.ConversationForkLifecycleTTL)
+	if got := turnFork.Fork.ExpiresAt.Sub(turnFork.Fork.CreatedAt); got != runfork.ConversationForkLifecycleTTL {
+		t.Fatalf("%s fork TTL = %s, want %s", rt.Backend, got, runfork.ConversationForkLifecycleTTL)
 	}
 	turnReplay := create(map[string]any{"kind": "turn", "turn_id": fixture.Turn1ID}, turnKey)
 	if !turnReplay.IdempotencyReplayed || turnReplay.Fork.ForkID != turnFork.Fork.ForkID {
@@ -2344,12 +2347,12 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 		t.Fatalf("%s keyless time forks = first:%#v second:%#v", rt.Backend, timeFork, keylessDuplicate)
 	}
 
-	var page1 store.ConversationForkListResult
+	var page1 runfork.ConversationForkListResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_list", map[string]any{"source_session_id": fixture.SessionID, "limit": 2}, &page1)
 	if len(page1.Forks) != 2 || page1.NextCursor == "" {
 		t.Fatalf("%s fork list page1 = %#v", rt.Backend, page1)
 	}
-	var page2 store.ConversationForkListResult
+	var page2 runfork.ConversationForkListResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_list", map[string]any{"source_session_id": fixture.SessionID, "limit": 2, "cursor": page1.NextCursor}, &page2)
 	if len(page2.Forks) != 2 || page2.NextCursor != "" {
 		t.Fatalf("%s fork list page2 = %#v", rt.Backend, page2)
@@ -2373,7 +2376,7 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	countsBefore := servedConversationForkLiveCounts(t, rt.DB, rt.Backend, fixture.RunID)
 	chatKey := keyPrefix + "-chat"
 	chatParams := map[string]any{"fork_id": turnFork.Fork.ForkID, "message": "inspect snapshot and try emit_event", "idempotency_key": chatKey}
-	var chat store.ConversationForkChatResult
+	var chat runfork.ConversationForkChatResult
 	chatResponse := requestServedJSONRPC(t, rt.Endpoint, "conversation.fork_chat", chatParams)
 	if chatResponse.Error != nil {
 		t.Fatalf("conversation.fork_chat error = %#v\n%s", chatResponse.Error, servedConversationForkTurnDebug(t, rt.DB, rt.Backend, turnFork.Fork.ForkID))
@@ -2398,7 +2401,7 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 		}
 		switch call.Name {
 		case "fork_snapshot_read_entities":
-			sawSnapshotRead = result["status"] == "read_from_snapshot" && result["snapshot_owner"] == store.ConversationForkChatSnapshotOwner
+			sawSnapshotRead = result["status"] == "read_from_snapshot" && result["snapshot_owner"] == runfork.ConversationForkChatSnapshotOwner
 		case "emit_event":
 			sawEventStub = result["status"] == "stubbed" && result["live_mutation"] == false
 		}
@@ -2410,7 +2413,7 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	if after := servedConversationForkLiveCounts(t, rt.DB, rt.Backend, fixture.RunID); after != countsBefore {
 		t.Fatalf("%s fork chat live counts changed from %#v to %#v", rt.Backend, countsBefore, after)
 	}
-	var chatReplay store.ConversationForkChatResult
+	var chatReplay runfork.ConversationForkChatResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_chat", chatParams, &chatReplay)
 	if !chatReplay.IdempotencyReplayed || chatReplay.Turn.TurnID != chat.Turn.TurnID || rt.LLMRequests.Load() != 2 {
 		t.Fatalf("%s fork chat replay = %#v requests=%d", rt.Backend, chatReplay, rt.LLMRequests.Load())
@@ -2420,14 +2423,14 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 		t.Fatalf("%s fork chat conflict = %#v", rt.Backend, chatConflict.Data)
 	}
 
-	var viewed store.OperatorConversationForkSession
+	var viewed runfork.OperatorConversationForkSession
 	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_view", map[string]any{"fork_id": turnFork.Fork.ForkID}, &viewed)
 	if len(viewed.Turns) != 1 || viewed.Turns[0].TurnID != chat.Turn.TurnID {
 		t.Fatalf("%s fork view = %#v", rt.Backend, viewed)
 	}
 
 	setServedConversationForkExpiry(t, rt.DB, rt.Backend, eventFork.Fork.ForkID, time.Now().UTC().Add(-time.Minute))
-	var expired store.OperatorConversationForkSession
+	var expired runfork.OperatorConversationForkSession
 	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_view", map[string]any{"fork_id": eventFork.Fork.ForkID}, &expired)
 	if expired.State != "expired" {
 		t.Fatalf("%s expired fork state = %q", rt.Backend, expired.State)
@@ -2459,7 +2462,7 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	if chatDeleted.Code == 0 {
 		t.Fatalf("%s deleted fork chat unexpectedly succeeded", rt.Backend)
 	}
-	var active store.ConversationForkListResult
+	var active runfork.ConversationForkListResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.fork_list", map[string]any{"source_session_id": fixture.SessionID, "limit": 20}, &active)
 	for _, item := range active.Forks {
 		if item.ForkID == turnFork.Fork.ForkID || item.ForkID == eventFork.Fork.ForkID {
@@ -3170,7 +3173,7 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 
 func requireServedScenarioRunOriginSurfaces(t *testing.T, endpoint, runID string) {
 	t.Helper()
-	requireOrigin := func(surface string, header store.RunHeader) {
+	requireOrigin := func(surface string, header operatorread.RunHeader) {
 		t.Helper()
 		if header.RunID != runID ||
 			header.Origin.Kind() != storerunlifecycle.OriginScenarioSetup ||
@@ -3180,13 +3183,13 @@ func requireServedScenarioRunOriginSurfaces(t *testing.T, endpoint, runID string
 	}
 
 	var get struct {
-		Run store.RunHeader `json:"run"`
+		Run operatorread.RunHeader `json:"run"`
 	}
 	requireServedJSONRPCResult(t, endpoint, "run.get", map[string]any{"run_id": runID}, &get)
 	requireOrigin("run.get", get.Run)
 
 	var list struct {
-		Runs []store.RunHeader `json:"runs"`
+		Runs []operatorread.RunHeader `json:"runs"`
 	}
 	requireServedJSONRPCResult(t, endpoint, "run.list", map[string]any{"limit": 500}, &list)
 	found := false
@@ -3202,7 +3205,7 @@ func requireServedScenarioRunOriginSurfaces(t *testing.T, endpoint, runID string
 	}
 
 	var diagnosis struct {
-		Run store.RunHeader `json:"run"`
+		Run operatorread.RunHeader `json:"run"`
 	}
 	requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis)
 	requireOrigin("run.diagnose", diagnosis.Run)
@@ -7850,7 +7853,7 @@ func TestPrepareServeBundleSourceDevStampsEphemeralWithoutCatalogRow(t *testing.
 	if !fact.IsEphemeral() || fact.BundleHash() == "" {
 		t.Fatalf("source fact = %#v", fact)
 	}
-	if _, err := pg.LoadBundleCatalog(ctx, fact.BundleHash()); err != store.ErrBundleNotFound {
+	if _, err := pg.LoadBundleCatalog(ctx, fact.BundleHash()); err != bundlecatalog.ErrNotFound {
 		t.Fatalf("LoadBundleCatalog(dev hash) error = %v, want ErrBundleNotFound", err)
 	}
 }
@@ -8051,7 +8054,7 @@ func seedServeRuntimeBundleCatalogFromBundle(t *testing.T, ctx context.Context, 
 	if err != nil {
 		t.Fatalf("BuildBundleCatalogProjection(%s): %v", label, err)
 	}
-	if _, err := pg.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
+	if _, err := pg.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
 		BundleHash:  projection.BundleHash,
 		ContentYAML: projection.ContentYAML,
 		ParsedJSON:  projection.ParsedJSON,

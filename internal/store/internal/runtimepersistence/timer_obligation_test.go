@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -109,14 +110,14 @@ func TestTimerObligationSnapshotDrivesRunDiagnosisOnBothStores(t *testing.T) {
 			insertTimerObligationProofRow(t, ctx, selected, runID, "scheduled_task", observedAt.Add(time.Hour))
 
 			var (
-				quiescence RunTestQuiescence
+				quiescence operatorread.RunTestQuiescence
 				err        error
 			)
 			switch store := selected.(type) {
 			case *PostgresStore:
-				quiescence, err = store.loadRunTestQuiescence(ctx, runID, observedAt)
+				quiescence, err = store.LoadRunTestQuiescence(ctx, runID, observedAt)
 			case *SQLiteRuntimeStore:
-				quiescence, err = store.sqliteRunTestQuiescence(ctx, runID, observedAt)
+				quiescence, err = store.LoadRunTestQuiescence(ctx, runID, observedAt)
 			default:
 				t.Fatalf("unsupported selected store %T", selected)
 			}

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -10,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
 	builderpkg "github.com/division-sh/swarm/internal/builder"
 	"github.com/division-sh/swarm/internal/events"
@@ -22,7 +25,6 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -76,7 +78,7 @@ func setOperatorAuth(req *http.Request) {
 }
 
 func TestDashboardEventFilterFromRequestPreservesTypedSubscriberIdentity(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/events?type=task.completed&source=runtime&entity_id=entity-1&subscriber=worker-1&subscriber_id=worker-1&subscriber_type=node", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/events?type=task.completed&source=runtime&entity_id=entity-1&subscriber_id=worker-1&subscriber_type=node", nil)
 
 	filter, err := dashboardEventFilterFromRequest(req)
 	if err != nil {
@@ -92,18 +94,18 @@ func TestDashboardEventFilterFromRequestPreservesTypedSubscriberIdentity(t *test
 }
 
 func TestDashboardEventFilterFromRequestRejectsInvalidSubscriberType(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/events?subscriber=worker-1&subscriber_type=platform", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/events?subscriber_id=worker-1&subscriber_type=platform", nil)
 
 	if _, err := dashboardEventFilterFromRequest(req); err == nil || !strings.Contains(err.Error(), "subscriber_type") {
 		t.Fatalf("dashboardEventFilterFromRequest error = %v, want subscriber_type rejection", err)
 	}
 }
 
-func TestDashboardEventFilterFromRequestRejectsConflictingSubscriberAliases(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/events?subscriber=worker-1&subscriber_id=worker-2&subscriber_type=agent", nil)
+func TestDashboardRejectsLegacySubscriberParameter(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/events?subscriber=worker-1&subscriber_id=worker-1&subscriber_type=agent", nil)
 
-	if _, err := dashboardEventFilterFromRequest(req); err == nil || !strings.Contains(err.Error(), "subscriber and subscriber_id must match") {
-		t.Fatalf("dashboardEventFilterFromRequest error = %v, want alias conflict rejection", err)
+	if _, err := dashboardEventFilterFromRequest(req); err == nil || !strings.Contains(err.Error(), "subscriber is unsupported") {
+		t.Fatalf("dashboardEventFilterFromRequest error = %v, want legacy subscriber rejection", err)
 	}
 }
 
@@ -121,13 +123,13 @@ func (s stubMailbox) GetMailboxItem(_ context.Context, id string) (runtimetools.
 }
 
 type stubInstances struct {
-	rows          []store.OperatorEntitySummary
-	byID          map[string]store.OperatorEntityFull
-	lastAggregate *store.OperatorEntityAggregateOptions
+	rows          []operatorread.OperatorEntitySummary
+	byID          map[string]operatorread.OperatorEntityFull
+	lastAggregate *operatorread.OperatorEntityAggregateOptions
 }
 
-func (s stubInstances) ListOperatorEntities(_ context.Context, opts store.OperatorEntityListOptions) (store.OperatorEntityListResult, error) {
-	rows := make([]store.OperatorEntitySummary, 0, len(s.rows))
+func (s stubInstances) ListOperatorEntities(_ context.Context, opts operatorread.OperatorEntityListOptions) (operatorread.OperatorEntityListResult, error) {
+	rows := make([]operatorread.OperatorEntitySummary, 0, len(s.rows))
 	for _, row := range s.rows {
 		if opts.RunID != "" && row.RunID != opts.RunID {
 			continue
@@ -149,21 +151,21 @@ func (s stubInstances) ListOperatorEntities(_ context.Context, opts store.Operat
 	if opts.Limit > 0 && len(rows) > opts.Limit {
 		rows = rows[:opts.Limit]
 	}
-	return store.OperatorEntityListResult{Entities: rows}, nil
+	return operatorread.OperatorEntityListResult{Entities: rows}, nil
 }
 
-func (s stubInstances) LoadOperatorEntity(_ context.Context, entityID, runID string) (store.OperatorEntityFull, error) {
+func (s stubInstances) LoadOperatorEntity(_ context.Context, entityID, runID string) (operatorread.OperatorEntityFull, error) {
 	item, ok := s.byID[entityID]
 	if !ok {
-		return store.OperatorEntityFull{}, store.ErrEntityNotFound
+		return operatorread.OperatorEntityFull{}, operatorread.ErrEntityNotFound
 	}
 	if runID != "" && item.Entity.RunID != runID {
-		return store.OperatorEntityFull{}, store.ErrEntityNotFound
+		return operatorread.OperatorEntityFull{}, operatorread.ErrEntityNotFound
 	}
 	return item, nil
 }
 
-func (s stubInstances) AggregateOperatorEntities(_ context.Context, opts store.OperatorEntityAggregateOptions) (store.OperatorEntityAggregateResult, error) {
+func (s stubInstances) AggregateOperatorEntities(_ context.Context, opts operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateResult, error) {
 	if s.lastAggregate != nil {
 		*s.lastAggregate = opts
 	}
@@ -191,24 +193,24 @@ func (s stubInstances) AggregateOperatorEntities(_ context.Context, opts store.O
 		}
 		counts[key]++
 	}
-	return store.OperatorEntityAggregateResult{Counts: counts}, nil
+	return operatorread.OperatorEntityAggregateResult{Counts: counts}, nil
 }
 
 func TestHandler_InstanceHandlersReturnCanonicalEntityProjection(t *testing.T) {
 	entityID := runtimeflowidentity.EntityID("wf-1")
-	lastAggregate := &store.OperatorEntityAggregateOptions{}
+	lastAggregate := &operatorread.OperatorEntityAggregateOptions{}
 	h := &Handler{
 		entities: stubInstances{
-			rows: []store.OperatorEntitySummary{{
+			rows: []operatorread.OperatorEntitySummary{{
 				EntityID:     entityID,
 				RunID:        "run-1",
 				FlowInstance: "order/wf-1",
 				EntityType:   "order",
 				CurrentState: "reviewing",
 			}},
-			byID: map[string]store.OperatorEntityFull{
+			byID: map[string]operatorread.OperatorEntityFull{
 				entityID: {
-					Entity: store.OperatorEntitySummary{
+					Entity: operatorread.OperatorEntitySummary{
 						EntityID:     entityID,
 						RunID:        "run-1",
 						FlowInstance: "order/wf-1",
@@ -257,7 +259,7 @@ func TestHandler_InstanceHandlersReturnCanonicalEntityProjection(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("handleInstanceDetail status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	var detail store.OperatorEntityFull
+	var detail operatorread.OperatorEntityFull
 	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
 		t.Fatalf("unmarshal instance detail: %v", err)
 	}
@@ -296,14 +298,15 @@ type stubObservability struct {
 	eventDetail map[string]eventRecord
 	runtimeLogs []runtimeLogRecord
 	incidents   []incidentRecord
+	err         error
 }
 
 type stubRunTrace struct {
-	rows map[string][]store.RunDebugTraceRow
+	rows map[string][]operatorread.RunDebugTraceRow
 	err  error
 }
 
-func (s stubRunTrace) LoadRunDebugTrace(_ context.Context, runID string, _ store.RunDebugTraceQueryOptions) ([]store.RunDebugTraceRow, error) {
+func (s stubRunTrace) LoadRunDebugTrace(_ context.Context, runID string, _ operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, error) {
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -475,19 +478,19 @@ func stubRunTerminal(status string) bool {
 	}
 }
 
-func (s *stubBuilderRunStore) LoadRunDebugReport(_ context.Context, runID string, _ store.RunDebugQueryOptions) (store.RunDebugReport, error) {
+func (s *stubBuilderRunStore) LoadRunDebugReport(_ context.Context, runID string, _ operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	report := store.RunDebugReport{
+	report := operatorread.RunDebugReport{
 		RunID:             strings.TrimSpace(runID),
-		EventCounts:       []store.RunDebugEventCount{},
-		Deliveries:        []store.RunDebugDeliveryCount{},
-		Events:            []store.RunDebugEvent{},
-		DeadLetters:       []store.RunDebugDeadLetter{},
-		AgentTurns:        []store.RunDebugAgentTurn{},
-		Mutations:         []store.RunDebugMutation{},
-		RuntimeLogs:       []store.RunDebugRuntimeLog{},
-		RuntimeLogSummary: []store.RunDebugRuntimeSummary{},
+		EventCounts:       []operatorread.RunDebugEventCount{},
+		Deliveries:        []operatorread.RunDebugDeliveryCount{},
+		Events:            []operatorread.RunDebugEvent{},
+		DeadLetters:       []operatorread.RunDebugDeadLetter{},
+		AgentTurns:        []operatorread.RunDebugAgentTurn{},
+		Mutations:         []operatorread.RunDebugMutation{},
+		RuntimeLogs:       []operatorread.RunDebugRuntimeLog{},
+		RuntimeLogSummary: []operatorread.RunDebugRuntimeSummary{},
 	}
 	if snap, ok := s.snapshots[runID]; ok {
 		report.RunTableStatus = snap.Status
@@ -529,7 +532,7 @@ func (s *stubBuilderRunStore) LoadRunDebugReport(_ context.Context, runID string
 					failure = &decoded
 				}
 			}
-			report.RuntimeLogs = append(report.RuntimeLogs, store.RunDebugRuntimeLog{
+			report.RuntimeLogs = append(report.RuntimeLogs, operatorread.RunDebugRuntimeLog{
 				EventID:   strings.TrimSpace(evt.ID()),
 				Level:     strings.TrimSpace(asString(payload["log_level"])),
 				Message:   strings.TrimSpace(asString(payload["message"])),
@@ -545,7 +548,7 @@ func (s *stubBuilderRunStore) LoadRunDebugReport(_ context.Context, runID string
 			continue
 		}
 		payload := append(json.RawMessage(nil), evt.Payload()...)
-		report.Events = append(report.Events, store.RunDebugEvent{
+		report.Events = append(report.Events, operatorread.RunDebugEvent{
 			EventID:    strings.TrimSpace(evt.ID()),
 			EventName:  strings.TrimSpace(string(evt.Type())),
 			EntityID:   strings.TrimSpace(evt.EntityID()),
@@ -556,11 +559,11 @@ func (s *stubBuilderRunStore) LoadRunDebugReport(_ context.Context, runID string
 		})
 	}
 	for eventName, count := range counts {
-		report.EventCounts = append(report.EventCounts, store.RunDebugEventCount{EventName: eventName, Count: count})
+		report.EventCounts = append(report.EventCounts, operatorread.RunDebugEventCount{EventName: eventName, Count: count})
 	}
-	slices.SortFunc(report.Events, func(a, b store.RunDebugEvent) int { return b.CreatedAt.Compare(a.CreatedAt) })
-	slices.SortFunc(report.RuntimeLogs, func(a, b store.RunDebugRuntimeLog) int { return b.CreatedAt.Compare(a.CreatedAt) })
-	slices.SortFunc(report.EventCounts, func(a, b store.RunDebugEventCount) int { return strings.Compare(a.EventName, b.EventName) })
+	slices.SortFunc(report.Events, func(a, b operatorread.RunDebugEvent) int { return b.CreatedAt.Compare(a.CreatedAt) })
+	slices.SortFunc(report.RuntimeLogs, func(a, b operatorread.RunDebugRuntimeLog) int { return b.CreatedAt.Compare(a.CreatedAt) })
+	slices.SortFunc(report.EventCounts, func(a, b operatorread.RunDebugEventCount) int { return strings.Compare(a.EventName, b.EventName) })
 	if report.RootEventID == "" && len(report.Events) > 0 {
 		root := report.Events[len(report.Events)-1]
 		report.RootEventID = root.EventID
@@ -569,11 +572,11 @@ func (s *stubBuilderRunStore) LoadRunDebugReport(_ context.Context, runID string
 	return report, nil
 }
 
-func (s *stubBuilderRunStore) LoadRunDebugTracePage(_ context.Context, runID string, opts store.RunDebugTraceQueryOptions) ([]store.RunDebugTraceRow, string, error) {
+func (s *stubBuilderRunStore) LoadRunDebugTracePage(_ context.Context, runID string, opts operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	runID = strings.TrimSpace(runID)
-	rows := []store.RunDebugTraceRow{}
+	rows := []operatorread.RunDebugTraceRow{}
 	for _, evt := range s.events {
 		if strings.TrimSpace(evt.RunID()) != runID {
 			continue
@@ -581,7 +584,7 @@ func (s *stubBuilderRunStore) LoadRunDebugTracePage(_ context.Context, runID str
 		if opts.Since != nil && !evt.CreatedAt().After(opts.Since.UTC()) {
 			continue
 		}
-		rows = append(rows, store.RunDebugTraceRow{
+		rows = append(rows, operatorread.RunDebugTraceRow{
 			EventID:         strings.TrimSpace(evt.ID()),
 			EventName:       strings.TrimSpace(string(evt.Type())),
 			SourceEventID:   strings.TrimSpace(evt.ParentEventID()),
@@ -591,7 +594,7 @@ func (s *stubBuilderRunStore) LoadRunDebugTracePage(_ context.Context, runID str
 			EventCreatedAt:  evt.CreatedAt().UTC(),
 		})
 	}
-	slices.SortFunc(rows, func(a, b store.RunDebugTraceRow) int {
+	slices.SortFunc(rows, func(a, b operatorread.RunDebugTraceRow) int {
 		if cmp := a.EventCreatedAt.Compare(b.EventCreatedAt); cmp != 0 {
 			return cmp
 		}
@@ -601,13 +604,13 @@ func (s *stubBuilderRunStore) LoadRunDebugTracePage(_ context.Context, runID str
 	if limit <= 0 || limit > len(rows) {
 		limit = len(rows)
 	}
-	return append([]store.RunDebugTraceRow(nil), rows[:limit]...), "", nil
+	return append([]operatorread.RunDebugTraceRow(nil), rows[:limit]...), "", nil
 }
 
-func (s *stubBuilderRunStore) ListOperatorEvents(_ context.Context, opts store.OperatorEventListOptions) (store.OperatorEventListResult, error) {
+func (s *stubBuilderRunStore) ListOperatorEvents(_ context.Context, opts operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	eventsOut := []store.OperatorEventFull{}
+	eventsOut := []operatorread.OperatorEventFull{}
 	for _, evt := range s.events {
 		if strings.TrimSpace(evt.RunID()) != strings.TrimSpace(opts.Filter.RunID) {
 			continue
@@ -620,7 +623,7 @@ func (s *stubBuilderRunStore) ListOperatorEvents(_ context.Context, opts store.O
 		}
 		payload := map[string]any{}
 		_ = json.Unmarshal(evt.Payload(), &payload)
-		eventsOut = append(eventsOut, store.OperatorEventFull{
+		eventsOut = append(eventsOut, operatorread.OperatorEventFull{
 			EventID:       strings.TrimSpace(evt.ID()),
 			EventName:     strings.TrimSpace(string(evt.Type())),
 			ExecutionMode: evt.ExecutionMode(),
@@ -632,7 +635,7 @@ func (s *stubBuilderRunStore) ListOperatorEvents(_ context.Context, opts store.O
 			Payload:       payload,
 		})
 	}
-	slices.SortFunc(eventsOut, func(a, b store.OperatorEventFull) int {
+	slices.SortFunc(eventsOut, func(a, b operatorread.OperatorEventFull) int {
 		if cmp := a.CreatedAt.Compare(b.CreatedAt); cmp != 0 {
 			if opts.Order == "asc" {
 				return cmp
@@ -648,13 +651,13 @@ func (s *stubBuilderRunStore) ListOperatorEvents(_ context.Context, opts store.O
 	if limit <= 0 || limit > len(eventsOut) {
 		limit = len(eventsOut)
 	}
-	return store.OperatorEventListResult{Events: append([]store.OperatorEventFull(nil), eventsOut[:limit]...)}, nil
+	return operatorread.OperatorEventListResult{Events: append([]operatorread.OperatorEventFull(nil), eventsOut[:limit]...)}, nil
 }
 
-func (s *stubBuilderRunStore) ListOperatorRuntimeLogs(_ context.Context, opts store.OperatorRuntimeLogListOptions) (store.OperatorRuntimeLogListResult, error) {
+func (s *stubBuilderRunStore) ListOperatorRuntimeLogs(_ context.Context, opts operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	logs := []store.OperatorRuntimeLogEntry{}
+	logs := []operatorread.OperatorRuntimeLogEntry{}
 	for _, evt := range s.events {
 		if strings.TrimSpace(evt.RunID()) != strings.TrimSpace(opts.RunID) || evt.Type() != events.EventType("platform.runtime_log") {
 			continue
@@ -665,20 +668,23 @@ func (s *stubBuilderRunStore) ListOperatorRuntimeLogs(_ context.Context, opts st
 		payload := map[string]any{}
 		_ = json.Unmarshal(evt.Payload(), &payload)
 		details, _ := payload["details"].(map[string]any)
-		logs = append(logs, store.OperatorRuntimeLogEntry{
-			LogID:     strings.TrimSpace(evt.ID()),
-			TS:        evt.CreatedAt().UTC(),
-			Level:     strings.TrimSpace(asString(payload["log_level"])),
-			Component: strings.TrimSpace(asString(details["component"])),
-			Source:    strings.TrimSpace(firstNonEmpty(asString(details["agent_id"]), evt.SourceAgent())),
-			RunID:     strings.TrimSpace(evt.RunID()),
-			EntityID:  strings.TrimSpace(firstNonEmpty(evt.EntityID(), asString(details["entity_id"]))),
-			ErrorCode: strings.TrimSpace(asString(details["error_code"])),
-			Message:   strings.TrimSpace(asString(payload["message"])),
-			Details:   cloneAnyMap(details),
+		logs = append(logs, operatorread.OperatorRuntimeLogEntry{
+			LogID:           strings.TrimSpace(evt.ID()),
+			TS:              evt.CreatedAt().UTC(),
+			Level:           strings.TrimSpace(asString(payload["log_level"])),
+			Component:       strings.TrimSpace(asString(details["component"])),
+			Source:          strings.TrimSpace(firstNonEmpty(asString(details["agent_id"]), evt.SourceAgent())),
+			RunID:           strings.TrimSpace(evt.RunID()),
+			EntityID:        strings.TrimSpace(firstNonEmpty(evt.EntityID(), asString(details["entity_id"]))),
+			ErrorCode:       strings.TrimSpace(asString(details["error_code"])),
+			Message:         strings.TrimSpace(asString(payload["message"])),
+			Action:          strings.TrimSpace(asString(details["action"])),
+			EventType:       strings.TrimSpace(firstNonEmpty(asString(details["event_name"]), asString(details["event_type"]))),
+			AgentID:         strings.TrimSpace(asString(details["agent_id"])),
+			CanonicalDetail: cloneAnyMap(details),
 		})
 	}
-	slices.SortFunc(logs, func(a, b store.OperatorRuntimeLogEntry) int {
+	slices.SortFunc(logs, func(a, b operatorread.OperatorRuntimeLogEntry) int {
 		if cmp := a.TS.Compare(b.TS); cmp != 0 {
 			return cmp
 		}
@@ -688,45 +694,104 @@ func (s *stubBuilderRunStore) ListOperatorRuntimeLogs(_ context.Context, opts st
 	if limit <= 0 || limit > len(logs) {
 		limit = len(logs)
 	}
-	return store.OperatorRuntimeLogListResult{Logs: append([]store.OperatorRuntimeLogEntry(nil), logs[:limit]...)}, nil
+	return operatorread.OperatorRuntimeLogListResult{Logs: append([]operatorread.OperatorRuntimeLogEntry(nil), logs[:limit]...)}, nil
 }
 
 type stubDashboardConversationHTTPReader struct {
-	listResult store.OperatorConversationListResult
-	turnPages  map[string]store.OperatorConversationTurnListResult
-	listOpts   store.OperatorConversationListOptions
-	turnOpts   []store.OperatorConversationTurnListOptions
+	listResult operatorread.OperatorConversationListResult
+	turnPages  map[string]operatorread.OperatorConversationTurnListResult
+	listOpts   operatorread.OperatorConversationListOptions
+	turnOpts   []operatorread.OperatorConversationTurnListOptions
 }
 
-func (s *stubDashboardConversationHTTPReader) ListOperatorConversations(_ context.Context, opts store.OperatorConversationListOptions) (store.OperatorConversationListResult, error) {
+func (s *stubDashboardConversationHTTPReader) ListOperatorConversations(_ context.Context, opts operatorread.OperatorConversationListOptions) (operatorread.OperatorConversationListResult, error) {
 	s.listOpts = opts
 	return s.listResult, nil
 }
 
-func (s *stubDashboardConversationHTTPReader) ListOperatorConversationTurns(_ context.Context, opts store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error) {
+func (s *stubDashboardConversationHTTPReader) ListOperatorConversationTurns(_ context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error) {
 	s.turnOpts = append(s.turnOpts, opts)
 	return s.turnPages[strings.TrimSpace(opts.Cursor)], nil
 }
 
-func (s *stubDashboardConversationHTTPReader) LoadOperatorPublicConversationTurn(context.Context, string, string) (store.OperatorPublicConversationTurnDetail, error) {
-	return store.OperatorPublicConversationTurnDetail{}, store.ErrTurnNotFound
+func (s *stubDashboardConversationHTTPReader) LoadOperatorPublicConversationTurn(context.Context, string, string) (operatorread.OperatorPublicConversationTurnDetail, error) {
+	return operatorread.OperatorPublicConversationTurnDetail{}, operatorread.ErrTurnNotFound
 }
 
 func (s stubObservability) ListEvents(context.Context, EventFilter, int) ([]eventRecord, error) {
-	return s.events, nil
+	return s.events, s.err
 }
 
 func (s stubObservability) GetEvent(_ context.Context, id string) (eventRecord, bool, error) {
+	if s.err != nil {
+		return eventRecord{}, false, s.err
+	}
 	item, ok := s.eventDetail[id]
 	return item, ok, nil
 }
 
 func (s stubObservability) ListRuntimeLogs(context.Context, RuntimeLogFilter, int) ([]runtimeLogRecord, error) {
-	return s.runtimeLogs, nil
+	return s.runtimeLogs, s.err
 }
 
 func (s stubObservability) ListIncidents(context.Context, IncidentFilter) ([]incidentRecord, error) {
-	return s.incidents, nil
+	return s.incidents, s.err
+}
+
+func TestDashboardMissingCapabilitiesFailClosed(t *testing.T) {
+	h := &Handler{}
+	tests := []struct {
+		name string
+		call func(http.ResponseWriter, *http.Request)
+		path string
+	}{
+		{name: "health", call: h.handleHealth, path: "/healthz"},
+		{name: "event list", call: h.handleEvents, path: "/api/events"},
+		{name: "event detail", call: h.handleEventDetail, path: "/api/events/evt-1"},
+		{name: "flow stream", call: h.handleFlowEvents, path: "/api/flow/events"},
+		{name: "event stream", call: h.handleEventStream, path: "/api/events?stream=true"},
+		{name: "runtime logs", call: h.handleRuntimeLogs, path: "/api/runtime/logs"},
+		{name: "runtime incidents", call: h.handleRuntimeIncidents, path: "/api/runtime/incidents"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.SetPathValue("id", "evt-1")
+			tc.call(rec, req)
+			if rec.Code != http.StatusNotImplemented {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusNotImplemented, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "not configured") {
+				t.Fatalf("body = %s, want explicit missing capability", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestDashboardStreamsSurfaceReadFailureAndTerminate(t *testing.T) {
+	readErr := errors.New("projection read failed")
+	h := &Handler{observability: stubObservability{err: readErr}}
+	for _, tc := range []struct {
+		name string
+		call func(http.ResponseWriter, *http.Request)
+		path string
+	}{
+		{name: "flow", call: h.handleFlowEvents, path: "/api/flow/events"},
+		{name: "event", call: h.handleEventStream, path: "/api/events?stream=true&include_runtime=true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			tc.call(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want stream status 200; body=%s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			if !strings.Contains(body, "event: error") || !strings.Contains(body, readErr.Error()) {
+				t.Fatalf("stream body = %q, want explicit terminal error event", body)
+			}
+		})
+	}
 }
 
 type stubRuntimeControl struct {
@@ -989,8 +1054,8 @@ func TestHandler_DashboardRoutesFailClosedWhenAuthIsNotConfigured(t *testing.T) 
 }
 
 func TestDashboardConversationListHTTPUsesCanonicalPageAndCursor(t *testing.T) {
-	reader := &stubDashboardConversationHTTPReader{listResult: store.OperatorConversationListResult{
-		Conversations: []store.OperatorConversationSummary{{SessionID: "sess-1", AgentID: "agent-1", Status: "active"}},
+	reader := &stubDashboardConversationHTTPReader{listResult: operatorread.OperatorConversationListResult{
+		Conversations: []operatorread.OperatorConversationSummary{{SessionID: "sess-1", AgentID: "agent-1", Status: "active"}},
 		NextCursor:    "conversation-page-3",
 	}}
 	handler := NewHandler(Options{Conversations: reader}).(*Handler)
@@ -1010,19 +1075,19 @@ func TestDashboardConversationListHTTPUsesCanonicalPageAndCursor(t *testing.T) {
 
 func TestDashboardConversationDetailHTTPUsesCompactSafeCursorPages(t *testing.T) {
 	completedAt := time.Date(2026, 7, 14, 1, 2, 3, 0, time.UTC)
-	reader := &stubDashboardConversationHTTPReader{turnPages: map[string]store.OperatorConversationTurnListResult{
+	reader := &stubDashboardConversationHTTPReader{turnPages: map[string]operatorread.OperatorConversationTurnListResult{
 		"": {
-			Conversation: store.OperatorConversationSummary{SessionID: "sess-1", AgentID: "agent-1", Status: "active"},
-			Turns: []store.OperatorConversationTurnListItem{{
+			Conversation: operatorread.OperatorConversationSummary{SessionID: "sess-1", AgentID: "agent-1", Status: "active"},
+			Turns: []operatorread.OperatorConversationTurnListItem{{
 				TurnID: "turn-2", Ordinal: 2, CompletedAt: completedAt, DurationMS: 42,
-				ActivityCounts: store.OperatorConversationActivityCounts{Dispatch: 1, Tool: 1, ToolResult: 1, Publish: 1, Output: 1, Failure: 1},
+				ActivityCounts: operatorread.OperatorConversationActivityCounts{Dispatch: 1, Tool: 1, ToolResult: 1, Publish: 1, Output: 1, Failure: 1},
 				ParseOK:        false, Outcome: "failed",
 			}},
 			NextCursor: "turn-page-2",
 		},
 		"turn-page-2": {
-			Conversation: store.OperatorConversationSummary{SessionID: "sess-1", AgentID: "agent-1", Status: "active"},
-			Turns:        []store.OperatorConversationTurnListItem{{TurnID: "turn-1", Ordinal: 1, CompletedAt: completedAt.Add(-time.Minute), DurationMS: 21, ParseOK: true}},
+			Conversation: operatorread.OperatorConversationSummary{SessionID: "sess-1", AgentID: "agent-1", Status: "active"},
+			Turns:        []operatorread.OperatorConversationTurnListItem{{TurnID: "turn-1", Ordinal: 1, CompletedAt: completedAt.Add(-time.Minute), DurationMS: 21, ParseOK: true}},
 		},
 	}}
 	handler := NewHandler(Options{Conversations: reader}).(*Handler)
@@ -1064,14 +1129,14 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	t.Skip("legacy dashboard/Builder operator endpoint retired under #731; canonical v1 owner tests cover this behavior")
 	projectCtl := &stubProjectControl{}
 	entityID := runtimeflowidentity.EntityID("wf-1")
-	lastAggregate := &store.OperatorEntityAggregateOptions{}
+	lastAggregate := &operatorread.OperatorEntityAggregateOptions{}
 	instances := stubInstances{
-		rows: []store.OperatorEntitySummary{
+		rows: []operatorread.OperatorEntitySummary{
 			{EntityID: entityID, FlowInstance: "order", CurrentState: "active"},
 		},
-		byID: map[string]store.OperatorEntityFull{
+		byID: map[string]operatorread.OperatorEntityFull{
 			entityID: {
-				Entity: store.OperatorEntitySummary{
+				Entity: operatorread.OperatorEntitySummary{
 					EntityID:     entityID,
 					FlowInstance: "order",
 					CurrentState: "active",
@@ -1135,7 +1200,7 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("dashboard entity detail status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	var dashboardEntity store.OperatorEntityFull
+	var dashboardEntity operatorread.OperatorEntityFull
 	if err := json.Unmarshal(rec.Body.Bytes(), &dashboardEntity); err != nil {
 		t.Fatalf("unmarshal dashboard entity detail: %v", err)
 	}
@@ -1194,7 +1259,7 @@ func TestHandler_BuilderRPC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal entity result: %v", err)
 	}
-	var builderEntity store.OperatorEntityFull
+	var builderEntity operatorread.OperatorEntityFull
 	if err := json.Unmarshal(rawEntity, &builderEntity); err != nil {
 		t.Fatalf("unmarshal canonical entity result: %v", err)
 	}
@@ -1583,7 +1648,7 @@ func TestHandler_RunTraceUsesCanonicalPersistedRunDebugOwner(t *testing.T) {
 			return map[string]any{"runtime": map[string]any{"ready": true}}, nil
 		},
 		AuthToken: testOperatorAuthToken,
-		RunTrace: stubRunTrace{rows: map[string][]store.RunDebugTraceRow{
+		RunTrace: stubRunTrace{rows: map[string][]operatorread.RunDebugTraceRow{
 			runID: {{
 				EventID:              "evt-1",
 				EventName:            "scan.requested",

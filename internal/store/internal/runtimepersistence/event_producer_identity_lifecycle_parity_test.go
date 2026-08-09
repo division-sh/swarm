@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -22,8 +23,8 @@ import (
 type eventProducerIdentityLifecycleStore interface {
 	semanticEventFixtureStore
 	PipelineObligations() runtimepipelineobligation.Store
-	ListPendingAgentDeliveryDetails(context.Context, PendingAgentDeliveryListOptions) (PendingAgentDeliveryPage, error)
-	LoadOperatorEvent(context.Context, string) (OperatorEventFull, error)
+	ListPendingAgentDeliveryDetails(context.Context, operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryPage, error)
+	LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
 }
 
 func TestEventProducerIdentityPersistenceToReadbackParity(t *testing.T) {
@@ -173,7 +174,7 @@ func eventProducerIdentityReadbacks(t testing.TB, surface eventProducerIdentityL
 			name:         "pending_delivery_diagnostics",
 			runtimeEvent: true,
 			load: func() (events.Event, error) {
-				page, err := surface.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{
+				page, err := surface.ListPendingAgentDeliveryDetails(ctx, operatorread.PendingAgentDeliveryListOptions{
 					AgentIdentity: mustTestAgentIdentity(agentID, "fixture/"+agentID),
 					Since:         since,
 					Limit:         10,

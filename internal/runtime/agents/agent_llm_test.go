@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"time"
+
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
@@ -28,7 +30,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
-	"time"
 )
 
 type staticAgentRuntimeResolver struct {

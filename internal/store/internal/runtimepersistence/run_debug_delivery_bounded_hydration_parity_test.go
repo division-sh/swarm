@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
@@ -17,7 +18,7 @@ import (
 
 type boundedRunDebugDeliveryStore interface {
 	authorActivityReceiptStore
-	LoadRunDebugReport(context.Context, string, RunDebugQueryOptions) (RunDebugReport, error)
+	LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
 }
 
 func TestRunDebugReportBoundsDeliveryHydrationParity(t *testing.T) {
@@ -54,7 +55,7 @@ func TestRunDebugReportBoundsDeliveryHydrationParity(t *testing.T) {
 			corruptOperatorAgentDeliveryTail(t, ctx, fixture, excludedFailure.DeliveryID)
 			corruptOperatorAgentDeliveryTail(t, ctx, fixture, delivered.DeliveryID)
 
-			report, err := selected.LoadRunDebugReport(ctx, runID, RunDebugQueryOptions{DeadLetterLimit: 1})
+			report, err := selected.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{DeadLetterLimit: 1})
 			if err != nil {
 				t.Fatalf("load bounded run debug report: %v", err)
 			}
@@ -81,7 +82,7 @@ func TestRunDebugReportBoundsDeliveryHydrationParity(t *testing.T) {
 			}
 
 			corruptOperatorAgentDeliveryTail(t, ctx, fixture, selectedFailure.DeliveryID)
-			if _, err := selected.LoadRunDebugReport(ctx, runID, RunDebugQueryOptions{DeadLetterLimit: 1}); err == nil || !strings.Contains(err.Error(), "decode delivery target") {
+			if _, err := selected.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{DeadLetterLimit: 1}); err == nil || !strings.Contains(err.Error(), "decode delivery target") {
 				t.Fatalf("selected malformed failure error = %v, want canonical route decode failure", err)
 			}
 		})

@@ -3,14 +3,16 @@ package runtimepersistence
 import (
 	"slices"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 func TestCanonicalConversationForkSandboxPolicyOwnsExactAvailableTools(t *testing.T) {
-	policy := CanonicalConversationForkSandboxPolicy()
+	policy := runfork.CanonicalConversationForkSandboxPolicy()
 	if err := policy.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
-	prepared := ConversationForkChatPrepared{
+	prepared := runfork.ConversationForkChatPrepared{
 		SandboxPolicy:  policy,
 		AvailableTools: policy.AvailableToolNames(),
 	}

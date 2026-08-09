@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	swruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 func TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners(t *testing.T) {
@@ -20,16 +20,13 @@ func TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:              func() time.Time { return now },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
 			Idempotency:      newRecordingAPIIdempotencyStore(),
 			RuntimeContexts:  fixture.manager,
 			ResetCoordinator: owners,
-			ResetQuiescer:    recordingRuntimeNukeQuiescer{owners},
-			ResetCleaner:     recordingRuntimeNukeCleaner{owners},
-			ResetContainers:  recordingRuntimeNukeContainerStopper{owners},
 		}),
 	})
 
@@ -66,15 +63,12 @@ func TestOperatorRuntimeNukeApplyReportsPartialFailureAndIdempotency(t *testing.
 	idempotency := newRecordingAPIIdempotencyStore()
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:              func() time.Time { return now },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
 			Idempotency:      idempotency,
 			ResetCoordinator: owners,
-			ResetQuiescer:    recordingRuntimeNukeQuiescer{owners},
-			ResetCleaner:     recordingRuntimeNukeCleaner{owners},
-			ResetContainers:  recordingRuntimeNukeContainerStopper{owners},
 		}),
 	})
 	body := `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_bundles":false,"idempotency_key":"apply"}}`
@@ -115,18 +109,16 @@ func TestOperatorRuntimeNukeIncludeBundlesDeactivatesLoadedRuntimeContexts(t *te
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	fixture := newOperatorRuntimeContextFixture(t)
 	owners := newRecordingRuntimeNukeOwners()
+	owners.runtimeContexts = fixture.manager
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:              func() time.Time { return now },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
 			Idempotency:      newRecordingAPIIdempotencyStore(),
 			RuntimeContexts:  fixture.manager,
 			ResetCoordinator: owners,
-			ResetQuiescer:    recordingRuntimeNukeQuiescer{owners},
-			ResetCleaner:     recordingRuntimeNukeCleaner{owners},
-			ResetContainers:  recordingRuntimeNukeContainerStopper{owners},
 		}),
 	})
 
@@ -143,18 +135,16 @@ func TestOperatorRuntimeNukeIncludeBundlesPartialFailureDeactivatesLoadedRuntime
 	fixture := newOperatorRuntimeContextFixture(t)
 	owners := newRecordingRuntimeNukeOwners()
 	owners.containerFailure = "docker stop denied"
+	owners.runtimeContexts = fixture.manager
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:              func() time.Time { return now },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
 			Idempotency:      idempotency,
 			RuntimeContexts:  fixture.manager,
 			ResetCoordinator: owners,
-			ResetQuiescer:    recordingRuntimeNukeQuiescer{owners},
-			ResetCleaner:     recordingRuntimeNukeCleaner{owners},
-			ResetContainers:  recordingRuntimeNukeContainerStopper{owners},
 		}),
 	})
 	body := `{"jsonrpc":"2.0","id":"nuke","method":"runtime.nuke","params":{"include_bundles":true,"idempotency_key":"nuke-contexts-partial"}}`
@@ -176,16 +166,13 @@ func TestOperatorRuntimeNukeIncludeBundlesPartialFailureDeactivatesLoadedRuntime
 	replayOwners := newRecordingRuntimeNukeOwners()
 	replayHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:              func() time.Time { return now },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
 			Idempotency:      idempotency,
 			RuntimeContexts:  replayFixture.manager,
 			ResetCoordinator: replayOwners,
-			ResetQuiescer:    recordingRuntimeNukeQuiescer{replayOwners},
-			ResetCleaner:     recordingRuntimeNukeCleaner{replayOwners},
-			ResetContainers:  recordingRuntimeNukeContainerStopper{replayOwners},
 		}),
 	})
 	replay := rpcCall(t, replayHandler, body)
@@ -222,18 +209,16 @@ func TestOperatorRuntimeNukeExcludeBundlesStillQuiescesRuntimeContexts(t *testin
 	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
 	fixture := newOperatorRuntimeContextFixture(t)
 	owners := newRecordingRuntimeNukeOwners()
+	owners.runtimeContexts = fixture.manager
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:              func() time.Time { return now },
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
 			Idempotency:      newRecordingAPIIdempotencyStore(),
 			RuntimeContexts:  fixture.manager,
 			ResetCoordinator: owners,
-			ResetQuiescer:    recordingRuntimeNukeQuiescer{owners},
-			ResetCleaner:     recordingRuntimeNukeCleaner{owners},
-			ResetContainers:  recordingRuntimeNukeContainerStopper{owners},
 		}),
 	})
 
@@ -248,14 +233,11 @@ func TestOperatorRuntimeNukeAuthFailureDoesNotTouchResetOwners(t *testing.T) {
 	owners := newRecordingRuntimeNukeOwners()
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
 			Idempotency:      newRecordingAPIIdempotencyStore(),
 			ResetCoordinator: owners,
-			ResetQuiescer:    recordingRuntimeNukeQuiescer{owners},
-			ResetCleaner:     recordingRuntimeNukeCleaner{owners},
-			ResetContainers:  recordingRuntimeNukeContainerStopper{owners},
 		}),
 	})
 
@@ -282,14 +264,11 @@ func TestOperatorRuntimeNukeOperationInProgressFailsClosed(t *testing.T) {
 	owners.planErr = destructivereset.ErrOperationInProgress
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Ready:            func() bool { return true },
 			Database:         fakePinger{},
 			Idempotency:      newRecordingAPIIdempotencyStore(),
 			ResetCoordinator: owners,
-			ResetQuiescer:    recordingRuntimeNukeQuiescer{owners},
-			ResetCleaner:     recordingRuntimeNukeCleaner{owners},
-			ResetContainers:  recordingRuntimeNukeContainerStopper{owners},
 		}),
 	})
 
@@ -311,6 +290,7 @@ type recordingRuntimeNukeOwners struct {
 	lastQuiescence   destructivereset.QuiescenceRequest
 	lastCleanup      destructivereset.CleanupRequest
 	lastContainers   destructivereset.ContainerResetRequest
+	runtimeContexts  *swruntime.RuntimeContextManager
 }
 
 func newRecordingRuntimeNukeOwners() *recordingRuntimeNukeOwners {
@@ -344,15 +324,29 @@ func (o *recordingRuntimeNukeOwners) BuildPlan(_ context.Context, req destructiv
 	}, false, nil
 }
 
-func (o *recordingRuntimeNukeOwners) BuildPlanWithLock(ctx context.Context, req destructivereset.Request, apply func(context.Context, destructivereset.Result) error) (destructivereset.Result, bool, error) {
-	result, replay, err := o.BuildPlan(ctx, req)
-	if err != nil || replay || apply == nil {
-		return result, replay, err
+func (o *recordingRuntimeNukeOwners) Execute(ctx context.Context, req destructivereset.Request) (destructivereset.ExecutionResult, error) {
+	result, _, err := o.BuildPlan(ctx, req)
+	if err != nil {
+		return destructivereset.ExecutionResult{}, err
 	}
-	if err := apply(ctx, result); err != nil {
-		return destructivereset.Result{}, false, err
+	if !req.DryRun && o.runtimeContexts != nil {
+		if err := o.runtimeContexts.QuiesceAllRuntimeContexts(ctx); err != nil {
+			return destructivereset.ExecutionResult{}, err
+		}
 	}
-	return result, false, nil
+	quiescence, err := (recordingRuntimeNukeQuiescer{o}).Apply(ctx, destructivereset.QuiescenceRequest{Result: result, ActorTokenID: req.ActorTokenID, RequestedAt: req.RequestedAt})
+	if err != nil {
+		return destructivereset.ExecutionResult{}, err
+	}
+	cleanup, err := (recordingRuntimeNukeCleaner{o}).Apply(ctx, destructivereset.CleanupRequest{Result: result, Quiescence: quiescence, ActorTokenID: req.ActorTokenID, RequestedAt: req.RequestedAt})
+	if err != nil {
+		return destructivereset.ExecutionResult{}, err
+	}
+	containers, err := (recordingRuntimeNukeContainerStopper{o}).Apply(ctx, destructivereset.ContainerResetRequest{Result: result, Cleanup: cleanup, ActorTokenID: req.ActorTokenID, RequestedAt: req.RequestedAt})
+	if err != nil {
+		return destructivereset.ExecutionResult{}, err
+	}
+	return destructivereset.ExecutionResult{Plan: result, Quiescence: quiescence, Cleanup: cleanup, Containers: containers}, nil
 }
 
 func (o *recordingRuntimeNukeOwners) ApplyQuiescence(req destructivereset.QuiescenceRequest) destructivereset.QuiescenceResult {
@@ -430,22 +424,22 @@ func (s recordingRuntimeNukeContainerStopper) Apply(ctx context.Context, req des
 }
 
 type recordingAPIIdempotencyStore struct {
-	records map[string]store.APIIdempotencyCompletion
+	records map[string]apiidempotency.Completion
 	hashes  map[string]string
 }
 
 func newRecordingAPIIdempotencyStore() *recordingAPIIdempotencyStore {
 	return &recordingAPIIdempotencyStore{
-		records: map[string]store.APIIdempotencyCompletion{},
+		records: map[string]apiidempotency.Completion{},
 		hashes:  map[string]string{},
 	}
 }
 
 func (s *recordingAPIIdempotencyStore) WithAPIIdempotency(
 	ctx context.Context,
-	req store.APIIdempotencyRequest,
-	execute func(context.Context) (store.APIIdempotencyCompletion, error),
-) (store.APIIdempotencyCompletion, bool, error) {
+	req apiidempotency.Request,
+	execute func(context.Context) (apiidempotency.Completion, error),
+) (apiidempotency.Completion, bool, error) {
 	if strings.TrimSpace(req.IdempotencyKey) == "" {
 		completion, err := execute(ctx)
 		return completion, false, err
@@ -453,7 +447,7 @@ func (s *recordingAPIIdempotencyStore) WithAPIIdempotency(
 	key := strings.Join([]string{req.Method, req.ActorTokenID, req.IdempotencyKey}, "|")
 	if completion, ok := s.records[key]; ok {
 		if s.hashes[key] != req.RequestHash {
-			return store.APIIdempotencyCompletion{}, false, &store.APIIdempotencyConflictError{
+			return apiidempotency.Completion{}, false, &apiidempotency.ConflictError{
 				OriginalRequestHash:    s.hashes[key],
 				ConflictingRequestHash: req.RequestHash,
 				Method:                 req.Method,
@@ -466,7 +460,7 @@ func (s *recordingAPIIdempotencyStore) WithAPIIdempotency(
 	}
 	completion, err := execute(ctx)
 	if err != nil {
-		return store.APIIdempotencyCompletion{}, false, err
+		return apiidempotency.Completion{}, false, err
 	}
 	copied := completion
 	copied.Response = append(json.RawMessage(nil), completion.Response...)

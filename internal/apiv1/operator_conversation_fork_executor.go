@@ -7,13 +7,15 @@ import (
 	"strings"
 	"sync"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
-	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
 type LLMForkChatExecutor struct {
@@ -24,26 +26,26 @@ func NewLLMForkChatExecutor(runtimes runtimellm.AgentRuntimeResolver) *LLMForkCh
 	return &LLMForkChatExecutor{Runtimes: runtimes}
 }
 
-func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared store.ConversationForkChatPrepared, message string) (store.ConversationForkChatExecution, error) {
+func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared runfork.ConversationForkChatPrepared, message string) (runfork.ConversationForkChatExecution, error) {
 	if e == nil || e.Runtimes == nil {
-		return store.ConversationForkChatExecution{}, fmt.Errorf("conversation fork chat llm runtime is required")
+		return runfork.ConversationForkChatExecution{}, fmt.Errorf("conversation fork chat llm runtime is required")
 	}
 	message = strings.TrimSpace(message)
 	if message == "" {
-		return store.ConversationForkChatExecution{}, fmt.Errorf("conversation fork chat message is required")
+		return runfork.ConversationForkChatExecution{}, fmt.Errorf("conversation fork chat message is required")
 	}
 	if err := prepared.ValidateSandboxPolicy(); err != nil {
-		return store.ConversationForkChatExecution{}, fmt.Errorf("validate conversation fork chat sandbox policy: %w", err)
+		return runfork.ConversationForkChatExecution{}, fmt.Errorf("validate conversation fork chat sandbox policy: %w", err)
 	}
 	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, prepared.SourceBundleHash)
 	if err != nil {
-		return store.ConversationForkChatExecution{}, fmt.Errorf("resolve conversation fork chat source scope: %w", err)
+		return runfork.ConversationForkChatExecution{}, fmt.Errorf("resolve conversation fork chat source scope: %w", err)
 	}
 	ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	actor := conversationForkChatActor(prepared)
 	resolved, err := e.Runtimes.ResolveAgentRuntime(actor)
 	if err != nil {
-		return store.ConversationForkChatExecution{}, fmt.Errorf("resolve conversation fork chat llm runtime: %w", err)
+		return runfork.ConversationForkChatExecution{}, fmt.Errorf("resolve conversation fork chat llm runtime: %w", err)
 	}
 	actor = resolved.Actor
 	tools := conversationForkChatToolDefinitions(prepared)
@@ -65,13 +67,13 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared stor
 	ctx = runtimellm.WithConversationForkSandboxInvocationPolicy(ctx, prepared.SandboxPolicy.AvailableToolNames())
 	resp, err := conv.Step(ctx, message)
 	if err != nil {
-		return store.ConversationForkChatExecution{}, fmt.Errorf("execute conversation fork chat turn: %w", err)
+		return runfork.ConversationForkChatExecution{}, fmt.Errorf("execute conversation fork chat turn: %w", err)
 	}
 	assistant := strings.TrimSpace(resp.Message.Content)
 	if assistant == "" {
 		assistant = "Forkchat sandbox turn completed."
 	}
-	return store.ConversationForkChatExecution{
+	return runfork.ConversationForkChatExecution{
 		AssistantMessage: assistant,
 		ToolCalls:        toolExec.toolCalls(),
 		ToolResults:      toolExec.toolResults(),
@@ -81,7 +83,7 @@ func (e *LLMForkChatExecutor) ExecuteForkChat(ctx context.Context, prepared stor
 	}, nil
 }
 
-func conversationForkChatActor(prepared store.ConversationForkChatPrepared) runtimeactors.AgentConfig {
+func conversationForkChatActor(prepared runfork.ConversationForkChatPrepared) runtimeactors.AgentConfig {
 	actor := prepared.Snapshot.SourceAgent
 	actor.ID = strings.TrimSpace(prepared.Fork.SourceAgentID)
 	actor.Type = "forkchat"
@@ -95,7 +97,7 @@ func conversationForkChatActor(prepared store.ConversationForkChatPrepared) runt
 	return actor
 }
 
-func conversationForkChatSystemPrompt(prepared store.ConversationForkChatPrepared) string {
+func conversationForkChatSystemPrompt(prepared runfork.ConversationForkChatPrepared) string {
 	var b strings.Builder
 	b.WriteString("You are executing a forkchat turn inside an isolated forensic sandbox.\n")
 	b.WriteString("Use only the provided forkchat tools when they are useful for answering the operator.\n")
@@ -112,7 +114,7 @@ func conversationForkChatSystemPrompt(prepared store.ConversationForkChatPrepare
 	return b.String()
 }
 
-func conversationForkChatToolDefinitions(prepared store.ConversationForkChatPrepared) []runtimellm.ToolDefinition {
+func conversationForkChatToolDefinitions(prepared runfork.ConversationForkChatPrepared) []runtimellm.ToolDefinition {
 	names := append([]string(nil), prepared.AvailableTools...)
 	if len(names) == 0 {
 		names = []string{"fork_snapshot_read_entities"}
@@ -152,13 +154,13 @@ func toolNamesFromDefinitions(defs []runtimellm.ToolDefinition) []string {
 }
 
 type conversationForkChatToolExecutor struct {
-	prepared store.ConversationForkChatPrepared
+	prepared runfork.ConversationForkChatPrepared
 	mu       sync.Mutex
-	calls    []store.OperatorConversationToolCall
-	results  []store.OperatorConversationToolResult
+	calls    []operatorread.OperatorConversationToolCall
+	results  []operatorread.OperatorConversationToolResult
 }
 
-func newConversationForkChatToolExecutor(prepared store.ConversationForkChatPrepared) *conversationForkChatToolExecutor {
+func newConversationForkChatToolExecutor(prepared runfork.ConversationForkChatPrepared) *conversationForkChatToolExecutor {
 	return &conversationForkChatToolExecutor{prepared: prepared}
 }
 
@@ -220,13 +222,13 @@ func (e *conversationForkChatToolExecutor) record(name string, input any, out ma
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	toolUseID := fmt.Sprintf("forkchat-tool-%02d", len(e.calls)+1)
-	call := store.OperatorConversationToolCall{
+	call := operatorread.OperatorConversationToolCall{
 		ToolUseID: toolUseID,
 		Name:      strings.TrimSpace(name),
 		Arguments: argsRaw,
 		Result:    resultRaw,
 	}
-	result := store.OperatorConversationToolResult{
+	result := operatorread.OperatorConversationToolResult{
 		ToolName:  strings.TrimSpace(name),
 		ToolUseID: toolUseID,
 		Output:    cloneRawJSON(resultRaw),
@@ -236,10 +238,10 @@ func (e *conversationForkChatToolExecutor) record(name string, input any, out ma
 	return out, nil
 }
 
-func (e *conversationForkChatToolExecutor) toolCalls() []store.OperatorConversationToolCall {
+func (e *conversationForkChatToolExecutor) toolCalls() []operatorread.OperatorConversationToolCall {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	out := make([]store.OperatorConversationToolCall, len(e.calls))
+	out := make([]operatorread.OperatorConversationToolCall, len(e.calls))
 	copy(out, e.calls)
 	for i := range out {
 		out[i].Arguments = cloneRawJSON(out[i].Arguments)
@@ -248,10 +250,10 @@ func (e *conversationForkChatToolExecutor) toolCalls() []store.OperatorConversat
 	return out
 }
 
-func (e *conversationForkChatToolExecutor) toolResults() []store.OperatorConversationToolResult {
+func (e *conversationForkChatToolExecutor) toolResults() []operatorread.OperatorConversationToolResult {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	out := make([]store.OperatorConversationToolResult, len(e.results))
+	out := make([]operatorread.OperatorConversationToolResult, len(e.results))
 	copy(out, e.results)
 	for i := range out {
 		out[i].Output = cloneRawJSON(out[i].Output)
@@ -286,7 +288,7 @@ func conversationForkChatCanonicalToolName(name string) string {
 	}
 }
 
-func conversationForkChatIsSideEffectTool(policy store.ConversationForkSandboxPolicy, canonical string) bool {
+func conversationForkChatIsSideEffectTool(policy runfork.ConversationForkSandboxPolicy, canonical string) bool {
 	for _, name := range policy.StubbedTools {
 		if conversationForkChatCanonicalToolName(name) == canonical {
 			return true

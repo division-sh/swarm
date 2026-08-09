@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -36,7 +36,7 @@ func (p *standingServiceControllerProbe) ResetStandingService(_ context.Context,
 
 type directStandingIdempotencyStore struct{}
 
-func (directStandingIdempotencyStore) WithAPIIdempotency(ctx context.Context, _ store.APIIdempotencyRequest, execute func(context.Context) (store.APIIdempotencyCompletion, error)) (store.APIIdempotencyCompletion, bool, error) {
+func (directStandingIdempotencyStore) WithAPIIdempotency(ctx context.Context, _ apiidempotency.Request, execute func(context.Context) (apiidempotency.Completion, error)) (apiidempotency.Completion, bool, error) {
 	completion, err := execute(ctx)
 	return completion, false, err
 }
@@ -45,7 +45,7 @@ func TestOperatorStandingServiceHandlersUseCanonicalOwner(t *testing.T) {
 	controller := &standingServiceControllerProbe{}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			StandingServices: controller,
 			Idempotency:      directStandingIdempotencyStore{},
 		}),

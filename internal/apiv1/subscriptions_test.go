@@ -10,16 +10,17 @@ import (
 	"testing"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/gorilla/websocket"
 )
 
 func TestHandlerWebSocketHealthSubscribeAndUnsubscribe(t *testing.T) {
 	now := time.Unix(1700001000, 0).UTC()
-	readOpts := OperatorReadOptions{
+	readOpts := testOperatorCapabilities{
 		Now:      func() time.Time { return now },
 		Ready:    func() bool { return true },
 		Database: fakePinger{err: nil},
@@ -31,8 +32,8 @@ func TestHandlerWebSocketHealthSubscribeAndUnsubscribe(t *testing.T) {
 	}
 	handler := testHandler(t, Options{
 		AuthTokens:    []string{testToken},
-		Handlers:      OperatorReadHandlers(readOpts),
-		Subscriptions: OperatorSubscriptions(readOpts, SubscriptionRuntimeOptions{HealthInterval: time.Hour, QueueSize: 4}),
+		Handlers:      testOperatorHandlers(readOpts),
+		Subscriptions: testOperatorSubscriptions(readOpts, SubscriptionRuntimeOptions{HealthInterval: time.Hour, QueueSize: 4}),
 	})
 
 	health := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"health","method":"health.check","params":{}}`)
@@ -149,7 +150,7 @@ func TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay(t *testing.T) {
 	base := time.Unix(1700001100, 0).UTC()
 	hasDeadLetter := false
 	observability := &fakeObservabilityReadStore{
-		events: map[string]store.OperatorEventFull{
+		events: map[string]operatorread.OperatorEventFull{
 			"evt-1": {
 				EventID:       "evt-1",
 				EventName:     "scan.requested",
@@ -160,8 +161,8 @@ func TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay(t *testing.T) {
 				Source:        "runtime",
 				ProducerType:  events.EventProducerPlatform,
 				Payload:       map[string]any{"ok": true},
-				Deliveries:    []store.OperatorEventDelivery{},
-				DeadLetters:   []store.OperatorDeadLetterRecord{},
+				Deliveries:    []operatorread.OperatorEventDelivery{},
+				DeadLetters:   []operatorread.OperatorDeadLetterRecord{},
 			},
 			"evt-payload-only": {
 				EventID:       "evt-payload-only",
@@ -172,18 +173,18 @@ func TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay(t *testing.T) {
 				Source:        "runtime",
 				ProducerType:  events.EventProducerPlatform,
 				Payload:       map[string]any{"entity_id": "entity-1", "marker": "payload-only"},
-				Deliveries:    []store.OperatorEventDelivery{},
-				DeadLetters:   []store.OperatorDeadLetterRecord{},
+				Deliveries:    []operatorread.OperatorEventDelivery{},
+				DeadLetters:   []operatorread.OperatorDeadLetterRecord{},
 			},
 		},
 	}
-	readOpts := OperatorReadOptions{
+	readOpts := testOperatorCapabilities{
 		Now:           func() time.Time { return base.Add(10 * time.Second) },
 		Observability: observability,
 	}
 	handler := testHandler(t, Options{
 		AuthTokens:    []string{testToken},
-		Subscriptions: OperatorSubscriptions(readOpts, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
+		Subscriptions: testOperatorSubscriptions(readOpts, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
 	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
@@ -235,10 +236,10 @@ func TestHandlerWebSocketEventSubscribeUsesOwnerFilterAndReplay(t *testing.T) {
 func TestEventListFilterValidationCoversListAndSubscribe(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Observability: &fakeObservabilityReadStore{},
 		}),
-		Subscriptions: OperatorSubscriptions(OperatorReadOptions{
+		Subscriptions: testOperatorSubscriptions(testOperatorCapabilities{
 			Observability: &fakeObservabilityReadStore{},
 		}, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
 	})
@@ -324,7 +325,7 @@ func TestHandlerWebSocketSubscriptionOwnerErrorClosesConnection(t *testing.T) {
 	observability := &fakeObservabilityReadStore{listErr: errors.New("store unavailable")}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Subscriptions: OperatorSubscriptions(OperatorReadOptions{
+		Subscriptions: testOperatorSubscriptions(testOperatorCapabilities{
 			Observability: observability,
 		}, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
 	})
@@ -361,7 +362,7 @@ func TestHandlerWebSocketRuntimeSubscribeLogsOwnerErrorClosesConnection(t *testi
 	observability := &fakeObservabilityReadStore{runtimeLogsErr: errors.New("runtime logs unavailable")}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Subscriptions: OperatorSubscriptions(OperatorReadOptions{
+		Subscriptions: testOperatorSubscriptions(testOperatorCapabilities{
 			Observability: observability,
 		}, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
 	})
@@ -394,10 +395,10 @@ func TestHandlerWebSocketRuntimeSubscribeLogsOwnerErrorClosesConnection(t *testi
 
 func TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound(t *testing.T) {
 	base := time.Unix(1700001200, 0).UTC()
-	missing := &fakeObservabilityReadStore{traceErr: store.ErrRunNotFound}
+	missing := &fakeObservabilityReadStore{traceErr: operatorread.ErrRunNotFound}
 	missingHandler := testHandler(t, Options{
 		AuthTokens:    []string{testToken},
-		Subscriptions: OperatorSubscriptions(OperatorReadOptions{Observability: missing}, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
+		Subscriptions: testOperatorSubscriptions(testOperatorCapabilities{Observability: missing}, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
 	})
 	missingServer := httptest.NewServer(missingHandler)
 	defer missingServer.Close()
@@ -418,7 +419,7 @@ func TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound(t *testi
 	}
 
 	observability := &fakeObservabilityReadStore{
-		traceRows: map[string][]store.RunDebugTraceRow{
+		traceRows: map[string][]operatorread.RunDebugTraceRow{
 			"run-1": {{
 				EventID:        "evt-1",
 				EventName:      "scan.requested",
@@ -428,7 +429,7 @@ func TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound(t *testi
 	}
 	handler := testHandler(t, Options{
 		AuthTokens:    []string{testToken},
-		Subscriptions: OperatorSubscriptions(OperatorReadOptions{Observability: observability}, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
+		Subscriptions: testOperatorSubscriptions(testOperatorCapabilities{Observability: observability}, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
 	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
@@ -494,7 +495,7 @@ func TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound(t *testi
 func TestRunSubscribeTraceFilterValidation(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Subscriptions: OperatorSubscriptions(OperatorReadOptions{
+		Subscriptions: testOperatorSubscriptions(testOperatorCapabilities{
 			Observability: &fakeObservabilityReadStore{},
 		}, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
 	})
@@ -537,7 +538,7 @@ func TestRunSubscribeTraceFilterValidation(t *testing.T) {
 func TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay(t *testing.T) {
 	base := time.Unix(1700001300, 0).UTC()
 	observability := &fakeObservabilityReadStore{
-		logs: []store.OperatorRuntimeLogEntry{
+		logs: []operatorread.OperatorRuntimeLogEntry{
 			{
 				LogID:     "old-log",
 				TS:        base.Add(-time.Second),
@@ -561,13 +562,16 @@ func TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay(t *testin
 				SessionID: "sess-1",
 				ErrorCode: "E_RUNTIME",
 				Message:   "runtime failed",
-				Details:   map[string]any{"action": "dispatch"},
+				Action:    "dispatch",
+				CanonicalDetail: map[string]any{
+					"action": "dispatch",
+				},
 			},
 		},
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Subscriptions: OperatorSubscriptions(OperatorReadOptions{
+		Subscriptions: testOperatorSubscriptions(testOperatorCapabilities{
 			Now:           func() time.Time { return base.Add(10 * time.Second) },
 			Observability: observability,
 		}, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
@@ -646,7 +650,7 @@ func TestRuntimeLogSubscriptionPreservesWatermarkAcrossPolls(t *testing.T) {
 		subs:   map[string]context.CancelFunc{},
 	}
 	observability := &fakeObservabilityReadStore{
-		logs: []store.OperatorRuntimeLogEntry{
+		logs: []operatorread.OperatorRuntimeLogEntry{
 			{
 				LogID:   "log-1",
 				TS:      base.Add(time.Second),
@@ -656,7 +660,7 @@ func TestRuntimeLogSubscriptionPreservesWatermarkAcrossPolls(t *testing.T) {
 	}
 	state := &runtimeLogSubscriptionState{since: &base}
 	runtime := &SubscriptionRuntime{}
-	opts := store.OperatorRuntimeLogListOptions{
+	opts := operatorread.OperatorRuntimeLogListOptions{
 		Limit: subscriptionBatchLimit,
 		Order: "asc",
 	}
@@ -671,7 +675,7 @@ func TestRuntimeLogSubscriptionPreservesWatermarkAcrossPolls(t *testing.T) {
 		t.Fatalf("runtime log watermark after first poll = %#v, want after %s", state.since, base)
 	}
 
-	observability.logs = append(observability.logs, store.OperatorRuntimeLogEntry{
+	observability.logs = append(observability.logs, operatorread.OperatorRuntimeLogEntry{
 		LogID:   "log-2",
 		TS:      base.Add(2 * time.Second),
 		Message: "second",
@@ -695,7 +699,7 @@ func TestRuntimeLogSubscriptionPreservesWatermarkAcrossPolls(t *testing.T) {
 func TestRuntimeSubscribeLogsRejectsSnapshotControls(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Subscriptions: OperatorSubscriptions(OperatorReadOptions{
+		Subscriptions: testOperatorSubscriptions(testOperatorCapabilities{
 			Observability: &fakeObservabilityReadStore{},
 		}, SubscriptionRuntimeOptions{PollInterval: time.Hour, QueueSize: 4}),
 	})

@@ -8,26 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 const runtimeNukeIdempotencyTTL = 24 * time.Hour
 
 type DestructiveResetCoordinator interface {
-	BuildPlanWithLock(context.Context, destructivereset.Request, func(context.Context, destructivereset.Result) error) (destructivereset.Result, bool, error)
-}
-
-type DestructiveResetQuiescer interface {
-	Apply(context.Context, destructivereset.QuiescenceRequest) (destructivereset.QuiescenceResult, error)
-}
-
-type DestructiveResetCleaner interface {
-	Apply(context.Context, destructivereset.CleanupRequest) (destructivereset.CleanupResult, error)
-}
-
-type DestructiveResetContainerStopper interface {
-	Apply(context.Context, destructivereset.ContainerResetRequest) (destructivereset.ContainerResetResult, error)
+	Execute(context.Context, destructivereset.Request) (destructivereset.ExecutionResult, error)
 }
 
 type runtimeNukeResult struct {
@@ -49,8 +37,8 @@ type runtimeNukePartialError struct {
 	Message string `json:"message"`
 }
 
-func OperatorRuntimeNukeHandlers(opts OperatorReadOptions) map[string]MethodHandler {
-	if opts.ResetCoordinator == nil || opts.ResetQuiescer == nil || opts.ResetCleaner == nil || opts.ResetContainers == nil || opts.Idempotency == nil {
+func OperatorRuntimeNukeHandlers(opts RuntimeNukeHandlerOptions) map[string]MethodHandler {
+	if opts.Coordinator == nil || opts.Idempotency == nil {
 		return nil
 	}
 	now := opts.Now
@@ -64,7 +52,7 @@ func OperatorRuntimeNukeHandlers(opts OperatorReadOptions) map[string]MethodHand
 	}
 }
 
-func executeRuntimeNuke(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+func executeRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandlerOptions, now time.Time) (any, error) {
 	dryRun, err := optionalBoolParam(req.Params, "dry_run", false)
 	if err != nil {
 		return nil, err
@@ -77,7 +65,7 @@ func executeRuntimeNuke(ctx context.Context, req Request, opts OperatorReadOptio
 	if err != nil {
 		return nil, err
 	}
-	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
+	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: idempotencyKey,
@@ -85,16 +73,16 @@ func executeRuntimeNuke(ctx context.Context, req Request, opts OperatorReadOptio
 		ResourceID:     destructivereset.DefaultOperationName,
 		TTL:            runtimeNukeIdempotencyTTL,
 		Now:            now,
-	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
+	}, func(ctx context.Context) (apiidempotency.Completion, error) {
 		result, err := performRuntimeNuke(ctx, req, opts, dryRun, includeBundles, now)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
 		response, err := json.Marshal(result)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
-		return store.APIIdempotencyCompletion{
+		return apiidempotency.Completion{
 			ResourceID: result.OperationName,
 			Response:   response,
 		}, nil
@@ -112,52 +100,19 @@ func executeRuntimeNuke(ctx context.Context, req Request, opts OperatorReadOptio
 	return stored, nil
 }
 
-func performRuntimeNuke(ctx context.Context, req Request, opts OperatorReadOptions, dryRun, includeBundles bool, now time.Time) (runtimeNukeResult, error) {
-	var quiescence destructivereset.QuiescenceResult
-	var cleanup destructivereset.CleanupResult
-	var containers destructivereset.ContainerResetResult
-	planResult, _, err := opts.ResetCoordinator.BuildPlanWithLock(ctx, destructivereset.Request{
+func performRuntimeNuke(ctx context.Context, req Request, opts RuntimeNukeHandlerOptions, dryRun, includeBundles bool, now time.Time) (runtimeNukeResult, error) {
+	execution, err := opts.Coordinator.Execute(ctx, destructivereset.Request{
 		ActorTokenID:      req.ActorTokenID,
 		RequestHash:       req.RequestHash,
 		DryRun:            dryRun,
 		IncludeBundles:    includeBundles,
 		IncludeBundlesSet: true,
 		RequestedAt:       now,
-	}, func(ctx context.Context, planResult destructivereset.Result) error {
-		var err error
-		if !dryRun && opts.RuntimeContexts != nil {
-			if err := opts.RuntimeContexts.QuiesceAllRuntimeContexts(ctx); err != nil {
-				return err
-			}
-		}
-		quiescence, err = opts.ResetQuiescer.Apply(ctx, destructivereset.QuiescenceRequest{
-			Result:       planResult,
-			ActorTokenID: req.ActorTokenID,
-			RequestedAt:  now,
-		})
-		if err != nil {
-			return err
-		}
-		cleanup, err = opts.ResetCleaner.Apply(ctx, destructivereset.CleanupRequest{
-			Result:       planResult,
-			Quiescence:   quiescence,
-			ActorTokenID: req.ActorTokenID,
-			RequestedAt:  now,
-		})
-		if err != nil {
-			return err
-		}
-		containers, err = opts.ResetContainers.Apply(ctx, destructivereset.ContainerResetRequest{
-			Result:       planResult,
-			Cleanup:      cleanup,
-			ActorTokenID: req.ActorTokenID,
-			RequestedAt:  now,
-		})
-		return err
 	})
 	if err != nil {
 		return runtimeNukeResult{}, err
 	}
+	planResult := execution.Plan
 	result := runtimeNukeResult{
 		OK:             true,
 		Status:         "completed",
@@ -165,9 +120,9 @@ func performRuntimeNuke(ctx context.Context, req Request, opts OperatorReadOptio
 		IncludeBundles: planResult.IncludeBundles,
 		OperationName:  strings.TrimSpace(planResult.OperationName),
 		Plan:           planResult,
-		Quiescence:     quiescence,
-		Cleanup:        cleanup,
-		Containers:     containers,
+		Quiescence:     execution.Quiescence,
+		Cleanup:        execution.Cleanup,
+		Containers:     execution.Containers,
 	}
 	if result.OperationName == "" {
 		result.OperationName = destructivereset.DefaultOperationName
@@ -175,11 +130,11 @@ func performRuntimeNuke(ctx context.Context, req Request, opts OperatorReadOptio
 	if dryRun {
 		result.Status = "dry_run"
 	}
-	if len(containers.Failed) > 0 {
+	if len(execution.Containers.Failed) > 0 {
 		result.OK = false
 		result.Status = "partial_failure"
 		result.PartialFailure = true
-		for _, failure := range containers.Failed {
+		for _, failure := range execution.Containers.Failed {
 			result.Errors = append(result.Errors, runtimeNukePartialError{
 				Scope:   "managed_containers",
 				Message: strings.TrimSpace(failure.Error),
@@ -190,7 +145,7 @@ func performRuntimeNuke(ctx context.Context, req Request, opts OperatorReadOptio
 }
 
 func runtimeNukeError(err error) error {
-	var conflict *store.APIIdempotencyConflictError
+	var conflict *apiidempotency.ConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
 			"original_request_hash":    conflict.OriginalRequestHash,
@@ -198,17 +153,6 @@ func runtimeNukeError(err error) error {
 			"original_response_ref": map[string]any{
 				"method":      conflict.Method,
 				"resource_id": conflict.ResourceID,
-			},
-		})
-	}
-	var resetConflict *destructivereset.IdempotencyConflictError
-	if errors.As(err, &resetConflict) {
-		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
-			"original_request_hash":    resetConflict.OriginalRequestHash,
-			"conflicting_request_hash": resetConflict.ConflictingRequestHash,
-			"original_response_ref": map[string]any{
-				"method":      "runtime.nuke",
-				"resource_id": resetConflict.Key.OperationName,
 			},
 		})
 	}

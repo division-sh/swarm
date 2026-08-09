@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	bundlecatalog "github.com/division-sh/swarm/internal/bundlecatalog"
 	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -57,7 +58,7 @@ agents:
 		t.Fatalf("seed bundles: %v", err)
 	}
 
-	first, err := pg.ListBundleCatalog(ctx, BundleCatalogListOptions{Limit: 1})
+	first, err := pg.ListBundleCatalog(ctx, bundlecatalog.ListOptions{Limit: 1})
 	if err != nil {
 		t.Fatalf("ListBundleCatalog first: %v", err)
 	}
@@ -71,7 +72,7 @@ agents:
 		t.Fatal("first page cursor empty")
 	}
 
-	second, err := pg.ListBundleCatalog(ctx, BundleCatalogListOptions{Limit: 1, Cursor: first.NextCursor})
+	second, err := pg.ListBundleCatalog(ctx, bundlecatalog.ListOptions{Limit: 1, Cursor: first.NextCursor})
 	if err != nil {
 		t.Fatalf("ListBundleCatalog second: %v", err)
 	}
@@ -127,14 +128,14 @@ func TestBundleCatalogReadSurfaceMissingCursorAndMalformedProjection(t *testing.
 	ctx := testAuthorActivityContext()
 
 	missingHash := "bundle-v1:sha256:9999999999999999999999999999999999999999999999999999999999999999"
-	if _, err := pg.LoadBundleCatalog(ctx, missingHash); !errors.Is(err, ErrBundleNotFound) {
-		t.Fatalf("LoadBundleCatalog missing error = %v, want ErrBundleNotFound", err)
+	if _, err := pg.LoadBundleCatalog(ctx, missingHash); !errors.Is(err, bundlecatalog.ErrNotFound) {
+		t.Fatalf("LoadBundleCatalog missing error = %v, want bundlecatalog.ErrNotFound", err)
 	}
 	if _, err := pg.LoadBundleCatalogRuntimeRecord(ctx, missingHash); !errors.Is(err, runtimerunbundle.ErrBundleNotFound) {
 		t.Fatalf("LoadBundleCatalogRuntimeRecord missing error = %v, want runbundle.ErrBundleNotFound", err)
 	}
-	if _, err := pg.ListBundleCatalog(ctx, BundleCatalogListOptions{Cursor: "not-a-cursor"}); !errors.Is(err, ErrInvalidBundleCatalogCursor) {
-		t.Fatalf("ListBundleCatalog invalid cursor error = %v, want ErrInvalidBundleCatalogCursor", err)
+	if _, err := pg.ListBundleCatalog(ctx, bundlecatalog.ListOptions{Cursor: "not-a-cursor"}); !errors.Is(err, bundlecatalog.ErrInvalidCursor) {
+		t.Fatalf("ListBundleCatalog invalid cursor error = %v, want bundlecatalog.ErrInvalidCursor", err)
 	}
 
 	badHash := "bundle-v1:sha256:3333333333333333333333333333333333333333333333333333333333333333"
@@ -155,7 +156,7 @@ func TestBundleCatalogWriteSurfaceUpsertsAndRejectsHashCollision(t *testing.T) {
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	bundleHash := "bundle-v1:sha256:5555555555555555555555555555555555555555555555555555555555555555"
-	req := BundleCatalogUpsert{
+	req := bundlecatalog.Upsert{
 		BundleHash:  bundleHash,
 		ContentYAML: "projection_version: swarm.bundle.catalog.v1\nfiles: []\n",
 		ParsedJSON: map[string]any{
@@ -191,8 +192,8 @@ func TestBundleCatalogWriteSurfaceUpsertsAndRejectsHashCollision(t *testing.T) {
 		t.Fatalf("duplicate upsert registered = true, want false")
 	}
 	req.ContentYAML = "projection_version: swarm.bundle.catalog.v1\nfiles: [changed]\n"
-	if _, err := pg.UpsertBundleCatalog(ctx, req); !errors.Is(err, ErrBundleCatalogConflict) {
-		t.Fatalf("UpsertBundleCatalog collision error = %v, want ErrBundleCatalogConflict", err)
+	if _, err := pg.UpsertBundleCatalog(ctx, req); !errors.Is(err, bundlecatalog.ErrConflict) {
+		t.Fatalf("UpsertBundleCatalog collision error = %v, want bundlecatalog.ErrConflict", err)
 	}
 }
 
@@ -202,7 +203,7 @@ func TestBundleCatalogUpsertRegistersDuplicatesConflictsAndDoesNotRestoreDeleted
 	ctx := testAuthorActivityContext()
 
 	bundleHash := "bundle-v1:sha256:4444444444444444444444444444444444444444444444444444444444444444"
-	req := BundleCatalogUpsert{
+	req := bundlecatalog.Upsert{
 		BundleHash:  bundleHash,
 		ContentYAML: "projection_version: swarm.bundle.catalog.v1\nfiles: []\ncanonical_inputs: []\n",
 		ParsedJSON:  map[string]any{"agents": map[string]any{}},
@@ -219,8 +220,8 @@ func TestBundleCatalogUpsertRegistersDuplicatesConflictsAndDoesNotRestoreDeleted
 
 	metadataConflict := req
 	metadataConflict.Metadata = map[string]any{"source": "swarm serve --contracts"}
-	if _, err := pg.UpsertBundleCatalog(ctx, metadataConflict); !errors.Is(err, ErrBundleCatalogConflict) {
-		t.Fatalf("UpsertBundleCatalog metadata conflict error = %v, want ErrBundleCatalogConflict", err)
+	if _, err := pg.UpsertBundleCatalog(ctx, metadataConflict); !errors.Is(err, bundlecatalog.ErrConflict) {
+		t.Fatalf("UpsertBundleCatalog metadata conflict error = %v, want bundlecatalog.ErrConflict", err)
 	}
 
 	duplicate, err := pg.UpsertBundleCatalog(ctx, req)
@@ -233,8 +234,8 @@ func TestBundleCatalogUpsertRegistersDuplicatesConflictsAndDoesNotRestoreDeleted
 
 	conflict := req
 	conflict.ContentYAML = "projection_version: swarm.bundle.catalog.v1\nfiles:\n  - label: \"bundle/package.yaml\"\n    content_base64: \"e30=\"\n    size_bytes: 2\ncanonical_inputs: []\n"
-	if _, err := pg.UpsertBundleCatalog(ctx, conflict); !errors.Is(err, ErrBundleCatalogConflict) {
-		t.Fatalf("UpsertBundleCatalog conflict error = %v, want ErrBundleCatalogConflict", err)
+	if _, err := pg.UpsertBundleCatalog(ctx, conflict); !errors.Is(err, bundlecatalog.ErrConflict) {
+		t.Fatalf("UpsertBundleCatalog conflict error = %v, want bundlecatalog.ErrConflict", err)
 	}
 
 	runID := "00000000-0000-0000-0000-000000000444"

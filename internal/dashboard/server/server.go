@@ -11,10 +11,11 @@ import (
 	"strings"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 type HealthChecker func(ctx context.Context) (map[string]any, error)
@@ -25,9 +26,9 @@ type MailboxReader interface {
 }
 
 type EntityReader interface {
-	ListOperatorEntities(ctx context.Context, opts store.OperatorEntityListOptions) (store.OperatorEntityListResult, error)
-	LoadOperatorEntity(ctx context.Context, entityID, runID string) (store.OperatorEntityFull, error)
-	AggregateOperatorEntities(ctx context.Context, opts store.OperatorEntityAggregateOptions) (store.OperatorEntityAggregateResult, error)
+	ListOperatorEntities(ctx context.Context, opts operatorread.OperatorEntityListOptions) (operatorread.OperatorEntityListResult, error)
+	LoadOperatorEntity(ctx context.Context, entityID, runID string) (operatorread.OperatorEntityFull, error)
+	AggregateOperatorEntities(ctx context.Context, opts operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateResult, error)
 }
 
 type ConversationSummary struct {
@@ -106,9 +107,9 @@ type OperatorLiveTurn struct {
 }
 
 type ConversationReader interface {
-	ListOperatorConversations(ctx context.Context, opts store.OperatorConversationListOptions) (store.OperatorConversationListResult, error)
-	ListOperatorConversationTurns(ctx context.Context, opts store.OperatorConversationTurnListOptions) (store.OperatorConversationTurnListResult, error)
-	LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (store.OperatorPublicConversationTurnDetail, error)
+	ListOperatorConversations(ctx context.Context, opts operatorread.OperatorConversationListOptions) (operatorread.OperatorConversationListResult, error)
+	ListOperatorConversationTurns(ctx context.Context, opts operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error)
+	LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error)
 }
 
 type ObservabilityReader interface {
@@ -119,7 +120,7 @@ type ObservabilityReader interface {
 }
 
 type RunTraceReader interface {
-	LoadRunDebugTrace(ctx context.Context, runID string, opts store.RunDebugTraceQueryOptions) ([]store.RunDebugTraceRow, error)
+	LoadRunDebugTrace(ctx context.Context, runID string, opts operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, error)
 }
 
 type RuntimeController interface {
@@ -246,18 +247,20 @@ type runtimeActionRequest struct {
 }
 
 func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if h.health == nil {
+		writeJSONError(w, http.StatusNotImplemented, errors.New("health checker is not configured"))
+		return
+	}
 	resp := map[string]any{
 		"ok":        true,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
-	if h.health != nil {
-		checks, err := h.health(r.Context())
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err)
-			return
-		}
-		resp["checks"] = checks
+	checks, err := h.health(r.Context())
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err)
+		return
 	}
+	resp["checks"] = checks
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -266,7 +269,7 @@ func (h *Handler) handleConversations(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusNotImplemented, errors.New("conversation reader is not configured"))
 		return
 	}
-	result, err := h.conversations.ListOperatorConversations(r.Context(), store.OperatorConversationListOptions{
+	result, err := h.conversations.ListOperatorConversations(r.Context(), operatorread.OperatorConversationListOptions{
 		AgentID: strings.TrimSpace(r.URL.Query().Get("agent_id")),
 		RunID:   strings.TrimSpace(r.URL.Query().Get("run_id")),
 		Cursor:  strings.TrimSpace(r.URL.Query().Get("cursor")),
@@ -293,13 +296,13 @@ func (h *Handler) handleConversationDetail(w http.ResponseWriter, r *http.Reques
 		writeJSONError(w, http.StatusBadRequest, errors.New("session id is required"))
 		return
 	}
-	row, err := h.conversations.ListOperatorConversationTurns(r.Context(), store.OperatorConversationTurnListOptions{
+	row, err := h.conversations.ListOperatorConversationTurns(r.Context(), operatorread.OperatorConversationTurnListOptions{
 		SessionID: sessionID,
 		Limit:     intQuery(r, "limit", 50),
 		Cursor:    strings.TrimSpace(r.URL.Query().Get("cursor")),
 	})
 	if err != nil {
-		if errors.Is(err, store.ErrSessionNotFound) {
+		if errors.Is(err, operatorread.ErrSessionNotFound) {
 			writeJSONError(w, http.StatusNotFound, errors.New("conversation not found"))
 			return
 		}
@@ -318,25 +321,26 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 		h.handleEventStream(w, r)
 		return
 	}
-	rows := []eventRecord{}
-	if h.observability != nil {
-		filter, err := dashboardEventFilterFromRequest(r)
-		if err != nil {
-			writeJSONError(w, http.StatusBadRequest, err)
-			return
-		}
-		rows, err = h.observability.ListEvents(r.Context(), filter, intQuery(r, "limit", 200))
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err)
-			return
-		}
+	if h.observability == nil {
+		writeJSONError(w, http.StatusNotImplemented, errors.New("observability reader is not configured"))
+		return
+	}
+	filter, err := dashboardEventFilterFromRequest(r)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, err)
+		return
+	}
+	rows, err := h.observability.ListEvents(r.Context(), filter, intQuery(r, "limit", 200))
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": rows})
 }
 
 func (h *Handler) handleEventDetail(w http.ResponseWriter, r *http.Request) {
 	if h.observability == nil {
-		writeJSONError(w, http.StatusNotFound, errors.New("event not found"))
+		writeJSONError(w, http.StatusNotImplemented, errors.New("observability reader is not configured"))
 		return
 	}
 	id := strings.TrimSpace(r.PathValue("id"))
@@ -357,6 +361,10 @@ func (h *Handler) handleEventDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleFlowEvents(w http.ResponseWriter, r *http.Request) {
+	if h.observability == nil {
+		writeJSONError(w, http.StatusNotImplemented, errors.New("observability reader is not configured"))
+		return
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeJSONError(w, http.StatusInternalServerError, errors.New("streaming is not supported"))
@@ -376,6 +384,41 @@ func (h *Handler) handleFlowEvents(w http.ResponseWriter, r *http.Request) {
 	poll := time.NewTicker(2 * time.Second)
 	defer heartbeat.Stop()
 	defer poll.Stop()
+	emit := func() bool {
+		rows, err := h.observability.ListEvents(r.Context(), filter, intQuery(r, "limit", 200))
+		if err != nil {
+			writeDashboardStreamError(w, flusher, err)
+			return false
+		}
+		if len(rows) == 0 {
+			return true
+		}
+		latest := filter.After
+		for i := len(rows) - 1; i >= 0; i-- {
+			payload := map[string]any{
+				"event_id":     rows[i].ID,
+				"id":           rows[i].ID,
+				"type":         rows[i].Type,
+				"event_type":   rows[i].Type,
+				"source_agent": rows[i].SourceAgent,
+				"entity_id":    rows[i].EntityID,
+				"scope":        rows[i].Scope,
+				"created_at":   rows[i].CreatedAt,
+				"payload":      rows[i].Payload,
+			}
+			encoded, _ := json.Marshal(payload)
+			_, _ = fmt.Fprintf(w, "event: flow\ndata: %s\n\n", encoded)
+			if ts, err := time.Parse(time.RFC3339, rows[i].CreatedAt); err == nil && ts.After(latest) {
+				latest = ts
+			}
+		}
+		filter.After = latest
+		flusher.Flush()
+		return true
+	}
+	if !emit() {
+		return
+	}
 
 	for {
 		select {
@@ -385,76 +428,51 @@ func (h *Handler) handleFlowEvents(w http.ResponseWriter, r *http.Request) {
 			_, _ = fmt.Fprint(w, ": keepalive\n\n")
 			flusher.Flush()
 		case <-poll.C:
-			if h.observability == nil {
-				continue
+			if !emit() {
+				return
 			}
-			rows, err := h.observability.ListEvents(r.Context(), filter, intQuery(r, "limit", 200))
-			if err != nil || len(rows) == 0 {
-				continue
-			}
-			latest := filter.After
-			for i := len(rows) - 1; i >= 0; i-- {
-				payload := map[string]any{
-					"event_id":     rows[i].ID,
-					"id":           rows[i].ID,
-					"type":         rows[i].Type,
-					"event_type":   rows[i].Type,
-					"source_agent": rows[i].SourceAgent,
-					"entity_id":    rows[i].EntityID,
-					"scope":        rows[i].Scope,
-					"created_at":   rows[i].CreatedAt,
-					"payload":      rows[i].Payload,
-				}
-				encoded, _ := json.Marshal(payload)
-				_, _ = fmt.Fprintf(w, "event: flow\ndata: %s\n\n", encoded)
-				if ts, err := time.Parse(time.RFC3339, rows[i].CreatedAt); err == nil && ts.After(latest) {
-					latest = ts
-				}
-			}
-			filter.After = latest
-			flusher.Flush()
 		}
 	}
 }
 
 func (h *Handler) handleRuntimeLogs(w http.ResponseWriter, r *http.Request) {
-	rows := []runtimeLogRecord{}
-	if h.observability != nil {
-		filter := RuntimeLogFilter{
-			Type:      strings.TrimSpace(r.URL.Query().Get("type")),
-			Source:    strings.TrimSpace(r.URL.Query().Get("source")),
-			EntityID:  strings.TrimSpace(r.URL.Query().Get("entity_id")),
-			Component: strings.TrimSpace(r.URL.Query().Get("component")),
-			Level:     strings.TrimSpace(r.URL.Query().Get("level")),
-			ErrorCode: strings.TrimSpace(r.URL.Query().Get("error_code")),
-			Order:     strings.TrimSpace(r.URL.Query().Get("order")),
-		}
-		var err error
-		rows, err = h.observability.ListRuntimeLogs(r.Context(), filter, intQuery(r, "limit", 200))
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err)
-			return
-		}
+	if h.observability == nil {
+		writeJSONError(w, http.StatusNotImplemented, errors.New("observability reader is not configured"))
+		return
+	}
+	filter := RuntimeLogFilter{
+		Type:      strings.TrimSpace(r.URL.Query().Get("type")),
+		Source:    strings.TrimSpace(r.URL.Query().Get("source")),
+		EntityID:  strings.TrimSpace(r.URL.Query().Get("entity_id")),
+		Component: strings.TrimSpace(r.URL.Query().Get("component")),
+		Level:     strings.TrimSpace(r.URL.Query().Get("level")),
+		ErrorCode: strings.TrimSpace(r.URL.Query().Get("error_code")),
+		Order:     strings.TrimSpace(r.URL.Query().Get("order")),
+	}
+	rows, err := h.observability.ListRuntimeLogs(r.Context(), filter, intQuery(r, "limit", 200))
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"runtime_logs": rows})
 }
 
 func (h *Handler) handleRuntimeIncidents(w http.ResponseWriter, r *http.Request) {
-	rows := []incidentRecord{}
-	if h.observability != nil {
-		filter := IncidentFilter{
-			SinceHours: intQuery(r, "since_hours", 24),
-			MCPOnly:    strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("mcp_only")), "true"),
-			Level:      strings.TrimSpace(r.URL.Query().Get("level")),
-			Component:  strings.TrimSpace(r.URL.Query().Get("component")),
-			Limit:      intQuery(r, "limit", 2000),
-		}
-		var err error
-		rows, err = h.observability.ListIncidents(r.Context(), filter)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, err)
-			return
-		}
+	if h.observability == nil {
+		writeJSONError(w, http.StatusNotImplemented, errors.New("observability reader is not configured"))
+		return
+	}
+	filter := IncidentFilter{
+		SinceHours: intQuery(r, "since_hours", 24),
+		MCPOnly:    strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("mcp_only")), "true"),
+		Level:      strings.TrimSpace(r.URL.Query().Get("level")),
+		Component:  strings.TrimSpace(r.URL.Query().Get("component")),
+		Limit:      intQuery(r, "limit", 2000),
+	}
+	rows, err := h.observability.ListIncidents(r.Context(), filter)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"incidents": rows})
 }
@@ -469,7 +487,7 @@ func (h *Handler) handleRunTrace(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, errors.New("run id is required"))
 		return
 	}
-	rows, err := h.runTrace.LoadRunDebugTrace(r.Context(), runID, store.RunDebugTraceQueryOptions{
+	rows, err := h.runTrace.LoadRunDebugTrace(r.Context(), runID, operatorread.RunDebugTraceQueryOptions{
 		Limit: intQuery(r, "limit", 200),
 	})
 	if err != nil {
@@ -483,6 +501,10 @@ func (h *Handler) handleRunTrace(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleEventStream(w http.ResponseWriter, r *http.Request) {
+	if h.observability == nil {
+		writeJSONError(w, http.StatusNotImplemented, errors.New("observability reader is not configured"))
+		return
+	}
 	includeRuntime := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_runtime")), "true")
 	eventFilter, err := dashboardEventFilterFromRequest(r)
 	if err != nil {
@@ -515,6 +537,47 @@ func (h *Handler) handleEventStream(w http.ResponseWriter, r *http.Request) {
 	poll := time.NewTicker(2 * time.Second)
 	defer heartbeat.Stop()
 	defer poll.Stop()
+	emit := func() bool {
+		rows, err := h.observability.ListEvents(r.Context(), eventFilter, 50)
+		if err != nil {
+			writeDashboardStreamError(w, flusher, err)
+			return false
+		}
+		if len(rows) > 0 {
+			latest := eventFilter.After
+			for i := len(rows) - 1; i >= 0; i-- {
+				_, _ = fmt.Fprintf(w, "event: event\ndata: {\"id\":%q}\n\n", rows[i].ID)
+				if ts, err := time.Parse(time.RFC3339, rows[i].CreatedAt); err == nil && ts.After(latest) {
+					latest = ts
+				}
+			}
+			eventFilter.After = latest
+			flusher.Flush()
+		}
+		if !includeRuntime {
+			return true
+		}
+		logs, err := h.observability.ListRuntimeLogs(r.Context(), logFilter, 50)
+		if err != nil {
+			writeDashboardStreamError(w, flusher, err)
+			return false
+		}
+		if len(logs) > 0 {
+			latest := logFilter.After
+			for i := len(logs) - 1; i >= 0; i-- {
+				_, _ = fmt.Fprintf(w, "event: runtime_log\ndata: {\"id\":%q}\n\n", logs[i].ID)
+				if ts, err := time.Parse(time.RFC3339, logs[i].TS); err == nil && ts.After(latest) {
+					latest = ts
+				}
+			}
+			logFilter.After = latest
+			flusher.Flush()
+		}
+		return true
+	}
+	if !emit() {
+		return
+	}
 
 	for {
 		select {
@@ -524,45 +587,27 @@ func (h *Handler) handleEventStream(w http.ResponseWriter, r *http.Request) {
 			_, _ = fmt.Fprint(w, ": keepalive\n\n")
 			flusher.Flush()
 		case <-poll.C:
-			if h.observability != nil {
-				if rows, err := h.observability.ListEvents(r.Context(), eventFilter, 50); err == nil && len(rows) > 0 {
-					latest := eventFilter.After
-					for i := len(rows) - 1; i >= 0; i-- {
-						_, _ = fmt.Fprintf(w, "event: event\ndata: {\"id\":%q}\n\n", rows[i].ID)
-						if ts, err := time.Parse(time.RFC3339, rows[i].CreatedAt); err == nil && ts.After(latest) {
-							latest = ts
-						}
-					}
-					eventFilter.After = latest
-					flusher.Flush()
-				}
-				if includeRuntime {
-					if rows, err := h.observability.ListRuntimeLogs(r.Context(), logFilter, 50); err == nil && len(rows) > 0 {
-						latest := logFilter.After
-						for i := len(rows) - 1; i >= 0; i-- {
-							_, _ = fmt.Fprintf(w, "event: runtime_log\ndata: {\"id\":%q}\n\n", rows[i].ID)
-							if ts, err := time.Parse(time.RFC3339, rows[i].TS); err == nil && ts.After(latest) {
-								latest = ts
-							}
-						}
-						logFilter.After = latest
-						flusher.Flush()
-					}
-				}
+			if !emit() {
+				return
 			}
 		}
 	}
 }
 
+func writeDashboardStreamError(w http.ResponseWriter, flusher http.Flusher, err error) {
+	payload, marshalErr := json.Marshal(map[string]string{"error": err.Error()})
+	if marshalErr != nil {
+		payload = []byte(`{"error":"dashboard stream read failed"}`)
+	}
+	_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", payload)
+	flusher.Flush()
+}
+
 func dashboardEventFilterFromRequest(r *http.Request) (EventFilter, error) {
 	query := r.URL.Query()
 	subscriberID := strings.TrimSpace(query.Get("subscriber_id"))
-	legacySubscriber := strings.TrimSpace(query.Get("subscriber"))
-	if subscriberID != "" && legacySubscriber != "" && subscriberID != legacySubscriber {
-		return EventFilter{}, errors.New("subscriber and subscriber_id must match")
-	}
-	if subscriberID == "" {
-		subscriberID = legacySubscriber
+	if strings.TrimSpace(query.Get("subscriber")) != "" {
+		return EventFilter{}, errors.New("subscriber is unsupported; use subscriber_id")
 	}
 	subscriberType := strings.TrimSpace(query.Get("subscriber_type"))
 	if subscriberType != "" {
@@ -716,8 +761,8 @@ func (h *Handler) handleRuntimeAction(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func dashboardEntityListOptions(r *http.Request) (store.OperatorEntityListOptions, error) {
-	opts := store.OperatorEntityListOptions{
+func dashboardEntityListOptions(r *http.Request) (operatorread.OperatorEntityListOptions, error) {
+	opts := operatorread.OperatorEntityListOptions{
 		RunID:        strings.TrimSpace(r.URL.Query().Get("run_id")),
 		Flow:         strings.TrimSpace(r.URL.Query().Get("flow")),
 		Type:         strings.TrimSpace(r.URL.Query().Get("type")),
@@ -734,8 +779,8 @@ func dashboardEntityListOptions(r *http.Request) (store.OperatorEntityListOption
 	return opts, nil
 }
 
-func dashboardEntityAggregateOptions(r *http.Request, groupBy string) (store.OperatorEntityAggregateOptions, error) {
-	return store.OperatorEntityAggregateOptions{
+func dashboardEntityAggregateOptions(r *http.Request, groupBy string) (operatorread.OperatorEntityAggregateOptions, error) {
+	return operatorread.OperatorEntityAggregateOptions{
 		RunID:   strings.TrimSpace(r.URL.Query().Get("run_id")),
 		GroupBy: dashboardEntityAggregateGroupBy(groupBy),
 		Type:    strings.TrimSpace(r.URL.Query().Get("type")),
@@ -758,11 +803,11 @@ func handleDashboardEntityReadError(w http.ResponseWriter, err error) bool {
 		return false
 	}
 	switch {
-	case errors.Is(err, store.ErrEntityNotFound):
+	case errors.Is(err, operatorread.ErrEntityNotFound):
 		writeJSONError(w, http.StatusNotFound, errors.New("entity not found"))
-	case errors.Is(err, store.ErrAmbiguousEntityRunID):
+	case errors.Is(err, operatorread.ErrAmbiguousEntityRunID):
 		writeJSONError(w, http.StatusBadRequest, errors.New("run_id is required when entity_id exists in multiple runs"))
-	case errors.Is(err, store.ErrInvalidEntityCursor), errors.Is(err, store.ErrInvalidEntityReadParam):
+	case errors.Is(err, operatorread.ErrInvalidEntityCursor), errors.Is(err, operatorread.ErrInvalidEntityReadParam):
 		writeJSONError(w, http.StatusBadRequest, err)
 	default:
 		writeJSONError(w, http.StatusInternalServerError, err)
@@ -792,7 +837,7 @@ func formatTime(ts time.Time) string {
 	return ts.UTC().Format(time.RFC3339)
 }
 
-func dashboardAgentLastTool(item *store.OperatorAgentTool) *AgentLastTool {
+func dashboardAgentLastTool(item *operatorread.OperatorAgentTool) *AgentLastTool {
 	if item == nil {
 		return nil
 	}
@@ -803,7 +848,7 @@ func dashboardAgentLastTool(item *store.OperatorAgentTool) *AgentLastTool {
 	}
 }
 
-func dashboardLiveTurn(item *store.OperatorLiveTurn) *OperatorLiveTurn {
+func dashboardLiveTurn(item *operatorread.OperatorLiveTurn) *OperatorLiveTurn {
 	if item == nil {
 		return nil
 	}

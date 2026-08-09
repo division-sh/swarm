@@ -44,7 +44,8 @@ import (
 
 type PostgresStore struct {
 	agentPostgresOwner             *storeagent.AgentPostgresOwner
-	adminPostgresOwner             *storeadmin.AdminPostgresOwner
+	bundleDeletePostgresOwner      *storeadmin.BundleDeletePostgresOwner
+	destructiveResetPostgresOwner  *storeadmin.DestructiveResetPostgresOwner
 	activityPostgresOwner          *storeactivityjournal.ActivityPostgresOwner
 	activityResultPostgresOwner    *storeactivityresult.ActivityResultPostgresOwner
 	postgresOwner                  *storeapiidempotency.PostgresOwner
@@ -59,7 +60,11 @@ type PostgresStore struct {
 	lLMPostgresOwner               *storellm.LLMPostgresOwner
 	managedCapabilityPostgresOwner *storemanagedcapability.ManagedCapabilityPostgresOwner
 	mailboxPostgresOwner           *storemailbox.MailboxPostgresOwner
-	operatorPostgres               *storeoperatorsurface.OperatorPostgres
+	operatorRunPostgres            *storeoperatorsurface.RunPostgres
+	operatorEntityPostgres         *storeoperatorsurface.EntityPostgres
+	operatorAgentPostgres          *storeoperatorsurface.AgentPostgres
+	operatorConversationPostgres   *storeoperatorsurface.ConversationPostgres
+	operatorObservabilityPostgres  *storeoperatorsurface.ObservabilityPostgres
 	pipelinePostgresOwner          *storepipeline.PipelinePostgresOwner
 	preservationPostgresOwner      *storepreservation.PreservationPostgresOwner
 	replyPostgresOwner             *storereplycontext.ReplyPostgresOwner

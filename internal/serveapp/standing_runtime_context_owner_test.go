@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -125,9 +126,9 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			t.Cleanup(selectedRegistration.Release)
 
 			controller := &serveStandingServiceController{manager: manager}
-			handlers := apiv1.OperatorStandingServiceHandlers(apiv1.OperatorReadOptions{
-				StandingServices: controller,
-				Idempotency:      selectedStores.IdempotencyStore,
+			handlers := apiv1.OperatorStandingServiceHandlers(apiv1.StandingServiceHandlerOptions{
+				Controller:  controller,
+				Idempotency: selectedStores.IdempotencyStore,
 			})
 			invoke := func(action string) standingRuntimeContextOperationResult {
 				t.Helper()
@@ -203,7 +204,7 @@ func seedStandingRuntimeContextBundle(t *testing.T, pg *store.PostgresStore, bun
 	if err != nil {
 		t.Fatalf("project standing runtime-context bundle: %v", err)
 	}
-	if _, err := pg.UpsertBundleCatalog(context.Background(), store.BundleCatalogUpsert{
+	if _, err := pg.UpsertBundleCatalog(context.Background(), bundlecatalog.Upsert{
 		BundleHash: projection.BundleHash, ContentYAML: projection.ContentYAML,
 		ParsedJSON: projection.ParsedJSON, DataBlob: projection.DataBlob, Metadata: projection.Metadata,
 	}); err != nil {

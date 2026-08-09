@@ -7,6 +7,7 @@ import (
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -130,7 +131,7 @@ func proveForkChatCurrentAuthorityTransition(t *testing.T, sqlite bool) {
 		t.Fatal("forkchat success accepted an expired group authority")
 	}
 	requireForkChatGroupState(t, fixture, prepared.ForkTurnID, "executing", false)
-	if err := fixture.store.FailOperatorConversationForkChat(testAuthorActivityContext(), ConversationForkChatFailureRequest{
+	if err := fixture.store.FailOperatorConversationForkChat(testAuthorActivityContext(), runfork.ConversationForkChatFailureRequest{
 		Prepared: prepared, Cause: context.DeadlineExceeded, OutcomeUncertain: true, Now: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("terminalize expired forkchat authority outcome-uncertain: %v", err)

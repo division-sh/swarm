@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -95,7 +96,7 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 		t.Fatalf("header.EntityCount = %d, want entity_state count 1 despite stale run counter", header.EntityCount)
 	}
 
-	firstPage, cursor, err := pg.ListRunHeaders(ctx, RunHeaderListOptions{Status: "running", Limit: 1})
+	firstPage, cursor, err := pg.ListRunHeaders(ctx, operatorread.RunHeaderListOptions{Status: "running", Limit: 1})
 	if err != nil {
 		t.Fatalf("ListRunHeaders first page: %v", err)
 	}
@@ -109,7 +110,7 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 		t.Fatalf("running-only cursor = %q, want empty", cursor)
 	}
 
-	allFirstPage, cursor, err := pg.ListRunHeaders(ctx, RunHeaderListOptions{Limit: 2})
+	allFirstPage, cursor, err := pg.ListRunHeaders(ctx, operatorread.RunHeaderListOptions{Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRunHeaders all first page: %v", err)
 	}
@@ -119,7 +120,7 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 	if cursor == "" {
 		t.Fatal("cursor empty for truncated run list")
 	}
-	allSecondPage, next, err := pg.ListRunHeaders(ctx, RunHeaderListOptions{Limit: 2, Cursor: cursor})
+	allSecondPage, next, err := pg.ListRunHeaders(ctx, operatorread.RunHeaderListOptions{Limit: 2, Cursor: cursor})
 	if err != nil {
 		t.Fatalf("ListRunHeaders all second page: %v", err)
 	}
@@ -131,21 +132,21 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 	}
 
 	since := now.Add(-90 * time.Minute)
-	recent, _, err := pg.ListRunHeaders(ctx, RunHeaderListOptions{Since: &since})
+	recent, _, err := pg.ListRunHeaders(ctx, operatorread.RunHeaderListOptions{Since: &since})
 	if err != nil {
 		t.Fatalf("ListRunHeaders since: %v", err)
 	}
 	if len(recent) != 2 {
 		t.Fatalf("recent runs len = %d, want 2: %#v", len(recent), recent)
 	}
-	bundleRuns, _, err := pg.ListRunHeaders(ctx, RunHeaderListOptions{BundleHash: bundleA, Limit: 10})
+	bundleRuns, _, err := pg.ListRunHeaders(ctx, operatorread.RunHeaderListOptions{BundleHash: bundleA, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListRunHeaders bundle_hash: %v", err)
 	}
 	if len(bundleRuns) != 2 || bundleRuns[0].RunID != newer || bundleRuns[1].RunID != older {
 		t.Fatalf("bundle-filtered runs = %#v, want newer and older only", bundleRuns)
 	}
-	runningBundleRuns, _, err := pg.ListRunHeaders(ctx, RunHeaderListOptions{Status: "running", BundleHash: bundleA, Limit: 10})
+	runningBundleRuns, _, err := pg.ListRunHeaders(ctx, operatorread.RunHeaderListOptions{Status: "running", BundleHash: bundleA, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListRunHeaders status+bundle_hash: %v", err)
 	}
@@ -158,7 +159,7 @@ func TestRunAPIReadSurface_LoadRunHeaderNotFound(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	_, err := pg.LoadRunHeader(testAuthorActivityContext(), uuid.NewString())
-	if !errors.Is(err, ErrRunNotFound) {
-		t.Fatalf("LoadRunHeader error = %v, want ErrRunNotFound", err)
+	if !errors.Is(err, operatorread.ErrRunNotFound) {
+		t.Fatalf("LoadRunHeader error = %v, want operatorread.ErrRunNotFound", err)
 	}
 }

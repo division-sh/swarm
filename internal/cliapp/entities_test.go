@@ -128,9 +128,7 @@ func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 	apiHandler, err := apiv1.NewHandler(apiv1.Options{
 		Registry:   registry,
 		AuthTokens: []string{"test-token"},
-		Handlers: apiv1.OperatorReadHandlers(apiv1.OperatorReadOptions{
-			Entities: sqliteStore,
-		}),
+		Handlers:   apiv1.OperatorEntityHandlers(apiv1.EntityHandlerOptions{Entities: sqliteStore}),
 	})
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)

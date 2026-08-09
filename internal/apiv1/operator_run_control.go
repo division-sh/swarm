@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -31,8 +31,8 @@ type runControlResult struct {
 	Recovery *runControlRecoveryResult `json:"recovery,omitempty"`
 }
 
-func OperatorRunControlHandlers(opts OperatorReadOptions) map[string]MethodHandler {
-	if opts.RunControl == nil || opts.Idempotency == nil {
+func OperatorRunControlHandlers(opts RunControlHandlerOptions) map[string]MethodHandler {
+	if opts.Controller == nil || opts.Idempotency == nil {
 		return nil
 	}
 	now := opts.Now
@@ -52,7 +52,7 @@ func OperatorRunControlHandlers(opts OperatorReadOptions) map[string]MethodHandl
 	}
 }
 
-func executeRunControl(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time, action string) (any, error) {
+func executeRunControl(ctx context.Context, req Request, opts RunControlHandlerOptions, now time.Time, action string) (any, error) {
 	runID, err := runControlRunIDParam(req.Params)
 	if err != nil {
 		return nil, err
@@ -61,7 +61,7 @@ func executeRunControl(ctx context.Context, req Request, opts OperatorReadOption
 	if err != nil {
 		return nil, err
 	}
-	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
+	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, apiidempotency.Request{
 		Method:         req.Method,
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: idempotencyKey,
@@ -69,14 +69,19 @@ func executeRunControl(ctx context.Context, req Request, opts OperatorReadOption
 		ResourceID:     runID,
 		TTL:            runControlIdempotencyTTL,
 		Now:            now,
-	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		selectedOpts := opts
-		if runtimeContextManager(opts) != nil {
+	}, func(ctx context.Context) (apiidempotency.Completion, error) {
+		controller := opts.Controller
+		if runtimeContextManager(opts.RuntimeContexts) != nil {
 			var err error
-			ctx, selectedOpts, _, err = runtimeBundleContextByRun(ctx, opts, runID)
+			var selected selectedRuntimeContext
+			ctx, selected, _, err = runtimeBundleContextByRun(ctx, opts.RuntimeContexts, runID)
 			if err != nil {
-				return store.APIIdempotencyCompletion{}, err
+				return apiidempotency.Completion{}, err
 			}
+			if selected.Runtime == nil || selected.Runtime.RunControl == nil {
+				return apiidempotency.Completion{}, fmt.Errorf("run control owner is required for the selected runtime")
+			}
+			controller = selected.Runtime.RunControl
 		}
 		controlReq := runtimeruncontrol.TransitionRequest{
 			RunID:        runID,
@@ -88,16 +93,16 @@ func executeRunControl(ctx context.Context, req Request, opts OperatorReadOption
 		var err error
 		switch action {
 		case "stop":
-			result, err = selectedOpts.RunControl.Stop(ctx, controlReq)
+			result, err = controller.Stop(ctx, controlReq)
 		case "pause":
-			result, err = selectedOpts.RunControl.Pause(ctx, controlReq)
+			result, err = controller.Pause(ctx, controlReq)
 		case "continue":
-			result, err = selectedOpts.RunControl.Continue(ctx, controlReq)
+			result, err = controller.Continue(ctx, controlReq)
 		default:
 			err = fmt.Errorf("unsupported run control action %q", action)
 		}
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, runControlError(runID, err)
+			return apiidempotency.Completion{}, runControlError(runID, err)
 		}
 		responseResult := runControlResult{OK: true}
 		if action == "stop" {
@@ -109,9 +114,9 @@ func executeRunControl(ctx context.Context, req Request, opts OperatorReadOption
 		}
 		response, err := json.Marshal(responseResult)
 		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
+			return apiidempotency.Completion{}, err
 		}
-		return store.APIIdempotencyCompletion{ResourceID: result.RunID, Response: response}, nil
+		return apiidempotency.Completion{ResourceID: result.RunID, Response: response}, nil
 	})
 	if err != nil {
 		return nil, runControlError(runID, err)
@@ -139,7 +144,7 @@ func runControlRunIDParam(params map[string]any) (string, error) {
 }
 
 func runControlError(runID string, err error) error {
-	var conflict *store.APIIdempotencyConflictError
+	var conflict *apiidempotency.ConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
 			"original_request_hash":    conflict.OriginalRequestHash,

@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -21,9 +22,9 @@ import (
 type operatorDeadLetterEvidenceStore interface {
 	authorActivityReceiptStore
 	UpsertAgent(context.Context, runtimemanager.PersistedAgent) error
-	LoadOperatorAgentDeliveryDiagnostics(context.Context, agentidentity.Identity, OperatorAgentDeliveryDiagnosticsOptions) (OperatorAgentDeliveryDiagnostics, error)
-	LoadOperatorEvent(context.Context, string) (OperatorEventFull, error)
-	LoadRunDebugReport(context.Context, string, RunDebugQueryOptions) (RunDebugReport, error)
+	LoadOperatorAgentDeliveryDiagnostics(context.Context, agentidentity.Identity, operatorread.OperatorAgentDeliveryDiagnosticsOptions) (operatorread.OperatorAgentDeliveryDiagnostics, error)
+	LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
+	LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
 	runtimerunlifecycle.OperationOwner
 }
 
@@ -81,7 +82,7 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 				snapshots[snapshot.DeliveryID] = snapshot
 			}
 
-			diagnostics, err := selected.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, OperatorAgentDeliveryDiagnosticsOptions{})
+			diagnostics, err := selected.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, operatorread.OperatorAgentDeliveryDiagnosticsOptions{})
 			if err != nil {
 				t.Fatalf("load agent diagnostics: %v", err)
 			}
@@ -103,7 +104,7 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 				assertExactOperatorDeadLetterEvidence(t, delivery.DeadLetters, snapshots[delivery.DeliveryID])
 			}
 
-			report, err := selected.LoadRunDebugReport(ctx, runID, RunDebugQueryOptions{})
+			report, err := selected.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{})
 			if err != nil {
 				t.Fatalf("load run debug report: %v", err)
 			}
@@ -187,7 +188,7 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 				t.Fatalf("terminalized delivery = %#v", snapshot)
 			}
 
-			diagnostics, err := selected.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, OperatorAgentDeliveryDiagnosticsOptions{})
+			diagnostics, err := selected.LoadOperatorAgentDeliveryDiagnostics(ctx, identity, operatorread.OperatorAgentDeliveryDiagnosticsOptions{})
 			if err != nil {
 				t.Fatalf("load terminalized agent diagnostics: %v", err)
 			}
@@ -205,7 +206,7 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 			}
 			assertExactOperatorDeadLetterEvidence(t, full.Deliveries[0].DeadLetters, snapshot)
 
-			report, err := selected.LoadRunDebugReport(ctx, runID, RunDebugQueryOptions{})
+			report, err := selected.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{})
 			if err != nil {
 				t.Fatalf("load terminalized run debug report: %v", err)
 			}
@@ -249,7 +250,7 @@ func installRunTerminalizationDeadLetterFault(t *testing.T, ctx context.Context,
 	return cleanup
 }
 
-func assertExactOperatorDeadLetterEvidence(t *testing.T, records []OperatorDeadLetterRecord, snapshot runtimedelivery.Snapshot) {
+func assertExactOperatorDeadLetterEvidence(t *testing.T, records []operatorread.OperatorDeadLetterRecord, snapshot runtimedelivery.Snapshot) {
 	t.Helper()
 	if len(records) != 1 {
 		t.Fatalf("dead-letter records for %s = %#v, want one", snapshot.DeliveryID, records)

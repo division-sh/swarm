@@ -17,12 +17,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/bundlecatalog"
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/gorilla/websocket"
 )
 
@@ -524,7 +526,7 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 	runID := "run-1"
 	eventID := "event-1"
 	fakeRuns := &fakeRunReadStore{
-		headers: map[string]store.RunHeader{
+		headers: map[string]operatorread.RunHeader{
 			runID: {
 				RunID:       runID,
 				Status:      "running",
@@ -534,7 +536,7 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 				StartedAt:   now.Add(-time.Hour),
 			},
 		},
-		reports: map[string]store.RunDebugReport{
+		reports: map[string]operatorread.RunDebugReport{
 			runID: {
 				RunID:          runID,
 				RunTableStatus: "running",
@@ -544,13 +546,13 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 				LastEventAt:    now.Add(-time.Minute),
 				EventCount:     1,
 				EntityCount:    2,
-				Deliveries:     []store.RunDebugDeliveryCount{{SubscriberID: "worker", Status: "pending", Count: 1}},
+				Deliveries:     []operatorread.RunDebugDeliveryCount{{SubscriberID: "worker", Status: "pending", Count: 1}},
 			},
 		},
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:      func() time.Time { return now },
 			Ready:    func() bool { return true },
 			Database: fakePinger{err: nil},
@@ -646,7 +648,7 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 func TestOperatorReadHandlersRunNotFoundAndRunStartStaysUnavailable(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Ready:    func() bool { return true },
 			Database: fakePinger{err: nil},
 			Runs: &fakeRunReadStore{
@@ -681,11 +683,11 @@ func TestOperatorReadHandlersRunNotFoundAndRunStartStaysUnavailable(t *testing.T
 func TestOperatorReadHandlersRunListRejectsInvalidFilters(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Ready:    func() bool { return true },
 			Database: fakePinger{err: nil},
 			Runs: &fakeRunReadStore{
-				headers: map[string]store.RunHeader{},
+				headers: map[string]operatorread.RunHeader{},
 			},
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
@@ -730,8 +732,8 @@ func TestOperatorBundleCatalogHandlersExposeStoreOwner(t *testing.T) {
 	now := time.Unix(1700000100, 0).UTC()
 	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	catalog := &fakeBundleCatalogReadStore{
-		listResult: store.BundleCatalogListResult{
-			Bundles: []store.BundleCatalogSummary{{
+		listResult: bundlecatalog.ListResult{
+			Bundles: []bundlecatalog.Summary{{
 				BundleHash:    bundleHash,
 				AgentCount:    1,
 				HasData:       true,
@@ -741,7 +743,7 @@ func TestOperatorBundleCatalogHandlersExposeStoreOwner(t *testing.T) {
 			}},
 			NextCursor: "cursor-2",
 		},
-		details: map[string]store.BundleCatalogDetail{
+		details: map[string]bundlecatalog.Detail{
 			bundleHash: {
 				BundleHash:    bundleHash,
 				ContentYAML:   "name: test",
@@ -753,9 +755,9 @@ func TestOperatorBundleCatalogHandlersExposeStoreOwner(t *testing.T) {
 				IngestedAt:    now,
 			},
 		},
-		agents: map[string]store.BundleCatalogAgentsResult{
+		agents: map[string]bundlecatalog.AgentsResult{
 			bundleHash: {
-				Agents: []store.BundleCatalogAgentDefinition{{
+				Agents: []bundlecatalog.AgentDefinition{{
 					AgentID:       "researcher",
 					Role:          "research",
 					Type:          "managed",
@@ -773,7 +775,7 @@ func TestOperatorBundleCatalogHandlersExposeStoreOwner(t *testing.T) {
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Ready:         func() bool { return true },
 			Database:      fakePinger{err: nil},
 			BundleCatalog: catalog,
@@ -827,10 +829,10 @@ func TestOperatorBundleCatalogHandlersErrors(t *testing.T) {
 	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			BundleCatalog: &fakeBundleCatalogReadStore{
 				missing: map[string]bool{bundleHash: true},
-				listErr: store.ErrInvalidBundleCatalogCursor,
+				listErr: bundlecatalog.ErrInvalidCursor,
 			},
 		}),
 	})
@@ -856,8 +858,8 @@ func TestOperatorBundleCatalogHandlersErrors(t *testing.T) {
 
 func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempotency(t *testing.T) {
 	catalog := &fakeBundleCatalogReadStore{
-		details: map[string]store.BundleCatalogDetail{},
-		agents:  map[string]store.BundleCatalogAgentsResult{},
+		details: map[string]bundlecatalog.Detail{},
+		agents:  map[string]bundlecatalog.AgentsResult{},
 	}
 	platformSpec := testBundleRegistrationPlatformSpec(t)
 	platformHash, err := fileSHA256Hex(platformSpec)
@@ -866,7 +868,7 @@ func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempote
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:              func() time.Time { return time.Unix(1700000200, 0).UTC() },
 			RepoRoot:         t.TempDir(),
 			PlatformSpecPath: platformSpec,
@@ -993,12 +995,12 @@ func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempote
 
 func TestOperatorBundleRegisterHandlersFailClosed(t *testing.T) {
 	catalog := &fakeBundleCatalogReadStore{
-		details: map[string]store.BundleCatalogDetail{},
-		agents:  map[string]store.BundleCatalogAgentsResult{},
+		details: map[string]bundlecatalog.Detail{},
+		agents:  map[string]bundlecatalog.AgentsResult{},
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			RepoRoot:         t.TempDir(),
 			PlatformSpecPath: testBundleRegistrationPlatformSpec(t),
 			BundleCatalog:    catalog,
@@ -1238,26 +1240,26 @@ func (p fakePinger) Ping(context.Context) error {
 }
 
 type fakeRunReadStore struct {
-	headers      map[string]store.RunHeader
-	reports      map[string]store.RunDebugReport
+	headers      map[string]operatorread.RunHeader
+	reports      map[string]operatorread.RunDebugReport
 	notFound     map[string]bool
-	lastListOpts store.RunHeaderListOptions
+	lastListOpts operatorread.RunHeaderListOptions
 }
 
-func (s *fakeRunReadStore) LoadRunHeader(_ context.Context, runID string) (store.RunHeader, error) {
+func (s *fakeRunReadStore) LoadRunHeader(_ context.Context, runID string) (operatorread.RunHeader, error) {
 	if s.notFound[runID] {
-		return store.RunHeader{}, store.ErrRunNotFound
+		return operatorread.RunHeader{}, operatorread.ErrRunNotFound
 	}
 	header, ok := s.headers[runID]
 	if !ok {
-		return store.RunHeader{}, store.ErrRunNotFound
+		return operatorread.RunHeader{}, operatorread.ErrRunNotFound
 	}
 	return header, nil
 }
 
-func (s *fakeRunReadStore) ListRunHeaders(_ context.Context, opts store.RunHeaderListOptions) ([]store.RunHeader, string, error) {
+func (s *fakeRunReadStore) ListRunHeaders(_ context.Context, opts operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error) {
 	s.lastListOpts = opts
-	out := make([]store.RunHeader, 0, len(s.headers))
+	out := make([]operatorread.RunHeader, 0, len(s.headers))
 	for _, header := range s.headers {
 		out = append(out, header)
 	}
@@ -1267,71 +1269,71 @@ func (s *fakeRunReadStore) ListRunHeaders(_ context.Context, opts store.RunHeade
 	return out, "", nil
 }
 
-func (s *fakeRunReadStore) LoadRunDebugReport(_ context.Context, runID string, _ store.RunDebugQueryOptions) (store.RunDebugReport, error) {
+func (s *fakeRunReadStore) LoadRunDebugReport(_ context.Context, runID string, _ operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
 	if s.notFound[runID] {
-		return store.RunDebugReport{}, store.ErrRunNotFound
+		return operatorread.RunDebugReport{}, operatorread.ErrRunNotFound
 	}
 	report, ok := s.reports[runID]
 	if !ok {
-		return store.RunDebugReport{}, store.ErrRunNotFound
+		return operatorread.RunDebugReport{}, operatorread.ErrRunNotFound
 	}
 	return report, nil
 }
 
 type fakeBundleCatalogReadStore struct {
-	listResult store.BundleCatalogListResult
+	listResult bundlecatalog.ListResult
 	listErr    error
-	lastList   store.BundleCatalogListOptions
-	details    map[string]store.BundleCatalogDetail
-	agents     map[string]store.BundleCatalogAgentsResult
+	lastList   bundlecatalog.ListOptions
+	details    map[string]bundlecatalog.Detail
+	agents     map[string]bundlecatalog.AgentsResult
 	missing    map[string]bool
-	upserts    []store.BundleCatalogUpsert
+	upserts    []bundlecatalog.Upsert
 	conflict   bool
 }
 
-func (s *fakeBundleCatalogReadStore) ListBundleCatalog(_ context.Context, opts store.BundleCatalogListOptions) (store.BundleCatalogListResult, error) {
+func (s *fakeBundleCatalogReadStore) ListBundleCatalog(_ context.Context, opts bundlecatalog.ListOptions) (bundlecatalog.ListResult, error) {
 	s.lastList = opts
 	if s.listErr != nil {
-		return store.BundleCatalogListResult{}, s.listErr
+		return bundlecatalog.ListResult{}, s.listErr
 	}
 	return s.listResult, nil
 }
 
-func (s *fakeBundleCatalogReadStore) LoadBundleCatalog(_ context.Context, bundleHash string) (store.BundleCatalogDetail, error) {
+func (s *fakeBundleCatalogReadStore) LoadBundleCatalog(_ context.Context, bundleHash string) (bundlecatalog.Detail, error) {
 	if s.missing[bundleHash] {
-		return store.BundleCatalogDetail{}, store.ErrBundleNotFound
+		return bundlecatalog.Detail{}, bundlecatalog.ErrNotFound
 	}
 	detail, ok := s.details[bundleHash]
 	if !ok {
-		return store.BundleCatalogDetail{}, store.ErrBundleNotFound
+		return bundlecatalog.Detail{}, bundlecatalog.ErrNotFound
 	}
 	return detail, nil
 }
 
-func (s *fakeBundleCatalogReadStore) ListBundleCatalogAgents(_ context.Context, bundleHash string) (store.BundleCatalogAgentsResult, error) {
+func (s *fakeBundleCatalogReadStore) ListBundleCatalogAgents(_ context.Context, bundleHash string) (bundlecatalog.AgentsResult, error) {
 	if s.missing[bundleHash] {
-		return store.BundleCatalogAgentsResult{}, store.ErrBundleNotFound
+		return bundlecatalog.AgentsResult{}, bundlecatalog.ErrNotFound
 	}
 	result, ok := s.agents[bundleHash]
 	if !ok {
-		return store.BundleCatalogAgentsResult{}, store.ErrBundleNotFound
+		return bundlecatalog.AgentsResult{}, bundlecatalog.ErrNotFound
 	}
 	return result, nil
 }
 
-func (s *fakeBundleCatalogReadStore) UpsertBundleCatalog(_ context.Context, req store.BundleCatalogUpsert) (store.BundleCatalogUpsertResult, error) {
+func (s *fakeBundleCatalogReadStore) UpsertBundleCatalog(_ context.Context, req bundlecatalog.Upsert) (bundlecatalog.UpsertResult, error) {
 	if s.conflict {
-		return store.BundleCatalogUpsertResult{}, &store.BundleCatalogConflictError{BundleHash: req.BundleHash}
+		return bundlecatalog.UpsertResult{}, &bundlecatalog.ConflictError{BundleHash: req.BundleHash}
 	}
 	if s.details == nil {
-		s.details = map[string]store.BundleCatalogDetail{}
+		s.details = map[string]bundlecatalog.Detail{}
 	}
 	if s.agents == nil {
-		s.agents = map[string]store.BundleCatalogAgentsResult{}
+		s.agents = map[string]bundlecatalog.AgentsResult{}
 	}
 	_, exists := s.details[req.BundleHash]
 	s.upserts = append(s.upserts, req)
-	detail := store.BundleCatalogDetail{
+	detail := bundlecatalog.Detail{
 		BundleHash:    req.BundleHash,
 		ContentYAML:   req.ContentYAML,
 		ParsedJSON:    req.ParsedJSON,
@@ -1345,7 +1347,7 @@ func (s *fakeBundleCatalogReadStore) UpsertBundleCatalog(_ context.Context, req 
 		detail = s.details[req.BundleHash]
 	}
 	s.details[req.BundleHash] = detail
-	return store.BundleCatalogUpsertResult{Detail: detail, Registered: !exists}, nil
+	return bundlecatalog.UpsertResult{Detail: detail, Registered: !exists}, nil
 }
 
 var _ BundleCatalogReadStore = (*fakeBundleCatalogReadStore)(nil)

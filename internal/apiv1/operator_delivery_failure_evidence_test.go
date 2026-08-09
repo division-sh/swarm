@@ -4,13 +4,14 @@ import (
 	"testing"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 func TestEventPublishDeliveriesExposeFailureEvidence(t *testing.T) {
 	at := time.Unix(1700000000, 0).UTC()
-	deliveries := eventPublishDeliveries([]store.OperatorEventDelivery{{
+	deliveries := eventPublishDeliveries([]operatorread.OperatorEventDelivery{{
 		DeliveryID:     "delivery-1",
 		SubscriberType: "node",
 		SubscriberID:   "node-a",
@@ -21,7 +22,7 @@ func TestEventPublishDeliveriesExposeFailureEvidence(t *testing.T) {
 		Terminal:       true,
 		CreatedAt:      &at,
 		FinishedAt:     &at,
-		DeadLetters: []store.OperatorDeadLetterRecord{{
+		DeadLetters: []operatorread.OperatorDeadLetterRecord{{
 			DeadLetterID: "dead-1",
 			Failure:      *testFailure("retry_exhausted"),
 			RetryCount:   2,
@@ -39,12 +40,12 @@ func TestEventPublishDeliveriesExposeFailureEvidence(t *testing.T) {
 
 func TestEventReplayTargetsExposeOriginalFailureEvidence(t *testing.T) {
 	at := time.Unix(1700000000, 0).UTC()
-	original := store.OperatorEventFull{
+	original := operatorread.OperatorEventFull{
 		EventID:      "event-1",
 		EventName:    "task.failed",
 		Source:       "runtime",
 		ProducerType: events.EventProducerPlatform,
-		Deliveries: []store.OperatorEventDelivery{{
+		Deliveries: []operatorread.OperatorEventDelivery{{
 			DeliveryID:     "delivery-1",
 			SubscriberType: "agent",
 			SubscriberID:   "agent-a",

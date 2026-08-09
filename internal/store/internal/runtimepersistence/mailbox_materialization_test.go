@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	mailbox "github.com/division-sh/swarm/internal/mailbox"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/testutil"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
@@ -157,13 +158,13 @@ func TestSQLiteRuntimeStore_MaterializeMailboxWriteOwnsNamedTransactionAndV1Read
 }
 
 type mailboxV1ReadStore interface {
-	ListV1MailboxItems(context.Context, MailboxV1ListOptions) ([]MailboxV1Item, string, error)
-	GetV1MailboxItem(context.Context, string) (MailboxV1ItemDetail, error)
+	ListV1MailboxItems(context.Context, mailbox.V1ListOptions) ([]mailbox.V1Item, string, error)
+	GetV1MailboxItem(context.Context, string) (mailbox.V1ItemDetail, error)
 }
 
 func assertV1MailboxMaterializationRead(t *testing.T, ctx context.Context, store mailboxV1ReadStore, item runtimepipeline.MailboxWriteMaterialization, runID string) {
 	t.Helper()
-	items, cursor, err := store.ListV1MailboxItems(ctx, MailboxV1ListOptions{
+	items, cursor, err := store.ListV1MailboxItems(ctx, mailbox.V1ListOptions{
 		Status:   "pending",
 		RunID:    runID,
 		EntityID: item.EntityID,

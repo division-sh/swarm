@@ -6,9 +6,10 @@ import (
 	"strings"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 func (h *handler) builderVersion() string {
@@ -116,12 +117,12 @@ func validationFindingIsWarning(finding runtimebootverify.Finding) bool {
 	return finding.Severity == runtimebootverify.SeveritySemanticDriftWarn
 }
 
-func (h *handler) legacyBuilderListEntities(ctx context.Context) ([]store.OperatorEntitySummary, error) {
+func (h *handler) legacyBuilderListEntities(ctx context.Context) ([]operatorread.OperatorEntitySummary, error) {
 	if h == nil || h.entities == nil {
 		return nil, fmt.Errorf("entity reader is not configured")
 	}
-	opts := store.OperatorEntityListOptions{Limit: 500}
-	out := []store.OperatorEntitySummary{}
+	opts := operatorread.OperatorEntityListOptions{Limit: 500}
+	out := []operatorread.OperatorEntitySummary{}
 	for {
 		result, err := h.entities.ListOperatorEntities(ctx, opts)
 		if err != nil {

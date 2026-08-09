@@ -9,13 +9,15 @@ import (
 	"testing"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
-	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
 
@@ -28,18 +30,18 @@ func (r staticForkChatRuntimeResolver) ResolveAgentRuntime(actor runtimeactors.A
 }
 
 type fakeConversationForkLifecycleStore struct {
-	createResult  store.OperatorConversationForkSession
+	createResult  runfork.OperatorConversationForkSession
 	createErr     error
-	listResult    store.ConversationForkListResult
+	listResult    runfork.ConversationForkListResult
 	listErr       error
-	viewResult    store.OperatorConversationForkSession
+	viewResult    runfork.OperatorConversationForkSession
 	viewErr       error
-	prepareResult store.ConversationForkChatPrepared
+	prepareResult runfork.ConversationForkChatPrepared
 	prepareErr    error
-	recordResult  store.ConversationForkChatResult
+	recordResult  runfork.ConversationForkChatResult
 	recordErr     error
 	heartbeatErr  error
-	deleteResult  store.ConversationForkDeleteResult
+	deleteResult  runfork.ConversationForkDeleteResult
 	deleteErr     error
 
 	createCalls    int
@@ -51,23 +53,23 @@ type fakeConversationForkLifecycleStore struct {
 	failCalls      int
 	deleteCalls    int
 
-	lastCreate  store.ConversationForkCreateRequest
-	lastList    store.ConversationForkListOptions
+	lastCreate  runfork.ConversationForkCreateRequest
+	lastList    runfork.ConversationForkListOptions
 	lastViewID  string
-	lastPrepare store.ConversationForkChatPrepareRequest
-	lastRecord  store.ConversationForkChatRecordRequest
-	lastFailure store.ConversationForkChatFailureRequest
+	lastPrepare runfork.ConversationForkChatPrepareRequest
+	lastRecord  runfork.ConversationForkChatRecordRequest
+	lastFailure runfork.ConversationForkChatFailureRequest
 	lastDelete  string
 	lastNow     time.Time
 
 	recordEffect func()
 }
 
-func (s *fakeConversationForkLifecycleStore) CreateOperatorConversationFork(_ context.Context, req store.ConversationForkCreateRequest) (store.OperatorConversationForkSession, error) {
+func (s *fakeConversationForkLifecycleStore) CreateOperatorConversationFork(_ context.Context, req runfork.ConversationForkCreateRequest) (runfork.OperatorConversationForkSession, error) {
 	s.createCalls++
 	s.lastCreate = req
 	if s.createErr != nil {
-		return store.OperatorConversationForkSession{}, s.createErr
+		return runfork.OperatorConversationForkSession{}, s.createErr
 	}
 	if s.recordEffect != nil {
 		s.recordEffect()
@@ -75,32 +77,32 @@ func (s *fakeConversationForkLifecycleStore) CreateOperatorConversationFork(_ co
 	return s.createResult, nil
 }
 
-func (s *fakeConversationForkLifecycleStore) ListOperatorConversationForks(_ context.Context, opts store.ConversationForkListOptions) (store.ConversationForkListResult, error) {
+func (s *fakeConversationForkLifecycleStore) ListOperatorConversationForks(_ context.Context, opts runfork.ConversationForkListOptions) (runfork.ConversationForkListResult, error) {
 	s.listCalls++
 	s.lastList = opts
 	return s.listResult, s.listErr
 }
 
-func (s *fakeConversationForkLifecycleStore) LoadOperatorConversationFork(_ context.Context, forkID string) (store.OperatorConversationForkSession, error) {
+func (s *fakeConversationForkLifecycleStore) LoadOperatorConversationFork(_ context.Context, forkID string) (runfork.OperatorConversationForkSession, error) {
 	s.viewCalls++
 	s.lastViewID = forkID
 	return s.viewResult, s.viewErr
 }
 
-func (s *fakeConversationForkLifecycleStore) PrepareOperatorConversationForkChat(_ context.Context, req store.ConversationForkChatPrepareRequest) (store.ConversationForkChatPrepared, error) {
+func (s *fakeConversationForkLifecycleStore) PrepareOperatorConversationForkChat(_ context.Context, req runfork.ConversationForkChatPrepareRequest) (runfork.ConversationForkChatPrepared, error) {
 	s.prepareCalls++
 	s.lastPrepare = req
 	if s.prepareErr != nil {
-		return store.ConversationForkChatPrepared{}, s.prepareErr
+		return runfork.ConversationForkChatPrepared{}, s.prepareErr
 	}
 	return s.prepareResult, nil
 }
 
-func (s *fakeConversationForkLifecycleStore) RecordOperatorConversationForkChat(_ context.Context, req store.ConversationForkChatRecordRequest) (store.ConversationForkChatResult, error) {
+func (s *fakeConversationForkLifecycleStore) RecordOperatorConversationForkChat(_ context.Context, req runfork.ConversationForkChatRecordRequest) (runfork.ConversationForkChatResult, error) {
 	s.recordCalls++
 	s.lastRecord = req
 	if s.recordErr != nil {
-		return store.ConversationForkChatResult{}, s.recordErr
+		return runfork.ConversationForkChatResult{}, s.recordErr
 	}
 	if s.recordEffect != nil {
 		s.recordEffect()
@@ -108,23 +110,23 @@ func (s *fakeConversationForkLifecycleStore) RecordOperatorConversationForkChat(
 	return s.recordResult, nil
 }
 
-func (s *fakeConversationForkLifecycleStore) HeartbeatOperatorConversationForkChat(_ context.Context, _ store.ConversationForkChatPrepared, _ time.Time) error {
+func (s *fakeConversationForkLifecycleStore) HeartbeatOperatorConversationForkChat(_ context.Context, _ runfork.ConversationForkChatPrepared, _ time.Time) error {
 	s.heartbeatCalls++
 	return s.heartbeatErr
 }
 
-func (s *fakeConversationForkLifecycleStore) FailOperatorConversationForkChat(_ context.Context, req store.ConversationForkChatFailureRequest) error {
+func (s *fakeConversationForkLifecycleStore) FailOperatorConversationForkChat(_ context.Context, req runfork.ConversationForkChatFailureRequest) error {
 	s.failCalls++
 	s.lastFailure = req
 	return nil
 }
 
-func (s *fakeConversationForkLifecycleStore) DeleteOperatorConversationFork(_ context.Context, forkID string, now time.Time) (store.ConversationForkDeleteResult, error) {
+func (s *fakeConversationForkLifecycleStore) DeleteOperatorConversationFork(_ context.Context, forkID string, now time.Time) (runfork.ConversationForkDeleteResult, error) {
 	s.deleteCalls++
 	s.lastDelete = forkID
 	s.lastNow = now
 	if s.deleteErr != nil {
-		return store.ConversationForkDeleteResult{}, s.deleteErr
+		return runfork.ConversationForkDeleteResult{}, s.deleteErr
 	}
 	if s.recordEffect != nil {
 		s.recordEffect()
@@ -133,25 +135,25 @@ func (s *fakeConversationForkLifecycleStore) DeleteOperatorConversationFork(_ co
 }
 
 type fakeForkChatExecutor struct {
-	result       store.ConversationForkChatExecution
+	result       runfork.ConversationForkChatExecution
 	err          error
 	calls        int
-	lastPrepared store.ConversationForkChatPrepared
+	lastPrepared runfork.ConversationForkChatPrepared
 	lastMessage  string
 }
 
-func (f *fakeForkChatExecutor) ExecuteForkChat(_ context.Context, prepared store.ConversationForkChatPrepared, message string) (store.ConversationForkChatExecution, error) {
+func (f *fakeForkChatExecutor) ExecuteForkChat(_ context.Context, prepared runfork.ConversationForkChatPrepared, message string) (runfork.ConversationForkChatExecution, error) {
 	f.calls++
 	f.lastPrepared = prepared
 	f.lastMessage = message
 	if f.err != nil {
-		return store.ConversationForkChatExecution{}, f.err
+		return runfork.ConversationForkChatExecution{}, f.err
 	}
 	return f.result, nil
 }
 
 func TestOperatorConversationForkHandlersSegregateReadAndLifecycleCapabilities(t *testing.T) {
-	readOnly := OperatorConversationForkHandlers(OperatorReadOptions{
+	readOnly := testOperatorConversationForkHandlers(testOperatorCapabilities{
 		ConversationForks: &fakeConversationForkLifecycleStore{},
 		Idempotency:       newMutatingProbeIdempotencyStore(),
 	})
@@ -166,7 +168,7 @@ func TestOperatorConversationForkHandlersSegregateReadAndLifecycleCapabilities(t
 		}
 	}
 
-	lifecycleOnly := OperatorConversationForkHandlers(OperatorReadOptions{
+	lifecycleOnly := testOperatorConversationForkHandlers(testOperatorCapabilities{
 		ConversationForkLifecycle: &fakeConversationForkLifecycleStore{},
 		Idempotency:               newMutatingProbeIdempotencyStore(),
 	})
@@ -181,7 +183,7 @@ func TestOperatorConversationForkHandlersSegregateReadAndLifecycleCapabilities(t
 		}
 	}
 
-	withoutIdempotency := OperatorConversationForkHandlers(OperatorReadOptions{
+	withoutIdempotency := testOperatorConversationForkHandlers(testOperatorCapabilities{
 		ConversationForkLifecycle: &fakeConversationForkLifecycleStore{},
 	})
 	for _, method := range []string{"conversation.fork", "conversation.fork_chat", "conversation.fork_delete"} {
@@ -197,12 +199,12 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 	forkID := "00000000-0000-0000-0000-000000000301"
 	turnID := "00000000-0000-0000-0000-000000000401"
 	created := now.Add(-time.Minute)
-	fork := store.OperatorConversationForkSession{
+	fork := runfork.OperatorConversationForkSession{
 		ForkID:          forkID,
 		SourceSessionID: sourceSessionID,
 		SourceRunID:     "00000000-0000-0000-0000-000000000501",
 		SourceAgentID:   "agent-1",
-		ForkPoint: store.ConversationForkPointDescriptor{
+		ForkPoint: runfork.ConversationForkPointDescriptor{
 			Kind:       "turn",
 			TurnIndex:  2,
 			TurnID:     turnID,
@@ -210,41 +212,41 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 		},
 		CreatedBy: "token",
 		CreatedAt: created,
-		ExpiresAt: created.Add(store.ConversationForkLifecycleTTL),
+		ExpiresAt: created.Add(runfork.ConversationForkLifecycleTTL),
 		State:     "active",
-		Turns:     []store.OperatorConversationTurn{},
+		Turns:     []operatorread.OperatorConversationTurn{},
 	}
 	forks := &fakeConversationForkLifecycleStore{
 		createResult: fork,
-		listResult:   store.ConversationForkListResult{Forks: []store.OperatorConversationForkSession{fork}, NextCursor: "cursor-2"},
+		listResult:   runfork.ConversationForkListResult{Forks: []runfork.OperatorConversationForkSession{fork}, NextCursor: "cursor-2"},
 		viewResult:   fork,
-		prepareResult: store.ConversationForkChatPrepared{
+		prepareResult: runfork.ConversationForkChatPrepared{
 			Fork: fork,
-			Snapshot: store.ConversationForkSnapshot{
+			Snapshot: runfork.ConversationForkSnapshot{
 				ForkID:          forkID,
 				SourceSessionID: sourceSessionID,
 				SourceRunID:     "00000000-0000-0000-0000-000000000501",
 				SourceAgentID:   "agent-1",
-				SourceTurn: store.ConversationForkSourceTurn{
+				SourceTurn: runfork.ConversationForkSourceTurn{
 					TurnID:     turnID,
 					TurnIndex:  2,
 					SelectedAt: created,
 					CreatedAt:  created,
 				},
-				EntitySnapshot: []store.ConversationForkEntitySnapshot{},
-				SnapshotOwner:  store.ConversationForkChatSnapshotOwner,
+				EntitySnapshot: []runfork.ConversationForkEntitySnapshot{},
+				SnapshotOwner:  runfork.ConversationForkChatSnapshotOwner,
 				CreatedAt:      now,
 			},
-			SandboxPolicy: store.ConversationForkSandboxPolicy{
-				Owner:       store.ConversationForkChatSandboxOwner,
+			SandboxPolicy: runfork.ConversationForkSandboxPolicy{
+				Owner:       runfork.ConversationForkChatSandboxOwner,
 				ReadPolicy:  "fork_snapshot_only",
 				WritePolicy: "stub_record_only_no_live_mutation",
 			},
 			AvailableTools: []string{"fork_snapshot_read_entities"},
 		},
-		recordResult: store.ConversationForkChatResult{
+		recordResult: runfork.ConversationForkChatResult{
 			ForkID: forkID,
-			Turn: store.OperatorConversationTurn{
+			Turn: operatorread.OperatorConversationTurn{
 				TurnIndex:       1,
 				TurnID:          "00000000-0000-0000-0000-000000000402",
 				ExecutionMode:   "live",
@@ -252,32 +254,32 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 				ResponsePayload: []byte(`{"message":"forkchat sandbox response: inspect"}`),
 				ParseOK:         true,
 			},
-			Snapshot: store.ConversationForkSnapshot{
+			Snapshot: runfork.ConversationForkSnapshot{
 				ForkID:          forkID,
 				SourceSessionID: sourceSessionID,
 				SourceRunID:     "00000000-0000-0000-0000-000000000501",
 				SourceAgentID:   "agent-1",
-				SourceTurn: store.ConversationForkSourceTurn{
+				SourceTurn: runfork.ConversationForkSourceTurn{
 					TurnID:     turnID,
 					TurnIndex:  2,
 					SelectedAt: created,
 					CreatedAt:  created,
 				},
-				EntitySnapshot: []store.ConversationForkEntitySnapshot{},
-				SnapshotOwner:  store.ConversationForkChatSnapshotOwner,
+				EntitySnapshot: []runfork.ConversationForkEntitySnapshot{},
+				SnapshotOwner:  runfork.ConversationForkChatSnapshotOwner,
 				CreatedAt:      now,
 			},
-			SandboxPolicy: store.ConversationForkSandboxPolicy{
-				Owner:       store.ConversationForkChatSandboxOwner,
+			SandboxPolicy: runfork.ConversationForkSandboxPolicy{
+				Owner:       runfork.ConversationForkChatSandboxOwner,
 				ReadPolicy:  "fork_snapshot_only",
 				WritePolicy: "stub_record_only_no_live_mutation",
 			},
 		},
-		deleteResult: store.ConversationForkDeleteResult{ForkID: forkID, Deleted: true},
+		deleteResult: runfork.ConversationForkDeleteResult{ForkID: forkID, Deleted: true},
 	}
-	executor := &fakeForkChatExecutor{result: store.ConversationForkChatExecution{
+	executor := &fakeForkChatExecutor{result: runfork.ConversationForkChatExecution{
 		AssistantMessage: "forkchat sandbox response: inspect",
-		ToolCalls: []store.OperatorConversationToolCall{{
+		ToolCalls: []operatorread.OperatorConversationToolCall{{
 			ToolUseID: "tool-1",
 			Name:      "fork_snapshot_read_entities",
 			Arguments: json.RawMessage(`{"entity_id":"entity-1"}`),
@@ -287,7 +289,7 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 	}}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:                       func() time.Time { return now },
 			ConversationForks:         forks,
 			ConversationForkLifecycle: forks,
@@ -353,7 +355,7 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 	if chatResult["fork_id"] != forkID || chatResult["idempotency_replayed"] != false {
 		t.Fatalf("conversation.fork_chat result = %#v", chatResult)
 	}
-	if got := asMap(t, chatResult["snapshot"])["snapshot_owner"]; got != store.ConversationForkChatSnapshotOwner {
+	if got := asMap(t, chatResult["snapshot"])["snapshot_owner"]; got != runfork.ConversationForkChatSnapshotOwner {
 		t.Fatalf("conversation.fork_chat snapshot owner = %#v", got)
 	}
 	if forks.prepareCalls != 1 || forks.lastPrepare.ForkID != forkID || !forks.lastPrepare.Now.Equal(now) {
@@ -412,7 +414,7 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			name:   "create missing source session",
 			method: "conversation.fork",
 			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork","params":{"source_session_id":"` + sourceSessionID + `","fork_point":{"kind":"turn","turn_id":"00000000-0000-0000-0000-000000000401"}}}`,
-			mutate: func(s *fakeConversationForkLifecycleStore) { s.createErr = store.ErrSessionNotFound },
+			mutate: func(s *fakeConversationForkLifecycleStore) { s.createErr = operatorread.ErrSessionNotFound },
 			code:   SessionNotFoundCode,
 			detail: map[string]any{"session_id": sourceSessionID},
 		},
@@ -420,7 +422,7 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			name:   "create missing turn",
 			method: "conversation.fork",
 			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork","params":{"source_session_id":"` + sourceSessionID + `","fork_point":{"kind":"turn","turn_id":"00000000-0000-0000-0000-000000000999"}}}`,
-			mutate: func(s *fakeConversationForkLifecycleStore) { s.createErr = store.ErrTurnNotFound },
+			mutate: func(s *fakeConversationForkLifecycleStore) { s.createErr = operatorread.ErrTurnNotFound },
 			code:   TurnNotFoundCode,
 			detail: map[string]any{"session_id": sourceSessionID, "turn_id": "00000000-0000-0000-0000-000000000999"},
 		},
@@ -428,7 +430,7 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			name:   "create missing event",
 			method: "conversation.fork",
 			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork","params":{"source_session_id":"` + sourceSessionID + `","fork_point":{"kind":"event","event_id":"00000000-0000-0000-0000-000000000999"}}}`,
-			mutate: func(s *fakeConversationForkLifecycleStore) { s.createErr = store.ErrEventNotFound },
+			mutate: func(s *fakeConversationForkLifecycleStore) { s.createErr = operatorread.ErrEventNotFound },
 			code:   EventNotFoundCode,
 			detail: map[string]any{"event_id": "00000000-0000-0000-0000-000000000999"},
 		},
@@ -436,14 +438,14 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			name:   "list bad cursor",
 			method: "conversation.fork_list",
 			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork_list","params":{"cursor":"bad"}}`,
-			mutate: func(s *fakeConversationForkLifecycleStore) { s.listErr = store.ErrInvalidConversationForkCursor },
+			mutate: func(s *fakeConversationForkLifecycleStore) { s.listErr = runfork.ErrInvalidConversationForkCursor },
 			code:   "",
 		},
 		{
 			name:   "view missing fork",
 			method: "conversation.fork_view",
 			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork_view","params":{"fork_id":"` + forkID + `"}}`,
-			mutate: func(s *fakeConversationForkLifecycleStore) { s.viewErr = store.ErrConversationForkNotFound },
+			mutate: func(s *fakeConversationForkLifecycleStore) { s.viewErr = runfork.ErrConversationForkNotFound },
 			code:   ForkNotFoundCode,
 			detail: map[string]any{"fork_id": forkID},
 		},
@@ -451,7 +453,7 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			name:   "chat missing fork",
 			method: "conversation.fork_chat",
 			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork_chat","params":{"fork_id":"` + forkID + `","message":"hello"}}`,
-			mutate: func(s *fakeConversationForkLifecycleStore) { s.prepareErr = store.ErrConversationForkNotFound },
+			mutate: func(s *fakeConversationForkLifecycleStore) { s.prepareErr = runfork.ErrConversationForkNotFound },
 			code:   ForkNotFoundCode,
 			detail: map[string]any{"fork_id": forkID},
 		},
@@ -459,7 +461,7 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			name:   "delete missing fork",
 			method: "conversation.fork_delete",
 			body:   `{"jsonrpc":"2.0","id":"err","method":"conversation.fork_delete","params":{"fork_id":"` + forkID + `"}}`,
-			mutate: func(s *fakeConversationForkLifecycleStore) { s.deleteErr = store.ErrConversationForkNotFound },
+			mutate: func(s *fakeConversationForkLifecycleStore) { s.deleteErr = runfork.ErrConversationForkNotFound },
 			code:   ForkNotFoundCode,
 			detail: map[string]any{"fork_id": forkID},
 		},
@@ -468,17 +470,17 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			forks := &fakeConversationForkLifecycleStore{
-				createResult: store.OperatorConversationForkSession{ForkID: forkID, SourceSessionID: sourceSessionID, SourceAgentID: "agent-1", ForkPoint: store.ConversationForkPointDescriptor{Kind: "turn", TurnIndex: 1, TurnID: "00000000-0000-0000-0000-000000000401", SelectedAt: now}, CreatedBy: "token", CreatedAt: now, ExpiresAt: now.Add(time.Hour), State: "active", Turns: []store.OperatorConversationTurn{}},
-				deleteResult: store.ConversationForkDeleteResult{ForkID: forkID, Deleted: true},
+				createResult: runfork.OperatorConversationForkSession{ForkID: forkID, SourceSessionID: sourceSessionID, SourceAgentID: "agent-1", ForkPoint: runfork.ConversationForkPointDescriptor{Kind: "turn", TurnIndex: 1, TurnID: "00000000-0000-0000-0000-000000000401", SelectedAt: now}, CreatedBy: "token", CreatedAt: now, ExpiresAt: now.Add(time.Hour), State: "active", Turns: []operatorread.OperatorConversationTurn{}},
+				deleteResult: runfork.ConversationForkDeleteResult{ForkID: forkID, Deleted: true},
 			}
 			tt.mutate(forks)
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: OperatorReadHandlers(OperatorReadOptions{
+				Handlers: testOperatorHandlers(testOperatorCapabilities{
 					Now:                       func() time.Time { return now },
 					ConversationForks:         forks,
 					ConversationForkLifecycle: forks,
-					ForkChatExecutor: &fakeForkChatExecutor{result: store.ConversationForkChatExecution{
+					ForkChatExecutor: &fakeForkChatExecutor{result: runfork.ConversationForkChatExecution{
 						AssistantMessage: "ok",
 					}},
 					Idempotency: newMutatingProbeIdempotencyStore(),
@@ -511,16 +513,16 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 func TestOperatorConversationForkChatHeartbeatFailurePreventsExecution(t *testing.T) {
 	now := time.Now().UTC()
 	forkID := uuid.NewString()
-	prepared := store.ConversationForkChatPrepared{
-		Fork: store.OperatorConversationForkSession{ForkID: forkID}, ForkTurnID: uuid.NewString(),
+	prepared := runfork.ConversationForkChatPrepared{
+		Fork: runfork.OperatorConversationForkSession{ForkID: forkID}, ForkTurnID: uuid.NewString(),
 		RequestOccurrenceID: uuid.NewString(), RequestHash: "request-hash", ActorTokenID: testToken,
 		ExecutionOwner: "forkchat-owner", LeaseExpiresAt: now.Add(time.Minute), FenceGeneration: 1,
 	}
 	forks := &fakeConversationForkLifecycleStore{prepareResult: prepared, heartbeatErr: errors.New("stale forkchat authority")}
-	executor := &fakeForkChatExecutor{result: store.ConversationForkChatExecution{AssistantMessage: "must not run"}}
+	executor := &fakeForkChatExecutor{result: runfork.ConversationForkChatExecution{AssistantMessage: "must not run"}}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now: func() time.Time { return now }, ConversationForkLifecycle: forks,
 			ForkChatExecutor: executor, Idempotency: newMutatingProbeIdempotencyStore(),
 		}),
@@ -543,26 +545,26 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 	requestOccurrenceID := uuid.NewString()
 	runtimeInstanceID := uuid.NewString()
 	bundleHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
-	prepared := store.ConversationForkChatPrepared{
-		Fork: store.OperatorConversationForkSession{
+	prepared := runfork.ConversationForkChatPrepared{
+		Fork: runfork.OperatorConversationForkSession{
 			ForkID:        forkID,
 			SourceRunID:   "run-1",
 			SourceAgentID: "agent-source",
 		},
-		Snapshot: store.ConversationForkSnapshot{
-			SnapshotOwner: store.ConversationForkChatSnapshotOwner,
+		Snapshot: runfork.ConversationForkSnapshot{
+			SnapshotOwner: runfork.ConversationForkChatSnapshotOwner,
 			SourceAgent: runtimeactors.AgentConfig{
 				ID: "agent-source", Type: "managed", Role: "researcher", Model: llmselection.ModelAliasRegular,
 				ExecutionMode: runtimeeffects.ExecutionModeLive, Memory: agentmemory.PlatformDefault(),
 				NativeTools: runtimeactors.NativeToolConfig{Bash: true, WebSearch: true, FileIO: true},
 			},
-			EntitySnapshot: []store.ConversationForkEntitySnapshot{{
+			EntitySnapshot: []runfork.ConversationForkEntitySnapshot{{
 				EntityID:     "entity-1",
 				CurrentState: "draft",
 				Fields:       map[string]any{"name": "Before"},
 			}},
 		},
-		SandboxPolicy: store.CanonicalConversationForkSandboxPolicy(),
+		SandboxPolicy: runfork.CanonicalConversationForkSandboxPolicy(),
 		ForkTurnID:    forkTurnID, SourceBundleHash: bundleHash, RequestOccurrenceID: requestOccurrenceID, RequestHash: "request-hash",
 		ActorTokenID: "actor-token", ExecutionOwner: "forkchat-test-owner", LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 1,
 	}
@@ -601,7 +603,7 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 	if rt.authority.ForkChat.BundleHash != bundleHash || rt.scope != runtimeauthoractivity.BundleScope(runtimeInstanceID, bundleHash) {
 		t.Fatalf("forkchat source scope = authority:%#v context:%#v", rt.authority.ForkChat, rt.scope)
 	}
-	if !strings.Contains(rt.systemPrompt, "isolated forensic sandbox") || !strings.Contains(rt.systemPrompt, store.ConversationForkChatSnapshotOwner) {
+	if !strings.Contains(rt.systemPrompt, "isolated forensic sandbox") || !strings.Contains(rt.systemPrompt, runfork.ConversationForkChatSnapshotOwner) {
 		t.Fatalf("system prompt = %q, want forkchat sandbox/snapshot context", rt.systemPrompt)
 	}
 	if got := forkChatToolNames(rt.tools); !stringSetContainsAll(got, "fork_snapshot_read_entities", "save_entity_field", "emit_event", "run_start") {
@@ -621,13 +623,13 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 	}
 	read := requireAPIForkToolCall(t, execution.ToolCalls, "fork_snapshot_read_entities")
 	readResult := decodeJSONMap(t, read.Result)
-	if readResult["status"] != "read_from_snapshot" || readResult["snapshot_owner"] != store.ConversationForkChatSnapshotOwner || readResult["entity_count"] != float64(1) {
+	if readResult["status"] != "read_from_snapshot" || readResult["snapshot_owner"] != runfork.ConversationForkChatSnapshotOwner || readResult["entity_count"] != float64(1) {
 		t.Fatalf("snapshot read result = %#v", readResult)
 	}
 	for _, name := range []string{"save_entity_field", "emit_event", "run_start"} {
 		call := requireAPIForkToolCall(t, execution.ToolCalls, name)
 		result := decodeJSONMap(t, call.Result)
-		if result["status"] != "stubbed" || result["owner"] != store.ConversationForkChatSandboxOwner || result["live_mutation"] != false {
+		if result["status"] != "stubbed" || result["owner"] != runfork.ConversationForkChatSandboxOwner || result["live_mutation"] != false {
 			t.Fatalf("%s result = %#v, want stubbed no-live-mutation", name, result)
 		}
 	}
@@ -650,13 +652,13 @@ func TestLLMForkChatExecutorRederivesSourceAgentAgainstCurrentRuntimeSet(t *test
 		t.Fatalf("NewAgentRuntimeSet: %v", err)
 	}
 	bundleHash := "bundle-v1:sha256:" + strings.Repeat("b", 64)
-	policy := store.CanonicalConversationForkSandboxPolicy()
-	prepared := store.ConversationForkChatPrepared{
-		Fork: store.OperatorConversationForkSession{
+	policy := runfork.CanonicalConversationForkSandboxPolicy()
+	prepared := runfork.ConversationForkChatPrepared{
+		Fork: runfork.OperatorConversationForkSession{
 			ForkID: uuid.NewString(), SourceRunID: "run-1", SourceAgentID: "agent-source",
 		},
-		Snapshot: store.ConversationForkSnapshot{
-			SnapshotOwner: store.ConversationForkChatSnapshotOwner,
+		Snapshot: runfork.ConversationForkSnapshot{
+			SnapshotOwner: runfork.ConversationForkChatSnapshotOwner,
 			SourceAgent: runtimeactors.AgentConfig{
 				ID: "agent-source", Role: "researcher",
 				ResolvedLLMBackend:   llmselection.BackendAnthropic,
@@ -745,7 +747,7 @@ func stringSetContainsAll(values []string, wants ...string) bool {
 	return true
 }
 
-func requireAPIForkToolCall(t *testing.T, calls []store.OperatorConversationToolCall, name string) store.OperatorConversationToolCall {
+func requireAPIForkToolCall(t *testing.T, calls []operatorread.OperatorConversationToolCall, name string) operatorread.OperatorConversationToolCall {
 	t.Helper()
 	if call := findConversationForkToolCall(calls, name); call != nil {
 		if len(call.Result) == 0 {
@@ -754,10 +756,10 @@ func requireAPIForkToolCall(t *testing.T, calls []store.OperatorConversationTool
 		return *call
 	}
 	t.Fatalf("tool call %s missing from %#v", name, calls)
-	return store.OperatorConversationToolCall{}
+	return operatorread.OperatorConversationToolCall{}
 }
 
-func findConversationForkToolCall(calls []store.OperatorConversationToolCall, name string) *store.OperatorConversationToolCall {
+func findConversationForkToolCall(calls []operatorread.OperatorConversationToolCall, name string) *operatorread.OperatorConversationToolCall {
 	for i := range calls {
 		if calls[i].Name == name {
 			return &calls[i]
@@ -813,7 +815,7 @@ func TestOperatorConversationForkRejectsInvalidForkPointBeforeOwner(t *testing.T
 			forks := &fakeConversationForkLifecycleStore{}
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
-				Handlers: OperatorReadHandlers(OperatorReadOptions{
+				Handlers: testOperatorHandlers(testOperatorCapabilities{
 					Now:                       func() time.Time { return now },
 					ConversationForkLifecycle: forks,
 					Idempotency:               newMutatingProbeIdempotencyStore(),
@@ -837,21 +839,21 @@ func TestOperatorConversationForkIdempotencyConflict(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	sourceSessionID := "00000000-0000-0000-0000-000000000201"
 	forks := &fakeConversationForkLifecycleStore{
-		createResult: store.OperatorConversationForkSession{
+		createResult: runfork.OperatorConversationForkSession{
 			ForkID:          "00000000-0000-0000-0000-000000000301",
 			SourceSessionID: sourceSessionID,
 			SourceAgentID:   "agent-1",
-			ForkPoint:       store.ConversationForkPointDescriptor{Kind: "turn", TurnIndex: 1, TurnID: "00000000-0000-0000-0000-000000000401", SelectedAt: now},
+			ForkPoint:       runfork.ConversationForkPointDescriptor{Kind: "turn", TurnIndex: 1, TurnID: "00000000-0000-0000-0000-000000000401", SelectedAt: now},
 			CreatedBy:       "token",
 			CreatedAt:       now,
 			ExpiresAt:       now.Add(time.Hour),
 			State:           "active",
-			Turns:           []store.OperatorConversationTurn{},
+			Turns:           []operatorread.OperatorConversationTurn{},
 		},
 	}
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
-		Handlers: OperatorReadHandlers(OperatorReadOptions{
+		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:                       func() time.Time { return now },
 			ConversationForkLifecycle: forks,
 			Idempotency:               newMutatingProbeIdempotencyStore(),
@@ -872,7 +874,7 @@ func TestOperatorConversationForkIdempotencyConflict(t *testing.T) {
 }
 
 func TestConversationForkErrorMapsParamErrors(t *testing.T) {
-	err := conversationForkError(&store.EntityReadParamError{Field: "source_session_id", Reason: "must be a UUID"}, conversationForkErrorDetails{})
+	err := conversationForkError(&operatorread.EntityReadParamError{Field: "source_session_id", Reason: "must be a UUID"}, conversationForkErrorDetails{})
 	var invalid *InvalidParamsError
 	if !errors.As(err, &invalid) {
 		t.Fatalf("conversationForkError = %T, want InvalidParamsError", err)

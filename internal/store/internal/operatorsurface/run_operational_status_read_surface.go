@@ -1,18 +1,15 @@
 package operatorsurface
 
-import "strings"
+import (
+	"strings"
 
-type RunOperationalStatus struct {
-	State          string
-	BlockingLayer  string
-	BlockingReason string
-	Heuristics     []string
-}
+	"github.com/division-sh/swarm/internal/operatorread"
+)
 
 // ProjectRunOperationalStatus owns supported run-status semantics above the
 // canonical persisted run-debug evidence surface.
-func ProjectRunOperationalStatus(report RunDebugReport) RunOperationalStatus {
-	out := RunOperationalStatus{
+func ProjectRunOperationalStatus(report operatorread.RunDebugReport) operatorread.RunOperationalStatus {
+	out := operatorread.RunOperationalStatus{
 		Heuristics: runOperationalStatusHeuristics(report),
 	}
 
@@ -58,7 +55,7 @@ func ProjectRunOperationalStatus(report RunDebugReport) RunOperationalStatus {
 	return out
 }
 
-func runOperationalStatusHeuristics(report RunDebugReport) []string {
+func runOperationalStatusHeuristics(report operatorread.RunDebugReport) []string {
 	if len(report.DeadLetters) == 0 {
 		return []string{}
 	}

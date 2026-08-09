@@ -13,13 +13,7 @@ import (
 	"github.com/lib/pq"
 )
 
-type destructiveResetCleanupExecutor interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}
-
-func (s *AdminPostgresOwner) ApplyDestructiveResetCleanup(ctx context.Context, req destructivereset.CleanupRequest) (destructivereset.CleanupResult, error) {
+func (s *DestructiveResetPostgresOwner) ApplyDestructiveResetCleanup(ctx context.Context, req destructivereset.CleanupRequest) (destructivereset.CleanupResult, error) {
 	if s == nil || s.backend == nil {
 		return destructivereset.CleanupResult{}, fmt.Errorf("postgres store is required")
 	}
@@ -43,21 +37,28 @@ func (s *AdminPostgresOwner) ApplyDestructiveResetCleanup(ctx context.Context, r
 	if out.OperationName == "" {
 		out.OperationName = destructivereset.DefaultOperationName
 	}
+	txOptions := (*sql.TxOptions)(nil)
 	if req.Result.DryRun {
-		out.RunIDs = runIDs
-		rows, err := destructiveResetCleanupTableResults(ctx, s.backend, runIDs, req.Result.IncludeBundles)
-		if err != nil {
-			return destructivereset.CleanupResult{}, err
-		}
-		out.Tables = rows
-		return out, nil
+		txOptions = &sql.TxOptions{ReadOnly: true}
 	}
-
-	tx, err := s.backend.BeginTx(ctx, nil)
+	tx, err := s.backend.BeginTx(ctx, txOptions)
 	if err != nil {
 		return destructivereset.CleanupResult{}, fmt.Errorf("begin destructive reset cleanup tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	if req.Result.DryRun {
+		out.RunIDs = runIDs
+		rows, err := destructiveResetCleanupTableResults(ctx, tx, runIDs, req.Result.IncludeBundles)
+		if err != nil {
+			return destructivereset.CleanupResult{}, err
+		}
+		out.Tables = rows
+		if err := tx.Commit(); err != nil {
+			return destructivereset.CleanupResult{}, fmt.Errorf("commit destructive reset cleanup dry-run tx: %w", err)
+		}
+		return out, nil
+	}
 
 	if err := lockDestructiveResetCleanupRuns(ctx, tx, runIDs); err != nil {
 		return destructivereset.CleanupResult{}, err
@@ -186,11 +187,11 @@ func destructiveResetCleanupRunIDsFromPlan(plan destructivereset.Plan) ([]string
 	return out, nil
 }
 
-func lockDestructiveResetCleanupRuns(ctx context.Context, exec destructiveResetCleanupExecutor, runIDs []string) error {
+func lockDestructiveResetCleanupRuns(ctx context.Context, tx *sql.Tx, runIDs []string) error {
 	if len(runIDs) == 0 {
 		return nil
 	}
-	rows, err := exec.QueryContext(ctx, `
+	rows, err := tx.QueryContext(ctx, `
 		SELECT run_id::text
 		FROM runs
 		WHERE run_id = ANY($1::uuid[])
@@ -213,12 +214,12 @@ func lockDestructiveResetCleanupRuns(ctx context.Context, exec destructiveResetC
 	return nil
 }
 
-func GuardSourceForkDependencies(ctx context.Context, exec destructiveResetCleanupExecutor, runIDs []string) error {
+func GuardSourceForkDependencies(ctx context.Context, tx *sql.Tx, runIDs []string) error {
 	if len(runIDs) == 0 {
 		return nil
 	}
 	var forkRunID, sourceRunID string
-	err := exec.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 		SELECT fork.run_id::text, fork.forked_from_run_id::text
 		FROM runs fork
 		WHERE fork.forked_from_run_id = ANY($1::uuid[])
@@ -235,11 +236,11 @@ func GuardSourceForkDependencies(ctx context.Context, exec destructiveResetClean
 	return fmt.Errorf("%w: cannot delete source run %s while dependent fork %s remains outside the cleanup set", destructivereset.ErrInvalidRequest, sourceRunID, forkRunID)
 }
 
-func guardDestructiveResetDirectiveAuthority(ctx context.Context, exec destructiveResetCleanupExecutor, runIDs []string, now time.Time) error {
+func guardDestructiveResetDirectiveAuthority(ctx context.Context, tx *sql.Tx, runIDs []string, now time.Time) error {
 	if len(runIDs) == 0 {
 		return nil
 	}
-	if _, err := exec.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM agent_directive_operations
 		WHERE resolved_run_id = ANY($1::uuid[])
 		  AND state IN ('succeeded', 'failed')
@@ -249,7 +250,7 @@ func guardDestructiveResetDirectiveAuthority(ctx context.Context, exec destructi
 	}
 	var operationID, state string
 	var expiresAt sql.NullTime
-	err := exec.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 		SELECT operation_id::text, state, expires_at
 		FROM agent_directive_operations
 		WHERE resolved_run_id = ANY($1::uuid[])
@@ -289,7 +290,7 @@ func prepareDestructiveResetBundleCatalogDelete(ctx context.Context, tx *sql.Tx,
 	return nil
 }
 
-func destructiveResetCleanupSeverPreservedReferences(ctx context.Context, exec destructiveResetCleanupExecutor, runIDs []string) error {
+func destructiveResetCleanupSeverPreservedReferences(ctx context.Context, tx *sql.Tx, runIDs []string) error {
 	if len(runIDs) == 0 {
 		return nil
 	}
@@ -390,14 +391,14 @@ func destructiveResetCleanupSeverPreservedReferences(ctx context.Context, exec d
 		},
 	}
 	for _, stmt := range statements {
-		if _, err := exec.ExecContext(ctx, stmt.query, pq.Array(runIDs)); err != nil {
+		if _, err := tx.ExecContext(ctx, stmt.query, pq.Array(runIDs)); err != nil {
 			return fmt.Errorf("sever destructive reset preserved reference %s: %w", stmt.name, err)
 		}
 	}
 	return nil
 }
 
-func destructiveResetCleanupTableResults(ctx context.Context, exec destructiveResetCleanupExecutor, runIDs []string, includeBundles bool) ([]destructivereset.CleanupTableResult, error) {
+func destructiveResetCleanupTableResults(ctx context.Context, tx *sql.Tx, runIDs []string, includeBundles bool) ([]destructivereset.CleanupTableResult, error) {
 	catalog := destructivereset.CleanupCatalogForPolicy(destructivereset.CleanupPolicy{IncludeBundles: includeBundles})
 	out := make([]destructivereset.CleanupTableResult, 0, len(catalog))
 	for _, entry := range catalog {
@@ -412,7 +413,7 @@ func destructiveResetCleanupTableResults(ctx context.Context, exec destructiveRe
 			out = append(out, result)
 			continue
 		}
-		count, err := destructiveResetCleanupCountTable(ctx, exec, entry, runIDs, includeBundles)
+		count, err := destructiveResetCleanupCountTable(ctx, tx, entry, runIDs, includeBundles)
 		if err != nil {
 			return nil, err
 		}
@@ -427,27 +428,27 @@ func destructiveResetCleanupTableResults(ctx context.Context, exec destructiveRe
 	return out, nil
 }
 
-func destructiveResetCleanupCountTable(ctx context.Context, exec destructiveResetCleanupExecutor, entry destructivereset.CleanupCatalogEntry, runIDs []string, includeBundles bool) (int64, error) {
-	query, args, err := destructiveResetCleanupQuery(entry.Table, "count", runIDs, includeBundles)
+func destructiveResetCleanupCountTable(ctx context.Context, tx *sql.Tx, entry destructivereset.CleanupCatalogEntry, runIDs []string, includeBundles bool) (int64, error) {
+	statements, err := destructiveResetCleanupStatementsForTable(entry.Table, runIDs, includeBundles)
 	if err != nil {
 		return 0, err
 	}
 	var count int64
-	if err := exec.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+	if err := tx.QueryRowContext(ctx, statements.count, statements.args...).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count destructive reset cleanup table %s: %w", entry.Table, err)
 	}
 	return count, nil
 }
 
-func destructiveResetCleanupDeleteTable(ctx context.Context, exec destructiveResetCleanupExecutor, table string, runIDs []string, includeBundles bool) (int64, error) {
-	query, args, err := destructiveResetCleanupQuery(table, "delete", runIDs, includeBundles)
+func destructiveResetCleanupDeleteTable(ctx context.Context, tx *sql.Tx, table string, runIDs []string, includeBundles bool) (int64, error) {
+	statements, err := destructiveResetCleanupStatementsForTable(table, runIDs, includeBundles)
 	if err != nil {
 		return 0, err
 	}
-	if strings.TrimSpace(query) == "" {
+	if strings.TrimSpace(statements.delete) == "" {
 		return 0, nil
 	}
-	res, err := exec.ExecContext(ctx, query, args...)
+	res, err := tx.ExecContext(ctx, statements.delete, statements.args...)
 	if err != nil {
 		return 0, fmt.Errorf("delete destructive reset cleanup table %s: %w", table, err)
 	}
@@ -458,107 +459,73 @@ func destructiveResetCleanupDeleteTable(ctx context.Context, exec destructiveRes
 	return rows, nil
 }
 
-func destructiveResetCleanupQuery(table, mode string, runIDs []string, includeBundles bool) (string, []any, error) {
+type destructiveResetCleanupStatements struct {
+	count  string
+	delete string
+	args   []any
+}
+
+func destructiveResetCleanupStatementsForTable(table string, runIDs []string, includeBundles bool) (destructiveResetCleanupStatements, error) {
 	table = strings.TrimSpace(table)
-	mode = strings.TrimSpace(mode)
-	if mode != "count" && mode != "delete" {
-		return "", nil, fmt.Errorf("unsupported destructive reset cleanup query mode %q", mode)
-	}
 	if destructiveResetCleanupPreservesTable(table, includeBundles) {
-		if mode == "delete" {
-			return "", nil, nil
-		}
-		return fmt.Sprintf(`SELECT COUNT(*) FROM %s`, quoteIdent(table)), nil, nil
+		return destructiveResetCleanupStatements{count: fmt.Sprintf(`SELECT COUNT(*) FROM %s`, quoteIdent(table))}, nil
 	}
 	if table == "bundles" && includeBundles {
-		if mode == "count" {
-			return `SELECT COUNT(*) FROM bundles`, nil, nil
-		}
-		return `DELETE FROM bundles`, nil, nil
+		return destructiveResetCleanupStatements{count: `SELECT COUNT(*) FROM bundles`, delete: `DELETE FROM bundles`}, nil
 	}
 	switch table {
 	case "standing_service_journal", "standing_service_generations", "standing_services":
-		if mode == "count" {
-			return fmt.Sprintf(`SELECT COUNT(*) FROM %s`, quoteIdent(table)), nil, nil
-		}
-		return fmt.Sprintf(`DELETE FROM %s`, quoteIdent(table)), nil, nil
-	}
-	if len(runIDs) == 0 && mode == "delete" {
-		return "", nil, nil
+		return destructiveResetCleanupStatements{
+			count:  fmt.Sprintf(`SELECT COUNT(*) FROM %s`, quoteIdent(table)),
+			delete: fmt.Sprintf(`DELETE FROM %s`, quoteIdent(table)),
+		}, nil
 	}
 	if len(runIDs) == 0 {
-		return `SELECT 0`, nil, nil
+		return destructiveResetCleanupStatements{count: `SELECT 0`}, nil
 	}
 	args := []any{pq.Array(runIDs)}
+	statements := destructiveResetCleanupStatements{args: args}
 	switch table {
 	case "inbound_publication_events":
-		if mode == "count" {
-			return `SELECT COUNT(*) FROM inbound_publication_events c WHERE EXISTS (SELECT 1 FROM inbound_publications p WHERE p.publication_id = c.publication_id AND p.resolved_run_id = ANY($1::uuid[]))`, args, nil
-		}
-		return `DELETE FROM inbound_publication_events c USING inbound_publications p WHERE c.publication_id = p.publication_id AND p.resolved_run_id = ANY($1::uuid[])`, args, nil
+		statements.count = `SELECT COUNT(*) FROM inbound_publication_events c WHERE EXISTS (SELECT 1 FROM inbound_publications p WHERE p.publication_id = c.publication_id AND p.resolved_run_id = ANY($1::uuid[]))`
+		statements.delete = `DELETE FROM inbound_publication_events c USING inbound_publications p WHERE c.publication_id = p.publication_id AND p.resolved_run_id = ANY($1::uuid[])`
 	case "inbound_publications":
-		if mode == "count" {
-			return `SELECT COUNT(*) FROM inbound_publications WHERE resolved_run_id = ANY($1::uuid[])`, args, nil
-		}
-		return `DELETE FROM inbound_publications WHERE resolved_run_id = ANY($1::uuid[])`, args, nil
+		statements.count = `SELECT COUNT(*) FROM inbound_publications WHERE resolved_run_id = ANY($1::uuid[])`
+		statements.delete = `DELETE FROM inbound_publications WHERE resolved_run_id = ANY($1::uuid[])`
 	case "event_receipts":
-		if mode == "count" {
-			return `SELECT COUNT(*) FROM event_receipts r WHERE EXISTS (SELECT 1 FROM events e WHERE e.event_id = r.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
-		}
-		return `DELETE FROM event_receipts r USING events e WHERE r.event_id = e.event_id AND e.run_id = ANY($1::uuid[])`, args, nil
+		statements.count = `SELECT COUNT(*) FROM event_receipts r WHERE EXISTS (SELECT 1 FROM events e WHERE e.event_id = r.event_id AND e.run_id = ANY($1::uuid[]))`
+		statements.delete = `DELETE FROM event_receipts r USING events e WHERE r.event_id = e.event_id AND e.run_id = ANY($1::uuid[])`
 	case "event_delivery_attempts", "event_delivery_outcomes":
-		if mode == "count" {
-			return fmt.Sprintf(`SELECT COUNT(*) FROM %s child WHERE EXISTS (SELECT 1 FROM event_deliveries d LEFT JOIN events e ON e.event_id = d.event_id WHERE d.delivery_id = child.delivery_id AND (d.run_id = ANY($1::uuid[]) OR e.run_id = ANY($1::uuid[])))`, quoteIdent(table)), args, nil
-		}
-		return fmt.Sprintf(`DELETE FROM %s child WHERE EXISTS (SELECT 1 FROM event_deliveries d LEFT JOIN events e ON e.event_id = d.event_id WHERE d.delivery_id = child.delivery_id AND (d.run_id = ANY($1::uuid[]) OR e.run_id = ANY($1::uuid[])))`, quoteIdent(table)), args, nil
+		statements.count = fmt.Sprintf(`SELECT COUNT(*) FROM %s child WHERE EXISTS (SELECT 1 FROM event_deliveries d LEFT JOIN events e ON e.event_id = d.event_id WHERE d.delivery_id = child.delivery_id AND (d.run_id = ANY($1::uuid[]) OR e.run_id = ANY($1::uuid[])))`, quoteIdent(table))
+		statements.delete = fmt.Sprintf(`DELETE FROM %s child WHERE EXISTS (SELECT 1 FROM event_deliveries d LEFT JOIN events e ON e.event_id = d.event_id WHERE d.delivery_id = child.delivery_id AND (d.run_id = ANY($1::uuid[]) OR e.run_id = ANY($1::uuid[])))`, quoteIdent(table))
 	case "dead_letters":
-		if mode == "count" {
-			return `SELECT COUNT(*) FROM dead_letters d WHERE EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.original_event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
-		}
-		return `DELETE FROM dead_letters d USING events e WHERE d.original_event_id = e.event_id AND e.run_id = ANY($1::uuid[])`, args, nil
+		statements.count = `SELECT COUNT(*) FROM dead_letters d WHERE EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.original_event_id AND e.run_id = ANY($1::uuid[]))`
+		statements.delete = `DELETE FROM dead_letters d USING events e WHERE d.original_event_id = e.event_id AND e.run_id = ANY($1::uuid[])`
 	case "event_deliveries":
-		if mode == "count" {
-			return `SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
-		}
-		return `DELETE FROM event_deliveries d WHERE d.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
+		statements.count = `SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.event_id AND e.run_id = ANY($1::uuid[]))`
+		statements.delete = `DELETE FROM event_deliveries d WHERE d.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.event_id AND e.run_id = ANY($1::uuid[]))`
 	case "committed_replay_scopes":
-		if mode == "count" {
-			return `SELECT COUNT(*) FROM committed_replay_scopes s WHERE s.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = s.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
-		}
-		return `DELETE FROM committed_replay_scopes s WHERE s.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = s.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
+		statements.count = `SELECT COUNT(*) FROM committed_replay_scopes s WHERE s.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = s.event_id AND e.run_id = ANY($1::uuid[]))`
+		statements.delete = `DELETE FROM committed_replay_scopes s WHERE s.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = s.event_id AND e.run_id = ANY($1::uuid[]))`
 	case "author_activity_occurrences", "run_fork_fact_revisions", "run_fork_revisions", "run_fork_revision_heads", "activity_attempts", "agent_turns", "agent_conversation_audits", "agent_sessions", "decision_card_route_obligations", "decision_card_changes", "decision_card_input_drafts", "proposed_effect_continuations", "human_task_continuations", "decision_cards", "entity_mutations", "entity_state", "workflow_instance_initial_materializations", "flow_instance_runtime_readiness", "run_control_state", "reply_contexts", "events", "runs":
-		if mode == "count" {
-			return fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE run_id = ANY($1::uuid[])`, quoteIdent(table)), args, nil
-		}
-		return fmt.Sprintf(`DELETE FROM %s WHERE run_id = ANY($1::uuid[])`, quoteIdent(table)), args, nil
+		statements.count = fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE run_id = ANY($1::uuid[])`, quoteIdent(table))
+		statements.delete = fmt.Sprintf(`DELETE FROM %s WHERE run_id = ANY($1::uuid[])`, quoteIdent(table))
 	case "agent_directive_operations":
-		if mode == "count" {
-			return `SELECT COUNT(*) FROM agent_directive_operations WHERE resolved_run_id = ANY($1::uuid[])`, args, nil
-		}
-		return "", nil, nil
+		statements.count = `SELECT COUNT(*) FROM agent_directive_operations WHERE resolved_run_id = ANY($1::uuid[])`
 	case "conversation_forks":
-		if mode == "count" {
-			return `SELECT COUNT(*) FROM conversation_forks WHERE source_run_id = ANY($1::uuid[])`, args, nil
-		}
-		return `DELETE FROM conversation_forks WHERE source_run_id = ANY($1::uuid[])`, args, nil
+		statements.count = `SELECT COUNT(*) FROM conversation_forks WHERE source_run_id = ANY($1::uuid[])`
+		statements.delete = `DELETE FROM conversation_forks WHERE source_run_id = ANY($1::uuid[])`
 	case "conversation_fork_snapshots":
-		if mode == "count" {
-			return `SELECT COUNT(*) FROM conversation_fork_snapshots s WHERE EXISTS (SELECT 1 FROM conversation_forks f WHERE f.fork_id = s.fork_id AND f.source_run_id = ANY($1::uuid[]))`, args, nil
-		}
-		return `DELETE FROM conversation_fork_snapshots s USING conversation_forks f WHERE s.fork_id = f.fork_id AND f.source_run_id = ANY($1::uuid[])`, args, nil
+		statements.count = `SELECT COUNT(*) FROM conversation_fork_snapshots s WHERE EXISTS (SELECT 1 FROM conversation_forks f WHERE f.fork_id = s.fork_id AND f.source_run_id = ANY($1::uuid[]))`
+		statements.delete = `DELETE FROM conversation_fork_snapshots s USING conversation_forks f WHERE s.fork_id = f.fork_id AND f.source_run_id = ANY($1::uuid[])`
 	case "conversation_fork_turns":
-		if mode == "count" {
-			return `SELECT COUNT(*) FROM conversation_fork_turns t WHERE EXISTS (SELECT 1 FROM conversation_forks f WHERE f.fork_id = t.fork_id AND f.source_run_id = ANY($1::uuid[]))`, args, nil
-		}
-		return `DELETE FROM conversation_fork_turns t USING conversation_forks f WHERE t.fork_id = f.fork_id AND f.source_run_id = ANY($1::uuid[])`, args, nil
+		statements.count = `SELECT COUNT(*) FROM conversation_fork_turns t WHERE EXISTS (SELECT 1 FROM conversation_forks f WHERE f.fork_id = t.fork_id AND f.source_run_id = ANY($1::uuid[]))`
+		statements.delete = `DELETE FROM conversation_fork_turns t USING conversation_forks f WHERE t.fork_id = f.fork_id AND f.source_run_id = ANY($1::uuid[])`
 	case "conversation_fork_turn_completions":
-		if mode == "count" {
-			return `SELECT COUNT(*) FROM conversation_fork_turn_completions c WHERE EXISTS (SELECT 1 FROM conversation_fork_turns t JOIN conversation_forks f ON f.fork_id = t.fork_id WHERE t.fork_turn_id = c.fork_turn_id AND f.source_run_id = ANY($1::uuid[]))`, args, nil
-		}
-		return `DELETE FROM conversation_fork_turn_completions c USING conversation_fork_turns t, conversation_forks f WHERE c.fork_turn_id = t.fork_turn_id AND t.fork_id = f.fork_id AND f.source_run_id = ANY($1::uuid[])`, args, nil
+		statements.count = `SELECT COUNT(*) FROM conversation_fork_turn_completions c WHERE EXISTS (SELECT 1 FROM conversation_fork_turns t JOIN conversation_forks f ON f.fork_id = t.fork_id WHERE t.fork_turn_id = c.fork_turn_id AND f.source_run_id = ANY($1::uuid[]))`
+		statements.delete = `DELETE FROM conversation_fork_turn_completions c USING conversation_fork_turns t, conversation_forks f WHERE c.fork_turn_id = t.fork_turn_id AND t.fork_id = f.fork_id AND f.source_run_id = ANY($1::uuid[])`
 	case "run_fork_delivery_event_replays":
-		if mode == "count" {
-			return `
+		statements.count = `
 				SELECT COUNT(*)
 				FROM run_fork_delivery_event_replays r
 				WHERE r.fork_run_id = ANY($1::uuid[])
@@ -576,9 +543,8 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string, includeBu
 						WHERE d.delivery_id IN (r.source_delivery_id, r.fork_delivery_id)
 						  AND (d.run_id = ANY($1::uuid[]) OR e.run_id = ANY($1::uuid[]))
 				   )
-			`, args, nil
-		}
-		return `
+			`
+		statements.delete = `
 			DELETE FROM run_fork_delivery_event_replays r
 			WHERE r.fork_run_id = ANY($1::uuid[])
 			   OR r.source_run_id = ANY($1::uuid[])
@@ -595,10 +561,9 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string, includeBu
 					WHERE d.delivery_id IN (r.source_delivery_id, r.fork_delivery_id)
 					  AND (d.run_id = ANY($1::uuid[]) OR e.run_id = ANY($1::uuid[]))
 			   )
-		`, args, nil
+		`
 	case "run_fork_selected_contract_executions":
-		if mode == "count" {
-			return `
+		statements.count = `
 				SELECT COUNT(*)
 				FROM run_fork_selected_contract_executions r
 				WHERE r.fork_run_id = ANY($1::uuid[])
@@ -609,9 +574,8 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string, includeBu
 						WHERE e.event_id IN (r.source_event_id, r.fork_event_id)
 						  AND e.run_id = ANY($1::uuid[])
 				   )
-			`, args, nil
-		}
-		return `
+			`
+		statements.delete = `
 			DELETE FROM run_fork_selected_contract_executions r
 			WHERE r.fork_run_id = ANY($1::uuid[])
 			   OR r.source_run_id = ANY($1::uuid[])
@@ -621,10 +585,9 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string, includeBu
 					WHERE e.event_id IN (r.source_event_id, r.fork_event_id)
 					  AND e.run_id = ANY($1::uuid[])
 			   )
-		`, args, nil
+		`
 	case "run_fork_selected_contract_branch_divergences", "run_fork_selected_contract_route_recoveries", "run_fork_selected_contract_bindings":
-		if mode == "count" {
-			return fmt.Sprintf(`
+		statements.count = fmt.Sprintf(`
 				SELECT COUNT(*)
 				FROM %s r
 				WHERE r.fork_run_id = ANY($1::uuid[])
@@ -635,9 +598,8 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string, includeBu
 						WHERE e.event_id = r.fork_event_id
 						  AND e.run_id = ANY($1::uuid[])
 				   )
-			`, quoteIdent(table)), args, nil
-		}
-		return fmt.Sprintf(`
+			`, quoteIdent(table))
+		statements.delete = fmt.Sprintf(`
 			DELETE FROM %s r
 			WHERE r.fork_run_id = ANY($1::uuid[])
 			   OR r.source_run_id = ANY($1::uuid[])
@@ -647,15 +609,14 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string, includeBu
 					WHERE e.event_id = r.fork_event_id
 					  AND e.run_id = ANY($1::uuid[])
 			   )
-		`, quoteIdent(table)), args, nil
+		`, quoteIdent(table))
 	case "timers":
-		if mode == "count" {
-			return `SELECT COUNT(*) FROM timers t WHERE t.run_id = ANY($1::uuid[]) OR t.forked_from_run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = t.forked_from_event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
-		}
-		return `DELETE FROM timers t WHERE t.run_id = ANY($1::uuid[]) OR t.forked_from_run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = t.forked_from_event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
+		statements.count = `SELECT COUNT(*) FROM timers t WHERE t.run_id = ANY($1::uuid[]) OR t.forked_from_run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = t.forked_from_event_id AND e.run_id = ANY($1::uuid[]))`
+		statements.delete = `DELETE FROM timers t WHERE t.run_id = ANY($1::uuid[]) OR t.forked_from_run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = t.forked_from_event_id AND e.run_id = ANY($1::uuid[]))`
 	default:
-		return "", nil, fmt.Errorf("destructive reset cleanup table %s is not implemented", table)
+		return destructiveResetCleanupStatements{}, fmt.Errorf("destructive reset cleanup table %s is not implemented", table)
 	}
+	return statements, nil
 }
 
 func destructiveResetCleanupPreservesTable(table string, includeBundles bool) bool {

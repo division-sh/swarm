@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/bundlecatalog"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
 	"github.com/google/uuid"
@@ -923,7 +924,7 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 	if err != nil {
 		t.Fatalf("BuildBundleCatalogProjection: %v", err)
 	}
-	if _, err := pg.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
+	if _, err := pg.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
 		BundleHash:  projection.BundleHash,
 		ContentYAML: projection.ContentYAML,
 		ParsedJSON:  projection.ParsedJSON,

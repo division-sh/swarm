@@ -8,17 +8,18 @@ import (
 	"strings"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/runstalled"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 type runStalledReadStore interface {
-	ListRunHeaders(context.Context, store.RunHeaderListOptions) ([]store.RunHeader, string, error)
-	LoadRunDebugReport(context.Context, string, store.RunDebugQueryOptions) (store.RunDebugReport, error)
-	ListOperatorEvents(context.Context, store.OperatorEventListOptions) (store.OperatorEventListResult, error)
+	ListRunHeaders(context.Context, operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error)
+	LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
+	ListOperatorEvents(context.Context, operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error)
 	LoadLatestRunFlowInstance(context.Context, string) (string, error)
 	LoadLatestRunNonEscalationProgressAt(context.Context, string, string) (time.Time, error)
 }
@@ -66,7 +67,7 @@ func (r *serveRunStalledReader) ListRunningRuns(ctx context.Context, limit int, 
 	if r == nil || r.store == nil {
 		return nil, "", fmt.Errorf("run stalled reader requires store")
 	}
-	headers, next, err := r.store.ListRunHeaders(ctx, store.RunHeaderListOptions{
+	headers, next, err := r.store.ListRunHeaders(ctx, operatorread.RunHeaderListOptions{
 		Status: "running",
 		Limit:  limit,
 		Cursor: cursor,
@@ -89,7 +90,7 @@ func (r *serveRunStalledReader) LoadRunSnapshot(ctx context.Context, runID strin
 	if r == nil || r.store == nil {
 		return runstalled.RunSnapshot{}, fmt.Errorf("run stalled reader requires store")
 	}
-	report, err := r.store.LoadRunDebugReport(ctx, strings.TrimSpace(runID), store.RunDebugQueryOptions{})
+	report, err := r.store.LoadRunDebugReport(ctx, strings.TrimSpace(runID), operatorread.RunDebugQueryOptions{})
 	if err != nil {
 		return runstalled.RunSnapshot{}, err
 	}
@@ -108,8 +109,8 @@ func (r *serveRunStalledReader) StalledRunEscalationExists(ctx context.Context, 
 	if r == nil || r.store == nil {
 		return false, fmt.Errorf("run stalled reader requires store")
 	}
-	result, err := r.store.ListOperatorEvents(ctx, store.OperatorEventListOptions{
-		Filter: store.OperatorEventListFilter{
+	result, err := r.store.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{
+		Filter: operatorread.OperatorEventListFilter{
 			RunID:     key.RunID,
 			EventName: runstalled.EventType,
 		},
@@ -135,9 +136,9 @@ func (r *serveRunStalledReader) StalledRunEscalationExists(ctx context.Context, 
 	return false, nil
 }
 
-func runStalledSnapshotFromDebugReport(report store.RunDebugReport, flowInstance string, progressAt time.Time) runstalled.RunSnapshot {
+func runStalledSnapshotFromDebugReport(report operatorread.RunDebugReport, flowInstance string, progressAt time.Time) runstalled.RunSnapshot {
 	report.LastEventAt = progressAt
-	status := store.ProjectRunOperationalStatus(report)
+	status := operatorread.ProjectRunOperationalStatus(report)
 	return runstalled.RunSnapshot{
 		RunID:          strings.TrimSpace(report.RunID),
 		RunTableStatus: strings.TrimSpace(report.RunTableStatus),

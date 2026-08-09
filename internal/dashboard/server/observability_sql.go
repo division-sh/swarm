@@ -2,12 +2,13 @@ package server
 
 import (
 	"context"
-	"database/sql"
+	"errors"
 	"strings"
 	"time"
 
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
+
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/store"
 )
 
 type EventFilter struct {
@@ -132,33 +133,29 @@ type incidentRecord struct {
 }
 
 type dashboardObservabilityReadOwner interface {
-	ListOperatorEvents(context.Context, store.OperatorEventListOptions) (store.OperatorEventListResult, error)
-	LoadOperatorEvent(context.Context, string) (store.OperatorEventFull, error)
-	ListOperatorRuntimeLogs(context.Context, store.OperatorRuntimeLogListOptions) (store.OperatorRuntimeLogListResult, error)
-	ListOperatorRuntimeIncidents(context.Context, store.OperatorRuntimeIncidentListOptions) (store.OperatorRuntimeIncidentListResult, error)
+	ListOperatorEvents(context.Context, operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error)
+	LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
+	ListOperatorRuntimeLogs(context.Context, operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error)
+	ListOperatorRuntimeIncidents(context.Context, operatorread.OperatorRuntimeIncidentListOptions) (operatorread.OperatorRuntimeIncidentListResult, error)
 }
 
-type SQLObservabilityReader struct {
+type ObservabilityProjection struct {
 	owner dashboardObservabilityReadOwner
 }
 
-func NewSQLObservabilityReader(db *sql.DB, source any) *SQLObservabilityReader {
-	owner, ok := source.(dashboardObservabilityReadOwner)
-	if db == nil || !ok || owner == nil {
+func NewObservabilityProjection(owner dashboardObservabilityReadOwner) *ObservabilityProjection {
+	if owner == nil {
 		return nil
 	}
-	return &SQLObservabilityReader{owner: owner}
+	return &ObservabilityProjection{owner: owner}
 }
 
-func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFilter, limit int) ([]eventRecord, error) {
-	if r == nil {
-		return []eventRecord{}, nil
+func (r *ObservabilityProjection) ListEvents(ctx context.Context, filter EventFilter, limit int) ([]eventRecord, error) {
+	if r == nil || r.owner == nil {
+		return nil, errors.New("dashboard observability owner is required")
 	}
-	if r.owner == nil {
-		return []eventRecord{}, nil
-	}
-	result, err := r.owner.ListOperatorEvents(ctx, store.OperatorEventListOptions{
-		Filter: store.OperatorEventListFilter{
+	result, err := r.owner.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{
+		Filter: operatorread.OperatorEventListFilter{
 			EntityID:       filter.EntityID,
 			EventName:      filter.Type,
 			SubscriberID:   filter.SubscriberID,
@@ -179,19 +176,16 @@ func (r *SQLObservabilityReader) ListEvents(ctx context.Context, filter EventFil
 	return out, nil
 }
 
-func (r *SQLObservabilityReader) GetEvent(ctx context.Context, id string) (eventRecord, bool, error) {
-	if r == nil {
-		return eventRecord{}, false, nil
-	}
-	if r.owner == nil {
-		return eventRecord{}, false, nil
+func (r *ObservabilityProjection) GetEvent(ctx context.Context, id string) (eventRecord, bool, error) {
+	if r == nil || r.owner == nil {
+		return eventRecord{}, false, errors.New("dashboard observability owner is required")
 	}
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return eventRecord{}, false, nil
 	}
 	event, err := r.owner.LoadOperatorEvent(ctx, id)
-	if err == store.ErrEventNotFound {
+	if err == operatorread.ErrEventNotFound {
 		return eventRecord{}, false, nil
 	}
 	if err != nil {
@@ -200,14 +194,11 @@ func (r *SQLObservabilityReader) GetEvent(ctx context.Context, id string) (event
 	return dashboardEventRecord(event), true, nil
 }
 
-func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter RuntimeLogFilter, limit int) ([]runtimeLogRecord, error) {
-	if r == nil {
-		return []runtimeLogRecord{}, nil
+func (r *ObservabilityProjection) ListRuntimeLogs(ctx context.Context, filter RuntimeLogFilter, limit int) ([]runtimeLogRecord, error) {
+	if r == nil || r.owner == nil {
+		return nil, errors.New("dashboard observability owner is required")
 	}
-	if r.owner == nil {
-		return []runtimeLogRecord{}, nil
-	}
-	result, err := r.owner.ListOperatorRuntimeLogs(ctx, store.OperatorRuntimeLogListOptions{
+	result, err := r.owner.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{
 		EntityID:          filter.EntityID,
 		Component:         filter.Component,
 		Level:             filter.Level,
@@ -228,14 +219,11 @@ func (r *SQLObservabilityReader) ListRuntimeLogs(ctx context.Context, filter Run
 	return out, nil
 }
 
-func (r *SQLObservabilityReader) ListIncidents(ctx context.Context, filter IncidentFilter) ([]incidentRecord, error) {
-	if r == nil {
-		return []incidentRecord{}, nil
+func (r *ObservabilityProjection) ListIncidents(ctx context.Context, filter IncidentFilter) ([]incidentRecord, error) {
+	if r == nil || r.owner == nil {
+		return nil, errors.New("dashboard observability owner is required")
 	}
-	if r.owner == nil {
-		return []incidentRecord{}, nil
-	}
-	result, err := r.owner.ListOperatorRuntimeIncidents(ctx, store.OperatorRuntimeIncidentListOptions{
+	result, err := r.owner.ListOperatorRuntimeIncidents(ctx, operatorread.OperatorRuntimeIncidentListOptions{
 		SinceHours: filter.SinceHours,
 		Component:  filter.Component,
 		Level:      filter.Level,
@@ -252,7 +240,7 @@ func (r *SQLObservabilityReader) ListIncidents(ctx context.Context, filter Incid
 	return out, nil
 }
 
-func dashboardEventRecord(event store.OperatorEventFull) eventRecord {
+func dashboardEventRecord(event operatorread.OperatorEventFull) eventRecord {
 	record := eventRecord{
 		ID:          event.EventID,
 		EventID:     event.EventID,
@@ -280,41 +268,37 @@ func dashboardEventRecord(event store.OperatorEventFull) eventRecord {
 	return record
 }
 
-func dashboardRuntimeLogRecord(log store.OperatorRuntimeLogEntry) runtimeLogRecord {
-	details := log.Details
-	if details == nil {
-		details = map[string]any{}
-	}
+func dashboardRuntimeLogRecord(log operatorread.OperatorRuntimeLogEntry) runtimeLogRecord {
 	return runtimeLogRecord{
 		ID:            log.LogID,
-		EventID:       readString(details["event_id"]),
+		EventID:       log.EventID,
 		TS:            formatTime(log.TS),
 		Level:         log.Level,
 		Component:     log.Component,
-		Action:        readString(details["action"]),
-		EventType:     firstString(readString(details["event_name"]), readString(details["event_type"])),
-		ParentEventID: readString(details["parent_event_id"]),
-		HandlerID:     readString(details["handler_id"]),
+		Action:        log.Action,
+		EventType:     log.EventType,
+		ParentEventID: log.ParentEventID,
+		HandlerID:     log.HandlerID,
 		ErrorCode:     log.ErrorCode,
 		Failure:       runtimefailures.CloneEnvelope(log.Failure),
-		AgentID:       readString(details["agent_id"]),
+		AgentID:       log.AgentID,
 		EntityID:      log.EntityID,
-		SessionID:     firstString(log.SessionID, readString(details["session_id"])),
-		DurationUS:    readInt(details["duration_us"]),
+		SessionID:     log.SessionID,
+		DurationUS:    log.DurationUS,
 		Source:        log.Source,
 		Message:       log.Message,
-		DeliveryState: readString(details["delivery_state"]),
-		PreviousState: readString(details["delivery_previous_state"]),
-		Transition:    readString(details["delivery_transition"]),
-		Reason:        readString(details["delivery_reason"]),
-		Terminal:      readString(details["delivery_terminal_outcome"]),
-		RetryCount:    readInt(details["retry_count"]),
-		Detail:        details,
-		Correlation:   details["correlation"],
+		DeliveryState: log.DeliveryState,
+		PreviousState: log.PreviousState,
+		Transition:    log.Transition,
+		Reason:        log.Reason,
+		Terminal:      log.Terminal,
+		RetryCount:    log.RetryCount,
+		Detail:        log.CanonicalDetail,
+		Correlation:   log.Correlation,
 	}
 }
 
-func dashboardIncidentRecord(incident store.OperatorRuntimeIncident) incidentRecord {
+func dashboardIncidentRecord(incident operatorread.OperatorRuntimeIncident) incidentRecord {
 	return incidentRecord{
 		Code:       incident.ErrorCode,
 		Count:      incident.Count,

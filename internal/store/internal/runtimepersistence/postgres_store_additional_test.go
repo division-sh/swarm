@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -2277,7 +2278,7 @@ func TestManagerStore_AppendStatelessTurnPersistsEntityAsAuditMetadata(t *testin
 		t.Fatalf("linked task turn count = %d, want 1", turns)
 	}
 
-	detail, err := pg.ListOperatorConversationTurns(ctx, OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 10})
+	detail, err := pg.ListOperatorConversationTurns(ctx, operatorread.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListOperatorConversationTurns: %v", err)
 	}
@@ -2348,7 +2349,7 @@ func TestManagerStore_AppendStatelessTurnPersistsFlowInstanceAuditIdentity(t *te
 		t.Fatalf("linked task turn count = %d, want 1", turns)
 	}
 
-	detail, err := pg.ListOperatorConversationTurns(ctx, OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 10})
+	detail, err := pg.ListOperatorConversationTurns(ctx, operatorread.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListOperatorConversationTurns: %v", err)
 	}
@@ -2842,7 +2843,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		t.Fatalf("AppendEvent with exact delivery: %v", err)
 	}
 	deliveryIdentity := testAgentIdentity(t, ceoID, "fixture/"+ceoID)
-	pending, err := pg.ListPendingAgentDeliveryDetails(ctx, PendingAgentDeliveryListOptions{
+	pending, err := pg.ListPendingAgentDeliveryDetails(ctx, operatorread.PendingAgentDeliveryListOptions{
 		AgentIdentity: deliveryIdentity,
 		Since:         time.Now().Add(-24 * time.Hour),
 		Limit:         10,
