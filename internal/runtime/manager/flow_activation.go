@@ -903,12 +903,29 @@ func buildFlowAgentConfig(
 	subscriptions := make([]string, 0, len(entry.Subscriptions))
 	subscriptions = append(subscriptions, entry.Subscriptions...)
 	rendered := make([]string, 0, len(subscriptions))
+	authorityPath := source.FlowPath(templateID)
+	if strings.TrimSpace(authorityPath) == "" {
+		authorityPath = templateID
+	}
 	for _, subscription := range subscriptions {
 		subscription = strings.TrimSpace(renderFlowTemplate(subscription, vars))
 		if subscription == "" {
 			continue
 		}
-		if _, ok := localEvents[subscription]; ok {
+		admission := semanticview.ClassifyAuthoredSubscription(source, semanticview.AuthoredSubscriptionRequest{
+			ConsumerKind: semanticview.AuthoredSubscriptionConsumerAgent,
+			ConsumerID:   agentID,
+			FlowID:       templateID,
+			FlowPath:     authorityPath,
+			LocalEvents:  localEvents,
+			Authored:     subscription,
+		})
+		if !admission.Admitted() {
+			return models.AgentConfig{}, fmt.Errorf("flow agent %s: %s", key, admission.Message())
+		}
+		if admission.Class() == semanticview.AuthoredSubscriptionSameScopeAgentExact {
+			subscription = eventidentity.Normalize(strings.Trim(flowPath, "/") + "/" + admission.LocalEvent())
+		} else if _, ok := localEvents[subscription]; ok {
 			subscription = eventidentity.ExternalizeForFlow(flowPath, localEventList(localEvents), subscription)
 		}
 		rendered = append(rendered, subscription)

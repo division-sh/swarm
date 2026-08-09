@@ -4390,6 +4390,32 @@ func TestStaticAndDynamicFlowAgentConfigRejectForeignExactAndPattern(t *testing.
 	}
 }
 
+func TestBuildFlowAgentConfigRebasesAdmittedSameScopeExactToConcreteInstance(t *testing.T) {
+	source := semanticview.Wrap(testFlowBundle(""))
+	cfg, err := buildFlowAgentConfig(
+		source,
+		"review",
+		"inst-1",
+		"ent-1",
+		"review/inst-1",
+		"reviewer",
+		runtimecontracts.AgentRegistryEntry{
+			ID:            "reviewer",
+			Type:          "generic",
+			Subscriptions: []string{"review/task.started"},
+		},
+		nil,
+		map[string]struct{}{"task.started": {}},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("buildFlowAgentConfig: %v", err)
+	}
+	if len(cfg.Subscriptions) != 1 || cfg.Subscriptions[0] != "review/inst-1/task.started" {
+		t.Fatalf("subscriptions = %#v, want concrete instance subscription", cfg.Subscriptions)
+	}
+}
+
 func TestStaticAndTemplateAgentMaterializationConsumeEffectivePlatformDefaults(t *testing.T) {
 	source := loadAgentPlatformDefaultsMaterializationSource(t)
 
