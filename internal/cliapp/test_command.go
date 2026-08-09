@@ -1584,14 +1584,14 @@ func (r scenarioRunner) buildPublishPayload(file scenarioTestFile, evaluator *sc
 	if err != nil {
 		return nil, "", err
 	}
-	schema, _, ok := runtimecontracts.EventSchemaForFlowEvent(r.bundle, file.FlowID, step.PublishEvent)
-	if !ok {
-		return nil, "", fmt.Errorf("event %s has no target schema in contract bundle", step.PublishEvent)
-	}
-	if err := runtimeeventschema.ValidatePayloadAgainstSchema(schema.Schema, payload); err != nil {
+	resolution, err := r.resolvePublishSchema(file, step.PublishEvent, "")
+	if err != nil {
 		return nil, "", err
 	}
-	return payload, step.PublishEvent, nil
+	if err := runtimeeventschema.ValidatePayloadAgainstSchema(resolution.Schema.Schema, payload); err != nil {
+		return nil, "", err
+	}
+	return payload, resolution.EventKey, nil
 }
 
 func (r scenarioRunner) compileGeneratedInputFixture(file scenarioTestFile, evaluator *scenarioExpressionEvaluator, publishIdentity string) (generatedInputFixturePlan, error) {
@@ -1609,20 +1609,11 @@ func (r scenarioRunner) compileGeneratedInputFixture(file scenarioTestFile, eval
 	association := census.ResolveDeclaredInputEndpoint(file.FlowID, publishIdentity)
 	endpoint, ok := association.Endpoint()
 	if !ok {
-		return generatedInputFixturePlan{}, generatedInputEndpointError(census, association)
+		return generatedInputFixturePlan{}, publishInputEndpointError(census, association)
 	}
-	resolution := semanticview.ResolveEventSchema(r.source, file.FlowID, endpoint.Event.EventKey())
-	if !resolution.HasSchema {
-		return generatedInputFixturePlan{}, fmt.Errorf(
-			"generated payload for flow %q input pin %q event %q has no resolved event schema; declare the event payload or provide an explicit fixture",
-			scenarioFlowLabel(file.FlowID), endpoint.PinName, endpoint.Event.EventKey(),
-		)
-	}
-	if err := resolution.UnresolvedTypeError(); err != nil {
-		return generatedInputFixturePlan{}, fmt.Errorf(
-			"generated payload for flow %q input pin %q event %q: %w",
-			scenarioFlowLabel(file.FlowID), endpoint.PinName, resolution.EventKey, err,
-		)
+	resolution, err := r.resolvePublishSchema(file, endpoint.Event.EventKey(), endpoint.PinName)
+	if err != nil {
+		return generatedInputFixturePlan{}, err
 	}
 
 	canonicalSchema := runtimeeventschema.CanonicalAcceptanceSchema(resolution.Schema.Schema)
@@ -1681,6 +1672,40 @@ func (r scenarioRunner) compileGeneratedInputFixture(file scenarioTestFile, eval
 	}, nil
 }
 
+func (r scenarioRunner) resolvePublishSchema(file scenarioTestFile, eventIdentity, pinName string) (semanticview.EventSchemaResolution, error) {
+	if r.source == nil {
+		return semanticview.EventSchemaResolution{}, fmt.Errorf("publish payload requires the effective semantic source")
+	}
+	if strings.TrimSpace(pinName) == "" {
+		association := semanticview.BuildAuthoredEventEndpointCensus(r.source).ResolveDeclaredInputEndpoint(file.FlowID, eventIdentity)
+		if endpoint, ok := association.Endpoint(); ok && strings.TrimSpace(eventIdentity) == strings.TrimSpace(endpoint.PinName) {
+			eventIdentity = endpoint.Event.EventKey()
+		}
+	}
+	canonicalEventKey := strings.TrimSpace(r.source.ResolveFlowEventReference(file.FlowID, eventIdentity))
+	if canonicalEventKey == "" {
+		return semanticview.EventSchemaResolution{}, fmt.Errorf(
+			"publish payload for flow %q event %q has no canonical event identity",
+			scenarioFlowLabel(file.FlowID), strings.TrimSpace(eventIdentity),
+		)
+	}
+	resolution := semanticview.ResolveEventSchema(r.source, file.FlowID, eventIdentity)
+	if !resolution.HasSchema {
+		context := fmt.Sprintf("event %q", strings.TrimSpace(eventIdentity))
+		if strings.TrimSpace(pinName) != "" {
+			context = fmt.Sprintf("input pin %q event %q", strings.TrimSpace(pinName), strings.TrimSpace(eventIdentity))
+		}
+		return semanticview.EventSchemaResolution{}, fmt.Errorf("publish payload for flow %q %s has no resolved event schema; declare the event payload", scenarioFlowLabel(file.FlowID), context)
+	}
+	if err := resolution.UnresolvedTypeError(); err != nil {
+		return semanticview.EventSchemaResolution{}, fmt.Errorf("publish payload for flow %q event %q: %w", scenarioFlowLabel(file.FlowID), resolution.EventKey, err)
+	}
+	// Schema resolution may select a wildcard declaration. Publication still
+	// carries the concrete event identity resolved from the effective source.
+	resolution.EventKey = canonicalEventKey
+	return resolution, nil
+}
+
 func (p generatedInputFixturePlan) materializePayload() (map[string]any, error) {
 	if len(p.payload) == 0 {
 		return nil, fmt.Errorf("generated input fixture plan has no admitted payload")
@@ -1695,7 +1720,7 @@ func (p generatedInputFixturePlan) materializePayload() (map[string]any, error) 
 	return payload, nil
 }
 
-func generatedInputEndpointError(census semanticview.AuthoredEventEndpointCensus, association semanticview.EndpointAssociationResult) error {
+func publishInputEndpointError(census semanticview.AuthoredEventEndpointCensus, association semanticview.EndpointAssociationResult) error {
 	pins := association.Candidates
 	if len(pins) == 0 {
 		for _, endpoint := range census.InputPins() {
@@ -1716,7 +1741,7 @@ func generatedInputEndpointError(census semanticview.AuthoredEventEndpointCensus
 	flow := scenarioFlowLabel(association.FlowID)
 	if association.Status == semanticview.EndpointAssociationAmbiguous {
 		return fmt.Errorf(
-			"generated payload publish %q in flow %q is ambiguous; matching input pins: %s; publish an exact pin name",
+			"publish identity %q in flow %q is ambiguous; matching input pins: %s; publish an exact pin name",
 			association.Identity, flow, strings.Join(labels, ", "),
 		)
 	}
@@ -1725,7 +1750,7 @@ func generatedInputEndpointError(census semanticview.AuthoredEventEndpointCensus
 		available = strings.Join(labels, ", ")
 	}
 	return fmt.Errorf(
-		"generated payload publish %q in flow %q does not resolve to a declared input pin; available input pins: %s",
+		"publish identity %q in flow %q does not resolve to a declared input pin; available input pins: %s",
 		association.Identity, flow, available,
 	)
 }

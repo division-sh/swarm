@@ -19,6 +19,8 @@ const (
 	MaxInhabitationDepth        = 64
 	MaxInhabitedCollectionItems = 1024
 	MaxInhabitedStringRunes     = 64 * 1024
+	MaxInhabitedAggregateCost   = 256 * 1024
+	inhabitedStructuralCost     = 8
 )
 
 // InhabitationContext stamps deterministic witnesses without granting the
@@ -39,7 +41,8 @@ func InhabitDeterministically(schema map[string]any, context InhabitationContext
 		return nil, fmt.Errorf("$: deterministic inhabitation identity is required")
 	}
 	accepted := CanonicalAcceptanceSchema(schema)
-	value, err := inhabitSchemaValue(schema, accepted, context.Identity, "$", 0)
+	budget := inhabitationBudget{remaining: MaxInhabitedAggregateCost}
+	value, err := inhabitSchemaValue(schema, accepted, context.Identity, "$", 0, &budget)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +55,7 @@ func InhabitDeterministically(schema map[string]any, context InhabitationContext
 	return value, nil
 }
 
-func inhabitSchemaValue(source, accepted map[string]any, identity, path string, depth int) (any, error) {
+func inhabitSchemaValue(source, accepted map[string]any, identity, path string, depth int, budget *inhabitationBudget) (any, error) {
 	if depth > MaxInhabitationDepth {
 		return nil, fmt.Errorf("%s: schema exceeds maximum inhabitation depth %d", path, MaxInhabitationDepth)
 	}
@@ -63,6 +66,9 @@ func inhabitSchemaValue(source, accepted map[string]any, identity, path string, 
 		}
 		if len(values) == 0 {
 			return nil, fmt.Errorf("%s.enum: must contain at least one value", path)
+		}
+		if err := budget.consumeSemanticValue(values[0], path+".enum[0]", depth); err != nil {
+			return nil, err
 		}
 		value, err := cloneSemanticJSON(values[0])
 		if err != nil {
@@ -91,32 +97,47 @@ func inhabitSchemaValue(source, accepted map[string]any, identity, path string, 
 
 	switch typeName {
 	case "object":
-		return inhabitObject(source, accepted, identity, path, depth)
+		return inhabitObject(source, accepted, identity, path, depth, budget)
 	case "array":
-		return inhabitArray(source, accepted, identity, path, depth)
+		return inhabitArray(source, accepted, identity, path, depth, budget)
 	case "string":
-		return inhabitString(accepted, identity, path)
+		return inhabitString(accepted, identity, path, budget)
 	case "boolean":
+		if err := budget.consume(path, inhabitedStructuralCost); err != nil {
+			return nil, err
+		}
 		return false, nil
 	case "number":
+		if err := budget.consume(path, inhabitedStructuralCost); err != nil {
+			return nil, err
+		}
 		return inhabitNumber(accepted, path, false)
 	case "integer":
+		if err := budget.consume(path, inhabitedStructuralCost); err != nil {
+			return nil, err
+		}
 		return inhabitNumber(accepted, path, true)
 	case "null":
+		if err := budget.consume(path, inhabitedStructuralCost); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("%s: unsupported schema type %q", path, typeName)
 	}
 }
 
-func inhabitObject(source, accepted map[string]any, identity, path string, depth int) (map[string]any, error) {
+func inhabitObject(source, accepted map[string]any, identity, path string, depth int, budget *inhabitationBudget) (map[string]any, error) {
 	sourceProperties := schemaProperties(source["properties"])
 	acceptedProperties := schemaProperties(accepted["properties"])
 	required := exactRequiredList(accepted["required"])
 	sort.Strings(required)
 
-	values := make(map[string]any, len(required))
-	state := make(map[string]uint8, len(required))
+	if err := budget.consume(path, inhabitedStructuralCost); err != nil {
+		return nil, err
+	}
+	values := make(map[string]any)
+	state := make(map[string]uint8)
 	var generate func(string) error
 	generate = func(name string) error {
 		propertyPath := path + ".properties[" + name + "]"
@@ -131,6 +152,9 @@ func inhabitObject(source, accepted map[string]any, identity, path string, depth
 		if !sourceOK || !acceptedOK {
 			return fmt.Errorf("%s: required property has no admitted schema", propertyPath)
 		}
+		if err := budget.consumeProperty(propertyPath, name); err != nil {
+			return err
+		}
 		state[name] = 1
 		target := strings.TrimSpace(asString(acceptedProperty["x-swarm-equalTo"]))
 		if target != "" {
@@ -138,6 +162,9 @@ func inhabitObject(source, accepted map[string]any, identity, path string, depth
 				return fmt.Errorf("%s: missing equality target %q", propertyPath, target)
 			}
 			if err := generate(target); err != nil {
+				return err
+			}
+			if err := budget.consumeSemanticValue(values[target], propertyPath, depth+1); err != nil {
 				return err
 			}
 			copied, err := cloneSemanticJSON(values[target])
@@ -149,7 +176,7 @@ func inhabitObject(source, accepted map[string]any, identity, path string, depth
 			}
 			values[name] = copied
 		} else {
-			value, err := inhabitSchemaValue(sourceProperty, acceptedProperty, identity, propertyPath, depth+1)
+			value, err := inhabitSchemaValue(sourceProperty, acceptedProperty, identity, propertyPath, depth+1, budget)
 			if err != nil {
 				return err
 			}
@@ -167,7 +194,7 @@ func inhabitObject(source, accepted map[string]any, identity, path string, depth
 	return values, nil
 }
 
-func inhabitArray(source, accepted map[string]any, identity, path string, depth int) ([]any, error) {
+func inhabitArray(source, accepted map[string]any, identity, path string, depth int, budget *inhabitationBudget) ([]any, error) {
 	minimum, err := nonNegativeIntegerConstraint(accepted, "minItems", path)
 	if err != nil {
 		return nil, err
@@ -187,10 +214,16 @@ func inhabitArray(source, accepted map[string]any, identity, path string, depth 
 	if !sourceOK || !acceptedOK {
 		return nil, fmt.Errorf("%s.items: array item schema is required", path)
 	}
+	if err := budget.consume(path, inhabitedStructuralCost); err != nil {
+		return nil, err
+	}
+	if err := budget.consume(path, uint64(minimum)*inhabitedStructuralCost); err != nil {
+		return nil, err
+	}
 	values := make([]any, 0, minimum)
 	for index := 0; index < minimum; index++ {
 		itemPath := fmt.Sprintf("%s.items[%d]", path, index)
-		value, err := inhabitSchemaValue(sourceItems, acceptedItems, identity, itemPath, depth+1)
+		value, err := inhabitSchemaValue(sourceItems, acceptedItems, identity, itemPath, depth+1, budget)
 		if err != nil {
 			return nil, err
 		}
@@ -199,7 +232,7 @@ func inhabitArray(source, accepted map[string]any, identity, path string, depth 
 	return values, nil
 }
 
-func inhabitString(schema map[string]any, identity, path string) (string, error) {
+func inhabitString(schema map[string]any, identity, path string, budget *inhabitationBudget) (string, error) {
 	minimum, err := nonNegativeIntegerConstraint(schema, "minLength", path)
 	if err != nil {
 		return "", err
@@ -218,10 +251,20 @@ func inhabitString(schema map[string]any, identity, path string) (string, error)
 	var value string
 	switch strings.TrimSpace(asString(schema["format"])) {
 	case "uuid":
+		if err := budget.consumeString(path, len("00000000-0000-0000-0000-000000000000"), len("00000000-0000-0000-0000-000000000000")); err != nil {
+			return "", err
+		}
 		value = uuid.NewSHA1(uuid.NameSpaceURL, []byte(identity+"\x00"+path)).String()
 	case "date-time":
+		length := deterministicDateTimeLength(minimum)
+		if err := budget.consumeString(path, length, length); err != nil {
+			return "", err
+		}
 		value = deterministicDateTime(identity, path, minimum)
 	default:
+		if err := budget.consumeString(path, minimum, minimum); err != nil {
+			return "", err
+		}
 		value = strings.Repeat("0", minimum)
 	}
 	length := utf8.RuneCountInString(value)
@@ -293,6 +336,101 @@ func deterministicDateTime(identity, path string, minimumLength int) string {
 	}
 	fraction := fmt.Sprintf("%09d", binary.BigEndian.Uint32(sum[8:12])%1_000_000_000)[:digits]
 	return base.Format("2006-01-02T15:04:05") + "." + fraction + "Z"
+}
+
+func deterministicDateTimeLength(minimumLength int) int {
+	const unqualifiedLength = len("2006-01-02T15:04:05Z")
+	if minimumLength <= unqualifiedLength {
+		return unqualifiedLength
+	}
+	digits := minimumLength - unqualifiedLength - 1
+	if digits < 1 {
+		digits = 1
+	}
+	if digits > 9 {
+		digits = 9
+	}
+	return unqualifiedLength + 1 + digits
+}
+
+type inhabitationBudget struct {
+	remaining uint64
+}
+
+func (b *inhabitationBudget) consume(path string, cost uint64) error {
+	if b == nil || cost > b.remaining {
+		return fmt.Errorf("%s: generated fixture aggregate cost budget %d exceeded; provide an explicit fixture for this field", path, MaxInhabitedAggregateCost)
+	}
+	b.remaining -= cost
+	return nil
+}
+
+func (b *inhabitationBudget) consumeProperty(path, name string) error {
+	if err := b.consume(path, inhabitedStructuralCost); err != nil {
+		return err
+	}
+	return b.consumeStringContent(path, name)
+}
+
+func (b *inhabitationBudget) consumeString(path string, runes, bytes int) error {
+	if err := b.consume(path, inhabitedStructuralCost); err != nil {
+		return err
+	}
+	if err := b.consume(path, uint64(runes)); err != nil {
+		return err
+	}
+	return b.consume(path, uint64(bytes))
+}
+
+func (b *inhabitationBudget) consumeStringContent(path, value string) error {
+	if err := b.consume(path, uint64(utf8.RuneCountInString(value))); err != nil {
+		return err
+	}
+	return b.consume(path, uint64(len(value)))
+}
+
+func (b *inhabitationBudget) consumeSemanticValue(value any, path string, depth int) error {
+	if depth > MaxInhabitationDepth {
+		return fmt.Errorf("%s: semantic value exceeds maximum inhabitation depth %d", path, MaxInhabitationDepth)
+	}
+	switch typed := value.(type) {
+	case string:
+		return b.consumeString(path, utf8.RuneCountInString(typed), len(typed))
+	case []any:
+		if err := b.consume(path, inhabitedStructuralCost); err != nil {
+			return err
+		}
+		if err := b.consume(path, uint64(len(typed))*inhabitedStructuralCost); err != nil {
+			return err
+		}
+		for index, item := range typed {
+			if err := b.consumeSemanticValue(item, fmt.Sprintf("%s[%d]", path, index), depth+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	case map[string]any:
+		if err := b.consume(path, inhabitedStructuralCost); err != nil {
+			return err
+		}
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			propertyPath := path + "[" + key + "]"
+			if err := b.consumeProperty(propertyPath, key); err != nil {
+				return err
+			}
+			if err := b.consumeSemanticValue(typed[key], propertyPath, depth+1); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return b.consume(path, inhabitedStructuralCost)
+	}
 }
 
 func nonNegativeIntegerConstraint(schema map[string]any, key, path string) (int, error) {

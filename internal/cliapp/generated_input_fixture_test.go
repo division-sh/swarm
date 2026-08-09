@@ -266,6 +266,97 @@ func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedE
 	}
 }
 
+func TestAuthoredTelegramInputFixturesUseEffectivePublishSchemaAndPublicRPC(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	setCLIAPITestToken(t, "test-token")
+	contractsPath := canonicalrouting.CopyStandingTelegramServe(t, "https://example.test")
+	bundle := loadWorkflowValidationBundleAt(t, contractsPath)
+	configPath := contractsPath + "/swarm.yaml"
+	writeRuntimeConfigText(t, configPath, withTestProviderTriggerPlatformInventory(t, "llm:\n  backend: mock\n"))
+	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: contractsPath, ExplicitPath: configPath})
+	if err != nil {
+		t.Fatalf("load unified config: %v", err)
+	}
+	configured, err := LoadConfiguredProviderTriggerPacks(contractsPath, configResult)
+	if err != nil {
+		t.Fatalf("load configured provider trigger packs: %v", err)
+	}
+	source, err := runtimeroot.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), configured.Catalog)
+	if err != nil {
+		t.Fatalf("compose effective provider source: %v", err)
+	}
+	bundleHash, err := runtimecontracts.BundleHash(bundle)
+	if err != nil {
+		t.Fatalf("bundle hash: %v", err)
+	}
+	wantPayload := map[string]any{
+		"conversation_reference":     "123",
+		"external_account_reference": "456",
+		"provider_message_reference": float64(789),
+		"text":                       "authored fixture",
+	}
+	fixturePath := filepath.Join(contractsPath, "flows", "telegram-chat", "tests", "fixtures", "telegram.yaml")
+	writeWorkflowValidationFixtureFile(t, fixturePath, `
+conversation_reference: "123"
+external_account_reference: "456"
+provider_message_reference: 789
+text: authored fixture
+`)
+	scenarioPath := filepath.Join(contractsPath, "flows", "telegram-chat", "tests", "scenario.yaml")
+
+	for _, test := range []struct {
+		name    string
+		payload any
+	}{
+		{name: "inline", payload: map[string]any{
+			"conversation_reference":     "123",
+			"external_account_reference": "456",
+			"provider_message_reference": float64(789),
+			"text":                       "authored fixture",
+		}},
+		{name: "file", payload: map[string]any{"from": "fixtures/telegram.yaml"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var call jsonRPCRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				if err := json.NewDecoder(request.Body).Decode(&call); err != nil {
+					t.Fatalf("decode RPC: %v", err)
+				}
+				if call.Method != eventPublishMethod || call.Params["event_name"] != "inbound.telegram.text_message" || call.Params["bundle_hash"] != bundleHash {
+					t.Fatalf("event.publish params = %#v", call.Params)
+				}
+				if !reflect.DeepEqual(call.Params["payload"], wantPayload) {
+					t.Fatalf("authored Telegram payload = %#v, want %#v", call.Params["payload"], wantPayload)
+				}
+				writeJSONRPCResult(t, w, call.ID, eventPublishTestResult(true))
+			}))
+			defer server.Close()
+			client, err := newCLIAPIClient(rootCommandOptions{apiServer: strings.TrimSuffix(server.URL, "/")})
+			if err != nil {
+				t.Fatalf("client: %v", err)
+			}
+			runner := scenarioRunner{
+				client:       client,
+				bundle:       bundle,
+				source:       source,
+				bundleHash:   bundleHash,
+				contractsDir: contractsPath,
+			}
+			step := scenarioStep{Action: "publish", PublishEvent: "telegram_text_message", Payload: test.payload}
+			state := &scenarioRunState{SetupEntities: map[string]scenarioSetupEntityBinding{}}
+			if err := runner.runPublishStep(
+				context.Background(),
+				scenarioTestFile{FlowID: "telegram-chat", Path: scenarioPath},
+				mustScenarioExpressionEvaluatorWithSeed(t, "authored-telegram-"+test.name),
+				state,
+				step,
+			); err != nil {
+				t.Fatalf("run %s Telegram publish step: %v", test.name, err)
+			}
+		})
+	}
+}
+
 func TestSwarmTestGeneratesConfiguredTelegramInputThroughProductionCommand(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
