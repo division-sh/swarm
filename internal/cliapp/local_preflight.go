@@ -12,10 +12,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -149,7 +149,17 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 	}
 	report.add(localPreflightWorkspacePrerequisite, code, severity, status, workspaceBackendDecisionDetail(workspaceBackend), remediation)
 	if req.CheckContractSecrets {
-		report.checkContractSecrets(ctx, source, req.ContractSecretSeverity)
+		mockConnectorResponses, err := providerconnectors.CompileMockResponsePlan(source)
+		if err != nil {
+			report.add(localPreflightContractSecretPrerequisite, "contract_secret_reachability_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the effective provider connector response declarations")
+			return report.finalize()
+		}
+		effectReachability, err := runtimebootverify.ResolveSourceBootEffectReachability(source, profile, mockConnectorResponses)
+		if err != nil {
+			report.add(localPreflightContractSecretPrerequisite, "contract_secret_reachability_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the effective agent LLM selection")
+			return report.finalize()
+		}
+		report.checkContractSecrets(ctx, source, req.ContractSecretSeverity, effectReachability)
 	}
 	if profile.ID != llmselection.BackendClaudeCLI {
 		report.add(localPreflightBackendPrerequisite, "backend_not_claude_cli", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, fmt.Sprintf("backend %q does not require claude_cli local proof prerequisites", profile.ID), "")
@@ -400,7 +410,7 @@ func (r *LocalPreflightReport) checkGatewayEnv() {
 	}
 }
 
-func (r *LocalPreflightReport) checkContractSecrets(ctx context.Context, source semanticview.Source, severity LocalPreflightSeverity) {
+func (r *LocalPreflightReport) checkContractSecrets(ctx context.Context, source semanticview.Source, severity LocalPreflightSeverity, effectReachability runtimebootverify.SourceBootEffectReachability) {
 	if severity == "" {
 		severity = LocalPreflightSeverityWarning
 	}
@@ -409,7 +419,10 @@ func (r *LocalPreflightReport) checkContractSecrets(ctx context.Context, source 
 		r.add(localPreflightContractSecretPrerequisite, "credential_store_unavailable", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the local credential store or SWARM_CREDENTIALS_FILE")
 		return
 	}
-	missing, err := runtimecredentials.MissingRequired(ctx, store, source)
+	missing, err := runtimebootverify.MissingStaticCredentialRequirements(ctx, source, runtimebootverify.Options{
+		Credentials:        store,
+		EffectReachability: effectReachability,
+	})
 	if err != nil {
 		r.add(localPreflightContractSecretPrerequisite, "contract_secret_check_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix contract credential references or credential store access")
 		return
