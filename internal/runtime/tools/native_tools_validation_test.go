@@ -10,6 +10,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -32,18 +33,14 @@ type staticAgentRuntimeResolver struct {
 	runtime llm.Runtime
 }
 
-func (r staticAgentRuntimeResolver) RuntimeForAgent(models.AgentConfig) (llm.Runtime, error) {
-	return r.runtime, nil
+func (r staticAgentRuntimeResolver) ResolveAgentRuntime(actor models.AgentConfig) (llm.AgentRuntimeResolution, error) {
+	return llm.AgentRuntimeResolution{Actor: actor, Runtime: r.runtime}, nil
 }
 
 type mappedAgentRuntimeResolver map[string]llm.Runtime
 
-func (r mappedAgentRuntimeResolver) RuntimeForAgent(actor models.AgentConfig) (llm.Runtime, error) {
-	runtime, ok := r[strings.TrimSpace(actor.ID)]
-	if !ok {
-		return nil, nil
-	}
-	return runtime, nil
+func (r mappedAgentRuntimeResolver) ResolveAgentRuntime(actor models.AgentConfig) (llm.AgentRuntimeResolution, error) {
+	return llm.AgentRuntimeResolution{Actor: actor, Runtime: r[strings.TrimSpace(actor.ID)]}, nil
 }
 
 type mockCapabilityRuntimeStub struct {
@@ -80,11 +77,11 @@ func TestExecutorNativeToolAdmissionUsesActorSelectedProviderContract(t *testing
 		},
 	})
 
-	mockOpts, err := exec.nativeToolAdmissionOptions(mockActor)
+	_, mockOpts, err := exec.nativeToolAdmissionOptions(mockActor)
 	if err != nil {
 		t.Fatalf("mock nativeToolAdmissionOptions: %v", err)
 	}
-	liveOpts, err := exec.nativeToolAdmissionOptions(liveActor)
+	_, liveOpts, err := exec.nativeToolAdmissionOptions(liveActor)
 	if err != nil {
 		t.Fatalf("live nativeToolAdmissionOptions: %v", err)
 	}
@@ -216,4 +213,80 @@ func TestValidateNativeToolBootConfig_FallbackFileIORequiresWorkspaceExecutionTa
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v, want none", warnings)
 	}
+}
+
+func TestValidateNativeToolBootConfigCensusesScopedAgentsHiddenByAmbiguousAlias(t *testing.T) {
+	source := scopedNativeToolAgentFixture(t)
+	if _, exists := source.AgentEntries()["shared-worker"]; exists {
+		t.Fatal("ambiguous shared-worker unexpectedly survived in flattened agent aliases")
+	}
+	_, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, nil, nil, nil)
+	if err == nil {
+		t.Fatal("ValidateNativeToolBootConfig unexpectedly ignored scoped native-tool agents")
+	}
+	for _, want := range []string{
+		"project packages/project-a agent shared-worker",
+		"project packages/project-b agent shared-worker",
+		"flow flow-a agent shared-worker",
+		"flow flow-b agent shared-worker",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("native admission error = %v, want %q", err, want)
+		}
+	}
+}
+
+func scopedNativeToolAgentFixture(t *testing.T) semanticview.Source {
+	t.Helper()
+	root := t.TempDir()
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: scoped-native-tool-census
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+packages:
+  - path: packages/project-a
+  - path: packages/project-b
+flows:
+  - id: flow-a
+    flow: flow-a
+    mode: static
+  - id: flow-b
+    flow: flow-b
+    mode: static
+`)
+	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-native-tool-census\n")
+	for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
+		writeToolFlowDataFixtureFile(t, filepath.Join(root, file), "{}\n")
+	}
+	for _, project := range []string{"project-a", "project-b"} {
+		dir := filepath.Join(root, "packages", project)
+		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project+"\nversion: \"1.0.0\"\nflows: []\n")
+		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "agents.yaml"), scopedNativeToolAgentYAML())
+		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "nodes.yaml"), "{}\n")
+	}
+	for _, flowID := range []string{"flow-a", "flow-b"} {
+		dir := filepath.Join(root, "flows", flowID)
+		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+flowID+"\nmode: static\ninitial_state: active\nstates: [active]\n")
+		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "agents.yaml"), scopedNativeToolAgentYAML())
+		for _, file := range []string{"events.yaml", "nodes.yaml", "policy.yaml"} {
+			writeToolFlowDataFixtureFile(t, filepath.Join(dir, file), "{}\n")
+		}
+	}
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func scopedNativeToolAgentYAML() string {
+	return `
+shared-worker:
+  id: shared-worker
+  model: regular
+  memory: false
+  native_tools:
+    file_io: true
+`
 }

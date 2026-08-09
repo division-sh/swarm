@@ -13,11 +13,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
@@ -52,15 +54,17 @@ func TestForkChatSandboxBuildsCanonicalMockAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build fork-chat mock runtime: %v", err)
 	}
-	selection, err := runtimes.SelectionForArtifact(true)
-	if err != nil {
-		t.Fatalf("select fork-chat mock runtime: %v", err)
-	}
-	runtime, err := runtimes.RuntimeForSelection(selection)
+	resolved, err := runtimes.ResolveAgentRuntime(runtimeactors.AgentConfig{
+		ID: "forkchat-mock",
+		Mock: mockperformance.Performance{
+			Kind: mockperformance.KindPython, Module: "mocks/forkchat.py",
+			Source: []byte("def handle(input):\n    return {'text': 'mock'}\n"), Digest: "sha256:forkchat-canonical-mock",
+		},
+	})
 	if err != nil {
 		t.Fatalf("resolve fork-chat mock runtime: %v", err)
 	}
-	contract, err := runtimellm.RequireProviderContract(string(runtimeeffects.ExecutionModeMock), runtime)
+	contract, err := runtimellm.RequireProviderContract(string(runtimeeffects.ExecutionModeMock), resolved.Runtime)
 	if err != nil {
 		t.Fatalf("fork-chat mock provider contract: %v", err)
 	}

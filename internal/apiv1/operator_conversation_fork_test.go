@@ -23,8 +23,8 @@ type staticForkChatRuntimeResolver struct {
 	runtime runtimellm.Runtime
 }
 
-func (r staticForkChatRuntimeResolver) RuntimeForAgent(runtimeactors.AgentConfig) (runtimellm.Runtime, error) {
-	return r.runtime, nil
+func (r staticForkChatRuntimeResolver) ResolveAgentRuntime(actor runtimeactors.AgentConfig) (runtimellm.AgentRuntimeResolution, error) {
+	return runtimellm.AgentRuntimeResolution{Actor: actor, Runtime: r.runtime}, nil
 }
 
 type fakeConversationForkLifecycleStore struct {
@@ -637,17 +637,66 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 	}
 }
 
+func TestLLMForkChatExecutorRederivesSourceAgentAgainstCurrentRuntimeSet(t *testing.T) {
+	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendOpenAIResponses)
+	if err != nil {
+		t.Fatalf("ResolveActiveBackend: %v", err)
+	}
+	rt := &forkChatScriptedRuntime{responses: []*runtimellm.Response{{
+		Message: runtimellm.Message{Role: "assistant", Content: "rederived"},
+	}}}
+	runtimes, err := runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{}, rt)
+	if err != nil {
+		t.Fatalf("NewAgentRuntimeSet: %v", err)
+	}
+	bundleHash := "bundle-v1:sha256:" + strings.Repeat("b", 64)
+	policy := store.CanonicalConversationForkSandboxPolicy()
+	prepared := store.ConversationForkChatPrepared{
+		Fork: store.OperatorConversationForkSession{
+			ForkID: uuid.NewString(), SourceRunID: "run-1", SourceAgentID: "agent-source",
+		},
+		Snapshot: store.ConversationForkSnapshot{
+			SnapshotOwner: store.ConversationForkChatSnapshotOwner,
+			SourceAgent: runtimeactors.AgentConfig{
+				ID: "agent-source", Role: "researcher",
+				ResolvedLLMBackend:   llmselection.BackendAnthropic,
+				ResolvedLLMProvider:  llmselection.ProviderAnthropic,
+				ResolvedLLMTransport: llmselection.TransportAPI,
+				ExecutionMode:        runtimeeffects.ExecutionModeLive,
+			},
+		},
+		SandboxPolicy:  policy,
+		AvailableTools: policy.AvailableToolNames(),
+		ForkTurnID:     uuid.NewString(), SourceBundleHash: bundleHash,
+		RequestOccurrenceID: uuid.NewString(), RequestHash: "request-hash",
+		ActorTokenID: "actor-token", ExecutionOwner: "forkchat-test-owner",
+		LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 1,
+	}
+	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.RuntimeScope(uuid.NewString()))
+	if _, err := NewLLMForkChatExecutor(runtimes).ExecuteForkChat(ctx, prepared, "inspect"); err != nil {
+		t.Fatalf("ExecuteForkChat: %v", err)
+	}
+	if rt.actorAuthoredBackend != "" {
+		t.Fatalf("forkchat authored llm_backend = %q, want preserved blank intent", rt.actorAuthoredBackend)
+	}
+	if rt.actorResolvedBackend != llmselection.BackendOpenAIResponses {
+		t.Fatalf("forkchat resolved llm backend = %q, want %q", rt.actorResolvedBackend, llmselection.BackendOpenAIResponses)
+	}
+}
+
 type forkChatScriptedRuntime struct {
-	responses        []*runtimellm.Response
-	startAgentID     string
-	systemPrompt     string
-	tools            []runtimellm.ToolDefinition
-	messages         []runtimellm.Message
-	actorModel       string
-	actorNativeTools runtimeactors.NativeToolConfig
-	authority        runtimeeffects.Authority
-	scope            runtimeauthoractivity.Scope
-	policyTools      []string
+	responses            []*runtimellm.Response
+	startAgentID         string
+	systemPrompt         string
+	tools                []runtimellm.ToolDefinition
+	messages             []runtimellm.Message
+	actorModel           string
+	actorAuthoredBackend string
+	actorResolvedBackend string
+	actorNativeTools     runtimeactors.NativeToolConfig
+	authority            runtimeeffects.Authority
+	scope                runtimeauthoractivity.Scope
+	policyTools          []string
 }
 
 func (r *forkChatScriptedRuntime) StartSession(ctx context.Context, agentID, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
@@ -656,6 +705,8 @@ func (r *forkChatScriptedRuntime) StartSession(ctx context.Context, agentID, sys
 	r.tools = append([]runtimellm.ToolDefinition(nil), tools...)
 	actor, _ := runtimeactors.ActorFromContext(ctx)
 	r.actorModel = actor.Model
+	r.actorAuthoredBackend = actor.LLMBackend
+	r.actorResolvedBackend = actor.ResolvedLLMBackend
 	r.actorNativeTools = actor.NativeTools
 	r.authority, _ = runtimeeffects.CompletionAuthorityFromContext(ctx)
 	r.scope, _ = runtimeauthoractivity.ScopeFromContext(ctx)

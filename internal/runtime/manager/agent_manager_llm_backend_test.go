@@ -13,6 +13,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -35,7 +36,7 @@ func TestAgentManagerDefaultsLLMBackendFromCanonicalProfile(t *testing.T) {
 	if !ok {
 		t.Fatal("spawned agent config is absent")
 	}
-	got := cfg.LLMBackend
+	got := cfg.ResolvedLLMBackend
 	if got != "openai_compatible" {
 		t.Fatalf("llm_backend = %q, want openai_compatible", got)
 	}
@@ -58,8 +59,8 @@ func TestResolveAgentModelUsesConfiguredLiveBackendWithoutMock(t *testing.T) {
 			if err := am.resolveAgentModel(&cfg); err != nil {
 				t.Fatalf("resolveAgentModel: %v", err)
 			}
-			if cfg.LLMBackend != tc.backend || cfg.ExecutionMode != runtimeeffects.ExecutionModeLive {
-				t.Fatalf("selected backend/mode = %q/%q, want %q/live", cfg.LLMBackend, cfg.ExecutionMode, tc.backend)
+			if cfg.ResolvedLLMBackend != tc.backend || cfg.ExecutionMode != runtimeeffects.ExecutionModeLive {
+				t.Fatalf("selected backend/mode = %q/%q, want %q/live", cfg.ResolvedLLMBackend, cfg.ExecutionMode, tc.backend)
 			}
 			if cfg.ResolvedLLMProvider != tc.provider || cfg.ResolvedLLMTransport != tc.transport {
 				t.Fatalf("resolved provider/transport = %q/%q, want %q/%q", cfg.ResolvedLLMProvider, cfg.ResolvedLLMTransport, tc.provider, tc.transport)
@@ -85,8 +86,8 @@ func TestResolveAgentModelExactMockOverridesEveryConfiguredLiveBackend(t *testin
 			if err := am.resolveAgentModel(&cfg); err != nil {
 				t.Fatalf("resolveAgentModel: %v", err)
 			}
-			if cfg.LLMBackend != llmselection.BackendMock || cfg.ExecutionMode != runtimeeffects.ExecutionModeMock {
-				t.Fatalf("selected backend/mode = %q/%q, want mock/mock", cfg.LLMBackend, cfg.ExecutionMode)
+			if cfg.ResolvedLLMBackend != llmselection.BackendMock || cfg.ExecutionMode != runtimeeffects.ExecutionModeMock {
+				t.Fatalf("selected backend/mode = %q/%q, want mock/mock", cfg.ResolvedLLMBackend, cfg.ExecutionMode)
 			}
 			if cfg.ResolvedLLMProvider != llmselection.ProviderMock || cfg.ResolvedLLMTransport != llmselection.TransportMock {
 				t.Fatalf("resolved provider/transport = %q/%q, want mock/in_process", cfg.ResolvedLLMProvider, cfg.ResolvedLLMTransport)
@@ -104,8 +105,8 @@ func TestResolveAgentModelMaterializesSelectionWithoutOptionalModel(t *testing.T
 	if err := am.resolveAgentModel(&cfg); err != nil {
 		t.Fatalf("resolveAgentModel: %v", err)
 	}
-	if cfg.LLMBackend != llmselection.BackendMock || cfg.ExecutionMode != runtimeeffects.ExecutionModeMock {
-		t.Fatalf("selected backend/mode = %q/%q, want mock/mock", cfg.LLMBackend, cfg.ExecutionMode)
+	if cfg.ResolvedLLMBackend != llmselection.BackendMock || cfg.ExecutionMode != runtimeeffects.ExecutionModeMock {
+		t.Fatalf("selected backend/mode = %q/%q, want mock/mock", cfg.ResolvedLLMBackend, cfg.ExecutionMode)
 	}
 	if cfg.ResolvedLLMProvider != llmselection.ProviderMock || cfg.ResolvedLLMTransport != llmselection.TransportMock {
 		t.Fatalf("resolved provider/transport = %q/%q, want mock/in_process", cfg.ResolvedLLMProvider, cfg.ResolvedLLMTransport)
@@ -243,6 +244,98 @@ func TestAuthoredMockSelectionSurvivesReconfigureRestartAndClone(t *testing.T) {
 	assertMockProjection(t, "constructed", artifact, built, base.ID, clone.ID)
 }
 
+func TestAgentRuntimeSetRecoveryRederivesUnpinnedBackendFromCurrentConfiguration(t *testing.T) {
+	store := &liveMockAlternativePersistence{}
+	initialBuilt := map[string]models.AgentConfig{}
+	initial := newRuntimeSetBackedManager(t, llmselection.BackendAnthropic, store, initialBuilt)
+	if err := initial.SpawnAgent(models.AgentConfig{ID: "backend-change-agent", Role: "worker"}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	if len(store.records) != 1 {
+		t.Fatalf("persisted records = %d, want 1", len(store.records))
+	}
+	persisted := store.records[0].Config
+	if persisted.LLMBackend != "" || persisted.ResolvedLLMBackend != llmselection.BackendAnthropic {
+		t.Fatalf("persisted authored/resolved backend = %q/%q, want blank/%q", persisted.LLMBackend, persisted.ResolvedLLMBackend, llmselection.BackendAnthropic)
+	}
+
+	recoveredBuilt := map[string]models.AgentConfig{}
+	recovered := newRuntimeSetBackedManager(t, llmselection.BackendOpenAIResponses, store, recoveredBuilt)
+	if err := recovered.Recover(managedExecutionTestContext(t, context.Background())); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	got, err := recovered.ResolveAgentConfig("backend-change-agent", "")
+	if err != nil {
+		t.Fatalf("ResolveAgentConfig: %v", err)
+	}
+	if got.LLMBackend != "" || got.ResolvedLLMBackend != llmselection.BackendOpenAIResponses {
+		t.Fatalf("recovered authored/resolved backend = %q/%q, want blank/%q", got.LLMBackend, got.ResolvedLLMBackend, llmselection.BackendOpenAIResponses)
+	}
+	if built := recoveredBuilt[got.ID]; built.LLMBackend != "" || built.ResolvedLLMBackend != llmselection.BackendOpenAIResponses {
+		t.Fatalf("constructed recovered authored/resolved backend = %q/%q", built.LLMBackend, built.ResolvedLLMBackend)
+	}
+}
+
+func TestAgentRuntimeSetReconfigureHonorsOrRejectsAuthoredBackendPatch(t *testing.T) {
+	store := &liveMockAlternativePersistence{}
+	built := map[string]models.AgentConfig{}
+	manager := newRuntimeSetBackedManager(t, llmselection.BackendAnthropic, store, built)
+	if err := manager.SpawnAgent(models.AgentConfig{ID: "backend-patch-agent", Role: "worker"}); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+
+	accepted, err := manager.ReconfigureAgentTarget("backend-patch-agent", "", models.AgentConfig{LLMBackend: llmselection.BackendAnthropic}, nil)
+	if err != nil {
+		t.Fatalf("ReconfigureAgentTarget(matching backend): %v", err)
+	}
+	if accepted.CurrentConfig.LLMBackend != llmselection.BackendAnthropic || accepted.CurrentConfig.ResolvedLLMBackend != llmselection.BackendAnthropic {
+		t.Fatalf("accepted authored/resolved backend = %q/%q", accepted.CurrentConfig.LLMBackend, accepted.CurrentConfig.ResolvedLLMBackend)
+	}
+	persistedCount := len(store.records)
+	if persistedCount < 2 {
+		t.Fatalf("persisted records after accepted patch = %d, want at least 2", persistedCount)
+	}
+	lastPersisted := store.records[persistedCount-1].Config
+	if lastPersisted.LLMBackend != llmselection.BackendAnthropic || lastPersisted.ResolvedLLMBackend != llmselection.BackendAnthropic {
+		t.Fatalf("persisted authored/resolved backend = %q/%q", lastPersisted.LLMBackend, lastPersisted.ResolvedLLMBackend)
+	}
+
+	_, err = manager.ReconfigureAgentTarget("backend-patch-agent", "", models.AgentConfig{LLMBackend: llmselection.BackendOpenAIResponses}, nil)
+	if err == nil || !strings.Contains(err.Error(), "conflicts with configured runtime backend") {
+		t.Fatalf("ReconfigureAgentTarget(conflicting backend) error = %v", err)
+	}
+	if len(store.records) != persistedCount {
+		t.Fatalf("conflicting patch persisted %d new record(s)", len(store.records)-persistedCount)
+	}
+	current, resolveErr := manager.ResolveAgentConfig("backend-patch-agent", "")
+	if resolveErr != nil {
+		t.Fatalf("ResolveAgentConfig: %v", resolveErr)
+	}
+	if !reflect.DeepEqual(current, accepted.CurrentConfig) {
+		t.Fatalf("current config changed after rejected patch\n got: %#v\nwant: %#v", current, accepted.CurrentConfig)
+	}
+}
+
+func newRuntimeSetBackedManager(t *testing.T, backend string, store ManagerPersistence, built map[string]models.AgentConfig) *AgentManager {
+	t.Helper()
+	profile, err := llmselection.ResolveActiveBackend(backend)
+	if err != nil {
+		t.Fatalf("ResolveActiveBackend(%s): %v", backend, err)
+	}
+	runtimes, err := runtimellm.NewAgentRuntimeSet(profile, runtimellm.RuntimeFactory{}, runtimellm.NoopRuntime{})
+	if err != nil {
+		t.Fatalf("NewAgentRuntimeSet(%s): %v", backend, err)
+	}
+	return newTestAgentManagerWithOptions(t, &recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
+		resolved, resolveErr := runtimes.ResolveAgentRuntime(cfg)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		built[cfg.ID] = resolved.Actor
+		return recoveryTestAgent{id: cfg.ID}, nil
+	}, AgentManagerOptions{LLMBackend: backend}, store)
+}
+
 type liveMockAlternativePersistence struct {
 	recoveryTestStore
 	records []PersistedAgent
@@ -271,8 +364,8 @@ func assertMockProjection(t *testing.T, phase string, artifact mockperformance.P
 		if !ok {
 			t.Fatalf("%s config %q missing", phase, id)
 		}
-		if cfg.LLMBackend != llmselection.BackendMock || cfg.ExecutionMode != runtimeeffects.ExecutionModeMock || !reflect.DeepEqual(cfg.Mock, artifact) {
-			t.Fatalf("%s config %q = backend %q mode %q mock %#v, want mock/mock with exact artifact %#v", phase, id, cfg.LLMBackend, cfg.ExecutionMode, cfg.Mock, artifact)
+		if cfg.ResolvedLLMBackend != llmselection.BackendMock || cfg.ExecutionMode != runtimeeffects.ExecutionModeMock || !reflect.DeepEqual(cfg.Mock, artifact) {
+			t.Fatalf("%s config %q = backend %q mode %q mock %#v, want mock/mock with exact artifact %#v", phase, id, cfg.ResolvedLLMBackend, cfg.ExecutionMode, cfg.Mock, artifact)
 		}
 	}
 }

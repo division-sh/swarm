@@ -21,6 +21,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -483,8 +484,14 @@ func (am *AgentManager) adoptPersistedAgentForLifecycle(
 	source semanticview.Source,
 	rec PersistedAgent,
 ) error {
+	if err := am.resolveAgentModel(&rec.Config); err != nil {
+		return err
+	}
 	subscriptionAdmission, err := admitAgentConfigSubscriptions(source, &rec.Config, nil)
 	if err != nil {
+		return err
+	}
+	if err := am.validateNativeToolAdmission(ctx, rec.Config); err != nil {
 		return err
 	}
 	agent, err := am.buildAgent(rec.Config)
@@ -503,37 +510,25 @@ func (am *AgentManager) resolveAgentModel(cfg *models.AgentConfig) error {
 	if err != nil {
 		return fmt.Errorf("agent %s invalid configured llm backend %q: %w", strings.TrimSpace(cfg.ID), strings.TrimSpace(am.llmBackend), err)
 	}
-	selection, err := llmselection.ResolveAgentExecutionSelection(configuredProfile, cfg.Mock.Configured())
+	resolved, err := runtimellm.ResolveAgentExecution(configuredProfile, am.modelAliases, *cfg)
 	if err != nil {
 		return fmt.Errorf("agent %s execution selection failed: %w", strings.TrimSpace(cfg.ID), err)
 	}
-	cfg.LLMBackend = selection.Profile.ID
-	cfg.ResolvedLLMProvider = selection.Profile.Provider
-	cfg.ResolvedLLMTransport = selection.Profile.Transport
-	cfg.ExecutionMode = selection.Mode
+	*cfg = resolved.Actor
 	if strings.TrimSpace(cfg.Model) == "" {
 		if am.requireModelResolution {
 			return fmt.Errorf("agent %s missing model", strings.TrimSpace(cfg.ID))
 		}
 		return nil
 	}
-	resolved, err := llmselection.ResolveModel(selection.Profile, llmselection.ModelResolution{
-		Model:  cfg.Model,
-		Models: am.modelAliases,
-	})
-	if err != nil {
-		return fmt.Errorf("agent %s model resolution failed: %w", strings.TrimSpace(cfg.ID), err)
-	}
-	cfg.Model = resolved.ModelAlias
-	cfg.LLMBackend = resolved.Backend
-	cfg.ResolvedModel = resolved.ConcreteModel
-	cfg.ResolvedLLMProvider = resolved.Provider
-	cfg.ResolvedLLMTransport = resolved.Transport
 	return nil
 }
 
 func (am *AgentManager) validateNativeToolAdmission(ctx context.Context, cfg models.AgentConfig) error {
 	if am == nil || am.nativeToolAdmissionValidator == nil || !cfg.NativeTools.Any() {
+		return nil
+	}
+	if cfg.ResolvedLLMBackend == llmselection.BackendMock {
 		return nil
 	}
 	if ctx == nil {

@@ -17,8 +17,8 @@ func usageMetadataForContext(ctx context.Context, profile llmselection.Profile, 
 	}
 	if actor, ok := runtimeactors.ActorFromContext(ctx); ok {
 		meta["model_alias"] = strings.TrimSpace(actor.Model)
-		if strings.TrimSpace(actor.LLMBackend) != "" {
-			meta["backend_profile"] = strings.TrimSpace(actor.LLMBackend)
+		if strings.TrimSpace(actor.ResolvedLLMBackend) != "" {
+			meta["backend_profile"] = strings.TrimSpace(actor.ResolvedLLMBackend)
 		}
 		if strings.TrimSpace(actor.ResolvedLLMProvider) != "" {
 			meta["provider"] = strings.TrimSpace(actor.ResolvedLLMProvider)

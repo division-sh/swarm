@@ -105,8 +105,15 @@ const (
 
 type AgentExecutionSelection struct {
 	Profile             Profile
+	ModelProfile        Profile
 	Mode                executionmode.Mode
 	ArtifactRequirement ArtifactRequirement
+}
+
+type AgentExecutionSelectionInput struct {
+	ConfiguredDefault Profile
+	AuthoredBackend   string
+	MockConfigured    bool
 }
 
 type EnvLookup func(string) (string, bool)
@@ -256,13 +263,31 @@ func ExecutionModeForProfile(profile Profile) (executionmode.Mode, error) {
 }
 
 // ResolveAgentExecutionSelection is the canonical per-agent selection owner.
-// An exact authored mock overrides the configured live default for that agent.
-func ResolveAgentExecutionSelection(configuredDefault Profile, mockConfigured bool) (AgentExecutionSelection, error) {
-	profile, err := ResolveActiveBackend(configuredDefault.ID)
+// Authored backend intent is validated as input and never rewritten. An exact
+// mock selects scripted execution only when no conflicting live pin exists.
+func ResolveAgentExecutionSelection(input AgentExecutionSelectionInput) (AgentExecutionSelection, error) {
+	configuredDefault, err := ResolveActiveBackend(input.ConfiguredDefault.ID)
 	if err != nil {
 		return AgentExecutionSelection{}, err
 	}
-	if mockConfigured {
+	profile := configuredDefault
+	authoredBackend := NormalizeBackendID(input.AuthoredBackend)
+	if authoredBackend != "" {
+		authoredProfile, resolveErr := ResolveActiveBackend(authoredBackend)
+		if resolveErr != nil {
+			return AgentExecutionSelection{}, fmt.Errorf("authored llm_backend %q is invalid: %w", authoredBackend, resolveErr)
+		}
+		switch {
+		case authoredProfile.ID == BackendMock:
+			profile = authoredProfile
+		case authoredProfile.ID != configuredDefault.ID:
+			return AgentExecutionSelection{}, fmt.Errorf("authored llm_backend %q conflicts with configured runtime backend %q", authoredProfile.ID, configuredDefault.ID)
+		case input.MockConfigured:
+			return AgentExecutionSelection{}, fmt.Errorf("authored llm_backend %q conflicts with an exact mock performance", authoredProfile.ID)
+		default:
+			profile = authoredProfile
+		}
+	} else if input.MockConfigured {
 		profile, err = ResolveActiveBackend(BackendMock)
 		if err != nil {
 			return AgentExecutionSelection{}, err
@@ -276,11 +301,12 @@ func ResolveAgentExecutionSelection(configuredDefault Profile, mockConfigured bo
 	if mode == executionmode.Mock {
 		requirement = ArtifactRequired
 	}
-	if requirement == ArtifactRequired && !mockConfigured {
+	if requirement == ArtifactRequired && !input.MockConfigured {
 		return AgentExecutionSelection{}, fmt.Errorf("llm backend profile %q requires an exact mock performance artifact", profile.ID)
 	}
 	return AgentExecutionSelection{
 		Profile:             profile,
+		ModelProfile:        configuredDefault,
 		Mode:                mode,
 		ArtifactRequirement: requirement,
 	}, nil

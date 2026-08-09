@@ -456,6 +456,7 @@ func TestAgentManagerDirectDeadLetterPersistsCanonicalEnvelopeSelectedStores(t *
 				Sessions:         backend.sessions,
 				SessionResetter:  backend.store,
 				PersistenceRoles: selectedStoreManagerPersistenceRoles(backend.store, eventBus),
+				LLMBackend:       "claude_cli",
 				WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 			}, backend.store)
 			if err := manager.SpawnAgent(claudeAttemptProofAgentConfig()); err != nil {
@@ -555,6 +556,7 @@ func newClaudeAttemptProofManagerForGeneration(
 		Sessions:         backend.sessions,
 		SessionResetter:  backend.store,
 		PersistenceRoles: selectedStoreManagerPersistenceRoles(backend.store, eventBus),
+		LLMBackend:       "claude_cli",
 		WorkOwner:        workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend.store)
 	return manager, eventBus, coordinator

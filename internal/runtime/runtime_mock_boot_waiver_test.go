@@ -133,23 +133,55 @@ func mockAgentMemorySource(t *testing.T, unmockedCount int) semanticview.Source 
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
-	sortedIDs := make([]string, 0, len(bundle.Agents))
-	for id := range bundle.Agents {
-		sortedIDs = append(sortedIDs, id)
+	type declaration struct {
+		label   string
+		localID string
+		entries map[string]runtimecontracts.AgentRegistryEntry
 	}
-	sort.Strings(sortedIDs)
-	if len(sortedIDs) == 0 {
+	declarations := []declaration{}
+	for _, view := range bundle.ProjectViews() {
+		for id := range view.Agents {
+			declarations = append(declarations, declaration{label: "project " + view.Paths.Key + " agent " + id, localID: id, entries: view.Agents})
+		}
+	}
+	for _, view := range bundle.FlowViews() {
+		for id := range view.Agents {
+			declarations = append(declarations, declaration{label: "flow " + view.Paths.ID + " agent " + id, localID: id, entries: view.Agents})
+		}
+	}
+	if len(declarations) == 0 {
+		for id := range bundle.Agents {
+			declarations = append(declarations, declaration{label: "agent " + id, localID: id, entries: bundle.Agents})
+		}
+	}
+	sort.Slice(declarations, func(i, j int) bool { return declarations[i].label < declarations[j].label })
+	if len(declarations) == 0 {
 		t.Fatal("agent memory fixture unexpectedly declares zero agents")
 	}
-	if unmockedCount > len(sortedIDs) {
-		unmockedCount = len(sortedIDs)
+	if unmockedCount > len(declarations) {
+		unmockedCount = len(declarations)
 	}
-	unmocked := map[string]struct{}{}
-	for _, id := range sortedIDs[:unmockedCount] {
-		unmocked[id] = struct{}{}
+	unmockedLabels := map[string]struct{}{}
+	unmockedLocalIDs := map[string]struct{}{}
+	for _, declaration := range declarations[:unmockedCount] {
+		unmockedLabels[declaration.label] = struct{}{}
+		unmockedLocalIDs[declaration.localID] = struct{}{}
+	}
+	for _, declaration := range declarations {
+		if _, skip := unmockedLabels[declaration.label]; skip {
+			continue
+		}
+		entry := declaration.entries[declaration.localID]
+		entry.Mock = mockperformance.Performance{
+			Kind:   "python",
+			Module: "mocks/" + declaration.localID + ".py",
+			Source: []byte("def handle(input):\n    return {}\n"),
+			Digest: "sha256:" + strings.Repeat("a", 64),
+		}
+		declaration.entries[declaration.localID] = entry
 	}
 	for id, entry := range bundle.Agents {
-		if _, skip := unmocked[id]; skip {
+		if _, skip := unmockedLocalIDs[id]; skip {
 			continue
 		}
 		entry.Mock = mockperformance.Performance{

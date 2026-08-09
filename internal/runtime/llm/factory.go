@@ -68,6 +68,25 @@ func (f RuntimeFactory) prepare() (RuntimeFactory, error) {
 	return f, nil
 }
 
+func (f RuntimeFactory) prepareMock() (RuntimeFactory, error) {
+	if f.Cfg == nil {
+		return RuntimeFactory{}, fmt.Errorf("llm runtime config is required")
+	}
+	if f.CompletionController == nil || !f.CompletionController.CompletionEnabled() {
+		return RuntimeFactory{}, fmt.Errorf("llm completion execution controller is required")
+	}
+	if f.Sessions == nil {
+		f.Sessions = sessions.NewInMemoryRegistry(f.Cfg.LLM.Session.LockTTL)
+	}
+	if f.LiveSessions == nil {
+		f.LiveSessions = NewTransientLiveSessionAcquirer(f.Sessions)
+	}
+	if f.LockOwner == "" {
+		f.LockOwner = defaultLockOwner()
+	}
+	return f, nil
+}
+
 func (f RuntimeFactory) buildProfile(profile llmselection.Profile) (Runtime, error) {
 	profile, err := llmselection.ResolveActiveBackend(profile.ID)
 	if err != nil {

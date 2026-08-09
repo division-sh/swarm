@@ -21,11 +21,34 @@ type SourceBootEffectReachability struct {
 	unreachableOutboundTools  map[string]struct{}
 }
 
-type sourceAgentSelectionEntry struct {
-	scopeKind string
-	scopeID   string
-	localID   string
-	entry     runtimecontracts.AgentRegistryEntry
+// SourceBootEffectContext is the canonical boot projection shared by Builder,
+// verify/serve validation, and local preflight.
+type SourceBootEffectContext struct {
+	Source                 semanticview.Source
+	MockConnectorResponses *providerconnectors.MockResponsePlan
+	Reachability           SourceBootEffectReachability
+}
+
+// PrepareSourceBootEffectContext imports connector packs, compiles the exact
+// mock response plan, and derives effect reachability as one operation.
+func PrepareSourceBootEffectContext(source semanticview.Source, configuredDefault llmselection.Profile) (SourceBootEffectContext, error) {
+	effectiveSource, err := providerconnectors.SourceWithConnectorPackImports(source)
+	if err != nil {
+		return SourceBootEffectContext{}, fmt.Errorf("provider connector pack import failed: %w", err)
+	}
+	plan, err := providerconnectors.CompileMockResponsePlan(effectiveSource)
+	if err != nil {
+		return SourceBootEffectContext{}, fmt.Errorf("provider connector mock response compilation failed: %w", err)
+	}
+	reachability, err := ResolveSourceBootEffectReachability(effectiveSource, configuredDefault, plan)
+	if err != nil {
+		return SourceBootEffectContext{}, fmt.Errorf("resolve source boot effect reachability: %w", err)
+	}
+	return SourceBootEffectContext{
+		Source:                 effectiveSource,
+		MockConnectorResponses: plan,
+		Reachability:           reachability,
+	}, nil
 }
 
 // ResolveSourceBootEffectReachability derives which outbound tool transports
@@ -37,7 +60,7 @@ func ResolveSourceBootEffectReachability(source semanticview.Source, configuredD
 		return SourceBootEffectReachability{}, fmt.Errorf("semantic source is required")
 	}
 
-	agents := sourceAgentSelectionEntries(source)
+	agents := semanticview.AgentDeclarations(source)
 
 	fact := SourceBootEffectReachability{
 		resolved:                  true,
@@ -45,16 +68,19 @@ func ResolveSourceBootEffectReachability(source semanticview.Source, configuredD
 	}
 	localIDCounts := map[string]int{}
 	for _, agent := range agents {
-		localIDCounts[agent.localID]++
+		localIDCounts[agent.LocalID]++
 	}
 	liveAgentLabels := map[string]struct{}{}
 	for _, agent := range agents {
-		selection, err := llmselection.ResolveAgentExecutionSelection(configuredDefault, agent.entry.Mock.Configured())
+		selection, err := llmselection.ResolveAgentExecutionSelection(llmselection.AgentExecutionSelectionInput{
+			ConfiguredDefault: configuredDefault,
+			MockConfigured:    agent.Entry.Mock.Configured(),
+		})
 		if err != nil {
-			return SourceBootEffectReachability{}, fmt.Errorf("resolve effective execution selection for agent %q: %w", sourceAgentSelectionLabel(agent, localIDCounts[agent.localID] > 1), err)
+			return SourceBootEffectReachability{}, fmt.Errorf("resolve effective execution selection for agent %q: %w", agent.Label(localIDCounts[agent.LocalID] > 1), err)
 		}
 		if selection.Mode != executionmode.Mock {
-			liveAgentLabels[sourceAgentSelectionLabel(agent, localIDCounts[agent.localID] > 1)] = struct{}{}
+			liveAgentLabels[agent.Label(localIDCounts[agent.LocalID] > 1)] = struct{}{}
 		}
 	}
 	fact.liveAgentIDs = sortedSetKeysLocal(liveAgentLabels)
@@ -91,63 +117,6 @@ func (r SourceBootEffectReachability) LiveAgentIDs() []string {
 // that can execute the tool from live non-agent ingress.
 func (r SourceBootEffectReachability) LiveWorkflowActivitySites(toolID string) []string {
 	return append([]string(nil), r.liveWorkflowActivitySites[strings.TrimSpace(toolID)]...)
-}
-
-func sourceAgentSelectionEntries(source semanticview.Source) []sourceAgentSelectionEntry {
-	entries := []sourceAgentSelectionEntry{}
-	scopedLocalIDs := map[string]struct{}{}
-	appendScoped := func(scopeKind, scopeID string, agents map[string]runtimecontracts.AgentRegistryEntry) {
-		for _, rawID := range sortedSetKeysLocal(agents) {
-			localID := strings.TrimSpace(rawID)
-			if localID == "" {
-				continue
-			}
-			scopedLocalIDs[localID] = struct{}{}
-			entries = append(entries, sourceAgentSelectionEntry{
-				scopeKind: scopeKind,
-				scopeID:   strings.TrimSpace(scopeID),
-				localID:   localID,
-				entry:     agents[rawID],
-			})
-		}
-	}
-	for _, scope := range source.ProjectScopes() {
-		appendScoped("project", scope.Key, scope.Agents)
-	}
-	for _, scope := range source.FlowScopes() {
-		appendScoped("flow", scope.ID, scope.Agents)
-	}
-	aliases := source.AgentEntries()
-	for _, rawID := range sortedSetKeysLocal(aliases) {
-		localID := strings.TrimSpace(rawID)
-		if localID == "" {
-			continue
-		}
-		if _, represented := scopedLocalIDs[localID]; represented {
-			continue
-		}
-		entries = append(entries, sourceAgentSelectionEntry{
-			localID: localID,
-			entry:   aliases[rawID],
-		})
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		left := sourceAgentSelectionLabel(entries[i], true)
-		right := sourceAgentSelectionLabel(entries[j], true)
-		return left < right
-	})
-	return entries
-}
-
-func sourceAgentSelectionLabel(agent sourceAgentSelectionEntry, qualify bool) string {
-	if !qualify || strings.TrimSpace(agent.scopeKind) == "" {
-		return agent.localID
-	}
-	scopeID := strings.TrimSpace(agent.scopeID)
-	if scopeID == "" || scopeID == "." {
-		scopeID = "root"
-	}
-	return strings.Join([]string{agent.scopeKind, scopeID, "agent", agent.localID}, " ")
 }
 
 func sourceLiveWorkflowActivitySites(source semanticview.Source) map[string][]string {

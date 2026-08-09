@@ -40,7 +40,7 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 		"memory_enabled":         session.Memory.Enabled,
 		"memory_source":          strings.TrimSpace(string(session.Memory.Source)),
 		"model":                  strings.TrimSpace(actor.Model),
-		"llm_backend":            strings.TrimSpace(actor.LLMBackend),
+		"llm_backend":            strings.TrimSpace(actor.ResolvedLLMBackend),
 		"resolved_llm_provider":  strings.TrimSpace(actor.ResolvedLLMProvider),
 		"resolved_llm_transport": strings.TrimSpace(actor.ResolvedLLMTransport),
 		"resolved_model":         strings.TrimSpace(actor.ResolvedModel),

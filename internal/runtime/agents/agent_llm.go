@@ -104,12 +104,13 @@ func NewLLMAgentFactory(runtimes llm.AgentRuntimeResolver, toolExecutor actorSco
 		if runtimes == nil {
 			return nil, errors.New("agent llm runtime resolver is required")
 		}
-		modelRuntime, err := runtimes.RuntimeForAgent(cfg)
+		resolved, err := runtimes.ResolveAgentRuntime(cfg)
 		if err != nil {
 			return nil, err
 		}
+		cfg = resolved.Actor
 		agentTools := toolExecutor.ToolDefinitionsForActor(cfg)
-		return newLLMAgent(cfg, modelRuntime, toolExecutor, agentTools, opts)
+		return newLLMAgent(cfg, resolved.Runtime, toolExecutor, agentTools, opts)
 	}
 }
 

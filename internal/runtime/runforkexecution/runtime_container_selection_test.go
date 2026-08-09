@@ -35,8 +35,14 @@ func TestSelectedContractContainerAcceptsMixedEffectiveAgentSelections(t *testin
 	}
 
 	records[1].Config.ExecutionMode = runtimeeffects.ExecutionModeLive
-	if err := validateSelectedContractAgentExecutionSelections(profile, records); err == nil || !strings.Contains(err.Error(), "conflicts with effective selection mode mock") {
-		t.Fatalf("drift error = %v", err)
+	records[1].Config.ResolvedLLMBackend = llmselection.BackendClaudeCLI
+	if err := validateSelectedContractAgentExecutionSelections(profile, records); err != nil {
+		t.Fatalf("stale derived descriptor must be recomputed by the manager: %v", err)
+	}
+
+	records[0].Config.LLMBackend = llmselection.BackendAnthropic
+	if err := validateSelectedContractAgentExecutionSelections(profile, records); err == nil || !strings.Contains(err.Error(), "conflicts with configured runtime backend") {
+		t.Fatalf("authored backend conflict error = %v", err)
 	}
 }
 

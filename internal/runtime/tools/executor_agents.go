@@ -320,9 +320,6 @@ func (e *Executor) execAgentHire(ctx context.Context, actor models.AgentConfig, 
 	if err := authorizeDelegableAgentConfig(actor, models.AgentConfig{}, in.Config, e.authority, e.emitRegistry); err != nil {
 		return nil, err
 	}
-	if err := e.ValidateNativeToolAdmission(ctx, in.Config); err != nil {
-		return nil, err
-	}
 	if err := preflightManagedAgentParent(manager, actor, in.Config); err != nil {
 		return nil, fmt.Errorf("validate hired agent authority: %w", err)
 	}
@@ -405,9 +402,6 @@ func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentC
 		return nil, fmt.Errorf("memory: true requires a flow-instance owner")
 	}
 	if err := authorizeDelegableAgentConfig(actor, targetCfg, updatedCfg, e.authority, e.emitRegistry); err != nil {
-		return nil, err
-	}
-	if err := e.ValidateNativeToolAdmission(ctx, updatedCfg); err != nil {
 		return nil, err
 	}
 	authorityPlan, err := managedAgentAuthorityPlanForCandidate(manager, actor, updatedCfg)

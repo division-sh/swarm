@@ -2714,7 +2714,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 					ID:            "bad-agent",
 					Identity:      badIdentity,
 					Role:          "worker",
-					LLMBackend:    "claude_cli",
+					LLMBackend:    llmselection.BackendAnthropic,
 					Model:         "regular",
 					Subscriptions: []string{"item.received"},
 				},

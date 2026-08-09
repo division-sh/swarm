@@ -12,7 +12,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -149,17 +148,13 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 	}
 	report.add(localPreflightWorkspacePrerequisite, code, severity, status, workspaceBackendDecisionDetail(workspaceBackend), remediation)
 	if req.CheckContractSecrets {
-		mockConnectorResponses, err := providerconnectors.CompileMockResponsePlan(source)
+		bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, profile)
 		if err != nil {
-			report.add(localPreflightContractSecretPrerequisite, "contract_secret_reachability_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the effective provider connector response declarations")
+			report.add(localPreflightContractSecretPrerequisite, "contract_secret_reachability_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the effective connector declarations or agent LLM selection")
 			return report.finalize()
 		}
-		effectReachability, err := runtimebootverify.ResolveSourceBootEffectReachability(source, profile, mockConnectorResponses)
-		if err != nil {
-			report.add(localPreflightContractSecretPrerequisite, "contract_secret_reachability_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the effective agent LLM selection")
-			return report.finalize()
-		}
-		report.checkContractSecrets(ctx, source, req.ContractSecretSeverity, effectReachability)
+		source = bootEffects.Source
+		report.checkContractSecrets(ctx, source, req.ContractSecretSeverity, bootEffects.Reachability)
 	}
 	if profile.ID != llmselection.BackendClaudeCLI {
 		report.add(localPreflightBackendPrerequisite, "backend_not_claude_cli", LocalPreflightSeverityInfo, LocalPreflightStatusSkipped, fmt.Sprintf("backend %q does not require claude_cli local proof prerequisites", profile.ID), "")
@@ -443,28 +438,13 @@ func (r *LocalPreflightReport) checkContractSecrets(ctx context.Context, source 
 }
 
 func appendContractSecretEffectReachability(message string, requiredBy []secretRequirement, reachability runtimebootverify.SourceBootEffectReachability) string {
-	if liveAgents := reachability.LiveAgentIDs(); len(liveAgents) > 0 {
-		message += " (reachable from live agents " + strings.Join(liveAgents, ", ") + ")"
-	}
-	sites := []string{}
-	seen := map[string]struct{}{}
+	toolIDs := []string{}
 	for _, requirement := range requiredBy {
-		if strings.TrimSpace(requirement.Kind) != "tool" {
-			continue
-		}
-		for _, site := range reachability.LiveWorkflowActivitySites(requirement.Name) {
-			if _, duplicate := seen[site]; duplicate {
-				continue
-			}
-			seen[site] = struct{}{}
-			sites = append(sites, site)
+		if strings.TrimSpace(requirement.Kind) == "tool" {
+			toolIDs = append(toolIDs, requirement.Name)
 		}
 	}
-	if len(sites) > 0 {
-		sort.Strings(sites)
-		message += " (reachable from live workflow activities " + strings.Join(sites, ", ") + ")"
-	}
-	return message
+	return runtimebootverify.AppendLiveEffectReachability(message, reachability, toolIDs)
 }
 
 func (r *LocalPreflightReport) checkWorkspace(ctx context.Context, cfg *config.Config, source semanticview.Source, contractsRoot string, mountSources WorkspaceMountSources, backend WorkspaceBackendSelection, claudeCLICommand string, claudeExecutionRequired bool) {
@@ -555,7 +535,7 @@ func loadLocalPreflightSource(repo string, paths CLIContractPlatformSpecPaths) (
 }
 
 func sourceDeclaresAgents(source semanticview.Source) bool {
-	return source != nil && len(source.AgentEntries()) > 0
+	return semanticview.SourceDeclaresAgents(source)
 }
 
 func lookupEnvValue(name string) string {

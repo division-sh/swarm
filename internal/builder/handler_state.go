@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
@@ -61,21 +60,13 @@ func (h *handler) runFullValidation(ctx context.Context) ValidationResult {
 		result.Summary.DurationMS = time.Since(startedAt).Milliseconds()
 		return result
 	}
-	effectiveSource, err := providerconnectors.SourceWithConnectorPackImports(source)
+	bootEffects, err := runtimebootverify.PrepareSourceBootEffectContext(source, h.llmProfile)
 	if err != nil {
-		return builderValidationSetupFailure(result, startedAt, fmt.Errorf("provider connector pack import failed: %w", err))
+		return builderValidationSetupFailure(result, startedAt, err)
 	}
-	mockConnectorResponses, err := providerconnectors.CompileMockResponsePlan(effectiveSource)
-	if err != nil {
-		return builderValidationSetupFailure(result, startedAt, fmt.Errorf("provider connector mock response compilation failed: %w", err))
-	}
-	effectReachability, err := runtimebootverify.ResolveSourceBootEffectReachability(effectiveSource, h.llmProfile, mockConnectorResponses)
-	if err != nil {
-		return builderValidationSetupFailure(result, startedAt, fmt.Errorf("resolve source boot effect reachability: %w", err))
-	}
-	report := runtimebootverify.Run(ctx, effectiveSource, runtimebootverify.Options{
+	report := runtimebootverify.Run(ctx, bootEffects.Source, runtimebootverify.Options{
 		Credentials:        h.credentials,
-		EffectReachability: effectReachability,
+		EffectReachability: bootEffects.Reachability,
 		CheckMCPReachable:  true,
 	})
 	for _, finding := range report.Findings {

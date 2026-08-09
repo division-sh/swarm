@@ -159,7 +159,7 @@ func TestRun_DoesNotWarnForBuiltinRuntimeToolReference(t *testing.T) {
 	}
 }
 
-func TestRunModelAliasValidationUsesEffectivePerAgentSelection(t *testing.T) {
+func TestRunModelAliasValidationUsesConfiguredLiveProfileForMockMetadata(t *testing.T) {
 	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
 	if err != nil {
 		t.Fatalf("ResolveActiveBackend: %v", err)
@@ -168,18 +168,19 @@ func TestRunModelAliasValidationUsesEffectivePerAgentSelection(t *testing.T) {
 		ValidateModelResolution: true,
 		LLMProfile:              profile,
 		ModelAliases: llmselection.ModelAliases{
-			"mock-only": {llmselection.BackendMock: "mock-only-model"},
+			"live-metadata": {llmselection.BackendClaudeCLI: "sonnet"},
+			"mock-only":     {llmselection.BackendMock: "mock-only-model"},
 		},
 	}
 	checker := newCheckerContext(context.Background(), nil, opts)
-	findings := checker.appendAgentModelAliasFindings(nil, "mock-agent", "mock-only", true)
+	findings := checker.appendAgentModelAliasFindings(nil, "mock-agent", "live-metadata", true)
 	if len(findings) != 0 {
-		t.Fatalf("exact mock was validated against the global Claude profile: %#v", findings)
+		t.Fatalf("exact mock did not use configured live metadata profile: %#v", findings)
 	}
 
-	findings = checker.appendAgentModelAliasFindings(nil, "live-agent", "mock-only", false)
+	findings = checker.appendAgentModelAliasFindings(nil, "mock-agent", "mock-only", true)
 	if len(findings) != 1 || !strings.Contains(findings[0].Message, "model alias resolution failed for claude_cli") {
-		t.Fatalf("unmocked agent did not retain global Claude model validation: %#v", findings)
+		t.Fatalf("mock-only alias unexpectedly became metadata authority: %#v", findings)
 	}
 }
 

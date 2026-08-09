@@ -38,7 +38,7 @@ func (c *checkerContext) credentials() []Finding {
 		}
 		message := fmtCredentialWarning(item.Key, requiredBy)
 		if len(toolRequirements) > 0 {
-			message = appendLiveEffectReachability(message, c.opts.EffectReachability, toolRequirements)
+			message = AppendLiveEffectReachability(message, c.opts.EffectReachability, toolRequirements)
 		}
 		c.credentialFindings = append(c.credentialFindings, Finding{
 			CheckID:  "credential_key_exists",
@@ -66,7 +66,7 @@ func (c *checkerContext) credentials() []Finding {
 				toolRequirements = append(toolRequirements, strings.TrimSpace(ref.Name))
 			}
 		}
-		message := appendLiveEffectReachability(fmtManagedCredentialWarning(item, requiredBy), c.opts.EffectReachability, toolRequirements)
+		message := AppendLiveEffectReachability(fmtManagedCredentialWarning(item, requiredBy), c.opts.EffectReachability, toolRequirements)
 		c.credentialFindings = append(c.credentialFindings, Finding{
 			CheckID:  "managed_credential_state",
 			Severity: "warning",
@@ -85,7 +85,7 @@ func appendLiveAgentReachability(message string, liveAgentIDs []string) string {
 	return message + " (reachable from live agents " + strings.Join(liveAgentIDs, ", ") + ")"
 }
 
-func appendLiveEffectReachability(message string, reachability SourceBootEffectReachability, toolIDs []string) string {
+func AppendLiveEffectReachability(message string, reachability SourceBootEffectReachability, toolIDs []string) string {
 	message = appendLiveAgentReachability(message, reachability.LiveAgentIDs())
 	sites := []string{}
 	seen := map[string]struct{}{}

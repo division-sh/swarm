@@ -2,7 +2,6 @@ package cliapp
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/config"
@@ -251,23 +250,24 @@ func classifyWorkspaceBackendRequirement(cfg *config.Config, source semanticview
 	if err != nil {
 		return "", nil, err
 	}
-	entries := source.AgentEntries()
+	entries := semanticview.AgentDeclarations(source)
 	if len(entries) == 0 {
 		return workspaceCapabilityNone, []WorkspaceCapabilityReason{{Kind: WorkspaceReasonNoAgents}}, nil
 	}
-
-	agentIDs := make([]string, 0, len(entries))
-	for id := range entries {
-		agentIDs = append(agentIDs, strings.TrimSpace(id))
+	localIDCounts := map[string]int{}
+	for _, declaration := range entries {
+		localIDCounts[declaration.LocalID]++
 	}
-	sort.Strings(agentIDs)
 
 	class := workspaceCapabilityWorkspaceWrite
 	reasons := []WorkspaceCapabilityReason{{Kind: WorkspaceReasonLifecycle}}
-	for _, agentID := range agentIDs {
-		entry := entries[agentID]
-		label := workspaceBackendAgentLabel(agentID, entry.ID, entry.Role)
-		selection, err := llmselection.ResolveAgentExecutionSelection(profile, entry.Mock.Configured())
+	for _, declaration := range entries {
+		entry := declaration.Entry
+		label := workspaceBackendAgentLabel(declaration.Label(localIDCounts[declaration.LocalID] > 1), entry.ID, entry.Role)
+		selection, err := llmselection.ResolveAgentExecutionSelection(llmselection.AgentExecutionSelectionInput{
+			ConfiguredDefault: profile,
+			MockConfigured:    entry.Mock.Configured(),
+		})
 		if err != nil {
 			return "", nil, fmt.Errorf("agent %s execution selection: %w", label, err)
 		}
