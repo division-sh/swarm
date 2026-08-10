@@ -189,13 +189,13 @@ func TestPostgresBundleCatalogOwnerBacksSupportedAPISurface(t *testing.T) {
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, data_blob, metadata, ingested_at)
 		VALUES ($1, $2, $3::jsonb, NULL, '{"source":"postgres-test"}'::jsonb, $4)
 	`, bundleHash, `agents:
-	  bundle-agent:
-	    intent:
-	      inline: Handle the bundle catalog proof.
-	    role: worker
-	    model: regular
-	    type: managed
-	`, parsedJSON, time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)); err != nil {
+  bundle-agent:
+    intent:
+      inline: Handle the bundle catalog proof.
+    role: worker
+    model: regular
+    type: managed
+`, parsedJSON, time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("seed postgres bundle catalog: %v", err)
 	}
 	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{BundleCatalog: selected})})
